@@ -456,6 +456,37 @@ def _trust_key_type(path: str) -> bytes:
     return decoded
 
 
+class _OnceAction(argparse.Action):
+    """``--sink``: one sink per run. A second ``--sink`` is a usage error, not a quiet replace."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: Optional[str] = None,
+    ) -> None:
+        if getattr(namespace, self.dest, None) is not None:
+            parser.error(
+                f"{option_string} was given twice; a run writes to one sink. Run again with "
+                "the other sink: the run is the same, and its receipt is added."
+            )
+        setattr(namespace, self.dest, values)
+
+
+def _sink_opt_type(item: str) -> str:
+    """``argparse`` ``type=`` callable for ``--sink-opt``: the ``KEY=VALUE`` shape.
+
+    Only the shape is checked here; which keys a sink takes, and what their
+    values may be, is the sink's to say (``FLX-3504``), and it says so before
+    the simulation runs.
+    """
+    key, separator, _value = item.partition("=")
+    if not separator or not key.strip():
+        raise argparse.ArgumentTypeError(f"expected KEY=VALUE, got {item!r}")
+    return item
+
+
 def _kv_pairs(items: Optional[Sequence[str]]) -> Dict[str, str]:
     """Fold already-validated ``NAME=VALUE`` pairs (see :func:`_kv_pair_type`) into a dict."""
     result: Dict[str, str] = {}
@@ -630,11 +661,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_p = sub.add_parser(
         "run",
-        help="plan + apply, with --verify/--ship sugar",
+        help="plan + apply, with --verify/--sink/--ship sugar",
         description=(
-            "Plan and apply in one call, then optionally verify and ship. Stops at the "
-            "first stage that exits non-zero; the artifacts of every stage that did run "
-            "are still returned under that stage's own key."
+            "Plan and apply in one call, then optionally verify, write every stream to a "
+            "sink, and ship. Stops at the first stage that exits non-zero; the artifacts "
+            "of every stage that did run are still returned under that stage's own key."
         ),
     )
     run_p.add_argument("bundle", help=_BUNDLE_HELP)
@@ -648,6 +679,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_p.add_argument(
         "-o", "--out-dir", default=None, help=f"{_OUT_DIR_HELP} (required with --ship)"
+    )
+    run_p.add_argument(
+        "--sink",
+        default=None,
+        action=_OnceAction,
+        metavar="NAME:TARGET",
+        help=(
+            "also write every stream to a sink, after verify and before ship: "
+            "parquet:DIR, arrow-ipc:DIR or adbc:DRIVER (`fluxsim plugins` lists them)"
+        ),
+    )
+    run_p.add_argument(
+        "--sink-opt",
+        action="append",
+        type=_sink_opt_type,
+        metavar="KEY=VALUE",
+        help=(
+            "a --sink setting, repeatable, for example row-group-size=100000 or "
+            "uri=sim.duckdb; never a password: pass uri-env=VAR instead"
+        ),
     )
     run_p.add_argument(
         "--committed-slice",
@@ -985,8 +1036,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     plugins_p = sub.add_parser(
         "plugins",
-        help="list installed vertical packs",
-        description="List the vertical packs installed in this environment.",
+        help="list installed vertical packs and sinks",
+        description=(
+            "List the vertical packs and the output sinks available in this environment, "
+            "with the extra each sink needs and whether it is installed. Nothing is "
+            "imported to find them."
+        ),
     )
     _add_json_flag(plugins_p)
 
@@ -1080,6 +1135,14 @@ _EXAMPLES: Dict[str, Tuple[Example, ...]] = {
             "plan, apply, verify and ship in one command",
         ),
         Example("fluxsim run ./bundle", "plan and apply only"),
+        Example(
+            "fluxsim run ./bundle --sink parquet:./out/parquet",
+            "plan, apply and write every stream as Parquet",
+        ),
+        Example(
+            "fluxsim run ./bundle --sink adbc:duckdb --sink-opt uri=./sim.duckdb",
+            "plan, apply and load every stream into a DuckDB table",
+        ),
     ),
     "verify": (
         Example(
@@ -1147,7 +1210,10 @@ _EXAMPLES: Dict[str, Tuple[Example, ...]] = {
     "describe": (
         Example("fluxsim describe --self --json", "identity, capabilities and the command tree"),
     ),
-    "plugins": (Example("fluxsim plugins --json", "list the installed vertical packs"),),
+    "plugins": (
+        Example("fluxsim plugins", "list the vertical packs and the sinks"),
+        Example("fluxsim plugins --json", "the same, as JSON"),
+    ),
     "explain": (
         Example("fluxsim explain FLX-1001", "print one code's explanation"),
         Example("fluxsim explain --list", "list every code"),
@@ -1265,6 +1331,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             allow_declared_baseline_drift=args.allow_declared_baseline_drift,
             signing_key=signing_key,
             trust_key=_read_trust_key(args),
+            sink=args.sink,
+            sink_options=_kv_pairs(args.sink_opt),
         )
     return _finish(args, result)
 
@@ -1919,16 +1987,30 @@ def _cmd_describe(args: argparse.Namespace) -> int:
 
 def _cmd_plugins(args: argparse.Namespace) -> int:
     from flux_engine.api.stages import StageResult
+    from flux_engine.sinks.registry import available
     from flux_engine.verticals import pack_names
 
     names = list(pack_names())
-    lines = ["vertical packs (the only plugin surface this build ships):"]
+    sinks = available()
+    lines = ["vertical packs:"]
     lines.extend(f"  {name}" for name in names)
+    lines.append("sinks (fluxsim run --sink NAME:TARGET):")
+    width = max((len(sink.name) for sink in sinks), default=0)
+    for sink in sinks:
+        if sink.extra:
+            state = "installed" if sink.installed else "not installed"
+            needs = f"needs flux-sim-engine[{sink.extra}] ({state})"
+        else:
+            needs = "shadowed by the built-in of that name" if sink.shadowed else sink.value
+        lines.append(f"  {sink.name.ljust(width)}  {sink.source}  {needs}")
     return _print_result(
         StageResult(
             stage="plugins",
             exit_code=0,
-            _artifacts={"verticalPacks": names},
+            _artifacts={
+                "verticalPacks": names,
+                "sinks": [sink.as_document() for sink in sinks],
+            },
             stdout="\n".join(lines),
         ),
         as_json=args.json,

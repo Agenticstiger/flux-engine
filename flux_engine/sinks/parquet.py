@@ -29,12 +29,13 @@ the stream's digest.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Sequence, Union
 
 from flux_engine.core.errors import FluxError
-from flux_engine.sinks._columnar import ColumnarFileSink, positive_int
+from flux_engine.sinks._columnar import ColumnarFileSink, FileTarget, positive_int
 from flux_engine.sinks._files import load_manifest
 from flux_engine.sinks._optional import require
+from flux_engine.sinks._options import bool_option, int_option, require_known, text_option
 from flux_engine.sinks.arrow import DEFAULT_BATCH_SIZE, pa
 from flux_engine.sinks.errors import FLX_3504
 from flux_engine.sinks.receipts import StreamContext
@@ -48,9 +49,21 @@ __all__ = [
     "DEFAULT_COMPRESSION",
     "DEFAULT_COMPRESSION_LEVEL",
     "DEFAULT_ROW_GROUP_SIZE",
+    "OPTIONS",
     "ParquetSink",
     "read_stream",
+    "target",
 ]
+
+#: The options ``--sink-opt`` may set, as the command line spells them.
+OPTIONS = (
+    "batch-size",
+    "compression",
+    "compression-level",
+    "row-group-size",
+    "rows-per-file",
+    "verify",
+)
 
 DEFAULT_COMPRESSION = "zstd"
 #: zstd's own default level, pinned rather than left to the writer.
@@ -196,3 +209,21 @@ def read_stream(manifest: Union[str, Path]) -> "pyarrow.Table":
     """
     _, paths = load_manifest(manifest, sink=ParquetSink.name)
     return _read_files(paths)
+
+
+def target(directory: str, options: Mapping[str, str]) -> FileTarget:
+    """The ``parquet`` sink's factory: ``--sink parquet:DIRECTORY`` and its options."""
+    require_known(ParquetSink.name, options, OPTIONS)
+    return FileTarget(
+        name=ParquetSink.name,
+        directory=directory,
+        sink_class=ParquetSink,
+        settings={
+            "compression": text_option(options, "compression", DEFAULT_COMPRESSION),
+            "compression_level": int_option(options, "compression-level", None),
+            "row_group_size": int_option(options, "row-group-size", DEFAULT_ROW_GROUP_SIZE),
+            "rows_per_file": int_option(options, "rows-per-file", None),
+            "batch_size": int_option(options, "batch-size", DEFAULT_BATCH_SIZE),
+            "verify": bool_option(options, "verify", False),
+        },
+    )

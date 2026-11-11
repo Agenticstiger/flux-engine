@@ -28,7 +28,7 @@ fluxsim explain FLX-3105
 | [`fluxsim validate`](./validate.md) | validate a FLUX bundle |
 | [`fluxsim plan`](./plan.md) | execute the loop once and record plan.json |
 | [`fluxsim apply`](./apply.md) | apply a recorded plan and write its run directory |
-| [`fluxsim run`](./run.md) | plan + apply, with --verify/--ship sugar |
+| [`fluxsim run`](./run.md) | plan + apply, with --verify/--sink/--ship sugar |
 | [`fluxsim verify`](./verify.md) | golden regression + row conformance + RFC-04 + fidelity |
 | [`fluxsim ship`](./ship.md) | the fidelity gate, then the evidence pack |
 | [`fluxsim replay`](./replay.md) | re-execute a recorded plan; assert its digest |
@@ -37,7 +37,7 @@ fluxsim explain FLX-3105
 | [`fluxsim gate`](./gate.md) | RFC-04 enforcement gate: decide, conform |
 | [`fluxsim expr`](./expr.md) | flux-expr/1: evaluate an expression, print an attribute model |
 | [`fluxsim describe`](./describe.md) | self-describe this installation |
-| [`fluxsim plugins`](./plugins.md) | list installed vertical packs |
+| [`fluxsim plugins`](./plugins.md) | list installed vertical packs and sinks |
 | [`fluxsim explain`](./explain.md) | print the catalog entry for one FLX-nnnn code, or list them all |
 
 ## Options every command accepts

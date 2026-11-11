@@ -1,6 +1,6 @@
 ---
 title: "fluxsim run"
-description: "plan + apply, with --verify/--ship sugar"
+description: "plan + apply, with --verify/--sink/--ship sugar"
 editLink: false
 ---
 
@@ -8,7 +8,7 @@ editLink: false
 
 # `fluxsim run`
 
-Plan and apply in one call, then optionally verify and ship. Stops at the first stage that exits non-zero; the artifacts of every stage that did run are still returned under that stage's own key.
+Plan and apply in one call, then optionally verify, write every stream to a sink, and ship. Stops at the first stage that exits non-zero; the artifacts of every stage that did run are still returned under that stage's own key.
 
 ## Synopsis
 
@@ -24,6 +24,12 @@ fluxsim run ./bundle --verify --ship -o ./out
 
 # plan and apply only
 fluxsim run ./bundle
+
+# plan, apply and write every stream as Parquet
+fluxsim run ./bundle --sink parquet:./out/parquet
+
+# plan, apply and load every stream into a DuckDB table
+fluxsim run ./bundle --sink adbc:duckdb --sink-opt uri=./sim.duckdb
 ```
 
 ## Arguments
@@ -41,6 +47,8 @@ fluxsim run ./bundle
 | `--verify` |  | run `fluxsim verify` on the applied run |
 | `--ship` |  | run `fluxsim ship` on the applied run; requires -o |
 | `-o, --out-dir` | `OUT_DIR` | directory the evidence archive and its statements are written to (required with --ship) |
+| `--sink` | `NAME:TARGET` | also write every stream to a sink, after verify and before ship: parquet:DIR, arrow-ipc:DIR or adbc:DRIVER (`fluxsim plugins` lists them) |
+| `--sink-opt` | `KEY=VALUE` | a --sink setting, repeatable, for example row-group-size=100000 or uri=sim.duckdb; never a password: pass uri-env=VAR instead |
 | `--committed-slice` | `EXPOSE_ID=file://PATH` | the committed real-data slice one expose's fidelity check is measured against, as EXPOSE_ID=file://PATH; repeatable, once per expose; the file holds one JSON object per line, keyed by the expose's contract column names (e.g. {"subscriber_id": "s-1", "amount": "12.50"}) |
 | `--update-golden` |  | record this run as the golden baseline (requires --reason) |
 | `--reason` | `REASON` | why the golden baseline is being updated |

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from flux_engine.core.errors import ErrorCode, register
 
-__all__ = ["FLX_3501", "FLX_3502", "FLX_3503", "FLX_3504", "FLX_3505", "FLX_3506"]
+__all__ = ["FLX_3501", "FLX_3502", "FLX_3503", "FLX_3504", "FLX_3505", "FLX_3506", "FLX_3507"]
 
 FLX_3501: ErrorCode = register(
     "FLX-3501",
@@ -90,4 +90,14 @@ FLX_3506: ErrorCode = register(
     "mode, a table whose columns no longer match the stream's (the contract changed), "
     "and, in create mode, any table that already exists. Choose another table prefix or "
     "schema, or, for a table the sink created under an older contract, use mode=replace.",
+)
+
+FLX_3507: ErrorCode = register(
+    "FLX-3507",
+    "there is no sink by that name",
+    "A sink is named as NAME:TARGET, for example parquet:out/ or adbc:duckdb, and the name "
+    "must be one this environment has: a sink the engine ships (parquet, arrow-ipc, adbc) "
+    "or one a package registers under the flux_engine.sinks entry-point group. The message "
+    "lists the names it found; fluxsim plugins lists them too, with the extra each one "
+    "needs. Check the spelling, or install the package that provides the sink.",
 )

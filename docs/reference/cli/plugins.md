@@ -1,6 +1,6 @@
 ---
 title: "fluxsim plugins"
-description: "list installed vertical packs"
+description: "list installed vertical packs and sinks"
 editLink: false
 ---
 
@@ -8,7 +8,7 @@ editLink: false
 
 # `fluxsim plugins`
 
-List the vertical packs installed in this environment.
+List the vertical packs and the output sinks available in this environment, with the extra each sink needs and whether it is installed. Nothing is imported to find them.
 
 ## Synopsis
 
@@ -19,7 +19,10 @@ fluxsim plugins [options]
 ## Examples
 
 ```bash
-# list the installed vertical packs
+# list the vertical packs and the sinks
+fluxsim plugins
+
+# the same, as JSON
 fluxsim plugins --json
 ```
 

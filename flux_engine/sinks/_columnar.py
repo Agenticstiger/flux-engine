@@ -31,11 +31,12 @@ the same comparison on every change.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Mapping, Optional, Sequence, Union
 
 from flux_engine.api.emit import EmitHeader
+from flux_engine.core.digest import digest_of_bytes
 from flux_engine.core.errors import FluxError
 from flux_engine.seam.emit import FLX_3301
 from flux_engine.sinks._files import FileSlice
@@ -52,7 +53,7 @@ from flux_engine.sinks.receipts import SinkReceipt, StreamContext
 if TYPE_CHECKING:  # pragma: no cover - annotations only
     import pyarrow
 
-__all__ = ["ColumnarFileSink", "optional_positive_int", "positive_int"]
+__all__ = ["ColumnarFileSink", "FileTarget", "optional_positive_int", "positive_int"]
 
 
 def positive_int(name: str, value: Any) -> int:
@@ -280,3 +281,36 @@ class ColumnarFileSink:
                 f"the files written for expose {self.context.expose_id!r} digest to "
                 f"{found.value}, not to the stream's {self.context.output_digest.value}",
             )
+
+
+#: A stream that is never written: building a sink for it runs every check
+#: on the settings, and touches nothing on disk.
+_PROBE = StreamContext(
+    run_id="probe", expose_id="probe", rows=0, output_digest=digest_of_bytes(b"", subject="probe")
+)
+
+
+@dataclass(frozen=True)
+class FileTarget:
+    """A file sink's checked settings, handing out one sink per stream."""
+
+    name: str
+    directory: str
+    sink_class: Any
+    settings: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # The text, not a Path: Path("") is ".", and a sink must never fall
+        # back to the current directory because a target was left out.
+        if not self.directory.strip():
+            raise FluxError(
+                FLX_3504,
+                f"the {self.name} sink needs a directory: --sink {self.name}:DIRECTORY",
+            )
+        # Every setting is checked now, before the simulation runs.
+        self.sink_class(Path(self.directory), _PROBE, **self.settings)
+
+    def sink_for(self, context: StreamContext) -> ColumnarFileSink:
+        """A fresh sink for one stream."""
+        sink: ColumnarFileSink = self.sink_class(Path(self.directory), context, **self.settings)
+        return sink

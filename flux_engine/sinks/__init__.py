@@ -24,6 +24,10 @@ answerable for: KERNEL-SPEC §8 computes the ``outputDigest`` above the sink.
   (:class:`~flux_engine.sinks.receipts.StreamContext`) and what it reports
   after one (:class:`~flux_engine.sinks.receipts.SinkReceipt`). No extra.
 
+* :mod:`flux_engine.sinks.registry` -- the names ``fluxsim run --sink
+  NAME:TARGET`` accepts: the built-ins, and any sink a package registers
+  under the ``flux_engine.sinks`` entry-point group. No extra.
+
 Every module that needs an optional library imports it when the module
 itself is imported, through :func:`flux_engine.sinks._optional.require`,
 which fails with ``FLX-3501`` and the install line when the extra is

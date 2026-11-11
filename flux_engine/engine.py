@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Union
 
 from flux_engine.api.stages import StageResult, failure_result
 from flux_engine.stages.apply import apply as _apply_stage
@@ -149,9 +149,11 @@ async def run(
     signing_key: Optional[bytes] = None,
     trust_key: Optional[bytes] = None,
     committed_at: Optional[str] = None,
+    sink: Optional[str] = None,
+    sink_options: Optional[Mapping[str, str]] = None,
     timeout: Optional[float] = None,
 ) -> StageResult:
-    """``fluxsim run`` (``plan`` + ``apply``, with ``--verify``/``--ship`` sugar), off the event loop."""
+    """``fluxsim run`` (``plan`` + ``apply``, with ``--verify``/``--sink``/``--ship`` sugar), off the event loop."""
     return await _call(
         _run_stage,
         timeout,
@@ -170,6 +172,8 @@ async def run(
         signing_key=signing_key,
         trust_key=trust_key,
         committed_at=committed_at,
+        sink=sink,
+        sink_options=sink_options,
     )
 
 
