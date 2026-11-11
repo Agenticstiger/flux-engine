@@ -267,6 +267,11 @@ class RunLayout:
         return self.run_dir / "receipt.json"
 
     @property
+    def sink_receipts_path(self) -> Path:
+        """Where ``fluxsim run --sink`` records what each sink did with each stream."""
+        return self.run_dir / "sink-receipts.json"
+
+    @property
     def golden_dir(self) -> Path:
         return self.state_dir / "golden"
 

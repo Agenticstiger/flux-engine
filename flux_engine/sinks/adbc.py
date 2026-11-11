@@ -65,12 +65,14 @@ messages are scrubbed of the URI and its secrets before they are raised.
 from __future__ import annotations
 
 import json
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
+    Dict,
     FrozenSet,
     List,
     Mapping,
@@ -82,11 +84,13 @@ from typing import (
 import numpy
 
 from flux_engine.api.emit import EmitHeader
+from flux_engine.core.digest import digest_of_bytes
 from flux_engine.core.errors import FluxError
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.emit import FLX_3301
 from flux_engine.sinks._columnar import positive_int
 from flux_engine.sinks._optional import require
+from flux_engine.sinks._options import bool_option, int_option, require_known, text_option
 from flux_engine.sinks.arrow import DEFAULT_BATCH_SIZE, BatchBuilder, output_digest_of, pa
 from flux_engine.sinks.errors import FLX_3501, FLX_3504, FLX_3505, FLX_3506
 from flux_engine.sinks.receipts import SinkReceipt, StreamContext
@@ -101,11 +105,19 @@ __all__ = [
     "DIALECTS",
     "MODES",
     "PROVENANCE_COLUMNS",
+    "OPTIONS",
     "AdbcSink",
+    "AdbcTarget",
     "Dialect",
+    "load_driver",
     "redact_uri",
     "table_name",
+    "target",
 ]
+
+#: The options ``--sink-opt`` may set, as the command line spells them, plus
+#: any ``db.<key>`` driver option.
+OPTIONS = ("batch-size", "mode", "prefix", "schema", "uri", "uri-env", "verify")
 
 #: The twin namespace a table lands in unless the user names another.
 DEFAULT_PREFIX = "sim_"
@@ -466,13 +478,7 @@ class AdbcSink:
             PROVENANCE_COLUMNS, (pa.bool_(), pa.string(), pa.string(), pa.int64()), strict=True
         ):
             self._schema = self._schema.append(pa.field(name, arrow_type, nullable=False))
-        driver = require(
-            self.dialect.module,
-            extra="",
-            feature=f"the database sink's {self.dialect.name} driver",
-            hint=f"pip install 'flux-sim-engine[adbc]' {self.dialect.package}",
-        )
-        self._require_version()
+        driver = load_driver(self.dialect)
         try:
             if not self.dialect.takes_uri:
                 self._connection = driver.connect(db_kwargs=dict(self.db_options))
@@ -498,21 +504,6 @@ class AdbcSink:
             self._rollback()
             self._release()
             raise self._fail(exc, f"could not prepare {self.qualified_table}") from exc
-
-    def _require_version(self) -> None:
-        wanted = self.dialect.min_version
-        if not wanted:
-            return
-        installed = _distribution_version(self.dialect.package)
-        parts = tuple(int(part) for part in re.findall(r"\d+", installed)[: len(wanted)])
-        if parts < wanted:
-            floor = ".".join(str(part) for part in wanted)
-            raise FluxError(
-                FLX_3501,
-                f"the database sink's {self.dialect.name} driver needs {self.dialect.package} "
-                f"{floor} or later, and {installed or 'an unknown version'} is installed: "
-                f"pip install '{self.dialect.package}>={floor}'",
-            )
 
     def _existing_columns(self) -> Optional[List[str]]:
         """The table's column names, or ``None`` when there is no such table."""
@@ -710,6 +701,29 @@ class AdbcSink:
         self._connection = None
 
 
+def load_driver(dialect: Dialect) -> Any:
+    """Import *dialect*'s ADBC driver, or ``FLX-3501`` naming what to install."""
+    driver = require(
+        dialect.module,
+        extra="",
+        feature=f"the database sink's {dialect.name} driver",
+        hint=f"pip install 'flux-sim-engine[adbc]' {dialect.package}",
+    )
+    wanted = dialect.min_version
+    if wanted:
+        installed = _distribution_version(dialect.package)
+        parts = tuple(int(part) for part in re.findall(r"\d+", installed)[: len(wanted)])
+        if parts < wanted:
+            floor = ".".join(str(part) for part in wanted)
+            raise FluxError(
+                FLX_3501,
+                f"the database sink's {dialect.name} driver needs {dialect.package} "
+                f"{floor} or later, and {installed or 'an unknown version'} is installed: "
+                f"pip install '{dialect.package}>={floor}'",
+            )
+    return driver
+
+
 def _distribution_version(name: str) -> str:
     from importlib.metadata import PackageNotFoundError, version
 
@@ -717,3 +731,153 @@ def _distribution_version(name: str) -> str:
         return version(name)
     except PackageNotFoundError:  # pragma: no cover - imported, so installed
         return ""
+
+
+#: Query keys that carry a secret in a connection URI.
+_SECRET_KEY = re.compile(r"pass|secret|token|key|credential", re.IGNORECASE)
+
+
+def _carries_secret(uri: str) -> bool:
+    """Whether *uri* holds a password in its user info or a secret in its query."""
+    text = uri.split("#", 1)[0]
+    location, _, query = text.partition("?")
+    authority = location.partition("://")[2] if "://" in location else location
+    userinfo = authority.partition("/")[0].rpartition("@")[0]
+    if userinfo.partition(":")[2]:
+        return True
+    return any(_SECRET_KEY.search(pair.partition("=")[0]) for pair in query.split("&") if pair)
+
+
+@dataclass(frozen=True)
+class AdbcTarget:
+    """The database sink's checked settings, handing out one sink per stream."""
+
+    driver: str
+    # Kept out of the repr: either may hold a credential read from the
+    # environment, and a repr ends up in logs and tracebacks.
+    uri: Optional[str] = field(default=None, repr=False)
+    db_options: Mapping[str, str] = field(default_factory=dict, repr=False)
+    schema: Optional[str] = None
+    prefix: str = DEFAULT_PREFIX
+    mode: str = "append"
+    batch_size: int = DEFAULT_BATCH_SIZE
+    verify: bool = False
+    name: str = "adbc"
+    _tables: Dict[str, str] = field(default_factory=dict, init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        probe = StreamContext(
+            run_id="probe",
+            expose_id="probe",
+            rows=0,
+            output_digest=digest_of_bytes(b"", subject="probe"),
+        )
+        # Every setting, the driver and its version are checked now, before
+        # the simulation runs; nothing connects yet.
+        self._sink(probe)
+        load_driver(DIALECTS[self.driver])
+
+    def sink_for(self, context: StreamContext) -> AdbcSink:
+        """A fresh sink for one stream; refuses a second expose in the same table."""
+        sink = self._sink(context)
+        if context.expose_id != "probe" or context.run_id != "probe":
+            # Case-folded: SQLite and DuckDB match table names without regard
+            # to case, so sim_Pay and sim_pay are one table there.
+            other = self._tables.setdefault(sink.qualified_table.casefold(), context.expose_id)
+            if other != context.expose_id:
+                raise FluxError(
+                    FLX_3504,
+                    f"exposes {other!r} and {context.expose_id!r} would both land in "
+                    f"{sink.qualified_table}; give them distinct ids or deliver them apart",
+                )
+        return sink
+
+    def _sink(self, context: StreamContext) -> AdbcSink:
+        return AdbcSink(
+            self.driver,
+            context,
+            uri=self.uri,
+            db_options=self.db_options,
+            schema=self.schema,
+            prefix=self.prefix,
+            mode=self.mode,
+            batch_size=self.batch_size,
+            verify=self.verify,
+        )
+
+
+def _driver_options(options: Mapping[str, str]) -> Dict[str, str]:
+    """``db.KEY=VALUE`` options, with ``db.KEY-env=VAR`` read from the environment.
+
+    A key that names a secret (a password, a token, a private key) is
+    refused as an inline value, for the reason the uri is: the command line
+    is the wrong place for it. ``db.KEY-env=VAR`` passes it instead.
+    """
+    driver_options: Dict[str, str] = {}
+    for key, value in options.items():
+        if not key.startswith("db."):
+            continue
+        name = key[3:]
+        if name.endswith("-env"):
+            name = name[: -len("-env")]
+            resolved = os.environ.get(value)
+            if not resolved:
+                raise FluxError(FLX_3504, f"the environment variable {value} is not set")
+            driver_options[name] = resolved
+            continue
+        if _SECRET_KEY.search(name):
+            raise FluxError(
+                FLX_3504,
+                f"the driver option {name} looks like a secret, and a command line is not the "
+                f"place for one: pass --sink-opt db.{name}-env=NAME instead",
+            )
+        driver_options[name] = value
+    return driver_options
+
+
+def target(driver: str, options: Mapping[str, str]) -> AdbcTarget:
+    """The ``adbc`` sink's factory: ``--sink adbc:DRIVER`` and its options.
+
+    The connection comes from ``uri`` -- a database file, or a URI without
+    a password -- or from ``uri-env``, the name of an environment variable
+    holding the URI. A URI with a password or a secret query parameter is
+    refused as an option, because a command line is visible to every user
+    of the machine and is kept in shell history; ``uri-env`` is the way to
+    pass one. ``db.<key>-env=<VAR>`` reads a driver option from the
+    environment, the only way to pass one that names a secret.
+    ``db.<key>=<value>`` options go to the driver as ADBC
+    database options.
+    """
+    if not driver:
+        raise FluxError(
+            FLX_3504,
+            "the adbc sink needs a driver: --sink adbc:DRIVER, one of "
+            + ", ".join(sorted(DIALECTS)),
+        )
+    db_options = _driver_options(options)
+    plain = {key: value for key, value in options.items() if not key.startswith("db.")}
+    require_known("adbc", plain, OPTIONS)
+    uri = text_option(plain, "uri")
+    variable = text_option(plain, "uri-env")
+    if uri is not None and variable is not None:
+        raise FluxError(FLX_3504, "give uri or uri-env, not both")
+    if uri is not None and _carries_secret(uri):
+        raise FluxError(
+            FLX_3504,
+            "the uri carries a password or a secret, and a command line is not the place "
+            "for one: put the uri in an environment variable and pass --sink-opt uri-env=NAME",
+        )
+    if variable is not None:
+        uri = os.environ.get(variable)
+        if not uri:
+            raise FluxError(FLX_3504, f"the environment variable {variable} is not set")
+    return AdbcTarget(
+        driver=driver,
+        uri=uri,
+        db_options=db_options,
+        schema=text_option(plain, "schema"),
+        prefix=text_option(plain, "prefix", DEFAULT_PREFIX) or "",
+        mode=text_option(plain, "mode", "append") or "append",
+        batch_size=int_option(plain, "batch-size", DEFAULT_BATCH_SIZE) or DEFAULT_BATCH_SIZE,
+        verify=bool_option(plain, "verify", False),
+    )

@@ -16,11 +16,12 @@ stream and the settings determine the bytes.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Sequence, Union
 
 from flux_engine.core.errors import FluxError
-from flux_engine.sinks._columnar import ColumnarFileSink
+from flux_engine.sinks._columnar import ColumnarFileSink, FileTarget
 from flux_engine.sinks._files import load_manifest
+from flux_engine.sinks._options import bool_option, int_option, require_known, text_option
 from flux_engine.sinks.arrow import DEFAULT_BATCH_SIZE, pa
 from flux_engine.sinks.errors import FLX_3504
 from flux_engine.sinks.receipts import StreamContext
@@ -28,7 +29,10 @@ from flux_engine.sinks.receipts import StreamContext
 if TYPE_CHECKING:  # pragma: no cover - annotations only
     import pyarrow
 
-__all__ = ["ArrowIpcSink", "read_files", "read_stream"]
+__all__ = ["OPTIONS", "ArrowIpcSink", "read_files", "read_stream", "target"]
+
+#: The options ``--sink-opt`` may set, as the command line spells them.
+OPTIONS = ("batch-size", "compression", "rows-per-file", "verify")
 
 _CODECS = ("zstd", "lz4", "none")
 
@@ -102,3 +106,19 @@ def read_stream(manifest: Union[str, Path]) -> "pyarrow.Table":
     """Read the slice an Arrow IPC manifest lists, in slice order, as one table."""
     _, paths = load_manifest(manifest, sink=ArrowIpcSink.name)
     return read_files(paths)
+
+
+def target(directory: str, options: Mapping[str, str]) -> FileTarget:
+    """The ``arrow-ipc`` sink's factory: ``--sink arrow-ipc:DIRECTORY`` and its options."""
+    require_known(ArrowIpcSink.name, options, OPTIONS)
+    return FileTarget(
+        name=ArrowIpcSink.name,
+        directory=directory,
+        sink_class=ArrowIpcSink,
+        settings={
+            "compression": text_option(options, "compression", "zstd"),
+            "rows_per_file": int_option(options, "rows-per-file", None),
+            "batch_size": int_option(options, "batch-size", DEFAULT_BATCH_SIZE),
+            "verify": bool_option(options, "verify", False),
+        },
+    )
