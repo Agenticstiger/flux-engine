@@ -74,6 +74,7 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-3503](./FLX-3503.md) | the data read back is not the stream it is read as |
 | [FLX-3504](./FLX-3504.md) | a sink was given a target or an option it cannot use |
 | [FLX-3505](./FLX-3505.md) | a sink could not finish writing a stream |
+| [FLX-3506](./FLX-3506.md) | the database sink will not touch a table it does not manage |
 
 ## 4000: governance/sovereignty
 

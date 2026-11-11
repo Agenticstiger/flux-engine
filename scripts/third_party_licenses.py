@@ -62,6 +62,17 @@ LICENSE_NOTES: Dict[str, Tuple[str, str, str]] = {
         "Apache-2.0",
         "[arrow]: Arrow batches, Parquet and Arrow IPC files for the output sinks",
     ),
+    "adbc-driver-manager": (
+        "adbc-driver-manager",
+        "Apache-2.0",
+        "[adbc]: loads the ADBC driver the database sink writes through",
+    ),
+    "adbc-driver-sqlite": (
+        "adbc-driver-sqlite",
+        "Apache-2.0",
+        "[dev]: the database sink's tests, against SQLite",
+    ),
+    "duckdb": ("duckdb", "MIT", "[dev]: the database sink's tests, against DuckDB"),
     "pytest": ("pytest", "MIT", "[dev]"),
     "pytest-cov": ("pytest-cov", "MIT", "[dev]"),
     "hypothesis": ("hypothesis", "MPL-2.0", "[dev]: property-based testing"),

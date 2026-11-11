@@ -202,6 +202,17 @@ def test_text_kinds_keep_the_rendering_itself() -> None:
     assert sink_arrow.output_digest_of(table).value == expected_digest(expose, rows)
 
 
+def test_decimals_wider_than_a_destination_allows_are_kept_as_text() -> None:
+    expose = compiled(EVERY_TYPE)
+    rows = rendered(expose, SAMPLE_ROWS)
+    builder = sink_arrow.BatchBuilder(header_of(expose), decimal_text_above=38)
+    table = pa.Table.from_batches(list(builder.extend(rows)), schema=builder.schema)
+    assert str(table.schema.field("d").type) == "decimal128(18, 4)"
+    assert str(table.schema.field("w").type) == "string"
+    assert list(sink_arrow.rows_from_table(table)) == rows
+    assert sink_arrow.output_digest_of(table).value == expected_digest(expose, rows)
+
+
 @pytest.mark.parametrize("kind", [LogicalKind.INT, LogicalKind.BOOL])
 def test_kinds_that_do_not_render_as_text_cannot_be_kept_as_text(kind: LogicalKind) -> None:
     with pytest.raises(ValueError, match="do not render as text"):
@@ -245,6 +256,37 @@ def test_a_column_of_nulls_reads_back_whatever_type_it_was_stored_as(kind: str, 
     assert list(sink_arrow.rows_from_table(table, types=[kind])) == [[None]] * rows
 
 
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pa.array(["6998.977", "0", None]),
+        pa.array([Decimal("6998.9770000"), Decimal("0E-7"), None], pa.decimal128(20, 7)),
+        pa.array([Decimal("6998.977"), Decimal("0"), None], pa.decimal128(10, 3)),
+    ],
+)
+def test_a_decimal_stored_at_another_scale_renders_at_the_declared_one(stored: Any) -> None:
+    """The number survives, the spelling does not: PostgreSQL drops trailing zeros."""
+    table = pa.table({"amount": stored})
+    assert list(sink_arrow.rows_from_table(table, types=["DECIMAL(18,4)"])) == [
+        ["6998.9770"],
+        ["0.0000"],
+        [None],
+    ]
+
+
+def test_an_extension_type_over_text_is_read_through_its_storage() -> None:
+    """PostgreSQL's ADBC driver returns NUMERIC as an opaque extension over string."""
+    expose = compiled([{"name": "amount", "type": "DECIMAL(18,4)"}])
+    rows = rendered(expose, [{"amount": Decimal("0.125")}, {"amount": None}])
+    opaque = pa.opaque(pa.string(), type_name="numeric", vendor_name="PostgreSQL")
+    storage = pa.array(["0.1250", None], pa.string())
+    table = pa.table({"amount": pa.ExtensionArray.from_storage(opaque, storage)})
+    assert list(sink_arrow.rows_from_table(table, types=["DECIMAL(18,4)"])) == rows
+    assert sink_arrow.output_digest_of(table, header=header_of(expose)).value == expected_digest(
+        expose, rows
+    )
+
+
 def test_sub_millisecond_timestamps_are_refused_on_the_way_back() -> None:
     table = pa.table({"at": pa.array([1767323045678001], pa.timestamp("us", tz="UTC"))})
     with pytest.raises(pa.ArrowInvalid):
@@ -259,10 +301,14 @@ def test_sub_millisecond_timestamps_are_refused_on_the_way_back() -> None:
         (lambda: pa.table({"x": pa.array([2], pa.int64())}), ["BOOL"], "other than 0 or 1"),
         (lambda: pa.table({"x": pa.array([1], pa.int64())}), ["DATE"], "stored as Arrow int64"),
         (
-            lambda: pa.table({"x": pa.array([Decimal("1.5")], pa.decimal128(10, 1))}),
+            lambda: pa.table({"x": pa.array([Decimal("1.505")], pa.decimal128(10, 3))}),
             ["DECIMAL(10,2)"],
-            "scale 1",
+            "more digits than its scale",
         ),
+        (lambda: pa.table({"x": ["0.12501"]}), ["DECIMAL(18,4)"], "more digits than its scale"),
+        (lambda: pa.table({"x": ["twelve"]}), ["DECIMAL(18,4)"], "not a number"),
+        (lambda: pa.table({"x": ["NaN"]}), ["DECIMAL(18,4)"], "not finite"),
+        (lambda: pa.table({"x": ["123456789012345"]}), ["DECIMAL(18,4)"], "integer digits"),
         (lambda: pa.table({"x": ["a"]}), ["STRING", "INT"], "2 logical types"),
     ],
 )

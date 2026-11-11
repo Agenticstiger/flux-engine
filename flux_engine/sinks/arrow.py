@@ -58,6 +58,7 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -78,6 +79,7 @@ from flux_engine.core.canonical import canonical_bytes
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import DigestRef
 from flux_engine.core.errors import FluxError
+from flux_engine.seam.conform import render_cell
 from flux_engine.seam.contract import LogicalKind, LogicalType, parse_logical_type
 from flux_engine.seam.emit import output_digest, row_line
 from flux_engine.sinks._optional import require
@@ -190,12 +192,17 @@ def _arrow_type(name: str, logical: LogicalType, as_text: bool) -> "pyarrow.Data
 
 
 def column_layouts(
-    header: EmitHeader, *, text_kinds: Iterable[LogicalKind] = ()
+    header: EmitHeader,
+    *,
+    text_kinds: Iterable[LogicalKind] = (),
+    decimal_text_above: Optional[int] = None,
 ) -> Tuple[ColumnLayout, ...]:
     """Map each of *header*'s columns to its Arrow storage, in declared order.
 
-    Refuses (``FLX-3502``) a column no Arrow type holds exactly, before a
-    single row is converted.
+    *decimal_text_above* keeps a DECIMAL whose precision exceeds it as text,
+    for a destination whose widest exact decimal is narrower than Arrow's
+    (most databases stop at 38 digits). Refuses (``FLX-3502``) a column no
+    Arrow type holds exactly, before a single row is converted.
     """
     if not header.columns or len(header.columns) != len(header.types):
         raise ValueError(
@@ -209,7 +216,11 @@ def column_layouts(
     layouts = []
     for name, spelling in zip(header.columns, header.types, strict=True):
         logical = parse_logical_type(spelling)
-        text = logical.kind in as_text
+        text = logical.kind in as_text or (
+            decimal_text_above is not None
+            and logical.kind is LogicalKind.DECIMAL
+            and (logical.precision or 0) > decimal_text_above
+        )
         layouts.append(
             ColumnLayout(
                 name=name,
@@ -317,13 +328,16 @@ class BatchBuilder:
         *,
         batch_size: int = DEFAULT_BATCH_SIZE,
         text_kinds: Iterable[LogicalKind] = (),
+        decimal_text_above: Optional[int] = None,
         metadata: Optional[Mapping[str, str]] = None,
     ) -> None:
         if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
             raise ValueError(f"batch_size must be a positive integer, got {batch_size!r}")
         self.header = header
         self.batch_size = batch_size
-        self.layouts = column_layouts(header, text_kinds=text_kinds)
+        self.layouts = column_layouts(
+            header, text_kinds=text_kinds, decimal_text_above=decimal_text_above
+        )
         self.schema = _schema_of(header, self.layouts, metadata)
         self._pending: List[Sequence[Any]] = []
         self._rows = 0
@@ -431,8 +445,61 @@ def _bool_of(name: str, value: int) -> bool:
     return value == 1
 
 
+def _storage(column: Any) -> Any:
+    """An extension-typed column as its storage, anything else as it is.
+
+    A driver can hand back a type it has no Arrow equivalent for as an
+    extension type over its text: PostgreSQL's NUMERIC arrives as
+    ``arrow.opaque`` over ``string``, holding the number at the column's
+    scale. The text is then read like any other text-stored value, and a
+    value that is not the stream's rendering still fails the digest.
+    """
+    if not isinstance(column.type, pa.BaseExtensionType):
+        return column
+    if isinstance(column, pa.ChunkedArray):
+        return pa.chunked_array(
+            [chunk.storage for chunk in column.chunks], type=column.type.storage_type
+        )
+    return column.storage
+
+
+def _exact_decimal(name: str, logical: LogicalType, value: Any) -> str:
+    """A stored decimal (a ``Decimal`` or its text) as the §9 rendering, or refused.
+
+    Databases keep the number and not always its spelling: PostgreSQL's
+    driver creates an unconstrained NUMERIC that drops trailing zeros, and a
+    wider decimal column pads them. The value is accepted when it is exactly
+    representable at the declared scale and rendered again by the seam's own
+    renderer; a value that would need rounding is not the stream's. (Not
+    Arrow's decimal-to-string cast: it follows Java's BigDecimal.toString and
+    writes a zero at scale 10 as ``0E-10``.)
+    """
+    assert logical.scale is not None and logical.precision is not None
+    try:
+        number = Decimal(value)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise FluxError(
+            FLX_3503, f"DECIMAL column {name!r} holds text that is not a number"
+        ) from exc
+    if not number.is_finite():
+        raise FluxError(FLX_3503, f"DECIMAL column {name!r} holds a value that is not finite")
+    with localcontext() as context:
+        context.prec = logical.precision + logical.scale + 80
+        exact = number.quantize(Decimal(1).scaleb(-logical.scale)) == number
+    if not exact:
+        raise FluxError(
+            FLX_3503,
+            f"DECIMAL column {name!r} ({logical}) holds a value with more digits than its scale",
+        )
+    try:
+        return str(render_cell(number, logical))
+    except FluxError as exc:
+        raise FluxError(FLX_3503, f"DECIMAL column {name!r}: {exc.detail}") from exc
+
+
 def _rendered(name: str, logical: LogicalType, column: Any) -> List[Any]:
     """One Arrow column back as §9 rendered values."""
+    column = _storage(column)
     if column.null_count == len(column):
         # Nothing to read but nulls, which render as null in every type. A
         # database that saw no value may report the column as any type it
@@ -441,6 +508,11 @@ def _rendered(name: str, logical: LogicalType, column: Any) -> List[Any]:
     arrow_type = column.type
     kind = logical.kind
     types = pa.types
+    if kind is LogicalKind.DECIMAL and (_is_text(arrow_type) or types.is_decimal(arrow_type)):
+        return [
+            None if value is None else _exact_decimal(name, logical, value)
+            for value in column.to_pylist()
+        ]
     if _is_text(arrow_type):
         # STRING and JSON, and any kind a text-kinds destination kept as text.
         if kind is LogicalKind.BOOL:
@@ -452,17 +524,6 @@ def _rendered(name: str, logical: LogicalType, column: Any) -> List[Any]:
         return list(column.to_pylist())
     if kind is LogicalKind.BOOL and types.is_integer(arrow_type):
         return [None if value is None else _bool_of(name, value) for value in column.to_pylist()]
-    if kind is LogicalKind.DECIMAL and types.is_decimal(arrow_type):
-        if arrow_type.scale != logical.scale:
-            raise FluxError(
-                FLX_3503,
-                f"column {name!r} is {logical} but stored at scale {arrow_type.scale}",
-            )
-        # Not Arrow's own decimal-to-string cast: it follows Java's
-        # BigDecimal.toString and writes a zero at scale 10 as "0E-10". §9
-        # writes the digits out in full, so the value goes through Decimal
-        # and format(..., "f"), exactly as the seam's renderer does.
-        return [None if value is None else format(value, "f") for value in column.to_pylist()]
     if kind is LogicalKind.DATE and (types.is_date32(arrow_type) or types.is_date64(arrow_type)):
         return [None if day is None else day.isoformat() for day in column.to_pylist()]
     if kind is LogicalKind.TIMESTAMP and types.is_timestamp(arrow_type):

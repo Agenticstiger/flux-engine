@@ -94,6 +94,16 @@ lineage = [
 arrow = [
   "pyarrow>=18",
 ]
+# The database sink (flux_engine.sinks.adbc): Arrow batches into any
+# database with an ADBC driver, through the driver manager. Apache-2.0. The
+# driver for each database is the user's choice and is installed on its own
+# (adbc-driver-postgresql, adbc-driver-sqlite, adbc-driver-snowflake,
+# adbc-driver-bigquery, or duckdb, which ships its own), so this extra
+# carries no database code of its own.
+adbc = [
+  "pyarrow>=18",
+  "adbc-driver-manager>=1.0",
+]
 # Dev / QA. Pin style copied verbatim from forge-cli's own [dev] extra
 # (forge-cli/pyproject.toml) so both engines run the identical linter
 # versions in CI -- no "passes in forge-cli, fails in flux-engine" drift.
@@ -151,6 +161,15 @@ dev = [
   # installs. Listed here as well, with the same floor, because CI installs
   # `.[dev]` alone.
   "pyarrow>=18",
+  # The database sink's tests run against the two ADBC drivers that need no
+  # server: SQLite's (Apache-2.0) and DuckDB's, which the duckdb wheel ships
+  # (MIT). A PostgreSQL test exists too, marked integration; it starts a
+  # container and skips itself when Docker is absent.
+  "adbc-driver-manager>=1.0",
+  "adbc-driver-sqlite>=1.0",
+  # 1.5 is the first release whose ADBC driver takes every ingest mode the
+  # sink uses (1.4.0 left the adbc_driver_duckdb module out of its wheel).
+  "duckdb>=1.5",
 ]
 
 [project.scripts]
@@ -370,14 +389,14 @@ allow_indirect_imports = false
 as_packages = true
 
 [[tool.importlinter.contracts]]
-name = "only the sinks may import pyarrow"
+name = "only the sinks may import pyarrow or the ADBC driver manager"
 type = "forbidden"
 source_modules = ["flux_engine"]
-forbidden_modules = ["pyarrow"]
-# The sinks reach pyarrow through flux_engine.sinks._optional.require (a
+forbidden_modules = ["pyarrow", "adbc_driver_manager"]
+# The sinks reach both through flux_engine.sinks._optional.require (a
 # dynamic import that names the extra when it is missing); the edges below
-# are the annotation-only imports under TYPE_CHECKING. A plain `import
-# pyarrow` anywhere else would put it on a path that runs without a sink.
+# are pyarrow's annotation-only imports under TYPE_CHECKING. A plain import
+# of either anywhere else would put it on a path that runs without a sink.
 ignore_imports = ["flux_engine.sinks.* -> pyarrow"]
 allow_indirect_imports = true
 as_packages = true
