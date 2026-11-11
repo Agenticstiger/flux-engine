@@ -1,0 +1,16 @@
+# A module bundles related documents so they can be swapped as one unit, and
+# declares which ports it binds. It is the only way a journey or a detector
+# gets into a run.
+fluxVersion: "0.5.0"
+kind: Module
+id: module-payment-recovery
+name: Payment Recovery Module
+version: 2.1.3
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  resources: [sig-payment-aborted, det-payment-aborted-burst, jr-payment-recovery]
+  binds:
+    - { port: event-envelope, config: { spec: cloudevents/1.0 } }
+    - { port: fluid-contract }

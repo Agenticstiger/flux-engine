@@ -1,0 +1,19 @@
+flux_spec (vendored copy)
+Copyright 2026 The FLUX Project authors
+
+This product includes software from the FLUX specification project
+(https://github.com/Agenticstiger/flux), licensed under the Apache
+License, Version 2.0. A copy of the License is available at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+See VENDOR-NOTES.md in this directory for the exact upstream commit this
+copy was taken from and the minimal edits applied to make the validator,
+enforcement gate, and bundler resolve their data paths from inside this
+vendored package layout instead of a checked-out FLUX repository.
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

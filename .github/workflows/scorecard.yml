@@ -1,0 +1,74 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Scorecard
+
+# OpenSSF Scorecard scores the repository's supply-chain posture (pinned
+# actions, token permissions, branch protection, signed releases) and uploads
+# the findings to code scanning. Adapted from the same workflow in forge-cli.
+#
+# It only makes sense on a public repository: the results go to the public
+# OpenSSF API, and the SARIF upload needs code scanning, which a private
+# repository does not have without GitHub Advanced Security. So the `analysis`
+# job runs only when the repository is public, and shows as skipped before that.
+# The visibility is asked of the API rather than read from the event payload,
+# because a scheduled run carries no repository in its payload.
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "41 5 * * 2"  # Tuesdays, 05:41 UTC
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  visibility:
+    name: Repository visibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      public: ${{ steps.visibility.outputs.public }}
+    steps:
+      - id: visibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          public="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.visibility == "public"')"
+          echo "public=$public" >> "$GITHUB_OUTPUT"
+          echo "public repository: $public"
+
+  analysis:
+    name: Scorecard analysis
+    needs: visibility
+    if: ${{ needs.visibility.outputs.public == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write  # upload SARIF to code scanning
+      id-token: write         # publish the results to the OpenSSF API
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: results.sarif

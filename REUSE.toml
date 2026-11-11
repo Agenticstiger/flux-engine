@@ -1,0 +1,93 @@
+version = 1
+SPDX-PackageName = "flux-sim-engine"
+SPDX-PackageDownloadLocation = "https://github.com/Agenticstiger/flux-engine"
+
+# Licensing information for the files that cannot carry a header, or must not.
+# Every source file (Python, workflows, Makefile, pyproject.toml) starts with
+#
+#     Copyright 2026 Agentics Transformation Limited
+#     SPDX-License-Identifier: Apache-2.0
+#
+# and `reuse lint` fails on one that does not. Nothing here covers "everything
+# else", so a new source file without a header is still reported.
+#
+# The format is the `REUSE.toml` of the REUSE Specification (introduced in 3.2;
+# reuse-tool 6 checks against 3.3): https://reuse.software/spec/.
+
+# Written text. It cannot take a header without showing it on the rendered
+# page or in front of a page's front matter.
+[[annotations]]
+path = [
+  "README.md",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "GOLDEN-CHANGELOG.md",
+  "MAINTAINERS.md",
+  "SECURITY.md",
+  "THIRD_PARTY_LICENSES.md",
+  "CITATION.cff",
+  ".gitignore",
+  ".github/**/*.md",
+  "docs/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright 2026 Agentics Transformation Limited"
+SPDX-License-Identifier = "Apache-2.0"
+
+# NOTICE quotes the vendored copy's copyright line, and the tool would read that
+# line as this file's own, so the notice is stated here and overrides the text.
+[[annotations]]
+path = "NOTICE"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright 2026 Agentics Transformation Limited"
+SPDX-License-Identifier = "Apache-2.0"
+
+# The Code of Conduct adapts the Contributor Covenant, which is licensed under
+# CC BY-SA 4.0. The attribution paragraph stays in the file.
+[[annotations]]
+path = "CODE_OF_CONDUCT.md"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright The Contributor Covenant authors"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# Data whose bytes are pinned. The bundles under tests/fixtures and
+# flux_engine/starter feed `inputDigest`, the files under tests/golden are the
+# pinned digests, and uv.lock is written by uv. A header in any of them would
+# move a digest or be overwritten.
+[[annotations]]
+path = [
+  "uv.lock",
+  "**/*.json",
+  "flux_engine/starter/**",
+  "tests/fixtures/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright 2026 Agentics Transformation Limited"
+SPDX-License-Identifier = "Apache-2.0"
+
+# The vendored fallback copy of flux_spec. It keeps its own notice and licence.
+[[annotations]]
+path = "flux_engine/_vendor/flux_spec/**"
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright 2026 The FLUX Project authors"
+SPDX-License-Identifier = "Apache-2.0"
+
+# The product guardrail canon. Every file here except profile.py is vendored
+# and byte-identical in each repository that carries it: check.py hashes its own
+# source, so a header in any of them makes the gate report BLIND (see the
+# README in that directory). profile.py is this repository's own and has a header.
+# check.py and canon_payload.py also contain legal-entity names that the tool would
+# read as copyright lines, so this annotation overrides what it finds in them.
+[[annotations]]
+path = [
+  "tools/product_guardrail/.gitignore",
+  "tools/product_guardrail/README.md",
+  "tools/product_guardrail/canon_payload.py",
+  "tools/product_guardrail/check.py",
+  "tools/product_guardrail/hook_posttooluse.py",
+  "tools/product_guardrail/hook_pretooluse.py",
+  "tools/product_guardrail/install-hooks.sh",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Copyright 2026 Agentics Transformation Limited"
+SPDX-License-Identifier = "Apache-2.0"

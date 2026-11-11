@@ -1,0 +1,935 @@
+{
+  "vectorsVersion": "0.5.0",
+  "contract": "https://agenticstiger.github.io/flux/schema/flux-enforcement-0.5.0.json",
+  "canonicalisation": "RFC 8785 (JSON Canonicalization Scheme) - policyDigest is sha256 over the JCS form of the document's agentPolicy",
+  "description": "RFC-04 conformance vectors. A conformant gate reproduces every allow, reasonCode AND policyDigest below. Check order is normative: INVALID_POLICY, INVALID_REQUEST, MODEL_NOT_ALLOWED, USE_CASE_DENIED, USE_CASE_NOT_ALLOWED, PURPOSE_REQUIRED, TOKEN_BUDGET_EXCEEDED - first failure wins. Identifiers are NFC-normalised and stripped before comparison; matching is case-sensitive. Integers follow JSON semantics (200000.0 is the integer 200000); booleans are never integers.",
+  "vectors": [
+    {
+      "name": "allow: fully compliant call",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "allow: second permitted model and use case",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-70b",
+        "useCase": "journey_synthesis",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "allow: tokens exactly at budget",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 200000
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      },
+      "note": "boundary: the budget is inclusive"
+    },
+    {
+      "name": "allow: zero tokens",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 0
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "allow: no purpose when purposeLimitation is explicitly false",
+      "policy": {
+        "allowedModels": [
+          "m1"
+        ],
+        "tokenBudget": 1000,
+        "purposeLimitation": false
+      },
+      "request": {
+        "model": "m1",
+        "useCase": "anything",
+        "tokens": 10
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:a77e163d0db8f9b54f67195b75c21c616579b38680af312c7a8f44fc57193406",
+        "effectiveBudget": 1000
+      },
+      "note": "no allowedUseCases declared means the use-case allow-list is not enforced"
+    },
+    {
+      "name": "allow: float-spelled tokenBudget still enforces (200000.0 == 200000)",
+      "policy": {
+        "allowedModels": [
+          "m1"
+        ],
+        "tokenBudget": 200000.0,
+        "purposeLimitation": false
+      },
+      "request": {
+        "model": "m1",
+        "useCase": "u",
+        "tokens": 200000
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:24a7e323aff74c5d03709cf529dc3d3fcd2933379aeeaa5147a10d5fa412ed9e",
+        "effectiveBudget": 200000
+      },
+      "note": "JSON Schema integer accepts 200000.0; a gate keying on a native int type would stop enforcing entirely"
+    },
+    {
+      "name": "allow: float-spelled tokens are integers",
+      "policy": {
+        "allowedModels": [
+          "m1"
+        ],
+        "tokenBudget": 1000,
+        "purposeLimitation": false
+      },
+      "request": {
+        "model": "m1",
+        "useCase": "u",
+        "tokens": 10.0
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:a77e163d0db8f9b54f67195b75c21c616579b38680af312c7a8f44fc57193406",
+        "effectiveBudget": 1000
+      },
+      "note": "a JS gate parses 10 and 10.0 identically; so must every gate"
+    },
+    {
+      "name": "allow: within the narrowed skill budget",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 50000
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 50000
+      },
+      "skill": {
+        "name": "journey-improviser",
+        "tokenBudget": 50000
+      }
+    },
+    {
+      "name": "deny: purposeLimitation ABSENT defaults to true",
+      "policy": {
+        "allowedModels": [
+          "m1"
+        ],
+        "tokenBudget": 1000
+      },
+      "request": {
+        "model": "m1",
+        "useCase": "u",
+        "tokens": 10
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "PURPOSE_REQUIRED",
+        "policyDigest": "sha256:66238b1bd62100a2ebde356e56d61eac9b2aced814b1f178e0ec27b846164a88",
+        "effectiveBudget": 1000
+      },
+      "note": "THE default-semantics vector: a gate defaulting to false fails only here"
+    },
+    {
+      "name": "deny: whitespace-only purpose is no purpose",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "   ",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "PURPOSE_REQUIRED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "deny: model outside the allow-list",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "remote-frontier",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "MODEL_NOT_ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "deny: explicitly denied use case",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "advertising",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "USE_CASE_DENIED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "deny: use case absent from the allow-list",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "pricing_optimisation",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "USE_CASE_NOT_ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "deny: purpose required but missing",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "tokens": 10
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "PURPOSE_REQUIRED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "deny: one token over budget",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 200001
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "TOKEN_BUDGET_EXCEEDED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "deny: skill budget narrows the policy budget",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 60000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "TOKEN_BUDGET_EXCEEDED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 50000
+      },
+      "skill": {
+        "name": "journey-improviser",
+        "tokenBudget": 50000
+      },
+      "note": "the effective budget is the skill's 50000, not the policy's 200000"
+    },
+    {
+      "name": "deny: a skill can NEVER widen the policy budget",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 400000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "TOKEN_BUDGET_EXCEEDED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      },
+      "skill": {
+        "name": "greedy-skill",
+        "tokenBudget": 500000
+      },
+      "note": "skill declares 500000 but the effective budget is min(skill, policy) = 200000; a gate letting the skill REPLACE the budget allows this"
+    },
+    {
+      "name": "deny: case variation does not evade the allow-list",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "Advertising",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "USE_CASE_NOT_ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      },
+      "note": "matching is case-sensitive: 'Advertising' is simply not an allowed use case"
+    },
+    {
+      "name": "deny: trailing whitespace does not evade the deny-list",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "advertising ",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "USE_CASE_DENIED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      },
+      "note": "identifiers are stripped before comparison"
+    },
+    {
+      "name": "deny: NFD spelling does not evade the deny-list",
+      "policy": {
+        "allowedModels": [
+          "m1"
+        ],
+        "tokenBudget": 1000,
+        "deniedUseCases": [
+          "café-ads"
+        ],
+        "purposeLimitation": false
+      },
+      "request": {
+        "model": "m1",
+        "useCase": "café-ads",
+        "tokens": 5
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "USE_CASE_DENIED",
+        "policyDigest": "sha256:5901150cf7f3c0b37e26692c7422e20b8b628716aa7c43c95ae322e79d3787e6",
+        "effectiveBudget": 1000
+      },
+      "note": "decomposed e+combining-acute is NFC-normalised to match"
+    },
+    {
+      "name": "order: denied model outranks denied use case",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "remote-frontier",
+        "useCase": "advertising",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "MODEL_NOT_ALLOWED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      },
+      "note": "normative check order - the first failing check wins"
+    },
+    {
+      "name": "order: denied use case outranks missing purpose",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "advertising",
+        "tokens": 10
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "USE_CASE_DENIED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "order: missing purpose outranks over-budget",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "tokens": 999999
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "PURPOSE_REQUIRED",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2",
+        "effectiveBudget": 200000
+      }
+    },
+    {
+      "name": "invalid: negative tokens",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": -1
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_REQUEST",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2"
+      }
+    },
+    {
+      "name": "invalid: missing model",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "useCase": "persona_variation",
+        "purpose": "x",
+        "tokens": 10
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_REQUEST",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2"
+      }
+    },
+    {
+      "name": "invalid: tokens as string",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": "lots"
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_REQUEST",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2"
+      }
+    },
+    {
+      "name": "invalid: tokens as boolean",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": true
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_REQUEST",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2"
+      },
+      "note": "true is not 1"
+    },
+    {
+      "name": "invalid: whitespace-only model",
+      "policy": {
+        "allowedModels": [
+          "local-sovereign-8b",
+          "local-sovereign-70b"
+        ],
+        "tokenBudget": 200000,
+        "allowedUseCases": [
+          "persona_variation",
+          "journey_synthesis"
+        ],
+        "deniedUseCases": [
+          "advertising"
+        ],
+        "purposeLimitation": true
+      },
+      "request": {
+        "model": "   ",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_REQUEST",
+        "policyDigest": "sha256:8e64692d2ad30b3cff36a71fb9768d51a0e59c3677520ead429e08da339dbaa2"
+      }
+    },
+    {
+      "name": "policy: empty allowedModels permits nothing",
+      "policy": {
+        "allowedModels": [],
+        "tokenBudget": 10
+      },
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_POLICY",
+        "policyDigest": "sha256:6c5b2c8861c1df682b3f59109abe18f489a51acf456b69ec116460704fa05129"
+      },
+      "note": "fail closed - an off-spec policy is rejected, not read leniently"
+    },
+    {
+      "name": "policy: missing tokenBudget is not an unlimited budget",
+      "policy": {
+        "allowedModels": [
+          "m1"
+        ],
+        "purposeLimitation": false
+      },
+      "request": {
+        "model": "m1",
+        "useCase": "u",
+        "tokens": 1000000000000000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_POLICY",
+        "policyDigest": "sha256:654d1ec2290e5dc6cfaca0a9160f4e4861b9310c949e349277b7b01109a352ba"
+      }
+    },
+    {
+      "name": "policy: boolean tokenBudget is not a budget of 1",
+      "policy": {
+        "allowedModels": [
+          "m1"
+        ],
+        "tokenBudget": true
+      },
+      "request": {
+        "model": "m1",
+        "useCase": "u",
+        "tokens": 0
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_POLICY",
+        "policyDigest": "sha256:7e5c4eaeb19c001a9f61aff121da4df63e5c2a4e2f1071b101a69f037332aac9"
+      }
+    },
+    {
+      "name": "policy: empty allowedUseCases is off-spec, not an unenforced allow-list",
+      "policy": {
+        "allowedModels": [
+          "m1"
+        ],
+        "tokenBudget": 10,
+        "allowedUseCases": [],
+        "purposeLimitation": false
+      },
+      "request": {
+        "model": "m1",
+        "useCase": "exfiltrate-pii",
+        "tokens": 5
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_POLICY",
+        "policyDigest": "sha256:080f8ec2026ea713c66c10be02a991a30b7e3b5f74cb5cdecd02cb1c28e8078c"
+      }
+    },
+    {
+      "name": "policy: empty object",
+      "policy": {},
+      "request": {
+        "model": "local-sovereign-8b",
+        "useCase": "persona_variation",
+        "purpose": "vary persona reactions",
+        "tokens": 1000
+      },
+      "expect": {
+        "allow": false,
+        "reasonCode": "INVALID_POLICY",
+        "policyDigest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      }
+    },
+    {
+      "name": "digest: unicode + float budget canonicalise per RFC 8785",
+      "policy": {
+        "allowedModels": [
+          "modèle-8b"
+        ],
+        "tokenBudget": 1000.0,
+        "purposeLimitation": false
+      },
+      "request": {
+        "model": "modèle-8b",
+        "useCase": "u",
+        "tokens": 5
+      },
+      "expect": {
+        "allow": true,
+        "reasonCode": "ALLOWED",
+        "policyDigest": "sha256:c3eb477c13e4f47d8dd10955e7c13f99d335d90eb10782aa3640ff190de06ccf",
+        "effectiveBudget": 1000
+      },
+      "note": "raw UTF-8 (not backslash-u), 1000.0 == 1000, key order irrelevant"
+    }
+  ]
+}

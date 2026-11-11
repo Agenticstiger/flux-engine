@@ -1,0 +1,13 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "name": "x_new",
+    "position": 0,
+    "rows": 6,
+    "seed": 5,
+    "spec": "normal_decimal"
+  },
+  "note": "a column added before the identifier",
+  "property": "mr5_generator_added_column",
+  "tier": "hand-written"
+}

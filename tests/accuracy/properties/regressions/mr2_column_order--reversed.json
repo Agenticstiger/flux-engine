@@ -1,0 +1,21 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "order": [
+      "seen_at",
+      "seen_on",
+      "active",
+      "wait",
+      "amount",
+      "level",
+      "count",
+      "market",
+      "widget_id"
+    ],
+    "rows": 6,
+    "seed": 7
+  },
+  "note": "reversed column order",
+  "property": "mr2_column_order",
+  "tier": "hand-written"
+}

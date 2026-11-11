@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticstiger.github.io/flux/schema/flux-enforcement-0.5.0.json",
+  "title": "FLUX Enforcement Decision Contract",
+  "description": "RFC-04: the normative runtime contract every conformant policy gate implements. Input: an agentPolicy (from any FLUX document), a request, and optionally the skill binding the call is made through. Output: a decision. Checks run in a fixed, normative order \u2014 INVALID_POLICY, INVALID_REQUEST, MODEL_NOT_ALLOWED, USE_CASE_DENIED, USE_CASE_NOT_ALLOWED, PURPOSE_REQUIRED, TOKEN_BUDGET_EXCEEDED \u2014 and the first failure wins, so identical inputs yield identical decisions on every implementation. NUMBERS: integers follow JSON semantics, not a host language's types \u2014 200000.0 is the integer 200000, and booleans are never integers. Values above 2^53-1 (9007199254740991) are rejected, because they cannot cross a JSON boundary or be canonicalised per RFC 8785 without silent precision loss. STRINGS: model and useCase identifiers are NFC-normalised and surrounding whitespace stripped before comparison; matching is case-sensitive. POLICIES: a gate MUST reject an off-spec policy with INVALID_POLICY rather than enforce a degraded reading of it \u2014 a missing or non-integer tokenBudget is never an unlimited budget. SKILLS: when a call is made through a skill, the effective budget is min(skill.tokenBudget, policy.tokenBudget) \u2014 a skill narrows and can never widen. The decision reports it as effectiveBudget, and policyDigest always digests the DOCUMENT's policy so an auditor can join a decision back to the document that authorised it. DIGESTS: policyDigest is sha256 over the RFC 8785 (JCS) canonicalisation of the policy, so gates in different languages agree byte-for-byte. Conformance is demonstrated by passing the published test vectors (tests/enforcement-vectors.json), which pin allow, reasonCode and policyDigest.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": [
+        "model",
+        "useCase",
+        "tokens"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Model identifier the caller wants to invoke."
+        },
+        "useCase": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Declared use case of the call."
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Free-text purpose statement. Required by policies with purposeLimitation (the default)."
+        },
+        "tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Requested token budget for the call. An integer in the JSON sense (200000.0 is 200000; true is not 1)."
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": [
+        "allow",
+        "reasonCode",
+        "reason",
+        "policyDigest",
+        "request"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "allow": {
+          "type": "boolean"
+        },
+        "reasonCode": {
+          "type": "string",
+          "enum": [
+            "ALLOWED",
+            "INVALID_POLICY",
+            "INVALID_REQUEST",
+            "MODEL_NOT_ALLOWED",
+            "USE_CASE_DENIED",
+            "USE_CASE_NOT_ALLOWED",
+            "PURPOSE_REQUIRED",
+            "TOKEN_BUDGET_EXCEEDED"
+          ],
+          "description": "Machine-readable outcome. Deny codes follow the normative check order; the first failing check wins."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable explanation."
+        },
+        "policyDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "sha256 over the RFC 8785 (JCS) canonicalisation of the DOCUMENT's agentPolicy \u2014 the audit anchor binding decision to policy. Never a synthesised or skill-narrowed policy."
+        },
+        "request": {
+          "type": "object",
+          "description": "Echo of the evaluated request. Deliberately unconstrained: on the INVALID_REQUEST path the request is malformed by definition, and the decision must still be able to carry it. The decision plus this echo is the audit record."
+        },
+        "effectiveBudget": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The token budget actually applied \u2014 min(skill, policy) when a skill narrows it. Present whenever the policy was well-formed."
+        },
+        "skillRef": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the skill binding the call was made through, when there was one. With effectiveBudget this makes the narrowing auditable without mutating the policy."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "reasonCode": {
+                "const": "ALLOWED"
+              }
+            },
+            "required": [
+              "reasonCode"
+            ]
+          },
+          "then": {
+            "properties": {
+              "allow": {
+                "const": true
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "allow": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

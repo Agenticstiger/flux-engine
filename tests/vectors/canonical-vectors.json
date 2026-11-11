@@ -1,0 +1,309 @@
+{
+  "vectorVersion": 1,
+  "about": "Canonicalisation vectors for KERNEL-SPEC \u00a72: a document, the exact RFC 8785 bytes it canonicalises to, and the sha256 of those bytes. The canonical strings are written by hand and reviewed; the digest is the sha256 of the canonical string, which a reader can check with 'printf %s <canonical> | sha256sum'.",
+  "encoding": {
+    "note": "JSON cannot spell every value the canonicaliser accepts, so a single-key object with one of these tags stands for the value named. Anything else is itself.",
+    "$decimal": "decimal.Decimal(<string>)",
+    "$int": "int(<string>) -- for integers JSON itself cannot carry exactly",
+    "$float": "float(<string>) -- only ever used in a rejection vector",
+    "$bytes": "bytes.fromhex(<string>)",
+    "$tuple": "tuple(<array>) -- only ever used as a rejected mapping key",
+    "$pairs": "a mapping built from [key, value] pairs, so keys can be non-strings"
+  },
+  "vectors": [
+    {
+      "name": "empty-object",
+      "why": "An empty document is a document: it canonicalises and carries a digest.",
+      "document": {},
+      "canonical": "{}",
+      "digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "key-order-and-nesting",
+      "why": "Object keys are sorted at every depth; array order is never touched.",
+      "document": {
+        "b": 1,
+        "a": {
+          "d": [
+            1,
+            2
+          ],
+          "c": true
+        }
+      },
+      "canonical": "{\"a\":{\"c\":true,\"d\":[1,2]},\"b\":1}",
+      "digest": "sha256:f720851bcc50dc6e74eb377fc289ded33213304cf544e5a86b762ee14f048f1a"
+    },
+    {
+      "name": "nfc-value-composed",
+      "why": "The composed spelling of a string value is the canonical one.",
+      "document": {
+        "name": "caf\u00e9"
+      },
+      "canonical": "{\"name\":\"caf\u00e9\"}",
+      "digest": "sha256:645fa443126a8954fc6d871912b8fc67bc2ee8feae417efe55546251962ca74d"
+    },
+    {
+      "name": "nfd-value-decomposed",
+      "why": "The decomposed spelling of the same value canonicalises to the same bytes as nfc-value-composed -- and therefore to the same digest.",
+      "document": {
+        "name": "cafe\u0301"
+      },
+      "canonical": "{\"name\":\"caf\u00e9\"}",
+      "digest": "sha256:645fa443126a8954fc6d871912b8fc67bc2ee8feae417efe55546251962ca74d"
+    },
+    {
+      "name": "nfd-key-decomposed",
+      "why": "Normalisation applies to keys as well as values (KERNEL-SPEC \u00a72.1).",
+      "document": {
+        "cafe\u0301": "x"
+      },
+      "canonical": "{\"caf\u00e9\":\"x\"}",
+      "digest": "sha256:fb2e140a849ee32fcbd38ef20556dea2f14fc57855b51c37773fcbc1dadd0539"
+    },
+    {
+      "name": "key-coercion",
+      "why": "PyYAML yields bool/int/null keys; they are coerced to their JSON spelling, then sorted as the strings they became. The int key here is 2 rather than 1 because Python's own dict would have merged an int 1 key with the True key before the canonicaliser ever saw them.",
+      "document": {
+        "$pairs": [
+          [
+            true,
+            "t"
+          ],
+          [
+            false,
+            "f"
+          ],
+          [
+            {
+              "$int": "2"
+            },
+            "two"
+          ],
+          [
+            null,
+            "nil"
+          ]
+        ]
+      },
+      "canonical": "{\"2\":\"two\",\"false\":\"f\",\"null\":\"nil\",\"true\":\"t\"}",
+      "digest": "sha256:b19022f6aa674e0c783bcfb0749d337af6c70a74484ff6797caaa372107b7b01"
+    },
+    {
+      "name": "decimal-keeps-its-scale",
+      "why": "A Decimal is a string at its declared scale, never a JSON number.",
+      "document": {
+        "amount": {
+          "$decimal": "42.0000"
+        }
+      },
+      "canonical": "{\"amount\":\"42.0000\"}",
+      "digest": "sha256:b91775f0bf60917cbfc0d9c6f15bb754b905451d76cdc0d3bd4c9f655cf69de2"
+    },
+    {
+      "name": "decimal-scale-is-part-of-the-value",
+      "why": "The same number at a different declared scale is a different canonical document -- and a different digest from decimal-keeps-its-scale.",
+      "document": {
+        "amount": {
+          "$decimal": "42"
+        }
+      },
+      "canonical": "{\"amount\":\"42\"}",
+      "digest": "sha256:d27dfa254fd57afd57463426a8b27cabf09f3821e5c599b687b50c10777e069f"
+    },
+    {
+      "name": "decimal-negative-zero-folds",
+      "why": "Negative zero and zero are one number, so they are one spelling.",
+      "document": {
+        "v": {
+          "$decimal": "-0.00"
+        }
+      },
+      "canonical": "{\"v\":\"0.00\"}",
+      "digest": "sha256:0841bb1f690a072b8d33494a465631738da317f5c3d587278dab7a223cc07b0c"
+    },
+    {
+      "name": "json-scalars",
+      "why": "Integers inside the safe domain, both booleans, and null.",
+      "document": {
+        "n": 0,
+        "big": {
+          "$int": "9007199254740991"
+        },
+        "t": true,
+        "f": false,
+        "nil": null
+      },
+      "canonical": "{\"big\":9007199254740991,\"f\":false,\"n\":0,\"nil\":null,\"t\":true}",
+      "digest": "sha256:52849e63fbff44122fd3d799c9ab954de3cc99774b1d10df37dd227993d9f4de"
+    },
+    {
+      "name": "arrays-keep-their-order",
+      "why": "Row-shaped data is an array precisely because JCS would sort an object's keys and erase the declared column order (KERNEL-SPEC \u00a78).",
+      "document": {
+        "rows": [
+          [
+            1,
+            "a"
+          ],
+          [
+            2,
+            "b"
+          ]
+        ]
+      },
+      "canonical": "{\"rows\":[[1,\"a\"],[2,\"b\"]]}",
+      "digest": "sha256:66bc805454af11bd3a1a45563821429f23e12827be151676d1a3bcc6775be99b"
+    },
+    {
+      "name": "control-characters-escape",
+      "why": "JCS escapes what JSON requires and nothing else.",
+      "document": {
+        "tab": "a\tb",
+        "quote": "a\"b",
+        "backslash": "a\\b"
+      },
+      "canonical": "{\"backslash\":\"a\\\\b\",\"quote\":\"a\\\"b\",\"tab\":\"a\\tb\"}",
+      "digest": "sha256:c6439c5ab90d352784c185890e580573092247fabe6ab3317987fb3c0543f81f"
+    },
+    {
+      "name": "non-ascii-stays-raw",
+      "why": "JCS emits raw UTF-8 rather than \\u escapes, which json.dumps does not do by default.",
+      "document": {
+        "emoji": "\ud83d\ude00"
+      },
+      "canonical": "{\"emoji\":\"\ud83d\ude00\"}",
+      "digest": "sha256:4525cb52c6a0122eacc150bacd11eb4a1d4615485ca8a5639c28d70f1c240193"
+    },
+    {
+      "name": "utf16-key-order-differs-from-codepoint-order",
+      "why": "JCS sorts keys by UTF-16 code unit, so a non-BMP key sorts BEFORE a private-use key even though its code point is larger. The intermediate structure's sorted-key order is not the byte order.",
+      "document": {
+        "\ue000": "private",
+        "\ud83d\ude00": "emoji"
+      },
+      "canonical": "{\"\ud83d\ude00\":\"emoji\",\"\ue000\":\"private\"}",
+      "digest": "sha256:cd88a3d3fb7f776454ae5549bdf53cb7399ef2683ff221a505edb46616e495f1"
+    },
+    {
+      "name": "float-value",
+      "why": "A float anywhere is refused (KERNEL-SPEC \u00a72.1).",
+      "document": {
+        "x": {
+          "$float": "1.5"
+        }
+      },
+      "error": "FLX-1001"
+    },
+    {
+      "name": "float-in-array",
+      "why": "Including inside an array.",
+      "document": {
+        "x": [
+          1,
+          {
+            "$float": "1.5"
+          }
+        ]
+      },
+      "error": "FLX-1001"
+    },
+    {
+      "name": "float-key",
+      "why": "Including as a mapping key.",
+      "document": {
+        "$pairs": [
+          [
+            {
+              "$float": "1.5"
+            },
+            "x"
+          ]
+        ]
+      },
+      "error": "FLX-1001"
+    },
+    {
+      "name": "integer-outside-jcs-domain",
+      "why": "RFC 8785 has no canonical spelling for an integer above 2^53-1.",
+      "document": {
+        "n": {
+          "$int": "9007199254740992"
+        }
+      },
+      "error": "FLX-1003"
+    },
+    {
+      "name": "unsupported-key-class",
+      "why": "A key class with no defined JSON spelling is refused, not guessed.",
+      "document": {
+        "$pairs": [
+          [
+            {
+              "$tuple": [
+                1,
+                2
+              ]
+            },
+            "x"
+          ]
+        ]
+      },
+      "error": "FLX-1004"
+    },
+    {
+      "name": "bytes-value",
+      "why": "Bytes are rendered at the seam (base64, KERNEL-SPEC \u00a79), never hashed as a sequence of integers here.",
+      "document": {
+        "blob": {
+          "$bytes": "68690a"
+        }
+      },
+      "error": "FLX-1005"
+    },
+    {
+      "name": "non-finite-decimal",
+      "why": "NaN has no JSON spelling and no ordering.",
+      "document": {
+        "x": {
+          "$decimal": "NaN"
+        }
+      },
+      "error": "FLX-1006"
+    },
+    {
+      "name": "keys-collide-after-coercion",
+      "why": "True and 'true' become one key; merging them would drop a value.",
+      "document": {
+        "$pairs": [
+          [
+            true,
+            1
+          ],
+          [
+            "true",
+            2
+          ]
+        ]
+      },
+      "error": "FLX-1007"
+    },
+    {
+      "name": "keys-collide-after-nfc",
+      "why": "The composed and decomposed spellings of one key are one key.",
+      "document": {
+        "$pairs": [
+          [
+            "caf\u00e9",
+            1
+          ],
+          [
+            "cafe\u0301",
+            2
+          ]
+        ]
+      },
+      "error": "FLX-1007"
+    }
+  ]
+}

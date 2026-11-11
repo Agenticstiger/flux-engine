@@ -1,0 +1,429 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flux-sim-engine"
+version = "0.2.0"
+description = "FLUX Simulation Engine: the runtime for FLUX bundles -- deterministic, governed simulation under a referenced FLUID contract."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "flux_engine/_vendor/flux_spec/NOTICE"]
+authors = [{ name = "Agentics Transformation Ltd" }]
+keywords = ["FLUX", "FLUID", "simulation", "synthetic data", "data contracts"]
+
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+
+# Core runtime deps -- kept lean. The extras below are `lineage` and `dev`;
+# no calibration, synthesis or statistics library is among them, because no
+# engine code imports one.
+dependencies = [
+  # PCG64 bit source for the deterministic seed tree (core/seedtree.py,
+  # W2): `SeedSequence.spawn`/path-addressed derivation is the standard
+  # pattern (borrow-before-build receipt: numpy docs; also how Synthea's
+  # per-person RNG and the `neworder` microsimulation framework seed their
+  # entities). Ceiling <3 because numpy 2.x's C-API churn is still
+  # settling across the scientific-Python stack this engine will sit
+  # next to.
+  "numpy>=1.26,<3",
+  # Typed frozen dataclasses/Protocols across flux_engine/api/, and the
+  # concordance record / accuracy verdict / run-attestation models.
+  # Matches forge-cli's pydantic v2 floor so a future host
+  # process that imports both engines gets one pydantic major, not two.
+  "pydantic>=2.7,<3",
+  # FLUX and FLUID bundle documents are YAML; also required (transitively)
+  # by the vendored flux_spec.validate loader.
+  "pyyaml>=6",
+  # Draft 2020-12 JSON Schema validation for FLUX documents and the FLUID
+  # seam's referenced contract schema (flux_spec.validate / .bundle).
+  "jsonschema>=4.22",
+  # RFC 8785 JSON Canonicalization Scheme -- the substrate every digest in
+  # this engine sits on: the vendored flux_spec.validate/.enforce/.bundle
+  # already depend on it, and flux_engine.core.canonical (the ONE place in
+  # flux_engine allowed to import it -- see [tool.importlinter] below) will
+  # canonicalise H, G, and every seed-tree root through the same scheme so
+  # a FLUX bundle and its FLUX engine agree on one digest, not two.
+  "rfc8785>=0.1",
+  # CNCF CloudEvents 1.0 envelope for signal/detection/emit event records
+  # (runtime/, W5) and the ship-gate failure signal (concordance/gate.py,
+  # W7). Borrowed-not-built per /borrow-before-build: the alternative was
+  # hand-rolling an event envelope, which is exactly the kind of
+  # stringly-typed wire format the project's own standing rules forbid.
+  # Ceiling <3 pins to the 1.x/2.x line the rest of the FLUID stack (the
+  # Marquez/OpenLineage receiver profile) already targets.
+  "cloudevents>=1.10,<3",
+  # cryptography: ed25519 signature over the fidelity record (evidence pack); the
+  # forge-cli codebase already depends on it, so no new supply-chain surface.
+  "cryptography>=42",
+  # flux-spec: the FLUX offline reference validator, the RFC-04 enforcement
+  # gate and the RFC-09 evidence bundler -- the code that answers "is this
+  # bundle conformant" and "is this call allowed". flux_engine imports it
+  # rather than reimplementing it (ADR 0005), so it is a real dependency,
+  # declared here, not whatever happens to be in the environment. The range is
+  # the supported one: flux_engine.spec refuses an installed flux_spec outside
+  # it rather than silently substituting a different enforcement decision,
+  # and still carries the vendored fallback for an environment that has to
+  # run without it.
+  "flux-spec>=0.5,<0.6",
+]
+
+[project.optional-dependencies]
+lineage = [
+  # Official OpenLineage Python client -- owns the RunEvent wire format so
+  # flux_engine does not hand-roll it, matching how forge-cli's own
+  # OpenLineage emitter is wired.
+  "openlineage-python>=1.20",
+]
+# Dev / QA. Pin style copied verbatim from forge-cli's own [dev] extra
+# (forge-cli/pyproject.toml) so both engines run the identical linter
+# versions in CI -- no "passes in forge-cli, fails in flux-engine" drift.
+dev = [
+  "pytest>=7.4",
+  "pytest-cov>=4.1",
+  "hypothesis>=6.100",
+  "mypy>=1.10",
+  "ruff>=0.5",
+  "black==26.10.1",
+  # Architecture linter -- declarative TOML contracts (under
+  # [tool.importlinter] below) enforced by the `lint-imports` CLI. Same
+  # dependency, same pin floor, as forge-cli's own import-linter contracts.
+  "import-linter>=2.0",
+  # Parallel test execution. A floor, not an exact pin, because unlike a
+  # formatter its presence does not change any verdict: it changes how long
+  # the same verdict takes to arrive.
+  #
+  # Measured back to back on one 16-core machine, `-n auto --dist loadscope`
+  # against the same selection run serially:
+  #   fast subset   3112 passed both ways   164.36s -> 29.41s
+  #   slow subset     44 passed both ways   680.35s -> 135.32s
+  # Identical pass counts, exit 0 on all four runs. `--dist loadscope` rather
+  # than the default keeps a module's tests on one worker, so the session
+  # fixtures that build the 25,000-subject bundle are built once per session
+  # rather than once per worker they scatter to.
+  #
+  # Parallel safety is not assumed from those green runs alone. Every test
+  # call to plan/apply/ship/verify/replay passes an explicit state_dir, so the
+  # cwd-relative ".flux" default is never exercised, and the one fixed-path
+  # write in the suite, import-linter's cache from tests/test_architecture.py,
+  # has exactly one caller and must not be parametrised or duplicated.
+  #
+  # Callers opt in through the Makefile's PARALLEL variable. Deliberately
+  # NOT added to addopts below: a bare `pytest` stays serial and debuggable.
+  "pytest-xdist>=3.6",
+  # Per-test backstop. The job-level timeout in CI already bounds the cost of
+  # a hung test, but under xdist it stops without naming which test hung.
+  # This names it.
+  "pytest-timeout>=2.3",
+  # Runs every code block and command line example in README.md and docs/ as a
+  # test (tests/docs/), so a page that stops being true fails CI. MIT. Pinned
+  # exactly: its Markdown parsers are the interface tests/docs/harness.py is
+  # written against.
+  "sybil==10.1.0",
+  # Checks that every file states its licence and copyright holder (`make
+  # reuse`): a short header in each source file, REUSE.toml for the files
+  # that cannot take one. Run as a tool, never imported or shipped. Its own
+  # licence is a mix that includes GPL-3.0-or-later. The charset-normalizer extra
+  # is the pure-Python way for it to detect a file's encoding, so nothing has to
+  # be installed on the system. Pinned exactly, because a newer release can move
+  # the specification it checks against.
+  "reuse[charset-normalizer]==6.3.0",
+]
+
+[project.scripts]
+fluxsim = "flux_engine.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Agenticstiger/flux-engine"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["flux_engine*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+flux_engine = [
+  "py.typed",
+]
+# The project `fluxsim init` writes. A wheel without these files installs fine
+# and then fails on its first command, so `make packaging-smoke` and the
+# first-run job both run `init` from the built wheel.
+"flux_engine.starter" = [
+  "bundle/*.yml",
+]
+"flux_engine._vendor.flux_spec" = [
+  "NOTICE",
+  "VENDOR-NOTES.md",
+  "schema/*.json",
+  "vendor/fluid/*.json",
+  "vectors/*.json",
+]
+
+# ---- Tooling configs ----
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["flux_engine/_vendor"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = [
+  "E203",  # whitespace before ':' -- Black-compatible
+  "E501",  # line-too-long -- handled by Black where possible
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+extend-exclude = "flux_engine/_vendor"
+
+[tool.mypy]
+# 3.12, not the 3.11 floor: numpy>=2.3 ships PEP 695 `type` statements in its stubs
+# that mypy refuses under a 3.11 target. Syntax is still held to 3.11 by ruff's target-version.
+python_version = "3.12"
+warn_unused_ignores = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+exclude = "^flux_engine/_vendor/"
+
+# Strict-ish: every non-vendored flux_engine module must type-annotate its
+# defs. Tests and the vendored fallback copy stay outside this gate.
+[[tool.mypy.overrides]]
+module = "flux_engine.*"
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "flux_engine._vendor.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-q --strict-markers"
+# Per-test backstop, in seconds, from pytest-timeout. Set here rather than as
+# a CI-only flag so `make ci-local` and CI share one number.
+#
+# This is a hang detector, not a performance budget, so it is set well above
+# any real test. For scale, the whole `-m slow` selection, 44 tests, took
+# 680s serially on a 16-core development machine, so 1500s is more than twice
+# the runtime of every slow test put together and no individual test comes
+# close to it. A CI runner is slower than that machine and parallel workers
+# contend with each other, and the margin absorbs both. A test that
+# legitimately needs longer should carry its own @pytest.mark.timeout rather
+# than raise this floor for everything.
+timeout = 1500
+markers = [
+  "unit: Unit tests (fast, no I/O)",
+  "integration: Integration tests (may need network/files)",
+  "property: Property-based tests (hypothesis)",
+  "golden: Golden/regression-snapshot tests -- byte-for-byte determinism gates",
+  "slow: Tests that take significant time (>5s)",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["flux_engine"]
+omit = ["flux_engine/_vendor/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 70
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+  "\\.\\.\\.",
+]
+
+# ── import-linter contracts ────────────────────────────────────────────
+#
+# Run locally: `.venv/bin/lint-imports` (exit 0 = pass, 1 = violation).
+[tool.importlinter]
+root_package = "flux_engine"
+# Global, not per-contract: import-linter only builds external-package
+# edges into the graph at all when this is set here. Needed because two
+# contracts below forbid external modules (rfc8785; random/uuid/socket/
+# time/os) -- contracts that forbid only internal flux_engine modules are
+# unaffected either way. Do not repeat it inside a contract: import-linter
+# 2.15 and older ignored it there without a word, and 2.16 refuses the
+# whole configuration with "include_external_packages: Unrecognized option".
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "evidence must not import runtime"
+type = "forbidden"
+source_modules = ["flux_engine.evidence"]
+forbidden_modules = ["flux_engine.runtime"]
+# Evidence packs a bundle's output from files on disk only, per the
+# architecture doc -- it must never be able to reach into a live run's
+# in-process state.
+allow_indirect_imports = false
+as_packages = true
+
+[[tool.importlinter.contracts]]
+name = "only governance.gate may import spec.enforce"
+type = "forbidden"
+source_modules = ["flux_engine"]
+forbidden_modules = ["flux_engine.spec.enforce"]
+# The one authorized edge: flux_engine.governance.gate is the sole path to
+# an enforcement decision (see governance/gate.py's docstring).
+ignore_imports = ["flux_engine.governance.gate -> flux_engine.spec.enforce"]
+allow_indirect_imports = false
+as_packages = true
+
+[[tool.importlinter.contracts]]
+name = "only core.canonical may import rfc8785"
+type = "forbidden"
+source_modules = ["flux_engine"]
+forbidden_modules = ["rfc8785"]
+ignore_imports = [
+  "flux_engine.core.canonical -> rfc8785",
+  # The vendored fallback copy (byte-for-byte third-party code -- see
+  # flux_engine/_vendor/flux_spec/VENDOR-NOTES.md) is out of scope for
+  # flux_engine's OWN kernel discipline, the same way it is excluded from
+  # ruff/black/mypy above. It imports rfc8785 directly in its own two
+  # modules; that is upstream FLUX spec code, not a flux_engine kernel
+  # module choosing to bypass core.canonical.
+  "flux_engine._vendor.flux_spec.enforce -> rfc8785",
+  "flux_engine._vendor.flux_spec.validate -> rfc8785",
+]
+# W0's core/canonical.py is still a placeholder (no rfc8785 usage yet --
+# that lands in W2), so the ignored edge above has nothing to match. "warn"
+# (rather than the default "error") keeps this contract green today and
+# stays correct once W2 adds the real import: it only differs from
+# "error" in the case where the edge does NOT exist.
+unmatched_ignore_imports_alerting = "warn"
+allow_indirect_imports = false
+as_packages = true
+
+[[tool.importlinter.contracts]]
+name = "kernel packages stay free of wall-clock, randomness, identity, and forbidden internal edges"
+type = "forbidden"
+source_modules = [
+  "flux_engine.core",
+  "flux_engine.world",
+  "flux_engine.runtime",
+  "flux_engine.expr",
+  "flux_engine.seam",
+]
+forbidden_modules = [
+  "random",
+  "uuid",
+  "socket",
+  "time",
+  "os",
+  "flux_engine.evidence",
+  "flux_engine.cli",
+  "flux_engine.engine",
+    "secrets",
+]
+# The datetime MODULE is allowed in kernel packages (RFC 3339 parsing/formatting);
+# wall-clock CALLS (datetime.now/time.time) are banned by the AST scan in
+# tests/test_architecture.py. `secrets` (randomness) stays forbidden here.
+# core.canonical's rfc8785 exception lives in a separate contract above;
+# nothing here is exempted -- the kernel must derive every wall-clock-ish
+# or identity-ish value (timestamps, ids, random draws) from the seed tree
+# / a caller-supplied value instead.
+allow_indirect_imports = false
+as_packages = true
+
+[[tool.importlinter.contracts]]
+name = "accuracy scoring mechanism is not wired until v0.3"
+type = "forbidden"
+source_modules = ["flux_engine"]
+forbidden_modules = ["flux_engine.accuracy._scoring"]
+allow_indirect_imports = false
+as_packages = true
+
+[[tool.importlinter.contracts]]
+name = "only core.canonical may import hashlib"
+type = "forbidden"
+source_modules = ["flux_engine"]
+forbidden_modules = ["hashlib"]
+ignore_imports = ["flux_engine.core.canonical -> hashlib", "flux_engine._vendor.flux_spec.* -> hashlib"]
+allow_indirect_imports = true
+as_packages = true
+
+# ── test-only dependency groups (PEP 735) ─────────────────────────────
+#
+# Never part of the distribution: `pip install flux-sim-engine` and
+# `pip install -e ".[dev]"` install none of these, and nothing under
+# flux_engine/ imports them. They exist for the accuracy program under
+# tests/accuracy/ (see docs/accuracy/DESIGN.md) and for
+# .github/workflows/accuracy-nightly.yml:
+#
+#   uv sync --extra dev --group accuracy        # or
+#   pip install -e ".[dev]" --group accuracy    # pip >= 25.1
+#
+# Without the group, the accuracy program's modules skip with a reason that
+# names it; FLUX_ACCURACY_REQUIRED=1 turns that skip into a failure, the way
+# FLUX_EXAMPLES_REQUIRED does for the sibling FLUX checkout.
+[dependency-groups]
+accuracy = [
+  # BSD-3-Clause. kstest, anderson, chisquare, cramervonmises, the
+  # two-sample tests, binomtest's exact interval and
+  # false_discovery_control (Benjamini-Hochberg / Benjamini-Yekutieli,
+  # added in 1.11), and `anderson(..., method=...)`, which gives the
+  # Anderson-Darling test a p-value and arrived in 1.17.
+  "scipy>=1.17",
+  # MPL-2.0, test-only and never vendored: MPL's file-level copyleft
+  # attaches to modified copies of its own files, and this repository
+  # neither copies nor modifies them. Generates documents that validate
+  # against the FLUX and FLUID JSON Schemas for the property tests.
+  "hypothesis-jsonschema==0.23.2",
+  # BSD-2-Clause. The speed half of the nightly artefact.
+  "pytest-benchmark>=5.3,<6",
+]
+# BSD-3-Clause. Weekly mutation testing of the kernel modules only; kept out
+# of `accuracy` because it pulls a TUI stack (textual, libcst) the pull
+# request tier has no use for.
+mutation = [
+  "mutmut==3.8.1",
+]
+
+# mutmut reads this table; `mutmut run` is driven by the weekly job in
+# .github/workflows/accuracy-nightly.yml. The modules are the kernel's
+# numeric core and the fidelity statistic; the kill-rate target and the
+# reason for it are in docs/accuracy/DESIGN.md.
+[tool.mutmut]
+source_paths = ["flux_engine/"]
+only_mutate = [
+  "flux_engine/core/lrm.py",
+  "flux_engine/core/rng.py",
+  "flux_engine/core/seedtree.py",
+  "flux_engine/core/fixedpoint.py",
+  "flux_engine/concordance/boundary/statistic.py",
+]
+# The kernel's own unit tests, plus the two accuracy modules that are fast
+# and deterministic. The statistical batteries are left out on purpose:
+# each recomputes a module-scoped battery of tens of thousands of draws, so
+# running them per mutant would cost hours a week for mutants the unit
+# tests already settle.
+pytest_add_cli_args_test_selection = [
+  "tests/core",
+  "tests/concordance",
+  "tests/accuracy/gof/test_kernel_numerics.py",
+  "tests/accuracy/fidelity/test_s_metric_definitions.py",
+]
+also_copy = ["tests/", "scripts/", "tools/"]
+mutate_only_covered_lines = true

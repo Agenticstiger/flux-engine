@@ -1,0 +1,12 @@
+fluxVersion: "0.5.0"
+kind: Campaign
+id: cam-payment-recovery
+name: Payment Recovery Campaign
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  treatmentRef: tr-fast-recovery
+  segmentRef: seg-atrisk-tv
+  channelRef: ch-sms-primary
+  consentRef: cp-telco-eu

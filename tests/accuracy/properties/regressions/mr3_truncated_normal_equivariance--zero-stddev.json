@@ -1,0 +1,16 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "a": "0",
+    "b": "0.1",
+    "entropy": 0,
+    "hi": "2",
+    "lo": "0",
+    "mean": "1",
+    "scale": 2,
+    "stddev": "0"
+  },
+  "note": "a mean mapped as b*mean+a (an earlier draft of the check used mean+a)",
+  "property": "mr3_truncated_normal_equivariance",
+  "tier": "hand-written"
+}

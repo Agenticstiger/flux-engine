@@ -1,0 +1,10 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "rows": 12,
+    "seed": 42
+  },
+  "note": "baseline: same root, twice and under a hostile ambient decimal context",
+  "property": "mr1_generator_same_bytes",
+  "tier": "hand-written"
+}

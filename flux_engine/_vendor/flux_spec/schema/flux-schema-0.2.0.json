@@ -1,0 +1,465 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FLUX Complete Document Schema",
+  "description": "Open standard JSON Schema for the FLUX v0.2.0 declarative specification, including Horizon 2/3 behavioral extensions.",
+  "type": "object",
+  "required": [
+    "fluxVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "fluxVersion": {
+      "type": "string",
+      "const": "0.2.0",
+      "description": "The version of the FLUX specification this document targets."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "World",
+        "Persona",
+        "Segment",
+        "Catalog",
+        "Offer",
+        "Channel",
+        "ConsentProfile",
+        "Playback",
+        "Journey",
+        "JourneyTaxonomy",
+        "Signal",
+        "Detector",
+        "Treatment",
+        "Campaign",
+        "Experiment",
+        "Module",
+        "VerticalPack",
+        "Blueprint",
+        "Simulation"
+      ],
+      "description": "The discriminator defining the family and behavior of this document."
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "description": "The kind-specific configuration block."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "World" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["seed", "population"],
+            "properties": {
+              "seed": { "type": "integer", "description": "Deterministic PRNG seed." },
+              "vertical": { "type": "string" },
+              "population": {
+                "type": "object",
+                "required": ["size", "lifecycle_mix"],
+                "properties": {
+                  "size": { "type": "integer", "minimum": 1 },
+                  "lifecycle_mix": {
+                    "type": "object",
+                    "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Persona" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "properties": {
+              "demographics": { "type": "object" },
+              "skills": {
+                "type": "object",
+                "properties": {
+                  "digital_fluency": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "financial_literacy": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "supply_chain_resilience": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              },
+              "worldview": {
+                "type": "object",
+                "properties": {
+                  "risk_tolerance": { "type": "string" },
+                  "trust_in_institutions": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "trend_following": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              },
+              "agentic_prompt": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Segment" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+              "query": { "type": "string", "description": "Expression to filter Personas." }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Catalog" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["items"],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["sku", "name"],
+                  "properties": {
+                    "sku": { "type": "string" },
+                    "name": { "type": "string" },
+                    "attributes": { "type": "object" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Offer" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["catalog_ref", "pricing"],
+            "properties": {
+              "catalog_ref": { "type": "string" },
+              "pricing": {
+                "type": "object",
+                "properties": {
+                  "amount": { "type": "number" },
+                  "currency": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Channel" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "enum": ["sms", "email", "push", "api_gateway", "in_app"] },
+              "rate_limit_per_second": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "ConsentProfile" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "properties": {
+              "allowed_jurisdictions": { "type": "array", "items": { "type": "string" } },
+              "requires_explicit_opt_in": { "type": "boolean" },
+              "permitted_purposes": { "type": "array", "items": { "type": "string" } },
+              "blocked_purposes": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Playback" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["source_stream", "persona_mapping"],
+            "properties": {
+              "source_stream": { "type": "string", "description": "URI of historical telemetry." },
+              "persona_mapping": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["behavior_pattern", "map_to_persona"],
+                  "properties": {
+                    "behavior_pattern": { "type": "string" },
+                    "map_to_persona": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Journey" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "properties": {
+              "trigger": { "type": "object", "properties": { "signal": { "type": "string" } } },
+              "intervention": { "type": "object", "properties": { "action": { "type": "string" } } },
+              "persona_reactions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": { "success_probability": { "type": "number", "minimum": 0, "maximum": 1 } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "JourneyTaxonomy" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["states", "transitions"],
+            "properties": {
+              "states": { "type": "array", "items": { "type": "string" } },
+              "transitions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": { "from": { "type": "string" }, "to": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Signal" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["source", "payload_schema"],
+            "properties": {
+              "source": { "type": "string" },
+              "payload_schema": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Detector" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["time_window_ms", "pattern"],
+            "properties": {
+              "time_window_ms": { "type": "integer" },
+              "pattern": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Treatment" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["action_type"],
+            "properties": {
+              "action_type": { "type": "string" },
+              "payload_template": { "type": "object" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Campaign" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["treatment_ref", "segment_ref", "channel_ref", "consent_ref"],
+            "properties": {
+              "treatment_ref": { "type": "string" },
+              "segment_ref": { "type": "string" },
+              "channel_ref": { "type": "string" },
+              "consent_ref": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Experiment" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["variants"],
+            "properties": {
+              "variants": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "treatment_ref": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Module" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["resources"],
+            "properties": {
+              "resources": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "VerticalPack" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["industry", "modules"],
+            "properties": {
+              "industry": { "type": "string" },
+              "modules": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Blueprint" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["topology"],
+            "properties": {
+              "topology": {
+                "type": "object",
+                "properties": {
+                  "nodes": { "type": "array", "items": { "type": "string" } },
+                  "edges": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "from": { "type": "string" },
+                        "to": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Simulation" } } },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": ["world", "emits"],
+            "properties": {
+              "world": { "type": "string" },
+              "time_bounds": {
+                "type": "object",
+                "properties": {
+                  "start": { "type": "string", "format": "date-time" },
+                  "end": { "type": "string", "format": "date-time" }
+                }
+              },
+              "emits": {
+                "type": "array",
+                "description": "The critical FLUID contract handoff seam.",
+                "items": {
+                  "type": "object",
+                  "required": ["exposeId", "contract"],
+                  "properties": {
+                    "exposeId": { "type": "string" },
+                    "contract": {
+                      "type": "object",
+                      "required": ["fluidVersion", "kind", "promise"],
+                      "properties": {
+                        "fluidVersion": { "type": "string" },
+                        "kind": { "type": "string", "const": "DataProduct" },
+                        "promise": { "type": "object" }
+                      },
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

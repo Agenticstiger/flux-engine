@@ -1,0 +1,11 @@
+fluxVersion: "0.5.0"
+kind: Treatment
+id: tr-standard-dunning
+name: Standard Dunning Letter
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  actionType: standard_dunning
+  payloadTemplate:
+    message: "Your payment is overdue"

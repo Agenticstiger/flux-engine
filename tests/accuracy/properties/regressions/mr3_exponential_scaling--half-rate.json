@@ -1,0 +1,12 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "c": "2",
+    "entropy": 123456789012345678901234567890,
+    "rate": "0.5",
+    "scale": 3
+  },
+  "note": "the brief's case: c = 2",
+  "property": "mr3_exponential_scaling",
+  "tier": "hand-written"
+}

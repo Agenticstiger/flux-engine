@@ -1,0 +1,1298 @@
+{
+  "vectorsVersion": 1,
+  "note": "SEAM-FIDELITY-SPEC 2-8 vectors: one small contract, one committed slice, the digests and margins the compiler takes from them, per-property outcomes for four synthetic datasets, tolerance-rounding direction cases, and one case per fail-closed condition and per offline refusal. Numbers are exact decimal strings, or numerator/denominator where the value does not terminate in decimal.",
+  "contract": {
+    "fluidVersion": "0.7.5",
+    "kind": "DataProduct",
+    "id": "example.gold.recovery_moment",
+    "exposes": [
+      {
+        "exposeId": "recovery_moment",
+        "kind": "stream",
+        "contract": {
+          "schema": [
+            {
+              "name": "subscriber_id",
+              "type": "STRING",
+              "required": true
+            },
+            {
+              "name": "aborted_at",
+              "type": "TIMESTAMP",
+              "required": true
+            },
+            {
+              "name": "amount",
+              "type": "DECIMAL(18,4)"
+            },
+            {
+              "name": "attempts",
+              "type": "INT"
+            },
+            {
+              "name": "market",
+              "type": "STRING"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "emit": {
+    "productRef": "example.gold.recovery_moment",
+    "exposeId": "recovery_moment",
+    "fluidVersion": "^0.7.3"
+  },
+  "extension": {
+    "rows": 8,
+    "fidelity": {
+      "encoding": {
+        "fractionalBits": 4,
+        "rounding": "floor"
+      },
+      "records": {
+        "min": 4,
+        "max": 8
+      },
+      "columns": {
+        "amount": {
+          "range": {
+            "min": "1",
+            "max": "8"
+          },
+          "null": "exclude"
+        },
+        "attempts": {
+          "range": {
+            "min": "0",
+            "max": "16"
+          },
+          "null": "fail"
+        },
+        "market": {
+          "support": {
+            "values": [
+              "ie",
+              "uk"
+            ]
+          },
+          "maxCardinality": 4,
+          "null": "fail"
+        },
+        "aborted_at": {
+          "range": {
+            "min": "2026-07-01T00:00:00Z",
+            "max": "2026-09-30T23:59:59Z"
+          },
+          "null": "fail"
+        }
+      },
+      "properties": [
+        {
+          "property": "mean",
+          "column": "amount",
+          "tolerance": {
+            "type": "relative",
+            "value": "0.25"
+          }
+        },
+        {
+          "property": "marginalHistogram",
+          "column": "amount",
+          "bins": [
+            "1",
+            "2",
+            "4",
+            "8"
+          ],
+          "tolerance": {
+            "type": "distance",
+            "measure": "totalVariation",
+            "max": "0.2"
+          }
+        },
+        {
+          "property": "support",
+          "column": "market",
+          "tolerance": {
+            "type": "count",
+            "max": 0
+          }
+        },
+        {
+          "property": "mean",
+          "column": "amount",
+          "groupBy": "market",
+          "tolerance": {
+            "type": "absolute",
+            "value": "2"
+          }
+        },
+        {
+          "property": "correlation",
+          "columns": [
+            "amount",
+            "attempts"
+          ],
+          "minVariance": "4",
+          "tolerance": {
+            "type": "absolute",
+            "value": "0.5"
+          }
+        },
+        {
+          "property": "quantile",
+          "column": "amount",
+          "level": "0.5",
+          "tolerance": {
+            "type": "absolute",
+            "value": "1"
+          }
+        }
+      ],
+      "budget": {
+        "maxChecksPerState": 3,
+        "maxStateAge": "P30D"
+      },
+      "failureAction": "withholdBundle"
+    }
+  },
+  "expose": {
+    "exposeId": "recovery_moment",
+    "columns": [
+      "subscriber_id",
+      "aborted_at",
+      "amount",
+      "attempts",
+      "market"
+    ]
+  },
+  "committedSlice": [
+    {
+      "subscriber_id": "s0",
+      "aborted_at": "2026-07-01T00:00:00.000Z",
+      "amount": "1",
+      "attempts": 1,
+      "market": "ie"
+    },
+    {
+      "subscriber_id": "s1",
+      "aborted_at": "2026-07-02T00:00:00.000Z",
+      "amount": "2",
+      "attempts": 2,
+      "market": "uk"
+    },
+    {
+      "subscriber_id": "s2",
+      "aborted_at": "2026-07-03T00:00:00.000Z",
+      "amount": "3",
+      "attempts": 3,
+      "market": "ie"
+    },
+    {
+      "subscriber_id": "s3",
+      "aborted_at": "2026-07-04T00:00:00.000Z",
+      "amount": "4",
+      "attempts": 4,
+      "market": "uk"
+    },
+    {
+      "subscriber_id": "s4",
+      "aborted_at": "2026-07-05T00:00:00.000Z",
+      "amount": "5",
+      "attempts": 5,
+      "market": "ie"
+    },
+    {
+      "subscriber_id": "s5",
+      "aborted_at": "2026-07-06T00:00:00.000Z",
+      "amount": "6",
+      "attempts": 6,
+      "market": "uk"
+    },
+    {
+      "subscriber_id": "s6",
+      "aborted_at": "2026-07-07T00:00:00.000Z",
+      "amount": "7",
+      "attempts": 7,
+      "market": "ie"
+    },
+    {
+      "subscriber_id": "s7",
+      "aborted_at": "2026-07-08T00:00:00.000Z",
+      "amount": "8",
+      "attempts": 8,
+      "market": "uk"
+    }
+  ],
+  "blindingHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "committedAt": "2026-09-01T00:00:00.000Z",
+  "stateOrdinal": 1,
+  "expect": {
+    "H": "sha256:404f5124404c2f273906fd2161a1f28641f7ba2d940fed6a3eb7e861760eb765",
+    "G": "sha256:da8a958865ed3a081742a042a8280a553d146a096ce8fc71c101dede6afb92fd",
+    "plan": {
+      "exposeId": "recovery_moment",
+      "H": "sha256:404f5124404c2f273906fd2161a1f28641f7ba2d940fed6a3eb7e861760eb765",
+      "G": "sha256:da8a958865ed3a081742a042a8280a553d146a096ce8fc71c101dede6afb92fd",
+      "encoding": {
+        "fractionalBits": 4,
+        "rounding": "floor"
+      },
+      "fieldCapacityBits": 253,
+      "properties": [
+        {
+          "propertyId": "000:mean:amount",
+          "property": "mean",
+          "columns": [
+            "amount"
+          ],
+          "epsilon": "0.078125",
+          "margin": "0.125",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "meanComparison": 17,
+            "sum": 11,
+            "value": 8
+          }
+        },
+        {
+          "propertyId": "001:marginalHistogram:amount",
+          "property": "marginalHistogram",
+          "columns": [
+            "amount"
+          ],
+          "epsilon": "0",
+          "margin": "0.1875",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "totalVariationComparison": 12,
+            "value": 8
+          }
+        },
+        {
+          "propertyId": "002:support:market",
+          "property": "support",
+          "columns": [
+            "market"
+          ],
+          "epsilon": "0",
+          "margin": null,
+          "maxNonMembers": 0,
+          "magnitudeBits": {}
+        },
+        {
+          "propertyId": "003:mean:amount@market",
+          "property": "mean",
+          "columns": [
+            "amount"
+          ],
+          "groupBy": "market",
+          "epsilon": "0.0625",
+          "margin": "1.9375",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "meanComparison": 18,
+            "sum": 11,
+            "value": 8
+          }
+        },
+        {
+          "propertyId": "004:correlation:amount+attempts",
+          "property": "correlation",
+          "columns": [
+            "amount",
+            "attempts"
+          ],
+          "epsilon": "0.25",
+          "margin": "0.25",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "centredSecondMoment": 23,
+            "correlationComparison": 51,
+            "correlationNumerator": 24,
+            "sum": 12,
+            "sumOfProducts": 20,
+            "value": 9
+          }
+        },
+        {
+          "propertyId": "005:quantile:amount",
+          "property": "quantile",
+          "columns": [
+            "amount"
+          ],
+          "epsilon": "0.0625",
+          "margin": "0.9375",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "value": 8
+          }
+        }
+      ]
+    },
+    "statistic": {
+      "exposeId": "recovery_moment",
+      "recordCount": 8,
+      "properties": [
+        {
+          "propertyId": "000:mean:amount",
+          "property": "mean",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "Sx": "576"
+            }
+          ]
+        },
+        {
+          "propertyId": "001:marginalHistogram:amount",
+          "property": "marginalHistogram",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "binCounts": [
+                1,
+                2,
+                5
+              ]
+            }
+          ]
+        },
+        {
+          "propertyId": "002:support:market",
+          "property": "support",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "support": [
+                "ie",
+                "uk"
+              ]
+            }
+          ]
+        },
+        {
+          "propertyId": "003:mean:amount@market",
+          "property": "mean",
+          "n": 8,
+          "groups": [
+            {
+              "group": "ie",
+              "k": 4,
+              "Sx": "256"
+            },
+            {
+              "group": "uk",
+              "k": 4,
+              "Sx": "320"
+            }
+          ]
+        },
+        {
+          "propertyId": "004:correlation:amount+attempts",
+          "property": "correlation",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "Sx": "576",
+              "Sy": "576",
+              "Sxx": "52224",
+              "Sxy": "52224",
+              "Syy": "52224"
+            }
+          ]
+        },
+        {
+          "propertyId": "005:quantile:amount",
+          "property": "quantile",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "quantileWitness": "64",
+              "quantileBelow": 3,
+              "quantileAtOrBelow": 4
+            }
+          ]
+        }
+      ]
+    },
+    "C2": "sha256:7d27ce399140c7b4b5101b556265fd0cff367ea6925ac85333a3342957b1a050"
+  },
+  "roundingCases": [
+    {
+      "id": "floor-rounds-down",
+      "fractionalBits": 4,
+      "tolerance": "0.25",
+      "epsilon": "0.078125",
+      "expect": {
+        "margin": "0.125",
+        "notLooserThan": "0.171875",
+        "onGrid": true
+      }
+    },
+    {
+      "id": "already-on-grid",
+      "fractionalBits": 4,
+      "tolerance": "0.5",
+      "epsilon": "0.25",
+      "expect": {
+        "margin": "0.25",
+        "notLooserThan": "0.25",
+        "onGrid": true
+      }
+    },
+    {
+      "id": "tiny-epsilon",
+      "fractionalBits": 8,
+      "tolerance": "0.02",
+      "epsilon": "0.00390625",
+      "expect": {
+        "margin": "0.015625",
+        "notLooserThan": "0.01609375",
+        "onGrid": true
+      }
+    },
+    {
+      "id": "wide-grid",
+      "fractionalBits": 2,
+      "tolerance": "0.9",
+      "epsilon": "0.25",
+      "expect": {
+        "margin": "0.5",
+        "notLooserThan": "0.65",
+        "onGrid": true
+      }
+    },
+    {
+      "id": "rounds-to-zero",
+      "fractionalBits": 2,
+      "tolerance": "0.3",
+      "epsilon": "0.2",
+      "expect": {
+        "code": "FLX-5002"
+      }
+    },
+    {
+      "id": "epsilon-equals-tolerance",
+      "fractionalBits": 4,
+      "tolerance": "0.25",
+      "epsilon": "0.25",
+      "expect": {
+        "code": "FLX-5002"
+      }
+    },
+    {
+      "id": "epsilon-above-tolerance",
+      "fractionalBits": 4,
+      "tolerance": "0.25",
+      "epsilon": "0.5",
+      "expect": {
+        "code": "FLX-5002"
+      }
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "identical",
+      "note": "the synthetic dataset is the committed record set; every property is within",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": true,
+        "refused": false,
+        "refusalCodes": [],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "within",
+          "003:mean:amount@market": "within",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "one-grid-step",
+      "note": "one amount moved by exactly one grid step; every property is still within",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1.0625",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": true,
+        "refused": false,
+        "refusalCodes": [],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "within",
+          "003:mean:amount@market": "within",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "drifted-mean",
+      "note": "amounts pushed to the top of the declared range; the mean and the histogram land outside their margins",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": false,
+        "refusalCodes": [],
+        "outcomes": {
+          "000:mean:amount": "outside",
+          "001:marginalHistogram:amount": "outside",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "outside",
+          "005:quantile:amount": "outside"
+        }
+      }
+    },
+    {
+      "id": "unseen-category",
+      "note": "one record carries a category the committed support does not hold",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "de"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "outside",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "nulls-excluded",
+      "note": "two amounts are null under null: exclude and leave the amount properties",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": null,
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": null,
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "outside",
+          "001:marginalHistogram:amount": "outside",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "outside"
+        }
+      }
+    },
+    {
+      "id": "all-amounts-null",
+      "note": "every amount is null: k = 0 for every amount property",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": null,
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": null,
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": null,
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": null,
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": null,
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": null,
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": null,
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": null,
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "outside",
+          "001:marginalHistogram:amount": "outside",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "outside",
+          "005:quantile:amount": "outside"
+        }
+      }
+    },
+    {
+      "id": "too-few-records",
+      "note": "three records, below the declared records.min",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {}
+      }
+    },
+    {
+      "id": "too-many-records",
+      "note": "nine records, above the declared records.max",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s8",
+          "aborted_at": "2026-07-09T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "ie"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {}
+      }
+    },
+    {
+      "id": "group-below-min",
+      "note": "eight records but one group holds three, below the declared records.min",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "column-absent",
+      "note": "the market column is absent from the synthetic rows",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5031"
+        ],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "outside",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "value-out-of-range",
+      "note": "one amount is outside the declared range: a fail-closed refusal, not an outcome",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "9",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "outside",
+          "001:marginalHistogram:amount": "outside",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "outside",
+          "005:quantile:amount": "outside"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,651 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release
+
+# One tag, one release.
+#
+# ci.yml already carried `on: push: tags: ["v*"]`, and its matrix expression
+# already expanded to the six-cell whole-suite shape on a tag, so a tag ran the
+# release-grade suite before any release workflow existed. What a tag did NOT
+# do was keep anything: the Packaging job builds a wheel and an sdist through
+# `make packaging-smoke` and the runner throws both away (there is no
+# upload-artifact anywhere in ci.yml). This file adds the three things that
+# were actually missing: a guard, persistence, and a record.
+#
+# The companion edit to ci.yml DELETES its `tags: ["v*"]` trigger. The matrix
+# now reaches a tag through ci.yml's `workflow_call` hook, which shipped with
+# the comment "it is the hook, not the guarantee" and has never had a caller.
+# The `ci` job below is that caller. Without the deletion the same six cells
+# run twice per tag, and macOS bills at 10x on a private repository.
+#
+# Nothing is published to a package index unless the repository variable
+# PYPI_PUBLISH is "true" (see the `publish-pypi` job at the bottom). PyPI also
+# refuses a package that carries `Private :: Do Not Upload`, so a private build
+# cannot reach the index by accident.
+on:
+  push:
+    tags: ["v*"]
+
+# Nothing by default, so a job added later without its own block inherits an
+# empty grant rather than the whole workflow grant. Every job below states what
+# it needs.
+permissions: {}
+
+defaults:
+  run:
+    # Naming bash explicitly is what turns on `-o pipefail`, matching ci.yml.
+    shell: bash
+
+concurrency:
+  group: release-${{ github.ref }}
+  # A cancelled release can leave a tag built and attested with nothing
+  # published, or a partially uploaded release. Releases run to completion.
+  cancel-in-progress: false
+
+env:
+  # The Makefile's tool prefix is `BIN ?= .venv/bin/`, which does not exist on
+  # a runner. An empty value resolves every tool on PATH. Same variable, same
+  # value, same reason as ci.yml sets workflow-wide.
+  BIN: ""
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  # ----------------------------------------------------------------- guard
+  # Runs first, before roughly forty minutes of matrix, because every refusal
+  # here is cheap to catch now and expensive to catch after a release is
+  # published.
+  #
+  # No pip install: scripts/release_guard.py is standard library only, so this
+  # job is well under a minute.
+  guard:
+    name: Release guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.guard.outputs.version }}
+      prerelease: ${{ steps.guard.outputs.prerelease }}
+    steps:
+      # Every action in every workflow is pinned by commit SHA now, and a test
+      # (tests/test_workflow_pins.py) holds the line; Dependabot proposes the
+      # bumps. This is the only workflow in the repository that holds
+      # `contents: write` and `id-token: write`, so it is the one where a moved
+      # tag on a third-party action would matter most.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The ancestry check needs main's history, not just this tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      # The control, before the thing it controls. --self-test builds a broken
+      # fixture for every check and requires each one to refuse, so a check
+      # that has silently stopped firing fails the release rather than blessing
+      # it. This mirrors `make guardrail`, which runs
+      # tools/product_guardrail/check.py --self-test on its own recipe line for
+      # the same reason.
+      #
+      # Each refusing arm also names a fragment its refusal must contain,
+      # because several checks run in sequence over one fixture and a Refusal
+      # on its own would not show WHICH check produced it.
+      - name: Release guard self-test (every check refuses a broken fixture)
+        run: python scripts/release_guard.py --self-test
+
+      # THE version check, and the reason this job exists.
+      #
+      # There are two copies of the package version in this tree:
+      # pyproject.toml line 7, and the hard-coded literal in
+      # flux_engine/__init__.py's `except PackageNotFoundError` branch. They
+      # can disagree forever with the whole suite green. The except branch
+      # never executes in CI, because every job pip-installs the package first
+      # and importlib.metadata always wins; and the one test that touches
+      # __version__, tests/test_cli.py::
+      # test_version_flag_prints_version_and_exits_zero, compares `fluxsim
+      # --version` against that same imported value, so it is a tautology that
+      # cannot observe the mismatch. A text check is the only thing that can.
+      #
+      # The guard also refuses a .devN or .postN tag at the shape check, which
+      # closes the obvious way around a version mismatch: tagging the dev
+      # string instead of bumping it.
+      #
+      # What the guard deliberately does NOT check is KERNEL_VERSION.
+      # flux_engine/stages/pipeline.py line 93 is the semver of normative
+      # kernel behaviour, it is hashed into inputDigest, and it is not the
+      # package version. It needs no check here because it already has a
+      # stronger one: moving it moves every pinned digest, which turns
+      # `make test-digests` red on all six cells of the matrix below. The guard
+      # does check the two constants beside it, SEED_TREE_VERSION and
+      # TRACE_VERSION, against flux_engine/core/seedtree.py and
+      # flux_engine/core/trace.py, because pipeline.py re-declares both as bare
+      # literals and nothing in tests/ compares the copies.
+      - name: The tag, pyproject.toml, the fallback literal and main agree
+        id: guard
+        run: |
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          python scripts/release_guard.py \
+            --tag "$GITHUB_REF_NAME" \
+            --commit "$GITHUB_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+
+      # A v* tag carries no required review and no required status check, and a
+      # repository admin can bypass the "release tags are immutable" ruleset and
+      # retag at will. This does not stop that. It stops a retag from quietly
+      # replacing an already published release and the digests recorded in it.
+      - name: No release exists for this tag yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "REFUSED: a release already exists for $GITHUB_REF_NAME."
+            echo "Publishing again would replace its assets and its recorded digests."
+            echo "Delete that release deliberately, or tag the next version."
+            exit 1
+          fi
+          echo "no existing release for $GITHUB_REF_NAME"
+
+  # -------------------------------------------------------------------- ci
+  # The six-cell whole-suite shape, on the tagged tree, in this run: ubuntu and
+  # macOS across Python 3.11, 3.12 and 3.13, fast subset plus slow subset, with
+  # the pinned-digest set on every cell.
+  #
+  # Called, not copied, and waited on: the release job `needs` this, and
+  # `needs` treats a skipped or cancelled call as a failure, so a red cell
+  # means no artifact is ever built.
+  #
+  # `full_matrix: true` and ci.yml's own `startsWith(github.ref, 'refs/tags/v')`
+  # clause both select the six-cell shape here, because a called workflow runs
+  # at the caller's ref. That redundancy is deliberate: the release keeps its
+  # shape if either condition is later edited away.
+  #
+  # `secrets: inherit` keeps the sibling FLUX checkout behaving exactly as it
+  # does on the pull-request path, where ci.yml reads
+  # `secrets.FLUX_SPEC_REPO_TOKEN || github.token`.
+  ci:
+    name: Whole suite
+    needs: guard
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      full_matrix: true
+    secrets: inherit
+
+  # --------------------------------------------------------------- release
+  # Build once, check what was built, attest it, show the attestation
+  # discriminating, then publish.
+  release:
+    name: Build, attest, publish
+    needs: [guard, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      # The sha256 of the two distributions, for the PyPI job to check against.
+      dist_sha256: ${{ steps.digests.outputs.dist_sha256 }}
+    permissions:
+      # Create the release and upload its assets.
+      contents: write
+      # Mint the OIDC token the attestation is signed against.
+      id-token: write
+      # Write the attestation, and read it back to verify it.
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.guard.outputs.version }}
+      SIGNER_WORKFLOW: ${{ github.repository }}/.github/workflows/release.yml
+      DIST: build/ci/pkg/dist
+      SBOM_NAME: flux-sim-engine-${{ needs.guard.outputs.version }}.cdx.json
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      # `make packaging-smoke` is the SAME target ci.yml's Packaging job runs.
+      # It builds the sdist and the wheel in an isolated interpreter, installs
+      # the wheel into a second clean one, and runs `fluxsim gate conform` and
+      # `fluxsim describe --self --json` from a directory that is not the source
+      # tree, so a broken [tool.setuptools.package-data] fails here rather than
+      # in a consumer's environment. Today it throws both files away. This job
+      # keeps them.
+      #
+      # Not re-implemented as a `python -m build` step here, on purpose. A
+      # second build recipe means the smoke-tested artifact and the shipped
+      # artifact stop being the same file the day the two drift.
+      - name: Build the distribution and smoke-test it from a clean interpreter
+        run: make packaging-smoke
+
+      - name: The build produced exactly the two files this release publishes
+        run: |
+          ls -l "$DIST"
+          wheel="$DIST/flux_sim_engine-$VERSION-py3-none-any.whl"
+          sdist="$DIST/flux_sim_engine-$VERSION.tar.gz"
+          for want in "$wheel" "$sdist"; do
+            test -f "$want" || {
+              echo "REFUSED: no $want"
+              echo "the build produced: $(ls "$DIST")"
+              exit 1
+            }
+          done
+          count=$(find "$DIST" -maxdepth 1 -type f | wc -l)
+          test "$count" -eq 2 || {
+            echo "REFUSED: expected exactly 2 files in $DIST, found $count"
+            echo "every file in the release is attested and published, so an"
+            echo "unexpected file fails closed rather than shipping unreviewed."
+            exit 1
+          }
+
+      # packaging-smoke's own assertions cover `fluxsim gate conform` and a
+      # non-empty spec_version. This adds the assertion a release needs and a
+      # smoke test does not: the artifact about to be attached to the tag
+      # agrees with the tag. describe.json was written by the CLI of the
+      # freshly installed wheel, from outside the source tree, so this reads
+      # built-and-installed metadata rather than repository text. It is the
+      # only check in the repository that can catch a wheel whose recorded
+      # version disagrees with what the tag names.
+      - name: The installed wheel describes itself as the tagged version
+        run: |
+          python scripts/release_guard.py \
+            --check-installed \
+            --version "$VERSION" \
+            --describe build/ci/pkg/describe.json
+
+      - name: Record the artifact digests
+        id: digests
+        run: |
+          (cd "$DIST" && sha256sum ./*.whl ./*.tar.gz) | sed 's|\./||' \
+            | tee "$RUNNER_TEMP/dist-hashes.txt"
+          cp "$RUNNER_TEMP/dist-hashes.txt" "$RUNNER_TEMP/hashes.txt"
+          {
+            echo "dist_sha256<<DIGESTS"
+            cat "$RUNNER_TEMP/dist-hashes.txt"
+            echo "DIGESTS"
+          } >> "$GITHUB_OUTPUT"
+
+      # Build provenance over the two files that are about to be published: a
+      # signed statement that this workflow, at this commit, in this run,
+      # produced these exact bytes.
+      #
+      # Kept because it cannot be retrofitted: a wheel shipped unattested today
+      # cannot be given provenance later without cutting a new version. It is
+      # one step and one permissions line, and the next two steps show it
+      # refusing.
+      #
+      # Kept to provenance alone. A custom predicate carrying kernel versions
+      # and spec pins was considered and left out: no consumer would pass its
+      # predicate-type URI to `gh attestation verify`, and the same facts are
+      # already in the wheel's metadata and the release body.
+      #
+      # One step, two subjects, ONE bundle: actions/attest calls attest() once
+      # with both subjects, so bundle-path names a single file whose statement
+      # carries both. Verified against the v4.2.2 source rather than assumed.
+      - name: Attest the build provenance of both assets
+        id: provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            build/ci/pkg/dist/flux_sim_engine-${{ needs.guard.outputs.version }}-py3-none-any.whl
+            build/ci/pkg/dist/flux_sim_engine-${{ needs.guard.outputs.version }}.tar.gz
+
+      # Offline first, against the bundle the attest step just wrote, so this
+      # verdict does not wait on the attestations API. Then two controls,
+      # because a verification seen only to pass is not evidence that it
+      # discriminates: altered bytes must be refused, and so must an
+      # attestation signed by a different workflow in this same repository.
+      - name: Verify the attestation offline, then watch it refuse twice
+        run: |
+          gh --version
+          wheel="$DIST/flux_sim_engine-$VERSION-py3-none-any.whl"
+          bundle="${{ steps.provenance.outputs.bundle-path }}"
+          test -f "$bundle" || { echo "no attestation bundle at $bundle"; exit 1; }
+
+          gh attestation verify "$wheel" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$SIGNER_WORKFLOW" \
+            --bundle "$bundle"
+          gh attestation verify "$DIST/flux_sim_engine-$VERSION.tar.gz" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$SIGNER_WORKFLOW" \
+            --bundle "$bundle"
+
+          cp "$wheel" "$RUNNER_TEMP/tampered.whl"
+          python3 - <<'PY'
+          import os
+          import pathlib
+
+          path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "tampered.whl"
+          data = bytearray(path.read_bytes())
+          index = len(data) // 2
+          data[index] ^= 0xFF
+          path.write_bytes(bytes(data))
+          print(f"flipped byte {index} of {len(data)}")
+          PY
+          if gh attestation verify "$RUNNER_TEMP/tampered.whl" \
+               --repo "$GITHUB_REPOSITORY" \
+               --signer-workflow "$SIGNER_WORKFLOW" \
+               --bundle "$bundle"; then
+            echo "REFUSED: verification accepted a wheel with an altered byte"
+            exit 1
+          fi
+          echo "control: verification refused the altered wheel"
+
+          if gh attestation verify "$wheel" \
+               --repo "$GITHUB_REPOSITORY" \
+               --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+               --bundle "$bundle"; then
+            echo "REFUSED: verification accepted the wrong signer workflow"
+            exit 1
+          fi
+          echo "control: verification refused the wrong signer workflow"
+
+      # The exact command the release notes tell a consumer to run, run here
+      # first, against the live attestations API rather than a local file.
+      # Nothing is published until it succeeds, so a release never carries a
+      # verification instruction that has not just worked. The loop is for
+      # propagation only.
+      - name: The consumer's own command, against the attestations API
+        run: |
+          wheel="$DIST/flux_sim_engine-$VERSION-py3-none-any.whl"
+          for attempt in 1 2 3 4 5; do
+            if gh attestation verify "$wheel" \
+                 --repo "$GITHUB_REPOSITORY" \
+                 --signer-workflow "$SIGNER_WORKFLOW"; then
+              echo "the published attestation is readable through the API"
+              exit 0
+            fi
+            echo "not readable yet (attempt $attempt of 5); waiting"
+            sleep 15
+          done
+          echo "REFUSED: the attestation never became verifiable through the API."
+          echo "Nothing was published. Re-running this job is safe."
+          exit 1
+
+      # The same two files, kept for the `publish-pypi` job below. Uploaded only
+      # now, after the attestation was verified, so what PyPI is offered is what
+      # was attested; `overwrite` lets a re-run of this job replace attempt 1's
+      # copy. Skipped while PyPI publishing is off.
+      - name: Keep the two distributions for the PyPI job
+        if: ${{ vars.PYPI_PUBLISH == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          overwrite: true
+          path: build/ci/pkg/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      # A CycloneDX SBOM of what installing this wheel brings in: the wheel goes
+      # into a clean virtual environment and cyclonedx-py reads that environment,
+      # the same shape forge-cli uses. It lives outside $DIST on purpose: $DIST
+      # must hold exactly the two files that are attested and sent to PyPI.
+      # Not attested itself; the release body says so.
+      #
+      # Runs after the attestation is verified, and the tool goes into its own
+      # virtual environment, so a bad release of cyclonedx-bom or one of its
+      # dependencies cannot touch the files that were just attested or the
+      # runner's Python. The Publish step re-checks both files' digests.
+      - name: CycloneDX SBOM of the installed wheel
+        run: |
+          python -m venv "$RUNNER_TEMP/sbom-env"
+          "$RUNNER_TEMP/sbom-env/bin/pip" install --quiet \
+            "$DIST/flux_sim_engine-$VERSION-py3-none-any.whl"
+          python -m venv "$RUNNER_TEMP/sbom-tool"
+          "$RUNNER_TEMP/sbom-tool/bin/pip" install --quiet "cyclonedx-bom==8.0.1"
+          mkdir -p "$RUNNER_TEMP/sbom"
+          "$RUNNER_TEMP/sbom-tool/bin/cyclonedx-py" environment "$RUNNER_TEMP/sbom-env" --sv 1.6 --of JSON \
+            --output-file "$RUNNER_TEMP/sbom/$SBOM_NAME"
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "sbom" / os.environ["SBOM_NAME"]
+          bom = json.loads(path.read_text(encoding="utf-8"))
+          names = {c["name"].lower().replace("_", "-") for c in bom.get("components", [])}
+          assert bom.get("bomFormat") == "CycloneDX", bom.get("bomFormat")
+          assert "flux-sim-engine" in names, "the SBOM does not list the engine itself"
+          print(f"SBOM lists {len(names)} components")
+          PY
+          (cd "$RUNNER_TEMP/sbom" && sha256sum "$SBOM_NAME") | tee -a "$RUNNER_TEMP/hashes.txt"
+
+      # flux-spec-pin-drift's `if` is `schedule || workflow_dispatch`, which
+      # excludes both a tag push and a workflow_call, and it is deliberately
+      # absent from ci-gate's `needs`. So "CI gate went green on this tag" says
+      # nothing whatever about whether what the engine installs from flux-spec
+      # still matches flux's main.
+      # The release runs the check itself and records the answer in the body.
+      # Non-blocking on purpose: drift in a repository this one does not
+      # control is not a reason to refuse a release, but a release that does
+      # not say which it was is hiding the question. When flux-spec becomes a
+      # version range the script goes away, and the step then records nothing.
+      - name: Record the flux-spec pin drift status
+        run: |
+          if [ -f scripts/check_flux_spec_pin.py ]; then
+            set +e
+            python3 scripts/check_flux_spec_pin.py > "$RUNNER_TEMP/pin.txt" 2>&1
+            echo "PIN_STATUS=$?" >> "$GITHUB_ENV"
+            set -e
+          else
+            echo "no pin-drift script: flux-spec is a version range" > "$RUNNER_TEMP/pin.txt"
+          fi
+          cat "$RUNNER_TEMP/pin.txt"
+
+      - name: Write the release body
+        env:
+          PRIVATE_REPO: ${{ github.event.repository.private }}
+          PYPI_PUBLISH: ${{ vars.PYPI_PUBLISH }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import tomllib
+
+          env = os.environ
+          version = env["VERSION"]
+          tag = env["GITHUB_REF_NAME"]
+          repo = env["GITHUB_REPOSITORY"]
+          sha = env["GITHUB_SHA"]
+          temp = pathlib.Path(env["RUNNER_TEMP"])
+          wheel = f"flux_sim_engine-{version}-py3-none-any.whl"
+          hashes = temp.joinpath("hashes.txt").read_text(encoding="utf-8").strip()
+          # The requirement as pyproject.toml writes it: a git pin today, a version
+          # range once flux-spec is on PyPI. Either way the release must still build.
+          dependencies = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))[
+              "project"
+          ]["dependencies"]
+          pin = next((d for d in dependencies if re.match(r"flux-spec\b", d)), "flux-spec (not declared)")
+          # Only a git pin has a drift status; a version range has none to report.
+          raw_status = env.get("PIN_STATUS")
+          pin_status = (
+              None
+              if raw_status is None
+              else {
+                  "0": "what it installs matches flux's main",
+                  "1": "what it installs differs from flux's main",
+              }.get(raw_status, "could not be checked")
+          )
+
+          # The install section follows the repository's state, so the body is true
+          # while the repository is private and after it is public, with no edit.
+          private = env.get("PRIVATE_REPO") == "true"
+          on_pypi = env.get("PYPI_PUBLISH") == "true"
+          verify = [
+              "```",
+              f"gh release download {tag} --repo {repo} --pattern '*.whl'",
+              f"gh attestation verify {wheel} \\",
+              f"  --repo {repo} \\",
+              f"  --signer-workflow {repo}/.github/workflows/release.yml",
+              f"pip install ./{wheel}",
+              "```",
+          ]
+          if private:
+              install = [
+                  "## Install",
+                  "",
+                  "This package is not on PyPI. It is installed from this repository,",
+                  "which is private, so the installing environment must already be",
+                  "authenticated to github.com.",
+                  "",
+                  "A bare `pip install https://github.com/.../releases/download/...` does",
+                  "NOT work against a private repository: pip's URL fetcher sends no",
+                  "Authorization header and gets a 404. Fetch the asset with an",
+                  "authenticated client first, then install the local file:",
+                  "",
+                  *verify,
+                  "",
+                  "The git-URL form also resolves:",
+                  "",
+                  "```",
+                  f"flux-sim-engine @ git+https://github.com/{repo}.git@{tag}",
+                  "```",
+                  "",
+                  "It needs a `git` authenticated to github.com (a token rewrite via",
+                  "`url.<base>.insteadOf`, a ~/.netrc entry, or an SSH deploy key with",
+                  "`git+ssh://`), and it rebuilds from source on the consumer's machine,",
+                  "so the bytes that end up installed are not the attested bytes below.",
+              ]
+          elif on_pypi:
+              install = [
+                  "## Install",
+                  "",
+                  f"`pip install flux-sim-engine=={version}`, once the",
+                  "`publish-pypi` job of this run has uploaded it to PyPI.",
+                  "",
+                  "Or install the attested wheel from this release:",
+                  "",
+                  *verify,
+              ]
+          else:
+              install = [
+                  "## Install",
+                  "",
+                  "This package is not on PyPI yet. Install the attested wheel from this",
+                  "release:",
+                  "",
+                  *verify,
+              ]
+
+          lines = [
+              f"flux-sim-engine {version}, built from {sha}.",
+              "",
+              *install,
+              "",
+              "## What this release ran",
+              "",
+              "- The whole suite in its release-grade shape: six cells, ubuntu-latest",
+              "  and macos-latest across Python 3.11, 3.12 and 3.13, fast subset plus",
+              "  slow subset, with the pinned-digest set on every cell.",
+              "- The attached wheel installed into a clean interpreter outside the",
+              "  source tree and passed `fluxsim gate conform` and",
+              "  `fluxsim describe --self --json`, which reported version " + version + ".",
+              "- The tag, pyproject.toml and the flux_engine/__init__.py fallback",
+              f"  literal all read {version}.",
+              "- The attestation above verified against this workflow, and refused both",
+              "  a wheel with one byte altered and a different signer workflow.",
+              f"- flux-spec requirement: `{pin}`" + (f" ({pin_status})." if pin_status else "."),
+              "- A CycloneDX SBOM of the wheel installed into a clean environment.",
+              "",
+              "## sha256",
+              "",
+              "```",
+              hashes,
+              "```",
+              "",
+              "## What this release does not claim",
+              "",
+              "- No consumer has yet installed this package, so the install commands",
+              "  above are written from the repository's own settings rather than from",
+              "  a build that has run them.",
+              "- The wheel is not claimed to be byte-reproducible. It was built once.",
+              "- The SBOM is not attested. It lists what installing the wheel pulled",
+              "  into a clean environment on the release runner.",
+              "- Release tags are covered by a ruleset that blocks deletion and",
+              "  force-moves, but a repository admin can bypass it. If this tag later",
+              "  points somewhere else, these assets and this attestation do not change,",
+              "  and the commit SHA above is the record of what was actually built.",
+              "",
+          ]
+          temp.joinpath("notes.md").write_text("\n".join(lines), encoding="utf-8")
+          PY
+          cat "$RUNNER_TEMP/notes.md"
+
+      # --verify-tag refuses if the tag does not already exist on the remote,
+      # which is otherwise the one thing `gh release create` will do for you:
+      # create it.
+      - name: Publish
+        env:
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+        run: |
+          # Nothing since the attestation may have touched the two files.
+          (cd "$DIST" && sha256sum -c "$RUNNER_TEMP/dist-hashes.txt")
+          flags=(--verify-tag
+                 --repo "$GITHUB_REPOSITORY"
+                 --title "flux-sim-engine $VERSION"
+                 --notes-file "$RUNNER_TEMP/notes.md")
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" \
+            "$DIST/flux_sim_engine-$VERSION-py3-none-any.whl" \
+            "$DIST/flux_sim_engine-$VERSION.tar.gz" \
+            "$RUNNER_TEMP/sbom/$SBOM_NAME"
+
+          # The same probe the guard job used to refuse an existing release,
+          # now on the other side of the publish. One run shows it returning
+          # both answers, so "no release exists yet" was a reading rather than
+          # a command that always succeeds quietly.
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[] | "\(.name)\t\(.size) bytes"'
+
+  # ------------------------------------------------------------------ pypi
+  # Off unless the repository variable PYPI_PUBLISH is "true". PyPI Trusted
+  # Publishing: no API token is stored anywhere. PyPI is told once (see
+  # docs/RELEASING.md) to trust this workflow file in this repository, limited to
+  # the `pypi` environment, and exchanges this job's short-lived OIDC token for
+  # an upload token. pypa/gh-action-pypi-publish attaches PEP 740 attestations
+  # by default.
+  #
+  # Its own job, holding nothing but `id-token: write`, so the step that talks
+  # to PyPI has no `contents: write` and no `attestations: write`. It uploads
+  # the two files the release job built, attested and attached; it does not
+  # build anything.
+  #
+  # PyPI refuses a distribution whose dependencies contain a direct reference
+  # (`name @ git+https://...`), so this job fails at the upload until the
+  # flux-spec dependency is a version range. Failing there is intended: PyPI is
+  # the last line of defence.
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [guard, release]
+    if: ${{ vars.PYPI_PUBLISH == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/flux-sim-engine/${{ needs.guard.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+
+      # What was downloaded is what the release job attested: the digests were
+      # recorded there, before the attestation, and travel as a job output.
+      - name: The downloaded files match the recorded digests
+        env:
+          DIGESTS: ${{ needs.release.outputs.dist_sha256 }}
+        run: |
+          test -n "$DIGESTS" || { echo "REFUSED: no recorded digests"; exit 1; }
+          cd dist
+          printf '%s\n' "$DIGESTS" | sha256sum -c -
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 2
+
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

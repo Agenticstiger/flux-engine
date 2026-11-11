@@ -1,0 +1,476 @@
+{
+  "$comment": "Projection vectors: an expose schema plus one row, and the exact canonical NDJSON line KERNEL-SPEC §8's line(row) must produce for it. Every `line` here is written by hand from §8 and §9, not captured from the implementation, so a transcription error in either side is a failure. Values are encoded with single-key `$`-tagged objects so a JSON file can carry the Python value classes §9 renders from: $decimal (an exact decimal string), $date (YYYY-MM-DD), $datetime (an RFC 3339 string handed to the renderer as a datetime), $bytes (base64 of the raw bytes), $ms (integer milliseconds since the epoch), $tuple (a sequence). Anything else is the JSON value itself. Driven by tests/seam/test_vectors.py.",
+  "version": 1,
+  "encoding": {
+    "$decimal": "decimal.Decimal(<string>)",
+    "$date": "datetime.date.fromisoformat(<string>)",
+    "$datetime": "datetime.datetime.fromisoformat(<string>)",
+    "$bytes": "base64.b64decode(<string>)",
+    "$ms": "int(<integer>) -- milliseconds since the Unix epoch",
+    "$tuple": "tuple(<array>)"
+  },
+  "vectors": [
+    {
+      "name": "telco payment_recovery_moment, the shipped schema",
+      "category": "shipped",
+      "schema": [
+        {"name": "subscriber_id", "type": "STRING", "required": true},
+        {"name": "aborted_at", "type": "TIMESTAMP", "required": true},
+        {"name": "amount", "type": "DECIMAL(18,4)"},
+        {"name": "market", "type": "STRING"}
+      ],
+      "types": ["STRING", "TIMESTAMP", "DECIMAL(18,4)", "STRING"],
+      "row": {
+        "subscriber_id": "sub-000001",
+        "aborted_at": "2026-07-01T00:00:00Z",
+        "amount": {"$decimal": "42.5"},
+        "market": "IE"
+      },
+      "line": "[\"sub-000001\",\"2026-07-01T00:00:00.000Z\",\"42.5000\",\"IE\"]\n"
+    },
+    {
+      "name": "telco schema, an absent optional column renders as JSON null",
+      "category": "shipped",
+      "schema": [
+        {"name": "subscriber_id", "type": "STRING", "required": true},
+        {"name": "aborted_at", "type": "TIMESTAMP", "required": true},
+        {"name": "amount", "type": "DECIMAL(18,4)"},
+        {"name": "market", "type": "STRING"}
+      ],
+      "types": ["STRING", "TIMESTAMP", "DECIMAL(18,4)", "STRING"],
+      "row": {
+        "subscriber_id": "sub-000002",
+        "aborted_at": {"$ms": 1782000000000}
+      },
+      "line": "[\"sub-000002\",\"2026-06-21T00:00:00.000Z\",null,null]\n"
+    },
+    {
+      "name": "the row is an array in declared order, not an object",
+      "category": "ordering",
+      "schema": [
+        {"name": "zebra", "type": "STRING"},
+        {"name": "alpha", "type": "STRING"}
+      ],
+      "types": ["STRING", "STRING"],
+      "row": {"alpha": "a", "zebra": "z"},
+      "line": "[\"z\",\"a\"]\n",
+      "why": "JCS sorts object keys, so an object would have emitted alpha first. §8 uses arrays for exactly this reason."
+    },
+    {
+      "name": "the same two columns declared the other way round",
+      "category": "ordering",
+      "schema": [
+        {"name": "alpha", "type": "STRING"},
+        {"name": "zebra", "type": "STRING"}
+      ],
+      "types": ["STRING", "STRING"],
+      "row": {"alpha": "a", "zebra": "z"},
+      "line": "[\"a\",\"z\"]\n"
+    },
+    {
+      "name": "STRING renders NFC, and the decomposed spelling becomes the composed one",
+      "category": "unicode",
+      "schema": [{"name": "town", "type": "STRING"}],
+      "types": ["STRING"],
+      "row": {"town": "café"},
+      "line": "[\"café\"]\n"
+    },
+    {
+      "name": "JCS emits raw UTF-8, not backslash escapes",
+      "category": "unicode",
+      "schema": [{"name": "label", "type": "STRING"}],
+      "types": ["STRING"],
+      "row": {"label": "日本語"},
+      "line": "[\"日本語\"]\n"
+    },
+    {
+      "name": "a control character in a STRING is escaped by JCS",
+      "category": "unicode",
+      "schema": [{"name": "label", "type": "STRING"}],
+      "types": ["STRING"],
+      "row": {"label": "a\tb\nc"},
+      "line": "[\"a\\tb\\nc\"]\n",
+      "why": "The newline inside the value is escaped, so exactly one raw newline terminates the line -- which is what makes the NDJSON framing unambiguous."
+    },
+    {
+      "name": "an astral-plane character survives as raw UTF-8",
+      "category": "unicode",
+      "schema": [{"name": "label", "type": "STRING"}],
+      "types": ["STRING"],
+      "row": {"label": "😀"},
+      "line": "[\"😀\"]\n"
+    },
+    {
+      "name": "INT renders as a JSON integer, never as a string",
+      "category": "types",
+      "schema": [
+        {"name": "small", "type": "INT"},
+        {"name": "negative", "type": "BIGINT"},
+        {"name": "zero", "type": "smallint"}
+      ],
+      "types": ["INT", "INT", "INT"],
+      "row": {"small": 42, "negative": -17, "zero": 0},
+      "line": "[42,-17,0]\n"
+    },
+    {
+      "name": "DECIMAL renders as a string at the declared scale",
+      "category": "types",
+      "schema": [
+        {"name": "four", "type": "DECIMAL(18,4)"},
+        {"name": "zero_scale", "type": "DECIMAL(9,0)"},
+        {"name": "from_int", "type": "numeric(6,2)"}
+      ],
+      "types": ["DECIMAL(18,4)", "DECIMAL(9,0)", "DECIMAL(6,2)"],
+      "row": {
+        "four": {"$decimal": "1.5"},
+        "zero_scale": {"$decimal": "-300"},
+        "from_int": 7
+      },
+      "line": "[\"1.5000\",\"-300\",\"7.00\"]\n",
+      "why": "A DECIMAL is a string, so JCS never puts it through the IEEE 754 double domain."
+    },
+    {
+      "name": "a decimal at the declared scale keeps its trailing zeros",
+      "category": "types",
+      "schema": [{"name": "n", "type": "DECIMAL(18,4)"}],
+      "types": ["DECIMAL(18,4)"],
+      "row": {"n": {"$decimal": "42"}},
+      "line": "[\"42.0000\"]\n"
+    },
+    {
+      "name": "negative zero folds onto the positive spelling",
+      "category": "types",
+      "schema": [{"name": "n", "type": "DECIMAL(6,2)"}],
+      "types": ["DECIMAL(6,2)"],
+      "row": {"n": {"$decimal": "-0.001"}},
+      "line": "[\"0.00\"]\n",
+      "why": "-0.00 and 0.00 are one number; two spellings would be two digests."
+    },
+    {
+      "name": "rounding is half-to-even, the rounding a SQL cast applies",
+      "category": "types",
+      "schema": [
+        {"name": "down", "type": "DECIMAL(4,1)"},
+        {"name": "up", "type": "DECIMAL(4,1)"}
+      ],
+      "types": ["DECIMAL(4,1)", "DECIMAL(4,1)"],
+      "row": {"down": {"$decimal": "0.25"}, "up": {"$decimal": "0.35"}},
+      "line": "[\"0.2\",\"0.4\"]\n"
+    },
+    {
+      "name": "BOOL renders as a JSON bool",
+      "category": "types",
+      "schema": [
+        {"name": "yes", "type": "BOOLEAN"},
+        {"name": "no", "type": "bit"}
+      ],
+      "types": ["BOOL", "BOOL"],
+      "row": {"yes": true, "no": false},
+      "line": "[true,false]\n"
+    },
+    {
+      "name": "DATE renders YYYY-MM-DD, from a date or from a string",
+      "category": "types",
+      "schema": [
+        {"name": "from_date", "type": "DATE"},
+        {"name": "from_string", "type": "DATE"}
+      ],
+      "types": ["DATE", "DATE"],
+      "row": {"from_date": {"$date": "2026-07-01"}, "from_string": "2026-12-31"},
+      "line": "[\"2026-07-01\",\"2026-12-31\"]\n"
+    },
+    {
+      "name": "TIMESTAMP renders RFC 3339 UTC with milliseconds and Z",
+      "category": "types",
+      "schema": [
+        {"name": "utc", "type": "TIMESTAMP"},
+        {"name": "offset", "type": "TIMESTAMP"},
+        {"name": "from_ms", "type": "datetime"},
+        {"name": "from_aware", "type": "timestamptz"}
+      ],
+      "types": ["TIMESTAMP", "TIMESTAMP", "TIMESTAMP", "TIMESTAMP"],
+      "row": {
+        "utc": "2026-07-01T00:00:00Z",
+        "offset": "2026-07-01T02:30:00+02:30",
+        "from_ms": {"$ms": 0},
+        "from_aware": {"$datetime": "2026-09-30T23:59:59.250+00:00"}
+      },
+      "line": "[\"2026-07-01T00:00:00.000Z\",\"2026-07-01T00:00:00.000Z\",\"1970-01-01T00:00:00.000Z\",\"2026-09-30T23:59:59.250Z\"]\n",
+      "why": "An offset is normalised to UTC, so two spellings of one instant are one value."
+    },
+    {
+      "name": "JSON renders as the canonical JSON string of its value",
+      "category": "types",
+      "schema": [
+        {"name": "object", "type": "JSON"},
+        {"name": "array", "type": "jsonb"},
+        {"name": "scalar", "type": "variant"}
+      ],
+      "types": ["JSON", "JSON", "JSON"],
+      "row": {
+        "object": {"b": 1, "a": 2},
+        "array": [1, "two", null, true],
+        "scalar": "plain"
+      },
+      "line": "[\"{\\\"a\\\":2,\\\"b\\\":1}\",\"[1,\\\"two\\\",null,true]\",\"\\\"plain\\\"\"]\n",
+      "why": "The nested document is canonicalised (keys sorted by JCS) and the result is carried as a string, so the outer array's own canonicalisation cannot re-sort it."
+    },
+    {
+      "name": "a decimal inside a JSON column stays an exact string",
+      "category": "types",
+      "schema": [{"name": "payload", "type": "JSON"}],
+      "types": ["JSON"],
+      "row": {"payload": {"amount": {"$decimal": "1.50"}}},
+      "line": "[\"{\\\"amount\\\":\\\"1.50\\\"}\"]\n"
+    },
+    {
+      "name": "BYTES renders as base64",
+      "category": "types",
+      "schema": [
+        {"name": "payload", "type": "BYTES"},
+        {"name": "empty", "type": "varbinary(16)"}
+      ],
+      "types": ["BYTES", "BYTES"],
+      "row": {"payload": {"$bytes": "aGVsbG8="}, "empty": {"$bytes": ""}},
+      "line": "[\"aGVsbG8=\",\"\"]\n"
+    },
+    {
+      "name": "every logical type in one row",
+      "category": "types",
+      "schema": [
+        {"name": "s", "type": "STRING"},
+        {"name": "i", "type": "INT"},
+        {"name": "d", "type": "DECIMAL(8,3)"},
+        {"name": "b", "type": "BOOL"},
+        {"name": "dt", "type": "DATE"},
+        {"name": "ts", "type": "TIMESTAMP"},
+        {"name": "j", "type": "JSON"},
+        {"name": "by", "type": "BYTES"}
+      ],
+      "types": ["STRING", "INT", "DECIMAL(8,3)", "BOOL", "DATE", "TIMESTAMP", "JSON", "BYTES"],
+      "row": {
+        "s": "x",
+        "i": -1,
+        "d": {"$decimal": "0.5"},
+        "b": true,
+        "dt": {"$date": "2026-01-02"},
+        "ts": "2026-01-02T03:04:05.006Z",
+        "j": [],
+        "by": {"$bytes": "AQI="}
+      },
+      "line": "[\"x\",-1,\"0.500\",true,\"2026-01-02\",\"2026-01-02T03:04:05.006Z\",\"[]\",\"AQI=\"]\n"
+    },
+    {
+      "name": "a row of nothing but nulls in optional columns",
+      "category": "nulls",
+      "schema": [
+        {"name": "a", "type": "STRING"},
+        {"name": "b", "type": "INT"},
+        {"name": "c", "type": "JSON"}
+      ],
+      "types": ["STRING", "INT", "JSON"],
+      "row": {},
+      "line": "[null,null,null]\n"
+    },
+    {
+      "name": "an explicit null in an optional column",
+      "category": "nulls",
+      "schema": [
+        {"name": "a", "type": "STRING", "required": true},
+        {"name": "b", "type": "STRING"}
+      ],
+      "types": ["STRING", "STRING"],
+      "row": {"a": "present", "b": null},
+      "line": "[\"present\",null]\n"
+    },
+    {
+      "name": "a single-column expose",
+      "category": "shape",
+      "schema": [{"name": "only", "type": "STRING"}],
+      "types": ["STRING"],
+      "row": {"only": ""},
+      "line": "[\"\"]\n"
+    },
+    {
+      "name": "a positional row is taken in declared order",
+      "category": "shape",
+      "schema": [
+        {"name": "a", "type": "STRING"},
+        {"name": "b", "type": "INT"}
+      ],
+      "types": ["STRING", "INT"],
+      "row": {"$tuple": ["a", 1]},
+      "line": "[\"a\",1]\n"
+    },
+    {
+      "name": "an integer at the top of the JCS safe domain",
+      "category": "boundaries",
+      "schema": [{"name": "n", "type": "BIGINT"}],
+      "types": ["INT"],
+      "row": {"n": 9007199254740991},
+      "line": "[9007199254740991]\n",
+      "why": "2^53 - 1: the largest integer with a canonical JCS spelling."
+    },
+    {
+      "name": "a decimal far outside the double domain stays exact",
+      "category": "boundaries",
+      "schema": [{"name": "n", "type": "DECIMAL(30,2)"}],
+      "types": ["DECIMAL(30,2)"],
+      "row": {"n": {"$decimal": "123456789012345678901234567.89"}},
+      "line": "[\"123456789012345678901234567.89\"]\n",
+      "why": "A decimal is a string, so no rounding to a double can happen to it."
+    },
+    {
+      "name": "the earliest and latest timestamps the clock renders in four digits",
+      "category": "boundaries",
+      "schema": [
+        {"name": "early", "type": "TIMESTAMP"},
+        {"name": "late", "type": "TIMESTAMP"}
+      ],
+      "types": ["TIMESTAMP", "TIMESTAMP"],
+      "row": {"early": {"$ms": 0}, "late": "9999-12-31T23:59:59.999Z"},
+      "line": "[\"1970-01-01T00:00:00.000Z\",\"9999-12-31T23:59:59.999Z\"]\n"
+    }
+  ],
+  "rejections": [
+    {
+      "name": "a float value",
+      "code": "FLX-3002",
+      "schema": [{"name": "n", "type": "DECIMAL(18,4)"}],
+      "row": {"n": 1.5},
+      "why": "KERNEL-SPEC §9: float -> FLX-3002. A binary float has no reproducible spelling."
+    },
+    {
+      "name": "a float in a column whose type is not numeric at all",
+      "code": "FLX-3002",
+      "schema": [{"name": "flag", "type": "BOOL"}],
+      "row": {"flag": 1.0},
+      "why": "The float check runs before type dispatch, so a float is a float everywhere."
+    },
+    {
+      "name": "a float nested inside a JSON column",
+      "code": "FLX-3002",
+      "schema": [{"name": "payload", "type": "JSON"}],
+      "row": {"payload": {"deep": [{"x": 0.1}]}},
+      "why": "The check is recursive: a JSON column is not a place a float can hide."
+    },
+    {
+      "name": "an undeclared column",
+      "code": "FLX-3201",
+      "schema": [{"name": "a", "type": "STRING"}],
+      "row": {"a": "x", "b": "undeclared"},
+      "why": "The seam is closed-world; the emitted array is positional and an undeclared value has no position."
+    },
+    {
+      "name": "a required column that is absent",
+      "code": "FLX-3202",
+      "schema": [
+        {"name": "id", "type": "STRING", "required": true},
+        {"name": "note", "type": "STRING"}
+      ],
+      "row": {"note": "no id"},
+      "why": "KERNEL-SPEC §9: a row missing a required column -> FLX-3202."
+    },
+    {
+      "name": "a required column that is present as null",
+      "code": "FLX-3202",
+      "schema": [{"name": "id", "type": "STRING", "required": true}],
+      "row": {"id": null},
+      "why": "A required column whose value is null carries no value."
+    },
+    {
+      "name": "a positional row shorter than the declared column set",
+      "code": "FLX-3203",
+      "schema": [
+        {"name": "a", "type": "STRING"},
+        {"name": "b", "type": "STRING"}
+      ],
+      "row": {"$tuple": ["only one"]},
+      "why": "Rows are aligned to the header; a row of another length has no alignment."
+    },
+    {
+      "name": "a positional row longer than the declared column set",
+      "code": "FLX-3203",
+      "schema": [{"name": "a", "type": "STRING"}],
+      "row": {"$tuple": ["one", "two"]},
+      "why": "The same rule in the other direction."
+    },
+    {
+      "name": "a string where an INT is declared",
+      "code": "FLX-3003",
+      "schema": [{"name": "n", "type": "INT"}],
+      "row": {"n": "42"},
+      "why": "The seam renders from a closed set of value classes so the spelling is a function of the declaration alone."
+    },
+    {
+      "name": "a bool where an INT is declared",
+      "code": "FLX-3003",
+      "schema": [{"name": "n", "type": "INT"}],
+      "row": {"n": true},
+      "why": "bool is a subclass of int in Python and a different type in JSON; the seam follows JSON."
+    },
+    {
+      "name": "a decimal too large for its declared precision",
+      "code": "FLX-3003",
+      "schema": [{"name": "n", "type": "DECIMAL(4,2)"}],
+      "row": {"n": {"$decimal": "100"}},
+      "why": "DECIMAL(4,2) admits two integer digits; rounding cannot make three fit."
+    },
+    {
+      "name": "a date spelled some other ISO 8601 way",
+      "code": "FLX-3003",
+      "schema": [{"name": "d", "type": "DATE"}],
+      "row": {"d": "20260701"},
+      "why": "§9's rendering is YYYY-MM-DD, so a string input is required to already be spelled that way."
+    },
+    {
+      "name": "a timestamp with no offset",
+      "code": "FLX-3003",
+      "schema": [{"name": "t", "type": "TIMESTAMP"}],
+      "row": {"t": "2026-07-01T00:00:00"},
+      "why": "A timestamp with no offset names no instant."
+    },
+    {
+      "name": "an already-base64 string where BYTES is declared",
+      "code": "FLX-3003",
+      "schema": [{"name": "b", "type": "BYTES"}],
+      "row": {"b": "aGVsbG8="},
+      "why": "The seam does the base64, so a caller passing base64 would produce a doubly-encoded value."
+    }
+  ],
+  "schemaRejections": [
+    {
+      "name": "a float column type",
+      "code": "FLX-3001",
+      "schema": [{"name": "n", "type": "DOUBLE"}],
+      "why": "Refused at the declaration, not at every row: a float column has no §9 rendering."
+    },
+    {
+      "name": "an unparameterised decimal",
+      "code": "FLX-3001",
+      "schema": [{"name": "n", "type": "decimal"}],
+      "why": "§9's set member is DECIMAL(p,s); a default scale here would silently decide how every number in the stream is spelled."
+    },
+    {
+      "name": "a type outside FLUID's own vocabulary",
+      "code": "FLX-3001",
+      "schema": [{"name": "n", "type": "MYSTERY_TYPE"}],
+      "why": "The closed set has no member for it."
+    },
+    {
+      "name": "two columns whose names normalise together",
+      "code": "FLX-3004",
+      "schema": [
+        {"name": "café", "type": "STRING"},
+        {"name": "café", "type": "INT"}
+      ],
+      "why": "NFC makes them one name, and one name cannot have two positions."
+    },
+    {
+      "name": "an empty schema",
+      "code": "FLX-3004",
+      "schema": [],
+      "why": "There is no ordered column set to align rows to."
+    }
+  ]
+}

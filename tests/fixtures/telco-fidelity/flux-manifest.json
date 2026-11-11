@@ -1,0 +1,56 @@
+{
+  "attestation": {
+    "profile": "enterprise",
+    "scorecards": [
+      {
+        "credibility": 0.78,
+        "grade": "B",
+        "playbackId": "pb-billing-history"
+      }
+    ],
+    "seam": [
+      {
+        "contractDigest": "sha256:b9b5ee575a8b313f6f72d039653d8be5d76e7ecc0012d7bd6ad2d37e0e60435d",
+        "exposeId": "payment_recovery_moment",
+        "fluidVersion": "^0.7.3",
+        "productRef": "telco.gold.payment_recovery_moment",
+        "simulationId": "sim-payment-recovery"
+      }
+    ],
+    "validator": {
+      "documents": 20,
+      "status": "green"
+    }
+  },
+  "files": {
+    "blueprint.flux.yml": "sha256:c8ed41599c0b7dbb9bccfabd3d790b54eef081df618ce4291cacf414597b7ade",
+    "campaign.flux.yml": "sha256:8f78bbc6d7daad66cccfba336e4b165bc5651d1ec73dcf1d0e3c501302009122",
+    "catalog.flux.yml": "sha256:31445d74cffd5d4935cb52ce736df08ad3c05f6a4f85a3d51c3ac7acc96205bb",
+    "channel.flux.yml": "sha256:8c001ae6c71192379fbeafb0096b4fd8a731daaf90c112fcef946198f4a38b24",
+    "consent.flux.yml": "sha256:f91b0a3ee2af86f445251ee5c17bb0135a2110f5e8aef11316f0c9f376e73953",
+    "detector.flux.yml": "sha256:9e8d140ca740ba4f14a1aa049b7a68721a9ee70df0100705ef5fd78309f9e2a4",
+    "experiment.flux.yml": "sha256:4bebc6196e4dce2812f4b92e73cb7dba9ffc3851a7a9fb2089ebe9814a16547d",
+    "flux.lock": "sha256:c5801aac98f111c78bb6d1509de84aef5fd7cd28191eda976ef479f73b691459",
+    "journey.flux.yml": "sha256:7b8c5f84e3441e7baf90020848a667f632de8264ab31ba680560b75e4998e1e1",
+    "module.flux.yml": "sha256:6f7947afd7f0c936a99f0d6639b0cdbdfd222feb209741b572ae11334d51a0e2",
+    "offer.flux.yml": "sha256:8566632704ccdc5ab910eddf9e7fc88cd7c1731c953fff16120313d6b4ea8795",
+    "payment-recovery.fluid.yml": "sha256:0a6d63c244171a093919b4be9f8623256b4950f4b1be8ec9aee0d9112b0d9680",
+    "persona.flux.yml": "sha256:8ffc79ff2936ad5f0155a4ac525349742d5681f6f132f7d1ba6df5da3f3fff7c",
+    "playback.flux.yml": "sha256:e0e39c582957d69f37d8a11c147095c14a66ffa79e8fde059fe262e12ce8657f",
+    "segment.flux.yml": "sha256:3ccdbd6b4993d41ad1a16b008a0089c5a6758bbc6633863eb7f96e166cfb04e1",
+    "signal.flux.yml": "sha256:14fec25807211c6ba6a5651ac664f7c2408dd48bf65400289d336665694ce35b",
+    "simulation.flux.yml": "sha256:ec29bb1d9ed44bb5d20e32b03750180295950c02f3ca1dafec528bd4b8a43bb6",
+    "taxonomy.flux.yml": "sha256:c0ed6f090ad39f8a3f0114ab656730fea907a21ed1d292eb84fcd615d2f37191",
+    "treatment-fast.flux.yml": "sha256:dd2808ef75167a3b7f12b75fa73df383e61ae58a90220c43e9fec0e02ab4f391",
+    "treatment-standard.flux.yml": "sha256:3c3ec2426211d736106a8d4dfa6de354469dceb3f0ba5be70c7455f55b90af0e",
+    "verticalpack.flux.yml": "sha256:3838ae7e7645ee6f9d6a40e9d54dd65c2e567717f2052204310f2292e3191ce8",
+    "world.flux.yml": "sha256:2f1a7eb4276f2a9101821f64f65a63ccab2717f64812ef970c6884cd04079ae7"
+  },
+  "fluxVersions": [
+    "0.5.0"
+  ],
+  "generator": "flux bundle 0.5.0",
+  "manifestVersion": 1,
+  "merkleRoot": "sha256:7682000ae0247376b2f00a47b2b667dde434e06edf3c8ae4e74f41cf0f0e66f6",
+  "schemaId": "https://agenticstiger.github.io/flux/schema/flux-schema-0.5.0.json"
+}

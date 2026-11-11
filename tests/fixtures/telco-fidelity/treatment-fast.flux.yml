@@ -1,0 +1,12 @@
+fluxVersion: "0.5.0"
+kind: Treatment
+id: tr-fast-recovery
+name: Fast Payment Recovery Link
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  actionType: payment_recovery_link
+  payloadTemplate:
+    message: "Complete your payment in one tap"
+    ttlHours: 48

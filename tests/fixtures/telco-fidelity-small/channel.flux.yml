@@ -1,0 +1,10 @@
+fluxVersion: "0.5.0"
+kind: Channel
+id: ch-sms-primary
+name: Primary SMS Channel
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  type: sms
+  rateLimitPerSecond: 50

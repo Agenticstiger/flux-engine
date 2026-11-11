@@ -1,0 +1,10 @@
+fluxVersion: "0.5.0"
+kind: VerticalPack
+id: vp-telco
+name: Telco Vertical Pack
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  industry: telco
+  modules: [module-payment-recovery]

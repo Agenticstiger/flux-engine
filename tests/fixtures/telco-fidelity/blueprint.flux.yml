@@ -1,0 +1,13 @@
+fluxVersion: "0.5.0"
+kind: Blueprint
+id: bp-telco-retention
+name: Telco Retention Blueprint
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  topology:
+    nodes: [q3-retention-world, module-payment-recovery, sim-payment-recovery]
+    edges:
+      - { from: q3-retention-world, to: sim-payment-recovery }
+      - { from: module-payment-recovery, to: sim-payment-recovery }

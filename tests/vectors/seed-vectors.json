@@ -1,0 +1,484 @@
+{
+  "seedTreeVersion": "flux-seed/1",
+  "description": "Pinned derivations for KERNEL-SPEC §3. Ids, digests and seeds are taken from the shipped telco-payment-recovery example; every hex string, entropy value and raw word below is computed by flux_engine.core.seedtree, never typed. The file is a change detector: a byte that moves in the derivation moves these values, and that is a kernelVersion bump.",
+  "regenerate": "Re-run the derivations asserted in tests/core/test_seedtree.py (derive_root, path_label, stream_entropy, the first four next_raw() words per path, and seed_paths_bytes/seed_paths_digest over the `streams` paths) and write the results back. A value that moves is a kernelVersion bump with a GOLDEN-CHANGELOG.md row, never a quiet regeneration.",
+  "source": {
+    "example": "FLUX/examples/telco-payment-recovery",
+    "contractDigest": "sha256:762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1",
+    "secondEmitDigest": {
+      "value": "sha256:a867ea368284c66ceb35e98e3f8b3a35df544180c0fa8620a179dc06e400ee4a",
+      "derivation": "sha256 of the ASCII bytes 'flux-seed vectors: synthetic second emit' -- a second emit the example does not declare, so that the several-emit folding rule of §3 has a vector too"
+    },
+    "worldId": "q3-retention-world",
+    "simulationId": "sim-payment-recovery",
+    "experimentId": "exp-recovery-ab",
+    "simulationSeed": 42,
+    "worldSeed": 42,
+    "assignmentSeed": 7,
+    "populationSize": 25000
+  },
+  "rootDerivation": [
+    {
+      "name": "single emit, telco contract digest, effective seed 42",
+      "emitDigests": [
+        "sha256:762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1"
+      ],
+      "hBytesHex": "762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1",
+      "effectiveSeed": 42,
+      "rootHex": "96bcf62804d24e665bc59c92df872ec857bdcb601d55a039a96aa419ef7c3426"
+    },
+    {
+      "name": "two emits: H_bytes folds the per-emit digests in emits[] order",
+      "emitDigests": [
+        "sha256:762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1",
+        "sha256:a867ea368284c66ceb35e98e3f8b3a35df544180c0fa8620a179dc06e400ee4a"
+      ],
+      "hBytesHex": "ee5897abdd943c160a11db4f622781815bba0f79ec28fc8f49f4fe103f189d72",
+      "effectiveSeed": 42,
+      "rootHex": "5dd8a2f6be43037573d0010158d50b8dc834044788569307f05c1fe7a713038a"
+    },
+    {
+      "name": "emits[] order matters: the same two digests, reversed",
+      "emitDigests": [
+        "sha256:a867ea368284c66ceb35e98e3f8b3a35df544180c0fa8620a179dc06e400ee4a",
+        "sha256:762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1"
+      ],
+      "hBytesHex": "fcefefc2f6e62bade0dd87d086f07eb8cbe5b0582f939bdb3f2361f9e463de9b",
+      "effectiveSeed": 42,
+      "rootHex": "fabd2b88470521c3734cfb909bec45f7c2a1a8c10223635f037d63656778e4e4"
+    },
+    {
+      "name": "experiment assignment: rooted at Experiment.spec.assignment.seed, not at root",
+      "emitDigests": [
+        "sha256:762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1"
+      ],
+      "hBytesHex": "762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1",
+      "effectiveSeed": 7,
+      "rootHex": "0becabd4dab0bb518d15cf7da0a9c713f9d58a005943cb9505d0758d5525a035"
+    },
+    {
+      "name": "sweep run 3: effective_seed = baseSeed + k",
+      "emitDigests": [
+        "sha256:762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1"
+      ],
+      "hBytesHex": "762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1",
+      "effectiveSeed": 45,
+      "rootHex": "dac06cc0d9712b1a60af22ac9d74414ec21b3838664e6aad2c27269301088b4e"
+    },
+    {
+      "name": "seed sensitivity: the same contract one seed later",
+      "emitDigests": [
+        "sha256:762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1"
+      ],
+      "hBytesHex": "762fdf58ed9d1d3f03e0d1502b287b314b6619c6b273d57270299440b9c853c1",
+      "effectiveSeed": 43,
+      "rootHex": "e3e8a8b4b42da8da564433bcc610d2c3efaa40a7071c8e38a01b9816ef0b9f8a"
+    }
+  ],
+  "streams": [
+    {
+      "shape": "world.cohorts",
+      "path": [
+        "world",
+        "q3-retention-world",
+        "cohorts"
+      ],
+      "labelHex": "776f726c641f71332d726574656e74696f6e2d776f726c641f636f686f727473",
+      "entropy": "43969004753017221240877295513116773805256130281452727683161083352842030971277",
+      "firstRawWords": [
+        "13365740866177743995",
+        "7238086646423217829",
+        "13912035105257106241",
+        "17340099321051126473"
+      ]
+    },
+    {
+      "shape": "world.market",
+      "path": [
+        "world",
+        "q3-retention-world",
+        "market",
+        0
+      ],
+      "labelHex": "776f726c641f71332d726574656e74696f6e2d776f726c641f6d61726b65741f30",
+      "entropy": "110231045776588169371454090204387948519719227674230600440749218589151949632258",
+      "firstRawWords": [
+        "11460241332221114387",
+        "1422816684128758217",
+        "16950962841759791111",
+        "12197119074864713808"
+      ]
+    },
+    {
+      "shape": "world.market",
+      "path": [
+        "world",
+        "q3-retention-world",
+        "market",
+        24999
+      ],
+      "labelHex": "776f726c641f71332d726574656e74696f6e2d776f726c641f6d61726b65741f3234393939",
+      "entropy": "21831276046616814634607440506776780543229522814514651317431626479210568745671",
+      "firstRawWords": [
+        "3605019908228735176",
+        "11144006741473665060",
+        "5213805395702831944",
+        "3555816754711049001"
+      ]
+    },
+    {
+      "shape": "world.subject.trait",
+      "path": [
+        "world",
+        "q3-retention-world",
+        "subject",
+        0,
+        "trait",
+        "monthlySpend"
+      ],
+      "labelHex": "776f726c641f71332d726574656e74696f6e2d776f726c641f7375626a6563741f301f74726169741f6d6f6e74686c795370656e64",
+      "entropy": "93219107779617642388655230555831804125239539232432761471358324030018666569058",
+      "firstRawWords": [
+        "18114210249470329088",
+        "4660265072332064633",
+        "17095042659185688284",
+        "9825930452419269069"
+      ]
+    },
+    {
+      "shape": "world.subject.trait",
+      "path": [
+        "world",
+        "q3-retention-world",
+        "subject",
+        0,
+        "trait",
+        "priceSensitivity"
+      ],
+      "labelHex": "776f726c641f71332d726574656e74696f6e2d776f726c641f7375626a6563741f301f74726169741f707269636553656e7369746976697479",
+      "entropy": "6157571142313465160044202639033092558644739047512386207633677054140187964741",
+      "firstRawWords": [
+        "11188256245364152625",
+        "8766344821602819547",
+        "14300772773435117968",
+        "16938660208330716514"
+      ]
+    },
+    {
+      "shape": "world.subject.products",
+      "path": [
+        "world",
+        "q3-retention-world",
+        "subject",
+        0,
+        "products"
+      ],
+      "labelHex": "776f726c641f71332d726574656e74696f6e2d776f726c641f7375626a6563741f301f70726f6475637473",
+      "entropy": "997373334391450819477486606369742163114181626779022165342877687256016686360",
+      "firstRawWords": [
+        "10226452072393592031",
+        "7511101335836466557",
+        "5753901432466269502",
+        "1808481242354992076"
+      ]
+    },
+    {
+      "shape": "sim.signal",
+      "path": [
+        "sim",
+        "sim-payment-recovery",
+        "signal",
+        "sig-payment-aborted",
+        "subject",
+        0,
+        0
+      ],
+      "labelHex": "73696d1f73696d2d7061796d656e742d7265636f766572791f7369676e616c1f7369672d7061796d656e742d61626f727465641f7375626a6563741f301f30",
+      "entropy": "26419613974855608115030801389049277544554945141675627747044000552871959462954",
+      "firstRawWords": [
+        "9980560693207780394",
+        "10504692102813603262",
+        "4487277544211028332",
+        "5693630559785701222"
+      ]
+    },
+    {
+      "shape": "sim.signal",
+      "path": [
+        "sim",
+        "sim-payment-recovery",
+        "signal",
+        "sig-payment-aborted",
+        "subject",
+        0,
+        1
+      ],
+      "labelHex": "73696d1f73696d2d7061796d656e742d7265636f766572791f7369676e616c1f7369672d7061796d656e742d61626f727465641f7375626a6563741f301f31",
+      "entropy": "42849320886797165606369725176953157536189241192338388410477413425980594930788",
+      "firstRawWords": [
+        "17325712193179161950",
+        "16002485521516038278",
+        "15707088565960367204",
+        "14911315977415475326"
+      ]
+    },
+    {
+      "shape": "sim.journey",
+      "path": [
+        "sim",
+        "sim-payment-recovery",
+        "journey",
+        "jr-payment-recovery",
+        "subject",
+        0,
+        0
+      ],
+      "labelHex": "73696d1f73696d2d7061796d656e742d7265636f766572791f6a6f75726e65791f6a722d7061796d656e742d7265636f766572791f7375626a6563741f301f30",
+      "entropy": "78515815116348956307719156421953867295265801906540676123336190960433677704921",
+      "firstRawWords": [
+        "17533460231084614186",
+        "5676081307041208845",
+        "14519449166834679161",
+        "4891740382585674957"
+      ]
+    },
+    {
+      "shape": "sim.campaign",
+      "path": [
+        "sim",
+        "sim-payment-recovery",
+        "campaign",
+        "cam-payment-recovery",
+        "subject",
+        0
+      ],
+      "labelHex": "73696d1f73696d2d7061796d656e742d7265636f766572791f63616d706169676e1f63616d2d7061796d656e742d7265636f766572791f7375626a6563741f30",
+      "entropy": "35513190840699299570773313516341012280620753354542805890239939118749101420380",
+      "firstRawWords": [
+        "15617118999809895029",
+        "17181224512978860021",
+        "4428758656839901469",
+        "17202464699320797906"
+      ]
+    },
+    {
+      "shape": "sim.temperature",
+      "path": [
+        "sim",
+        "sim-payment-recovery",
+        "temperature",
+        "engagement",
+        "subject",
+        0,
+        0
+      ],
+      "labelHex": "73696d1f73696d2d7061796d656e742d7265636f766572791f74656d70657261747572651f656e676167656d656e741f7375626a6563741f301f30",
+      "entropy": "21625050702482744063305005179321579007751725143544425587096164745187332445672",
+      "firstRawWords": [
+        "1560001122412191265",
+        "17734911238648094122",
+        "10484511113507841176",
+        "10329796428755002711"
+      ]
+    },
+    {
+      "shape": "sim.temperature",
+      "path": [
+        "sim",
+        "sim-payment-recovery",
+        "temperature",
+        "campaignResponse",
+        "subject",
+        0,
+        0
+      ],
+      "labelHex": "73696d1f73696d2d7061796d656e742d7265636f766572791f74656d70657261747572651f63616d706169676e526573706f6e73651f7375626a6563741f301f30",
+      "entropy": "70208789153051611330345068210100429636485662652710792788976748517570650308285",
+      "firstRawWords": [
+        "12396011804874541308",
+        "3501056775792552749",
+        "5546335976895109326",
+        "17575704185673935854"
+      ]
+    },
+    {
+      "shape": "sim.agentic",
+      "path": [
+        "sim",
+        "sim-payment-recovery",
+        "agentic",
+        "journey-improviser",
+        "subject",
+        0,
+        0
+      ],
+      "labelHex": "73696d1f73696d2d7061796d656e742d7265636f766572791f6167656e7469631f6a6f75726e65792d696d70726f76697365721f7375626a6563741f301f30",
+      "entropy": "24846315711625134404758968879882684047241958204444637294341038326241461045287",
+      "firstRawWords": [
+        "16596284942104289181",
+        "7455730297027634049",
+        "1135232485496414802",
+        "16591798710753811816"
+      ]
+    }
+  ],
+  "reRootedStreams": [
+    {
+      "shape": "experiment.assignment",
+      "rootHex": "0becabd4dab0bb518d15cf7da0a9c713f9d58a005943cb9505d0758d5525a035",
+      "path": [
+        "experiment",
+        "exp-recovery-ab",
+        "assignment"
+      ],
+      "labelHex": "6578706572696d656e741f6578702d7265636f766572792d61621f61737369676e6d656e74",
+      "entropy": "62976657235313688203143162404023689139737731405239519464543011104095630623013",
+      "firstRawWords": [
+        "320132159097791067",
+        "11725854574909316392",
+        "12153101918074532118",
+        "11933018624124184995"
+      ]
+    },
+    {
+      "shape": "sweep.run",
+      "rootHex": "dac06cc0d9712b1a60af22ac9d74414ec21b3838664e6aad2c27269301088b4e",
+      "path": [
+        "sweep",
+        3
+      ],
+      "labelHex": "73776565701f33",
+      "entropy": "14565697211877237717457049568955041839153189518290193299238585329582987488409",
+      "firstRawWords": [
+        "10985358255406641414",
+        "11148013666817734937",
+        "8709471464992235810",
+        "8376899088588639265"
+      ]
+    }
+  ],
+  "seedTreeDigest": "sha256:b2292d21cb233dba592bbbb306ca1f02c827607c0dbaedd69cae55adf9891df1",
+  "seedPathsFile": {
+    "filename": "seed-paths.ndjson",
+    "description": "KERNEL-SPEC §3's path list, as it is written beside plan.json: one canonical (RFC 8785) path per line, sorted by line, newline-terminated. seedTreeDigest below is the raw-bytes sha256 of exactly these bytes -- `sha256sum seed-paths.ndjson` reproduces it without running the engine.",
+    "paths": [
+      [
+        "world",
+        "q3-retention-world",
+        "cohorts"
+      ],
+      [
+        "world",
+        "q3-retention-world",
+        "market",
+        0
+      ],
+      [
+        "world",
+        "q3-retention-world",
+        "market",
+        24999
+      ],
+      [
+        "world",
+        "q3-retention-world",
+        "subject",
+        0,
+        "trait",
+        "monthlySpend"
+      ],
+      [
+        "world",
+        "q3-retention-world",
+        "subject",
+        0,
+        "trait",
+        "priceSensitivity"
+      ],
+      [
+        "world",
+        "q3-retention-world",
+        "subject",
+        0,
+        "products"
+      ],
+      [
+        "sim",
+        "sim-payment-recovery",
+        "signal",
+        "sig-payment-aborted",
+        "subject",
+        0,
+        0
+      ],
+      [
+        "sim",
+        "sim-payment-recovery",
+        "signal",
+        "sig-payment-aborted",
+        "subject",
+        0,
+        1
+      ],
+      [
+        "sim",
+        "sim-payment-recovery",
+        "journey",
+        "jr-payment-recovery",
+        "subject",
+        0,
+        0
+      ],
+      [
+        "sim",
+        "sim-payment-recovery",
+        "campaign",
+        "cam-payment-recovery",
+        "subject",
+        0
+      ],
+      [
+        "sim",
+        "sim-payment-recovery",
+        "temperature",
+        "engagement",
+        "subject",
+        0,
+        0
+      ],
+      [
+        "sim",
+        "sim-payment-recovery",
+        "temperature",
+        "campaignResponse",
+        "subject",
+        0,
+        0
+      ],
+      [
+        "sim",
+        "sim-payment-recovery",
+        "agentic",
+        "journey-improviser",
+        "subject",
+        0,
+        0
+      ]
+    ],
+    "lines": [
+      "[\"sim\",\"sim-payment-recovery\",\"agentic\",\"journey-improviser\",\"subject\",0,0]",
+      "[\"sim\",\"sim-payment-recovery\",\"campaign\",\"cam-payment-recovery\",\"subject\",0]",
+      "[\"sim\",\"sim-payment-recovery\",\"journey\",\"jr-payment-recovery\",\"subject\",0,0]",
+      "[\"sim\",\"sim-payment-recovery\",\"signal\",\"sig-payment-aborted\",\"subject\",0,0]",
+      "[\"sim\",\"sim-payment-recovery\",\"signal\",\"sig-payment-aborted\",\"subject\",0,1]",
+      "[\"sim\",\"sim-payment-recovery\",\"temperature\",\"campaignResponse\",\"subject\",0,0]",
+      "[\"sim\",\"sim-payment-recovery\",\"temperature\",\"engagement\",\"subject\",0,0]",
+      "[\"world\",\"q3-retention-world\",\"cohorts\"]",
+      "[\"world\",\"q3-retention-world\",\"market\",0]",
+      "[\"world\",\"q3-retention-world\",\"market\",24999]",
+      "[\"world\",\"q3-retention-world\",\"subject\",0,\"products\"]",
+      "[\"world\",\"q3-retention-world\",\"subject\",0,\"trait\",\"monthlySpend\"]",
+      "[\"world\",\"q3-retention-world\",\"subject\",0,\"trait\",\"priceSensitivity\"]"
+    ]
+  }
+}

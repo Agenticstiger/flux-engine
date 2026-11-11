@@ -1,0 +1,10 @@
+FLUX Simulation Engine
+Copyright 2026 Agentics Transformation Limited
+
+This product includes a vendored fallback copy of `flux_spec`
+(Apache License, Version 2.0; Copyright 2026 The FLUX Project authors)
+under flux_engine/_vendor/flux_spec/ -- see that directory's own NOTICE
+and VENDOR-NOTES.md for attribution details and the exact upstream
+commit it was taken from.
+
+Third-party dependency licenses are listed in THIRD_PARTY_LICENSES.md.

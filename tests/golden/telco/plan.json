@@ -1,0 +1,35 @@
+{
+  "emits": {
+    "payment_recovery_moment": {
+      "G": "sha256:eee5c8c8c595a15e70d72360de2f422c4490594c1de4e1aade2e9ccbaed65cfb",
+      "H": "sha256:72262c0093d040736a15cbda45e7c618578090be51f84a004ead8307ef181a39",
+      "declaresFidelity": true,
+      "generator": {
+        "columns": [
+          "subscriber_id",
+          "aborted_at",
+          "amount",
+          "market"
+        ],
+        "generatorDigest": "sha256:31b6cca91d3a5e4e981ec77b67fa56f03dcdf2f4d05daf4013c2311c0d4cee19",
+        "rows": 64
+      },
+      "productRef": "telco.gold.payment_recovery_moment"
+    }
+  },
+  "fidelity": "deterministic",
+  "inputDigest": "sha256:c056d3d29d739f285dbf05412f1fedc2a0598e16fd6093a2a12549e064839556",
+  "kernelVersion": "0.1.0",
+  "seed": 42,
+  "seedTreeDigest": "sha256:997fff742df77a05988944cfcefec16cebc04d32d6739d0c94f60d2949d9c7c3",
+  "seedTreeShapes": {
+    "sim.campaign": 570,
+    "sim.signal": 21934,
+    "sim.temperature": 20149,
+    "world.market": 25000,
+    "world.subject.products": 25000,
+    "world.subject.trait": 50000
+  },
+  "seedTreeVersion": "flux-seed/1",
+  "simulationId": "sim-payment-recovery"
+}

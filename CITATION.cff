@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata in this file."
+title: "FLUX Simulation Engine"
+type: software
+authors:
+  - name: "The FLUX Project authors"
+repository-code: "https://github.com/Agenticstiger/flux-engine"
+abstract: "The runtime for FLUX bundles: deterministic, governed simulation under a referenced FLUID contract."
+keywords:
+  - FLUX
+  - FLUID
+  - simulation
+  - synthetic data
+  - data contracts

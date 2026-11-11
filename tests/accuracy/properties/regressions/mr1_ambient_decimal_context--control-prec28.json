@@ -1,0 +1,12 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "prec": 28,
+    "rounding": "ROUND_UP",
+    "seed": 42,
+    "size": 200
+  },
+  "note": "control: the default precision with a hostile rounding mode does not move anything",
+  "property": "mr1_ambient_decimal_context",
+  "tier": "hand-written"
+}

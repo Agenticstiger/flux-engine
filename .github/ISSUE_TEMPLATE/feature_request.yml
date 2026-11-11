@@ -1,0 +1,39 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Feature request
+description: Suggest something the engine should do
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How you imagine it working. A sketch of the command line or the bundle is plenty.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you tried, or other tools that do this.
+
+  - type: dropdown
+    id: help
+    attributes:
+      label: Could you help build it?
+      options:
+        - "Yes, I would open a pull request"
+        - "Maybe, with some pointers"
+        - "No, I am only suggesting it"

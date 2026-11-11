@@ -1,0 +1,40 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+version: 2
+updates:
+  # The dev and runtime dependencies, and uv.lock with them.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(deps)"
+    # A release has to be a week old before a pull request is opened for it, so a
+    # release that is pulled or hijacked has days to be noticed first.
+    cooldown:
+      default-days: 7
+    # Minor and patch updates come as one pull request a week. A major update keeps
+    # its own pull request and its own read of the release notes.
+    groups:
+      python-minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # Action pins. Every `uses:` in .github/workflows is a commit SHA followed by a
+  # `# vX.Y.Z` comment; Dependabot moves both together. If a composite action is
+  # ever added under .github/actions/, list it here with `directories:` as well.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "chore(ci)"
+    cooldown:
+      default-days: 7
+    groups:
+      actions-minor-and-patch:
+        update-types: ["minor", "patch"]

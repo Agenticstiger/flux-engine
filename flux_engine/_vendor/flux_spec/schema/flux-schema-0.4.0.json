@@ -1,0 +1,1601 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticstiger.github.io/flux/schema/flux-schema-0.4.0.json",
+  "title": "FLUX Document Schema",
+  "description": "Open standard JSON Schema for the FLUX v0.4.0 declarative specification. A FLUX document declares one of nineteen kinds; the discovery-side sibling of the FLUID data-product contract standard. Cross-document checks (reference resolution, weight sums, state membership, FLUID seam conformance) are enforced by the offline reference validator, not by this schema alone.",
+  "type": "object",
+  "required": [
+    "fluxVersion",
+    "kind",
+    "id",
+    "name",
+    "metadata",
+    "spec"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "fluxVersion": {
+      "type": "string",
+      "enum": [
+        "0.3.0",
+        "0.4.0"
+      ],
+      "description": "The version of the FLUX specification this document targets. Each published schema file accepts the versions in its declared compatibility window."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "World",
+        "Persona",
+        "Segment",
+        "Catalog",
+        "Offer",
+        "Channel",
+        "ConsentProfile",
+        "Playback",
+        "Journey",
+        "JourneyTaxonomy",
+        "Signal",
+        "Detector",
+        "Treatment",
+        "Campaign",
+        "Experiment",
+        "Module",
+        "VerticalPack",
+        "Blueprint",
+        "Simulation"
+      ],
+      "description": "The discriminator defining the family and behavior of this document. Nineteen kinds in six families: Population (World, Persona, Segment), Commerce (Catalog, Offer, Channel, ConsentProfile), Behaviour (Journey, JourneyTaxonomy, Signal, Detector), Activation (Campaign, Treatment, Experiment), Calibration (Playback), Composition (Simulation, Module, Blueprint, VerticalPack)."
+    },
+    "id": {
+      "$ref": "#/$defs/identifier",
+      "description": "Unique document identifier within a bundle. Referenced by *Ref fields of other documents; the offline validator resolves every reference against this."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display name."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of this document (RFC-03). Required in practice for Modules consumed through versioned refs: the flux.lock entry must match it."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional free-text description of the document."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Free-form string key/value labels for selection and grouping."
+    },
+    "metadata": {
+      "type": "object",
+      "required": [
+        "owner"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "type": "object",
+          "required": [
+            "team"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "team": {
+              "type": "string",
+              "minLength": 1
+            },
+            "email": {
+              "type": "string",
+              "minLength": 3
+            },
+            "slack": {
+              "type": "string"
+            },
+            "oncall": {
+              "type": "string"
+            }
+          },
+          "description": "Accountable owner of this document. Mirrors FLUID metadata.owner."
+        },
+        "createdAt": {
+          "$ref": "#/$defs/rfc3339"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Operational context. Document identity (id, name) lives at top level, matching the FLUID envelope."
+    },
+    "agentPolicy": {
+      "$ref": "#/$defs/agentPolicy",
+      "description": "Gates every AI call made on behalf of this document: model allow-list, token budget, use-case and purpose limits. Required whenever skills are declared."
+    },
+    "skills": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/skillBinding"
+      },
+      "description": "The uniform agentic extension point available on every kind: sandboxed capabilities that generate bounded variation under the document's agentPolicy. A skill never changes the shape a kind must satisfy \u2014 only the content it emits within those bounds."
+    },
+    "extensions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^([a-z0-9-]+\\.)+[a-z0-9-]+/[1-9][0-9]*$|^x-[a-z][a-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "type": "object"
+      },
+      "description": "The versioned extension port (RFC-02): dialect-specific fields live here, keyed by a namespace of the form reverse-dns/major (e.g. com.acme.flux/1) or an x- vendor key. Each value is an object whose contents are owned by that namespace, not by this schema. The core stays closed everywhere else \u2014 this is the one sanctioned escape hatch, so dialects extend without forking."
+    },
+    "spec": {
+      "description": "The kind-specific configuration block. Its shape is fixed by the matching kind branch below."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "skills"
+        ]
+      },
+      "then": {
+        "required": [
+          "agentPolicy"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "World"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "seed",
+              "population"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "seed": {
+                "type": "integer",
+                "description": "Deterministic PRNG seed. Identical documents and seeds always yield byte-identical populations."
+              },
+              "vertical": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sovereignty": {
+                "$ref": "#/$defs/sovereignty"
+              },
+              "population": {
+                "type": "object",
+                "required": [
+                  "size",
+                  "lifecycleMix"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "size": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "lifecycleMix": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "additionalProperties": {
+                      "$ref": "#/$defs/unitInterval"
+                    },
+                    "description": "Fractions per lifecycle state. Must sum to 1; the sum and the integer cohort allocation (Largest Remainder Method) are enforced by the offline validator."
+                  },
+                  "markets": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "description": "Named operating markets the population is distributed across (e.g. regions or country markets)."
+                  }
+                }
+              },
+              "temperature": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "$ref": "#/$defs/unitInterval"
+                },
+                "description": "Per-dial stochastic temperature (0 = frozen, 1 = maximally variable), e.g. engagement, campaignResponse."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Persona"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "demographics": {
+                "$ref": "#/$defs/scalarMap"
+              },
+              "traits": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "$ref": "#/$defs/trait"
+                },
+                "description": "Named traits: scalar 0..1 or an RFC-01 distribution (categorical / bounded normal)."
+              },
+              "worldview": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": false,
+                "properties": {
+                  "riskTolerance": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high"
+                    ]
+                  },
+                  "trustInInstitutions": {
+                    "$ref": "#/$defs/unitInterval"
+                  },
+                  "trendFollowing": {
+                    "$ref": "#/$defs/unitInterval"
+                  }
+                }
+              },
+              "agenticPrompt": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Prompt fragments for model-backed persona behavior. Model, budget and purpose are gated by the document's agentPolicy."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Segment"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "query"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Expression selecting Personas from the population."
+              },
+              "queryLanguage": {
+                "type": "string",
+                "const": "flux-expr/1",
+                "description": "The expression grammar the query is written in. flux-expr/1 is the only grammar defined by this version of the spec."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Catalog"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "items"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "sku",
+                    "name"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "sku": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "attributes": {
+                      "$ref": "#/$defs/scalarMap"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Offer"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "catalogRef",
+              "pricing"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "catalogRef": {
+                "$ref": "#/$defs/ref"
+              },
+              "pricing": {
+                "type": "object",
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "amount": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "currency": {
+                    "$ref": "#/$defs/currencyCode"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Channel"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "sms",
+                      "email",
+                      "push",
+                      "api_gateway",
+                      "in_app"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^x-[a-z][a-z0-9_.-]*$"
+                  }
+                ],
+                "description": "Well-known channel type, or an x- prefixed extension type."
+              },
+              "rateLimitPerSecond": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "ConsentProfile"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "allowedJurisdictions": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 2
+                }
+              },
+              "requiresExplicitOptIn": {
+                "type": "boolean"
+              },
+              "allowedUseCases": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Vocabulary aligned with FLUID agentPolicy.allowedUseCases; a contract emitted at the seam must be at least as strict as the gating ConsentProfile (validator-enforced)."
+              },
+              "deniedUseCases": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "description": "A ConsentProfile must assert at least one constraint; an empty profile is not a provable basis for consent reach."
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Playback"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "worldRef",
+              "sourceStream",
+              "personaMapping"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "worldRef": {
+                "$ref": "#/$defs/ref",
+                "description": "The World this playback calibrates."
+              },
+              "sourceStream": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9+.-]*://\\S+$",
+                "description": "URI of historical telemetry the twin is fitted against."
+              },
+              "personaMapping": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "behaviorPattern",
+                    "mapToPersona"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "behaviorPattern": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "flux-expr/1 predicate over observed events."
+                    },
+                    "mapToPersona": {
+                      "$ref": "#/$defs/ref"
+                    }
+                  }
+                }
+              },
+              "calibration": {
+                "type": "object",
+                "required": [
+                  "targets"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "targets": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "population.size",
+                        "population.lifecycleMix",
+                        "eventRates",
+                        "channelReach"
+                      ]
+                    }
+                  },
+                  "window": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Observation window, e.g. P90D."
+                  },
+                  "method": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "description": "Which World dials are fitted from the source stream."
+              },
+              "drift": {
+                "type": "object",
+                "required": [
+                  "metric",
+                  "threshold"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "metric": {
+                    "type": "string",
+                    "enum": [
+                      "psi",
+                      "kl",
+                      "ks"
+                    ]
+                  },
+                  "threshold": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "onBreach": {
+                    "type": "string",
+                    "enum": [
+                      "warn",
+                      "fail"
+                    ],
+                    "default": "warn"
+                  }
+                },
+                "description": "Twin-predicted vs estate-observed divergence is reported as drift against this threshold."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Journey"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "trigger"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "trigger": {
+                "type": "object",
+                "required": [
+                  "signalRef"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "signalRef": {
+                    "$ref": "#/$defs/ref"
+                  },
+                  "condition": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Optional flux-expr/1 predicate over the signal payload."
+                  }
+                }
+              },
+              "intervention": {
+                "type": "object",
+                "required": [
+                  "treatmentRef"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "treatmentRef": {
+                    "$ref": "#/$defs/ref"
+                  },
+                  "action": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "taxonomyRef": {
+                "$ref": "#/$defs/ref",
+                "description": "JourneyTaxonomy whose states this journey's reactions may transition to."
+              },
+              "personaReactions": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": {
+                  "$ref": "#/$defs/ref"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "required": [
+                    "successProbability"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "successProbability": {
+                      "$ref": "#/$defs/unitInterval"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "nextState": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Must be a state of the referenced taxonomy (validator-enforced)."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "JourneyTaxonomy"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "states",
+              "transitions"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "states": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "transitions": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/edge"
+                },
+                "description": "from/to must be members of states (validator-enforced)."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Signal"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "source",
+              "type"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "envelope": {
+                "type": "string",
+                "const": "cloudevents/1.0",
+                "description": "Every emitted record is a CloudEvents 1.0 envelope; this is the event-envelope port."
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "description": "CloudEvents 'source' context attribute."
+              },
+              "type": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9]+([._-][A-Za-z0-9]+)*$",
+                "description": "CloudEvents 'type' context attribute. Reverse-DNS style is recommended (e.g. com.telco.payment.aborted) but any CE-legal dotted token is accepted, including single-label and mixed-case producer types like Microsoft.Storage.BlobCreated."
+              },
+              "dataschema": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9+.-]*://\\S+$",
+                "description": "URI of the payload schema (CloudEvents 'dataschema'). Replaces 0.2.0 payload_schema."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Detector"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "timeWindowMs",
+              "pattern"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "timeWindowMs": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "pattern": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "signalRef"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "signalRef": {
+                      "$ref": "#/$defs/ref"
+                    },
+                    "predicate": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "flux-expr/1 predicate over the signal payload."
+                    }
+                  }
+                },
+                "description": "Ordered sequence of signal conditions that must occur within the window."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Treatment"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "actionType"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "actionType": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$"
+              },
+              "payloadTemplate": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Campaign"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "treatmentRef",
+              "segmentRef",
+              "channelRef",
+              "consentRef"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "treatmentRef": {
+                "$ref": "#/$defs/ref"
+              },
+              "segmentRef": {
+                "$ref": "#/$defs/ref"
+              },
+              "channelRef": {
+                "$ref": "#/$defs/ref"
+              },
+              "consentRef": {
+                "$ref": "#/$defs/ref"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Experiment"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "variants"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "variants": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "weight",
+                    "treatmentRef"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "weight": {
+                      "$ref": "#/$defs/unitInterval"
+                    },
+                    "treatmentRef": {
+                      "$ref": "#/$defs/ref"
+                    },
+                    "isControl": {
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
+                },
+                "description": "Variant names must be unique and weights must sum to 1 (validator-enforced)."
+              },
+              "assignment": {
+                "type": "object",
+                "required": [
+                  "method"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "const": "largest_remainder",
+                    "description": "Integer cohort allocation with zero rounding loss."
+                  },
+                  "seed": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "metrics": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "ossieRef": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Deprecated in 0.4.0 \u2014 use semanticRef (RFC-07). Retained for 0.3.0 compatibility."
+                    },
+                    "semanticRef": {
+                      "$ref": "#/$defs/semanticRef"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Module"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "resources"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "resources": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/ref"
+                }
+              },
+              "binds": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "port"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "port": {
+                      "type": "string",
+                      "enum": [
+                        "event-envelope",
+                        "fluid-contract",
+                        "ossie-model",
+                        "binding-port"
+                      ]
+                    },
+                    "config": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "description": "The seams this module binds to; a capability can be swapped without touching the documents that use it."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "VerticalPack"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "industry",
+              "modules"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "industry": {
+                "type": "string",
+                "minLength": 1
+              },
+              "modules": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/versionedRef"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Blueprint"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "topology"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "topology": {
+                "type": "object",
+                "required": [
+                  "nodes"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "nodes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "$ref": "#/$defs/ref"
+                    }
+                  },
+                  "edges": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "$ref": "#/$defs/edge"
+                    },
+                    "description": "from/to must be members of nodes (validator-enforced)."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "Simulation"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "type": "object",
+            "required": [
+              "worldRef",
+              "emits"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "worldRef": {
+                "$ref": "#/$defs/ref"
+              },
+              "fidelity": {
+                "type": "string",
+                "enum": [
+                  "deterministic",
+                  "stochastic",
+                  "agentic"
+                ],
+                "default": "deterministic",
+                "description": "Escalating fidelities: deterministic (pure function of seed), stochastic (seed sweep -> distribution), agentic (model-backed actors under agentPolicy)."
+              },
+              "seed": {
+                "type": "integer",
+                "description": "Overrides the World seed for this run."
+              },
+              "sweep": {
+                "type": "object",
+                "required": [
+                  "runs"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "runs": {
+                    "type": "integer",
+                    "minimum": 2
+                  },
+                  "baseSeed": {
+                    "type": "integer"
+                  }
+                },
+                "description": "Stochastic mode: sweep seeds baseSeed..baseSeed+runs-1; each run remains independently replayable."
+              },
+              "golden": {
+                "type": "object",
+                "required": [
+                  "baselineDigest"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "baselineDigest": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  }
+                },
+                "description": "Golden-regression anchor: the verify gate fails on a single byte of drift from this digest."
+              },
+              "sovereignty": {
+                "$ref": "#/$defs/sovereignty"
+              },
+              "timeBounds": {
+                "type": "object",
+                "required": [
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "start": {
+                    "$ref": "#/$defs/rfc3339"
+                  },
+                  "end": {
+                    "$ref": "#/$defs/rfc3339"
+                  }
+                },
+                "description": "start must precede end (validator-enforced)."
+              },
+              "personaRefs": {
+                "$ref": "#/$defs/refList"
+              },
+              "segmentRefs": {
+                "$ref": "#/$defs/refList"
+              },
+              "signalRefs": {
+                "$ref": "#/$defs/refList"
+              },
+              "campaignRefs": {
+                "$ref": "#/$defs/refList"
+              },
+              "experimentRefs": {
+                "$ref": "#/$defs/refList"
+              },
+              "moduleRefs": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "$ref": "#/$defs/versionedRef"
+                }
+              },
+              "emits": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "productRef",
+                    "exposeId",
+                    "fluidVersion"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "productRef": {
+                      "$ref": "#/$defs/ref",
+                      "description": "The id of the FLUID DataProduct document (.fluid.yml) proven by this simulation. The validator resolves it within the bundle and validates it against the vendored FLUID schema for the pinned fluidVersion \u2014 the seam is FLUID validation itself, not a re-statement of it."
+                    },
+                    "exposeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Which expose of the referenced DataProduct this stream fulfils. Must be a member of the product's exposes[].exposeId (validator-enforced)."
+                    },
+                    "fluidVersion": {
+                      "type": "string",
+                      "enum": [
+                        "0.7.3",
+                        "0.7.4",
+                        "0.7.5"
+                      ],
+                      "description": "FLUID schema version the referenced contract is validated against. The enum lists the FLUID versions vendored by this FLUX release."
+                    }
+                  }
+                },
+                "description": "The FLUID contract handoff seam. The contract is referenced, never restated: what is proven in the twin is byte-for-byte the document that ships."
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*[A-Za-z0-9_]$|^[A-Za-z0-9_]$",
+      "description": "Identifier grammar, byte-identical to FLUID's $defs/identifier: alphanumerics and underscore, with dots/hyphens allowed inside but not at either end. Any legal FLUID product id is a legal FLUX ref and vice versa."
+    },
+    "ref": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*[A-Za-z0-9_]$|^[A-Za-z0-9_]$",
+      "description": "A reference to the id of another document in the same bundle (same grammar as identifier). Kind-correctness and resolution are enforced by the offline validator: a well-formed universe has no dangling links."
+    },
+    "refList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/ref"
+      }
+    },
+    "unitInterval": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "rfc3339": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])[Tt]([01]\\d|2[0-3]):[0-5]\\d:([0-5]\\d|60)(\\.\\d+)?([Zz]|[+-]([01]\\d|2[0-3]):[0-5]\\d)$",
+      "description": "RFC 3339 timestamp (lowercase t/z permitted, per the RFC). The pattern bounds every field lexically (month 01-12, day 01-31, hour 00-23, leap second allowed); per-month day validity (e.g. Feb 30) is left to format-asserting tooling."
+    },
+    "currencyCode": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 alphabetic currency code."
+    },
+    "scalarMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "minLength": 1
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "sovereignty": {
+      "type": "object",
+      "required": [
+        "allowedZones"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "allowedZones": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 2
+          }
+        },
+        "enforcement": {
+          "type": "string",
+          "enum": [
+            "block",
+            "audit"
+          ],
+          "default": "block",
+          "description": "block: execution mathematically fails outside allowed zones; audit: violations are recorded as lineage."
+        }
+      }
+    },
+    "agentPolicy": {
+      "type": "object",
+      "required": [
+        "allowedModels",
+        "tokenBudget"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "allowedModels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tokenBudget": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "allowedUseCases": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "deniedUseCases": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "purposeLimitation": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "description": "Vocabulary aligned with FLUID's exposes[].policy.agentPolicy so seam-crossing policy comparison is field-to-field."
+    },
+    "skillBinding": {
+      "type": "object",
+      "required": [
+        "name",
+        "skillRef",
+        "purpose"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/identifier"
+        },
+        "skillRef": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier of the sandboxed capability in the runtime's skill registry."
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Checked against agentPolicy use-case limits before every invocation."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Must be a member of agentPolicy.allowedModels (validator-enforced)."
+        },
+        "tokenBudget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-skill budget; must not exceed agentPolicy.tokenBudget (validator-enforced)."
+        }
+      }
+    },
+    "trait": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/unitInterval"
+        },
+        {
+          "type": "object",
+          "required": [
+            "dist",
+            "levels"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "dist": {
+              "const": "categorical"
+            },
+            "levels": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "$ref": "#/$defs/unitInterval"
+              },
+              "description": "Weighted levels. Must sum to 1 (validator-enforced)."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "dist",
+            "mean",
+            "stddev"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "dist": {
+              "const": "normal"
+            },
+            "mean": {
+              "type": "number"
+            },
+            "stddev": {
+              "type": "number",
+              "minimum": 0
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number",
+              "description": "Must exceed min when both are given (validator-enforced)."
+            }
+          }
+        }
+      ],
+      "description": "RFC-01 trait: a plain 0..1 scalar (0.3.0-compatible), a categorical distribution, or a bounded normal. Sampling is deterministic under the World seed."
+    },
+    "versionedRef": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_]([A-Za-z0-9_.-]*[A-Za-z0-9_])?(@[~^]?\\d+\\.\\d+(\\.\\d+)?)?$",
+      "description": "RFC-03: a ref optionally pinned to a semver range \u2014 name (in-bundle, as before), name@2.1.3 (exact), name@^2.1 (caret) or name@~2.1.0 (tilde). Any versioned ref requires a flux.lock entry resolving it to an exact version and content digest (validator-enforced)."
+    },
+    "semanticRef": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)*/[a-z0-9_.-]+$",
+      "description": "RFC-07: model/measure into the bundle's bound semantic model (a Module binding the ossie-model port declaring config.measures). Existence is validator-enforced: 'revenue' means one governed thing per bundle."
+    }
+  }
+}

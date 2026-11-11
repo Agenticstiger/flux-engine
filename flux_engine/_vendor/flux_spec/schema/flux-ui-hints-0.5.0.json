@@ -1,0 +1,852 @@
+{
+  "uiHintsVersion": "0.5.0",
+  "schema": "https://agenticstiger.github.io/flux/schema/flux-schema-0.5.0.json",
+  "description": "RFC-08 UI hints: enough metadata for any editor to render a form per kind. Widgets are derived from the schema; titles/summaries/ordering are curated. Not normative \u2014 validation authority stays with the JSON Schema.",
+  "envelope": {
+    "id": {
+      "widget": "text",
+      "required": true
+    },
+    "name": {
+      "widget": "text",
+      "required": true
+    },
+    "description": {
+      "widget": "textarea",
+      "required": false
+    },
+    "metadata.owner.team": {
+      "widget": "text",
+      "required": true
+    },
+    "extensions": {
+      "widget": "namespace-map",
+      "required": false,
+      "help": "Dialect fields under a versioned namespace (RFC-02)."
+    }
+  },
+  "kinds": {
+    "World": {
+      "title": "World",
+      "family": "Population",
+      "order": 0,
+      "summary": "The synthetic population: size, lifecycle mix, markets, dials",
+      "example": "examples/telco-payment-recovery/world.flux.yml",
+      "fields": {
+        "seed": {
+          "widget": "number",
+          "integer": true,
+          "required": true,
+          "help": "Deterministic PRNG seed."
+        },
+        "vertical": {
+          "widget": "text",
+          "required": false
+        },
+        "sovereignty": {
+          "widget": "group",
+          "required": false
+        },
+        "sovereignty.allowedZones": {
+          "widget": "list",
+          "required": true
+        },
+        "sovereignty.enforcement": {
+          "widget": "select",
+          "options": [
+            "block",
+            "audit"
+          ],
+          "required": false,
+          "help": "block: execution mathematically fails outside allowed zones; audit: violations are recorded as lineage."
+        },
+        "population": {
+          "widget": "group",
+          "required": true
+        },
+        "population.size": {
+          "widget": "number",
+          "integer": true,
+          "min": 1,
+          "required": true
+        },
+        "population.lifecycleMix": {
+          "widget": "group",
+          "required": true,
+          "help": "Fractions per lifecycle state."
+        },
+        "population.markets": {
+          "widget": "list",
+          "required": false,
+          "help": "Named operating markets the population is distributed across (e.g."
+        },
+        "temperature": {
+          "widget": "group",
+          "required": false,
+          "help": "Per-dial stochastic temperature (0 = frozen, 1 = maximally variable), e.g."
+        }
+      }
+    },
+    "Persona": {
+      "title": "Persona",
+      "family": "Population",
+      "order": 0,
+      "summary": "An identity archetype: demographics, traits, worldview",
+      "example": "examples/telco-payment-recovery/persona.flux.yml",
+      "fields": {
+        "demographics": {
+          "widget": "group",
+          "required": false
+        },
+        "traits": {
+          "widget": "group",
+          "required": false,
+          "help": "Named traits: scalar 0..1 or an RFC-01 distribution (categorical / bounded normal)."
+        },
+        "worldview": {
+          "widget": "group",
+          "required": false
+        },
+        "worldview.riskTolerance": {
+          "widget": "select",
+          "options": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "required": false
+        },
+        "worldview.trustInInstitutions": {
+          "widget": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "required": false
+        },
+        "worldview.trendFollowing": {
+          "widget": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "required": false
+        },
+        "agenticPrompt": {
+          "widget": "list",
+          "required": false,
+          "help": "Prompt fragments for model-backed persona behavior."
+        }
+      }
+    },
+    "Segment": {
+      "title": "Segment",
+      "family": "Population",
+      "order": 0,
+      "summary": "A query selecting personas from the population",
+      "example": "examples/telco-payment-recovery/segment.flux.yml",
+      "fields": {
+        "query": {
+          "widget": "text",
+          "required": true,
+          "help": "Expression selecting Personas from the population."
+        },
+        "queryLanguage": {
+          "widget": "constant",
+          "value": "flux-expr/1",
+          "required": false,
+          "help": "The expression grammar the query is written in."
+        }
+      }
+    },
+    "Catalog": {
+      "title": "Catalog",
+      "family": "Commerce",
+      "order": 1,
+      "summary": "The sellable items and their attributes",
+      "example": "examples/telco-payment-recovery/catalog.flux.yml",
+      "fields": {
+        "items": {
+          "widget": "list",
+          "required": true
+        },
+        "items[].sku": {
+          "widget": "text",
+          "required": true
+        },
+        "items[].name": {
+          "widget": "text",
+          "required": true
+        },
+        "items[].attributes": {
+          "widget": "group",
+          "required": false
+        }
+      }
+    },
+    "Offer": {
+      "title": "Offer",
+      "family": "Commerce",
+      "order": 1,
+      "summary": "Priced offer over a catalog",
+      "example": "examples/telco-payment-recovery/offer.flux.yml",
+      "fields": {
+        "catalogRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "pricing": {
+          "widget": "group",
+          "required": true
+        },
+        "pricing.amount": {
+          "widget": "number",
+          "required": true
+        },
+        "pricing.currency": {
+          "widget": "currency",
+          "required": true,
+          "help": "ISO 4217 alphabetic currency code."
+        }
+      }
+    },
+    "Channel": {
+      "title": "Channel",
+      "family": "Commerce",
+      "order": 1,
+      "summary": "A reachable channel and its rate limits",
+      "example": "examples/telco-payment-recovery/channel.flux.yml",
+      "fields": {
+        "type": {
+          "widget": "text",
+          "required": true,
+          "help": "Well-known channel type, or an x- prefixed extension type."
+        },
+        "rateLimitPerSecond": {
+          "widget": "number",
+          "integer": true,
+          "min": 1,
+          "required": false
+        }
+      }
+    },
+    "ConsentProfile": {
+      "title": "ConsentProfile",
+      "family": "Commerce",
+      "order": 1,
+      "summary": "Jurisdictions and use-case consent constraints",
+      "example": "examples/telco-payment-recovery/consent.flux.yml",
+      "fields": {
+        "allowedJurisdictions": {
+          "widget": "list",
+          "required": false
+        },
+        "requiresExplicitOptIn": {
+          "widget": "toggle",
+          "required": false
+        },
+        "allowedUseCases": {
+          "widget": "list",
+          "required": false,
+          "help": "Vocabulary aligned with FLUID agentPolicy.allowedUseCases; a contract emitted at the seam must be at least as strict as the gating ConsentProfile (validator-enforced)."
+        },
+        "deniedUseCases": {
+          "widget": "list",
+          "required": false
+        }
+      }
+    },
+    "Playback": {
+      "title": "Playback",
+      "family": "Calibration",
+      "order": 4,
+      "summary": "Fits the World to observed telemetry; reports drift",
+      "example": "examples/telco-payment-recovery/playback.flux.yml",
+      "fields": {
+        "worldRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "The World this playback calibrates."
+        },
+        "sourceStream": {
+          "widget": "text",
+          "required": true,
+          "help": "URI of historical telemetry the twin is fitted against."
+        },
+        "personaMapping": {
+          "widget": "list",
+          "required": true
+        },
+        "personaMapping[].behaviorPattern": {
+          "widget": "text",
+          "required": true,
+          "help": "flux-expr/1 predicate over observed events."
+        },
+        "personaMapping[].mapToPersona": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "calibration": {
+          "widget": "group",
+          "required": false,
+          "help": "Which World dials are fitted from the source stream."
+        },
+        "calibration.targets": {
+          "widget": "list",
+          "required": true
+        },
+        "calibration.window": {
+          "widget": "text",
+          "required": false,
+          "help": "Observation window, e.g."
+        },
+        "calibration.method": {
+          "widget": "text",
+          "required": false
+        },
+        "drift": {
+          "widget": "group",
+          "required": false,
+          "help": "Twin-predicted vs estate-observed divergence is reported as drift against this threshold."
+        },
+        "drift.metric": {
+          "widget": "select",
+          "options": [
+            "psi",
+            "kl",
+            "ks"
+          ],
+          "required": true
+        },
+        "drift.threshold": {
+          "widget": "number",
+          "required": true
+        },
+        "drift.onBreach": {
+          "widget": "select",
+          "options": [
+            "warn",
+            "fail"
+          ],
+          "required": false
+        },
+        "scorecard": {
+          "widget": "group",
+          "required": false,
+          "help": "RFC-05: the twin states its own trustworthiness."
+        },
+        "scorecard.backtestWindow": {
+          "widget": "text",
+          "required": false,
+          "help": "ISO-8601 duration of the backtest window, e.g."
+        },
+        "scorecard.grade": {
+          "widget": "select",
+          "options": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E",
+            "F"
+          ],
+          "required": true,
+          "help": "Calibration grade derived from interval coverage and drift by the calibration engine."
+        },
+        "scorecard.intervalCoverage": {
+          "widget": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "required": false,
+          "help": "Fraction of observed outcomes falling inside the twin's predicted intervals over the backtest window."
+        },
+        "scorecard.credibility": {
+          "widget": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "required": true,
+          "help": "The twin's overall trust score."
+        }
+      }
+    },
+    "Journey": {
+      "title": "Journey",
+      "family": "Behaviour",
+      "order": 2,
+      "summary": "Trigger, intervention and per-persona reactions",
+      "example": "examples/telco-payment-recovery/journey.flux.yml",
+      "fields": {
+        "trigger": {
+          "widget": "group",
+          "required": true
+        },
+        "trigger.signalRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "trigger.condition": {
+          "widget": "text",
+          "required": false,
+          "help": "Optional flux-expr/1 predicate over the signal payload."
+        },
+        "intervention": {
+          "widget": "group",
+          "required": false
+        },
+        "intervention.treatmentRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "intervention.action": {
+          "widget": "text",
+          "required": false
+        },
+        "taxonomyRef": {
+          "widget": "reference",
+          "required": false,
+          "help": "JourneyTaxonomy whose states this journey's reactions may transition to."
+        },
+        "personaReactions": {
+          "widget": "group",
+          "required": false
+        }
+      }
+    },
+    "JourneyTaxonomy": {
+      "title": "JourneyTaxonomy",
+      "family": "Behaviour",
+      "order": 2,
+      "summary": "The lifecycle state machine journeys move through",
+      "example": "examples/telco-payment-recovery/taxonomy.flux.yml",
+      "fields": {
+        "states": {
+          "widget": "list",
+          "required": true
+        },
+        "transitions": {
+          "widget": "list",
+          "required": true,
+          "help": "from/to must be members of states (validator-enforced)."
+        },
+        "transitions[].from": {
+          "widget": "text",
+          "required": true
+        },
+        "transitions[].to": {
+          "widget": "text",
+          "required": true
+        }
+      }
+    },
+    "Signal": {
+      "title": "Signal",
+      "family": "Behaviour",
+      "order": 2,
+      "summary": "A CloudEvents-typed event the twin emits or watches",
+      "example": "examples/telco-payment-recovery/signal.flux.yml",
+      "fields": {
+        "envelope": {
+          "widget": "constant",
+          "value": "cloudevents/1.0",
+          "required": false,
+          "help": "Every emitted record is a CloudEvents 1.0 envelope; this is the event-envelope port."
+        },
+        "source": {
+          "widget": "text",
+          "required": true,
+          "help": "CloudEvents 'source' context attribute."
+        },
+        "type": {
+          "widget": "text",
+          "required": true,
+          "help": "CloudEvents 'type' context attribute."
+        },
+        "dataschema": {
+          "widget": "text",
+          "required": false,
+          "help": "URI of the payload schema (CloudEvents 'dataschema')."
+        }
+      }
+    },
+    "Detector": {
+      "title": "Detector",
+      "family": "Behaviour",
+      "order": 2,
+      "summary": "A windowed pattern over signals",
+      "example": "examples/telco-payment-recovery/detector.flux.yml",
+      "fields": {
+        "timeWindowMs": {
+          "widget": "number",
+          "integer": true,
+          "min": 1,
+          "required": true
+        },
+        "pattern": {
+          "widget": "list",
+          "required": true,
+          "help": "Ordered sequence of signal conditions that must occur within the window."
+        },
+        "pattern[].signalRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "pattern[].predicate": {
+          "widget": "text",
+          "required": false,
+          "help": "flux-expr/1 predicate over the signal payload."
+        }
+      }
+    },
+    "Treatment": {
+      "title": "Treatment",
+      "family": "Activation",
+      "order": 3,
+      "summary": "The action taken when a campaign fires",
+      "example": "examples/telco-payment-recovery/treatment-fast.flux.yml",
+      "fields": {
+        "actionType": {
+          "widget": "text",
+          "required": true
+        },
+        "payloadTemplate": {
+          "widget": "group",
+          "required": false
+        }
+      }
+    },
+    "Campaign": {
+      "title": "Campaign",
+      "family": "Activation",
+      "order": 3,
+      "summary": "Treatment x segment x channel x consent",
+      "example": "examples/telco-payment-recovery/campaign.flux.yml",
+      "fields": {
+        "treatmentRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "segmentRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "channelRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "consentRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        }
+      }
+    },
+    "Experiment": {
+      "title": "Experiment",
+      "family": "Activation",
+      "order": 3,
+      "summary": "Weighted variants, assignment method, governed metrics",
+      "example": "examples/telco-payment-recovery/experiment.flux.yml",
+      "fields": {
+        "variants": {
+          "widget": "list",
+          "required": true,
+          "help": "Variant names must be unique and weights must sum to 1 (validator-enforced)."
+        },
+        "variants[].name": {
+          "widget": "text",
+          "required": true
+        },
+        "variants[].weight": {
+          "widget": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "required": true
+        },
+        "variants[].treatmentRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "variants[].isControl": {
+          "widget": "toggle",
+          "required": false
+        },
+        "assignment": {
+          "widget": "group",
+          "required": false
+        },
+        "assignment.method": {
+          "widget": "constant",
+          "value": "largest_remainder",
+          "required": true,
+          "help": "Integer cohort allocation with zero rounding loss."
+        },
+        "assignment.seed": {
+          "widget": "number",
+          "integer": true,
+          "required": false
+        },
+        "metrics": {
+          "widget": "list",
+          "required": false
+        },
+        "metrics[].name": {
+          "widget": "text",
+          "required": true
+        },
+        "metrics[].ossieRef": {
+          "widget": "text",
+          "required": false,
+          "help": "Deprecated in 0.4.0 \u2014 use semanticRef (RFC-07)."
+        },
+        "metrics[].semanticRef": {
+          "widget": "semantic-measure",
+          "required": false,
+          "help": "RFC-07: model/measure into the bundle's bound semantic model (a Module binding the ossie-model port declaring config.measures)."
+        }
+      }
+    },
+    "Module": {
+      "title": "Module",
+      "family": "Composition",
+      "order": 5,
+      "summary": "A reusable capability bundle bound to the four ports",
+      "example": "examples/telco-payment-recovery/module.flux.yml",
+      "fields": {
+        "resources": {
+          "widget": "list",
+          "required": true
+        },
+        "binds": {
+          "widget": "list",
+          "required": false,
+          "help": "The seams this module binds to; a capability can be swapped without touching the documents that use it."
+        },
+        "binds[].port": {
+          "widget": "select",
+          "options": [
+            "event-envelope",
+            "fluid-contract",
+            "ossie-model",
+            "binding-port"
+          ],
+          "required": true
+        },
+        "binds[].config": {
+          "widget": "group",
+          "required": false
+        }
+      }
+    },
+    "VerticalPack": {
+      "title": "VerticalPack",
+      "family": "Composition",
+      "order": 5,
+      "summary": "Industry packaging of modules",
+      "example": "examples/telco-payment-recovery/verticalpack.flux.yml",
+      "fields": {
+        "industry": {
+          "widget": "text",
+          "required": true
+        },
+        "modules": {
+          "widget": "list",
+          "required": true
+        }
+      }
+    },
+    "Blueprint": {
+      "title": "Blueprint",
+      "family": "Composition",
+      "order": 5,
+      "summary": "Topology of documents as a reviewable graph",
+      "example": "examples/telco-payment-recovery/blueprint.flux.yml",
+      "fields": {
+        "topology": {
+          "widget": "group",
+          "required": true
+        },
+        "topology.nodes": {
+          "widget": "list",
+          "required": true
+        },
+        "topology.edges": {
+          "widget": "list",
+          "required": false,
+          "help": "from/to must be members of nodes (validator-enforced)."
+        },
+        "topology.edges[].from": {
+          "widget": "text",
+          "required": true
+        },
+        "topology.edges[].to": {
+          "widget": "text",
+          "required": true
+        }
+      }
+    },
+    "Simulation": {
+      "title": "Simulation",
+      "family": "Composition",
+      "order": 5,
+      "summary": "The root: world, fidelity, composition refs and the FLUID seam",
+      "example": "examples/telco-payment-recovery/simulation.flux.yml",
+      "fields": {
+        "worldRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "A reference to the id of another document in the same bundle (same grammar as identifier)."
+        },
+        "fidelity": {
+          "widget": "select",
+          "options": [
+            "deterministic",
+            "stochastic",
+            "agentic"
+          ],
+          "required": false,
+          "help": "Escalating fidelities: deterministic (pure function of seed), stochastic (seed sweep -> distribution), agentic (model-backed actors under agentPolicy)."
+        },
+        "seed": {
+          "widget": "number",
+          "integer": true,
+          "required": false,
+          "help": "Overrides the World seed for this run."
+        },
+        "sweep": {
+          "widget": "group",
+          "required": false,
+          "help": "Stochastic mode: sweep seeds baseSeed..baseSeed+runs-1; each run remains independently replayable."
+        },
+        "sweep.runs": {
+          "widget": "number",
+          "integer": true,
+          "min": 2,
+          "required": true
+        },
+        "sweep.baseSeed": {
+          "widget": "number",
+          "integer": true,
+          "required": false
+        },
+        "golden": {
+          "widget": "group",
+          "required": false,
+          "help": "Golden-regression anchor: the verify gate fails on a single byte of drift from this digest."
+        },
+        "golden.baselineDigest": {
+          "widget": "text",
+          "required": true
+        },
+        "sovereignty": {
+          "widget": "group",
+          "required": false
+        },
+        "sovereignty.allowedZones": {
+          "widget": "list",
+          "required": true
+        },
+        "sovereignty.enforcement": {
+          "widget": "select",
+          "options": [
+            "block",
+            "audit"
+          ],
+          "required": false,
+          "help": "block: execution mathematically fails outside allowed zones; audit: violations are recorded as lineage."
+        },
+        "timeBounds": {
+          "widget": "group",
+          "required": false,
+          "help": "start must precede end (validator-enforced)."
+        },
+        "timeBounds.start": {
+          "widget": "datetime",
+          "required": true,
+          "help": "RFC 3339 timestamp (lowercase t/z permitted, per the RFC)."
+        },
+        "timeBounds.end": {
+          "widget": "datetime",
+          "required": true,
+          "help": "RFC 3339 timestamp (lowercase t/z permitted, per the RFC)."
+        },
+        "personaRefs": {
+          "widget": "reference-list",
+          "required": false
+        },
+        "segmentRefs": {
+          "widget": "reference-list",
+          "required": false
+        },
+        "signalRefs": {
+          "widget": "reference-list",
+          "required": false
+        },
+        "campaignRefs": {
+          "widget": "reference-list",
+          "required": false
+        },
+        "experimentRefs": {
+          "widget": "reference-list",
+          "required": false
+        },
+        "moduleRefs": {
+          "widget": "list",
+          "required": false
+        },
+        "emits": {
+          "widget": "list",
+          "required": true,
+          "help": "The FLUID contract handoff seam."
+        },
+        "emits[].productRef": {
+          "widget": "reference",
+          "required": true,
+          "help": "The id of the FLUID DataProduct document (.fluid.yml) proven by this simulation."
+        },
+        "emits[].exposeId": {
+          "widget": "text",
+          "required": true,
+          "help": "Which expose of the referenced DataProduct this stream fulfils."
+        },
+        "emits[].fluidVersion": {
+          "widget": "text",
+          "required": true,
+          "help": "RFC-06: an exact vendored FLUID version (as before) or a semver range (^0.7.3, ~0.7.4) resolved against the vendored compatibility set."
+        },
+        "emits[].minCredibility": {
+          "widget": "slider",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "required": false,
+          "help": "RFC-05 seam gate: a Playback scorecard calibrating this Simulation's world must report at least this credibility (validator-enforced)."
+        },
+        "emits[].provenance": {
+          "widget": "group",
+          "required": false,
+          "help": "RFC-06: cryptographic binding of the seam crossing."
+        },
+        "emits[].provenance.contractDigest": {
+          "widget": "text",
+          "required": false,
+          "help": "Canonical-JSON sha256 of the referenced FLUID document."
+        },
+        "emits[].provenance.outputDigest": {
+          "widget": "text",
+          "required": false,
+          "help": "Digest of the run output attested by the engine at emit time."
+        }
+      }
+    }
+  }
+}

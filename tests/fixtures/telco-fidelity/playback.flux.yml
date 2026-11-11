@@ -1,0 +1,23 @@
+fluxVersion: "0.5.0"
+kind: Playback
+id: pb-billing-history
+name: Billing History Calibration
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  worldRef: q3-retention-world
+  sourceStream: kafka://billing.events.v1
+  personaMapping:
+    - behaviorPattern: "late_payment_count >= 2"
+      mapToPersona: persona-pragmatic-family
+  calibration:
+    targets: [population.lifecycleMix, eventRates]
+    window: P90D
+    method: mle
+  drift: { metric: psi, threshold: 0.2, onBreach: warn }
+  scorecard:                       # RFC-05: the twin states its own trustworthiness
+    backtestWindow: P90D
+    grade: B
+    intervalCoverage: 0.92
+    credibility: 0.78

@@ -1,0 +1,80 @@
+{
+  "G": "sha256:eee5c8c8c595a15e70d72360de2f422c4490594c1de4e1aade2e9ccbaed65cfb",
+  "H": "sha256:72262c0093d040736a15cbda45e7c618578090be51f84a004ead8307ef181a39",
+  "columnsCovered": [
+    "amount",
+    "market"
+  ],
+  "committedState": {
+    "C1": [
+      {
+        "column": "aborted_at",
+        "leafCount": 100000,
+        "leafFunction": "sha256",
+        "root": "sha256:72bae02c24bbf126fdcfa95079b533dc96434cea201891cea775f3f9ddf51985"
+      },
+      {
+        "column": "amount",
+        "leafCount": 100000,
+        "leafFunction": "sha256",
+        "root": "sha256:199faf08ca91b16fe877e0db1e22b8961575fc2d17f4945f13b31d94e2e3f8c6"
+      },
+      {
+        "column": "market",
+        "leafCount": 100000,
+        "leafFunction": "sha256",
+        "root": "sha256:9e2a89d9abee3ffcad5100e8bf700808c5649009db215b2ecc8ec209f174d9f4"
+      }
+    ],
+    "checkOrdinal": 1,
+    "ordinal": 1,
+    "recordCount": 64
+  },
+  "proofSystem": "none",
+  "properties": [
+    {
+      "column": "amount",
+      "epsilon": "0.0000152587890625",
+      "margin": "49.9999847412109375",
+      "outcome": "within",
+      "property": "mean",
+      "tolerance": {
+        "type": "absolute",
+        "value": "50"
+      }
+    },
+    {
+      "column": "market",
+      "epsilon": "0",
+      "margin": null,
+      "outcome": "within",
+      "property": "support",
+      "tolerance": {
+        "max": "0",
+        "type": "count"
+      }
+    }
+  ],
+  "recordVersion": 1,
+  "reference": {
+    "contractDigest": "sha256:b9b5ee575a8b313f6f72d039653d8be5d76e7ecc0012d7bd6ad2d37e0e60435d",
+    "exposeId": "payment_recovery_moment",
+    "fluidVersion": "^0.7.3",
+    "productRef": "telco.gold.payment_recovery_moment"
+  },
+  "scope": {
+    "certifies": "statistical relation between the synthetic dataset and the committed state under the registered properties",
+    "doesNotCertify": [
+      "privacy or re-identification resistance of the synthetic dataset",
+      "fairness or any property of the source dataset itself",
+      "any property of a system trained on or tested with the synthetic dataset",
+      "that the synthetic dataset was generated independently of the source",
+      "that the committed state is the whole source dataset",
+      "predictive validity of any simulation outcome"
+    ]
+  },
+  "synthetic": {
+    "generatorDigest": "sha256:31b6cca91d3a5e4e981ec77b67fa56f03dcdf2f4d05daf4013c2311c0d4cee19",
+    "rows": 64
+  }
+}

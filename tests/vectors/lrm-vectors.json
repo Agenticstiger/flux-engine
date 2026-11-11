@@ -1,0 +1,321 @@
+{
+  "description": "Pinned splits for KERNEL-SPEC §5's Largest Remainder Method. Weights and population sizes come from the shipped telco-payment-recovery example where the example declares them; every count below is computed by flux_engine.core.lrm, never typed. 'residualOrder' is the order keys stand in line for a residual unit -- largest fractional part first, ties by NFC-sorted key -- so a vector pins the tie-break itself and not only its effect.",
+  "regenerate": "see the module docstring of tests/core/test_lrm.py",
+  "source": "FLUX/examples/telco-payment-recovery (world.flux.yml, experiment.flux.yml)",
+  "vectors": [
+    {
+      "name": "telco lifecycleMix over the declared population",
+      "n": 25000,
+      "weights": {
+        "new": "0.15",
+        "active": "0.55",
+        "atrisk": "0.20",
+        "churned": "0.10"
+      },
+      "counts": {
+        "new": 3750,
+        "active": 13750,
+        "atrisk": 5000,
+        "churned": 2500
+      },
+      "countKeyOrder": [
+        "new",
+        "active",
+        "atrisk",
+        "churned"
+      ],
+      "residualOrder": [
+        "active",
+        "atrisk",
+        "churned",
+        "new"
+      ],
+      "sum": 25000,
+      "note": "world.flux.yml spec.population: size 25000, lifecycleMix {new, active, atrisk, churned}. Exact: no residual to place."
+    },
+    {
+      "name": "telco lifecycleMix over a population that does not divide",
+      "n": 25001,
+      "weights": {
+        "new": "0.15",
+        "active": "0.55",
+        "atrisk": "0.20",
+        "churned": "0.10"
+      },
+      "counts": {
+        "new": 3750,
+        "active": 13751,
+        "atrisk": 5000,
+        "churned": 2500
+      },
+      "countKeyOrder": [
+        "new",
+        "active",
+        "atrisk",
+        "churned"
+      ],
+      "residualOrder": [
+        "active",
+        "atrisk",
+        "new",
+        "churned"
+      ],
+      "sum": 25001,
+      "note": "The same declared mix over 25001 subjects: one residual unit to place."
+    },
+    {
+      "name": "experiment variants, even population",
+      "n": 25000,
+      "weights": {
+        "control": "0.5",
+        "fast-recovery": "0.5"
+      },
+      "counts": {
+        "control": 12500,
+        "fast-recovery": 12500
+      },
+      "countKeyOrder": [
+        "control",
+        "fast-recovery"
+      ],
+      "residualOrder": [
+        "control",
+        "fast-recovery"
+      ],
+      "sum": 25000,
+      "note": "experiment.flux.yml spec.variants: control 0.5, fast-recovery 0.5."
+    },
+    {
+      "name": "adversarial tie: experiment variants over an odd population",
+      "n": 25001,
+      "weights": {
+        "control": "0.5",
+        "fast-recovery": "0.5"
+      },
+      "counts": {
+        "control": 12501,
+        "fast-recovery": 12500
+      },
+      "countKeyOrder": [
+        "control",
+        "fast-recovery"
+      ],
+      "residualOrder": [
+        "control",
+        "fast-recovery"
+      ],
+      "sum": 25001,
+      "note": "Both fractional parts are exactly 1/2. The tie is broken by NFC-sorted key, so the residual unit goes to 'control' -- never to a seed, and never to whichever variant was declared first."
+    },
+    {
+      "name": "adversarial tie: declaration order reversed",
+      "n": 25001,
+      "weights": {
+        "fast-recovery": "0.5",
+        "control": "0.5"
+      },
+      "counts": {
+        "fast-recovery": 12500,
+        "control": 12501
+      },
+      "countKeyOrder": [
+        "fast-recovery",
+        "control"
+      ],
+      "residualOrder": [
+        "control",
+        "fast-recovery"
+      ],
+      "sum": 25001,
+      "note": "The same two variants declared the other way round. The counts are the same -- order-invariance -- and the output key order follows the input."
+    },
+    {
+      "name": "adversarial tie: two equal fractional parts, three keys",
+      "n": 10,
+      "weights": {
+        "a": "0.25",
+        "b": "0.25",
+        "c": "0.5"
+      },
+      "counts": {
+        "a": 3,
+        "b": 2,
+        "c": 5
+      },
+      "countKeyOrder": [
+        "a",
+        "b",
+        "c"
+      ],
+      "residualOrder": [
+        "a",
+        "b",
+        "c"
+      ],
+      "sum": 10
+    },
+    {
+      "name": "adversarial tie: every fractional part equal",
+      "n": 10,
+      "weights": {
+        "delta": "0.25",
+        "charlie": "0.25",
+        "bravo": "0.25",
+        "alpha": "0.25"
+      },
+      "counts": {
+        "delta": 2,
+        "charlie": 2,
+        "bravo": 3,
+        "alpha": 3
+      },
+      "countKeyOrder": [
+        "delta",
+        "charlie",
+        "bravo",
+        "alpha"
+      ],
+      "residualOrder": [
+        "alpha",
+        "bravo",
+        "charlie",
+        "delta"
+      ],
+      "sum": 10,
+      "note": "Four keys at 0.25 over 10 units: floors 2 each, two residual units, all four fractional parts exactly 1/2. The first two NFC-sorted keys win."
+    },
+    {
+      "name": "adversarial tie: NFC decides, not code point",
+      "n": 3,
+      "weights": {
+        "é": "0.5",
+        "z": "0.5"
+      },
+      "counts": {
+        "é": 1,
+        "z": 2
+      },
+      "countKeyOrder": [
+        "é",
+        "z"
+      ],
+      "residualOrder": [
+        "z",
+        "é"
+      ],
+      "sum": 3,
+      "note": "'z' sorts before the composed 'e-acute' (U+00E9) and after the decomposed spelling (U+0065 U+0301). Sorting by NFC form rather than by raw code point is what makes the two spellings of the same key resolve one way."
+    },
+    {
+      "name": "declared scale is not significance",
+      "n": 25001,
+      "weights": {
+        "new": "0.150",
+        "active": "0.550",
+        "atrisk": "0.200",
+        "churned": "0.100"
+      },
+      "counts": {
+        "new": 3750,
+        "active": 13751,
+        "atrisk": 5000,
+        "churned": 2500
+      },
+      "countKeyOrder": [
+        "new",
+        "active",
+        "atrisk",
+        "churned"
+      ],
+      "residualOrder": [
+        "active",
+        "atrisk",
+        "new",
+        "churned"
+      ],
+      "sum": 25001,
+      "note": "0.150 and 0.15 are one number; a trailing declared zero must not move a count."
+    },
+    {
+      "name": "many keys, one unit",
+      "n": 1,
+      "weights": {
+        "e": "0.2",
+        "d": "0.2",
+        "c": "0.2",
+        "b": "0.2",
+        "a": "0.2"
+      },
+      "counts": {
+        "e": 0,
+        "d": 0,
+        "c": 0,
+        "b": 0,
+        "a": 1
+      },
+      "countKeyOrder": [
+        "e",
+        "d",
+        "c",
+        "b",
+        "a"
+      ],
+      "residualOrder": [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e"
+      ],
+      "sum": 1,
+      "note": "n = 1 over five equal shares: every floor is 0 and the single residual unit goes to the first NFC-sorted key."
+    },
+    {
+      "name": "a weight of zero receives nothing",
+      "n": 100,
+      "weights": {
+        "kept": "1",
+        "dropped": "0"
+      },
+      "counts": {
+        "kept": 100,
+        "dropped": 0
+      },
+      "countKeyOrder": [
+        "kept",
+        "dropped"
+      ],
+      "residualOrder": [
+        "dropped",
+        "kept"
+      ],
+      "sum": 100
+    },
+    {
+      "name": "long decimals inside the declared tolerance",
+      "n": 1000,
+      "weights": {
+        "a": "0.333333333",
+        "b": "0.333333333",
+        "c": "0.333333333"
+      },
+      "counts": {
+        "a": 334,
+        "b": 333,
+        "c": 333
+      },
+      "countKeyOrder": [
+        "a",
+        "b",
+        "c"
+      ],
+      "residualOrder": [
+        "a",
+        "b",
+        "c"
+      ],
+      "sum": 1000,
+      "note": "Three shares that sum to 0.999999999 -- exactly at the 1e-9 tolerance KERNEL-SPEC §5 allows."
+    }
+  ]
+}

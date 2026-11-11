@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+.hypothesis/
+.coverage
+# coverage.py parallel mode (-n auto) writes one .coverage.<host>.<pid>.<rand> per worker
+.coverage.*
+coverage.xml
+htmlcov/
+
+# flux_engine runtime state
+.flux/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

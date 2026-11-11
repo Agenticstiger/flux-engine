@@ -1,0 +1,19 @@
+{
+  "baseSeed": 20261111,
+  "input": {
+    "seed": 0,
+    "size": 6,
+    "spec": {
+      "traits": {
+        "t": {
+          "dist": "normal",
+          "mean": 0.0,
+          "stddev": 1.25e+43
+        }
+      }
+    }
+  },
+  "note": "found by hypothesis-jsonschema in test_persona_specs: a schema-valid bounded-normal trait with a huge stddev. materialise_population raised decimal.InvalidOperation, not a FluxError. Fixed: it is refused with FLX-5021.",
+  "property": "schema_flux_persona",
+  "tier": "nightly-reproduced"
+}
