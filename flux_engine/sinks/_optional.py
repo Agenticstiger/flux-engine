@@ -64,20 +64,22 @@ def is_available(module: str) -> bool:
     return _present(module)
 
 
-def require(module: str, *, extra: str, feature: str) -> ModuleType:
+def require(module: str, *, extra: str, feature: str, hint: str = "") -> ModuleType:
     """Import *module*, or raise ``FLX-3501`` naming the extra that provides it.
 
     *feature* names what needs the module ("the Parquet sink"), *extra* the
-    ``flux-sim-engine[...]`` extra that installs it. A driver that no extra
-    installs (the ADBC driver for one database) passes ``extra=""`` and the
-    message names the package to install instead.
+    ``flux-sim-engine[...]`` extra that installs it. *hint* replaces the
+    install line, for a package no extra installs (the ADBC driver for one
+    database); without either, the message names the package itself.
     """
     top = module.split(".", 1)[0]
     package = DISTRIBUTION.get(top, top)
     if not _present(module):
-        if extra:
-            hint = f"pip install 'flux-sim-engine[{extra}]'"
+        if hint:
+            line = hint
+        elif extra:
+            line = f"pip install 'flux-sim-engine[{extra}]'"
         else:
-            hint = f"pip install {package}"
-        raise FluxError(FLX_3501, f"{feature} needs {package}, which is not installed: {hint}")
+            line = f"pip install {package}"
+        raise FluxError(FLX_3501, f"{feature} needs {package}, which is not installed: {line}")
     return importlib.import_module(module)

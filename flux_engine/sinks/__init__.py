@@ -16,6 +16,10 @@ answerable for: KERNEL-SPEC §8 computes the ``outputDigest`` above the sink.
   one stream as zstd-compressed files named after its ``outputDigest``,
   with a manifest of their sha256, published only when the stream is whole.
   Need ``flux-sim-engine[arrow]``.
+* :mod:`flux_engine.sinks.adbc` -- one stream into one table of SQLite,
+  DuckDB, PostgreSQL, Snowflake or BigQuery through ADBC, in a ``sim_``
+  twin namespace, labelled synthetic, with replays replacing their own
+  slice. Needs ``flux-sim-engine[adbc]`` and the database's ADBC driver.
 * :mod:`flux_engine.sinks.receipts` -- what a sink is told before a stream
   (:class:`~flux_engine.sinks.receipts.StreamContext`) and what it reports
   after one (:class:`~flux_engine.sinks.receipts.SinkReceipt`). No extra.

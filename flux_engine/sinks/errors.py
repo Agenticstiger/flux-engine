@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from flux_engine.core.errors import ErrorCode, register
 
-__all__ = ["FLX_3501", "FLX_3502", "FLX_3503", "FLX_3504", "FLX_3505"]
+__all__ = ["FLX_3501", "FLX_3502", "FLX_3503", "FLX_3504", "FLX_3505", "FLX_3506"]
 
 FLX_3501: ErrorCode = register(
     "FLX-3501",
@@ -77,4 +77,17 @@ FLX_3505: ErrorCode = register(
     "for a reader to mistake for a whole one. The run directory and its outputDigest are "
     "unaffected. Fix the cause the message names and run the command again: the same "
     "run writes the same files under the same names.",
+)
+
+FLX_3506: ErrorCode = register(
+    "FLX-3506",
+    "the database sink will not touch a table it does not manage",
+    "The database sink only ever changes tables it created itself. Every table it "
+    "creates carries four columns of its own, _flux_synthetic, _flux_run_id, "
+    "_flux_output_digest and _flux_row, after the stream's declared columns, and it "
+    "refuses an existing table that lacks them, so a production table that happens to "
+    "share a name is never appended to, emptied or dropped. It also refuses, in append "
+    "mode, a table whose columns no longer match the stream's (the contract changed), "
+    "and, in create mode, any table that already exists. Choose another table prefix or "
+    "schema, or, for a table the sink created under an older contract, use mode=replace.",
 )
