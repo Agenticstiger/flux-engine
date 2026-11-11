@@ -5,14 +5,14 @@
 """Architecture gates: the import-linter contracts, plus a kernel AST scan.
 
 Two independent checks of the same "kernel packages stay deterministic"
-property from the approved plan:
+property:
 
 1. The import-linter contracts in pyproject.toml (run as a subprocess --
    the same `lint-imports` entry point `make ci-local` and CI use).
 2. An AST scan asserting the kernel packages (core, world, runtime, expr,
    seam) never call the wall clock, a UUID generator, or the stdlib
-   `random` module -- the "six deliberately broken kernels" idea from the
-   build plan names exactly these as the ways a kernel silently loses
+   `random` module -- the "six deliberately broken kernels" idea
+   names exactly these as the ways a kernel silently loses
    determinism (wall clock, uuid4 ids, ...). import-linter's forbidden
    contract already bans importing the `random`/`uuid`/`time`/`os`/
    `socket` *modules* from the kernel; this test is an independent,

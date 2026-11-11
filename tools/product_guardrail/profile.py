@@ -29,8 +29,8 @@ already handles that well and says so explicitly.
 LOCALE = "en-US"
 
 # Mirrors register_lint.py's own boundary exactly: docs/spec/ holds the
-# INTERNAL normative specifications, which name private modules by design and
-# are never published. Everything else under docs/ is a public-facing surface.
+# normative specifications, which name engine modules by design. Everything
+# else under docs/ is a public-facing surface.
 # docs/spec/ is still SCANNED — it just lands in developer prose, where naming
 # advises rather than blocks.
 SURFACE_TIER = (

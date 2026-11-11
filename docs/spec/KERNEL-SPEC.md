@@ -1,4 +1,4 @@
-# FLUX Simulation Engine — kernel normative specification (internal, v0.1)
+# FLUX Simulation Engine: kernel normative specification (v0.1)
 
 Status: normative for `flux_engine.core`, `flux_engine.world`, `flux_engine.runtime`, `flux_engine.expr`,
 `flux_engine.seam`. Every rule here is either pinned by a published vector file, a golden, or a property test.

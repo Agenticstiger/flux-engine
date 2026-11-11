@@ -13,7 +13,6 @@ Make (on Windows, use WSL). Fork the repository on GitHub, then:
 git clone https://github.com/<you>/flux-engine
 cd flux-engine
 git remote add upstream https://github.com/Agenticstiger/flux-engine
-git clone https://github.com/Agenticstiger/FLUX ../FLUX   # example bundles some tests read
 uv sync --extra dev && make test-fast
 ```
 
@@ -25,8 +24,10 @@ about a minute on a 16-core workstation and a few minutes on a laptop.
 `uv run pytest` runs the whole suite, slow tests included, and takes tens of
 minutes, so leave that to CI unless you are chasing a slow-test failure.
 
-Without the `../FLUX` checkout, the tests that read its example bundles are
-skipped locally. CI refuses to skip them.
+The FLUX specification repository is optional. Only the tests that read its
+example bundles need it: clone it next to this repository
+(`git clone https://github.com/Agenticstiger/flux ../FLUX`) to run them. Without
+it they are skipped locally. CI and `make ci-local` refuse to skip them.
 
 ## Before you open a pull request
 

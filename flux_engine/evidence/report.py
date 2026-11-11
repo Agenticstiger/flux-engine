@@ -58,12 +58,11 @@ __all__ = [
 
 FLX_8030 = register(
     "FLX-8030",
-    "generated evidence prose contains reserved pre-receipt vocabulary",
+    "generated evidence prose contains a reserved word",
     "EVIDENCE.md is rendered from a fixed template, but a caller-supplied "
     "value (a bundle name, a conformance summary) can still introduce a "
-    "word this project reserves until an external event lifts the freeze "
-    "-- see scripts/register_lint.py. The report is refused rather than "
-    "written with the word inside it.",
+    "word this project reserves (the list is in flux_engine/_vocabulary.py). "
+    "The report is refused rather than written with the word inside it.",
 )
 
 #: The five sections of ``EVIDENCE.md``, in the fixed order they always
@@ -78,12 +77,12 @@ EVIDENCE_SECTIONS: Tuple[str, ...] = (
 )
 
 #: v0.1 names exactly one authored dial in the mandatory "What Was Not
-#: Proven" section -- the one the build plan itself names. A later
+#: Proven" section -- the one the design names. A later
 #: increment with a real calibration loop grows this list; nothing here
 #: shrinks it silently.
 DEFAULT_AUTHORED_DIALS: Tuple[str, ...] = ("temperature.campaignResponse",)
 
-#: The register-discipline freeze list. Re-exported from
+#: The reserved-word list. Re-exported from
 #: :mod:`flux_engine._vocabulary`, which is the single definition shared
 #: with ``scripts/register_lint.py``: the list used to be hand-copied into
 #: both gates plus three test modules, with nothing asserting they were
@@ -92,7 +91,7 @@ _BANNED_WORDS: Tuple[str, ...] = BANNED_WORDS
 
 
 def find_banned_words(text: str) -> Tuple[str, ...]:
-    """Return every reserved pre-receipt word found in *text*, lower-cased, sorted, deduplicated.
+    """Return every reserved word found in *text*, lower-cased, sorted, deduplicated.
 
     Thin wrapper over :func:`flux_engine._vocabulary.find_banned_words`,
     kept because this module is where the runtime refusal lives: unlike
@@ -106,7 +105,7 @@ def find_banned_words(text: str) -> Tuple[str, ...]:
 
 
 def require_no_banned_words(text: str, *, label: str = "EVIDENCE.md") -> None:
-    """Raise ``FLX-8030`` when *text* contains a reserved pre-receipt word."""
+    """Raise ``FLX-8030`` when *text* contains a reserved word."""
     hits = find_banned_words(text)
     if hits:
         raise FluxError(FLX_8030, f"{label} contains reserved vocabulary: {', '.join(hits)}")
@@ -173,7 +172,7 @@ def render_evidence_report(
     """Render ``EVIDENCE.md``'s five fixed sections for one bundle.
 
     Raises ``FLX-8030`` if the rendered text contains a reserved
-    pre-receipt word -- most likely introduced through a caller-supplied
+    word -- most likely introduced through a caller-supplied
     string such as *bundle_name* or *conformance_summary*.
     """
     sections = [

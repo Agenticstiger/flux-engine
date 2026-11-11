@@ -17,8 +17,7 @@ name: Accuracy
 #       (`flux-accuracy-nightly/1`) with the report page rendered from it.
 #       On Mondays (UTC), on `accuracy-weekly`, or on dispatch with
 #       `weekly`, it adds the macOS determinism cells and mutation testing.
-#       macOS bills at 10x on a private repository, which is why it is
-#       weekly and not nightly.
+#       macOS runs weekly, not nightly.
 #
 # One cron, not two: the weekly extras key on the day of the week computed
 # in the `seed` job, so a Monday is one run, not a nightly and a weekly run

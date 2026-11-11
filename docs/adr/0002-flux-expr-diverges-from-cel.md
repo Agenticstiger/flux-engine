@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (W0)
+Accepted
 
 ## Context
 
@@ -17,8 +17,8 @@ Borrow-before-build search: "cel-python Common Expression Language"
 2026.
 
 CEL's own grammar accepts expression forms FLUX does not want to accept,
-and is versioned by Google's own release cadence, not FLUX's. The build
-plan requires `flux-expr/1` to be a frozen, closed grammar whose AST
+and is versioned by Google's own release cadence, not FLUX's. The design
+requires `flux-expr/1` to be a frozen, closed grammar whose AST
 compiles to a typed closure at plan time and is digest-stable across
 engine versions -- a property that has to be true of the language FLUX
 ships, not of whatever CEL happens to accept in a given release.

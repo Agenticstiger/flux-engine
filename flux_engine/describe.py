@@ -29,9 +29,9 @@ from flux_engine.spec import SOURCE
 __all__ = ["installed_spec_version", "self_describe"]
 
 #: The FLUX spec version the **vendored** validator/enforcement copy in
-#: ``flux_engine._vendor.flux_spec`` implements (RFC-04 + RFC-09, v0.5.0 per
-#: the approved plan). It is the answer only while the vendored fallback is
-#: what this installation runs on -- see :func:`installed_spec_version`.
+#: ``flux_engine._vendor.flux_spec`` implements (RFC-04 + RFC-09, v0.5.0).
+#: It is the answer only while the vendored fallback is what this
+#: installation runs on -- see :func:`installed_spec_version`.
 VENDORED_SPEC_VERSION = "0.5.0"
 
 #: The pre-0.2 spelling of :data:`VENDORED_SPEC_VERSION`, kept so a caller

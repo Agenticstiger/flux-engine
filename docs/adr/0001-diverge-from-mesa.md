@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (W0)
+Accepted
 
 ## Context
 

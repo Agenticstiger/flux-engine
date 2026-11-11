@@ -12,9 +12,9 @@ Retrieved via `git show <commit>:<path>` rather than the working tree,
 because the FLUX checkout had uncommitted, in-flight changes at copy time
 (a `feat/flux-spec-package` branch already mid-refactor into a `flux_spec/`
 package with `scripts/*.py` becoming compatibility shims — exactly the
-public-distribution work owner decision 2 describes for a later
-increment, W1). Pinning to the last commit keeps this vendor copy
-reproducible and independent of that unmerged, unstable work.
+public-distribution work planned for a later increment). Pinning to the
+last commit keeps this vendor copy reproducible and independent of that
+unmerged, unstable work.
 
 Files copied, each verified byte-identical to the pinned blob before any
 edit was applied:

@@ -153,7 +153,7 @@ def test_all_34_vectors_pass_through_the_shim() -> None:
 def test_a_fail_open_gate_fails_the_conformance_vectors() -> None:
     """A deliberately fail-open gate (always allows) must FAIL the vectors.
 
-    Regression guard for the build plan's "six deliberately broken
+    Regression guard in the spirit of the "six deliberately broken
     kernels" idea, applied here to the enforcement gate: a gate that
     always allows would pass no vector expecting a denial, proving the
     vectors are a real oracle and not a rubber stamp that passes anything.

@@ -2,11 +2,13 @@
 
 Describe your customers and what they do in YAML, and this engine turns that into synthetic rows that follow a [FLUID](https://open-data-protocol.github.io/fluid/) data contract: the same rows every time, with a report that says plainly what the run does not show.
 
+Documentation: <https://agenticstiger.github.io/flux/engine/>
+
 ## Try it
 
-You need [uv](https://docs.astral.sh/uv/). (Until the package is on PyPI you also need a clone of this repository and `git`: run `uv build --wheel` in the clone and pass the wheel's path after `--from` instead of the package name.)
+You need [uv](https://docs.astral.sh/uv/).
 
-<!-- skip: next "the package is not on PyPI yet; the First run workflow runs these same commands from a built wheel" -->
+<!-- skip: next "installs the published package, so it cannot test this checkout; the First run workflow runs these same commands from a built wheel" -->
 ```bash
 uvx --from flux-sim-engine fluxsim init demo && cd demo && uvx --from flux-sim-engine fluxsim run . --verify --ship -o out
 ```

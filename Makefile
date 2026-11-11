@@ -12,9 +12,10 @@
 # The workflow does run a handful of commands that are not `make` targets,
 # and none of them is a check. Counted from the workflow at the time of
 # writing, they are: three `pip install -e ".[dev]"` steps, two assertions
-# that the sibling FLUX checkout is on disk, one step printing the runner's
-# cpu_count, and the `CI gate` job's own aggregation of its dependencies'
-# results. Setup and plumbing, in other words, not verdicts about the tree.
+# that the sibling FLUX checkout is on disk (a contributor does not need it,
+# see below), one step printing the runner's cpu_count, and the `CI gate`
+# job's own aggregation of its dependencies' results. Setup and plumbing, in
+# other words, not verdicts about the tree.
 #
 # Job names in .github/workflows/ci.yml:
 #   Gates                     lint, format-check, typecheck, imports,
@@ -98,9 +99,12 @@ ci-local: lint format-check typecheck imports register-lint guardrail reuse proo
           describe gate-conform slow-partition test-fast-cov test-digests \
           test-slow-acceptance test-slow-rest packaging-smoke
 
-# A missing sibling ../FLUX checkout must fail the local mirror the same way it
-# fails CI, where this is set at workflow level. A bare `make test` stays
-# permissive for a developer who has not cloned the specification repository.
+# The sibling ../FLUX checkout is optional: only the tests that read its example
+# bundles need it, and without it they are skipped. A missing one must still
+# fail the local mirror the same way it fails CI, where this is set at workflow
+# level, so a green ci-local never has those tests skipped. A bare `make test`
+# stays permissive for a developer who has not cloned the specification
+# repository.
 # Target-specific exports propagate to prerequisites, and running a
 # prerequisite on its own does not see them; both verified on GNU Make 3.81.
 ci-local: export FLUX_EXAMPLES_REQUIRED := 1

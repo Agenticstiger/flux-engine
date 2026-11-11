@@ -1,10 +1,6 @@
-# Seam generator and fidelity check — internal specification (v0.1). PRIVATE REPO ONLY.
+# Seam generator and fidelity check: normative specification (v0.1)
 
-Vocabulary: in this private document the check is called the **fidelity check**; the record is the **fidelity
-record**. The pre-receipt vocabulary rule applies to every public surface (CLI output, `--help`, README, docs site,
-recordings): none of the words on the freeze list may appear there until the CEO lifts the freeze.
-
-## 1. The contract-schema generator (`generator/`) — T4.4 core
+## 1. The contract-schema generator (`generator/`)
 
 Input: a resolved expose (`seam/contract.py: compile_expose`) → ordered columns with `LogicalType`. For each column
 the generator picks a **family** from the column's declared aggregate statistics (§3) or, absent statistics, from
@@ -47,11 +43,11 @@ The scenario path (`seam/mapping.py`, `stages/pipeline.py`):
 
 ## 2. The fidelity block (lives in `Simulation.extensions["com.agentics.flux/1"].emits[<exposeId>].fidelity`)
 
-`fidelity` is the block's **only** spelling in a document. The internal
+`fidelity` is the block's **only** spelling in a document. The
 subsystem keeps its own module name (`flux_engine.concordance`), and that name
 stays inside the package: a second accepted key would be two digests of one
 contract — the same reason §2 refuses a bare support list below — and it would
-put a frozen-register word into a file an author writes.
+put a reserved word into a file an author writes.
 
 **Why it does not sit in `spec.emits[]`.** FLUX 0.5.0 declares `Simulation.spec.emits[]` items with
 `additionalProperties: false`, so a bundle carrying `fidelity` or `rows` there is refused by the published

@@ -6,7 +6,7 @@
 
 """The first five minutes, timed, on a machine that has nothing of ours.
 
-Builds the wheel (or takes a package name once the engine is published), then
+Builds the wheel (or takes a package name, to try the published package), then
 does what a newcomer is told to do, through ``uvx``, from a directory that is
 not this checkout and with an empty uv cache::
 
@@ -32,7 +32,7 @@ the budget. Exit 1 when something failed or the budget was exceeded. Exit 2 when
 this machine cannot run the check at all (no ``uvx``, or nowhere to write the report).
 
     make first-run
-    python scripts/first_run.py --from flux-sim-engine   # once it is on PyPI
+    python scripts/first_run.py --from flux-sim-engine   # the published package
 """
 
 from __future__ import annotations

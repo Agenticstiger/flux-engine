@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (W0). **Amended 2026-11-11:** the opt-in `[synth]` extra named under
+Accepted. **Amended 2026-11-11:** the opt-in `[synth]` extra named under
 Decision was removed, because nothing imported it. The rule itself is unchanged.
 
 ## Context

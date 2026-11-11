@@ -17,10 +17,9 @@ name: CI
 # carry `tags: ["v*"]`, which meant a tag started the six-cell matrix
 # natively. .github/workflows/release.yml now triggers on that tag and calls
 # this file through `workflow_call` below, so restoring the filter would give
-# one tag TWO independent six-cell runs, and macOS bills at 10x on a private
-# repository. The matrix still reads the tag: a called workflow runs at the
-# caller's ref, so `startsWith(github.ref, 'refs/tags/v')` is true inside the
-# call.
+# one tag TWO independent six-cell runs. The matrix still reads the tag: a
+# called workflow runs at the caller's ref, so
+# `startsWith(github.ref, 'refs/tags/v')` is true inside the call.
 on:
   push:
     branches: [main]
@@ -189,9 +188,7 @@ jobs:
   #
   #   pull request, push to main
   #       ubuntu 3.11 / 3.12 / 3.13 run the fast subset; macOS 3.12 runs the
-  #       determinism set. macOS bills at 10x on a private repository and was
-  #       78% of this pipeline's cost in both runs sampled (260 of 332 minutes,
-  #       300 of 386).
+  #       determinism set. The other macOS cells wait for the shape below.
   #
   #   schedule, v* tag, dispatch or release call with full_matrix
   #       all six cells run the fast subset AND the slow subset. This is the

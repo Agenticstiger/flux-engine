@@ -53,6 +53,26 @@ def test_the_page_carries_no_reserved_vocabulary() -> None:
     assert found == (), found
 
 
+def test_the_page_links_the_workflow_and_not_a_single_run() -> None:
+    page = render(_latest())
+    assert "/actions/workflows/accuracy-nightly.yml)" in page
+    assert "/actions/runs/" not in page
+
+
+def test_an_owner_named_actions_does_not_confuse_the_workflow_link() -> None:
+    artefact = copy.deepcopy(_latest())
+    artefact["run"]["url"] = "https://github.com/actions/toolkit/actions/runs/1"
+    assert "(https://github.com/actions/toolkit/actions/workflows/accuracy-nightly.yml)" in render(
+        artefact
+    )
+
+
+def test_a_run_url_that_names_no_actions_page_adds_no_link() -> None:
+    artefact = copy.deepcopy(_latest())
+    artefact["run"]["url"] = "https://example.invalid/run/1"
+    assert "[nightly workflow]" not in render(artefact)
+
+
 def test_the_page_ends_with_what_was_not_tested() -> None:
     page = render(_latest())
     heading = page.rindex("## What was not tested")

@@ -6,7 +6,7 @@
 
 A fixed set of words is held back from every public-facing surface this
 project ships -- ``README.md``, repository-root Markdown, ``docs/``
-outside the internal specification directories, every ``fluxsim --help``
+outside ``docs/spec/``, every ``fluxsim --help``
 string, the docstrings and error-catalog explanations under
 ``flux_engine/``, and the generated ``EVIDENCE.md``. Public prose uses
 "sign-off", "credibility" and "fidelity check" instead.

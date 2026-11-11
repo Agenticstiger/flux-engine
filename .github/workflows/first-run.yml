@@ -19,14 +19,11 @@ name: First run
 # `make first-run` is the same check on a developer's machine.
 #
 # Linux runs on every pull request and every push to main. macOS runs weekly and
-# on demand only: it bills at ten times the Linux rate while this repository is
-# private. When the repository is public, add macOS to the pull-request shape in
-# the matrix below.
+# on demand only; the matrix below says where.
 #
 # This is not one of the jobs `CI gate` in ci.yml waits for, on purpose. It needs
-# the network (PyPI, and GitHub for `flux-spec`, which is fetched from git until
-# it is on PyPI), so a flaky download should show up here as a red check rather
-# than hold up an unrelated merge. Require it once `flux-spec` is on PyPI.
+# the network (PyPI), so a flaky download should show up here as a red check
+# rather than hold up an unrelated merge.
 on:
   pull_request:
   push:

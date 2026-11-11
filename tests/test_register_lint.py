@@ -19,7 +19,7 @@ assert every consumer reads it rather than a copy.
 ``docs/``, so ``GOLDEN-CHANGELOG.md`` carried a banned word past a green
 run of the lint. The scan now covers every Markdown file at the
 repository root; the negative controls below prove it fires there, still
-fires under ``docs/``, and still exempts the internal
+fires under ``docs/``, and still exempts the
 ``docs/spec`` tree.
 """
 
@@ -101,7 +101,7 @@ def _fake_repo(root: Path) -> None:
     docs.mkdir()
     (docs / "public.md").write_text("this proves the docs scan still works\n")
     (docs / "spec").mkdir()
-    (docs / "spec" / "x.md").write_text("this proves internal docs are exempt\n")
+    (docs / "spec" / "x.md").write_text("this proves spec docs are exempt\n")
 
 
 def test_scan_docs_covers_repository_root_markdown(tmp_path: Path, monkeypatch) -> None:
@@ -112,7 +112,7 @@ def test_scan_docs_covers_repository_root_markdown(tmp_path: Path, monkeypatch) 
 
     assert any(hit.startswith("GOLDEN-CHANGELOG.md:") for hit in hits), hits
     assert any(hit.startswith("docs/public.md:") for hit in hits), hits
-    # The internal specification tree stays exempt, and a non-Markdown file
+    # The specification tree stays exempt, and a non-Markdown file
     # at the root is not swept in by the widening.
     assert not any("docs/spec" in hit for hit in hits), hits
     assert not any("NOTES.txt" in hit for hit in hits), hits
