@@ -34,7 +34,7 @@
         test test-fast test-fast-cov test-vectors test-digests test-determinism \
         test-slow test-slow-acceptance test-slow-rest slow-partition \
         describe gate-conform packaging-smoke third-party-licenses \
-        release-guard first-run docs-gen docs-check docs-test check
+        release-guard first-run docs-gen docs-check docs-test check bench
 
 # Local runs use the repository virtualenv. CI installs into the runner's own
 # interpreter and sets BIN= (empty) in the workflow env, so every tool below
@@ -339,6 +339,15 @@ docs-test:
 	$(BIN)pytest tests/docs -n auto --dist load
 
 # ---------------------------------------------------------------- Other
+# Not a CI gate. What the output sinks cost next to generating the rows they
+# write (tests/bench): needs the accuracy group for pytest-benchmark
+# (`uv sync --extra dev --group accuracy`). One process, because
+# pytest-benchmark switches itself off under xdist. FLUX_BENCH_ROWS sets the
+# stream length (default 20000).
+bench:
+	$(BIN)pytest tests/bench -m slow -p no:xdist -p no:cacheprovider --benchmark-only \
+	  --benchmark-columns=min,mean,max,rounds --benchmark-sort=name
+
 # Not a CI gate. Regenerates THIRD_PARTY_LICENSES.md on demand.
 third-party-licenses:
 	$(BIN)python scripts/third_party_licenses.py

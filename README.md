@@ -46,7 +46,7 @@ Open `.flux/runs/<runId>/EVIDENCE.md` first: its last section, "What Was Not Pro
 ## Where to go next
 
 - [Tutorial](docs/tutorial/README.md): your first evidence pack in five minutes.
-- [How-to guides](docs/how-to/README.md): model customers, add a journey, use the FLUID seam, calibrate from aggregates, ship with evidence.
+- [How-to guides](docs/how-to/README.md): model customers, add a journey, use the FLUID seam, calibrate from aggregates, ship with evidence, load a simulation into a database.
 - [Explanation](docs/explanation/README.md): the six-step loop, determinism and the seed tree, the seam, and what an evidence pack does not claim.
 - [Reference](docs/reference/README.md): every command, every error code, the Python API and the schemas.
 - The FLUX specification: [Agenticstiger/flux](https://github.com/Agenticstiger/flux).
