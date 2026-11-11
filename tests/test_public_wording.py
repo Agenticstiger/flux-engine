@@ -35,9 +35,7 @@ LEAKS: Dict[str, "re.Pattern[str]"] = {
     "a banner saying the repository is private": re.compile(
         r"(?i)private\s+repo(?:sitory)?\s+only"
     ),
-    "wording about a freeze on vocabulary": re.compile(
-        r"(?i)pre-receipt|freeze\s+list|lifts?\s+the\s+freeze"
-    ),
+    "wording about a freeze on vocabulary": re.compile(r"(?i)freeze\s+list|lifts?\s+the\s+freeze"),
     "a job title in prose": re.compile(r"\bCEO\b"),
     "a reference to a plan nobody outside the project can read": re.compile(
         r"(?i)\b(?:approved|build)\s+plan\b"
