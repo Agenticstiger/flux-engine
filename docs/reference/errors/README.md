@@ -72,6 +72,8 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-3501](./FLX-3501.md) | a sink needs an optional extra that is not installed |
 | [FLX-3502](./FLX-3502.md) | a value has no exact representation in the sink's format |
 | [FLX-3503](./FLX-3503.md) | the data read back is not the stream it is read as |
+| [FLX-3504](./FLX-3504.md) | a sink was given a target or an option it cannot use |
+| [FLX-3505](./FLX-3505.md) | a sink could not finish writing a stream |
 
 ## 4000: governance/sovereignty
 

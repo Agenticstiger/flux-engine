@@ -60,6 +60,7 @@ __all__ = [
     "nfc",
     "partition_fields",
     "sha256_hex",
+    "sha256_hex_chunks",
 ]
 
 FLX_1001 = register(
@@ -267,6 +268,19 @@ def sha256_hex(data: bytes) -> str:
     domains of KERNEL-SPEC §2.3.
     """
     return hashlib.sha256(data).hexdigest()
+
+
+def sha256_hex_chunks(chunks: Iterable[bytes]) -> str:
+    """Return the lowercase hex sha256 of the concatenation of *chunks*.
+
+    :func:`sha256_hex` for data too large to hold at once, such as a file
+    an output sink wrote, read back in fixed-size pieces. Equal to
+    ``sha256_hex(b"".join(chunks))`` without building the joined bytes.
+    """
+    digest = hashlib.sha256()
+    for chunk in chunks:
+        digest.update(chunk)
+    return digest.hexdigest()
 
 
 def mask_document(

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from flux_engine.core.errors import ErrorCode, register
 
-__all__ = ["FLX_3501", "FLX_3502", "FLX_3503"]
+__all__ = ["FLX_3501", "FLX_3502", "FLX_3503", "FLX_3504", "FLX_3505"]
 
 FLX_3501: ErrorCode = register(
     "FLX-3501",
@@ -53,4 +53,28 @@ FLX_3503: ErrorCode = register(
     "type (a BOOL kept as text, a DECIMAL at another scale) cannot be turned back into "
     "the rendered rows the outputDigest covers. Pass the header and the logical types "
     "explicitly, or read the data the sink wrote rather than a copy that changed it.",
+)
+
+FLX_3504: ErrorCode = register(
+    "FLX-3504",
+    "a sink was given a target or an option it cannot use",
+    "A sink writes only where it is told to and only in ways it can name, so it checks "
+    "its target and its options before it opens: a file sink needs a directory that is "
+    "not a file, a stream whose expose id is a safe single path segment, and options "
+    "of the right type and range; every sink needs to be opened on the stream it was "
+    "set up for. The message names the target or the option and says what it expects. "
+    "Nothing was written.",
+)
+
+FLX_3505: ErrorCode = register(
+    "FLX-3505",
+    "a sink could not finish writing a stream",
+    "The destination refused a write part-way: a disk filled up, a permission was "
+    "missing, a file could not be renamed into place, or a read-back check found data "
+    "that does not digest to the stream's outputDigest. A file sink stages every file "
+    "under a hidden name and renames it into place only when the whole stream is "
+    "written, and it removes what it staged when it fails, so no partial stream is left "
+    "for a reader to mistake for a whole one. The run directory and its outputDigest are "
+    "unaffected. Fix the cause the message names and run the command again: the same "
+    "run writes the same files under the same names.",
 )

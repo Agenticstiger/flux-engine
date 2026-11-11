@@ -38,6 +38,7 @@ from flux_engine.core.canonical import (
     nfc,
     partition_fields,
     sha256_hex,
+    sha256_hex_chunks,
 )
 from flux_engine.core.digest import (
     DigestDomain,
@@ -558,3 +559,9 @@ def test_an_attribute_model_digest_from_the_wrong_domain_is_refused() -> None:
 def test_a_malformed_attribute_model_digest_is_refused() -> None:
     with pytest.raises(ValueError):
         _input_digest(attribute_model_digest="not-a-digest")
+
+
+@given(st.lists(st.binary(max_size=64), max_size=8))
+def test_sha256_hex_chunks_is_sha256_hex_of_the_joined_chunks(chunks: list) -> None:
+    assert sha256_hex_chunks(iter(chunks)) == sha256_hex(b"".join(chunks))
+    assert sha256_hex_chunks(chunks) == hashlib.sha256(b"".join(chunks)).hexdigest()
