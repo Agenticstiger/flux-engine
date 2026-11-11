@@ -5,11 +5,11 @@ Release carrying three assets: the wheel and the sdist that
 `make packaging-smoke` builds, and a CycloneDX SBOM of the wheel installed
 into a clean environment.
 
-Nothing is published to PyPI unless the repository variable `PYPI_PUBLISH` is
-`true`; the workflow's `publish-pypi` job stays skipped until then. PyPI also
-refuses a package that carries the classifier `Private :: Do Not Upload`, so a
-private build cannot reach the index by accident. See "Publishing to PyPI"
-below.
+A release also goes to PyPI as `flux-sim-engine`. The workflow's `publish-pypi`
+job uploads it through Trusted Publishing, so no API token is stored anywhere.
+The job runs only while the repository variable `PYPI_PUBLISH` is `true` (it
+is), and each upload waits for a maintainer to approve the `pypi` environment.
+See "Publishing to PyPI" below.
 
 ## The three version strings that are NOT the package version
 
@@ -40,6 +40,8 @@ The package version is the pair below, and only that pair.
      and `uv lock --check` fails while it differs from `pyproject.toml`.
    - `CHANGELOG.md`, turning the `## Unreleased` section into a
      `## X.Y.Z - YYYY-MM-DD` section.
+   - `CITATION.cff`: `version` to `X.Y.Z`, and `date-released` to the date in
+     that changelog heading. A test compares both.
    - The two places the docs tests compare with the output of
      `fluxsim --version`: the console block in
      `docs/tutorial/first-evidence-pack.md` and its fixture in
@@ -65,7 +67,8 @@ The package version is the pair below, and only that pair.
    `.github/workflows/release.yml` takes it from there: it refuses a tag that
    disagrees with the tree, runs the whole suite on six cells, builds and
    attests the distribution, checks its own attestation refuses an altered
-   wheel, and publishes.
+   wheel, and publishes the GitHub Release. The PyPI upload follows once a
+   reviewer signs off on the `pypi` environment (see "Publishing to PyPI").
 
 ## Tag shape
 
@@ -102,16 +105,14 @@ consume the tag.
 ## Publishing to PyPI
 
 The `publish-pypi` job uses PyPI Trusted Publishing, so no API token is stored
-anywhere. It stays skipped until the repository variable `PYPI_PUBLISH` is
-`true`.
+anywhere. It runs only while the repository variable `PYPI_PUBLISH` is `true`,
+and each upload waits for approval of the `pypi` environment.
 
-Prerequisites. PyPI refuses a distribution whose dependencies contain a direct
-reference such as `flux-spec @ git+https://...`, and one that still carries the
-`Private :: Do Not Upload` classifier. The `flux-spec` dependency has to be a
-version range, `flux-spec` has to be on PyPI, and the classifier has to be gone,
-first.
+PyPI refuses a distribution whose dependencies contain a direct reference such
+as `flux-spec @ git+https://...`, so every dependency stays a version range.
 
-One-time setup, by a maintainer:
+The setup below is done for this repository. A fork, or a renamed project,
+repeats it:
 
 1. On pypi.org, open your account's Publishing page and add a pending publisher
    on the GitHub Actions tab:

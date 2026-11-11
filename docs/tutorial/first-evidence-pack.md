@@ -14,7 +14,7 @@ You need [uv](https://docs.astral.sh/uv/) and a terminal.
 
 ## 1. Install the command
 
-<!-- skip: next "the package is not published yet" -->
+<!-- skip: next "installs the published package, so it cannot test this checkout; the First run workflow runs init and run from a built wheel" -->
 ```console
 $ uv tool install flux-sim-engine
 ```

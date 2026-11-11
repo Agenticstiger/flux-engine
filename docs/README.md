@@ -29,7 +29,8 @@ nothing else.
 
 Every command and file on the tutorial, how-to and explanation pages is run by the
 project's tests, so what you read is what the engine does. The one exception is the
-install line, which needs the package to be published.
+install line: it installs the published package, so it cannot test this checkout, and
+the First run workflow runs the same commands from a built wheel instead.
 
 ## What it is, and what it is not
 

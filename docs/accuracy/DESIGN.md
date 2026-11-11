@@ -369,8 +369,9 @@ entropies, and the run digest of one small end-to-end run. A final job
 requires every manifest to be byte-identical. The cells at the NumPy floor
 also run the pinned digest set. `ci.yml` already runs that set at the
 latest NumPy on every pull request and weekly on all six cells, so it is not
-repeated there. Linux runs nightly. macOS runs weekly while the
-repository is private, because macOS minutes bill at ten times the Linux rate.
+repeated there. Linux runs nightly. macOS runs weekly, on Mondays (UTC), and
+on demand: label a pull request `accuracy-weekly`, or dispatch the workflow
+with `weekly` set.
 
 ### 8. Nightly accuracy and speed
 

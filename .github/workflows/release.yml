@@ -18,12 +18,11 @@ name: Release
 # now reaches a tag through ci.yml's `workflow_call` hook, which shipped with
 # the comment "it is the hook, not the guarantee" and has never had a caller.
 # The `ci` job below is that caller. Without the deletion the same six cells
-# run twice per tag, and macOS bills at 10x on a private repository.
+# run twice per tag.
 #
-# Nothing is published to a package index unless the repository variable
-# PYPI_PUBLISH is "true" (see the `publish-pypi` job at the bottom). PyPI also
-# refuses a package that carries `Private :: Do Not Upload`, so a private build
-# cannot reach the index by accident.
+# The `publish-pypi` job at the bottom uploads to PyPI through Trusted
+# Publishing. It runs only while the repository variable PYPI_PUBLISH is "true"
+# and waits for approval of the `pypi` environment.
 on:
   push:
     tags: ["v*"]
@@ -413,16 +412,8 @@ jobs:
           PY
           (cd "$RUNNER_TEMP/sbom" && sha256sum "$SBOM_NAME") | tee -a "$RUNNER_TEMP/hashes.txt"
 
-      # flux-spec-pin-drift's `if` is `schedule || workflow_dispatch`, which
-      # excludes both a tag push and a workflow_call, and it is deliberately
-      # absent from ci-gate's `needs`. So "CI gate went green on this tag" says
-      # nothing whatever about whether what the engine installs from flux-spec
-      # still matches flux's main.
-      # The release runs the check itself and records the answer in the body.
-      # Non-blocking on purpose: drift in a repository this one does not
-      # control is not a reason to refuse a release, but a release that does
-      # not say which it was is hiding the question. When flux-spec becomes a
-      # version range the script goes away, and the step then records nothing.
+      # flux-spec is a version range, so there is no pin to drift and the
+      # pin-drift script is gone. The step only records that.
       - name: Record the flux-spec pin drift status
         run: |
           if [ -f scripts/check_flux_spec_pin.py ]; then
@@ -437,7 +428,6 @@ jobs:
 
       - name: Write the release body
         env:
-          PRIVATE_REPO: ${{ github.event.repository.private }}
           PYPI_PUBLISH: ${{ vars.PYPI_PUBLISH }}
         run: |
           python3 - <<'PY'
@@ -454,8 +444,7 @@ jobs:
           temp = pathlib.Path(env["RUNNER_TEMP"])
           wheel = f"flux_sim_engine-{version}-py3-none-any.whl"
           hashes = temp.joinpath("hashes.txt").read_text(encoding="utf-8").strip()
-          # The requirement as pyproject.toml writes it: a git pin today, a version
-          # range once flux-spec is on PyPI. Either way the release must still build.
+          # The requirement as pyproject.toml writes it: a version range.
           dependencies = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))[
               "project"
           ]["dependencies"]
@@ -471,9 +460,6 @@ jobs:
               }.get(raw_status, "could not be checked")
           )
 
-          # The install section follows the repository's state, so the body is true
-          # while the repository is private and after it is public, with no edit.
-          private = env.get("PRIVATE_REPO") == "true"
           on_pypi = env.get("PYPI_PUBLISH") == "true"
           verify = [
               "```",
@@ -484,33 +470,7 @@ jobs:
               f"pip install ./{wheel}",
               "```",
           ]
-          if private:
-              install = [
-                  "## Install",
-                  "",
-                  "This package is not on PyPI. It is installed from this repository,",
-                  "which is private, so the installing environment must already be",
-                  "authenticated to github.com.",
-                  "",
-                  "A bare `pip install https://github.com/.../releases/download/...` does",
-                  "NOT work against a private repository: pip's URL fetcher sends no",
-                  "Authorization header and gets a 404. Fetch the asset with an",
-                  "authenticated client first, then install the local file:",
-                  "",
-                  *verify,
-                  "",
-                  "The git-URL form also resolves:",
-                  "",
-                  "```",
-                  f"flux-sim-engine @ git+https://github.com/{repo}.git@{tag}",
-                  "```",
-                  "",
-                  "It needs a `git` authenticated to github.com (a token rewrite via",
-                  "`url.<base>.insteadOf`, a ~/.netrc entry, or an SSH deploy key with",
-                  "`git+ssh://`), and it rebuilds from source on the consumer's machine,",
-                  "so the bytes that end up installed are not the attested bytes below.",
-              ]
-          elif on_pypi:
+          if on_pypi:
               install = [
                   "## Install",
                   "",
@@ -525,8 +485,7 @@ jobs:
               install = [
                   "## Install",
                   "",
-                  "This package is not on PyPI yet. Install the attested wheel from this",
-                  "release:",
+                  "Install the attested wheel from this release:",
                   "",
                   *verify,
               ]
@@ -559,9 +518,9 @@ jobs:
               "",
               "## What this release does not claim",
               "",
-              "- No consumer has yet installed this package, so the install commands",
-              "  above are written from the repository's own settings rather than from",
-              "  a build that has run them.",
+              "- The install commands above are written from the tag and the",
+              "  repository's settings. This run installed the attached wheel into a",
+              "  clean environment, but it did not install from PyPI.",
               "- The wheel is not claimed to be byte-reproducible. It was built once.",
               "- The SBOM is not attested. It lists what installing the wheel pulled",
               "  into a clean environment on the release runner.",
@@ -617,9 +576,8 @@ jobs:
   # build anything.
   #
   # PyPI refuses a distribution whose dependencies contain a direct reference
-  # (`name @ git+https://...`), so this job fails at the upload until the
-  # flux-spec dependency is a version range. Failing there is intended: PyPI is
-  # the last line of defence.
+  # (`name @ git+https://...`), so a dependency declared that way fails this job
+  # at the upload. Failing there is intended: PyPI is the last line of defence.
   publish-pypi:
     name: Publish to PyPI
     needs: [guard, release]

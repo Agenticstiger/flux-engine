@@ -203,8 +203,8 @@ def test_main_says_what_to_install_when_uvx_is_missing(
 def test_the_workflow_runs_the_make_target_and_keeps_macos_off_the_pull_request_path() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "run: make first-run" in text
-    # macOS bills at ten times the Linux rate on a private repository: it may only
-    # appear in the expression that is selected for the weekly and manual runs.
+    # macOS may only appear in the expression that is selected for the weekly
+    # and manual runs.
     assert text.count("macos-latest") == 1
     expression = text[text.index("include: >-") :]
     assert expression.index("schedule") < expression.index("macos-latest")

@@ -110,8 +110,8 @@ moved: `GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`,
   other failure says how to get the traceback (`FLUX_DEBUG=1`) and where to
   report it. `fluxsim explain FLX-nnnn` ends with the same address. The
   `--json` envelope is unchanged. **The addresses point into the engine's
-  documentation, which is published with the specification's site at the
-  first public release; until then they do not resolve.**
+  documentation, which is published with the specification's site at
+  https://agenticstiger.github.io/flux/engine/.**
 - On a terminal, a command in the six-step loop now ends with `next:` and the
   command to run after it, built from the bundle and run id it just used, with
   the flags the next command needs again (`--simulation-id`, `--zone`,

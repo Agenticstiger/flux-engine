@@ -22,9 +22,7 @@ The base is the address these docs are published at. They are written in this
 repository and join the FLUX specification's site as its ``engine/`` folder. That
 site is built with VuePress at ``base: '/flux/'``, which its config locks because
 every published schema ``$id`` depends on it, so ``docs/engine/reference/errors/FLX-nnnn.md``
-there is served as ``/flux/engine/reference/errors/FLX-nnnn.html``. Until the pages
-are in the site they are not reachable: printing the address early is deliberate,
-because the address is what has to stay stable.
+there is served as ``/flux/engine/reference/errors/FLX-nnnn.html``.
 
 **These addresses are public.** Every released version prints them, and a printed
 address cannot be recalled. Moving a page means leaving something behind at the
