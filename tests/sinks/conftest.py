@@ -44,11 +44,16 @@ def rendered(expose: CompiledExpose, rows: Sequence[Mapping[str, Any]]) -> List[
     return [list(render_row(dict(row), expose, row_index=index)) for index, row in enumerate(rows)]
 
 
-def expected_digest(expose: CompiledExpose, rows: Sequence[Sequence[Any]]) -> str:
+def expected_ref(expose: CompiledExpose, rows: Sequence[Sequence[Any]]) -> DigestRef:
     """§8's outputDigest over already-rendered *rows*, the writer's own way."""
     document = emit_header_document(expose, CONTRACT_DIGEST)
     lines = [row_line(list(row)) for row in rows]
-    return output_digest(document, lines, subject=f"outputDigest:{expose.expose_id}").value
+    return output_digest(document, lines, subject=f"outputDigest:{expose.expose_id}")
+
+
+def expected_digest(expose: CompiledExpose, rows: Sequence[Sequence[Any]]) -> str:
+    """:func:`expected_ref`'s ``sha256:`` value."""
+    return expected_ref(expose, rows).value
 
 
 #: One column of every logical type, for the type-map tests.
