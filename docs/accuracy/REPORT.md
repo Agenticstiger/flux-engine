@@ -4,7 +4,7 @@
 
 What each family measures, and the pass criterion every number below is held to, is in [DESIGN.md](DESIGN.md). Results are measured at the stated sizes and seeds, not established in general.
 
-Latest nightly run: 2026-11-11, commit `bd36cc7dcad4`, base seed `8201423603942286921`, confirmation seed `8201423603942286922`, [workflow run](https://github.com/Agenticstiger/flux-engine/actions/runs/42983060143).
+Latest nightly run: 2026-11-11, commit `bd36cc7dcad4`, base seed `8201423603942286921`, confirmation seed `8201423603942286922`, [nightly workflow](https://github.com/Agenticstiger/flux-engine/actions/workflows/accuracy-nightly.yml).
 
 Verdict: **passed**.
 

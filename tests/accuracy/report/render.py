@@ -292,6 +292,19 @@ def _mutation_section(mutation: Optional[Mapping[str, Any]]) -> List[str]:
     return lines
 
 
+#: The nightly workflow's page, below the repository. A link to one run does not last:
+#: GitHub drops runs after its retention period, and a snapshot committed from another
+#: repository names a run this one never had. The workflow's page is always there and
+#: lists the latest runs.
+NIGHTLY_WORKFLOW_PAGE = "actions/workflows/accuracy-nightly.yml"
+
+
+def _workflow_link(run_url: str) -> str:
+    """The nightly workflow's page in the repository *run_url* belongs to, or ``""``."""
+    repository, found, _ = run_url.rpartition("/actions/runs/")
+    return f"{repository}/{NIGHTLY_WORKFLOW_PAGE}" if found else ""
+
+
 def render(artefact: Mapping[str, Any]) -> str:
     """The report page for *artefact*, as Markdown."""
     run = artefact.get("run") or {}
@@ -309,10 +322,11 @@ def render(artefact: Mapping[str, Any]) -> str:
         "",
     ]
     commit = str(run.get("commit") or "")[:12]
+    workflow_link = _workflow_link(str(run.get("url") or ""))
     lines.append(
         f"Latest nightly run: {run.get('date', '-')}, commit `{commit or '-'}`, base seed "
         f"`{run.get('baseSeed', '-')}`, confirmation seed `{run.get('confirmSeed', '-')}`"
-        + (f", [workflow run]({run['url']})" if run.get("url") else "")
+        + (f", [nightly workflow]({workflow_link})" if workflow_link else "")
         + "."
     )
     lines.append("")
