@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (W0). **Amended 2026-09-07:** the precondition this ADR was
+Accepted. **Amended 2026-09-07:** the precondition this ADR was
 written around has occurred. `flux_spec` 0.5.0 is published from the
 public `Agenticstiger/flux` repository, and `flux-spec` is now a declared
 core dependency in `pyproject.toml` -- a PEP 508 direct reference pinned
@@ -19,14 +19,14 @@ pin-drift alert that stood in for it was retired.
 The FLUX offline reference validator, the RFC-04 enforcement gate, and the
 RFC-09 evidence bundler already exist, tested, in the FLUX specification
 repository (`Agenticstiger/flux`) as `scripts/validate.py`, `enforce.py`,
-and `bundle.py`. The approved plan's owner decisions commit to publishing
-these as a public, Apache-2.0 `flux_spec` PyPI distribution in a later
-increment (W1) -- until then, flux_engine cannot depend on a distribution
-that does not exist yet.
+and `bundle.py`. The plan was to publish these as a public, Apache-2.0
+`flux_spec` PyPI distribution in a later increment -- until then,
+flux_engine cannot depend on a distribution that does not exist yet.
 
-(Written at W0. That increment has since landed: `flux_spec` 0.5.0 is
-published and depended on -- see Status above. The paragraph is kept as
-the context the decision was taken in, not as a description of today.)
+(Written when the project started. That increment has since landed:
+`flux_spec` 0.5.0 is published and depended on -- see Status above. The
+paragraph is kept as the context the decision was taken in, not as a
+description of today.)
 
 ## Decision
 

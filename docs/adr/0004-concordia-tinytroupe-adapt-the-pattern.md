@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (W0)
+Accepted
 
 ## Context
 
@@ -24,8 +24,8 @@ FLUX's deterministic core (the v0.1/v0.2 scope) is seeded,
 byte-stable, and language-model-free by construction -- putting either
 library under the kernel would introduce a non-deterministic dependency
 under the one property that scope promises. The agentic tier is also the
-first thing cut if the build is squeezed (per the build plan's descope
-order), so any dependency it takes must be easy to remove entirely: an
+first thing cut if the build is squeezed, so any dependency it takes must
+be easy to remove entirely: an
 adapted pattern qualifies, a hard dependency on a research library with a
 moving API does not.
 
@@ -63,4 +63,4 @@ Adapt, do not depend:
 - Apache-2.0 (Concordia) and MIT (TinyTroupe) are both compatible with
   adapting a pattern inside an Apache-2.0 project, with attribution
   recorded in `THIRD_PARTY_LICENSES.md` if any literal code is ever
-  copied (none is, as of W0).
+  copied (none is, as of this decision).

@@ -1,4 +1,4 @@
-# flux-expr/1 — normative specification (internal v0.1; the public spec RFC is derived from this)
+# flux-expr/1: normative specification (v0.1)
 
 `Segment.spec.queryLanguage` is `const: flux-expr/1` in FLUX 0.5.0 and no grammar exists anywhere in the spec.
 This document defines it. The grammar is **closed**: anything not derivable is a parse error (`FLX-6001`), never an

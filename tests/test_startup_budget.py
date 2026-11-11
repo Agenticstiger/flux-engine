@@ -5,7 +5,7 @@
 """Startup budget gate: `import flux_engine.cli` must not pull numpy.
 
 Mirrors forge-cli's tests/perf/test_startup_budget.py idea, scoped to
-what W0 actually ships: the CLI module itself must stay numpy-free on
+the CLI module itself: it must stay numpy-free on
 import so `fluxsim --help` (and every other cold invocation) stays fast --
 the CLI's command bodies do their heavy imports lazily, inside the
 function that needs them, never at module scope.

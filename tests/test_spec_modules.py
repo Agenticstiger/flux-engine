@@ -8,7 +8,7 @@ test_spec_shim.py already exercises flux_engine.spec.enforce end to end
 (all 34 conformance vectors). These tests do the equivalent minimal smoke
 check for the other two re-exported modules -- validate.py's offline
 reference-validator surface and bundle.py's evidence-bundle surface --
-without needing a full FLUX bundle fixture, which is out of scope for W0.
+without needing a full FLUX bundle fixture, which is out of scope here.
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@
 
 """The sole authorized boundary onto the FLUX enforcement contract (RFC-04).
 
-The build plan's architecture makes ``AIGate.call`` "the only path to a
+The architecture makes ``AIGate.call`` "the only path to a
 ``ModelPort``... first statement ``flux_spec.enforce.decide``". This
 module is that boundary today: the import-linter contract "only
 governance.gate may import spec.enforce" (pyproject.toml) keeps every

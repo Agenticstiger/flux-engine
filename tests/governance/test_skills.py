@@ -146,7 +146,7 @@ def test_agentic_fidelity_passes_when_available() -> None:
 
 
 def test_agentic_extension_available_reflects_a_real_find_spec_lookup() -> None:
-    # The extension is not installed in this environment (Stage A / W0 ships
+    # The extension is not installed in this environment (this release ships
     # no agentic package): a live lookup must say so, and requiring agentic
     # fidelity with the live check (no override) must therefore raise.
     assert agentic_extension_available() is False

@@ -99,12 +99,13 @@ def _scan_docs() -> List[str]:
             hits.extend(_scan_text(str(path.relative_to(REPO_ROOT)), path.read_text()))
     docs_dir = REPO_ROOT / "docs"
     if docs_dir.is_dir():
-        # docs/spec/ holds the INTERNAL normative specifications of this private
-        # repository; they name private modules by design and are never
-        # published. Every other docs/ file is a public-facing surface.
-        internal_dirs = (docs_dir / "spec",)
+        # docs/spec/ holds the normative specifications. They name engine
+        # modules by design, among them one whose name is a reserved word, so
+        # the lint leaves them out. Every other docs/ file is a public-facing
+        # surface.
+        exempt_dirs = (docs_dir / "spec",)
         for path in sorted(docs_dir.rglob("*")):
-            if any(internal in path.parents for internal in internal_dirs):
+            if any(exempt in path.parents for exempt in exempt_dirs):
                 continue
             # HTML is scanned RAW, tags and all, rather than stripped to
             # its text first. The gate's job is to stop a reserved word

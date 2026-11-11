@@ -138,4 +138,4 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 |---|---|
 | [FLX-8001](./FLX-8001.md) | the ship gate withheld the bundle |
 | [FLX-8002](./FLX-8002.md) | the fidelity record is malformed or its signature does not verify |
-| [FLX-8030](./FLX-8030.md) | generated evidence prose contains reserved pre-receipt vocabulary |
+| [FLX-8030](./FLX-8030.md) | generated evidence prose contains a reserved word |

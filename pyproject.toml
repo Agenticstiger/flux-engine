@@ -30,8 +30,8 @@ classifiers = [
 # no calibration, synthesis or statistics library is among them, because no
 # engine code imports one.
 dependencies = [
-  # PCG64 bit source for the deterministic seed tree (core/seedtree.py,
-  # W2): `SeedSequence.spawn`/path-addressed derivation is the standard
+  # PCG64 bit source for the deterministic seed tree (core/seedtree.py):
+  # `SeedSequence.spawn`/path-addressed derivation is the standard
   # pattern (borrow-before-build receipt: numpy docs; also how Synthea's
   # per-person RNG and the `neworder` microsimulation framework seed their
   # entities). Ceiling <3 because numpy 2.x's C-API churn is still
@@ -57,8 +57,8 @@ dependencies = [
   # a FLUX bundle and its FLUX engine agree on one digest, not two.
   "rfc8785>=0.1",
   # CNCF CloudEvents 1.0 envelope for signal/detection/emit event records
-  # (runtime/, W5) and the ship-gate failure signal (concordance/gate.py,
-  # W7). Borrowed-not-built per /borrow-before-build: the alternative was
+  # (runtime/) and the ship-gate failure signal (concordance/gate.py).
+  # Borrowed-not-built per /borrow-before-build: the alternative was
   # hand-rolling an event envelope, which is exactly the kind of
   # stringly-typed wire format the project's own standing rules forbid.
   # Ceiling <3 pins to the 1.x/2.x line the rest of the FLUID stack (the
@@ -307,11 +307,10 @@ ignore_imports = [
   "flux_engine._vendor.flux_spec.enforce -> rfc8785",
   "flux_engine._vendor.flux_spec.validate -> rfc8785",
 ]
-# W0's core/canonical.py is still a placeholder (no rfc8785 usage yet --
-# that lands in W2), so the ignored edge above has nothing to match. "warn"
-# (rather than the default "error") keeps this contract green today and
-# stays correct once W2 adds the real import: it only differs from
-# "error" in the case where the edge does NOT exist.
+# "warn" (rather than the default "error") keeps this contract green when an
+# ignored edge above matches nothing, for example if the vendored copy stops
+# importing rfc8785. It only differs from "error" in the case where an edge
+# does NOT exist.
 unmatched_ignore_imports_alerting = "warn"
 allow_indirect_imports = false
 as_packages = true

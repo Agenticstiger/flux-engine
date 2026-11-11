@@ -10,7 +10,7 @@ refuses (``FLX-2101``) when the bundle's freshly recomputed ``inputDigest``
 no longer matches the one the plan recorded -- the bundle moved since
 `fluxsim plan` ran. Both are checked *before* a single row is written.
 
-Every artifact KERNEL-SPEC and the build plan name lands under the run
+Every artifact KERNEL-SPEC names lands under the run
 directory: ``population.ndjson`` (cohort/market/trait), ``events.ndjson``
 (signal/detect/transition/deliver/suppress/assign), ``suppressions.ndjson``,
 ``decisions.ndjson`` + its meta sidecar, one ``emits/<exposeId>.ndjson``
