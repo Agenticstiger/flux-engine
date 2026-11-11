@@ -1,6 +1,6 @@
 # Third-party licenses
 
-Generated 2026-11-11T16:29:30.602525Z by `scripts/third_party_licenses.py` (documented list derived from pyproject.toml (pip-licenses not installed)).
+Generated 2026-11-11T19:42:37.445406Z by `scripts/third_party_licenses.py` (documented list derived from pyproject.toml (pip-licenses not installed)).
 Every distribution `pyproject.toml` declares appears below; the list is
 derived from those declarations rather than maintained by hand, and
 `tests/test_third_party_licenses.py` fails when one has no entry.
@@ -18,6 +18,7 @@ the `flux-spec` distribution listed below.
 | cloudevents | Apache-2.0 | core: event envelope |
 | cryptography | Apache-2.0 OR BSD-3-Clause | core: ed25519 signature over the fidelity record |
 | flux-spec | Apache-2.0 | core: FLUX validator, RFC-04 enforcement gate, RFC-09 bundler |
+| pyarrow | Apache-2.0 | [arrow]: Arrow batches, Parquet and Arrow IPC files for the output sinks |
 | pytest | MIT | [dev] |
 | pytest-cov | MIT | [dev] |
 | hypothesis | MPL-2.0 | [dev]: property-based testing |

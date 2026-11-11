@@ -69,6 +69,9 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-3302](./FLX-3302.md) | a required expose column has no runtime attribute mapped onto it |
 | [FLX-3401](./FLX-3401.md) | no distribution family is available for this column |
 | [FLX-3402](./FLX-3402.md) | declared statistics do not parameterise the chosen family |
+| [FLX-3501](./FLX-3501.md) | a sink needs an optional extra that is not installed |
+| [FLX-3502](./FLX-3502.md) | a value has no exact representation in the sink's format |
+| [FLX-3503](./FLX-3503.md) | the data read back is not the stream it is read as |
 
 ## 4000: governance/sovereignty
 
