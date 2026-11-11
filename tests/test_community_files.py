@@ -23,6 +23,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from flux_engine._links import DOCS_URL, ISSUES_URL
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # Placeholder domains documentation is allowed to use in examples.
@@ -82,6 +84,28 @@ def test_citation_file_carries_the_required_keys() -> None:
     assert data["cff-version"].startswith("1.2")
     assert data["title"] and data["message"]
     assert data["authors"] and all(author.get("name") for author in data["authors"])
+
+
+@pytest.mark.unit
+def test_citation_file_names_this_release() -> None:
+    data = yaml.safe_load(_read("CITATION.cff"))
+    project = tomllib.loads(_read("pyproject.toml"))["project"]
+    assert data["version"] == project["version"], "move CITATION.cff with pyproject.toml"
+    assert data["license"] == project["license"]
+    heading = re.search(
+        rf"^## {re.escape(project['version'])} - (\d{{4}}-\d{{2}}-\d{{2}})$",
+        _read("CHANGELOG.md"),
+        re.MULTILINE,
+    )
+    assert heading, "CHANGELOG.md has no dated section for this version"
+    assert str(data["date-released"]) == heading.group(1)
+
+
+@pytest.mark.unit
+def test_project_urls_name_the_published_docs_and_the_issue_tracker() -> None:
+    urls = tomllib.loads(_read("pyproject.toml"))["project"]["urls"]
+    assert urls["Documentation"] == DOCS_URL
+    assert urls["Issues"] == ISSUES_URL
 
 
 @pytest.mark.unit
