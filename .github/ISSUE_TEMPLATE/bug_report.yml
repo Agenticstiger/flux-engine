@@ -18,7 +18,7 @@ body:
     attributes:
       label: Engine version
       description: 'Output of `python -c "import flux_engine; print(flux_engine.__version__)"`.'
-      placeholder: "0.2.0"
+      placeholder: "0.2.1"
     validations:
       required: true
 

@@ -19,6 +19,28 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## 0.2.1 - 2026-11-11
+
+Docs and wording fixes; no behaviour change. No pinned digest moved:
+`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
+and `TRACE_VERSION` keep their values.
+
+- The README and the tutorial no longer say the package is unpublished or that
+  you need a clone and a built wheel, so the PyPI page shows the install line
+  that works.
+- `fluxsim explain FLX-8030` and its page say "generated evidence prose contains
+  a reserved word" and point at the list in `flux_engine/_vocabulary.py`. The
+  check itself is unchanged.
+- The specifications under `docs/spec/`, the ADR status lines and a few
+  comments lose wording that was only meant for the people building the engine.
+- The accuracy report links the nightly workflow instead of a run that no longer
+  exists.
+- `SECURITY.md` supports 0.2.x, `docs/RELEASING.md` describes Trusted Publishing
+  as live, the release notes template has one Install section, and
+  `CONTRIBUTING.md` says the sibling FLUX clone is optional.
+- Packaging metadata: `Documentation` and `Issues` project URLs, and
+  `CITATION.cff` carries the version, the release date and the licence.
+
 ## 0.2.0 - 2026-11-11
 
 The command is now `fluxsim`, the distribution is now `flux-sim-engine`, and
