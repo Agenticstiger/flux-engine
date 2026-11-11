@@ -86,6 +86,14 @@ lineage = [
   # OpenLineage emitter is wired.
   "openlineage-python>=1.20",
 ]
+# Columnar output sinks: the Arrow batching layer (flux_engine.sinks.arrow)
+# and the Parquet and Arrow IPC file sinks. Apache-2.0. Imported only when a
+# sink that needs it is selected, never on the CLI's cold path
+# (tests/test_startup_budget.py), and no core module may import it
+# (the "only the sinks may import pyarrow" contract below).
+arrow = [
+  "pyarrow>=18",
+]
 # Dev / QA. Pin style copied verbatim from forge-cli's own [dev] extra
 # (forge-cli/pyproject.toml) so both engines run the identical linter
 # versions in CI -- no "passes in forge-cli, fails in flux-engine" drift.
@@ -139,6 +147,10 @@ dev = [
   # be installed on the system. Pinned exactly, because a newer release can move
   # the specification it checks against.
   "reuse[charset-normalizer]==6.3.0",
+  # The sinks' tests (tests/sinks/) need the libraries the [arrow] extra
+  # installs. Listed here as well, with the same floor, because CI installs
+  # `.[dev]` alone.
+  "pyarrow>=18",
 ]
 
 [project.scripts]
@@ -336,6 +348,7 @@ forbidden_modules = [
   "flux_engine.evidence",
   "flux_engine.cli",
   "flux_engine.engine",
+  "flux_engine.sinks",
     "secrets",
 ]
 # The datetime MODULE is allowed in kernel packages (RFC 3339 parsing/formatting);
@@ -354,6 +367,19 @@ type = "forbidden"
 source_modules = ["flux_engine"]
 forbidden_modules = ["flux_engine.accuracy._scoring"]
 allow_indirect_imports = false
+as_packages = true
+
+[[tool.importlinter.contracts]]
+name = "only the sinks may import pyarrow"
+type = "forbidden"
+source_modules = ["flux_engine"]
+forbidden_modules = ["pyarrow"]
+# The sinks reach pyarrow through flux_engine.sinks._optional.require (a
+# dynamic import that names the extra when it is missing); the edges below
+# are the annotation-only imports under TYPE_CHECKING. A plain `import
+# pyarrow` anywhere else would put it on a path that runs without a sink.
+ignore_imports = ["flux_engine.sinks.* -> pyarrow"]
+allow_indirect_imports = true
 as_packages = true
 
 [[tool.importlinter.contracts]]

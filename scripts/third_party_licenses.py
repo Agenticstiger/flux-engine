@@ -57,6 +57,11 @@ LICENSE_NOTES: Dict[str, Tuple[str, str, str]] = {
         "core: FLUX validator, RFC-04 enforcement gate, RFC-09 bundler",
     ),
     "openlineage-python": ("openlineage-python", "Apache-2.0", "[lineage]: RunEvent client"),
+    "pyarrow": (
+        "pyarrow",
+        "Apache-2.0",
+        "[arrow]: Arrow batches, Parquet and Arrow IPC files for the output sinks",
+    ),
     "pytest": ("pytest", "MIT", "[dev]"),
     "pytest-cov": ("pytest-cov", "MIT", "[dev]"),
     "hypothesis": ("hypothesis", "MPL-2.0", "[dev]: property-based testing"),

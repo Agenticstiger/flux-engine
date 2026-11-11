@@ -35,3 +35,28 @@ def test_importing_cli_does_not_load_numpy() -> None:
         f"import in the offending command handler.\nstdout={result.stdout!r} "
         f"stderr={result.stderr!r}"
     )
+
+
+#: The optional libraries behind the sink extras. Selecting a sink imports
+#: them; nothing on the cold path may.
+_SINK_LIBRARIES = ("pyarrow", "adbc_driver_manager")
+
+_SINK_PROBE = (
+    "import sys, flux_engine, flux_engine.cli, flux_engine.sinks, flux_engine.sinks.errors; "
+    f"print([name for name in {_SINK_LIBRARIES!r} if name in sys.modules])"
+)
+
+
+@pytest.mark.unit
+def test_importing_the_engine_and_its_sinks_package_loads_no_sink_library() -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", _SINK_PROBE],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "[]", (
+        "the sinks' optional libraries must stay off the cold path: only a sink module "
+        "imported because a sink was selected may load them.\n"
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )

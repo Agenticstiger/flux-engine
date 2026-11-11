@@ -113,6 +113,7 @@ _CORE_CODE_MODULES: Tuple[str, ...] = (
     "flux_engine.seam.contract",
     "flux_engine.seam.emit",
     "flux_engine.seam.resolve",
+    "flux_engine.sinks.errors",
     "flux_engine.stages.errors",
     "flux_engine.stages.layout",
     "flux_engine.world.errors",
