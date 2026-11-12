@@ -192,7 +192,14 @@ share one worker per CPU: an emit gets the workers it asks for or what
 other runs have left, so the count the run summary prints ("4 processes")
 also tells a caller how busy the process is. The soft timeout stops
 neither the stage thread nor its workers; after `TimeoutError` they run on,
-and keep their share of the workers, until the stage ends.
+and keep their share of the workers, until the stage ends. Workers start
+with the current directory off their import path: unless the host already
+runs with `-P` or with `PYTHONSAFEPATH` set, the engine sets
+`PYTHONSAFEPATH` for the moment it starts them, which other threads of the
+host can see. `fluxsim` sets it for its whole process, so a sink or plugin
+that starts a Python script of its own as a child process passes that
+script the directories it imports from: its own directory is not on its
+path either.
 
 Stability here is governed by the frozen-kwarg promise in that module's
 own docstring, not by `__api_version__`: `__api_version__` covers the

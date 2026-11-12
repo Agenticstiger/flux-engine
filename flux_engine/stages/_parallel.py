@@ -261,7 +261,15 @@ def _children_without_the_working_directory() -> Iterator[None]:
     (Python 3.11) tells a new interpreter to leave that directory off. It is
     set while the pool starts its processes, under a lock, and put back
     afterwards, since ``os.environ`` belongs to the whole process.
+
+    Nothing is changed when the children start safe already: this
+    interpreter runs with ``-P`` (multiprocessing passes its flags on), or
+    the variable is set, as ``fluxsim`` sets it for its own process. Then no
+    other thread ever sees the environment change.
     """
+    if sys.flags.safe_path or os.environ.get("PYTHONSAFEPATH"):
+        yield
+        return
     with _SPAWN_LOCK:
         previous = os.environ.get("PYTHONSAFEPATH")
         os.environ["PYTHONSAFEPATH"] = "1"
@@ -310,6 +318,12 @@ def generate_framed(
     slices = _slices(plan.rows, workers * _SLICES_PER_WORKER)
     # The pool starts its resource tracker when it is built and its workers as
     # the slices are submitted, which map does before it returns.
+    #
+    # On the way out after a failure the pool is shut down with wait=True: the
+    # workers still running a slice finish it (or die with it) before this
+    # returns, because the caller then gives their share of the budget back
+    # (reserve_workers), and a worker still busy must not be counted as free.
+    failure: Optional[BaseException] = None
     with _children_without_the_working_directory():
         pool = ProcessPoolExecutor(
             max_workers=workers,
@@ -319,13 +333,15 @@ def generate_framed(
         )
         try:
             pending = pool.map(_run_slice, slices)
-        except BaseException:
-            pool.shutdown(wait=False, cancel_futures=True)
-            raise
+        except BaseException as error:
+            failure = error
+    if failure is not None:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise failure
     try:
         outcomes = list(pending)
     except BrokenProcessPool as error:
-        pool.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=True, cancel_futures=True)
         raise RuntimeError(
             f"a worker process generating {expose.expose_id!r} stopped before it "
             "finished: it could not start, ran out of memory or was killed. A script "
@@ -334,7 +350,7 @@ def generate_framed(
             "process."
         ) from error
     except BaseException:
-        pool.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=True, cancel_futures=True)
         raise
     pool.shutdown()
 
