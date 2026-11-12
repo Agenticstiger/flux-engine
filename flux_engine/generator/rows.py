@@ -92,6 +92,7 @@ __all__ = [
     "GeneratorPlan",
     "IDENTIFIER_DEFAULT_LENGTH",
     "build_plan",
+    "clear_memos",
     "generate_column",
     "generate_rows",
     "identifier_value",
@@ -122,6 +123,24 @@ _MEMO_SIZE = 1024
 #: below is keyed on when its result reads the value's exponent, so that
 #: ``Decimal("1.0")`` and ``Decimal("1.00")`` never share an entry.
 _Exact = Tuple[int, Tuple[int, ...], int]
+
+
+def clear_memos() -> None:
+    """Forget every declaration the generator's memos remembered.
+
+    Safe at any time, since no row depends on what is remembered;
+    :func:`flux_engine.stages.pipeline.execute` clears at the end of every
+    run, together with :func:`flux_engine.core.rng.clear_memos`.
+    """
+    for memo in (
+        _seam_bytes,
+        _grid_of,
+        _inner_bin_top,
+        _declared_levels,
+        _declared_support,
+        _bin_levels,
+    ):
+        memo.cache_clear()
 
 
 def _exact(value: Decimal) -> _Exact:
@@ -209,7 +228,8 @@ def identifier_value(
     """
     _require_identifier_shape(length, as_uuid)
     path = generator_column_path(sim_id, expose_id, row_index, column)
-    return _identifier_of_label(seam_digest, path_label(path), length=length, as_uuid=as_uuid)
+    seam = _seam_bytes(seam_digest)
+    return _identifier_of_label(seam, path_label(path), length=length, as_uuid=as_uuid)
 
 
 def _require_identifier_shape(length: int, as_uuid: bool) -> None:
@@ -225,13 +245,12 @@ def _seam_bytes(seam_digest: str) -> bytes:
     return digest_bytes(seam_digest)
 
 
-def _identifier_of_label(seam_digest: str, label: bytes, *, length: int, as_uuid: bool) -> str:
-    """:func:`identifier_value`'s derivation, for a cell whose path label is in hand.
+def _identifier_of_label(seam: bytes, label: bytes, *, length: int, as_uuid: bool) -> str:
+    """:func:`identifier_value`'s derivation, from ``H``'s bytes and the cell's path label.
 
-    The caller has checked the shape (:func:`_require_identifier_shape`) and
-    built *label* for the cell's generator path.
+    The caller has checked the shape (:func:`_require_identifier_shape`).
     """
-    material = GENERATOR_LABEL + _NUL + _seam_bytes(seam_digest) + _NUL + label
+    material = GENERATOR_LABEL + _NUL + seam + _NUL + label
     digits = sha256_hex(material)
     if not as_uuid:
         return digits[:length]
@@ -982,8 +1001,15 @@ def _cell_in_context(
         as_uuid = column.declared_type.strip().lower() in _UUID_TYPES
         if isinstance(source, CellStreams):
             _require_identifier_shape(length, as_uuid)
-            label = source.label(row_index, column.name)
-            return _identifier_of_label(h, label, length=length, as_uuid=as_uuid)
+            try:
+                label = source.label(row_index, column.name)
+            except (FluxError, UnicodeError):
+                label = None
+            if label is not None:
+                return _identifier_of_label(_seam_bytes(h), label, length=length, as_uuid=as_uuid)
+            # A part of the path is refused. identifier_value checks the parts
+            # and the seam digest in its own order, so the refusal raised is
+            # the one it raises.
         return identifier_value(
             h,
             sim_id=sim_id,
@@ -1030,8 +1056,11 @@ def generate_rows(
 
     Each row is a tuple aligned to the expose's declared column order, in
     the value classes :mod:`flux_engine.seam.conform` renders. Pass either
-    the run's seed-tree *root* or an explicit stream *source*; see
-    :func:`flux_engine.generator.paths.resolve_stream_source`.
+    the run's seed-tree *root* or an explicit stream *source*. Over a
+    *root*, the generator's own
+    :class:`~flux_engine.generator.paths.CellStreams` serves every cell; a
+    *source* is used as given (see
+    :func:`flux_engine.generator.paths.resolve_stream_source`).
     """
     streams = _stream_source(plan, root, source)
     expose_id = plan.expose.expose_id

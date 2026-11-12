@@ -48,6 +48,11 @@ The engine report carries the exact diff for that row.
 method (:class:`StreamSource`), so a caller that has a real
 :class:`~flux_engine.core.seedtree.SeedTree` -- once it knows this shape
 -- passes it in and the generator uses it unchanged.
+
+A generation pass over a run root does not keep a table at all: it takes
+each cell's stream from :class:`CellStreams`, which hands out the stream
+:class:`GeneratorStreams` would for the same path and keeps none of them,
+since a pass asks for each cell's address once.
 """
 
 from __future__ import annotations
@@ -247,22 +252,26 @@ class CellStreams:
 
         Byte for byte what :func:`~flux_engine.core.seedtree.path_label` returns for
         that path: a decimal ordinal is its own NFC form and holds no separator, so
-        its part is its ASCII digits. The parts are checked in the order
-        :func:`generator_column_path` checks them, the fixed ones on the first cell
-        only, so a bad part is refused where and as it always was.
+        its part is its ASCII digits.
         """
         prefix = self._prefix
-        if prefix is None:
-            fixed = generator_column_path(self._sim_id, self._expose_id, 0, "column")[:5]
-            prefix = self._prefix = path_label(fixed) + _PART_SEPARATOR
+        try:
+            suffix = self._columns.get(column)
+        except TypeError:  # not a name at all: the whole route below refuses it
+            suffix = None
+        if prefix is None or suffix is None:
+            # A column's first cell is labelled the whole way, so every part is
+            # checked, and refused, exactly as for any other path. No part holds
+            # a separator, so the label splits back into its seven parts.
+            whole = path_label(
+                generator_column_path(self._sim_id, self._expose_id, row_index, column)
+            )
+            head, _ordinal, tail = whole.rsplit(_PART_SEPARATOR, 2)
+            self._prefix = head + _PART_SEPARATOR
+            self._columns[column] = _PART_SEPARATOR + tail
+            return whole
+        # Every fixed part and this column have passed; only the ordinal is new.
         ordinal = _require_ordinal(row_index, "rowIndex")
-        suffix = self._columns.get(column)
-        if suffix is None:
-            # Labelled as part of a whole path, so a refusal names the part it always
-            # named. No part holds a separator, so the seventh piece is the column's.
-            whole = path_label(generator_column_path(self._sim_id, self._expose_id, 0, column))
-            suffix = _PART_SEPARATOR + whole.split(_PART_SEPARATOR, 6)[6]
-            self._columns[column] = suffix
         return prefix + str(ordinal).encode("ascii") + suffix
 
     def stream_at(self, row_index: int, column: str) -> DrawStream:

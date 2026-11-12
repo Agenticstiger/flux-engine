@@ -27,19 +27,22 @@ stages leans on it rather than re-deriving anything.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import localcontext
-from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, FrozenSet, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.core.canonical import nfc
 from flux_engine.core.clock import Phase, Scheduler, VirtualClock
 from flux_engine.core.digest import DigestedDocument, build_input_digest
 from flux_engine.core.errors import FluxError
+from flux_engine.core.rng import clear_memos as clear_draw_memos
 from flux_engine.core.rng import kernel_context
 from flux_engine.core.seedtree import SeedTree, SeedTreeRoot, derive_root, effective_seed
 from flux_engine.core.trace import RunComponents
 from flux_engine.expr.attrs import AttributeModel, build_attribute_model
 from flux_engine.generator import GeneratorPlan, build_plan, generate_rows
+from flux_engine.generator.rows import clear_memos as clear_generator_memos
 from flux_engine.governance.audit import DecisionAuditLog
 from flux_engine.governance.skills import agentic_extension_available
 from flux_engine.governance.sovereignty import (
@@ -249,6 +252,16 @@ def require_supported_fidelity(fidelity: str) -> None:
         )
 
 
+@contextmanager
+def _memos_for_one_run() -> Iterator[None]:
+    """Clear the draws' memos when the run inside ends, however it ends."""
+    try:
+        yield
+    finally:
+        clear_draw_memos()
+        clear_generator_memos()
+
+
 def execute(
     directory: Any,
     *,
@@ -268,8 +281,14 @@ def execute(
     themselves; this is the guard that keeps a run a function of its bundle
     and seed when one of them does not, because the CLI's default context
     equals the kernel's and would never show the difference.
+
+    However the run ends, the draws' memos are cleared when it does
+    (:func:`flux_engine.core.rng.clear_memos`,
+    :func:`flux_engine.generator.rows.clear_memos`): what they hold is worked
+    out from this run's declarations, and a long-lived process that runs
+    many bundles keeps none of it past the run.
     """
-    with localcontext(kernel_context()):
+    with _memos_for_one_run(), localcontext(kernel_context()):
         loaded = load_bundle(directory, tolerate_additive=tolerate_additive)
         cast = resolve_cast(loaded.flux_documents, simulation_id=simulation_id)
         simulation = cast.simulation

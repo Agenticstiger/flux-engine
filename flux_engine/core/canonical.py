@@ -280,6 +280,9 @@ def canonical_array_bytes(values: Sequence[Any]) -> bytes:
     UTF-8 -- goes through :func:`canonical_bytes`, so those bytes and every
     refusal are that function's own.
     """
+    if not isinstance(values, (list, tuple)):
+        # Read once, so an iterator is not half spent when the fallback reads it.
+        values = list(values)
     scalars: List[Any] = []
     for value in values:
         kind = type(value)

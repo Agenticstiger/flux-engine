@@ -62,6 +62,7 @@ __all__ = [
     "bernoulli",
     "bounded_uint",
     "categorical",
+    "clear_memos",
     "exponential",
     "kernel_context",
     "nfc_sorted_items",
@@ -347,7 +348,11 @@ def bounded_uint(stream: DrawStream, n: int) -> int:
     if n < 1:
         raise FluxError(FLX_5021, f"bounded_uint bound must be >= 1, got {n}")
 
-    words = stream.next_raw_words(BOUNDED_UINT_DRAW_BUDGET)
+    batch = getattr(stream, "next_raw_words", None)
+    if batch is not None:
+        words = batch(BOUNDED_UINT_DRAW_BUDGET)
+    else:  # a stream-like object that reads one word at a time
+        words = [stream.next_raw() for _ in range(BOUNDED_UINT_DRAW_BUDGET)]
     # Lemire's rejection threshold, 2**64 mod n. Written out rather than spelled with the
     # C idiom ``(-n) % n``, which relies on unsigned wraparound and evaluates to 0 in
     # Python's arbitrary-precision integers.
@@ -762,6 +767,9 @@ def _bound_cdf(bound: Decimal) -> Decimal:
     representation (sign, digits and exponent), not on its numeric value, so it hands back
     precisely the ``Decimal`` the evaluation itself returns.
     """
+    if not bound.is_finite():
+        # Not a key the memo can hold; the evaluation refuses it as it always has.
+        return normal_cdf(bound, precision=_WORKING_PRECISION)
     sign, digits, exponent = bound.as_tuple()
     return _bound_cdf_of((sign, digits, int(exponent)))
 
@@ -769,6 +777,18 @@ def _bound_cdf(bound: Decimal) -> Decimal:
 @lru_cache(maxsize=_MEMO_SIZE)
 def _bound_cdf_of(bound: Tuple[int, Tuple[int, ...], int]) -> Decimal:
     return normal_cdf(Decimal(bound), precision=_WORKING_PRECISION)
+
+
+def clear_memos() -> None:
+    """Forget every parameter set the samplers above remembered.
+
+    No draw depends on what is remembered, only on its parameters, so
+    clearing is always safe. :func:`flux_engine.stages.pipeline.execute`
+    clears at the end of every run, so a long-lived process that runs many
+    bundles keeps none of one bundle's declarations once its run is over.
+    """
+    for memo in (_probability_threshold, _categorical_table, _bound_cdf_of):
+        memo.cache_clear()
 
 
 def exponential(stream: DrawStream, *, rate: Decimal, scale: int = 6) -> Decimal:

@@ -20,7 +20,12 @@ import pytest
 from flux_engine.core.errors import FluxError
 from flux_engine.core.seedtree import path_label
 from flux_engine.generator.paths import CellStreams, GeneratorStreams, generator_column_path
-from flux_engine.generator.rows import build_plan, generate_column, generate_rows
+from flux_engine.generator.rows import (
+    build_plan,
+    generate_column,
+    generate_rows,
+    identifier_value,
+)
 
 from .conftest import EXPOSE_ID, SIM_ID, TIME_BOUNDS, H, expose_from_schema, fidelity, root_for
 
@@ -69,17 +74,58 @@ def test_asking_twice_starts_a_new_stream_rather_than_continuing_one() -> None:
         (SIM_ID, EXPOSE_ID, 0, ""),
         (SIM_ID, EXPOSE_ID, 0, "a\x1fb"),
         ("a\x1eb", EXPOSE_ID, 0, "c"),
+        # Two bad parts at once: the one the whole path reports first wins.
+        ("a\x1fb", EXPOSE_ID, -1, "c"),
+        (SIM_ID, "a\x1fb", 0, ""),
+        ("\ud800", EXPOSE_ID, 0, ""),
+        ("\ud800", EXPOSE_ID, 0, "c"),
+        (SIM_ID, EXPOSE_ID, 0, ["c"]),  # not a name at all
     ],
 )
 def test_a_bad_part_is_refused_as_the_path_refuses_it(
     sim_id: str, expose_id: str, row_index: Any, column: str
 ) -> None:
-    with pytest.raises(FluxError) as expected:
+    with pytest.raises(Exception) as expected:
         path_label(generator_column_path(sim_id, expose_id, row_index, column))
-    with pytest.raises(FluxError) as refused:
+    with pytest.raises(Exception) as refused:
         CellStreams(root_for(), sim_id, expose_id).label(row_index, column)
-    assert refused.value.code == expected.value.code
+    assert type(refused.value) is type(expected.value)
     assert str(refused.value) == str(expected.value)
+
+
+def test_a_known_column_still_has_its_row_checked() -> None:
+    cells = CellStreams(root_for(), SIM_ID, EXPOSE_ID)
+    cells.label(0, "amount")
+    with pytest.raises(FluxError) as expected:
+        generator_column_path(SIM_ID, EXPOSE_ID, -3, "amount")
+    with pytest.raises(FluxError) as refused:
+        cells.label(-3, "amount")
+    assert str(refused.value) == str(expected.value)
+
+
+def test_a_generated_identifier_reports_what_identifier_value_reports() -> None:
+    """Even when the label fails with something other than a FluxError."""
+    plan = build_plan(
+        expose_from_schema([{"name": "id", "type": "STRING", "semanticType": "identifier"}]),
+        sim_id="\ud800",
+        seam_digest="md5:abc",
+        rows=1,
+        fidelity=fidelity({}),
+    )
+    with pytest.raises(Exception) as expected:
+        identifier_value("md5:abc", sim_id="\ud800", expose_id=EXPOSE_ID, row_index=0, column="id")
+    with pytest.raises(Exception) as refused:
+        generate_rows(plan, root=root_for())
+    assert type(refused.value) is type(expected.value)
+    assert str(refused.value) == str(expected.value)
+
+
+def test_an_identifier_reports_a_bad_seam_digest_before_a_bad_column() -> None:
+    """The order identifier_value has always checked them in."""
+    with pytest.raises(FluxError, match="digest reference must start with"):
+        identifier_value(
+            "md5:abc", sim_id=SIM_ID, expose_id=EXPOSE_ID, row_index=0, column="a\x1fb"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -101,3 +101,24 @@ class _Number(int):
 )
 def test_anything_else_takes_the_canonical_path(values: Any) -> None:
     assert canonical_array_bytes(values) == canonical_bytes(list(values))
+
+
+def test_an_iterator_is_read_once_even_when_the_fallback_takes_it() -> None:
+    values = ["a", JCS_MAX_SAFE_INTEGER + 1, "z"]
+    with pytest.raises(FluxError) as expected:
+        canonical_bytes(list(values))
+    with pytest.raises(FluxError) as refused:
+        canonical_array_bytes(iter(values))
+    assert str(refused.value) == str(expected.value)
+    assert canonical_array_bytes(iter(["a", Decimal("1.5"), None])) == canonical_bytes(
+        ["a", Decimal("1.5"), None]
+    )
+
+
+def test_every_code_point_below_u0800_and_a_sweep_above_is_written_as_jcs_writes_it() -> None:
+    """Pins the two escape tables to each other, should either library change its own."""
+    points = [*range(0x800), *range(0x800, 0x110000, 0x101)]
+    texts = [chr(point) for point in points if not 0xD800 <= point <= 0xDFFF]
+    for start in range(0, len(texts), 512):
+        block = texts[start : start + 512]
+        assert canonical_array_bytes(block) == canonical_bytes(list(block))

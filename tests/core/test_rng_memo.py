@@ -13,7 +13,7 @@ values in the same representation.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from typing import Dict, List, Mapping
 
@@ -230,3 +230,49 @@ def test_kernel_context_still_hands_out_a_context_of_ones_own() -> None:
     first.prec = 3
     assert rng.kernel_context().prec == rng.KERNEL_DECIMAL_PRECISION
     assert rng._pinned(rng.KERNEL_DECIMAL_PRECISION).prec == rng.KERNEL_DECIMAL_PRECISION
+
+
+# ---------------------------------------------------------------------------
+# Edges the memos must not move
+# ---------------------------------------------------------------------------
+
+
+class _WordAtATime:
+    """A stream-like object with ``next_raw`` only, not a DrawStream."""
+
+    def __init__(self, entropy: int) -> None:
+        self._stream = rng.DrawStream.from_entropy(entropy)
+
+    def next_raw(self) -> int:
+        return self._stream.next_raw()
+
+
+def test_bounded_uint_still_reads_a_stream_that_has_only_next_raw() -> None:
+    plain = _WordAtATime(9)
+    real = rng.DrawStream.from_entropy(9)
+    assert [rng.bounded_uint(plain, 1000) for _ in range(5)] == [  # type: ignore[arg-type]
+        rng.bounded_uint(real, 1000) for _ in range(5)
+    ]
+
+
+@pytest.mark.parametrize("mean", ["Infinity", "-Infinity"])
+def test_a_bound_the_memo_cannot_key_is_refused_as_it_always_was(mean: str) -> None:
+    stream = rng.DrawStream.from_entropy(1)
+    with pytest.raises(InvalidOperation):
+        rng.truncated_normal(
+            stream, mean=Decimal(mean), stddev=Decimal(1), lo=Decimal(0), hi=Decimal(10)
+        )
+    assert rng._bound_cdf(Decimal("Infinity")) == rng.normal_cdf(
+        Decimal("Infinity"), precision=rng._WORKING_PRECISION
+    )
+
+
+def test_clear_memos_empties_every_memo() -> None:
+    stream = rng.DrawStream.from_entropy(4)
+    rng.bernoulli(stream, Decimal("0.3"))
+    rng.categorical(stream, {"a": Decimal("0.5"), "b": Decimal("0.5")})
+    rng.truncated_normal(stream, mean=Decimal(0), stddev=Decimal(1), lo=Decimal(-1), hi=Decimal(1))
+    memos = (rng._probability_threshold, rng._categorical_table, rng._bound_cdf_of)
+    assert all(memo.cache_info().currsize > 0 for memo in memos)
+    rng.clear_memos()
+    assert all(memo.cache_info().currsize == 0 for memo in memos)
