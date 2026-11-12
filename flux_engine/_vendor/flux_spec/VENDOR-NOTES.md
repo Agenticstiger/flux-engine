@@ -105,7 +105,7 @@ All vendored JSON files are byte-identical to `origin/main` (`35d979f`) of Agent
 
 ## Re-sync (2026-11-12): FLUX 0.5.1
 
-The JSON data files were re-synced from Agenticstiger/flux at `SPEC_COMMIT`, the
+The JSON data files were re-synced from Agenticstiger/flux at `9be1bd0` (Agenticstiger/flux#20), the
 commit that adds FLUX 0.5.1 (FLUID 0.7.6 at the seam). The three Python modules
 are unchanged: they still differ from upstream only by the path edits above.
 
