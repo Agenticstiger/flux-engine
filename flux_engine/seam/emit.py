@@ -373,6 +373,30 @@ class EmitWriter:
     def __post_init__(self) -> None:
         self._header = emit_header_document(self.expose, self.contract_digest)
 
+    @classmethod
+    def from_framed(
+        cls,
+        expose: CompiledExpose,
+        contract_digest: DigestRef,
+        lines: Iterable[bytes],
+        *,
+        retain_lines: bool = True,
+    ) -> "EmitWriter":
+        """A closed writer over *lines* that ``row_line(render_row(row))`` framed elsewhere, in order.
+
+        The pipeline's workers frame the rows when a run has more than one
+        job. No sink: no row passes through the writer, but it answers as one
+        that wrote the rows itself.
+        """
+        writer = cls(expose=expose, contract_digest=contract_digest, retain_lines=retain_lines)
+        writer._digest_material = list(lines)
+        if retain_lines:
+            writer._lines = list(writer._digest_material)
+        writer._rows = len(writer._digest_material)
+        writer._opened = True
+        writer._closed = True
+        return writer
+
     # -- lifecycle ----------------------------------------------------------
 
     @property

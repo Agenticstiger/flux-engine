@@ -95,6 +95,7 @@ __all__ = [
     "build_plan",
     "clear_memos",
     "generate_column",
+    "generate_row_slice",
     "generate_rows",
     "identifier_value",
 ]
@@ -1048,6 +1049,35 @@ def generate_rows(
     *source* is used as given (see
     :func:`flux_engine.generator.paths.resolve_stream_source`).
     """
+    return generate_row_slice(plan, 0, plan.rows, root=root, source=source)
+
+
+def generate_row_slice(
+    plan: GeneratorPlan,
+    start: int,
+    stop: int,
+    *,
+    root: Optional[SeedTreeRoot] = None,
+    source: Optional[StreamSource] = None,
+) -> Tuple[Tuple[Any, ...], ...]:
+    """Rows *start* to *stop* - 1 of :func:`generate_rows`, exactly.
+
+    Every cell's stream is addressed by its row index (§1), never by the
+    order the generator reaches it, so a slice holds the same rows wherever
+    and whenever it is generated. That is what lets a run cut its rows into
+    slices, generate them in several processes and join them in order.
+    """
+    if (
+        isinstance(start, bool)
+        or isinstance(stop, bool)
+        or not isinstance(start, int)
+        or not isinstance(stop, int)
+        or not 0 <= start <= stop <= plan.rows
+    ):
+        raise FluxError(
+            FLX_3402,
+            f"a row slice lies within [0, {plan.rows}]; got start={start!r}, stop={stop!r}",
+        )
     streams = _stream_source(plan, root, source)
     expose_id = plan.expose.expose_id
     return tuple(
@@ -1055,7 +1085,7 @@ def generate_rows(
             _cell(column_plan, streams, plan.sim_id, expose_id, row_index, plan.seam_digest)
             for column_plan in plan.columns
         )
-        for row_index in range(plan.rows)
+        for row_index in range(start, stop)
     )
 
 

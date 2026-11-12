@@ -36,6 +36,7 @@ fluxsim apply ./bundle --run-id de72fa4b22711c52
 | `--run-id` | `RUN_ID` | the run id to act on (as reported by `fluxsim plan`/`fluxsim run`) (default: take a fresh plan first) |
 | `--simulation-id` | `SIMULATION_ID` | which Simulation document to resolve (default: the bundle's only one) |
 | `--zone` | `ZONE` | declared run zone, for sovereignty checks |
+| `--jobs` | `N` | processes that generate the rows of an emit declared by statistics: a number (never more than one per CPU is used), or auto for one per CPU; the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1) |
 | `--state-dir` | `STATE_DIR` | run-state directory (default: ./.flux) |
 | `-j, --json` |  | emit machine-readable JSON |
 

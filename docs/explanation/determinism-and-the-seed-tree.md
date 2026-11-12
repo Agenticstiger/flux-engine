@@ -38,9 +38,13 @@ Splitting a population into cohorts uses the largest-remainder method on exact f
 
 ## Order and time
 
-Time in the kernel is an integer number of milliseconds from the start of `timeBounds`. No wall clock is read. Every scheduled item has a key made of the time, a fixed phase, the subject's ordinal, the producing document's ordinal and a counter. The key is unique, the queue orders by it, and the run is single-threaded. Mappings are walked in sorted key order.
+Time in the kernel is an integer number of milliseconds from the start of `timeBounds`. No wall clock is read. Every scheduled item has a key made of the time, a fixed phase, the subject's ordinal, the producing document's ordinal and a counter. The key is unique, the queue orders by it, and the scheduler runs in one thread. Mappings are walked in sorted key order.
 
 The kernel's tests include six deliberately broken kernels that must fail the property suite: a spawn-ordered seed tree, float-accumulating remainders, a scheduler that iterates a set, a wall-clock timestamp, a random event id, and a row writer that sorts object keys.
+
+## More than one job
+
+`--jobs N`, or the `FLUX_JOBS` environment variable, lets several processes generate the rows of an emit that declares statistics. `--jobs auto` uses one per CPU the process may run on; in a container with a CPU quota, give the number instead. Each cell's stream is addressed by its row and its column, never by the order the generator reaches it, so a slice of rows is the same rows in whichever process it is made. Each worker generates, renders and frames a slice. The run joins the framed lines in row order, and those lines are what the output digest covers. The rows, the digests and every file the run writes are therefore the ones one job gives; only the time it takes changes. A small emit stays in one process, because starting a worker costs about as much as generating a few thousand rows, and a run never uses more than one worker per CPU.
 
 ## What the input digest covers
 

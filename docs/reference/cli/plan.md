@@ -38,6 +38,7 @@ fluxsim plan ./bundle --state-dir ./.flux
 |---|---|---|
 | `--simulation-id` | `SIMULATION_ID` | which Simulation document to resolve (default: the bundle's only one) |
 | `--zone` | `ZONE` | declared run zone, for sovereignty checks |
+| `--jobs` | `N` | processes that generate the rows of an emit declared by statistics: a number (never more than one per CPU is used), or auto for one per CPU; the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1) |
 | `--state-dir` | `STATE_DIR` | run-state directory (default: ./.flux) |
 | `-j, --json` |  | emit machine-readable JSON |
 

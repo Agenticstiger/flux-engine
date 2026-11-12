@@ -127,7 +127,7 @@ A dial `t ∈ [0,1]` for an outcome with authored rate `p` over an eligible set 
   `SIGNAL=0, DETECT=1, JOURNEY=2, CAMPAIGN=3, EXPERIMENT=4, EMIT=5`; `entity_ordinal` is the subject ordinal
   (`-1` for world-level items); `stream_ordinal` is the canonical ordinal of the producing document in the bundle
   (documents sorted by NFC id); `seq` is a per-run monotonic counter. The key is unique by construction.
-- The queue is a binary heap over that key; the run is single-threaded; iteration over any mapping is by sorted key.
+- The queue is a binary heap over that key; the scheduler runs in one thread; iteration over any mapping is by sorted key.
 
 ## 8. Emit stream and `outputDigest` (`seam/emit.py`)
 
