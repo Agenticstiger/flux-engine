@@ -11,7 +11,7 @@ factored out of the two places that need it: the vertical-derived subject
 attributes of :mod:`flux_engine.world.derived` and the signal payload fields of
 :mod:`flux_engine.runtime.payloads`.
 
-Three rules hold of every family here:
+Four rules hold of every family here:
 
 * **Every parameter is an exact ``Decimal`` built from a string.** No family
   ever holds a ``float``, so a drawn value is safe to put in a traced op
@@ -24,6 +24,10 @@ Three rules hold of every family here:
 * **Draw order inside a composite family is NFC-sorted key order**
   (KERNEL-SPEC §7), so a family declared in a different mapping order draws the
   same values.
+* **Whether a family draws only whole numbers is a property of its
+  declaration** (:attr:`Family.integral`), so the seam decides at plan time
+  whether a drawn attribute may fill an ``INT`` column (KERNEL-SPEC §9), and
+  never from the values one run happened to draw.
 
 :meth:`Family.draw` takes a *factory* rather than a stream, and a zero-cost
 family never calls it. That is the type-level statement of KERNEL-SPEC §3's
@@ -89,6 +93,27 @@ class Family(ABC):
     def expr_type(self) -> Type:
         """The ``flux-expr/1`` type the drawn value inhabits (EXPR-SPEC §2)."""
 
+    @property
+    def integral(self) -> bool:
+        """Whether every value this family can draw is a whole number.
+
+        Read off the declaration, never off a drawn value, so the seam can
+        decide at plan time whether a source may fill an ``INT`` column
+        (KERNEL-SPEC §9). ``False`` unless a family says otherwise: a family
+        that does not state it draws only whole numbers is refused for an
+        ``INT`` column, at plan time and by name, rather than trusted.
+        """
+        return False
+
+
+def _is_whole_number(value: Any) -> bool:
+    """Whether *value* is an ``int`` (never a ``bool``) or a finite whole ``Decimal``."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, Decimal) and value.is_finite() and value == value.to_integral_value()
+
 
 @dataclass(frozen=True)
 class Constant(Family):
@@ -113,6 +138,11 @@ class Constant(Family):
     @property
     def expr_type(self) -> Type:
         return self.declared_type
+
+    @property
+    def integral(self) -> bool:
+        """The declared value is the only value, so it decides: ``1.000000`` is whole."""
+        return _is_whole_number(self.value)
 
 
 @dataclass(frozen=True)
@@ -161,6 +191,16 @@ class BoundedNormal(Family):
     def expr_type(self) -> Type:
         return NUMBER
 
+    @property
+    def integral(self) -> bool:
+        """Whole at scale 0, and only there.
+
+        ``truncated_normal`` quantises its result to the declared scale and
+        clamps it to the bounds rounded *inward* onto that scale, so at scale 0
+        the value and both bounds it can be clamped to are whole numbers.
+        """
+        return self.scale == 0
+
 
 @dataclass(frozen=True)
 class RateCount(Family):
@@ -186,6 +226,11 @@ class RateCount(Family):
     @property
     def expr_type(self) -> Type:
         return NUMBER
+
+    @property
+    def integral(self) -> bool:
+        """A Poisson count is an ``int``, so the draw is whole when the offset is."""
+        return _is_whole_number(self.offset)
 
 
 @dataclass(frozen=True)

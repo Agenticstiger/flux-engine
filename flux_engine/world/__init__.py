@@ -51,6 +51,7 @@ from flux_engine.world.population import (
     PopulationSpec,
     Subject,
     SubjectStore,
+    integral_trait_names,
     materialise_population,
     subject_id,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "decimal_of",
     "derivation_for",
     "int_of",
+    "integral_trait_names",
     "materialise_population",
     "probability_of",
     "subject_id",

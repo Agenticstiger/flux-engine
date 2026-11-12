@@ -51,6 +51,7 @@ __all__ = [
     "EXCLUDED_FROM_REUSABLE_DIGEST",
     "FLX_3301",
     "FLX_3302",
+    "FLX_3303",
     "EmitWriter",
     "EmitResult",
     "SeamDigests",
@@ -87,6 +88,23 @@ FLX_3302 = register(
     "before a row exists, rather than on every row it would produce. "
     "Declare the source under the emit's mapping block, or add the column "
     "to the vertical's alias table.",
+)
+
+FLX_3303 = register(
+    "FLX-3303",
+    "an INT expose column is mapped onto a source that is not always a whole number",
+    "KERNEL-SPEC §9 renders an INT column as a JSON integer. A scenario-driven "
+    "emit decides at plan time, from the declarations alone, whether the "
+    "source mapped onto an INT column is always a whole number: one of the "
+    "integer scalars (subject.ordinal, event.time, moment.firstTime, "
+    "moment.lastTime, moment.eventCount), or an attribute, trait or payload "
+    "field whose every declared family draws only whole numbers (a rate "
+    "count, a bounded normal at scale 0, a constant whole number). Any other "
+    "source could put a fraction, a string or a bool into the column, and "
+    "whether a run then failed would depend on which values it drew, so the "
+    "run is refused before a row exists. Map the column onto a whole-number "
+    "source, or declare it DECIMAL(p,s), which renders an exact number at its "
+    "declared scale.",
 )
 
 #: §8's domain-separation label. Part of the digest pre-image, so a change

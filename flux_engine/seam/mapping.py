@@ -44,31 +44,49 @@ optional one renders JSON ``null`` -- the contract said the column may be
 absent, and inventing a value for it is the one thing this module must not
 do.
 
+**An ``INT`` column's source is decided at plan time too.** KERNEL-SPEC §9
+renders ``INT`` as a JSON integer from an ``int`` and refuses every other
+value class, a ``Decimal`` included. A drawn count is a ``Decimal``
+(``RateCount``, ``BoundedNormal`` at scale 0), so whether it may fill an
+``INT`` column is settled here, once, from the declarations: the column's
+source must be one of the paths the run declares is always a whole number
+(:func:`integral_namespace`) -- an integer scalar, or an attribute, trait or
+payload field every family of which draws only whole numbers -- or the run
+is ``FLX-3303`` before a row exists. :meth:`ColumnMapping.row` then hands a
+``Decimal`` from that source on as the exact ``int`` it equals. Nothing is
+decided per value: a per-value fallback would let one run pass and the next
+fail on what each happened to draw.
+
 **Nothing here reads a run.** :func:`resolve_column_mapping` takes the
-compiled expose, the alias table, the overrides and the set of source
-paths the run declares; :meth:`ColumnMapping.row` takes a mapping from
-source path to value. The gluing -- which subject, which event, which
-detection -- is :mod:`flux_engine.stages.pipeline`'s, so this module stays
-free of every runtime type and can be tested with two dictionaries.
+compiled expose, the alias table, the overrides, the set of source paths
+the run declares and the subset of them that is always a whole number;
+:meth:`ColumnMapping.row` takes a mapping from source path to value. The
+gluing -- which subject, which event, which detection, which family drew
+what -- is :mod:`flux_engine.stages.pipeline`'s, so this module stays free
+of every runtime type and can be tested with dictionaries and sets.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
+from decimal import Decimal
+from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Set, Tuple
 
 from flux_engine.core.canonical import nfc
 from flux_engine.core.errors import FluxError
-from flux_engine.seam.contract import CompiledExpose
-from flux_engine.seam.emit import FLX_3302
+from flux_engine.seam.conform import FLX_3003
+from flux_engine.seam.contract import CompiledExpose, LogicalKind
+from flux_engine.seam.emit import FLX_3302, FLX_3303
 
 __all__ = [
     "EVENT_SCALARS",
+    "INTEGER_SCALARS",
     "MOMENT_SCALARS",
     "SUBJECT_SCALARS",
     "BY_NAME_PREFIXES",
     "ColumnBinding",
     "ColumnMapping",
+    "integral_namespace",
     "resolve_column_mapping",
     "source_namespace",
 ]
@@ -111,6 +129,31 @@ MOMENT_SCALARS: Tuple[str, ...] = (
 #: the same name describes the subject the moment happened to.
 BY_NAME_PREFIXES: Tuple[str, ...] = ("event.data.", "subject.", "subject.traits.")
 
+#: The closed scalars the engine carries as an ``int``: the subject's
+#: ordinal, the epoch-millisecond instants of the event and of the moment,
+#: and the moment's matched-event count. Every value of each is a whole
+#: number whatever the vertical, so :func:`integral_namespace` always
+#: includes them and an ``INT`` column may always take one.
+INTEGER_SCALARS: Tuple[str, ...] = (
+    "subject.ordinal",
+    "event.time",
+    "moment.firstTime",
+    "moment.lastTime",
+    "moment.eventCount",
+)
+
+
+def _named_paths(
+    subject_attributes: Iterable[str],
+    subject_traits: Iterable[str],
+    event_payload_fields: Iterable[str],
+) -> Set[str]:
+    """Bare names spelled as source paths, one prefix per scope."""
+    paths = {f"subject.{nfc(str(name))}" for name in subject_attributes}
+    paths.update(f"subject.traits.{nfc(str(name))}" for name in subject_traits)
+    paths.update(f"event.data.{nfc(str(name))}" for name in event_payload_fields)
+    return paths
+
 
 def source_namespace(
     *,
@@ -126,9 +169,28 @@ def source_namespace(
     of all three scopes are always present.
     """
     paths = set(SUBJECT_SCALARS) | set(EVENT_SCALARS) | set(MOMENT_SCALARS)
-    paths.update(f"subject.{nfc(str(name))}" for name in subject_attributes)
-    paths.update(f"subject.traits.{nfc(str(name))}" for name in subject_traits)
-    paths.update(f"event.data.{nfc(str(name))}" for name in event_payload_fields)
+    paths.update(_named_paths(subject_attributes, subject_traits, event_payload_fields))
+    return frozenset(paths)
+
+
+def integral_namespace(
+    *,
+    subject_attributes: Iterable[str] = (),
+    subject_traits: Iterable[str] = (),
+    event_payload_fields: Iterable[str] = (),
+) -> FrozenSet[str]:
+    """Every source path a run declares that is always a whole number.
+
+    The arguments are *bare names*, as for :func:`source_namespace`, and
+    name only the attributes, traits and payload fields whose every declared
+    family draws whole numbers
+    (:attr:`flux_engine.world.families.Family.integral`); the pipeline reads
+    that off the families, never off the values a run drew.
+    :data:`INTEGER_SCALARS` are always present. An ``INT`` column's source
+    is checked against this set at plan time (``FLX-3303``).
+    """
+    paths = set(INTEGER_SCALARS)
+    paths.update(_named_paths(subject_attributes, subject_traits, event_payload_fields))
     return frozenset(paths)
 
 
@@ -139,12 +201,17 @@ class ColumnBinding:
     ``source`` is ``None`` for an optional column no step resolved: the row
     renders JSON ``null`` there. ``how`` names which of the three steps
     decided, so a plan can report the mapping rather than merely apply it.
+    ``integral`` is ``True`` for an ``INT`` column with a source: the plan
+    checked that the source is always a whole number (``FLX-3303``
+    otherwise), and :meth:`ColumnMapping.row` hands a ``Decimal`` from it on
+    as the exact ``int`` the ``INT`` renderer takes.
     """
 
     column: str
     source: Optional[str]
     required: bool
     how: str
+    integral: bool = False
 
     def as_document(self) -> Dict[str, Any]:
         """The binding as canonical-ready JSON, for ``plan.json``."""
@@ -153,6 +220,7 @@ class ColumnBinding:
             "source": self.source,
             "required": self.required,
             "resolvedBy": self.how,
+            "integral": self.integral,
         }
 
 
@@ -168,7 +236,7 @@ class ColumnMapping:
         """The source path per column, positionally aligned to the expose."""
         return tuple(binding.source for binding in self.bindings)
 
-    def row(self, values: Mapping[str, Any]) -> Tuple[Any, ...]:
+    def row(self, values: Mapping[str, Any], *, row_index: Optional[int] = None) -> Tuple[Any, ...]:
         """Render one moment as the positional row the emit stream takes.
 
         *values* maps a source path to the value the run holds for it. A
@@ -177,12 +245,15 @@ class ColumnMapping:
         where a missing value in an otherwise well-mapped run belongs.
         Nothing here renders: the returned tuple carries the runtime
         values, and :func:`flux_engine.seam.conform.render_row` decides
-        how each one is spelled.
+        how each one is spelled. The one value that changes on the way is
+        the plan's own decision: a ``Decimal`` in an
+        :attr:`~ColumnBinding.integral` column becomes the ``int`` it
+        equals, so the ``INT`` renderer's class rule stays as strict as it
+        is for every other caller. Any other value is handed on as it is,
+        and the renderer judges its class. *row_index* is the row's position
+        in the stream, named by a refusal the way the emit writer names it.
         """
-        return tuple(
-            None if binding.source is None else values.get(binding.source)
-            for binding in self.bindings
-        )
+        return tuple(_cell(binding, values, row_index) for binding in self.bindings)
 
     def as_document(self) -> Dict[str, Any]:
         """The whole mapping as canonical-ready JSON, for ``plan.json``."""
@@ -190,6 +261,38 @@ class ColumnMapping:
             "exposeId": self.expose_id,
             "bindings": [binding.as_document() for binding in self.bindings],
         }
+
+
+def _cell(binding: ColumnBinding, values: Mapping[str, Any], row_index: Optional[int]) -> Any:
+    """One column's runtime value, as :meth:`ColumnMapping.row` hands it on."""
+    if binding.source is None:
+        return None
+    value = values.get(binding.source)
+    if binding.integral and isinstance(value, Decimal):
+        return _exact_int(value, binding, row_index)
+    return value
+
+
+def _exact_int(value: Decimal, binding: ColumnBinding, row_index: Optional[int]) -> int:
+    """*value* as the ``int`` it equals, or ``FLX-3003`` when it is not whole.
+
+    The plan admitted the source because every family behind it draws only
+    whole numbers, so a fraction here is a broken promise rather than data:
+    it is refused, not rounded, and the diagnostic names the row, the
+    column, the source and the value's class, never the value
+    (KERNEL-SPEC §9). ``int()`` is exact on a finite whole ``Decimal``:
+    ``Decimal('220')`` and ``Decimal('220.000')`` are both ``220``.
+    """
+    if not (value.is_finite() and value == value.to_integral_value()):
+        where = f"column {binding.column!r}"
+        if row_index is not None:
+            where = f"row {row_index}, {where}"
+        raise FluxError(
+            FLX_3003,
+            f"{where}: the plan checked that {binding.source!r} is always a whole "
+            "number, and the run holds a Decimal that is not one",
+        )
+    return int(value)
 
 
 def _resolve_one(
@@ -230,6 +333,7 @@ def resolve_column_mapping(
     expose: CompiledExpose,
     *,
     declared_sources: FrozenSet[str],
+    integral_sources: Optional[FrozenSet[str]] = None,
     aliases: Optional[Mapping[str, str]] = None,
     overrides: Optional[Mapping[str, Any]] = None,
 ) -> ColumnMapping:
@@ -240,6 +344,12 @@ def resolve_column_mapping(
     path the run declares no attribute for -- both at plan time, before a
     single row exists.
 
+    *integral_sources* are the declared paths that are always a whole
+    number, as :func:`integral_namespace` builds them; omitted, they are
+    :data:`INTEGER_SCALARS` alone. An ``INT`` column whose source is not
+    one of them raises ``FLX-3303``, also before a row exists; one whose
+    source is one of them is bound :attr:`~ColumnBinding.integral`.
+
     *overrides* is the emit's ``mapping`` block, read defensively: a
     non-mapping value, or an entry whose key is not a column of the expose
     or whose value is not a string, is refused here rather than ignored,
@@ -247,6 +357,7 @@ def resolve_column_mapping(
     declaration the engine did not honour.
     """
     expose_id = expose.expose_id
+    whole = integral_sources if integral_sources is not None else integral_namespace()
     normalised_overrides: Dict[str, str] = {}
     if overrides is not None:
         if not isinstance(overrides, Mapping):
@@ -293,7 +404,21 @@ def resolve_column_mapping(
                 f"vertical, and no attribute named {column.name!r} under "
                 f"{', '.join(prefix.rstrip('.') for prefix in BY_NAME_PREFIXES)}",
             )
+        integral = source is not None and column.logical_type.kind is LogicalKind.INT
+        if integral and source not in whole:
+            raise FluxError(
+                FLX_3303,
+                f"expose {expose_id!r} column {column.name!r} is INT, and its source "
+                f"{source!r} (resolved by {how}) is not always a whole number; map the "
+                "column onto a whole-number source, or declare it DECIMAL(p,s)",
+            )
         bindings.append(
-            ColumnBinding(column=column.name, source=source, required=column.required, how=how)
+            ColumnBinding(
+                column=column.name,
+                source=source,
+                required=column.required,
+                how=how,
+                integral=integral,
+            )
         )
     return ColumnMapping(expose_id=expose_id, bindings=tuple(bindings))
