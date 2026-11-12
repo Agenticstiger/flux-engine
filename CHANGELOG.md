@@ -19,6 +19,48 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## 0.3.0 - 2026-11-12
+
+Output sinks, and generation several times faster. No pinned digest moved:
+`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
+and `TRACE_VERSION` keep their values. Every row, line and digest is the one
+0.2.1 produces.
+
+### Sinks
+
+- `fluxsim run --sink NAME:TARGET` writes every stream of a run to a sink,
+  after verify and before ship, and records each delivery in
+  `sink-receipts.json`; `--sink-opt KEY=VALUE` passes a sink its settings, and
+  `fluxsim plugins` lists the sinks.
+- `parquet:DIR` and `arrow-ipc:DIR` write files named by the stream's
+  `outputDigest`, behind the new `[arrow]` extra.
+- `adbc:DRIVER` loads a stream into a database through ADBC, behind the new
+  `[adbc]` extra; `uri-env=VAR` keeps a connection string off the command line.
+- A how-to, "Load a simulation into a database", and `make bench`, which
+  measures what each sink adds to a run.
+
+### Faster generation
+
+- One process makes the same rows in under half the time and a fraction of
+  the memory: 100,000 rows of the small telco fixture took 21.4 s and 511 MB,
+  and now take 8.3 s and 127 MB.
+- `--jobs N`, or `--jobs auto`, on `plan`, `apply`, `run` and `replay` (and
+  `FLUX_JOBS`, and `jobs=` in the Python API and the async facade) makes an
+  emit's rows in up to N processes and joins them in row order, so the output
+  is the one a single job gives. The same 100,000 rows take 1.8 s with 12 jobs.
+  Runs in one process share one worker per CPU, a small emit stays in one
+  process, and the run summary says how many processes made an emit.
+- Workers start with the current directory off their import path and end
+  with the process that started them. A script that passes more than one job
+  needs an `if __name__ == "__main__":` guard. `fluxsim` sets
+  `PYTHONSAFEPATH` for its whole process, so a Python script that a sink or
+  plugin starts as a child process does not have its own directory on its
+  import path either.
+- New public helpers: `core.canonical.canonical_array_bytes`,
+  `core.seedtree.stream_entropy_of_label` and `stream_of_label`,
+  `core.rng.equal_weights` and `clear_memos`, `generator.paths.CellStreams`,
+  `generator.generate_row_slice` and `seam.emit.EmitWriter.from_framed`.
+
 ## 0.2.1 - 2026-11-11
 
 Docs and wording fixes; no behaviour change. No pinned digest moved:

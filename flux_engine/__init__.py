@@ -17,6 +17,6 @@ from importlib import metadata as _metadata
 try:
     __version__ = _metadata.version("flux-sim-engine")
 except _metadata.PackageNotFoundError:  # pragma: no cover - editable/dev tree, no metadata yet
-    __version__ = "0.2.1"
+    __version__ = "0.3.0"
 
 __all__ = ["__version__"]
