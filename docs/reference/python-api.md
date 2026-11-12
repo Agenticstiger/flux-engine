@@ -181,6 +181,16 @@ running in the background — Python threads cannot be cancelled — so this
 is a bound on how long the *caller* waits, not a kill. Same contract
 forge-cli's engine documents.
 
+**More than one job.** `plan`, `apply`, `run` and `replay` take `jobs`
+(default 1): how many processes may generate an emit's rows from declared
+statistics. The rows and every digest are the ones one job gives. The
+worker processes are started with spawn, so each one imports the host's
+main module again: a script that passes `jobs` above 1 keeps its work
+under `if __name__ == "__main__":`, and whatever it does at the top level,
+outside that block, happens again in every worker. The soft timeout stops
+neither the stage thread nor its workers; after `TimeoutError` they run on
+until the stage ends.
+
 Stability here is governed by the frozen-kwarg promise in that module's
 own docstring, not by `__api_version__`: `__api_version__` covers the
 names exported from `flux_engine.api`, and the facade exports none of

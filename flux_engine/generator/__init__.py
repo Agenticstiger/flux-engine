@@ -53,6 +53,7 @@ from flux_engine.generator.rows import (
     GeneratorPlan,
     build_plan,
     generate_column,
+    generate_row_slice,
     generate_rows,
     identifier_value,
 )
@@ -86,6 +87,7 @@ __all__ = [
     "classify_column",
     "exact_decimal",
     "generate_column",
+    "generate_row_slice",
     "generate_rows",
     "generator_column_path",
     "identifier_value",

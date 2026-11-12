@@ -21,8 +21,6 @@ runs once, untimed; ``make bench`` runs it in one process to time it.
 from __future__ import annotations
 
 import os
-import re
-import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator
@@ -37,6 +35,7 @@ pytest.importorskip("adbc_driver_duckdb")
 from flux_engine.sinks.registry import open_target  # noqa: E402
 from flux_engine.stages import pipeline  # noqa: E402
 from flux_engine.stages.deliver import deliver  # noqa: E402
+from tests.bundles import bundle_with_rows  # noqa: E402
 
 pytestmark = pytest.mark.slow
 
@@ -49,13 +48,7 @@ _TIMES: Dict[str, float] = {}
 
 @pytest.fixture(scope="module")
 def bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    target = tmp_path_factory.mktemp("bench") / "bundle"
-    shutil.copytree(_FIXTURE, target)
-    simulation = target / "simulation.flux.yml"
-    text, count = re.subn(r"(?m)^(\s+rows:) 64\b", rf"\1 {_ROWS}", simulation.read_text())
-    assert count == 1, "the fixture's declared row count moved"
-    simulation.write_text(text)
-    return target
+    return bundle_with_rows(_FIXTURE, tmp_path_factory.mktemp("bench") / "bundle", _ROWS)
 
 
 @pytest.fixture(scope="module")

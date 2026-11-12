@@ -127,6 +127,7 @@ def apply(
     zone: Optional[str] = None,
     auto_plan: bool = True,
     precomputed: Optional["_pipeline.PipelineResult"] = None,
+    jobs: int = 1,
 ) -> StageResult:
     """Apply the plan at ``<state_dir>/runs/<run_id>/plan.json``.
 
@@ -154,7 +155,7 @@ def apply(
         layout = RunLayout.for_state_dir(state, run_id)
     elif auto_plan:
         planned, planned_result = run_plan_with_result(
-            directory, simulation_id=simulation_id, state_dir=state, zone=zone
+            directory, simulation_id=simulation_id, state_dir=state, zone=zone, jobs=jobs
         )
         if not planned.success:
             return StageResult(
@@ -184,7 +185,7 @@ def apply(
         result = precomputed
     else:
         try:
-            result = _pipeline.execute(directory, simulation_id=simulation_id, zone=zone)
+            result = _pipeline.execute(directory, simulation_id=simulation_id, zone=zone, jobs=jobs)
         except FluxError as error:
             return StageResult(
                 stage="apply",

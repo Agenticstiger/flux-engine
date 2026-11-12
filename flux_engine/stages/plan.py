@@ -102,10 +102,15 @@ def plan(
     simulation_id: Optional[str] = None,
     state_dir: Union[str, Path, None] = None,
     zone: Optional[str] = None,
+    jobs: int = 1,
 ) -> StageResult:
-    """Execute the loop once and write ``<state_dir>/runs/<runId>/plan.json``."""
+    """Execute the loop once and write ``<state_dir>/runs/<runId>/plan.json``.
+
+    *jobs* is how many processes may generate rows from declared statistics;
+    it never changes what is generated (:func:`flux_engine.stages.pipeline.execute`).
+    """
     return plan_with_result(
-        bundle_directory, simulation_id=simulation_id, state_dir=state_dir, zone=zone
+        bundle_directory, simulation_id=simulation_id, state_dir=state_dir, zone=zone, jobs=jobs
     )[0]
 
 
@@ -115,6 +120,7 @@ def plan_with_result(
     simulation_id: Optional[str] = None,
     state_dir: Union[str, Path, None] = None,
     zone: Optional[str] = None,
+    jobs: int = 1,
 ) -> Tuple[StageResult, Optional["_pipeline.PipelineResult"]]:
     """:func:`plan`, plus the execution it planned from (``None`` when it failed).
 
@@ -129,7 +135,7 @@ def plan_with_result(
     state = Path(state_dir) if state_dir is not None else Path(".flux")
 
     try:
-        result = _pipeline.execute(directory, simulation_id=simulation_id, zone=zone)
+        result = _pipeline.execute(directory, simulation_id=simulation_id, zone=zone, jobs=jobs)
     except FluxError as error:
         return (
             StageResult(

@@ -505,6 +505,56 @@ def _add_state_dir(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state-dir", default=None, help="run-state directory (default: ./.flux)")
 
 
+#: The environment variable that sets ``--jobs`` when the flag is not given.
+JOBS_ENV_VAR = "FLUX_JOBS"
+
+
+def _jobs_type(text: str) -> int:
+    """``argparse`` ``type=`` callable for ``--jobs`` (and ``FLUX_JOBS``): a count or ``auto``.
+
+    ``auto`` is one job per CPU this process may run on.
+    """
+    value = text.strip().lower()
+    if value == "auto":
+        from flux_engine.stages._parallel import cpu_jobs
+
+        return cpu_jobs()
+    jobs = int(value) if value.isdecimal() else 0
+    if jobs < 1:
+        raise argparse.ArgumentTypeError(f"expected a positive integer or 'auto', got {text!r}")
+    return jobs
+
+
+def _add_jobs(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--jobs",
+        default=None,
+        type=_jobs_type,
+        metavar="N",
+        help=(
+            "processes that generate the rows of an emit declared by statistics: a number "
+            "(never more than one per CPU is used), or auto for one per CPU; the rows and "
+            f"every digest are the same whatever the number (default: {JOBS_ENV_VAR}, else 1)"
+        ),
+    )
+
+
+def _jobs_from_environment(parser: argparse.ArgumentParser) -> int:
+    """``FLUX_JOBS`` for a command given no ``--jobs``: 1 when unset or blank.
+
+    Read after parsing rather than as the option's default, so that the
+    parser, and the tree ``fluxsim describe`` prints from it, never depend on
+    the environment. A bad value is a usage error of *parser*'s command.
+    """
+    text = os.environ.get(JOBS_ENV_VAR, "").strip()
+    if not text:
+        return 1
+    try:
+        return _jobs_type(text)
+    except argparse.ArgumentTypeError as error:
+        parser.error(f"{JOBS_ENV_VAR}: {error}")
+
+
 def _add_json_flag(parser: argparse.ArgumentParser) -> None:
     """Add ``-j/--json`` to *parser*, honoured after the subcommand as well as before it.
 
@@ -637,6 +687,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_p.add_argument("bundle", help=_BUNDLE_HELP)
     plan_p.add_argument("--simulation-id", default=None, help=_SIMULATION_ID_HELP)
     plan_p.add_argument("--zone", default=None, help=_ZONE_HELP)
+    _add_jobs(plan_p)
     _add_state_dir(plan_p)
     _add_json_flag(plan_p)
 
@@ -656,6 +707,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     apply_p.add_argument("--simulation-id", default=None, help=_SIMULATION_ID_HELP)
     apply_p.add_argument("--zone", default=None, help=_ZONE_HELP)
+    _add_jobs(apply_p)
     _add_state_dir(apply_p)
     _add_json_flag(apply_p)
 
@@ -737,6 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help=_TRUST_KEY_HELP,
     )
+    _add_jobs(run_p)
     _add_state_dir(run_p)
     _add_json_flag(run_p)
 
@@ -865,6 +918,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     replay_p.add_argument("--simulation-id", default=None, help=_SIMULATION_ID_HELP)
     replay_p.add_argument("--zone", default=None, help=_ZONE_HELP)
+    _add_jobs(replay_p)
     _add_state_dir(replay_p)
     _add_json_flag(replay_p)
 
@@ -1289,7 +1343,11 @@ def _cmd_plan(args: argparse.Namespace) -> int:
 
     with stage_progress(f"planning {args.bundle}", as_json=args.json):
         result = plan(
-            args.bundle, simulation_id=args.simulation_id, state_dir=args.state_dir, zone=args.zone
+            args.bundle,
+            simulation_id=args.simulation_id,
+            state_dir=args.state_dir,
+            zone=args.zone,
+            jobs=args.jobs,
         )
     return _finish(args, result)
 
@@ -1304,6 +1362,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             simulation_id=args.simulation_id,
             state_dir=args.state_dir,
             zone=args.zone,
+            jobs=args.jobs,
         )
     return _finish(args, result)
 
@@ -1333,6 +1392,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             trust_key=_read_trust_key(args),
             sink=args.sink,
             sink_options=_kv_pairs(args.sink_opt),
+            jobs=args.jobs,
         )
     return _finish(args, result)
 
@@ -1383,6 +1443,7 @@ def _cmd_replay(args: argparse.Namespace) -> int:
             simulation_id=args.simulation_id,
             state_dir=args.state_dir,
             zone=args.zone,
+            jobs=args.jobs,
         )
     return _print_result(result, as_json=args.json)
 
@@ -2189,6 +2250,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "plugins": _cmd_plugins,
         "explain": _cmd_explain,
     }
+    if getattr(args, "jobs", "absent") is None:
+        args.jobs = _jobs_from_environment(_children(parser)[args.command])
     if args.command in dispatch:
         if args.command == "describe" and not args.self_:
             _children(parser)["describe"].error("describe requires --self")

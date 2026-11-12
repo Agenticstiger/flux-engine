@@ -152,6 +152,7 @@ def run(
     committed_at: Optional[str] = None,
     sink: Optional[str] = None,
     sink_options: Optional[Mapping[str, str]] = None,
+    jobs: int = 1,
 ) -> StageResult:
     """``plan`` + ``apply``, then ``verify``/``ship`` when asked for.
 
@@ -189,7 +190,7 @@ def run(
     ]
 
     planned, planned_result = run_plan_with_result(
-        bundle_directory, simulation_id=simulation_id, state_dir=state_dir, zone=zone
+        bundle_directory, simulation_id=simulation_id, state_dir=state_dir, zone=zone, jobs=jobs
     )
     artifacts: Dict[str, Any] = {"plan": dict(planned.artifacts)}
     stdout_lines = [line for line in (planned.stdout,) if line]
@@ -218,6 +219,7 @@ def run(
         zone=zone,
         auto_plan=False,
         precomputed=planned_result,
+        jobs=jobs,
     )
     artifacts["apply"] = dict(applied.artifacts)
     if applied.stdout:

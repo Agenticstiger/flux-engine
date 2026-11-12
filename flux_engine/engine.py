@@ -95,6 +95,7 @@ async def plan(
     simulation_id: Optional[str] = None,
     state_dir: Union[str, Path, None] = None,
     zone: Optional[str] = None,
+    jobs: int = 1,
     timeout: Optional[float] = None,
 ) -> StageResult:
     """``fluxsim plan``, off the event loop."""
@@ -106,6 +107,7 @@ async def plan(
         simulation_id=simulation_id,
         state_dir=state_dir,
         zone=zone,
+        jobs=jobs,
     )
 
 
@@ -117,6 +119,7 @@ async def apply(
     state_dir: Union[str, Path, None] = None,
     zone: Optional[str] = None,
     auto_plan: bool = True,
+    jobs: int = 1,
     timeout: Optional[float] = None,
 ) -> StageResult:
     """``fluxsim apply``, off the event loop."""
@@ -130,6 +133,7 @@ async def apply(
         state_dir=state_dir,
         zone=zone,
         auto_plan=auto_plan,
+        jobs=jobs,
     )
 
 
@@ -151,6 +155,7 @@ async def run(
     committed_at: Optional[str] = None,
     sink: Optional[str] = None,
     sink_options: Optional[Mapping[str, str]] = None,
+    jobs: int = 1,
     timeout: Optional[float] = None,
 ) -> StageResult:
     """``fluxsim run`` (``plan`` + ``apply``, with ``--verify``/``--sink``/``--ship`` sugar), off the event loop."""
@@ -174,6 +179,7 @@ async def run(
         committed_at=committed_at,
         sink=sink,
         sink_options=sink_options,
+        jobs=jobs,
     )
 
 
@@ -245,6 +251,7 @@ async def replay(
     simulation_id: Optional[str] = None,
     state_dir: Union[str, Path, None] = None,
     zone: Optional[str] = None,
+    jobs: int = 1,
     timeout: Optional[float] = None,
 ) -> StageResult:
     """``fluxsim replay --assert-digest``, off the event loop."""
@@ -258,4 +265,5 @@ async def replay(
         simulation_id=simulation_id,
         state_dir=state_dir,
         zone=zone,
+        jobs=jobs,
     )

@@ -82,6 +82,7 @@ from flux_engine.seam.emit import (
 from flux_engine.seam.mapping import ColumnMapping, resolve_column_mapping, source_namespace
 from flux_engine.seam.resolve import LoadedBundle, ResolvedEmit, load_bundle, resolve_all_emits
 from flux_engine.seam.sinks import NullSink
+from flux_engine.stages._parallel import generate_framed, require_jobs, workers_for
 from flux_engine.verticals import emit_aliases, get_pack
 from flux_engine.world import PopulationSpec, SubjectStore, TraceLog, materialise_population
 
@@ -268,6 +269,7 @@ def execute(
     simulation_id: Optional[str] = None,
     zone: Optional[str] = None,
     tolerate_additive: bool = True,
+    jobs: int = 1,
 ) -> PipelineResult:
     """Run every stage of the six-step loop's core once, in memory.
 
@@ -282,12 +284,20 @@ def execute(
     and seed when one of them does not, because the CLI's default context
     equals the kernel's and would never show the difference.
 
+    *jobs* is how many processes may generate an emit's rows from declared
+    statistics (:mod:`flux_engine.stages._parallel`). It changes how long a
+    run takes, never what it produces: every row, line and digest is the
+    one ``jobs=1`` gives. A script that passes more than one must start
+    from an ``if __name__ == "__main__":`` block, as any program that
+    starts processes with ``spawn`` must.
+
     However the run ends, the draws' memos are cleared when it does
     (:func:`flux_engine.core.rng.clear_memos`,
     :func:`flux_engine.generator.rows.clear_memos`): what they hold is worked
     out from this run's declarations, and a long-lived process that runs
     many bundles keeps none of it past the run.
     """
+    require_jobs(jobs)
     with _memos_for_one_run(), localcontext(kernel_context()):
         loaded = load_bundle(directory, tolerate_additive=tolerate_additive)
         cast = resolve_cast(loaded.flux_documents, simulation_id=simulation_id)
@@ -409,7 +419,7 @@ def execute(
             store=population, detections=detections, events=events, cast=cast, pack=pack
         )
         emits = tuple(
-            _generate_emit(resolved, digests, root, cast, simulation, scenario)
+            _generate_emit(resolved, digests, root, cast, simulation, scenario, jobs)
             for resolved, digests in zip(resolved_emits, per_emit_digests, strict=True)
         )
 
@@ -459,12 +469,14 @@ def _generate_emit(
     cast: Cast,
     simulation: Mapping[str, Any],
     scenario: "_Scenario",
+    jobs: int = 1,
 ) -> EmitOutcome:
     """Produce one emit's rows, from declared statistics or from the run."""
     expose = resolved.compile()
     plan: Optional[GeneratorPlan] = None
     mapping: Optional[ColumnMapping] = None
     rows: Tuple[Tuple[Any, ...], ...] = ()
+    writer: Optional[EmitWriter] = None
     declared_rows = resolved.declared_row_count
 
     if resolved.fidelity is not None:
@@ -477,7 +489,11 @@ def _generate_emit(
             fidelity=resolved.fidelity,
             time_bounds=simulation.get("spec", {}).get("timeBounds"),
         )
-        rows = generate_rows(plan, root=root)
+        if workers_for(plan.rows, jobs) > 1:
+            rows, lines = generate_framed(plan, root=root, expose=expose, jobs=jobs)
+            writer = EmitWriter.from_framed(expose, resolved.contract_digest, lines)
+        else:
+            rows = generate_rows(plan, root=root)
     else:
         mapping = resolve_column_mapping(
             expose,
@@ -487,9 +503,12 @@ def _generate_emit(
         )
         rows = scenario.rows(mapping, limit=declared_rows)
 
-    writer = EmitWriter(expose=expose, contract_digest=resolved.contract_digest, sink=NullSink())
-    with writer:
-        writer.write_all(rows)
+    if writer is None:
+        writer = EmitWriter(
+            expose=expose, contract_digest=resolved.contract_digest, sink=NullSink()
+        )
+        with writer:
+            writer.write_all(rows)
     return EmitOutcome(
         resolved=resolved,
         expose=expose,

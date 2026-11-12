@@ -35,6 +35,7 @@ def replay(
     simulation_id: Optional[str] = None,
     state_dir: Union[str, Path, None] = None,
     zone: Optional[str] = None,
+    jobs: int = 1,
 ) -> StageResult:
     """Re-apply the plan at *run_id* and check the resulting ``runDigest``."""
     applied = run_apply(
@@ -44,6 +45,7 @@ def replay(
         state_dir=state_dir,
         zone=zone,
         auto_plan=False,
+        jobs=jobs,
     )
     if not applied.success:
         return StageResult(
