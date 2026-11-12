@@ -30,7 +30,7 @@ Two rules:
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, Mapping
+from typing import Dict, Iterable, List, Mapping, Tuple
 
 from flux_engine.core.errors import FluxError
 from flux_engine.expr.attrs import VerticalPack
@@ -45,7 +45,7 @@ from flux_engine.world.families import (
     drawn_type_satisfies,
 )
 
-__all__ = ["PAYLOAD_FAMILIES", "default_family", "payload_families"]
+__all__ = ["PAYLOAD_FAMILIES", "default_family", "integral_payload_fields", "payload_families"]
 
 
 def _d(literal: str) -> Decimal:
@@ -176,3 +176,22 @@ def payload_families(signal_id: str, pack: VerticalPack) -> Mapping[str, Family]
             )
         built[name] = family
     return built
+
+
+def integral_payload_fields(signal_ids: Iterable[str], pack: VerticalPack) -> Tuple[str, ...]:
+    """The payload fields every event that carries them holds as a whole number.
+
+    A field qualifies when every Signal in *signal_ids* that declares it draws
+    it from an :attr:`~flux_engine.world.families.Family.integral` family,
+    because a moment's event can be an arrival of any of them: two Signals
+    that share a field name share its ``event.data.`` source path. A Signal
+    that does not declare the field puts no value there, so it neither
+    qualifies nor disqualifies the field. NFC-sorted.
+    """
+    families: Dict[str, List[Family]] = {}
+    for signal_id in sorted({nfc(str(signal_id)) for signal_id in signal_ids}):
+        for name, family in payload_families(signal_id, pack).items():
+            families.setdefault(name, []).append(family)
+    return tuple(
+        name for name in sorted(families) if all(family.integral for family in families[name])
+    )

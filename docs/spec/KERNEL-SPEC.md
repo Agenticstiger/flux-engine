@@ -149,6 +149,17 @@ Closed `LogicalType` set: `STRING, INT, DECIMAL(p,s), BOOL, DATE, TIMESTAMP, JSO
 normalised case-insensitively; anything outside the set fails by name (`FLX-3001`). Rendering: STRING → NFC string;
 INT → JSON integer; DECIMAL → string at scale `s`; BOOL → JSON bool; DATE → `YYYY-MM-DD`; TIMESTAMP → RFC 3339 UTC
 with millisecond precision and `Z`; JSON → canonical JSON string; BYTES → base64 string. `float` → `FLX-3002`.
+
+INT renders from an `int` only: any other value class, `bool` and `Decimal` included, → `FLX-3003`. A
+scenario-driven INT column (`seam/mapping.py`) is decided at plan time, never per value: its mapped source must
+be **integral**, every value it can hold a whole number. The integral sources are the integer scalars
+(`subject.ordinal`, `event.time`, `moment.firstTime`, `moment.lastTime`, `moment.eventCount`) and each derived
+attribute, trait or payload field whose every declared family draws only whole numbers (`RateCount`;
+`BoundedNormal` at scale 0; `Constant` holding a whole number), across every lifecycle override, Persona and Signal
+that declares it. Any other source → `FLX-3303` before a row exists. A `Decimal` from an integral source is
+converted exactly (`int(v)`, after checking `v` is finite and whole, else `FLX-3003`) before it is rendered, so the
+class rule holds for every caller.
+
 A row missing a `required` column → `FLX-3202`; an undeclared column → `FLX-3201`; errors name column, row index
 and value **class**, never the value.
 

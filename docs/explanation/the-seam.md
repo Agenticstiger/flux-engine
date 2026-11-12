@@ -95,6 +95,8 @@ The contract fixes the column order and the types. The engine turns each column 
 
 A required column that nothing fills is an error at plan time (`FLX-3302`). An optional column renders `null`. The engine does not invent a value.
 
+An `INT` column is checked at the same time. Its source must be a whole number on every row: a count, such as the moment's event count or a subject attribute drawn as one. Anything else, such as an amount, stops planning (`FLX-3303`). The engine reads this from how each value is drawn, not from the values one run happened to draw, so the same declarations get the same answer on every run.
+
 Types come from a small closed set. `float` and `double` columns are refused by name (`FLX-3001`) because they have no reproducible spelling. Use `DECIMAL(p,s)` instead. A row is a JSON array in contract order:
 
 ```console

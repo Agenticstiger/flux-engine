@@ -79,6 +79,7 @@ __all__ = [
     "Subject",
     "SubjectStore",
     "TRAIT_SCALE",
+    "integral_trait_names",
     "materialise_population",
     "subject_id",
 ]
@@ -274,6 +275,25 @@ def _worldview_value(name: str, declared: Any, persona_id: str) -> Any:
     if isinstance(declared, str):
         return nfc(declared)
     return probability_of(declared, what=f"Persona {persona_id!r} worldview {name!r}")
+
+
+def integral_trait_names(personas: Sequence[Mapping[str, Any]]) -> Tuple[str, ...]:
+    """The traits every subject that carries them holds as a whole number, NFC-sorted.
+
+    *personas* are the documents :func:`materialise_population` draws from.
+    A trait qualifies when every Persona that declares it draws it from an
+    :attr:`~flux_engine.world.families.Family.integral` family. A subject
+    whose Persona does not declare the trait carries no value for it, so that
+    Persona neither qualifies nor disqualifies the trait. Decided from the
+    declarations alone, before a subject exists.
+    """
+    specs = [PersonaSpec.from_document(document) for document in personas]
+    names = sorted({name for spec in specs for name in spec.traits}, key=nfc)
+    return tuple(
+        name
+        for name in names
+        if all(spec.traits[name].integral for spec in specs if name in spec.traits)
+    )
 
 
 # ---------------------------------------------------------------------------

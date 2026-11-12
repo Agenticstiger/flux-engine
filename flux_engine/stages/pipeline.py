@@ -65,6 +65,7 @@ from flux_engine.runtime import (
     compile_experiments,
     compile_journeys,
     emit_signals,
+    integral_payload_fields,
     requests_from_transitions,
     resolve_cast,
     run_campaign,
@@ -79,7 +80,12 @@ from flux_engine.seam.emit import (
     seam_digests,
     seam_entropy_bytes,
 )
-from flux_engine.seam.mapping import ColumnMapping, resolve_column_mapping, source_namespace
+from flux_engine.seam.mapping import (
+    ColumnMapping,
+    integral_namespace,
+    resolve_column_mapping,
+    source_namespace,
+)
 from flux_engine.seam.resolve import LoadedBundle, ResolvedEmit, load_bundle, resolve_all_emits
 from flux_engine.seam.sinks import NullSink
 from flux_engine.stages._parallel import (
@@ -89,7 +95,15 @@ from flux_engine.stages._parallel import (
     workers_for,
 )
 from flux_engine.verticals import emit_aliases, get_pack
-from flux_engine.world import PopulationSpec, SubjectStore, TraceLog, materialise_population
+from flux_engine.world import (
+    Derivation,
+    PopulationSpec,
+    SubjectStore,
+    TraceLog,
+    derivation_for,
+    integral_trait_names,
+    materialise_population,
+)
 
 __all__ = [
     "KERNEL_VERSION",
@@ -356,12 +370,15 @@ def execute(
         seed_tree = SeedTree(root=root)
 
         spec = PopulationSpec.from_document(world_doc)
+        personas = [cast.document(doc_id) for doc_id in cast.ids("Persona")]
+        derivation = derivation_for(spec.vertical)
         population = materialise_population(
             world=world_doc,
-            personas=[cast.document(doc_id) for doc_id in cast.ids("Persona")],
+            personas=personas,
             pack=pack,
             seed_tree=seed_tree,
             trace=trace,
+            derivation=derivation,
         )
 
         bounds = simulation.get("spec", {}).get("timeBounds", {})
@@ -423,7 +440,13 @@ def execute(
             counts = arm_counts(assignment, successes)
 
         scenario = _Scenario.build(
-            store=population, detections=detections, events=events, cast=cast, pack=pack
+            store=population,
+            detections=detections,
+            events=events,
+            cast=cast,
+            pack=pack,
+            derivation=derivation,
+            personas=personas,
         )
         emits = tuple(
             _generate_emit(resolved, digests, root, cast, simulation, scenario, jobs)
@@ -507,6 +530,7 @@ def _generate_emit(
         mapping = resolve_column_mapping(
             expose,
             declared_sources=scenario.declared_sources,
+            integral_sources=scenario.integral_sources,
             aliases=scenario.aliases,
             overrides=resolved.column_mapping,
         )
@@ -536,10 +560,19 @@ class _Scenario:
     """The run's own moments, ready to be rendered onto a declared row set.
 
     One instance per execution, built once from the population, the
-    detections and the vertical pack. It owns three things and nothing
+    detections and the vertical pack. It owns four things and nothing
     else: which source paths the run *declares* (so a mapping can be
-    refused at plan time rather than on the first row), the vertical's
-    alias table, and the ordered moments.
+    refused at plan time rather than on the first row), which of them are
+    always a whole number (so an ``INT`` column's source is checked at plan
+    time too), the vertical's alias table, and the ordered moments.
+
+    **Whole numbers are read off the families, never off the values.** A
+    derived attribute qualifies when its base family and every lifecycle
+    override draw only whole numbers, a trait when every Persona declaring
+    it does, a payload field when every Signal of the run declaring it does
+    (:attr:`flux_engine.world.families.Family.integral`). The population
+    and the events already exist here, and a check of what they happen to
+    hold would pass one run and fail the next on the same declarations.
 
     **Scheduler order, at the EMIT phase.** KERNEL-SPEC §7 fixes the
     ordering key ``(t_ms, phase, entity_ordinal, stream_ordinal, seq)`` and
@@ -554,6 +587,7 @@ class _Scenario:
     detections: Tuple[Detection, ...]
     aliases: Mapping[str, str]
     declared_sources: FrozenSet[str]
+    integral_sources: FrozenSet[str]
     stream_ordinal: int
 
     @classmethod
@@ -565,6 +599,8 @@ class _Scenario:
         events: Sequence[SignalEvent],
         cast: Cast,
         pack: Any,
+        derivation: Derivation,
+        personas: Sequence[Mapping[str, Any]],
     ) -> "_Scenario":
         signal_ids = {nfc(str(event.signal_id)) for event in events}
         signal_ids.update(nfc(str(signal_id)) for signal_id, _ in cast.of_kind("Signal"))
@@ -581,6 +617,11 @@ class _Scenario:
                 subject_attributes=store.derived_names,
                 subject_traits=store.trait_names,
                 event_payload_fields=payload_fields,
+            ),
+            integral_sources=integral_namespace(
+                subject_attributes=derivation.integral_names(),
+                subject_traits=integral_trait_names(personas),
+                event_payload_fields=integral_payload_fields(signal_ids, pack),
             ),
             stream_ordinal=cast.stream_ordinal(cast.simulation_id),
         )
@@ -644,5 +685,5 @@ class _Scenario:
         for item in scheduler.drain():
             if limit is not None and len(built) >= limit:
                 break
-            built.append(mapping.row(self._values(item.payload)))
+            built.append(mapping.row(self._values(item.payload), row_index=len(built)))
         return tuple(built)

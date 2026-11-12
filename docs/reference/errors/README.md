@@ -67,6 +67,7 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-3203](./FLX-3203.md) | positional row does not match the declared column count |
 | [FLX-3301](./FLX-3301.md) | emit writer used out of order |
 | [FLX-3302](./FLX-3302.md) | a required expose column has no runtime attribute mapped onto it |
+| [FLX-3303](./FLX-3303.md) | an INT expose column is mapped onto a source that is not always a whole number |
 | [FLX-3401](./FLX-3401.md) | no distribution family is available for this column |
 | [FLX-3402](./FLX-3402.md) | declared statistics do not parameterise the chosen family |
 | [FLX-3501](./FLX-3501.md) | a sink needs an optional extra that is not installed |

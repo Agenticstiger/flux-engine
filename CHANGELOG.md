@@ -19,6 +19,24 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+A FLUID `INTEGER` column takes a drawn count. No pinned digest moved:
+`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
+and `TRACE_VERSION` keep their values.
+
+### Changed
+
+- A FLUID `INTEGER` column of a scenario-driven emit takes a drawn count, such
+  as the towers `tenancyCount`. Whether the column's source is always a whole
+  number is decided at plan time from the declared families: a rate count, a
+  bounded normal at scale 0, a constant whole number, or an integer scalar such
+  as `moment.eventCount`. A source that is not, such as an amount, stops
+  planning with the new `FLX-3303`, where before the run failed on its first
+  row with `FLX-3003`, or passed when it had no rows. The renderer still
+  refuses a `Decimal` in an `INT` column from every other caller. KERNEL-SPEC
+  §9 states the rule.
+
 ## 0.4.0 - 2026-11-12
 
 A second vertical, `towers`, and FLUID 0.7.6. No telco digest moved:

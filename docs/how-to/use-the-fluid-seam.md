@@ -113,7 +113,7 @@ reproducible: not checked | validity: not asserted
 
 ## What the engine does with a column
 
-- **Types.** The engine renders each value as the column's declared type. `DECIMAL(18,4)` and `TIMESTAMP` values are strings, as above. A value that does not fit, such as a decimal in an `INT` column, fails the run with FLX-3003.
+- **Types.** The engine renders each value as the column's declared type. `DECIMAL(18,4)` and `TIMESTAMP` values are strings, as above. A value that does not fit, such as a decimal too large for its declared precision, fails the run with FLX-3003. An `INT` column needs a source that is a whole number on every row, such as a count: mapped onto anything else, such as an amount, it stops planning with FLX-3303.
 - **Where a value comes from.** For this contract the engine fills `subscriber_id`, `aborted_at`, `amount` and `market` through the telco alias table: the customer id, the moment of the event, the event's amount and the customer's market. A column that is not in that table is filled when its name matches an attribute of the event or the customer. `priceSensitivity` matches a Persona trait, so it has a value. List the names with `fluxsim expr model --bundle .`.
 - **A column with no source.** `plan_code` has none, so every row has `null` for it. This is allowed only because the column is optional. In a test with `required: true` on it, planning stopped with FLX-3302 and no run was written.
 - **`tags: [identifier]`.** The tag marks a column as an identifier. It does not give the column values: in a test, a second tagged column with no source was `null`. `subscriber_id` has values because the engine maps it to the customer id.

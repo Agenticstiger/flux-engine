@@ -110,6 +110,26 @@ class Derivation:
         """The ``flux-expr/1`` type of each derived attribute, for cross-checking a pack."""
         return {name: self.attributes[name].expr_type for name in self.names}
 
+    def integral_names(self) -> Tuple[str, ...]:
+        """The attributes every subject carries as a whole number, in :attr:`names` order.
+
+        An attribute qualifies only when its base family and every lifecycle
+        override of it are :attr:`~flux_engine.world.families.Family.integral`:
+        the cohort a subject lands in picks the family, and an ``INT`` column
+        fed by the attribute must hold in every cohort, not only in the ones
+        one run happened to draw.
+        """
+        return tuple(
+            name
+            for name in self.names
+            if self.attributes[name].integral
+            and all(
+                overrides[name].integral
+                for overrides in self.by_lifecycle.values()
+                if name in overrides
+            )
+        )
+
     def check_against(self, pack: VerticalPack) -> None:
         """Fail (``FLX-5040``) unless this table draws exactly what *pack* declares.
 

@@ -36,6 +36,10 @@ The scenario path (`seam/mapping.py`, `stages/pipeline.py`):
   subject.market`); (3) the column's own name, searched under `event.data.`, `subject.`, `subject.traits.` in
   that order. A **required** column no step resolves is `FLX-3302`, naming the column, before any row exists; an
   optional one renders JSON `null`.
+* **an INT column's source is checked in the same step**: it must be integral (KERNEL-SPEC §9), read off the
+  declared families and never off the values a run drew, or the emit is `FLX-3303`, naming the column and the
+  source, before any row exists. A `Decimal` from an integral source reaches the renderer as the exact `int` it
+  equals.
 * the moment's event is the **last** matched event of the detection — the one that completed the pattern.
 * rows are scheduled through KERNEL-SPEC §7's scheduler at `phase = EMIT`, keyed on that event's instant, and
   written through the same `EmitWriter`; `outputDigest` is unchanged (§8 of KERNEL-SPEC, computed above the sink).

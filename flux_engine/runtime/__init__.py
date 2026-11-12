@@ -79,7 +79,11 @@ from flux_engine.runtime.journey import (
     run_journeys,
 )
 from flux_engine.runtime.jurisdiction import MARKET_JURISDICTIONS, jurisdiction_map, jurisdiction_of
-from flux_engine.runtime.payloads import PAYLOAD_FAMILIES, payload_families
+from flux_engine.runtime.payloads import (
+    PAYLOAD_FAMILIES,
+    integral_payload_fields,
+    payload_families,
+)
 from flux_engine.runtime.signals import (
     ARRIVAL_DIAL,
     CLOUDEVENTS_ENVELOPE,
@@ -138,6 +142,7 @@ __all__ = [
     "compile_journeys",
     "default_readout",
     "emit_signals",
+    "integral_payload_fields",
     "jurisdiction_map",
     "jurisdiction_of",
     "negated_outcome",
