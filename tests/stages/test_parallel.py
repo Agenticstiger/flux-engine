@@ -19,12 +19,19 @@ import sys
 import time
 from decimal import ROUND_UP, Context, localcontext
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, List
 
 import pytest
 
+from flux_engine.core.errors import FluxError
+from flux_engine.core.seedtree import derive_root, digest_bytes
+from flux_engine.generator.rows import build_plan, generate_rows
+from flux_engine.seam.conform import render_row
+from flux_engine.seam.contract import compile_expose
 from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
+from flux_engine.stages.apply import _emit_summary_line
 from flux_engine.stages.plan import build_plan_document
 from tests.bundles import bundle_with_rows
 
@@ -130,7 +137,8 @@ def test_three_jobs_make_the_run_one_job_makes(tmp_path: Path) -> None:
     # framed lines has no sink, while one process writes through a NullSink.
     generated = [e for e in three.emits if e.plan is not None and e.plan.rows == rows]
     assert generated and all(e.writer.sink is None for e in generated)
-    assert all(e.writer.sink is not None for e in one.emits)
+    assert all(e.processes == min(3, parallel.cpu_jobs()) for e in generated)
+    assert all(e.writer.sink is not None and e.processes == 1 for e in one.emits)
 
 
 # ---------------------------------------------------------------------------
@@ -294,3 +302,120 @@ def test_workers_end_when_the_process_that_started_them_is_killed(tmp_path: Path
     while any(_alive(pid) for pid in workers) and time.monotonic() < deadline:
         time.sleep(0.2)
     assert not [pid for pid in workers if _alive(pid)]
+
+
+# ---------------------------------------------------------------------------
+# One budget for every run in the process
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_runs_in_one_process_share_one_worker_per_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(parallel, "cpu_jobs", lambda: 8)
+    budget = parallel._WorkerBudget()
+    with budget.reserve(6) as first:
+        assert first == 6
+        with budget.reserve(6) as second:
+            assert second == 2
+            with budget.reserve(4) as third:
+                assert third == 1  # nothing left: this run makes its rows itself
+    with budget.reserve(8) as again:
+        assert again == 8
+
+
+@pytest.mark.unit
+def test_reserve_workers_draws_on_the_one_budget_of_the_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(parallel, "cpu_jobs", lambda: 8)
+    with parallel.reserve_workers(6) as first:
+        with parallel.reserve_workers(6) as second:
+            assert (first, second) == (6, 2)
+    with parallel.reserve_workers(8) as again:
+        assert again == 8
+
+
+@pytest.mark.integration
+def test_a_run_makes_its_rows_itself_when_other_runs_hold_every_worker(
+    tmp_path: Path,
+) -> None:
+    """The pipeline asks the process's budget, not a budget of its own."""
+    rows = 3 * parallel.MIN_ROWS_PER_JOB + 11
+    bundle = _bundle(tmp_path, rows)
+    with parallel.reserve_workers(parallel.cpu_jobs()):
+        held = pipeline.execute(bundle, jobs=3)
+    generated = [e for e in held.emits if e.plan is not None and e.plan.rows == rows]
+    assert generated and all(e.processes == 1 for e in generated)
+    assert all(e.writer.sink is not None for e in generated)
+
+
+@pytest.mark.unit
+def test_a_run_that_fails_gives_its_workers_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(parallel, "cpu_jobs", lambda: 4)
+    budget = parallel._WorkerBudget()
+    with pytest.raises(RuntimeError):
+        with budget.reserve(4):
+            raise RuntimeError("the emit failed")
+    with budget.reserve(4) as granted:
+        assert granted == 4
+
+
+@pytest.mark.unit
+def test_the_summary_says_how_many_processes_made_an_emit() -> None:
+    def emitted(source_plan: Any, processes: int) -> Any:
+        return SimpleNamespace(
+            resolved=SimpleNamespace(expose_id="moments"),
+            result=SimpleNamespace(rows=9000),
+            source="generator" if source_plan else "scenario",
+            processes=processes,
+        )
+
+    def line(*outcomes: Any) -> str:
+        return _emit_summary_line(SimpleNamespace(emits=outcomes))  # type: ignore[arg-type]
+
+    assert line(emitted(True, 1)) == "emitted moments: 9000 rows (generator)"
+    assert line(emitted(True, 4)) == "emitted moments: 9000 rows (generator, 4 processes)"
+    assert line(emitted(False, 1)) == "emitted moments: 9000 rows (scenario)"
+
+
+# ---------------------------------------------------------------------------
+# A refusal raised inside a worker
+# ---------------------------------------------------------------------------
+
+_SEAM = "sha256:" + "1" * 64
+
+
+def _refused_on_every_row(rows: int) -> Any:
+    """A plan whose every row is refused when rendered: four integer digits in DECIMAL(5,2)."""
+    expose = compile_expose(
+        {
+            "exposeId": "amounts",
+            "kind": "stream",
+            "contract": {"schema": [{"name": "amount", "type": "DECIMAL(5,2)"}]},
+            "binding": {"platform": "kafka", "format": "kafka_topic", "location": {"topic": "t"}},
+        }
+    )
+    plan = build_plan(
+        expose,
+        sim_id="sim-refusal",
+        seam_digest=_SEAM,
+        rows=rows,
+        fidelity={"columns": {"amount": {"range": {"min": "1000", "max": "9000"}}}},
+    )
+    return plan, expose, derive_root(digest_bytes(_SEAM), 42)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.skipif(parallel.cpu_jobs() < 2, reason="one CPU: every emit stays in one process")
+def test_a_refusal_in_a_worker_is_the_refusal_one_process_raises() -> None:
+    """Every slice is refused; the run must report the one at row 0, as one process does."""
+    plan, expose, root = _refused_on_every_row(3 * parallel.MIN_ROWS_PER_JOB + 7)
+    with pytest.raises(FluxError) as alone:
+        for index, row in enumerate(generate_rows(plan, root=root)):
+            render_row(row, expose, row_index=index)
+    with pytest.raises(FluxError) as pooled:
+        parallel.generate_framed(plan, root=root, expose=expose, workers=3)
+    assert pooled.value.code is alone.value.code
+    assert str(pooled.value) == str(alone.value)
+    assert "row 0," in str(pooled.value)

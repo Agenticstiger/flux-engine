@@ -351,14 +351,18 @@ def _emit_summary_line(result: "_pipeline.PipelineResult") -> str:
     question anyone asks of a simulation, and a stream that silently
     produced none is exactly the failure this line makes impossible to
     miss. Emits are named in declared order (KERNEL-SPEC §3's ``emits[]``
-    order), so the line is stable across runs.
+    order), so the line is stable across runs. An emit made by more than one
+    process says how many, so ``--jobs`` shows whether it took effect; one
+    process, the common case, adds nothing to the line.
     """
     if not result.emits:
         return "no emits declared"
-    parts = [
-        f"{outcome.resolved.expose_id}: {outcome.result.rows} rows ({outcome.source})"
-        for outcome in result.emits
-    ]
+    parts = []
+    for outcome in result.emits:
+        source = outcome.source
+        if outcome.processes > 1:
+            source = f"{source}, {outcome.processes} processes"
+        parts.append(f"{outcome.resolved.expose_id}: {outcome.result.rows} rows ({source})")
     return "emitted " + "; ".join(parts)
 
 

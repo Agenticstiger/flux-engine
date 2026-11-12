@@ -187,9 +187,12 @@ statistics. The rows and every digest are the ones one job gives. The
 worker processes are started with spawn, so each one imports the host's
 main module again: a script that passes `jobs` above 1 keeps its work
 under `if __name__ == "__main__":`, and whatever it does at the top level,
-outside that block, happens again in every worker. The soft timeout stops
-neither the stage thread nor its workers; after `TimeoutError` they run on
-until the stage ends.
+outside that block, happens again in every worker. Runs in one process
+share one worker per CPU: an emit gets the workers it asks for or what
+other runs have left, so the count the run summary prints ("4 processes")
+also tells a caller how busy the process is. The soft timeout stops
+neither the stage thread nor its workers; after `TimeoutError` they run on,
+and keep their share of the workers, until the stage ends.
 
 Stability here is governed by the frozen-kwarg promise in that module's
 own docstring, not by `__api_version__`: `__api_version__` covers the

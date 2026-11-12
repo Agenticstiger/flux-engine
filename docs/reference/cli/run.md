@@ -55,7 +55,7 @@ fluxsim run ./bundle --sink adbc:duckdb --sink-opt uri=./sim.duckdb
 | `--allow-declared-baseline-drift` |  | exit 0 even when the bundle's declared golden.baselineDigest does not match this run's runDigest |
 | `--signing-key` | `SIGNING_KEY` | file holding a 32-byte ed25519 seed (raw or hex) to sign fidelity records with; without it ship signs with a per-invocation key attributable to nobody |
 | `--trust-key` | `PATH` | file holding the 32-byte raw ed25519 PUBLIC key (raw or hex -- the `publicKey` a fidelity record prints) the gate checks the record's signature against; without it the record is checked against the public half of the key that signed it and says it is self-attested |
-| `--jobs` | `N` | processes that generate the rows of an emit declared by statistics: a number (never more than one per CPU is used), or auto for one per CPU; the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1) |
+| `--jobs` | `N` | the most processes that may generate the rows of an emit declared by statistics: a number (never more than one per CPU) or auto for one per CPU; the run summary says how many it used, and the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1) |
 | `--state-dir` | `STATE_DIR` | run-state directory (default: ./.flux) |
 | `-j, --json` |  | emit machine-readable JSON |
 
