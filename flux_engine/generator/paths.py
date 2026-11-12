@@ -73,7 +73,7 @@ from flux_engine.core.seedtree import (
     path_label,
     seed_tree_digest,
     stream_entropy,
-    stream_entropy_of_label,
+    stream_of_label,
 )
 
 __all__ = [
@@ -183,9 +183,7 @@ class GeneratorStreams:
         existing = self._streams.get(label)
         if existing is not None:
             return existing
-        created = DrawStream.from_entropy(
-            stream_entropy_of_label(self.root, label), label=label.decode("utf-8", "replace")
-        )
+        created = stream_of_label(self.root, label)
         self._streams[label] = created
         self._materialised[label] = normalised
         return created
@@ -276,10 +274,7 @@ class CellStreams:
 
     def stream_at(self, row_index: int, column: str) -> DrawStream:
         """A new stream for one cell, positioned at its first word."""
-        label = self.label(row_index, column)
-        return DrawStream.from_entropy(
-            stream_entropy_of_label(self.root, label), label=label.decode("utf-8", "replace")
-        )
+        return stream_of_label(self.root, self.label(row_index, column))
 
 
 def resolve_stream_source(

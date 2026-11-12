@@ -43,7 +43,7 @@ from decimal import (
 )
 from fractions import Fraction
 from functools import lru_cache
-from typing import List, Mapping, Tuple, TypeVar
+from typing import Dict, List, Mapping, Sequence, Tuple, TypeVar
 
 from numpy.random import PCG64, Generator, SeedSequence
 
@@ -63,6 +63,7 @@ __all__ = [
     "bounded_uint",
     "categorical",
     "clear_memos",
+    "equal_weights",
     "exponential",
     "kernel_context",
     "nfc_sorted_items",
@@ -213,16 +214,9 @@ class DrawStream:
         return int(raw) & _WORD_MASK
 
     def next_raw_words(self, count: int) -> List[int]:
-        """Consume *count* raw words in one read and return them as Python ints.
+        """*count* calls of :meth:`next_raw` in one read into numpy: the same words, in order.
 
-        The words, their order and the advance of :attr:`position` are exactly those of
-        *count* calls of :meth:`next_raw`: ``random_raw(size)`` walks the bit generator one
-        word at a time, so the batch is only a cheaper way into numpy, not a different
-        stream. :func:`bounded_uint` spends a 64-word budget on every draw, which is where
-        the single reads added up.
-
-        A subclass that overrides :meth:`next_raw` (the tests' stub streams do) keeps its
-        own words: the batch read is taken only while :meth:`next_raw` is this class's own.
+        A subclass that overrides :meth:`next_raw` keeps its own words.
         """
         if type(self).next_raw is not DrawStream.next_raw:
             return [self.next_raw() for _ in range(count)]
@@ -331,6 +325,21 @@ def _categorical_table(
         cumulative += Fraction(weight)
         thresholds.append((int(cumulative * UNIFORM53_DENOMINATOR), key))
     return tuple(thresholds), ordered[-1][0]
+
+
+def equal_weights(names: Sequence[str]) -> Dict[str, Decimal]:
+    """Equal weights over *names*, as exact decimals that sum to exactly 1.
+
+    The last name absorbs the representation remainder: one third three
+    times sums to just under 1, and a weight set is compared against 1 on
+    exact rationals. Evaluated in the kernel's context, since the caller's
+    precision would change the share.
+    """
+    with localcontext(_pinned(KERNEL_DECIMAL_PRECISION)):
+        share = Decimal(1) / Decimal(len(names))
+        weights = {name: share for name in names}
+        weights[names[-1]] = Decimal(1) - share * (len(names) - 1)
+    return weights
 
 
 def bounded_uint(stream: DrawStream, n: int) -> int:

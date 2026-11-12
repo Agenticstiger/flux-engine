@@ -55,16 +55,11 @@ def test_an_empty_batch_reads_nothing() -> None:
 
 def test_a_stream_that_overrides_next_raw_keeps_its_own_words_in_a_batch() -> None:
     class _Counting(rng.DrawStream):
-        def __init__(self) -> None:
-            super().__init__(rng.DrawStream.from_entropy(1)._generator)
-            self._count = 0
-
         def next_raw(self) -> int:
             self._position += 1
-            self._count += 1
-            return self._count
+            return self._position
 
-    stream = _Counting()
+    stream = _Counting(rng.DrawStream.from_entropy(1)._generator)
     assert stream.next_raw_words(4) == [1, 2, 3, 4]
     assert stream.position == 4
 

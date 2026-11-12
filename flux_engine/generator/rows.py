@@ -57,6 +57,7 @@ from flux_engine.core.rng import (
     bernoulli,
     bounded_uint,
     categorical,
+    equal_weights,
     kernel_context,
     nfc_sorted_items,
     truncated_normal,
@@ -702,28 +703,13 @@ def _grid_of(low: _Exact, high: _Exact, step: _Exact) -> Tuple[int, int, int, in
     return low_units, step_units, points, exponent
 
 
-def _categorical_levels(statistics: ColumnStatistics) -> Mapping[str, Decimal]:
-    """The declared level weights, or the equal weights of a declared support."""
-    if statistics.levels is not None:
-        return statistics.levels
-    return _support_weights(statistics.support or ())
-
-
-def _support_weights(support: Sequence[str]) -> Dict[str, Decimal]:
-    """Equal weights over a declared support, the last level taking the residue."""
-    weight = Decimal(1) / Decimal(len(support))
-    weights = {name: weight for name in support[:-1]}
-    weights[support[-1]] = Decimal(1) - weight * (len(support) - 1)
-    return weights
-
-
 def _column_levels(statistics: ColumnStatistics) -> Mapping[str, Decimal]:
     """What a categorical column draws from: its levels, renormalised, once per declaration.
 
-    ``_renormalised(dict(_categorical_levels(statistics)))``, memoised on the
-    declared levels (or support) themselves. The memo works in the kernel's
-    own context, so the context of whichever caller asks first cannot be the
-    one it remembers.
+    The declared levels, or equal weights over a declared support, with any
+    rendering residue folded in (:func:`_renormalised`), memoised on the
+    declaration itself. The memo works in the kernel's own context, so the
+    context of whichever caller asks first cannot be the one it remembers.
     """
     if statistics.levels is not None:
         return _declared_levels(tuple(statistics.levels.items()))
@@ -739,7 +725,7 @@ def _declared_levels(items: Tuple[Tuple[str, Decimal], ...]) -> Mapping[str, Dec
 @lru_cache(maxsize=_MEMO_SIZE)
 def _declared_support(support: Tuple[str, ...]) -> Mapping[str, Decimal]:
     with localcontext(_KERNEL_CONTEXT):
-        return MappingProxyType(_renormalised(_support_weights(support)))
+        return MappingProxyType(_renormalised(equal_weights(support)))
 
 
 def _bin_keys(count: int) -> Tuple[str, ...]:

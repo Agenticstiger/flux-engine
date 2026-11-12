@@ -81,6 +81,7 @@ __all__ = [
     "signal_path",
     "stream_entropy",
     "stream_entropy_of_label",
+    "stream_of_label",
     "subject_products_path",
     "subject_trait_path",
     "sweep_effective_seed",
@@ -441,6 +442,13 @@ def stream_entropy_of_label(root: SeedTreeRoot, label: bytes) -> int:
     """
     material = _DOMAIN + _NUL + root.digest + _NUL + label
     return int.from_bytes(_sha256_bytes(material), "big")
+
+
+def stream_of_label(root: SeedTreeRoot, label: bytes) -> DrawStream:
+    """The stream §3 derives for the path whose :func:`path_label` is *label*, at its first word."""
+    return DrawStream.from_entropy(
+        stream_entropy_of_label(root, label), label=label.decode("utf-8", "replace")
+    )
 
 
 def derive_identifier(root: SeedTreeRoot, path: Sequence[SeedPathPart], *, length: int = 32) -> str:
@@ -896,6 +904,4 @@ class SeedTree:
 
     def _new_stream(self, path: SeedPath, label: bytes) -> DrawStream:
         """Derive one stream. The single seam a test subclass overrides to break the tree."""
-        return DrawStream.from_entropy(
-            stream_entropy(self.root, path), label=label.decode("utf-8", "replace")
-        )
+        return stream_of_label(self.root, label)
