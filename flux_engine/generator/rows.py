@@ -43,7 +43,9 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, localcontext
 from fractions import Fraction
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from functools import lru_cache
+from types import MappingProxyType
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from flux_engine.core.canonical import sha256_hex
 from flux_engine.core.clock import parse_rfc3339_ms
@@ -55,6 +57,7 @@ from flux_engine.core.rng import (
     bernoulli,
     bounded_uint,
     categorical,
+    equal_weights,
     kernel_context,
     nfc_sorted_items,
     truncated_normal,
@@ -69,7 +72,12 @@ from flux_engine.generator.families import (
     choose_family,
     classify_column,
 )
-from flux_engine.generator.paths import StreamSource, generator_column_path, resolve_stream_source
+from flux_engine.generator.paths import (
+    CellStreams,
+    StreamSource,
+    generator_column_path,
+    resolve_stream_source,
+)
 from flux_engine.generator.statistics import (
     DATE_EPOCH_ORDINAL,
     FLX_3402,
@@ -85,6 +93,7 @@ __all__ = [
     "GeneratorPlan",
     "IDENTIFIER_DEFAULT_LENGTH",
     "build_plan",
+    "clear_memos",
     "generate_column",
     "generate_rows",
     "identifier_value",
@@ -105,6 +114,43 @@ GENERATOR_VERSION = "flux-gen/1"
 IDENTIFIER_DEFAULT_LENGTH = 32
 
 _NUL = b"\x00"
+
+#: How many distinct declarations each memo below keeps. A plan declares one
+#: per column; the bound only stops a long-lived process from growing
+#: without limit.
+_MEMO_SIZE = 1024
+
+#: A finite ``Decimal`` exactly, as ``(sign, digits, exponent)``: what a memo
+#: below is keyed on when its result reads the value's exponent, so that
+#: ``Decimal("1.0")`` and ``Decimal("1.00")`` never share an entry.
+_Exact = Tuple[int, Tuple[int, ...], int]
+
+
+def clear_memos() -> None:
+    """Forget every declaration the generator's memos remembered.
+
+    Safe at any time, since no row depends on what is remembered;
+    :func:`flux_engine.stages.pipeline.execute` clears at the end of every
+    run, together with :func:`flux_engine.core.rng.clear_memos`.
+    """
+    for memo in (
+        _seam_bytes,
+        _grid_of,
+        _inner_bin_top,
+        _declared_levels,
+        _declared_support,
+        _bin_levels,
+    ):
+        memo.cache_clear()
+
+
+def _exact(value: Decimal) -> _Exact:
+    sign, digits, exponent = value.as_tuple()
+    return sign, digits, int(exponent)
+
+
+#: Declared types whose identifier is formatted as a UUID.
+_UUID_TYPES = ("uuid", "uniqueidentifier", "guid")
 
 #: The one ``decimal`` context every value in this module is computed in.
 #:
@@ -181,12 +227,31 @@ def identifier_value(
     version 4 (random) or 5 (name-based SHA-1) would be claiming a
     derivation this is not.
     """
+    _require_identifier_shape(length, as_uuid)
+    path = generator_column_path(sim_id, expose_id, row_index, column)
+    seam = _seam_bytes(seam_digest)
+    return _identifier_of_label(seam, path_label(path), length=length, as_uuid=as_uuid)
+
+
+def _require_identifier_shape(length: int, as_uuid: bool) -> None:
     if not 1 <= length <= 64:
         raise FluxError(FLX_3402, f"identifier length must lie in [1, 64], got {length}")
     if as_uuid and length < 32:
         raise FluxError(FLX_3402, "a UUID-shaped identifier needs at least 32 hex characters")
-    path = generator_column_path(sim_id, expose_id, row_index, column)
-    material = GENERATOR_LABEL + _NUL + digest_bytes(seam_digest) + _NUL + path_label(path)
+
+
+@lru_cache(maxsize=64)
+def _seam_bytes(seam_digest: str) -> bytes:
+    """The 32 bytes of ``H``, parsed once per digest rather than once per row."""
+    return digest_bytes(seam_digest)
+
+
+def _identifier_of_label(seam: bytes, label: bytes, *, length: int, as_uuid: bool) -> str:
+    """:func:`identifier_value`'s derivation, from ``H``'s bytes and the cell's path label.
+
+    The caller has checked the shape (:func:`_require_identifier_shape`).
+    """
+    material = GENERATOR_LABEL + _NUL + seam + _NUL + label
     digits = sha256_hex(material)
     if not as_uuid:
         return digits[:length]
@@ -470,12 +535,21 @@ def _bin_top(edges: Sequence[Decimal], index: int, step: Decimal) -> Decimal:
     top_edge = edges[index + 1]
     if index == len(edges) - 2:
         return top_edge
-    exponent = _common_exponent(edges[index], top_edge, step)
-    top = _decimal_from_units(
-        _grid_units(top_edge, exponent) - _grid_units(step, exponent), exponent
-    )
+    return _inner_bin_top(_exact(edges[index]), _exact(top_edge), _exact(step))
+
+
+@lru_cache(maxsize=_MEMO_SIZE)
+def _inner_bin_top(low: _Exact, top_edge: _Exact, step: _Exact) -> Decimal:
+    """:func:`_bin_top` for a bin below the last, once per bin.
+
+    Keyed on the exact representations, because the exponent the units are
+    counted in is read from them.
+    """
+    low_edge, top, unit = Decimal(low), Decimal(top_edge), Decimal(step)
+    exponent = _common_exponent(low_edge, top, unit)
+    below = _decimal_from_units(_grid_units(top, exponent) - _grid_units(unit, exponent), exponent)
     # A bin narrower than one grid point holds exactly its lower edge.
-    return top if top >= edges[index] else edges[index]
+    return below if below >= low_edge else low_edge
 
 
 def _require_drawable_uniform(column: CompiledColumn, statistics: ColumnStatistics) -> None:
@@ -603,27 +677,55 @@ def _uniform_on_grid(stream: DrawStream, low: Decimal, high: Decimal, step: Deci
     A uniform over a ``DECIMAL(18,4)`` range is therefore a uniform over the
     values that type can actually hold, not a rounded real.
     """
-    exponent = _common_exponent(low, high, step)
-    low_units = _grid_units(low, exponent)
-    step_units = _grid_units(step, exponent)
-    points = _grid_point_count(low, high, step)
+    low_units, step_units, points, exponent = _grid_of(_exact(low), _exact(high), _exact(step))
+    return _decimal_from_units(low_units + bounded_uint(stream, points) * step_units, exponent)
+
+
+@lru_cache(maxsize=_MEMO_SIZE)
+def _grid_of(low: _Exact, high: _Exact, step: _Exact) -> Tuple[int, int, int, int]:
+    """The integer grid :func:`_uniform_on_grid` draws on: low point, step, size, exponent.
+
+    A function of the three declared values alone, so it is worked out once
+    per column rather than once per draw. Keyed on their exact
+    representations, because the exponent the grid is counted in is read
+    from them. A refusal is raised rather than remembered.
+    """
+    low_value, high_value, step_value = Decimal(low), Decimal(high), Decimal(step)
+    exponent = _common_exponent(low_value, high_value, step_value)
+    low_units = _grid_units(low_value, exponent)
+    step_units = _grid_units(step_value, exponent)
+    points = _grid_point_count(low_value, high_value, step_value)
     if points < 1 or points > _MAX_ADDRESSABLE_GRID_POINTS:  # pragma: no cover
         # build_plan already refused this grid (_require_drawable_uniform).
         # The guard is kept so that no future caller of this function can
         # reach bounded_uint's silent fallback by skipping the plan.
         raise FluxError(FLX_3402, f"a grid of {points} points is not drawable in one draw")
-    return _decimal_from_units(low_units + bounded_uint(stream, points) * step_units, exponent)
+    return low_units, step_units, points, exponent
 
 
-def _categorical_levels(statistics: ColumnStatistics) -> Mapping[str, Decimal]:
-    """The declared level weights, or the equal weights of a declared support."""
+def _column_levels(statistics: ColumnStatistics) -> Mapping[str, Decimal]:
+    """What a categorical column draws from: its levels, renormalised, once per declaration.
+
+    The declared levels, or equal weights over a declared support, with any
+    rendering residue folded in (:func:`_renormalised`), memoised on the
+    declaration itself. The memo works in the kernel's own context, so the
+    context of whichever caller asks first cannot be the one it remembers.
+    """
     if statistics.levels is not None:
-        return statistics.levels
-    support = statistics.support or ()
-    weight = Decimal(1) / Decimal(len(support))
-    weights = {name: weight for name in support[:-1]}
-    weights[support[-1]] = Decimal(1) - weight * (len(support) - 1)
-    return weights
+        return _declared_levels(tuple(statistics.levels.items()))
+    return _declared_support(tuple(statistics.support or ()))
+
+
+@lru_cache(maxsize=_MEMO_SIZE)
+def _declared_levels(items: Tuple[Tuple[str, Decimal], ...]) -> Mapping[str, Decimal]:
+    with localcontext(_KERNEL_CONTEXT):
+        return MappingProxyType(_renormalised(dict(items)))
+
+
+@lru_cache(maxsize=_MEMO_SIZE)
+def _declared_support(support: Tuple[str, ...]) -> Mapping[str, Decimal]:
+    with localcontext(_KERNEL_CONTEXT):
+        return MappingProxyType(_renormalised(equal_weights(support)))
 
 
 def _bin_keys(count: int) -> Tuple[str, ...]:
@@ -635,21 +737,39 @@ def _draw_histogram(
 ) -> Decimal:
     """Pick a declared bin by its weight, then draw uniformly inside it."""
     bins = statistics.bins or ()
-    weights = statistics.bin_weights or ()
+    table = _bin_levels(tuple(statistics.bin_weights or ()))
+    if table is None:
+        raise FluxError(FLX_3402, f"{column.name}: binWeights sum to zero")
+    levels, positions = table
+    chosen = categorical(stream, levels)
+    index = positions[chosen]
+    step = _grid_step(column)
+    low = bins[index]
+    high = _bin_top(bins, index, step)
+    return _uniform_on_grid(stream, low, high, step)
+
+
+@lru_cache(maxsize=_MEMO_SIZE)
+def _bin_levels(
+    weights: Tuple[Decimal, ...],
+) -> Optional[Tuple[Mapping[str, Decimal], Mapping[str, int]]]:
+    """A histogram's bin weights as categorical levels, and each level's bin, once per set.
+
+    ``None`` when the weights sum to zero, which the caller refuses with the
+    column's name. Evaluated in the kernel's own context, like
+    :func:`_column_levels`.
+    """
     total = sum((Fraction(weight) for weight in weights), Fraction(0))
     if total <= 0:
-        raise FluxError(FLX_3402, f"{column.name}: binWeights sum to zero")
+        return None
     keys = _bin_keys(len(weights))
     normalised = {
         key: _fraction_as_decimal(Fraction(weight) / total)
         for key, weight in zip(keys, weights, strict=True)
     }
-    chosen = categorical(stream, _renormalised(normalised))
-    index = keys.index(chosen)
-    step = _grid_step(column)
-    low = bins[index]
-    high = _bin_top(bins, index, step)
-    return _uniform_on_grid(stream, low, high, step)
+    with localcontext(_KERNEL_CONTEXT):
+        levels = _renormalised(normalised)
+    return MappingProxyType(levels), MappingProxyType({key: i for i, key in enumerate(keys)})
 
 
 def _fraction_as_decimal(value: Fraction) -> Decimal:
@@ -750,7 +870,7 @@ def _draw_value(plan: ColumnPlan, stream: DrawStream) -> Any:
     kind = column.logical_type.kind
 
     if family is Family.CATEGORICAL:
-        level = categorical(stream, _renormalised(dict(_categorical_levels(statistics))))
+        level = categorical(stream, _column_levels(statistics))
         return _level_to_value(level, column)
 
     if family is Family.BOUNDED_NORMAL:
@@ -831,8 +951,11 @@ def _level_to_value(level: str, column: CompiledColumn) -> Any:
     return _from_grid(number, column)  # pragma: no cover - families table forbids the rest
 
 
+_Source = Union[CellStreams, StreamSource]
+
+
 def _cell(
-    plan: ColumnPlan, source: StreamSource, sim_id: str, expose_id: str, row_index: int, h: str
+    plan: ColumnPlan, source: _Source, sim_id: str, expose_id: str, row_index: int, h: str
 ) -> Any:
     """Produce one cell: an identifier, a declared null, or a draw.
 
@@ -849,21 +972,43 @@ def _cell(
 
 
 def _cell_in_context(
-    plan: ColumnPlan, source: StreamSource, sim_id: str, expose_id: str, row_index: int, h: str
+    plan: ColumnPlan, source: _Source, sim_id: str, expose_id: str, row_index: int, h: str
 ) -> Any:
-    """:func:`_cell`'s body, with the kernel's ``decimal`` context installed."""
+    """:func:`_cell`'s body, with the kernel's ``decimal`` context installed.
+
+    A :class:`~flux_engine.generator.paths.CellStreams` *source* is the
+    generator's own, built for this plan's ``sim_id`` and expose: the cell's
+    label comes from it whole. Any other source is asked for the stream at
+    the cell's path.
+    """
     column = plan.column
     if plan.column_type is ColumnType.IDENTIFIER:
+        length = plan.statistics.identifier_length or IDENTIFIER_DEFAULT_LENGTH
+        as_uuid = column.declared_type.strip().lower() in _UUID_TYPES
+        if isinstance(source, CellStreams):
+            _require_identifier_shape(length, as_uuid)
+            try:
+                label = source.label(row_index, column.name)
+            except (FluxError, UnicodeError):
+                label = None
+            if label is not None:
+                return _identifier_of_label(_seam_bytes(h), label, length=length, as_uuid=as_uuid)
+            # A part of the path is refused. identifier_value checks the parts
+            # and the seam digest in its own order, so the refusal raised is
+            # the one it raises.
         return identifier_value(
             h,
             sim_id=sim_id,
             expose_id=expose_id,
             row_index=row_index,
             column=column.name,
-            length=plan.statistics.identifier_length or IDENTIFIER_DEFAULT_LENGTH,
-            as_uuid=column.declared_type.strip().lower() in ("uuid", "uniqueidentifier", "guid"),
+            length=length,
+            as_uuid=as_uuid,
         )
-    stream = source.stream(generator_column_path(sim_id, expose_id, row_index, column.name))
+    if isinstance(source, CellStreams):
+        stream = source.stream_at(row_index, column.name)
+    else:
+        stream = source.stream(generator_column_path(sim_id, expose_id, row_index, column.name))
     if plan.statistics.null_fraction is not None:
         # The null draw comes first and always happens, so the value draw
         # lands on the same stream position whether or not the cell is null.
@@ -871,6 +1016,20 @@ def _cell_in_context(
         value = _draw_value(plan, stream)
         return None if is_null else value
     return _draw_value(plan, stream)
+
+
+def _stream_source(
+    plan: GeneratorPlan, root: Optional[SeedTreeRoot], source: Optional[StreamSource]
+) -> _Source:
+    """The pass's streams: the caller's *source*, or the generator's own over *root*.
+
+    The generator's own (:class:`~flux_engine.generator.paths.CellStreams`)
+    gives each cell the stream :class:`~flux_engine.generator.paths.GeneratorStreams`
+    would, without keeping every stream of the pass alive.
+    """
+    if root is not None and source is None:
+        return CellStreams(root, plan.sim_id, plan.expose.expose_id)
+    return resolve_stream_source(root=root, source=source)
 
 
 def generate_rows(
@@ -883,10 +1042,13 @@ def generate_rows(
 
     Each row is a tuple aligned to the expose's declared column order, in
     the value classes :mod:`flux_engine.seam.conform` renders. Pass either
-    the run's seed-tree *root* or an explicit stream *source*; see
-    :func:`flux_engine.generator.paths.resolve_stream_source`.
+    the run's seed-tree *root* or an explicit stream *source*. Over a
+    *root*, the generator's own
+    :class:`~flux_engine.generator.paths.CellStreams` serves every cell; a
+    *source* is used as given (see
+    :func:`flux_engine.generator.paths.resolve_stream_source`).
     """
-    streams = resolve_stream_source(root=root, source=source)
+    streams = _stream_source(plan, root, source)
     expose_id = plan.expose.expose_id
     return tuple(
         tuple(
@@ -910,7 +1072,7 @@ def generate_column(
     promises: the values produced column-first are the values produced
     row-first, because no cell's stream depends on any other cell.
     """
-    streams = resolve_stream_source(root=root, source=source)
+    streams = _stream_source(plan, root, source)
     column_plan = plan.column_plan(column)
     return tuple(
         _cell(column_plan, streams, plan.sim_id, plan.expose.expose_id, index, plan.seam_digest)

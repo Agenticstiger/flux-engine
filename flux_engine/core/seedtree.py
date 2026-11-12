@@ -80,6 +80,8 @@ __all__ = [
     "shape_counts",
     "signal_path",
     "stream_entropy",
+    "stream_entropy_of_label",
+    "stream_of_label",
     "subject_products_path",
     "subject_trait_path",
     "sweep_effective_seed",
@@ -428,9 +430,25 @@ def derive_root(seam: bytes, seed: int) -> SeedTreeRoot:
 
 def stream_entropy(root: SeedTreeRoot, path: Sequence[SeedPathPart]) -> int:
     """The ``SeedSequence`` entropy for *path* under *root* (§3's second formula)."""
-    label = path_label(path)
+    return stream_entropy_of_label(root, path_label(path))
+
+
+def stream_entropy_of_label(root: SeedTreeRoot, label: bytes) -> int:
+    """:func:`stream_entropy` for a path whose :func:`path_label` the caller already holds.
+
+    For a caller that needs the label anyway (to key a stream table, or to build it from
+    parts it checked once), so the label is not built a second time. *label* must be the
+    label :func:`path_label` returns; this function takes it on trust.
+    """
     material = _DOMAIN + _NUL + root.digest + _NUL + label
     return int.from_bytes(_sha256_bytes(material), "big")
+
+
+def stream_of_label(root: SeedTreeRoot, label: bytes) -> DrawStream:
+    """The stream §3 derives for the path whose :func:`path_label` is *label*, at its first word."""
+    return DrawStream.from_entropy(
+        stream_entropy_of_label(root, label), label=label.decode("utf-8", "replace")
+    )
 
 
 def derive_identifier(root: SeedTreeRoot, path: Sequence[SeedPathPart], *, length: int = 32) -> str:
@@ -886,6 +904,4 @@ class SeedTree:
 
     def _new_stream(self, path: SeedPath, label: bytes) -> DrawStream:
         """Derive one stream. The single seam a test subclass overrides to break the tree."""
-        return DrawStream.from_entropy(
-            stream_entropy(self.root, path), label=label.decode("utf-8", "replace")
-        )
+        return stream_of_label(self.root, label)

@@ -48,6 +48,11 @@ The engine report carries the exact diff for that row.
 method (:class:`StreamSource`), so a caller that has a real
 :class:`~flux_engine.core.seedtree.SeedTree` -- once it knows this shape
 -- passes it in and the generator uses it unchanged.
+
+A generation pass over a run root does not keep a table at all: it takes
+each cell's stream from :class:`CellStreams`, which hands out the stream
+:class:`GeneratorStreams` would for the same path and keeps none of them,
+since a pass asks for each cell's address once.
 """
 
 from __future__ import annotations
@@ -68,10 +73,12 @@ from flux_engine.core.seedtree import (
     path_label,
     seed_tree_digest,
     stream_entropy,
+    stream_of_label,
 )
 
 __all__ = [
     "GENERATOR_PATH_SHAPE",
+    "CellStreams",
     "GeneratorStreams",
     "StreamSource",
     "generator_column_path",
@@ -176,9 +183,7 @@ class GeneratorStreams:
         existing = self._streams.get(label)
         if existing is not None:
             return existing
-        created = DrawStream.from_entropy(
-            stream_entropy(self.root, normalised), label=label.decode("utf-8", "replace")
-        )
+        created = stream_of_label(self.root, label)
         self._streams[label] = created
         self._materialised[label] = normalised
         return created
@@ -207,6 +212,69 @@ class GeneratorStreams:
     def digest(self) -> str:
         """``seedTreeDigest`` over the paths this pass materialised."""
         return seed_tree_digest(self.materialised_paths)
+
+
+#: The byte between two parts of a seed-tree label (KERNEL-SPEC §3).
+_PART_SEPARATOR = b"\x1f"
+
+
+class CellStreams:
+    """The generator's own streams for one pass over a run root: a new stream per cell.
+
+    :class:`GeneratorStreams` keeps every stream it hands out, so that asking twice
+    for one address continues one stream, and records every path for its
+    :meth:`~GeneratorStreams.digest`. A generation pass over a run root needs
+    neither. It asks for each cell's address exactly once, since a compiled
+    expose's column names are unique (``FLX-3004``), and nothing reads the pass's
+    table afterwards. Keeping one numpy generator per cell alive until the pass
+    ended was what made a run's memory grow with its row count.
+
+    Each stream here is the one :class:`GeneratorStreams` hands out for the same
+    path: the same label, so the same entropy, so the same words. The label is
+    put together from parts checked once per pass and once per column, rather than
+    rebuilt and re-checked part by part for every cell, which is where much of a
+    cell's time went.
+    """
+
+    __slots__ = ("root", "_sim_id", "_expose_id", "_prefix", "_columns")
+
+    def __init__(self, root: SeedTreeRoot, sim_id: str, expose_id: str) -> None:
+        self.root = root
+        self._sim_id = sim_id
+        self._expose_id = expose_id
+        self._prefix: Optional[bytes] = None
+        self._columns: Dict[str, bytes] = {}
+
+    def label(self, row_index: int, column: str) -> bytes:
+        """§3's label of ``generator_column_path(sim_id, expose_id, row_index, column)``.
+
+        Byte for byte what :func:`~flux_engine.core.seedtree.path_label` returns for
+        that path: a decimal ordinal is its own NFC form and holds no separator, so
+        its part is its ASCII digits.
+        """
+        prefix = self._prefix
+        try:
+            suffix = self._columns.get(column)
+        except TypeError:  # not a name at all: the whole route below refuses it
+            suffix = None
+        if prefix is None or suffix is None:
+            # A column's first cell is labelled the whole way, so every part is
+            # checked, and refused, exactly as for any other path. No part holds
+            # a separator, so the label splits back into its seven parts.
+            whole = path_label(
+                generator_column_path(self._sim_id, self._expose_id, row_index, column)
+            )
+            head, _ordinal, tail = whole.rsplit(_PART_SEPARATOR, 2)
+            self._prefix = head + _PART_SEPARATOR
+            self._columns[column] = _PART_SEPARATOR + tail
+            return whole
+        # Every fixed part and this column have passed; only the ordinal is new.
+        ordinal = _require_ordinal(row_index, "rowIndex")
+        return prefix + str(ordinal).encode("ascii") + suffix
+
+    def stream_at(self, row_index: int, column: str) -> DrawStream:
+        """A new stream for one cell, positioned at its first word."""
+        return stream_of_label(self.root, self.label(row_index, column))
 
 
 def resolve_stream_source(

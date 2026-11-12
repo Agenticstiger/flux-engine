@@ -51,7 +51,7 @@ from typing import Any, Dict, FrozenSet, Iterator, List, Mapping, Optional, Sequ
 
 from flux_engine.core.errors import FluxError
 from flux_engine.core.lrm import largest_remainder
-from flux_engine.core.rng import DrawStream, bounded_uint, kernel_context
+from flux_engine.core.rng import DrawStream, bounded_uint, equal_weights, kernel_context
 from flux_engine.core.seedtree import (
     SeedTree,
     SeedTreeRoot,
@@ -462,18 +462,8 @@ def _blocks(allocation: Mapping[str, int]) -> Tuple[str, ...]:
 
 
 def _equal_share(names: Sequence[str], size: int) -> Mapping[str, Decimal]:
-    """Equal largest-remainder weights over *names*, as exact decimals."""
-    # In the kernel's context: the caller's precision would change the share,
-    # and with it which subject the remainder lands on.
-    with localcontext(kernel_context()):
-        share = Decimal(1) / Decimal(len(names))
-        weights = {name: share for name in names}
-        # The last name absorbs the representation remainder so the weights
-        # sum to exactly 1: `largest_remainder` compares the sum against 1 on
-        # exact rationals and would otherwise refuse three thirds of 1.
-        last = names[-1]
-        weights[last] = Decimal(1) - share * (len(names) - 1)
-    return weights
+    """Equal largest-remainder weights over *names* (:func:`~flux_engine.core.rng.equal_weights`)."""
+    return equal_weights(names)
 
 
 def materialise_population(

@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.api.emit import EmitHeader, EmitSink
-from flux_engine.core.canonical import canonical_bytes
+from flux_engine.core.canonical import canonical_array_bytes, canonical_bytes
 from flux_engine.core.digest import DigestRef, digest_of_document, digest_of_stream
 from flux_engine.core.errors import FluxError, register
 from flux_engine.core.seedtree import digest_bytes, seam_bytes
@@ -144,7 +144,7 @@ def emit_header_document(expose: CompiledExpose, contract_digest: DigestRef) -> 
 
 def row_line(rendered: Sequence[Any]) -> bytes:
     """``JCS([v1, v2, ...]) + b"\\n"`` -- §8's ``line(row)``."""
-    return canonical_bytes(list(rendered)) + _NEWLINE
+    return canonical_array_bytes(rendered) + _NEWLINE
 
 
 def output_digest(header: Mapping[str, Any], lines: Iterable[bytes], *, subject: str) -> DigestRef:

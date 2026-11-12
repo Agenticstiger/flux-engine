@@ -43,7 +43,7 @@ from decimal import (
 )
 from fractions import Fraction
 from functools import lru_cache
-from typing import Mapping, Tuple, TypeVar
+from typing import Dict, List, Mapping, Sequence, Tuple, TypeVar
 
 from numpy.random import PCG64, Generator, SeedSequence
 
@@ -62,6 +62,8 @@ __all__ = [
     "bernoulli",
     "bounded_uint",
     "categorical",
+    "clear_memos",
+    "equal_weights",
     "exponential",
     "kernel_context",
     "nfc_sorted_items",
@@ -95,6 +97,15 @@ _WORD_MASK = (1 << WORD_BITS) - 1
 #: ``uniform53`` returns an integer in ``[0, 2**53)``; this is the denominator that turns
 #: it into an exact fraction of the unit interval.
 UNIFORM53_DENOMINATOR = 1 << 53
+_UNIFORM53_DECIMAL = Decimal(UNIFORM53_DENOMINATOR)
+
+_ZERO = Decimal(0)
+_ONE = Decimal(1)
+_HALF = Decimal("0.5")
+
+#: How many distinct parameter sets each memo below keeps. A run declares a handful per
+#: trait; the bound only stops a long-lived process from growing without limit.
+_MEMO_SIZE = 1024
 
 #: §4: ``bounded_uint`` is "debiased by a fixed 64-draw budget ... the bound is consumed in
 #: full (all 64 words are always drawn) so the stream position is data-independent".
@@ -202,6 +213,17 @@ class DrawStream:
         self._position += 1
         return int(raw) & _WORD_MASK
 
+    def next_raw_words(self, count: int) -> List[int]:
+        """*count* calls of :meth:`next_raw` in one read into numpy: the same words, in order.
+
+        A subclass that overrides :meth:`next_raw` keeps its own words.
+        """
+        if type(self).next_raw is not DrawStream.next_raw:
+            return [self.next_raw() for _ in range(count)]
+        words: List[int] = self._bit_generator.random_raw(count).tolist()
+        self._position += count
+        return words
+
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"DrawStream(label={self.label!r}, position={self._position})"
 
@@ -221,13 +243,18 @@ def uniform53(stream: DrawStream) -> int:
     return stream.next_raw() >> (WORD_BITS - 53)
 
 
+@lru_cache(maxsize=_MEMO_SIZE)
 def _probability_threshold(p: Decimal) -> int:
-    """``floor(p · 2**53)`` on exact rationals -- the integer form of §4's comparison."""
+    """``floor(p · 2**53)`` on exact rationals -- the integer form of §4's comparison.
+
+    Memoised: the threshold is a function of the value of *p* alone, and one declared
+    probability is compared against on every draw that uses it.
+    """
     return int(Fraction(p) * UNIFORM53_DENOMINATOR)
 
 
 def _require_probability(p: Decimal, what: str) -> None:
-    if not Decimal(0) <= p <= Decimal(1):
+    if not _ZERO <= p <= _ONE:
         raise FluxError(FLX_5021, f"{what} must lie in [0, 1], got {p}")
 
 
@@ -250,10 +277,37 @@ def categorical(stream: DrawStream, levels: Mapping[str, Decimal]) -> str:
     weights, so no level's share depends on the order in which the weights were
     accumulated. The last level absorbs the rounding remainder, which makes the sampler
     total: every value ``uniform53`` can return maps to a declared level.
+
+    The thresholds depend on the weights alone, so they are worked out once per distinct
+    level set (:func:`_categorical_table`) rather than once per draw.
     """
     if not levels:
         raise FluxError(FLX_5021, "categorical levels must not be empty")
-    ordered = nfc_sorted_items(levels)
+    items = tuple(levels.items())
+    try:
+        thresholds, last = _categorical_table(items)
+    except TypeError:
+        # A weight that cannot be hashed cannot key the memo. Work the table out directly,
+        # so that whatever the computation raises is what the caller sees.
+        thresholds, last = _categorical_table.__wrapped__(items)
+    draw = uniform53(stream)
+    for threshold, key in thresholds:
+        if draw < threshold:
+            return key
+    return last
+
+
+@lru_cache(maxsize=_MEMO_SIZE)
+def _categorical_table(
+    items: Tuple[Tuple[str, Decimal], ...],
+) -> Tuple[Tuple[Tuple[int, str], ...], str]:
+    """:func:`categorical`'s cumulative integer thresholds, and the level that takes the rest.
+
+    Levels in NFC key order; each threshold is ``int(cumulative · 2**53)`` on the exact
+    rational running sum, so a draw below it picks that level. A refusal is raised rather
+    than remembered, so the next draw that asks is refused the same way.
+    """
+    ordered = nfc_sorted_items(dict(items))
     total = Fraction(0)
     for key, weight in ordered:
         if weight < 0:
@@ -265,14 +319,27 @@ def categorical(stream: DrawStream, levels: Mapping[str, Decimal]) -> str:
             f"categorical weights sum to {total.numerator}/{total.denominator}, "
             f"which is further than {WEIGHT_SUM_TOLERANCE} from 1",
         )
-
-    draw = uniform53(stream)
+    thresholds = []
     cumulative = Fraction(0)
     for key, weight in ordered[:-1]:
         cumulative += Fraction(weight)
-        if draw < int(cumulative * UNIFORM53_DENOMINATOR):
-            return key
-    return ordered[-1][0]
+        thresholds.append((int(cumulative * UNIFORM53_DENOMINATOR), key))
+    return tuple(thresholds), ordered[-1][0]
+
+
+def equal_weights(names: Sequence[str]) -> Dict[str, Decimal]:
+    """Equal weights over *names*, as exact decimals that sum to exactly 1.
+
+    The last name absorbs the representation remainder: one third three
+    times sums to just under 1, and a weight set is compared against 1 on
+    exact rationals. Evaluated in the kernel's context, since the caller's
+    precision would change the share.
+    """
+    with localcontext(_pinned(KERNEL_DECIMAL_PRECISION)):
+        share = Decimal(1) / Decimal(len(names))
+        weights = {name: share for name in names}
+        weights[names[-1]] = Decimal(1) - share * (len(names) - 1)
+    return weights
 
 
 def bounded_uint(stream: DrawStream, n: int) -> int:
@@ -290,7 +357,11 @@ def bounded_uint(stream: DrawStream, n: int) -> int:
     if n < 1:
         raise FluxError(FLX_5021, f"bounded_uint bound must be >= 1, got {n}")
 
-    words = [stream.next_raw() for _ in range(BOUNDED_UINT_DRAW_BUDGET)]
+    batch = getattr(stream, "next_raw_words", None)
+    if batch is not None:
+        words = batch(BOUNDED_UINT_DRAW_BUDGET)
+    else:  # a stream-like object that reads one word at a time
+        words = [stream.next_raw() for _ in range(BOUNDED_UINT_DRAW_BUDGET)]
     # Lemire's rejection threshold, 2**64 mod n. Written out rather than spelled with the
     # C idiom ``(-n) % n``, which relies on unsigned wraparound and evaluates to 0 in
     # Python's arbitrary-precision integers.
@@ -349,6 +420,20 @@ def kernel_context(precision: int = KERNEL_DECIMAL_PRECISION) -> Context:
     )
 
 
+@lru_cache(maxsize=None)
+def _pinned(precision: int) -> Context:
+    """One shared :func:`kernel_context` per precision, for ``localcontext`` to copy.
+
+    ``localcontext(ctx)`` installs a *copy* of *ctx* (the ``decimal`` documentation's own
+    words), so the copy is what collects flags and the shared original is never made
+    current and never changes. Every evaluation therefore starts from exactly the context
+    :func:`kernel_context` builds, without building a new ``Context`` for each of the dozen
+    contexts one continuous draw enters. Private: :func:`kernel_context` still hands every
+    outside caller a fresh one it may change.
+    """
+    return kernel_context(precision)
+
+
 def _current_precision() -> int:
     """The precision of the context the caller is currently evaluating in."""
     return getcontext().prec
@@ -362,7 +447,7 @@ def _pi(precision: int) -> Decimal:
     documentation, transcribed onto an explicit context instead of the ambient one so the
     value cannot depend on a caller's settings.
     """
-    with localcontext(kernel_context(precision + 4)):
+    with localcontext(_pinned(precision + 4)):
         three = Decimal(3)
         lasts, t, s, n, na, d, da = Decimal(0), three, Decimal(3), 1, 0, 0, 24
         while s != lasts:
@@ -371,31 +456,31 @@ def _pi(precision: int) -> Decimal:
             d, da = d + da, da + 32
             t = (t * n) / d
             s += t
-    with localcontext(kernel_context(precision)):
+    with localcontext(_pinned(precision)):
         return +s
 
 
 @lru_cache(maxsize=None)
 def _sqrt_pi(precision: int) -> Decimal:
-    with localcontext(kernel_context(precision + 4)):
+    with localcontext(_pinned(precision + 4)):
         value = _pi(precision + 4).sqrt()
-    with localcontext(kernel_context(precision)):
+    with localcontext(_pinned(precision)):
         return +value
 
 
 @lru_cache(maxsize=None)
 def _sqrt_two(precision: int) -> Decimal:
-    with localcontext(kernel_context(precision + 4)):
+    with localcontext(_pinned(precision + 4)):
         value = Decimal(2).sqrt()
-    with localcontext(kernel_context(precision)):
+    with localcontext(_pinned(precision)):
         return +value
 
 
 @lru_cache(maxsize=None)
 def _sqrt_two_pi(precision: int) -> Decimal:
-    with localcontext(kernel_context(precision + 4)):
+    with localcontext(_pinned(precision + 4)):
         value = (2 * _pi(precision + 4)).sqrt()
-    with localcontext(kernel_context(precision)):
+    with localcontext(_pinned(precision)):
         return +value
 
 
@@ -449,13 +534,13 @@ def normal_cdf(x: Decimal, *, precision: int = KERNEL_DECIMAL_PRECISION) -> Deci
     number with full precision rather than as the difference of two values that both round
     to 1.
     """
-    with localcontext(kernel_context(_WORKING_PRECISION)):
+    with localcontext(_pinned(_WORKING_PRECISION)):
         scaled = x / _sqrt_two(_WORKING_PRECISION)
         if scaled <= 0:
             value = _erfc_nonnegative(-scaled) / 2
         else:
             value = 1 - _erfc_nonnegative(scaled) / 2
-    with localcontext(kernel_context(precision)):
+    with localcontext(_pinned(precision)):
         return +value
 
 
@@ -512,7 +597,7 @@ def _acklam(p: Decimal) -> Decimal:
         return -_acklam_tail((-2 * (1 - p).ln()).sqrt())
     a0, a1, a2, a3, a4, a5 = _ACKLAM_A
     b0, b1, b2, b3, b4 = _ACKLAM_B
-    q = p - Decimal("0.5")
+    q = p - _HALF
     r = q * q
     numerator = (((((a0 * r + a1) * r + a2) * r + a3) * r + a4) * r + a5) * q
     denominator = ((((b0 * r + b1) * r + b2) * r + b3) * r + b4) * r + 1
@@ -531,14 +616,14 @@ def normal_ppf(p: Decimal, *, precision: int = KERNEL_DECIMAL_PRECISION) -> Deci
     is unconditional -- there is no "iterate until converged" loop whose trip count could
     differ between two evaluations of the same input.
     """
-    if not Decimal(0) < p < Decimal(1):
+    if not _ZERO < p < _ONE:
         raise FluxError(FLX_5021, f"normal_ppf requires 0 < p < 1, got {p}")
-    with localcontext(kernel_context(_WORKING_PRECISION)):
+    with localcontext(_pinned(_WORKING_PRECISION)):
         x = _acklam(p)
         residual = normal_cdf(x, precision=_WORKING_PRECISION) - p
         u = residual * _sqrt_two_pi(_WORKING_PRECISION) * (x * x / 2).exp()
         refined = x - u / (1 + x * u / 2)
-    with localcontext(kernel_context(precision)):
+    with localcontext(_pinned(precision)):
         return +refined
 
 
@@ -554,8 +639,8 @@ def _unit_interval(draw: int) -> Decimal:
     is inside the working precision, so this quotient is exact: the conversion introduces
     no rounding of its own.
     """
-    with localcontext(kernel_context(_WORKING_PRECISION)):
-        return Decimal(draw) / Decimal(UNIFORM53_DENOMINATOR)
+    with localcontext(_pinned(_WORKING_PRECISION)):
+        return Decimal(draw) / _UNIFORM53_DECIMAL
 
 
 def _unrepresentable(scale: int) -> FluxError:
@@ -578,7 +663,7 @@ def _unrepresentable(scale: int) -> FluxError:
 def _quantise(value: Decimal, scale: int) -> Decimal:
     if scale < 0:
         raise FluxError(FLX_5021, f"declared scale must be >= 0, got {scale}")
-    with localcontext(kernel_context(_WORKING_PRECISION)):
+    with localcontext(_pinned(_WORKING_PRECISION)):
         try:
             return value.quantize(Decimal(1).scaleb(-scale))
         except InvalidOperation:
@@ -589,7 +674,7 @@ def _inward_bounds(lo: Decimal, hi: Decimal, scale: int) -> Tuple[Decimal, Decim
     """The declared bounds rounded *inward* onto the declared scale."""
     if scale < 0:
         raise FluxError(FLX_5021, f"declared scale must be >= 0, got {scale}")
-    with localcontext(kernel_context(_WORKING_PRECISION)):
+    with localcontext(_pinned(_WORKING_PRECISION)):
         step = Decimal(1).scaleb(-scale)
         try:
             lo_q = lo.quantize(step, rounding=ROUND_CEILING)
@@ -651,7 +736,7 @@ def truncated_normal(
     if stddev == 0:
         return _clamp(_quantise(mean, scale), lo_q, hi_q)
 
-    with localcontext(kernel_context(_WORKING_PRECISION)):
+    with localcontext(_pinned(_WORKING_PRECISION)):
         u = _unit_interval(draw)
         a = (lo - mean) / stddev
         b = (hi - mean) / stddev
@@ -665,8 +750,8 @@ def truncated_normal(
 
 def _standard_truncated(u: Decimal, a: Decimal, b: Decimal) -> Decimal:
     """Φ⁻¹ of *u* mapped into ``[Φ(a), Φ(b)]``. Inside a working-precision context."""
-    cdf_a = normal_cdf(a, precision=_WORKING_PRECISION)
-    cdf_b = normal_cdf(b, precision=_WORKING_PRECISION)
+    cdf_a = _bound_cdf(a)
+    cdf_b = _bound_cdf(b)
     mass = cdf_b - cdf_a
     if mass <= 0:
         # A degenerate interval: equal bounds, or one whose mass is below the working
@@ -682,6 +767,39 @@ def _standard_truncated(u: Decimal, a: Decimal, b: Decimal) -> Decimal:
     return normal_ppf(target, precision=_WORKING_PRECISION)
 
 
+def _bound_cdf(bound: Decimal) -> Decimal:
+    """Φ(*bound*) at the working precision, evaluated once per distinct bound.
+
+    A trait's standardised bounds are the same on every draw, and their two Φ values were
+    about half of a bounded-normal draw's cost. :func:`normal_cdf` runs in pinned contexts
+    and reads nothing but its argument, so the memo is exact. It is keyed on the bound's
+    representation (sign, digits and exponent), not on its numeric value, so it hands back
+    precisely the ``Decimal`` the evaluation itself returns.
+    """
+    if not bound.is_finite():
+        # Not a key the memo can hold; the evaluation refuses it as it always has.
+        return normal_cdf(bound, precision=_WORKING_PRECISION)
+    sign, digits, exponent = bound.as_tuple()
+    return _bound_cdf_of((sign, digits, int(exponent)))
+
+
+@lru_cache(maxsize=_MEMO_SIZE)
+def _bound_cdf_of(bound: Tuple[int, Tuple[int, ...], int]) -> Decimal:
+    return normal_cdf(Decimal(bound), precision=_WORKING_PRECISION)
+
+
+def clear_memos() -> None:
+    """Forget every parameter set the samplers above remembered.
+
+    No draw depends on what is remembered, only on its parameters, so
+    clearing is always safe. :func:`flux_engine.stages.pipeline.execute`
+    clears at the end of every run, so a long-lived process that runs many
+    bundles keeps none of one bundle's declarations once its run is over.
+    """
+    for memo in (_probability_threshold, _categorical_table, _bound_cdf_of):
+        memo.cache_clear()
+
+
 def exponential(stream: DrawStream, *, rate: Decimal, scale: int = 6) -> Decimal:
     """One draw from the exponential distribution -- §4: "inverse CDF in ``decimal``".
 
@@ -692,7 +810,7 @@ def exponential(stream: DrawStream, *, rate: Decimal, scale: int = 6) -> Decimal
     if rate <= 0:
         raise FluxError(FLX_5021, f"exponential rate must be > 0, got {rate}")
     draw = uniform53(stream)
-    with localcontext(kernel_context(_WORKING_PRECISION)):
+    with localcontext(_pinned(_WORKING_PRECISION)):
         value = -((1 - _unit_interval(draw)).ln()) / rate
     return _quantise(value, scale)
 
@@ -705,7 +823,7 @@ def poisson_cap(mean: Decimal) -> int:
     """
     if mean < 0:
         raise FluxError(FLX_5021, f"poisson mean must be >= 0, got {mean}")
-    with localcontext(kernel_context(_WORKING_PRECISION)):
+    with localcontext(_pinned(_WORKING_PRECISION)):
         bound = mean + 10 * mean.sqrt() + 10
         return int(bound.to_integral_value(rounding=ROUND_FLOOR))
 
@@ -724,7 +842,7 @@ def poisson(stream: DrawStream, *, mean: Decimal) -> int:
     if mean == 0:
         return 0
     cap = poisson_cap(mean)
-    with localcontext(kernel_context(_WORKING_PRECISION)):
+    with localcontext(_pinned(_WORKING_PRECISION)):
         u = _unit_interval(draw)
         term = (-mean).exp()
         cumulative = term
