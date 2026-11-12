@@ -19,6 +19,28 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## 0.3.1 - 2026-11-12
+
+A fix for the HTTP lineage emitter. No pinned digest moved:
+`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
+and `TRACE_VERSION` keep their values.
+
+### Fixed
+
+- `OpenLineageHttpEmitter` delivers its events. Since 0.2.0 it handed the
+  OpenLineage client a plain dict, which the client refuses, and swallowed
+  the error, so with the `[lineage]` extra installed no event reached the
+  receiver: `failed` counted each one and `flush()` returned `False`. Events
+  now go through the client's HTTP transport, and the body leaves out null
+  values, which the NDJSON lines keep. `OPENLINEAGE_DISABLED` still turns
+  delivery off.
+
+### Development
+
+- A `Lineage extra` CI job, and `make lineage-extra`, run the lineage tests
+  against the real client. `make ci-local` runs that target first and needs
+  the extra: `uv sync --extra dev --extra lineage`.
+
 ## 0.3.0 - 2026-11-12
 
 Output sinks, and generation several times faster. No pinned digest moved:

@@ -27,7 +27,7 @@ either way.
 
 ```console
 $ fluxsim --version
-0.3.0
+0.3.1
 ```
 
 ## 2. Create a project
