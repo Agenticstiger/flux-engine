@@ -32,6 +32,7 @@ so an intermediate structure is as order-stable as the bytes it becomes.
 from __future__ import annotations
 
 import hashlib
+import json
 import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
@@ -52,6 +53,7 @@ __all__ = [
     "JCS_MAX_SAFE_INTEGER",
     "NON_DIGEST_FIELDS",
     "SELF_REFERENTIAL_FIELDS",
+    "canonical_array_bytes",
     "canonical_bytes",
     "canonicalise",
     "coerce_key",
@@ -258,6 +260,44 @@ def canonical_bytes(value: Any) -> bytes:
         raise FluxError(FLX_1003, str(exc)) from exc
     except rfc8785.CanonicalizationError as exc:  # pragma: no cover - guarded above
         raise FluxError(FLX_1005, str(exc)) from exc
+
+
+def canonical_array_bytes(values: Sequence[Any]) -> bytes:
+    """``canonical_bytes(list(values))``, quicker for a flat array of JSON scalars.
+
+    A row the seam renders (KERNEL-SPEC §9) is a flat array of strings,
+    integers, booleans and nulls. For such an array JCS writes exactly what
+    the standard library's JSON encoder writes with ``ensure_ascii=False``
+    and no whitespace: ``null``, ``true``/``false``, an integer's decimal
+    digits, and a string escaped by one rule -- the quote, the backslash,
+    ``\\b \\f \\n \\r \\t``, and any other control character as
+    ``\\u00XX``. ``rfc8785``'s escape table is the encoder's own table, and
+    the two agree on every code point outside the surrogates. Each string is
+    NFC'd first, as :func:`canonicalise` does.
+
+    Anything else -- a nested value, a ``Decimal``, an integer outside the
+    JCS domain, a subclass of ``str`` or ``int``, a string that is not valid
+    UTF-8 -- goes through :func:`canonical_bytes`, so those bytes and every
+    refusal are that function's own.
+    """
+    scalars: List[Any] = []
+    for value in values:
+        kind = type(value)
+        if kind is str:
+            scalars.append(nfc(value))
+        elif kind is int:
+            if abs(value) > JCS_MAX_SAFE_INTEGER:
+                return canonical_bytes(list(values))
+            scalars.append(value)
+        elif kind is bool or value is None:
+            scalars.append(value)
+        else:
+            return canonical_bytes(list(values))
+    try:
+        return json.dumps(scalars, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone surrogate: JCS refuses it, and the refusal is canonical_bytes's to make.
+        return canonical_bytes(list(values))
 
 
 def sha256_hex(data: bytes) -> str:

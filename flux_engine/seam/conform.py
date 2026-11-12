@@ -122,6 +122,11 @@ FLX_3203 = register(
 #: what the column looks like.
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+#: Value classes that hold no float at any depth, so :func:`_reject_floats`
+#: has nothing to look inside. Matched on the exact class: a subclass takes
+#: the general walk.
+_FLOAT_FREE = frozenset({str, int, bool, Decimal, type(None), date, datetime, bytes, bytearray})
+
 #: What a caller may hand the renderer as one row: either a mapping from
 #: column name to value, or a sequence already aligned to the declared
 #: column order.
@@ -151,6 +156,8 @@ def _reject_floats(value: Any) -> None:
     it sits -- including inside a ``JSON`` column's nested structure,
     where the canonicaliser would otherwise be the one to notice.
     """
+    if type(value) in _FLOAT_FREE:
+        return
     if isinstance(value, float):
         raise FluxError(FLX_3002, "value class 'float'")
     if isinstance(value, Mapping):
@@ -364,21 +371,27 @@ def _values_in_declared_order(
     row: Row, expose: CompiledExpose, row_index: Optional[int]
 ) -> Tuple[Any, ...]:
     """Align *row* to the declared column order, closing the world both ways."""
-    if isinstance(row, Mapping):
+    values: Tuple[Any, ...]
+    if type(row) is tuple:
+        # The generator's own rows, so the common case: a tuple is neither a
+        # mapping nor a string, which the branches below would ask first.
+        values = row
+    elif isinstance(row, Mapping):
         return _mapping_values(row, expose, row_index)
-    if isinstance(row, Sequence) and not isinstance(row, (str, bytes, bytearray)):
+    elif isinstance(row, Sequence) and not isinstance(row, (str, bytes, bytearray)):
         values = tuple(row)
-        if len(values) != len(expose.columns):
-            raise FluxError(
-                FLX_3203,
-                f"{_at('<positional>', row_index)}: expose {expose.expose_id!r} declares "
-                f"{len(expose.columns)} columns; the row carries {len(values)} values",
-            )
-        return values
-    raise FluxError(
-        FLX_3003,
-        f"row {row_index}: a row is a mapping or a sequence, got {_class_of(row)}",
-    )
+    else:
+        raise FluxError(
+            FLX_3003,
+            f"row {row_index}: a row is a mapping or a sequence, got {_class_of(row)}",
+        )
+    if len(values) != len(expose.columns):
+        raise FluxError(
+            FLX_3203,
+            f"{_at('<positional>', row_index)}: expose {expose.expose_id!r} declares "
+            f"{len(expose.columns)} columns; the row carries {len(values)} values",
+        )
+    return values
 
 
 def _mapping_values(

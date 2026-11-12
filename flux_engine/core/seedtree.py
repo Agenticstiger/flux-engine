@@ -80,6 +80,7 @@ __all__ = [
     "shape_counts",
     "signal_path",
     "stream_entropy",
+    "stream_entropy_of_label",
     "subject_products_path",
     "subject_trait_path",
     "sweep_effective_seed",
@@ -428,7 +429,16 @@ def derive_root(seam: bytes, seed: int) -> SeedTreeRoot:
 
 def stream_entropy(root: SeedTreeRoot, path: Sequence[SeedPathPart]) -> int:
     """The ``SeedSequence`` entropy for *path* under *root* (§3's second formula)."""
-    label = path_label(path)
+    return stream_entropy_of_label(root, path_label(path))
+
+
+def stream_entropy_of_label(root: SeedTreeRoot, label: bytes) -> int:
+    """:func:`stream_entropy` for a path whose :func:`path_label` the caller already holds.
+
+    For a caller that needs the label anyway (to key a stream table, or to build it from
+    parts it checked once), so the label is not built a second time. *label* must be the
+    label :func:`path_label` returns; this function takes it on trust.
+    """
     material = _DOMAIN + _NUL + root.digest + _NUL + label
     return int.from_bytes(_sha256_bytes(material), "big")
 
