@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flux-sim-engine"
-version = "0.2.1"
+version = "0.3.0"
 description = "FLUX Simulation Engine: the runtime for FLUX bundles -- deterministic, governed simulation under a referenced FLUID contract."
 readme = "README.md"
 requires-python = ">=3.11"
