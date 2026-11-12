@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flux-sim-engine"
-version = "0.3.1"
+version = "0.4.0"
 description = "FLUX Simulation Engine: the runtime for FLUX bundles -- deterministic, governed simulation under a referenced FLUID contract."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -75,8 +75,9 @@ dependencies = [
   # the supported one: flux_engine.spec refuses an installed flux_spec outside
   # it rather than silently substituting a different enforcement decision,
   # and still carries the vendored fallback for an environment that has to
-  # run without it.
-  "flux-spec>=0.5,<0.6",
+  # run without it. The floor is 0.5.1, the first release that carries
+  # FLUID 0.7.6, which the towers example's contract declares.
+  "flux-spec>=0.5.1,<0.6",
 ]
 
 [project.optional-dependencies]

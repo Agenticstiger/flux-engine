@@ -97,7 +97,7 @@ def test_a_drifted_version_fallback_is_refused_without_any_tag(tmp_path: Path) -
     assert "must move together" in result.stderr
 
 
-@pytest.mark.parametrize("tag", ["v0.3.1.dev0", "v0.3.1.post1", "0.3.1", "release-0.3.1"])
+@pytest.mark.parametrize("tag", ["v0.4.0.dev0", "v0.4.0.post1", "0.4.0", "release-0.4.0"])
 def test_a_working_version_cannot_be_tagged_as_a_release(tag: str, tmp_path: Path) -> None:
     """The obvious way around a version mismatch: tag the dev string."""
     guard = _load_guard()
@@ -114,7 +114,7 @@ def test_a_consistent_tree_and_tag_is_accepted(tmp_path: Path) -> None:
     output = tmp_path / "github-output.txt"
     result = _run(
         "--tag",
-        "v0.3.1",
+        "v0.4.0",
         "--commit",
         head,
         "--root",
@@ -123,4 +123,4 @@ def test_a_consistent_tree_and_tag_is_accepted(tmp_path: Path) -> None:
         str(output),
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
-    assert output.read_text(encoding="utf-8") == "version=0.3.1\nprerelease=false\n"
+    assert output.read_text(encoding="utf-8") == "version=0.4.0\nprerelease=false\n"

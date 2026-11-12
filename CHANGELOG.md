@@ -21,6 +21,24 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ## Unreleased
 
+A FLUID `INTEGER` column takes a drawn count. No pinned digest moved:
+`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
+and `TRACE_VERSION` keep their values.
+
+### Changed
+
+- A FLUID `INTEGER` column of a scenario-driven emit takes a drawn count, such
+  as the towers `tenancyCount`. Whether the column's source is always a whole
+  number is decided at plan time from the declared families: a rate count, a
+  bounded normal at scale 0, a constant whole number, or an integer scalar such
+  as `moment.eventCount`. A source that is not, such as an amount, stops
+  planning with the new `FLX-3303`, where before the run failed on its first
+  row with `FLX-3003`, or passed when it had no rows. The renderer still
+  refuses a `Decimal` in an `INT` column from every other caller. KERNEL-SPEC
+  §9 states the rule.
+
+## 0.4.0 - 2026-11-12
+
 A second vertical, `towers`, and FLUID 0.7.6. No telco digest moved:
 `GOLDEN-CHANGELOG.md` gains one row, for the new `tests/golden/towers-public/`
 set, and `KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep their
@@ -56,15 +74,9 @@ values.
 - CI installs `flux-spec` from the sibling FLUX checkout in the jobs that read
   its example bundles, so an example and the validator that checks it come
   from one commit.
-- A FLUID `INTEGER` column of a scenario-driven emit takes a drawn count, such
-  as the towers `tenancyCount`. Whether the column's source is always a whole
-  number is decided at plan time from the declared families: a rate count, a
-  bounded normal at scale 0, a constant whole number, or an integer scalar such
-  as `moment.eventCount`. A source that is not, such as an amount, stops
-  planning with the new `FLX-3303`, where before the run failed on its first
-  row with `FLX-3003`, or passed when it had no rows. The renderer still
-  refuses a `Decimal` in an `INT` column from every other caller. KERNEL-SPEC
-  §9 states the rule. No pinned digest moved.
+- The `flux-spec` floor is `0.5.1` (`flux-spec>=0.5.1,<0.6`), the first
+  release that carries FLUID 0.7.6. An older installed `flux-spec` refuses the
+  towers example's `fluxVersion: "0.5.1"` documents (`FLX-3105`).
 
 ## 0.3.1 - 2026-11-12
 

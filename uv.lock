@@ -739,7 +739,7 @@ wheels = [
 
 [[package]]
 name = "flux-sim-engine"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "cloudevents" },
@@ -800,7 +800,7 @@ requires-dist = [
     { name = "cloudevents", specifier = ">=1.10,<3" },
     { name = "cryptography", specifier = ">=42" },
     { name = "duckdb", marker = "extra == 'dev'", specifier = ">=1.5" },
-    { name = "flux-spec", specifier = ">=0.5,<0.6" },
+    { name = "flux-spec", specifier = ">=0.5.1,<0.6" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "jsonschema", specifier = ">=4.22" },
@@ -833,16 +833,16 @@ mutation = [{ name = "mutmut", specifier = "==3.8.1" }]
 
 [[package]]
 name = "flux-spec"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pyyaml" },
     { name = "rfc8785" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/36/ee/e6972759c02311ca2e7f80281cffe24d402f34f9645228ec3b5fb5b0a164/flux_spec-0.5.0.tar.gz", hash = "sha256:c2276b7def284cf82e8f8ff63fed41431d166c421efbb8e4c07ba6a6ef902c0a", size = 178436, upload-time = "2026-11-11T12:09:45.423Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/2d/7842ff51cf606288e5b8220b412b1914f7553a0c875ce449e9f0421d2d03/flux_spec-0.5.1.tar.gz", hash = "sha256:c80d5d0d1b3c5a63aef56a8fbfac1e530f1636104cadd34a1edb6dd6a7af8112", size = 235702, upload-time = "2026-11-12T21:34:42.411Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/2e/e3412b7a51e0a1200d694ed9f37e3d233f475747ffb9f5d6ba51e4778cd5/flux_spec-0.5.0-py3-none-any.whl", hash = "sha256:eadb40c3f7ad566bc07abad4e054700880ce9653df29d142d12b3ab5cddbe6df", size = 186576, upload-time = "2026-11-11T12:09:43.556Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/a4/7caa8a433a8015b3d09e8c4b22a34af6e34a54f85c3b06b9d21a641c5682/flux_spec-0.5.1-py3-none-any.whl", hash = "sha256:4785c1a45458b209297c52f94c44bebfefeac7670f12123e2e6fbb46f99587c3", size = 248538, upload-time = "2026-11-12T21:34:40.679Z" },
 ]
 
 [[package]]
