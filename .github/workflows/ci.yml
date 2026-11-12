@@ -251,6 +251,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # The specification package from the sibling checkout, over the PyPI
+      # release the dev install pulled in. This job reads its example bundles
+      # from FLUX main, so the validator that checks them comes from the same
+      # commit: an example that needs a newer schema than the released
+      # flux-spec (the towers bundle pins FLUID 0.7.6) would otherwise fail
+      # here until the next spec release. --no-deps keeps every dependency at
+      # the version the engine pins, and flux_engine.spec still refuses a
+      # flux_spec outside SUPPORTED_SPEC_VERSION_RANGE.
+      - name: Install flux_spec from the sibling FLUX checkout
+        run: pip install --no-deps ../FLUX
+
       # Fail in two seconds on a checkout misconfiguration, naming the path,
       # rather than in five minutes as a wall of test failures.
       - name: The sibling FLUX example bundle is on disk
@@ -366,6 +377,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+
+      # The same spec install as the `test` job, for the same reason.
+      - name: Install flux_spec from the sibling FLUX checkout
+        run: pip install --no-deps ../FLUX
 
       - name: The sibling FLUX example bundle is on disk
         run: |

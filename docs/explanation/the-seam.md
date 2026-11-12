@@ -150,7 +150,7 @@ After `apply`, `verify` checks conformance again from the files on disk. Every s
 
 ## Who owns the schema
 
-The engine does not own the FLUID schema or the FLUX schema. It depends on the published FLUX specification package for validation, and that package carries the FLUID schemas for versions 0.7.3 to 0.7.5. A contract cannot silently target a version the toolchain has not seen. If a range matches none of them, validation fails. When FLUID moves, the schemas move with the package, not with this engine.
+The engine does not own the FLUID schema or the FLUX schema. It depends on the published FLUX specification package for validation, and that package carries the FLUID schemas for versions 0.7.3 to 0.7.6. A contract cannot silently target a version the toolchain has not seen. If a range matches none of them, validation fails. When FLUID moves, the schemas move with the package, not with this engine.
 
 ## What the seam does not do
 

@@ -1,0 +1,17 @@
+{
+  "components": {
+    "assignment": "sha256:832e767323d67f521e63c0e7c596b38b6b4a802ebca2ee59c7e92e04b1432c5d",
+    "decisions": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "delivery": "sha256:8cb7bc3b220c4dc3133c30b0fefb2908d97bff2ac987cee033d5b3dd42af9db6",
+    "emits": {
+      "tenant_renewal_risk_moment": "sha256:57fcb8f9ce57182e98c76844a79bbe9c8cfdd5e19d2558a63d63401f33e5358c"
+    },
+    "events": "sha256:300a573560fcf81dfa4ad5fd4b7039a9e09bc683ade13a1b36fe8a03ef457519",
+    "journeys": "sha256:b23f488cee8bb8d9072a58abf7091db248adc375fbbaa1eabde250e19ade985e",
+    "population": "sha256:623d9ac3aea0a9d800658ad4caaf454206583a5c2d70d1702233c01b34343ba7"
+  },
+  "inputDigest": "sha256:9e7683ec789ecf8211799764ada7180731c68fc274eb1e40c7fd5e65bbd806ed",
+  "kernelVersion": "0.1.0",
+  "runFormatVersion": 1,
+  "traceVersion": "flux-trace/1"
+}

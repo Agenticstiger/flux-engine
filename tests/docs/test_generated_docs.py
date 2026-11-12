@@ -105,9 +105,24 @@ def test_the_schemas_page_names_the_pinned_version_and_every_flux_file() -> None
 
     text = (DOCS / "reference" / "schemas.md").read_text(encoding="utf-8")
     assert f"**FLUX {VENDORED_SPEC_VERSION}**" in text
+    assert f"[flux-schema-{VENDORED_SPEC_VERSION}.json](" in text
     for stem in gen_docs._FLUX_SCHEMA_PURPOSE:
-        assert f"[{stem}-{VENDORED_SPEC_VERSION}.json](" in text
+        assert re.search(rf"\[{re.escape(stem)}-\d+\.\d+\.\d+\.json\]\(", text), stem
     assert text.count("fluid-schema-") >= 3
+
+
+def test_each_schema_family_links_its_newest_file_at_or_below_the_pin(tmp_path: Path) -> None:
+    """A release republishes only what it changed; the page must not invent a file."""
+    for name in (
+        "flux-x-0.4.1.json",
+        "flux-x-0.5.0.json",
+        "flux-x-0.6.0.json",
+        "flux-x-latest.json",
+    ):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    assert gen_docs._current_schema_file(tmp_path, "flux-x", "0.5.1") == "flux-x-0.5.0.json"
+    assert gen_docs._current_schema_file(tmp_path, "flux-x", "0.6.0") == "flux-x-0.6.0.json"
+    assert gen_docs._current_schema_file(tmp_path, "flux-x", "0.4.0") is None
 
 
 def test_a_schema_the_specification_no_longer_ships_stops_the_generator(

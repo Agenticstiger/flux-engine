@@ -102,3 +102,21 @@ Apache License, Version 2.0. See `NOTICE` in this directory.
 ## Provenance check (2026-09-06)
 
 All vendored JSON files are byte-identical to `origin/main` (`35d979f`) of Agenticstiger/flux; the three Python modules are identical to `origin/main` except for the path edits listed above.
+
+## Re-sync (2026-11-12): FLUX 0.5.1
+
+The JSON data files were re-synced from Agenticstiger/flux at `SPEC_COMMIT`, the
+commit that adds FLUX 0.5.1 (FLUID 0.7.6 at the seam). The three Python modules
+are unchanged: they still differ from upstream only by the path edits above.
+
+- New: `schema/flux-schema-0.5.1.json`, `schema/flux-ui-hints-0.5.1.json` and
+  `vendor/fluid/fluid-schema-0.7.6.json`.
+- Moved: `schema/flux-schema-latest.json` now aliases 0.5.1.
+- Caught up with upstream changes made since `35d979f`:
+  `schema/flux-schema-0.5.0.json` (the reworded `agentPolicy` description) and
+  `vendor/fluid/fluid-schema-0.7.3.json` to `0.7.5.json`, which FLUX re-vendored
+  from FLUID (0.7.5 gains the pgvector binding).
+- Unchanged: the enforcement and manifest schemas and
+  `vectors/enforcement-vectors.json`.
+
+Every vendored JSON file is byte-identical to its upstream copy at that commit.

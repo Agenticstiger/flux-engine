@@ -52,6 +52,18 @@ def _d(literal: str) -> Decimal:
     return Decimal(literal)
 
 
+#: The outage-class alarm types of dp014 ``worst_outage_cause``, weighted for
+#: the towers signals that carry a cause. Mains failure leads, as it does on a
+#: grid-dependent estate.
+_OUTAGE_CAUSES: Mapping[str, Decimal] = {
+    "BATTERY_LOW": _d("0.15"),
+    "COMMS_LOSS": _d("0.10"),
+    "GENERATOR_FAIL": _d("0.20"),
+    "HIGH_TEMPERATURE": _d("0.10"),
+    "MAINS_FAILURE": _d("0.35"),
+    "RECTIFIER_FAULT": _d("0.10"),
+}
+
 #: Per-Signal payload families, keyed by Signal document id then field name.
 #: ``attempts`` is a ``RateCount`` with ``offset=1``: an aborted payment has been
 #: attempted at least once, and ``jr-payment-recovery``'s trigger
@@ -64,6 +76,43 @@ PAYLOAD_FAMILIES: Mapping[str, Mapping[str, Family]] = {
         ),
         "attempts": RateCount(mean=_d("1.20"), offset=1),
         "channel": Categorical({"card": _d("0.60"), "sepa_dd": _d("0.30"), "wallet": _d("0.10")}),
+    },
+    # towers. A breach's measured availability sits below a typical target and
+    # its downtime is chargeable minutes in the month (dp014); the causes are
+    # the outage-class alarm types dp014 names as ``worst_outage_cause``.
+    "sig-sla-breach": {
+        "availabilityPct": BoundedNormal(
+            mean=_d("99.40"), stddev=_d("0.35"), lo=_d("95.00"), hi=_d("99.89"), scale=4
+        ),
+        "cause": Categorical(_OUTAGE_CAUSES),
+        "downtimeMinutes": BoundedNormal(
+            mean=_d("95.00"), stddev=_d("70.00"), lo=_d("5.00"), hi=_d("1440.00"), scale=2
+        ),
+    },
+    # An outage takes at least one site down, so ``sitesAffected`` is shifted,
+    # not clamped, the way ``attempts`` is.
+    "sig-site-outage": {
+        "cause": Categorical(_OUTAGE_CAUSES),
+        "outageMinutes": BoundedNormal(
+            mean=_d("180"), stddev=_d("150"), lo=_d("10"), hi=_d("2880"), scale=0
+        ),
+        "sitesAffected": RateCount(mean=_d("0.60"), offset=1),
+    },
+    # A disputed line is a posted charge (dp016 ``charge_type``), never the
+    # non-posting ``UNBILLED_ENERGY_GAP`` reconciliation line.
+    "sig-billing-dispute": {
+        "chargeType": Categorical(
+            {
+                "BASE_RENT": _d("0.25"),
+                "ENERGY_PASSTHROUGH": _d("0.40"),
+                "FUEL_SURCHARGE": _d("0.20"),
+                "ONE_TIME_SERVICE": _d("0.10"),
+                "PENALTY_CREDIT": _d("0.05"),
+            }
+        ),
+        "disputedAmount": BoundedNormal(
+            mean=_d("8500.00"), stddev=_d("6000.00"), lo=_d("100.00"), hi=_d("250000.00"), scale=2
+        ),
     },
 }
 

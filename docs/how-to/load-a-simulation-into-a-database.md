@@ -33,6 +33,7 @@ pip install 'flux-sim-engine[adbc]' adbc-driver-postgresql  # PostgreSQL
 $ fluxsim plugins
 vertical packs:
   telco
+  towers
 sinks (fluxsim run --sink NAME:TARGET):
   adbc       built-in  needs flux-sim-engine[adbc] (installed)
   arrow-ipc  built-in  needs flux-sim-engine[arrow] (installed)

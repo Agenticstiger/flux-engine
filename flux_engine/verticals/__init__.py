@@ -28,6 +28,7 @@ from typing import Mapping, Tuple
 from flux_engine.expr.attrs import VerticalPack
 from flux_engine.expr.types import nfc
 from flux_engine.verticals.telco import TELCO, TELCO_EMIT_ALIASES
+from flux_engine.verticals.towers import TOWERS, TOWERS_EMIT_ALIASES
 
 __all__ = [
     "EMIT_ALIASES",
@@ -39,7 +40,7 @@ __all__ = [
 ]
 
 #: Every pack this engine ships, keyed by the ``World.spec.vertical`` string.
-PACKS: Mapping[str, VerticalPack] = {TELCO.name: TELCO}
+PACKS: Mapping[str, VerticalPack] = {TELCO.name: TELCO, TOWERS.name: TOWERS}
 
 #: Per-vertical expose-column aliases -- step 2 of
 #: :func:`flux_engine.seam.mapping.resolve_column_mapping`. Kept beside the
@@ -48,7 +49,10 @@ PACKS: Mapping[str, VerticalPack] = {TELCO.name: TELCO}
 #: expression may name) and an alias is a seam concern (which declared
 #: column a runtime attribute fills). Two questions, two tables, one
 #: registry.
-EMIT_ALIASES: Mapping[str, Mapping[str, str]] = {TELCO.name: TELCO_EMIT_ALIASES}
+EMIT_ALIASES: Mapping[str, Mapping[str, str]] = {
+    TELCO.name: TELCO_EMIT_ALIASES,
+    TOWERS.name: TOWERS_EMIT_ALIASES,
+}
 
 
 def pack_names() -> Tuple[str, ...]:

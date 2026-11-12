@@ -38,9 +38,12 @@ PACK_ATTRIBUTE = "market_jurisdictions"
 
 #: Market -> ISO 3166-1 alpha-2 jurisdiction, per vertical. The telco row maps
 #: the shipped example's three markets onto the three jurisdictions
-#: ``cp-telco-eu`` allows, in the markets' own sorted order.
+#: ``cp-telco-eu`` allows, in the markets' own sorted order. The towers
+#: example names each market by its ISO 3166-1 alpha-2 country code, so its row
+#: is the identity over the six markets it declares.
 MARKET_JURISDICTIONS: Mapping[str, Mapping[str, str]] = {
     "telco": {"mkt-a": "DE", "mkt-b": "FR", "mkt-c": "NL"},
+    "towers": {code: code for code in ("DZ", "IQ", "JO", "KW", "QA", "TN")},
 }
 
 
