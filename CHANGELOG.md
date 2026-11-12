@@ -19,7 +19,7 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.4.0 - 2026-11-12
 
 A second vertical, `towers`, and FLUID 0.7.6. No telco digest moved:
 `GOLDEN-CHANGELOG.md` gains one row, for the new `tests/golden/towers-public/`
@@ -56,6 +56,9 @@ values.
 - CI installs `flux-spec` from the sibling FLUX checkout in the jobs that read
   its example bundles, so an example and the validator that checks it come
   from one commit.
+- The `flux-spec` floor is `0.5.1` (`flux-spec>=0.5.1,<0.6`), the first
+  release that carries FLUID 0.7.6. An older installed `flux-spec` refuses the
+  towers example's `fluxVersion: "0.5.1"` documents (`FLX-3105`).
 
 ## 0.3.1 - 2026-11-12
 
