@@ -33,7 +33,7 @@
 .PHONY: ci-local lint format-check typecheck imports register-lint guardrail reuse proof-guard \
         test test-fast test-fast-cov test-vectors test-digests test-determinism \
         test-slow test-slow-acceptance test-slow-rest slow-partition \
-        describe gate-conform packaging-smoke third-party-licenses \
+        describe gate-conform packaging-smoke lineage-extra third-party-licenses \
         release-guard first-run docs-gen docs-check docs-test check bench
 
 # Local runs use the repository virtualenv. CI installs into the runner's own
@@ -95,8 +95,8 @@ SLOW_REST := -m slow --ignore=tests/acceptance --ignore=tests/golden
 # misses and a `fluxsim run` subprocess killed on its timeout. A gate that fails
 # on a configuration nothing ships is worse than no gate, so ci-local now runs
 # the CI selections and `test` stays available for a developer who wants it.
-ci-local: lint format-check typecheck imports register-lint guardrail reuse proof-guard \
-          describe gate-conform slow-partition test-fast-cov test-digests \
+ci-local: lineage-extra lint format-check typecheck imports register-lint guardrail reuse \
+          proof-guard describe gate-conform slow-partition test-fast-cov test-digests \
           test-slow-acceptance test-slow-rest packaging-smoke
 
 # The sibling ../FLUX checkout is optional: only the tests that read its example
@@ -301,6 +301,17 @@ packaging-smoke:
 	$(BIN)python -c "import json; a=json.load(open('$(CI_SCRATCH)/pkg/describe.json'))['artifacts']; assert a['spec_version'], a; print('installed wheel describes:', a['version'], a['spec_version'], a['spec_source'])"
 	cd $(CI_SCRATCH)/pkg && ./venv/bin/fluxsim init project
 	cd $(CI_SCRATCH)/pkg/project && ../venv/bin/fluxsim run . --verify --ship -o out
+
+# ------------------------------------------------------------ Lineage extra
+# Mirrors the `Lineage extra` job. Every other target runs without the
+# OpenLineage client, so its real-client tests skip and mypy does not see the
+# client's annotations. This one needs the `lineage` extra
+# (`uv sync --extra dev --extra lineage`) and fails when the client cannot be
+# imported, so a mirror run cannot pass by skipping those tests.
+lineage-extra:
+	$(BIN)python -c "import openlineage.client" || { echo "lineage-extra needs the lineage extra: uv sync --extra dev --extra lineage" >&2; exit 1; }
+	$(BIN)mypy flux_engine scripts
+	$(BIN)pytest -m "not slow" tests/lineage tests/cli/test_human_surface.py
 
 # ------------------------------------------------------------ First run
 # Mirrors the `First run` workflow, .github/workflows/first-run.yml. It is its

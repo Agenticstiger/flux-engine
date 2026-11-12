@@ -319,7 +319,16 @@ class OpenLineageHttpEmitter:
 
     def emit(self, event: LineageEvent) -> None:
         try:
-            self._client.emit(render_run_event(event))
+            # The client's own ``emit`` accepts only its RunEvent/DatasetEvent/
+            # JobEvent classes and raises ValueError on anything else. FLUX
+            # renders the OpenLineage JSON itself (``render_run_event``), so
+            # hand the dict to the transport, which serializes it with the
+            # client's Serde: null values are dropped (the HTTP body can lack
+            # keys the NDJSON line keeps as null) and keys are sorted. Typed as
+            # Any: the transport's ``emit`` is annotated for the client's event
+            # classes, and CI type-checks without the extra.
+            transport: Any = self._client.transport
+            transport.emit(render_run_event(event))
         except Exception as error:  # noqa: BLE001 - a down receiver must not fail the run
             self._failed += 1
             self._last_error = f"{type(error).__name__}: {error}"

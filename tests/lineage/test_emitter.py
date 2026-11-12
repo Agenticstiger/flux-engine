@@ -256,12 +256,17 @@ def test_openlineage_http_emitter_uses_the_real_client_when_available(
 
     calls = []
 
+    class _FakeRunEvent:
+        """Stands in for the real client's own event classes."""
+
     class _FakeClient:
         def __init__(self, transport: object) -> None:
             self.transport = transport
 
         def emit(self, event: object) -> None:
-            calls.append(event)
+            # The real client's contract: only its own event classes.
+            if not isinstance(event, _FakeRunEvent):
+                raise ValueError("`emit` only accepts RunEvent, DatasetEvent, JobEvent classes")
 
     class _FakeHttpConfig:
         def __init__(self, url: str, timeout: float = 5.0, endpoint: str | None = None) -> None:
@@ -270,6 +275,9 @@ def test_openlineage_http_emitter_uses_the_real_client_when_available(
     class _FakeHttpTransport:
         def __init__(self, config: object) -> None:
             self.config = config
+
+        def emit(self, event: object) -> None:
+            calls.append(event)
 
     client_module = types.ModuleType("openlineage.client")
     client_module.OpenLineageClient = _FakeClient  # type: ignore[attr-defined]
@@ -288,7 +296,8 @@ def test_openlineage_http_emitter_uses_the_real_client_when_available(
 
     emitter = OpenLineageHttpEmitter(url="http://localhost:5000")
     emitter.emit(_event())
-    assert len(calls) == 1
+    assert calls == [render_run_event(_event())]
+    assert emitter.failed == 0
     assert emitter.flush() is True
 
 
@@ -304,12 +313,17 @@ def _install_fake_openlineage(monkeypatch: pytest.MonkeyPatch, transport_cls: ty
     """Put a minimal fake ``openlineage`` in ``sys.modules`` (the optional extra)."""
     import types
 
+    class _FakeRunEvent:
+        """Stands in for the real client's own event classes."""
+
     class _FakeClient:
         def __init__(self, transport: object) -> None:
             self.transport = transport
 
         def emit(self, event: object) -> None:
-            self.transport.sent.append(event)  # type: ignore[attr-defined]
+            # The real client's contract: only its own event classes.
+            if not isinstance(event, _FakeRunEvent):
+                raise ValueError("`emit` only accepts RunEvent, DatasetEvent, JobEvent classes")
 
     class _FakeHttpConfig:
         def __init__(self, url: str, timeout: float = 5.0, endpoint: str | None = None) -> None:
@@ -336,6 +350,9 @@ class _ClosingTransport:
         self.sent: list = []
         self.closed_with: list = []
         self.result = True
+
+    def emit(self, event: object) -> None:
+        self.sent.append(event)
 
     def close(self, timeout: int = -1) -> bool:
         self.closed_with.append(timeout)
@@ -380,15 +397,11 @@ def test_a_dropped_event_is_visible_to_a_caller(monkeypatch: pytest.MonkeyPatch)
     """``emit`` never raises, so the counter is the only place a drop shows up."""
 
     class _RefusingTransport(_ClosingTransport):
-        pass
+        def emit(self, event: object) -> None:
+            raise ConnectionError("no route to host")
 
     _install_fake_openlineage(monkeypatch, _RefusingTransport)
     emitter = OpenLineageHttpEmitter(url="http://localhost:5000")
-
-    def _boom(event: object) -> None:
-        raise ConnectionError("no route to host")
-
-    monkeypatch.setattr(emitter._client, "emit", _boom)
     emitter.emit(_event())  # must not raise: a down receiver does not end a run
 
     assert emitter.failed == 1
@@ -407,12 +420,16 @@ def test_a_transport_with_nothing_to_flush_is_a_clean_flush(
             self.config = config
             self.sent: list = []
 
+        def emit(self, event: object) -> None:
+            self.sent.append(event)
+
     _install_fake_openlineage(monkeypatch, _SynchronousTransport)
     emitter = OpenLineageHttpEmitter(url="http://localhost:5000")
     emitter.emit(_event())
 
     assert emitter.flush(timeout_seconds=3) is True
     assert emitter.failed == 0
+    assert emitter._client.transport.sent == [render_run_event(_event())]  # type: ignore[attr-defined]
 
 
 @pytest.mark.unit
@@ -428,3 +445,117 @@ def test_the_ndjson_emitter_reports_its_failures_too(
     monkeypatch.setattr(emitter.path.__class__, "open", _boom)
     emitter.emit(_event())
     assert emitter.failed == 1
+
+
+# --- the real client, against a real socket ---------------------------------
+#
+# The fakes above install a stand-in ``openlineage`` module, and a stand-in
+# agrees with whatever the code under test does. This one runs the installed
+# client against a local HTTP server, so what is asserted is what a receiver
+# would see. (The first version of the emitter passed the rendered dict to
+# ``client.emit``, which accepts only the client's own event classes: every
+# event was dropped and no fake noticed.) Skipped without the lineage extra.
+
+
+@pytest.fixture
+def lineage_receiver(monkeypatch: pytest.MonkeyPatch):
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    # The receiver is on loopback: a proxy set in the environment must not
+    # carry the request away, and OpenLineage's own settings must not swap the
+    # transport for its no-op one or point it elsewhere.
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "127.0.0.1")
+    for name in ("OPENLINEAGE_DISABLED", "OPENLINEAGE_URL", "OPENLINEAGE_CONFIG"):
+        monkeypatch.delenv(name, raising=False)
+
+    received: list[tuple[str, bytes]] = []
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - http.server's spelling
+            length = int(self.headers.get("Content-Length", 0))
+            received.append((self.path, self.rfile.read(length)))
+            self.send_response(201)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}", received
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.unit
+def test_the_http_emitter_delivers_a_run_event_through_the_real_client(lineage_receiver) -> None:
+    pytest.importorskip("openlineage.client")
+    url, received = lineage_receiver
+
+    emitter = OpenLineageHttpEmitter(url=url)
+    event = _event()
+    emitter.emit(event)
+
+    assert emitter.flush(timeout_seconds=5) is True
+    assert emitter.failed == 0, emitter.last_error
+    assert len(received) == 1
+    path, body = received[0]
+    assert path == "/api/v1/lineage"
+    assert json.loads(body) == render_run_event(event)
+
+
+@pytest.mark.unit
+def test_the_http_emitter_honours_a_custom_endpoint(lineage_receiver) -> None:
+    pytest.importorskip("openlineage.client")
+    url, received = lineage_receiver
+
+    emitter = OpenLineageHttpEmitter(url=url, endpoint="custom/lineage")
+    emitter.emit(_event())
+
+    assert emitter.flush(timeout_seconds=5) is True
+    assert [path for path, _ in received] == ["/custom/lineage"]
+
+
+def _without_nulls(value: object) -> object:
+    """What the client's serializer (``Serde.to_dict``) does to plain JSON.
+
+    Null values leave every object, and null or empty-object items leave every
+    array. The NDJSON line keeps its nulls; the HTTP body does not.
+    """
+    if isinstance(value, dict):
+        return {key: _without_nulls(item) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        kept = [_without_nulls(item) for item in value if item is not None]
+        return [item for item in kept if item != {}]
+    return value
+
+
+@pytest.mark.unit
+def test_the_http_body_is_the_rendered_event_less_its_nulls(lineage_receiver) -> None:
+    """A run's governance facet keeps its nulls in the NDJSON line, not over HTTP.
+
+    apply builds the facet from a decisions digest alone, so organizationId and
+    policyDigest are null in what ``render_run_event`` returns.
+    """
+    pytest.importorskip("openlineage.client")
+    url, received = lineage_receiver
+    facet = governance_facet(decisions_digest="sha256:" + "ab" * 32)
+    event = _event(**{"flux.governance": facet})
+    rendered = render_run_event(event)
+    assert rendered["run"]["facets"]["flux.governance"]["organizationId"] is None
+
+    emitter = OpenLineageHttpEmitter(url=url)
+    emitter.emit(event)
+
+    assert emitter.flush(timeout_seconds=5) is True
+    ((_path, body),) = received
+    arrived = json.loads(body)
+    assert arrived == _without_nulls(rendered)
+    assert "organizationId" not in arrived["run"]["facets"]["flux.governance"]
