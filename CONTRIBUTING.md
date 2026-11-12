@@ -29,6 +29,11 @@ example bundles need it: clone it next to this repository
 (`git clone https://github.com/Agenticstiger/flux ../FLUX`) to run them. Without
 it they are skipped locally. CI and `make ci-local` refuse to skip them.
 
+Those tests validate the examples with the `flux_spec` package from the same
+checkout, as CI does, because an example can need a newer specification than
+the released one (the towers example pins FLUID 0.7.6). Install it over the
+released package with `uv pip install --no-deps ../FLUX`.
+
 ## Before you open a pull request
 
 ```bash

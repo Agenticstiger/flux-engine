@@ -1,0 +1,52 @@
+{
+  "G": "sha256:949f1781123a0bbadbeb075a266ad797500724229b57e417e2c0249b9abc46eb",
+  "H": "sha256:949f1781123a0bbadbeb075a266ad797500724229b57e417e2c0249b9abc46eb",
+  "columns": [
+    "tenant_id",
+    "detected_at",
+    "first_breach_at",
+    "breach_count",
+    "country",
+    "tenant_segment",
+    "lifecycle_stage",
+    "tenancy_count",
+    "monthly_recurring_charge",
+    "sla_target_pct",
+    "chronic_sla_breaches",
+    "months_to_lease_expiry",
+    "availability_pct",
+    "downtime_minutes",
+    "outage_cause"
+  ],
+  "emitIndex": 0,
+  "reference": {
+    "contractDigest": "sha256:4f85bb210dbb25ac908e29da31f247bd0e24a39ff5f9affddc5bc04bc2e08766",
+    "contractFileDigest": "sha256:86ea0530854f322ccd40f008bf2e093be9148f37858fba831c56e01e173aab0a",
+    "exposeId": "tenant_renewal_risk_moment",
+    "fluidVersion": "0.7.6",
+    "productRef": "towers.gold.tenant_renewal_risk_moment"
+  },
+  "shippedContract": null,
+  "simulationId": "sim-tenant-renewal-risk",
+  "synthetic": {
+    "generatorDigest": null,
+    "rows": 442
+  },
+  "types": [
+    "STRING",
+    "TIMESTAMP",
+    "TIMESTAMP",
+    "INT",
+    "STRING",
+    "STRING",
+    "STRING",
+    "DECIMAL(10,0)",
+    "DECIMAL(12,2)",
+    "DECIMAL(6,3)",
+    "DECIMAL(6,0)",
+    "DECIMAL(6,0)",
+    "DECIMAL(7,4)",
+    "DECIMAL(10,2)",
+    "STRING"
+  ]
+}

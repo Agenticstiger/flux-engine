@@ -72,11 +72,13 @@ from flux_engine.world.tracing import TraceLog
 
 __all__ = [
     "ARRIVAL_DIAL",
+    "ARRIVAL_MODELS",
     "CLOUDEVENTS_ENVELOPE",
     "DEFAULT_ARRIVAL_MODEL",
     "EVENT_ID_LENGTH",
     "ArrivalModel",
     "SignalEvent",
+    "arrival_model_for",
     "emit_signals",
 ]
 
@@ -120,6 +122,27 @@ DEFAULT_ARRIVAL_MODEL = ArrivalModel(
     extra_occurrences_mean=Decimal("1.50"),
     gap_mean_ms=Decimal("300000"),
 )
+
+#: Per-vertical arrival shapes, keyed the way :data:`flux_engine.verticals.PACKS`
+#: is keyed. A vertical without a row uses :data:`DEFAULT_ARRIVAL_MODEL`, which
+#: is tuned to telco's aborted-payment bursts. A tower tenant's SLA breaches,
+#: outages and billing disputes arrive days apart, not minutes: the towers gap
+#: mean is nine days (777 600 000 ms), so the shipped ``det-renewal-risk`` and
+#: its 30-day window see a second breach inside the window most of the time and
+#: a burst can still run past the end of a quarter. Engine-owned and part of
+#: ``kernelVersion``, like every shape table.
+ARRIVAL_MODELS: Mapping[str, ArrivalModel] = {
+    "towers": ArrivalModel(
+        emitter_share=Decimal("0.35"),
+        extra_occurrences_mean=Decimal("1.50"),
+        gap_mean_ms=Decimal("777600000"),
+    ),
+}
+
+
+def arrival_model_for(vertical: str) -> ArrivalModel:
+    """The arrival shape for *vertical*; :data:`DEFAULT_ARRIVAL_MODEL` when it has none."""
+    return ARRIVAL_MODELS.get(nfc(vertical), DEFAULT_ARRIVAL_MODEL)
 
 
 @dataclass(frozen=True)
@@ -221,7 +244,7 @@ def emit_signals(
     trace: TraceLog,
     pack: VerticalPack,
     eligible: Optional[Sequence[int]] = None,
-    arrival: ArrivalModel = DEFAULT_ARRIVAL_MODEL,
+    arrival: Optional[ArrivalModel] = None,
 ) -> Tuple[SignalEvent, ...]:
     """Emit every subject's arrivals for every ``Signal`` in the cast.
 
@@ -230,7 +253,12 @@ def emit_signals(
     ``signal`` trace ops are appended in that drained order, so ``eventDigest``
     is a digest of the run's execution order and not of the order the loops
     below happen to build events in.
+
+    *arrival* defaults to the shape registered for *pack*'s vertical
+    (:func:`arrival_model_for`).
     """
+    if arrival is None:
+        arrival = arrival_model_for(pack.name)
     sim_id = cast.simulation_id
     ordinals = tuple(eligible) if eligible is not None else tuple(store.ordinals)
     scheduler: Scheduler[SignalEvent] = Scheduler()

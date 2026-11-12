@@ -1562,7 +1562,7 @@
           "default": true
         }
       },
-      "description": "Vocabulary aligned with FLUID's exposes[].policy.agentPolicy so seam-crossing policy comparison is field-to-field."
+      "description": "FLUX's own agent-policy vocabulary. It is NOT field-for-field identical to FLUID's exposes[].policy.agentPolicy and must not be compared as if it were: FLUX declares 5 members to FLUID's 13, FLUX's tokenBudget has no FLUID counterpart (FLUID splits it into maxTokensPerRequest and maxTokensPerDay), purposeLimitation is boolean here and a string in FLUID, and FLUX's use-case values are free strings where FLUID constrains them to a 12-value enum. See docs/reconciliation.md for the divergence table and what the seam validator can and cannot enforce because of it."
     },
     "skillBinding": {
       "type": "object",

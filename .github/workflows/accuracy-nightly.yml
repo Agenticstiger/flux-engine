@@ -357,6 +357,11 @@ jobs:
           pip install -e ".[dev]"
           if [[ "${NUMPY}" != "latest" ]]; then pip install "numpy==${NUMPY}"; fi
           python -c "import numpy; print('numpy', numpy.__version__)"
+      # make test-digests runs tests/golden, whose towers set reads the FLUX
+      # checkout's example: validate it with the flux_spec from that same
+      # checkout, as ci.yml's test cells do (see the comment there).
+      - name: Install flux_spec from the sibling FLUX checkout
+        run: pip install --no-deps ../FLUX
       - name: Pinned digest set (NumPy floor cells)
         if: matrix.numpy != 'latest'
         run: |

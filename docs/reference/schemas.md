@@ -8,20 +8,20 @@ editLink: false
 
 # Schemas
 
-This version of the engine implements **FLUX 0.5.0** and accepts specification releases in the range `>=0.5,<0.6`; `fluxsim describe --self` reports the one that is running. The FLUX schema accepts documents that declare a `fluxVersion` of `0.3.0`, `0.4.0`, `0.4.1`, `0.5.0`, and refuses any other. A FLUID contract is checked against the schema of its own `fluidVersion`, from the versions this release carries: **0.7.3**, **0.7.4**, **0.7.5**.
+This version of the engine implements **FLUX 0.5.1** and accepts specification releases in the range `>=0.5,<0.6`; `fluxsim describe --self` reports the one that is running. The FLUX schema accepts documents that declare a `fluxVersion` of `0.3.0`, `0.4.0`, `0.4.1`, `0.5.0`, `0.5.1`, and refuses any other. A FLUID contract is checked against the schema of its own `fluidVersion`, from the versions this release carries: **0.7.3**, **0.7.4**, **0.7.5**, **0.7.6**.
 
 Each link has the version in its file name, so it does not move when a newer specification is published. This page is generated, and it changes in the same commit that moves the engine to a newer specification.
 
 A schema is only the first layer. The validator then checks what no schema can: that every reference resolves, every id is unique, every weight sums, and that a Simulation's emits agree with the FLUID contract they refer to.
 
-## FLUX 0.5.0
+## FLUX 0.5.1
 
 | Schema | What it checks |
 |---|---|
-| [flux-schema-0.5.0.json](https://agenticstiger.github.io/flux/schema/flux-schema-0.5.0.json) | Every FLUX document: its kind, its fields, and the rules that hold inside one document. |
+| [flux-schema-0.5.1.json](https://agenticstiger.github.io/flux/schema/flux-schema-0.5.1.json) | Every FLUX document: its kind, its fields, and the rules that hold inside one document. |
 | [flux-enforcement-0.5.0.json](https://agenticstiger.github.io/flux/schema/flux-enforcement-0.5.0.json) | The decision object the RFC-04 enforcement gate returns for one request. |
 | [flux-manifest-0.5.0.json](https://agenticstiger.github.io/flux/schema/flux-manifest-0.5.0.json) | The manifest of an evidence archive: the files, their digests and the Merkle root. |
-| [flux-ui-hints-0.5.0.json](https://agenticstiger.github.io/flux/schema/flux-ui-hints-0.5.0.json) | Hints for editors that build forms from the schema. |
+| [flux-ui-hints-0.5.1.json](https://agenticstiger.github.io/flux/schema/flux-ui-hints-0.5.1.json) | Hints for editors that build forms from the schema. |
 
 ## FLUID
 
@@ -30,3 +30,4 @@ A schema is only the first layer. The validator then checks what no schema can: 
 | [fluid-schema-0.7.3.json](https://open-data-protocol.github.io/fluid/schema/fluid-schema-0.7.3.json) | FLUID 0.7.3 — Source-Aligned Data Products |
 | [fluid-schema-0.7.4.json](https://open-data-protocol.github.io/fluid/schema/fluid-schema-0.7.4.json) | FLUID 0.7.4 — Runtime agentPolicy Enforcement at the MCP Gateway |
 | [fluid-schema-0.7.5.json](https://open-data-protocol.github.io/fluid/schema/fluid-schema-0.7.5.json) | FLUID 0.7.5 — Streaming Kafka→Iceberg Sink & Confluent Tableflow |
+| [fluid-schema-0.7.6.json](https://open-data-protocol.github.io/fluid/schema/fluid-schema-0.7.6.json) | FLUID 0.7.6 — Declarative Packaging Modes |

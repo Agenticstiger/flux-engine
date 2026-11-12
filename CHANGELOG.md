@@ -19,6 +19,44 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+A second vertical, `towers`, and FLUID 0.7.6. No telco digest moved:
+`GOLDEN-CHANGELOG.md` gains one row, for the new `tests/golden/towers-public/`
+set, and `KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep their
+values.
+
+### Added
+
+- The `towers` vertical pack: a tower company whose subjects are its tenants,
+  one operator in one market. Subject attributes `tenancyCount`,
+  `monthlyRecurringCharge`, `slaTargetPct`, `chronicSlaBreaches` and
+  `monthsToLeaseExpiry`; the signals `sig-sla-breach`, `sig-site-outage` and
+  `sig-billing-dispute`; emit aliases for the `tenant_renewal_risk_moment`
+  contract; and markets named by ISO country code, so a tenant's market is its
+  country. Its derivation draws more chronic breaches and fewer months to lease
+  expiry for at-risk and notice-giving tenants. `fluxsim plugins` lists it.
+- Arrival shapes per vertical (`flux_engine.runtime.signals.ARRIVAL_MODELS`). A
+  tower tenant's breaches arrive days apart, so the towers gap mean is nine
+  days. A vertical with no row, telco among them, keeps the default.
+- FLUID 0.7.6. The vendored specification (`flux_engine/_vendor/flux_spec`) is
+  re-synced to FLUX 0.5.1, which accepts an exact `fluidVersion: "0.7.6"` pin
+  and vendors the FLUID 0.7.6 schema. An installed `flux-spec` still takes
+  precedence: running a 0.7.6 contract needs a `flux-spec` that carries
+  FLUID 0.7.6.
+- A golden baseline for the FLUX repository's `examples/towers-tenant-renewal`
+  bundle, including the `runDigest` that `fluxsim replay --assert-digest` must
+  reproduce.
+
+### Changed
+
+- `fluxsim describe --self` reports `0.5.1` when the vendored specification is
+  the one running, and `docs/reference/schemas.md` links each schema family's
+  current file (FLUX 0.5.1 kept the 0.5.0 enforcement and manifest schemas).
+- CI installs `flux-spec` from the sibling FLUX checkout in the jobs that read
+  its example bundles, so an example and the validator that checks it come
+  from one commit.
+
 ## 0.3.1 - 2026-11-12
 
 A fix for the HTTP lineage emitter. No pinned digest moved:

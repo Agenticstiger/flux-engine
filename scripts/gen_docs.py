@@ -418,6 +418,28 @@ _FLUX_SCHEMA_PURPOSE = {
 _FLUX_SCHEMA_URL = "https://agenticstiger.github.io/flux/schema/{name}"
 
 
+def _current_schema_file(directory: Path, stem: str, spec_version: str) -> Optional[str]:
+    """The newest ``<stem>-X.Y.Z.json`` in *directory* at or below *spec_version*.
+
+    A specification release republishes only the schemas it changed: FLUX 0.5.1
+    widened the document schema and kept the 0.5.0 enforcement and manifest
+    contracts, so the current file of each family is its newest version that
+    does not postdate the specification, not one file name per release.
+    """
+
+    def version_of(path: Path) -> Tuple[int, ...]:
+        return tuple(int(part) for part in path.stem.removeprefix(f"{stem}-").split("."))
+
+    ceiling = tuple(int(part) for part in spec_version.split("."))
+    candidates = [
+        path
+        for path in directory.glob(f"{stem}-*.json")
+        if re.fullmatch(rf"{re.escape(stem)}-\d+\.\d+\.\d+", path.stem)
+        and version_of(path) <= ceiling
+    ]
+    return max(candidates, key=version_of).name if candidates else None
+
+
 def schemas_page() -> Dict[str, str]:
     """``reference/schemas.md``: the schemas this version validates against, by versioned address.
 
@@ -433,14 +455,15 @@ def schemas_page() -> Dict[str, str]:
     base = Path(vendored.__file__).resolve().parent
     flux_rows = []
     for stem, purpose in _FLUX_SCHEMA_PURPOSE.items():
-        name = f"{stem}-{VENDORED_SPEC_VERSION}.json"
-        if not (base / "schema" / name).is_file():
+        name = _current_schema_file(base / "schema", stem, VENDORED_SPEC_VERSION)
+        if name is None:
             # A page that quietly lost a row would still match its own output, and the
             # drift gate would pass. Say it instead: the pin moved to a specification
             # that names its files differently, and this table has to follow.
             raise GenerationError(
-                f"the vendored specification has no {name}; "
-                "update _FLUX_SCHEMA_PURPOSE in scripts/gen_docs.py to the files it ships"
+                f"the vendored specification has no {stem}-*.json at or below "
+                f"{VENDORED_SPEC_VERSION}; update _FLUX_SCHEMA_PURPOSE in scripts/gen_docs.py "
+                "to the files it ships"
             )
         flux_rows.append(f"| [{name}]({_FLUX_SCHEMA_URL.format(name=name)}) | {_cell(purpose)} |")
     flux_schema = json.loads(

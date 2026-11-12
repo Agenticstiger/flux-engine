@@ -48,7 +48,7 @@ from flux_engine.world.families import (
     drawn_type_satisfies,
 )
 
-__all__ = ["DERIVATIONS", "Derivation", "derivation_for", "TELCO_DERIVATION"]
+__all__ = ["DERIVATIONS", "Derivation", "derivation_for", "TELCO_DERIVATION", "TOWERS_DERIVATION"]
 
 
 @dataclass(frozen=True)
@@ -172,9 +172,68 @@ TELCO_DERIVATION = Derivation(
     },
 )
 
+#: The towers table: one subject is one tenant in one market
+#: (:mod:`flux_engine.verticals.towers`). Two attributes are
+#: lifecycle-conditioned, because they are what makes a tenant at risk at
+#: renewal: an at-risk or notice-giving tenant has more chronic SLA breaches
+#: and fewer months left on its lease than an active one. A tenant still
+#: onboarding has a long lease ahead and almost no breach history; a churned
+#: tenant's lease has run out. ``tenancyCount``, ``monthlyRecurringCharge`` and
+#: ``slaTargetPct`` describe the contract, not the relationship's health, so
+#: they draw the same way in every cohort. Every override keeps its base
+#: family's word cost, which :class:`Derivation` checks.
+TOWERS_DERIVATION = Derivation(
+    vertical="towers",
+    attributes={
+        "chronicSlaBreaches": RateCount(mean=_d("0.40")),
+        "monthlyRecurringCharge": BoundedNormal(
+            mean=_d("1450.00"), stddev=_d("420.00"), lo=_d("300.00"), hi=_d("6000.00"), scale=2
+        ),
+        "monthsToLeaseExpiry": BoundedNormal(
+            mean=_d("54"), stddev=_d("30"), lo=_d("0"), hi=_d("180"), scale=0
+        ),
+        "slaTargetPct": BoundedNormal(
+            mean=_d("99.80"), stddev=_d("0.12"), lo=_d("99.00"), hi=_d("99.99"), scale=2
+        ),
+        "tenancyCount": BoundedNormal(
+            mean=_d("220"), stddev=_d("240"), lo=_d("1"), hi=_d("4000"), scale=0
+        ),
+    },
+    by_lifecycle={
+        "onboarding": {
+            "chronicSlaBreaches": RateCount(mean=_d("0.05")),
+            "monthsToLeaseExpiry": BoundedNormal(
+                mean=_d("118"), stddev=_d("12"), lo=_d("60"), hi=_d("180"), scale=0
+            ),
+        },
+        "active": {"chronicSlaBreaches": RateCount(mean=_d("0.30"))},
+        "atrisk": {
+            "chronicSlaBreaches": RateCount(mean=_d("2.80")),
+            "monthsToLeaseExpiry": BoundedNormal(
+                mean=_d("14"), stddev=_d("8"), lo=_d("0"), hi=_d("36"), scale=0
+            ),
+        },
+        "notice": {
+            "chronicSlaBreaches": RateCount(mean=_d("3.60")),
+            "monthsToLeaseExpiry": BoundedNormal(
+                mean=_d("5"), stddev=_d("3"), lo=_d("0"), hi=_d("12"), scale=0
+            ),
+        },
+        "churned": {
+            "chronicSlaBreaches": RateCount(mean=_d("2.20")),
+            "monthsToLeaseExpiry": BoundedNormal(
+                mean=_d("0"), stddev=_d("1"), lo=_d("0"), hi=_d("2"), scale=0
+            ),
+        },
+    },
+)
+
 #: Every vertical this engine can materialise, keyed the way
 #: :data:`flux_engine.verticals.PACKS` is keyed.
-DERIVATIONS: Mapping[str, Derivation] = {TELCO_DERIVATION.vertical: TELCO_DERIVATION}
+DERIVATIONS: Mapping[str, Derivation] = {
+    TELCO_DERIVATION.vertical: TELCO_DERIVATION,
+    TOWERS_DERIVATION.vertical: TOWERS_DERIVATION,
+}
 
 
 def derivation_for(vertical: str) -> Derivation:
