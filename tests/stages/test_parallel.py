@@ -419,3 +419,83 @@ def test_a_refusal_in_a_worker_is_the_refusal_one_process_raises() -> None:
     assert pooled.value.code is alone.value.code
     assert str(pooled.value) == str(alone.value)
     assert "row 0," in str(pooled.value)
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.skipif(parallel.cpu_jobs() < 2, reason="one CPU: every emit stays in one process")
+def test_a_failed_run_waits_for_its_workers_before_giving_them_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No worker is alive when the error reaches the caller, who then frees its share."""
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    real_map = ProcessPoolExecutor.map
+
+    def map_then_fail(self: Any, fn: Any, *iterables: Any, **options: Any) -> Any:
+        results = real_map(self, fn, *iterables, **options)
+
+        def read() -> Any:
+            yield next(results)
+            raise RuntimeError("the run stopped reading its slices")
+
+        return read()
+
+    monkeypatch.setattr(ProcessPoolExecutor, "map", map_then_fail)
+    plan, expose, root = _refused_on_every_row(3 * parallel.MIN_ROWS_PER_JOB + 7)
+    with pytest.raises(RuntimeError, match="stopped reading"):
+        parallel.generate_framed(plan, root=root, expose=expose, workers=3)
+    assert multiprocessing.active_children() == []
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+@pytest.mark.skipif(parallel.cpu_jobs() < 2, reason="one CPU: every emit stays in one process")
+def test_a_run_whose_slices_cannot_all_be_handed_out_waits_for_its_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other way out: map itself fails once the workers have started."""
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    real_map = ProcessPoolExecutor.map
+
+    def start_then_fail(self: Any, fn: Any, *iterables: Any, **options: Any) -> Any:
+        real_map(self, fn, *iterables, **options)
+        raise RuntimeError("the slices could not all be handed out")
+
+    monkeypatch.setattr(ProcessPoolExecutor, "map", start_then_fail)
+    plan, expose, root = _refused_on_every_row(3 * parallel.MIN_ROWS_PER_JOB + 7)
+    with pytest.raises(RuntimeError, match="handed out"):
+        parallel.generate_framed(plan, root=root, expose=expose, workers=3)
+    assert multiprocessing.active_children() == []
+
+
+class _SafePathUnwritten(dict):  # type: ignore[type-arg]
+    """An environment that refuses any change to PYTHONSAFEPATH (pytest writes its own keys)."""
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        if key == "PYTHONSAFEPATH":
+            raise AssertionError("PYTHONSAFEPATH was written")
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key: Any) -> None:
+        if key == "PYTHONSAFEPATH":
+            raise AssertionError("PYTHONSAFEPATH was removed")
+        super().__delitem__(key)
+
+    def pop(self, key: Any, *default: Any) -> Any:
+        if key == "PYTHONSAFEPATH":
+            raise AssertionError("PYTHONSAFEPATH was removed")
+        return super().pop(key, *default)
+
+
+@pytest.mark.unit
+def test_children_that_start_safe_already_leave_the_environment_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    watched = _SafePathUnwritten({**os.environ, "PYTHONSAFEPATH": "1"})
+    monkeypatch.setattr(os, "environ", watched)
+    with parallel._children_without_the_working_directory():
+        assert os.environ["PYTHONSAFEPATH"] == "1"

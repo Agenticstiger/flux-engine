@@ -13,6 +13,9 @@ a bundle large enough for two workers, and asks for the same digests.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, List
 
@@ -136,3 +139,44 @@ def test_two_jobs_give_the_run_digest_one_job_gives(
     )
     assert one[0].startswith("sha256:") and one[1]
     assert two == one
+
+
+_RUN_AS_FLUXSIM = (
+    "import os, sys\n"
+    "from flux_engine.cli import main\n"
+    "sys.argv = ['fluxsim', '--version']\n"
+    "code = main()\n"
+    "print(code, os.environ.get('PYTHONSAFEPATH'))\n"
+)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("before", [None, ""])
+def test_fluxsim_runs_its_children_with_a_safe_path(before: Any) -> None:
+    """As the program itself, the CLI sets PYTHONSAFEPATH once, for its own process.
+
+    An empty value is unset to Python, so it is set too.
+    """
+    environment = {k: v for k, v in os.environ.items() if k != "PYTHONSAFEPATH"}
+    if before is not None:
+        environment["PYTHONSAFEPATH"] = before
+    done = subprocess.run(
+        [sys.executable, "-c", _RUN_AS_FLUXSIM],
+        cwd=Path(__file__).resolve().parents[2],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip().splitlines()[-1] == "0 1"
+
+
+@pytest.mark.unit
+def test_a_caller_of_main_keeps_its_own_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
+    assert main(["--version"]) == 0
+    capsys.readouterr()
+    assert "PYTHONSAFEPATH" not in os.environ

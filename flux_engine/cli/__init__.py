@@ -2211,6 +2211,16 @@ def _run_command(fn: Any, args: argparse.Namespace) -> int:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    if argv is None:
+        # Run as the program itself (the `fluxsim` script, `python -m
+        # flux_engine.cli`), so this process is the CLI's alone: every Python
+        # process it starts, the --jobs workers and a resource tracker that
+        # multiprocessing has to restart, leaves the current directory off its
+        # import path, and the setting never changes while threads run (see
+        # flux_engine.stages._parallel). A caller of main(argv) keeps its own
+        # environment. An empty value counts as unset, as Python reads it.
+        if not os.environ.get("PYTHONSAFEPATH"):
+            os.environ["PYTHONSAFEPATH"] = "1"
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     # Set before the parse, because a usage error happens DURING it: the
     # namespace does not exist yet when `parser.error` has to decide
