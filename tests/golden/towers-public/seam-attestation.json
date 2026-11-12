@@ -1,6 +1,6 @@
 {
-  "G": "sha256:74da6de208bc29f5d5b69e4776ede5f26c030be43f15ac6a731a88edfbaba993",
-  "H": "sha256:74da6de208bc29f5d5b69e4776ede5f26c030be43f15ac6a731a88edfbaba993",
+  "G": "sha256:949f1781123a0bbadbeb075a266ad797500724229b57e417e2c0249b9abc46eb",
+  "H": "sha256:949f1781123a0bbadbeb075a266ad797500724229b57e417e2c0249b9abc46eb",
   "columns": [
     "tenant_id",
     "detected_at",
@@ -20,8 +20,8 @@
   ],
   "emitIndex": 0,
   "reference": {
-    "contractDigest": "sha256:1fc27b495f61f6095387983845975aba5520675d0c9a358d07ca5c515992d6d1",
-    "contractFileDigest": "sha256:413a7e19cb975c5ab72cc39255317c0b69313574a49de71ebdb2fe6ea8b31721",
+    "contractDigest": "sha256:4f85bb210dbb25ac908e29da31f247bd0e24a39ff5f9affddc5bc04bc2e08766",
+    "contractFileDigest": "sha256:86ea0530854f322ccd40f008bf2e093be9148f37858fba831c56e01e173aab0a",
     "exposeId": "tenant_renewal_risk_moment",
     "fluidVersion": "0.7.6",
     "productRef": "towers.gold.tenant_renewal_risk_moment"
@@ -30,7 +30,7 @@
   "simulationId": "sim-tenant-renewal-risk",
   "synthetic": {
     "generatorDigest": null,
-    "rows": 398
+    "rows": 442
   },
   "types": [
     "STRING",

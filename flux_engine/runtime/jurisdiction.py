@@ -40,7 +40,9 @@ PACK_ATTRIBUTE = "market_jurisdictions"
 #: the shipped example's three markets onto the three jurisdictions
 #: ``cp-telco-eu`` allows, in the markets' own sorted order. The towers
 #: example names each market by its ISO 3166-1 alpha-2 country code, so its row
-#: is the identity over the six markets it declares.
+#: is the identity over the six markets it declares. A towers World that adds a
+#: market adds it here too: an unlisted market stays ``FLX-4110`` at the first
+#: consent decision, never a guessed jurisdiction.
 MARKET_JURISDICTIONS: Mapping[str, Mapping[str, str]] = {
     "telco": {"mkt-a": "DE", "mkt-b": "FR", "mkt-c": "NL"},
     "towers": {code: code for code in ("DZ", "IQ", "JO", "KW", "QA", "TN")},

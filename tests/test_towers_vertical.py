@@ -25,6 +25,7 @@ from flux_engine.stages.plan import plan
 from flux_engine.verticals import emit_aliases, get_pack, pack_names
 from flux_engine.verticals.towers import TOWERS, TOWERS_EMIT_ALIASES
 from flux_engine.world.derived import Derivation, derivation_for
+from flux_engine.world.families import BoundedNormal
 from tests.flux_examples import skip_or_fail_without_flux_examples
 
 pytestmark = pytest.mark.unit
@@ -193,7 +194,24 @@ def test_a_breach_availability_stays_inside_its_declared_interval() -> None:
     family = payload_families("sig-sla-breach", TOWERS)["availabilityPct"]
     for entropy in STREAMS:
         value = draw_on(family, DrawStream.from_entropy(entropy))
-        assert Decimal("95.00") <= value <= Decimal("99.89")
+        assert Decimal("95.00") <= value <= Decimal("98.99")
+
+
+def test_a_breach_is_below_every_sla_target_the_derivation_draws() -> None:
+    """A payload is drawn without seeing its subject; only the bounds keep a breach a breach."""
+    availability = PAYLOAD_FAMILIES["sig-sla-breach"]["availabilityPct"]
+    target = derivation_for("towers").attributes["slaTargetPct"]
+    assert isinstance(availability, BoundedNormal) and isinstance(target, BoundedNormal)
+    assert availability.hi < target.lo
+
+
+def test_the_longest_outage_fits_inside_the_breach_months_downtime() -> None:
+    """Even at the highest breach availability, a 30-day month has more downtime than the cap."""
+    availability = PAYLOAD_FAMILIES["sig-sla-breach"]["availabilityPct"]
+    outage = PAYLOAD_FAMILIES["sig-sla-breach"]["downtimeMinutes"]
+    assert isinstance(availability, BoundedNormal) and isinstance(outage, BoundedNormal)
+    least_downtime = (Decimal(100) - availability.hi) / Decimal(100) * Decimal(30 * 24 * 60)
+    assert outage.hi <= least_downtime
 
 
 def test_no_number_in_the_towers_table_entries_is_a_float() -> None:

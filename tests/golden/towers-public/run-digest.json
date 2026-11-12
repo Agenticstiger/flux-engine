@@ -4,13 +4,13 @@
     "decisions": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "delivery": "sha256:8cb7bc3b220c4dc3133c30b0fefb2908d97bff2ac987cee033d5b3dd42af9db6",
     "emits": {
-      "tenant_renewal_risk_moment": "sha256:57fcb8f9ce57182e98c76844a79bbe9c8cfdd5e19d2558a63d63401f33e5358c"
+      "tenant_renewal_risk_moment": "sha256:34fffe76502d966ec7d15833e628bf6b383fb546bc60f58eed29d422311f396a"
     },
-    "events": "sha256:300a573560fcf81dfa4ad5fd4b7039a9e09bc683ade13a1b36fe8a03ef457519",
-    "journeys": "sha256:b23f488cee8bb8d9072a58abf7091db248adc375fbbaa1eabde250e19ade985e",
-    "population": "sha256:623d9ac3aea0a9d800658ad4caaf454206583a5c2d70d1702233c01b34343ba7"
+    "events": "sha256:aec67ac942bf94be0cffb8dfe406a104f821a67ddc06e8f2b6cbc12fb14fc796",
+    "journeys": "sha256:1437ced91c42c77f82a4f7652638d53b4144182fb3fc97b48d9002763c2536e4",
+    "population": "sha256:c6e12a40ce9aa10f611867ef44c32397cdf18accaa063172ba955ee84d655c7c"
   },
-  "inputDigest": "sha256:9e7683ec789ecf8211799764ada7180731c68fc274eb1e40c7fd5e65bbd806ed",
+  "inputDigest": "sha256:a910ffffa1daa3aa0add2de6b984ed7cabf9c8fae3f7f46fd4975da43e188c55",
   "kernelVersion": "0.1.0",
   "runFormatVersion": 1,
   "traceVersion": "flux-trace/1"

@@ -120,3 +120,5 @@ are unchanged: they still differ from upstream only by the path edits above.
   `vectors/enforcement-vectors.json`.
 
 Every vendored JSON file is byte-identical to its upstream copy at that commit.
+The copy now holds 13 schema files and 4 FLUID schemas; the provenance table at
+the top lists the 11 and 3 of the original vendoring.

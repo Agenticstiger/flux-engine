@@ -77,16 +77,21 @@ PAYLOAD_FAMILIES: Mapping[str, Mapping[str, Family]] = {
         "attempts": RateCount(mean=_d("1.20"), offset=1),
         "channel": Categorical({"card": _d("0.60"), "sepa_dd": _d("0.30"), "wallet": _d("0.10")}),
     },
-    # towers. A breach's measured availability sits below a typical target and
-    # its downtime is chargeable minutes in the month (dp014); the causes are
-    # the outage-class alarm types dp014 names as ``worst_outage_cause``.
+    # towers. A payload field is drawn without seeing the subject, so the two
+    # bounds below are what keep a breach a breach. Its month's availability
+    # stays under 99.00, the lowest SLA target the towers derivation draws, so
+    # it is below the tenant's target whatever that target is. Its downtime is
+    # the month's longest chargeable outage (the one dp014's
+    # ``worst_outage_cause`` names), capped at 430 minutes: a month at 98.99 %
+    # or less has at least 436 chargeable minutes, so the longest outage always
+    # fits inside it. The causes are dp014's outage-class alarm types.
     "sig-sla-breach": {
         "availabilityPct": BoundedNormal(
-            mean=_d("99.40"), stddev=_d("0.35"), lo=_d("95.00"), hi=_d("99.89"), scale=4
+            mean=_d("98.40"), stddev=_d("0.40"), lo=_d("95.00"), hi=_d("98.99"), scale=4
         ),
         "cause": Categorical(_OUTAGE_CAUSES),
         "downtimeMinutes": BoundedNormal(
-            mean=_d("95.00"), stddev=_d("70.00"), lo=_d("5.00"), hi=_d("1440.00"), scale=2
+            mean=_d("95.00"), stddev=_d("70.00"), lo=_d("5.00"), hi=_d("430.00"), scale=2
         ),
     },
     # An outage takes at least one site down, so ``sitesAffected`` is shifted,

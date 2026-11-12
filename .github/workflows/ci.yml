@@ -261,7 +261,11 @@ jobs:
       # flux-spec (the towers bundle pins FLUID 0.7.6) would otherwise fail
       # here until the next spec release. --no-deps keeps every dependency at
       # the version the engine pins, and flux_engine.spec still refuses a
-      # flux_spec outside SUPPORTED_SPEC_VERSION_RANGE.
+      # flux_spec outside SUPPORTED_SPEC_VERSION_RANGE. That refusal couples
+      # these cells to FLUX main: the change that moves FLUX main's package
+      # version out of that range turns them red here until the engine widens
+      # the range, which is the point -- it is the first engine build that would
+      # run against that specification.
       - name: Install flux_spec from the sibling FLUX checkout
         run: pip install --no-deps ../FLUX
 

@@ -29,8 +29,9 @@ example's emitted product consumes: ``silver.commercial.active_tenancy_v1``
   markets by ISO 3166-1 alpha-2 code, as dp019 ``country_code`` ("market of
   the site") does, so ``subject.market`` *is* the country and is never drawn
   twice.
-* signal attributes -- ``sig-sla-breach`` (dp014 ``availability_pct``,
-  ``downtime_minutes``, ``worst_outage_cause``), ``sig-site-outage`` (an
+* signal attributes -- ``sig-sla-breach`` (the breach month's dp014
+  ``availability_pct``, its longest chargeable outage in minutes, and that
+  outage's ``worst_outage_cause``), ``sig-site-outage`` (an
   outage-class alarm: minutes, sites affected, cause) and
   ``sig-billing-dispute`` (a dp016 line on a ``DISPUTED`` invoice: amount and
   ``charge_type``).
