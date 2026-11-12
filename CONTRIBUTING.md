@@ -39,7 +39,9 @@ That runs the static checks (ruff, black, mypy, import-linter, the
 vocabulary lint, the naming guardrail, the licence-header check and the
 proof-material guard) and the fast tests. CI runs more:
 the slow shards, and a matrix of operating systems and Python versions.
-`make ci-local` mirrors all of it and takes about half an hour.
+`make ci-local` mirrors all of it and takes about half an hour. It also runs
+the lineage tests against the real OpenLineage client, so install that extra
+first: `uv sync --extra dev --extra lineage`.
 
 ## What a good change looks like
 

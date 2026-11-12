@@ -81,9 +81,9 @@ dependencies = [
 
 [project.optional-dependencies]
 lineage = [
-  # Official OpenLineage Python client -- owns the RunEvent wire format so
-  # flux_engine does not hand-roll it, matching how forge-cli's own
-  # OpenLineage emitter is wired.
+  # Official OpenLineage Python client. FLUX renders the run event itself
+  # (flux_engine.lineage.emitter.render_run_event) and the client carries it
+  # over HTTP through its transport.
   "openlineage-python>=1.20",
 ]
 # Columnar output sinks: the Arrow batching layer (flux_engine.sinks.arrow)

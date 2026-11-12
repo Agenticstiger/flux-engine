@@ -444,6 +444,40 @@ jobs:
       - name: Proof-system backends are out of scope
         run: make proof-guard
 
+  # ------------------------------------------------------------ lineage-extra
+  # Every other job installs the dev extras only, so the OpenLineage client is
+  # absent and the real-client tests skip. A fake client that accepts anything
+  # once hid a delivery bug here for several releases; this job installs the
+  # `lineage` extra and runs the lineage tests (and the describe surface, whose
+  # capability list depends on what is installed) against the real package, and
+  # type-checks with the client's own annotations in view. The check is the
+  # `make lineage-extra` target, which `make ci-local` runs too.
+  lineage-extra:
+    name: Lineage extra
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: flux-engine/pyproject.toml
+
+      - name: Install flux_engine (dev and lineage extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,lineage]"
+
+      - name: Types and the real-client tests (make lineage-extra)
+        run: make lineage-extra
+
   # ------------------------------------------------------------- ci-gate
   # The one required status check on main.
   #
@@ -457,7 +491,7 @@ jobs:
   ci-gate:
     name: CI gate
     if: always()
-    needs: [gates, test, slow, packaging, proof-guard]
+    needs: [gates, test, slow, packaging, proof-guard, lineage-extra]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

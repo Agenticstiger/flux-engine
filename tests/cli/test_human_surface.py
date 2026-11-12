@@ -19,6 +19,7 @@ Four separate ways the terminal surface was worse than the machine one:
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -33,6 +34,7 @@ import pytest
 
 from flux_engine.cli import main
 from flux_engine.cli._progress import progress_enabled, stage_progress
+from flux_engine.describe import _CAPABILITY_MODULES
 
 pytestmark = pytest.mark.unit
 
@@ -175,10 +177,21 @@ def test_describe_names_the_capabilities_that_are_off(capsys) -> None:
     assert main(["describe", "--self"]) == 0
     out = capsys.readouterr().out
     assert "capabilities: " in out
-    absent = next(line for line in out.splitlines() if line.startswith("not available: "))
-    for name in ("agentic", "calibrate_abc", "lineage_transport", "synth"):
+    # The same probe describe uses, so this holds with and without the extras.
+    off = [
+        name
+        for name, module in _CAPABILITY_MODULES.items()
+        if importlib.util.find_spec(module) is None
+    ]
+    listed = [line for line in out.splitlines() if line.startswith("not available: ")]
+    if not off:
+        assert listed == [], "nothing is absent, so no line names anything as absent"
+        return
+    absent = listed[0]
+    enabled = out.split("not available:")[0]
+    for name in off:
         assert name in absent, name
-    assert name not in out.split("not available:")[0], "an absent capability is not 'enabled'"
+        assert name not in enabled, "an absent capability is not 'enabled'"
 
 
 def test_the_human_and_json_capability_sets_agree(capsys) -> None:
