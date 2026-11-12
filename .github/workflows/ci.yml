@@ -239,6 +239,9 @@ jobs:
           repository: Agenticstiger/FLUX
           path: FLUX
           token: ${{ secrets.FLUX_SPEC_REPO_TOKEN || github.token }}
+          # The FLUX checkout is installed and run below, so its token is not
+          # left in FLUX/.git/config for that code to read; nothing here pushes.
+          persist-credentials: false
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -366,6 +369,9 @@ jobs:
           repository: Agenticstiger/FLUX
           path: FLUX
           token: ${{ secrets.FLUX_SPEC_REPO_TOKEN || github.token }}
+          # The FLUX checkout is installed and run below, so its token is not
+          # left in FLUX/.git/config for that code to read; nothing here pushes.
+          persist-credentials: false
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
