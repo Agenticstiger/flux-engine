@@ -17,10 +17,10 @@ from flux_engine.core.errors import FluxError
 from flux_engine.core.rng import DrawStream
 from flux_engine.expr.types import STRING
 from flux_engine.runtime.jurisdiction import jurisdiction_of
-from flux_engine.runtime.payloads import PAYLOAD_FAMILIES, payload_families
+from flux_engine.runtime.payloads import PAYLOAD_FAMILIES, integral_payload_fields, payload_families
 from flux_engine.runtime.signals import DEFAULT_ARRIVAL_MODEL, arrival_model_for
 from flux_engine.seam.contract import compile_expose
-from flux_engine.seam.mapping import resolve_column_mapping, source_namespace
+from flux_engine.seam.mapping import integral_namespace, resolve_column_mapping, source_namespace
 from flux_engine.stages.plan import plan
 from flux_engine.verticals import emit_aliases, get_pack, pack_names
 from flux_engine.verticals.towers import TOWERS, TOWERS_EMIT_ALIASES
@@ -284,15 +284,33 @@ def _towers_declared() -> FrozenSet[str]:
     )
 
 
+def _towers_integral() -> FrozenSet[str]:
+    """The towers sources that are always whole numbers, as the pipeline builds them."""
+    return integral_namespace(
+        subject_attributes=derivation_for("towers").integral_names(),
+        event_payload_fields=integral_payload_fields(TOWERS_SIGNALS, TOWERS),
+    )
+
+
 def test_every_column_of_the_shipped_contract_binds_through_the_towers_aliases() -> None:
     example = skip_or_fail_without_flux_examples(EXAMPLE)
     expose = _example_expose(example)
     mapping = resolve_column_mapping(
-        expose, declared_sources=_towers_declared(), aliases=TOWERS_EMIT_ALIASES
+        expose,
+        declared_sources=_towers_declared(),
+        integral_sources=_towers_integral(),
+        aliases=TOWERS_EMIT_ALIASES,
     )
     assert [binding.column for binding in mapping.bindings] == list(expose.column_names)
     assert {binding.how for binding in mapping.bindings} == {"alias"}
     assert all(binding.source is not None for binding in mapping.bindings)
+    # The contract's INTEGER columns, and only those, are fed by integral sources.
+    assert {binding.column for binding in mapping.bindings if binding.integral} == {
+        "breach_count",
+        "tenancy_count",
+        "chronic_sla_breaches",
+        "months_to_lease_expiry",
+    }
 
 
 def test_every_towers_alias_names_a_declared_source_path() -> None:
