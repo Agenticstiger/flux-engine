@@ -38,7 +38,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from decimal import setcontext
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
@@ -51,7 +51,14 @@ from flux_engine.seam.conform import render_row
 from flux_engine.seam.contract import CompiledExpose
 from flux_engine.seam.emit import row_line
 
-__all__ = ["MIN_ROWS_PER_JOB", "cpu_jobs", "generate_framed", "require_jobs", "workers_for"]
+__all__ = [
+    "MIN_ROWS_PER_JOB",
+    "cpu_jobs",
+    "generate_framed",
+    "require_jobs",
+    "reserve_workers",
+    "workers_for",
+]
 
 #: The fewest rows a worker process is started for.
 MIN_ROWS_PER_JOB = 4096
@@ -117,6 +124,57 @@ def _children_keep_the_working_directory_off_their_path() -> bool:
     keeps it off anyway. In that one case the rows are made in this process.
     """
     return bool(sys.flags.safe_path) or not sys.flags.ignore_environment
+
+
+class _WorkerBudget:
+    """The worker processes every run in this process may have at once: one per CPU.
+
+    Only workers are counted. A run that makes its rows itself, in its own
+    process, reserves nothing.
+
+    Runs that share a process (a host running several through the async
+    facade) would otherwise each start a full pool, and together run several
+    workers per CPU. A run takes the workers it asks for or what is left,
+    whichever is fewer, and gives them back when its emit is done. One left
+    with fewer than two makes its rows itself rather than wait, so no run
+    ever blocks on another.
+
+    loky's reusable executor shares one pool per interpreter; this shares the
+    count of workers instead, because each emit's pool carries that emit's
+    plan in its initializer.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._in_use = 0
+
+    @contextmanager
+    def reserve(self, wanted: int) -> Iterator[int]:
+        reserved = 0
+        try:
+            with self._lock:
+                granted = min(wanted, cpu_jobs() - self._in_use)
+                if granted >= 2:
+                    self._in_use += granted
+                    reserved = granted
+            # With nothing reserved, this process makes the rows.
+            yield reserved or 1
+        finally:
+            if reserved:
+                with self._lock:
+                    self._in_use -= reserved
+
+
+_BUDGET = _WorkerBudget()
+
+
+def reserve_workers(wanted: int) -> AbstractContextManager[int]:
+    """Reserve up to *wanted* workers for one emit: ``with reserve_workers(n) as workers:``.
+
+    *workers* is how many to start, and 1 means this process makes the rows
+    (see :class:`_WorkerBudget`).
+    """
+    return _BUDGET.reserve(wanted)
 
 
 def _slices(rows: int, count: int) -> List[Tuple[int, int]]:
@@ -235,9 +293,9 @@ def _run_slice(bounds: Tuple[int, int]) -> _SliceOutcome:
 
 
 def generate_framed(
-    plan: GeneratorPlan, *, root: SeedTreeRoot, expose: CompiledExpose, jobs: int
+    plan: GeneratorPlan, *, root: SeedTreeRoot, expose: CompiledExpose, workers: int
 ) -> Tuple[Rows, List[bytes]]:
-    """*plan*'s rows and their framed lines, made by up to *jobs* worker processes.
+    """*plan*'s rows and their framed lines, made by *workers* worker processes.
 
     The same rows, in the same order, and the same lines
     (``row_line(render_row(row))``) as one process makes. A refusal from a
@@ -249,7 +307,6 @@ def generate_framed(
     from concurrent.futures import ProcessPoolExecutor
     from concurrent.futures.process import BrokenProcessPool
 
-    workers = workers_for(plan.rows, jobs)
     slices = _slices(plan.rows, workers * _SLICES_PER_WORKER)
     # The pool starts its resource tracker when it is built and its workers as
     # the slices are submitted, which map does before it returns.

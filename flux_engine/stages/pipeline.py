@@ -82,7 +82,12 @@ from flux_engine.seam.emit import (
 from flux_engine.seam.mapping import ColumnMapping, resolve_column_mapping, source_namespace
 from flux_engine.seam.resolve import LoadedBundle, ResolvedEmit, load_bundle, resolve_all_emits
 from flux_engine.seam.sinks import NullSink
-from flux_engine.stages._parallel import generate_framed, require_jobs, workers_for
+from flux_engine.stages._parallel import (
+    generate_framed,
+    require_jobs,
+    reserve_workers,
+    workers_for,
+)
 from flux_engine.verticals import emit_aliases, get_pack
 from flux_engine.world import PopulationSpec, SubjectStore, TraceLog, materialise_population
 
@@ -144,6 +149,8 @@ class EmitOutcome:
     result: EmitResult
     writer: EmitWriter
     mapping: Optional[ColumnMapping] = None
+    #: How many processes made the rows: 1 is the run's own process.
+    processes: int = 1
 
     @property
     def source(self) -> str:
@@ -477,6 +484,7 @@ def _generate_emit(
     mapping: Optional[ColumnMapping] = None
     rows: Tuple[Tuple[Any, ...], ...] = ()
     writer: Optional[EmitWriter] = None
+    processes = 1
     declared_rows = resolved.declared_row_count
 
     if resolved.fidelity is not None:
@@ -489,11 +497,12 @@ def _generate_emit(
             fidelity=resolved.fidelity,
             time_bounds=simulation.get("spec", {}).get("timeBounds"),
         )
-        if workers_for(plan.rows, jobs) > 1:
-            rows, lines = generate_framed(plan, root=root, expose=expose, jobs=jobs)
-            writer = EmitWriter.from_framed(expose, resolved.contract_digest, lines)
-        else:
-            rows = generate_rows(plan, root=root)
+        with reserve_workers(workers_for(plan.rows, jobs)) as processes:
+            if processes > 1:
+                rows, lines = generate_framed(plan, root=root, expose=expose, workers=processes)
+                writer = EmitWriter.from_framed(expose, resolved.contract_digest, lines)
+            else:
+                rows = generate_rows(plan, root=root)
     else:
         mapping = resolve_column_mapping(
             expose,
@@ -518,6 +527,7 @@ def _generate_emit(
         result=writer.result(),
         writer=writer,
         mapping=mapping,
+        processes=processes,
     )
 
 

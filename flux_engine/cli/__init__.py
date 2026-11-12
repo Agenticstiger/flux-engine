@@ -532,9 +532,10 @@ def _add_jobs(parser: argparse.ArgumentParser) -> None:
         type=_jobs_type,
         metavar="N",
         help=(
-            "processes that generate the rows of an emit declared by statistics: a number "
-            "(never more than one per CPU is used), or auto for one per CPU; the rows and "
-            f"every digest are the same whatever the number (default: {JOBS_ENV_VAR}, else 1)"
+            "the most processes that may generate the rows of an emit declared by "
+            "statistics: a number (never more than one per CPU) or auto for one per CPU; "
+            "the run summary says how many it used, and the rows and every digest are the "
+            f"same whatever the number (default: {JOBS_ENV_VAR}, else 1)"
         ),
     )
 
