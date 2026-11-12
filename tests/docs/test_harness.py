@@ -238,7 +238,7 @@ def test_a_text_block_is_not_run(tmp_path: Path) -> None:
 def test_a_page_runs_in_its_own_directory_with_fluxsim_on_the_path(tmp_path: Path) -> None:
     _run(
         tmp_path,
-        "```console\n$ fluxsim --version\n0.3.0\n$ fluxsim init demo   # exit 0\n...\n$ ls demo | head -1\n"
+        "```console\n$ fluxsim --version\n0.3.1\n$ fluxsim init demo   # exit 0\n...\n$ ls demo | head -1\n"
         "detector.flux.yml\n```\n",
     )
 
