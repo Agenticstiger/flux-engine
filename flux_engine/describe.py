@@ -92,7 +92,6 @@ _CAPABILITY_MODULES: Dict[str, str] = {
     "agentic": "flux_engine_agentic",
     "calibrate_abc": "pyabc",
     "lineage_transport": "openlineage",
-    "synth": "synthcity",
 }
 
 
