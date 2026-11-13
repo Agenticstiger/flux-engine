@@ -454,6 +454,15 @@ def statistics_for(
             )
         if any(weight < 0 for weight in bin_weights):
             raise FluxError(FLX_3402, f"{name}: binWeights carries a negative weight")
+        # Refused here, where the plan is formed, and not on the first row
+        # drawn: with no mass in any bin no row can be drawn at all, and a
+        # plan with no rows would otherwise pass.
+        if not any(weight > 0 for weight in bin_weights):
+            raise FluxError(
+                FLX_3402,
+                f"{name}: binWeights sums to zero, so no bin can be drawn; "
+                "give at least one bin a weight above zero",
+            )
 
     null_policy = block.get("null")
     if null_policy is not None and not isinstance(null_policy, str):

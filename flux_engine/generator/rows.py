@@ -481,6 +481,7 @@ def _require_parameters(
                     f"{name}: {size} declared levels exceed the declared "
                     f"maxCardinality of {statistics.max_cardinality}",
                 )
+        _require_renderable_levels(column, statistics)
     elif family is Family.BOUNDED_NORMAL:
         if not statistics.has_range:
             raise FluxError(FLX_3402, f"{name}: a bounded normal needs a declared range")
@@ -514,6 +515,30 @@ def _require_parameters(
                 "where the bins are, not how much mass each carries",
             )
         _require_drawable_uniform(column, statistics)
+
+
+def _require_renderable_levels(column: CompiledColumn, statistics: ColumnStatistics) -> None:
+    """Refuse a level the column's own value class cannot hold, before any row is drawn.
+
+    A categorical cell draws a level and reads it with :func:`_level_to_value`.
+    A level such as ``"p"`` on a ``DECIMAL`` column used to pass the plan and
+    fail on the first row with a bare ``decimal.InvalidOperation``. Each level
+    is read here once, in the kernel's own context, exactly as a cell reads it.
+    The levels are the ones :func:`_column_levels` draws from: the declared
+    ``levels``, or else the declared support.
+    """
+    names = statistics.levels if statistics.levels is not None else statistics.support or ()
+    with localcontext(_KERNEL_CONTEXT):
+        for level in names:
+            try:
+                _level_to_value(level, column)
+            except (ArithmeticError, ValueError) as error:
+                raise FluxError(
+                    FLX_3402,
+                    f"{column.name}: level {level!r} is not a valid "
+                    f"{column.logical_type.kind.value} value; declare levels the "
+                    "column's type can hold",
+                ) from error
 
 
 def _bin_top(edges: Sequence[Decimal], index: int, step: Decimal) -> Decimal:
@@ -818,6 +843,14 @@ def _renormalised(weights: Mapping[str, Decimal]) -> Mapping[str, Decimal]:
     decimal residue is exactly the level ``categorical``'s last-level rule
     absorbs its threshold remainder into. A raw code-point sort would
     disagree with it whenever a level is written in a decomposed form.
+
+    One exception: a negative residue that the last level cannot absorb. A
+    level declared with no mass (a ``binWeights`` entry of ``0``, say) would
+    be left with a negative weight, which ``categorical`` refuses with
+    FLX-5021 on every draw. The residue goes instead to the NFC-last level
+    that can take it and stay non-negative. Only weights that every draw
+    used to refuse take this branch, so no row a run could already produce
+    moves.
     """
     ordered = [key for key, _ in nfc_sorted_items(weights)]
     total = sum((Decimal(weights[key]) for key in ordered), Decimal(0))
@@ -828,8 +861,14 @@ def _renormalised(weights: Mapping[str, Decimal]) -> Mapping[str, Decimal]:
             f"declared weights sum to {total}, which is further than "
             f"{WEIGHT_SUM_TOLERANCE} from 1",
         )
+    absorber = ordered[-1]
+    if weights[absorber] + residue < 0:
+        # Some level always qualifies: the residue is at most the tolerance,
+        # and the weights sum to about one. The default keeps the old refusal
+        # should that ever stop holding.
+        absorber = next((key for key in reversed(ordered) if weights[key] + residue >= 0), absorber)
     adjusted = dict(weights)
-    adjusted[ordered[-1]] = weights[ordered[-1]] + residue
+    adjusted[absorber] = weights[absorber] + residue
     return adjusted
 
 

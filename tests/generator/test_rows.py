@@ -605,6 +605,38 @@ def test_support_declared_over_an_enum_type_draws_the_types_own_levels() -> None
             {"family": "rate", "rate": "1"},
             "an inter-arrival rate needs a declared range.min",
         ),
+        # A level the column cannot read: these passed the plan, and the first
+        # row raised a bare InvalidOperation, ValueError or OverflowError.
+        (
+            "DECIMAL(18,2)",
+            {"levels": {"p": "0.5", "q": "0.5"}},
+            "n: level 'p' is not a valid DECIMAL value",
+        ),
+        (
+            "DECIMAL(18,2)",
+            {"support": {"values": ["1.5", "q"]}},
+            "n: level 'q' is not a valid DECIMAL value",
+        ),
+        (
+            "DECIMAL(18,2)",
+            {"levels": {"1": "0.5", "Infinity": "0.5"}},
+            "n: level 'Infinity' is not a valid DECIMAL value",
+        ),
+        ("INT", {"levels": {"1": "0.5", "x": "0.5"}}, "n: level 'x' is not a valid INT value"),
+        ("INT", {"levels": {"1": "0.5", "NaN": "0.5"}}, "n: level 'NaN' is not a valid INT value"),
+        # Whatever the level's weight. These planned and generated rows, but
+        # `?` is the NFC-last level, so it takes the 1e-12 residue and a row
+        # can draw it.
+        (
+            "INT",
+            {"levels": {"1": "0.999999999999", "?": "0"}},
+            "n: level '?' is not a valid INT value",
+        ),
+        (
+            "BOOL",
+            {"levels": {"false": "1", "maybe": "0"}},
+            "n: a BOOL level is 'true' or 'false', not 'maybe'",
+        ),
     ],
 )
 def test_a_family_without_its_parameters_is_refused(
@@ -624,31 +656,37 @@ def test_a_family_without_its_parameters_is_refused(
 
 
 def test_a_bool_level_that_is_not_true_or_false_is_refused() -> None:
+    """Refused when the plan is formed, before any row is drawn."""
     expose = expose_from_schema([{"name": "b", "type": "BOOL"}])
-    plan = build_plan(
-        expose,
-        sim_id=SIM_ID,
-        seam_digest=H,
-        rows=1,
-        fidelity=fidelity({"b": {"levels": {"yes": "0.5", "no": "0.5"}}}),
-    )
     with pytest.raises(FluxError) as error:
-        generate_rows(plan, root=root_for())
+        build_plan(
+            expose,
+            sim_id=SIM_ID,
+            seam_digest=H,
+            rows=1,
+            fidelity=fidelity({"b": {"levels": {"yes": "0.5", "no": "0.5"}}}),
+        )
     assert error.value.code.code == "FLX-3402"
 
 
-def test_binweights_that_sum_to_zero_are_refused() -> None:
+@pytest.mark.parametrize("rows", [1, 0], ids=["one-row", "no-rows"])
+def test_binweights_that_sum_to_zero_are_refused(rows: int) -> None:
+    """Refused when the plan is formed, before any row is drawn.
+
+    A plan with no rows never draws, so a refusal on the first draw let it
+    pass.
+    """
     expose = expose_from_schema([{"name": "n", "type": "DECIMAL(18,2)"}])
-    plan = build_plan(
-        expose,
-        sim_id=SIM_ID,
-        seam_digest=H,
-        rows=1,
-        fidelity=fidelity({"n": {"bins": ["0", "1", "2"], "binWeights": ["0", "0"]}}),
-    )
     with pytest.raises(FluxError) as error:
-        generate_rows(plan, root=root_for())
+        build_plan(
+            expose,
+            sim_id=SIM_ID,
+            seam_digest=H,
+            rows=rows,
+            fidelity=fidelity({"n": {"bins": ["0", "1", "2"], "binWeights": ["0", "0"]}}),
+        )
     assert error.value.code.code == "FLX-3402"
+    assert "n: binWeights sums to zero" in str(error.value)
 
 
 # ---------------------------------------------------------------------------
@@ -1257,6 +1295,47 @@ def test_the_residue_lands_on_the_level_categorical_treats_as_last() -> None:
     adjusted = _renormalised(weights)
     moved = [key for key, value in adjusted.items() if value != weights[key]]
     assert moved == [nfc_sorted_items(weights)[-1][0]]
+
+
+def test_a_negative_residue_skips_a_last_level_with_no_mass() -> None:
+    """The residue goes to the NFC-last level that can take it and stay non-negative.
+
+    ``z`` is declared with no mass, so the ``-1e-10`` these weights leave
+    behind would give it a negative weight, which ``categorical`` refuses
+    with FLX-5021 on every draw.
+    """
+    from flux_engine.generator.rows import _renormalised
+
+    weights = {"a": Decimal("0.5"), "b": Decimal("0.5000000001"), "z": Decimal(0)}
+    adjusted = _renormalised(weights)
+    assert adjusted == {"a": Decimal("0.5"), "b": Decimal("0.5"), "z": Decimal(0)}
+
+
+def test_an_empty_last_level_and_a_negative_residue_still_draw() -> None:
+    """Both columns' weights come to a little more than one.
+
+    ``n``'s histogram weights render that way, and ``m``'s levels are
+    declared that way, within the tolerance. In each, the NFC-last level
+    carries no mass and the residue used to land on it, so every draw failed
+    with FLX-5021. The draws now succeed, and the empty level stays empty.
+    """
+    expose = expose_from_schema(
+        [{"name": "n", "type": "DECIMAL(18,4)"}, {"name": "m", "type": "STRING"}]
+    )
+    histogram = {"bins": [str(edge) for edge in range(15)], "binWeights": ["2"] * 12 + ["13", "0"]}
+    plan = build_plan(
+        expose,
+        sim_id=SIM_ID,
+        seam_digest=H,
+        rows=300,
+        fidelity=fidelity(
+            {"n": histogram, "m": {"levels": {"a": "0.5", "b": "0.5000000001", "z": "0"}}}
+        ),
+    )
+    rows = generate_rows(plan, root=root_for())
+    assert len(rows) == 300
+    assert all(n < Decimal(13) for n, _ in rows), "the empty last bin was drawn"
+    assert {m for _, m in rows} == {"a", "b"}
 
 
 # ---------------------------------------------------------------------------
