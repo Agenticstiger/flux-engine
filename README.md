@@ -41,7 +41,7 @@ Open `.flux/runs/<runId>/EVIDENCE.md` first: its last section, "What Was Not Pro
 
 - **Not evidence about the real world.** The engine reproduces the scenario you describe. Whether the scenario matches reality is a separate question, and in this release the report answers it `validity: not asserted`.
 - **Not a privacy or fairness tool.** The rows are made from the numbers you declare. The pack makes no claim about privacy, fairness or any model trained on the rows.
-- **Not finished.** The agentic tier, the sweep executor for `fidelity: stochastic`, calibration with `pyabc`, synthesis with `synthcity` and an OpenLineage transport are absent, and the engine says so instead of degrading quietly. `fluxsim describe --self` says whether the libraries behind four of them (`agentic`, `calibrate_abc`, `synth`, `lineage_transport`) are installed, and a bundle that asks for `fidelity: stochastic` is refused with an error.
+- **Not finished.** The agentic tier, the sweep executor for `fidelity: stochastic`, calibration with `pyabc` and an OpenLineage transport are absent, and the engine says so instead of degrading quietly. `fluxsim describe --self` says whether the libraries behind three of them (`agentic`, `calibrate_abc`, `lineage_transport`) are installed, and a bundle that asks for `fidelity: stochastic` is refused with an error. Synthesis from real records, the way synthcity or SDV fit a model to rows, is not planned at all: see [ADR 0003](docs/adr/0003-sdv-bsl-and-aggregate-only-rule.md).
 
 ## Where to go next
 

@@ -111,8 +111,18 @@ def test_every_subcommand_that_names_a_capability_is_reported_true() -> None:
 def test_optional_backends_are_still_probed_and_named_for_the_backend() -> None:
     """An absent backend must not read as an absent feature."""
     capabilities = self_describe()["capabilities"]
-    for name in ("agentic", "calibrate_abc", "synth", "lineage_transport"):
+    for name in ("agentic", "calibrate_abc", "lineage_transport"):
         assert isinstance(capabilities[name], bool)
+
+
+@pytest.mark.unit
+def test_record_level_synthesis_is_not_offered_as_a_capability() -> None:
+    """ADR 0003 puts synthesis from real records out of scope, not merely unfinished.
+
+    describe used to probe synthcity for a ``synth`` capability that nothing in
+    the engine could use, so an installed synthcity read as a feature.
+    """
+    assert "synth" not in self_describe()["capabilities"]
 
 
 # ── the spec version is read, not hardcoded ────────────────────────────

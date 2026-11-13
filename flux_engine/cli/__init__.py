@@ -2014,7 +2014,7 @@ def _describe_human_lines(result: Dict[str, Any]) -> str:
     # The absent capabilities are the whole point of the README's "What it
     # is not" section, and printing only the true ones kept the engine's
     # say-what-is-absent posture for machines and dropped it for people: a
-    # human could not see that `agentic`, `synth`, `calibrate_abc` and
+    # human could not see that `agentic`, `calibrate_abc` and
     # `lineage_transport` are off without re-running with --json.
     absent = sorted(name for name, on in capabilities.items() if not on)
     lines = [
