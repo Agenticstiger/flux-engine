@@ -37,6 +37,29 @@ and `TRACE_VERSION` keep their values.
   refuses a `Decimal` in an `INT` column from every other caller. KERNEL-SPEC
   §9 states the rule.
 
+### Fixed
+
+- Two kinds of fidelity weights that sum to one failed on every draw with
+  `FLX-5021` ("categorical weight ... is negative"): a histogram whose
+  `binWeights` render to a little more than one in total and whose last bin
+  is `0`, such as twelve bins of `2`, one of `13` and a last bin of `0`; and
+  `levels` within `1e-9` of one whose NFC-last level is `0`. The rounding
+  residue went to that last level, which had no mass to give. It now goes to
+  the NFC-last level that can take it. A plan that generated before
+  generates the same rows and the same plan digest.
+- `binWeights` that are all zero are refused with `FLX-3402` when the plan
+  is formed. Before, the refusal came on the first row drawn, so a plan with
+  no rows passed.
+- A categorical level that cannot be read as its column's type, such as `p`
+  on a `DECIMAL(18,2)` column, is refused with `FLX-3402` when the plan is
+  formed, whatever its weight. Before, the plan passed, and the first row
+  that drew the level raised a bare `decimal.InvalidOperation`, or a
+  `ValueError` for `NaN` on an `INT` column. A plan whose bad level is
+  declared at `0` used to generate rows and is now refused too. Such a level
+  is outside the column's domain, and when it is the NFC-last level it takes
+  any positive rounding residue, so a row can still draw it. A `BOOL` level
+  other than `true` or `false` follows the same rule and keeps its message.
+
 ## 0.4.0 - 2026-11-12
 
 A second vertical, `towers`, and FLUID 0.7.6. No telco digest moved:
