@@ -162,7 +162,7 @@ it. A pair of columns that no declared property counts together is not checked.
 - `H` = `jcs-document` digest of `{"contract": <parsed .fluid.yml>, "emit": <emits[] entry>, "extension": <the emit's entry in `extensions["com.agentics.flux/1"].emits`, when it has one>, "columns": [declared column names in order]}`. The `extension` key is **present only when the emit has such an entry**, so a bundle that declares none keeps the `H`, the seed root and the whole stream it had before the block existed. Computed by `fluxsim plan`, printed, and stored in `plan.json`; the run seed derives from it (KERNEL-SPEC §3).
 - `G` = the same with the **excluded set removed** from the emit entry and from the extension block: every `tolerance`, every `minVariance`, `budget.maxStateAge`. `G ⊂ H`. A change that leaves `G` unchanged keeps the committed statistic reusable.
 - `ε` per property, computed by the compiler from `encoding`, `columns[].range`, `records.min` (and `minVariance` for correlations) by interval propagation; `τ′ = τ − ε`; `ε ≥ τ` → `FLX-5002` at plan time; `τ′` rounded onto the grid in the tightening direction.
-- Both `H` and `G` and every `ε` are written to `plan.json`.
+- Both `H` and `G` and every `ε` are written to `plan.json`. The emit's entry carries the compiled block under `fidelity`, the key the block is declared under: `exposeId`, `H`, `G`, `encoding`, `fieldCapacityBits`, and per property its `epsilon`, `margin` (`τ′`), `maxNonMembers` and `magnitudeBits`. An emit that declares no block carries no such key.
 
 ## 4. Boundary side (`concordance/boundary/`, invoked by `fluxsim apply --boundary` from `Playback.sourceStream`)
 

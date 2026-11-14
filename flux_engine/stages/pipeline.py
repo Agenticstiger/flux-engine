@@ -174,6 +174,10 @@ class EmitOutcome:
     mapping: Optional[ColumnMapping] = None
     #: How many processes made the rows: 1 is the run's own process.
     processes: int = 1
+    #: The declared fidelity block as :func:`compile_declared_fidelity`
+    #: compiled it before the population existed; ``None`` when the emit
+    #: declares none. ``plan.json`` records it (SEAM-FIDELITY-SPEC §3).
+    compiled_fidelity: Optional[CompiledFidelity] = None
 
     @property
     def source(self) -> str:
@@ -414,9 +418,9 @@ def execute(
         resolved_emits = resolve_all_emits(loaded, simulation_id=cast.simulation_id)
         # SEAM-FIDELITY-SPEC §3: a declared block is compiled at plan time,
         # before the population exists, so a block `verify` would refuse is
-        # refused here, with its code and message.
-        for resolved in resolved_emits:
-            compile_declared_fidelity(resolved)
+        # refused here, with its code and message. The compiled blocks are
+        # kept: `plan.json` records each one, epsilons included.
+        compiled_blocks = tuple(compile_declared_fidelity(resolved) for resolved in resolved_emits)
         per_emit_digests = tuple(
             seam_digests(
                 resolved.contract_document,
@@ -514,8 +518,10 @@ def execute(
             personas=personas,
         )
         emits = tuple(
-            _generate_emit(resolved, digests, root, cast, simulation, scenario, jobs)
-            for resolved, digests in zip(resolved_emits, per_emit_digests, strict=True)
+            _generate_emit(resolved, digests, root, cast, simulation, scenario, jobs, compiled)
+            for resolved, digests, compiled in zip(
+                resolved_emits, per_emit_digests, compiled_blocks, strict=True
+            )
         )
 
         decisions = DecisionAuditLog()  # v0.1: no agentic skill calls to audit yet
@@ -565,6 +571,7 @@ def _generate_emit(
     simulation: Mapping[str, Any],
     scenario: "_Scenario",
     jobs: int = 1,
+    compiled_fidelity: Optional[CompiledFidelity] = None,
 ) -> EmitOutcome:
     """Produce one emit's rows, from declared statistics or from the run."""
     expose = resolved.compile()
@@ -617,6 +624,7 @@ def _generate_emit(
         writer=writer,
         mapping=mapping,
         processes=processes,
+        compiled_fidelity=compiled_fidelity,
     )
 
 

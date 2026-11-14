@@ -452,6 +452,8 @@ class CompiledFidelity:
         ``plan.json``." The margin and the magnitude bounds travel with
         them: a reader checking a record months later needs the number the
         comparison actually used, not only the two it was derived from.
+        ``fluxsim plan`` writes it into the emit's entry, as
+        ``emits.<exposeId>.fidelity``.
         """
         return {
             "exposeId": self.block.expose_id,

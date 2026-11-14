@@ -33,10 +33,15 @@ from pathlib import Path
 import pytest
 
 from flux_engine.concordance.boundary.vault import BlindingVault
+from flux_engine.concordance.compiler import compile_fidelity
+from flux_engine.concordance.predicate import expose_from_contract
+from flux_engine.core.digest import build_plan_digest
 from flux_engine.evidence.pack import verify_evidence
 from flux_engine.stages.apply import apply
-from flux_engine.stages.layout import RunLayout
+from flux_engine.stages.layout import RunLayout, run_id_for
+from flux_engine.stages.replay import replay
 from flux_engine.stages.ship import ship
+from flux_engine.stages.verify import verify
 
 from .conftest import FIXTURE_BUNDLE, read_json
 
@@ -267,6 +272,67 @@ def test_verify_and_ship_check_one_committed_state(
     record = read_json(layout.fidelity_record_path(EXPOSE_ID))
     assert record["committedState"]["ordinal"] == held[0].ordinal
     assert record["committedState"]["committedAt"] == held[0].committed_at
+
+
+def test_the_plan_ship_took_records_the_block_the_gate_compiles(
+    shipped, state_dir: Path, run_id: str
+) -> None:
+    """SEAM-FIDELITY-SPEC §3: the plan records every epsilon the gate then uses.
+
+    The module's run is a fresh plan, taken by ``apply`` itself. Its emit
+    entry carries the compiled block, and that block is what the gate
+    compiles from the record ``apply`` wrote for ``verify`` and ``ship``.
+    """
+    assert shipped.success, shipped.stderr
+    layout = RunLayout.for_state_dir(state_dir, run_id)
+    recorded = read_json(layout.fidelity_input_path(EXPOSE_ID))
+    expose = expose_from_contract(recorded["contract"], EXPOSE_ID)
+    compiled = compile_fidelity(contract=recorded["contract"], emit=recorded["emit"], expose=expose)
+    planned = read_json(layout.plan_path)["emits"][EXPOSE_ID]["fidelity"]
+    assert planned == json.loads(json.dumps(compiled.plan_document()))
+
+
+def test_a_plan_written_before_the_block_was_recorded_still_applies_and_ships(
+    tmp_path: Path, bundle_dir: Path, state_dir: Path, run_id: str, committed_slice_uri: str
+) -> None:
+    """A plan without ``emits.<exposeId>.fidelity``, as 0.4.0 wrote it, still runs to a pack.
+
+    No stage after ``plan`` reads the key. ``apply``, ``verify`` and
+    ``replay`` check the plan against its own ``planDigest`` and run id, and
+    ``ship`` pins ``H`` and ``G`` from the entry's own keys. The plan lives
+    under its own run id, because the block moves the digest. The rows do not
+    depend on ``planDigest``, so the module's slice still matches them.
+    """
+    fresh = RunLayout.for_state_dir(state_dir, run_id)
+    document = read_json(fresh.plan_path)
+    del document["emits"][EXPOSE_ID]["fidelity"]
+    document["planDigest"] = build_plan_digest(document).ref.value
+    state = tmp_path / ".flux"
+    older = RunLayout.for_state_dir(state, run_id_for(document["planDigest"])).ensure()
+    assert older.run_id != run_id, "the block moves the plan's digest, so its run id"
+    older.plan_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    older.seed_paths_path.write_bytes(fresh.seed_paths_path.read_bytes())
+
+    applied = apply(bundle_dir, run_id=older.run_id, state_dir=state)
+    assert applied.success, applied.stderr
+    receipt = read_json(older.receipt_path)
+    assert receipt["planDigest"] == document["planDigest"]
+    verified = verify(bundle_dir, run_id=older.run_id, state_dir=state)
+    assert verified.success, verified.stderr
+    replayed = replay(
+        bundle_dir, run_id=older.run_id, assert_digest=receipt["runDigest"], state_dir=state
+    )
+    assert replayed.success, replayed.stderr
+    shipped_older = ship(
+        bundle_dir,
+        run_id=older.run_id,
+        out_dir=tmp_path / "dist",
+        state_dir=state,
+        committed_slice={EXPOSE_ID: committed_slice_uri},
+    )
+    assert shipped_older.success, shipped_older.stderr
 
 
 @pytest.mark.skipif(
