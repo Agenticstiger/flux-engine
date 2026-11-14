@@ -157,6 +157,15 @@ _TOO_MANY_DIGITS = "9" * 5000
             id="in-the-contract",
         ),
         pytest.param(
+            "flux.lock",
+            "lockVersion: 1",
+            f"lockVersion: {_TOO_MANY_DIGITS}",
+            "FLX-1003",
+            "flux.lock: an integer of more than 4300 digits is too long to read "
+            "(line 2, column 14)",
+            id="in-the-lockfile-the-supply-chain-check-reads",
+        ),
+        pytest.param(
             "simulation.flux.yml",
             "rows: 64 ",
             "rows: 0b_ ",

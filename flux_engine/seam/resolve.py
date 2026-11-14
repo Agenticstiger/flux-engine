@@ -366,7 +366,7 @@ def _refuse_integers_no_read_can_form(path: Path) -> None:
     scalar resolved as an integer is constructed as :class:`ExactLoader`
     constructs one, in document order, before the next document is parsed:
     the order the validator's read meets them in. A file that does not
-    parse is left to that read, which reports it with its position.
+    parse, or does not exist, is left to that read, which reports it.
     """
     try:
         with Path(path).open(encoding="utf-8") as handle:
@@ -560,6 +560,9 @@ class SeamBundle(Bundle):
                 continue
             for doc in docs:
                 self._load_fluid_document(path, doc)
+        # RFC-03's supply-chain check reads the lockfile with the validator's
+        # loader later in this run, so its integers are refused here first.
+        _refuse_integers_no_read_can_form(self.dir / LOCK_FILE_NAME)
         self.load_errors = tuple(self.errors)
 
     def flux_paths(self) -> List[Path]:
