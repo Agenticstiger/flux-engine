@@ -126,6 +126,18 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   Before, `plan` passed all of these, and the run wrote rows that no check
   could accept. A bundle that planned before plans to the same `plan.json`,
   digests and rows.
+- A number in a fidelity block that has more than 1000 digits written out,
+  such as a range bound of `"1E+99999999"`, is refused with `FLX-5030` by its
+  length, before its value is formed. Forming it exactly took minutes, so
+  `validate`, `plan`, `verify` and `ship` each stalled on twelve characters.
+  1000 is jackson-core's default longest number. It also keeps what an
+  accepted number becomes inside CPython's 4300-digit limit on printing an
+  `int`: a `maxStateAge` or a tolerance of about 4300 digits made `ship` or
+  `plan` stop with a bare `ValueError` in place of its refusal. A block whose
+  numbers all have 1000 digits or fewer reads exactly as before. A range
+  bound that a property reads already failed the field-capacity check
+  (`FLX-5001`) long before that length, but a tolerance or a quantile `level`
+  that long used to compile, and is now refused.
 
 ## 0.4.0 - 2026-11-12
 
