@@ -138,16 +138,18 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   bound that a property reads already failed the field-capacity check
   (`FLX-5001`) long before that length, but a tolerance or a quantile `level`
   that long used to compile, and is now refused.
-- An unquoted integer of more than 4300 digits anywhere in a bundle is
-  refused with `FLX-1003`, the code an integer outside the JSON safe-integer
-  domain already gets when its digest is taken. PyYAML builds an integer with
+- An unquoted integer of more than 4300 digits in a bundle document, or in
+  the `flux.lock` that a versioned ref makes the validator read, is refused
+  with `FLX-1003`, the code an integer outside the JSON safe-integer domain
+  already gets when its digest is taken. PyYAML builds an integer with
   `int()`, and CPython converts at most 4300 digits, so `validate` and `plan`
   stopped with a bare `ValueError` before any reader ran. A value that long
   spelled in hex loaded, and then broke the first message that printed it; it
   is refused the same way. The refusal names the file, the line and the
   column, never the value. A scalar that YAML reads as an integer but that
   has no integer value, such as `0b_` or `!!int ''`, is refused with
-  `FLX-3105` in place of a bare `ValueError` or `IndexError`.
+  `FLX-3105` in place of a bare `ValueError` or `IndexError`. A lockfile the
+  validator never reads still has no say in whether a bundle loads.
 - A draw parameter that only the generator reads, such as
   `mean: "1E+99999999"`, is refused by `plan` with `FLX-5030`, by the same
   1000-digit rule and with the same message as a number the check reads.
