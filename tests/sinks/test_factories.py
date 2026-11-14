@@ -15,7 +15,9 @@ import pytest
 from flux_engine.core.errors import FluxError
 from flux_engine.sinks import registry
 
-pytest.importorskip("pyarrow")
+from .conftest import pyarrow_or_skip
+
+pyarrow_or_skip()
 
 pytestmark = pytest.mark.unit
 

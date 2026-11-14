@@ -27,9 +27,9 @@ from flux_engine.api.emit import EmitHeader
 from flux_engine.core.errors import FluxError
 from flux_engine.sinks.receipts import SinkReceipt, StreamContext
 
-from .conftest import compiled, expected_ref, header_of, rendered
+from .conftest import compiled, expected_ref, header_of, pyarrow_or_skip, rendered
 
-pa = pytest.importorskip("pyarrow")
+pa = pyarrow_or_skip()
 pq = pytest.importorskip("pyarrow.parquet")
 from flux_engine.sinks import arrow_ipc, parquet  # noqa: E402  (after the importorskip)
 from flux_engine.sinks._files import MANIFEST_VERSION, load_manifest  # noqa: E402

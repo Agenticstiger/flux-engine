@@ -32,9 +32,9 @@ from flux_engine.api.emit import EmitHeader
 from flux_engine.core.errors import FluxError
 from flux_engine.sinks.receipts import SinkReceipt, StreamContext
 
-from .conftest import compiled, expected_ref, header_of, rendered
+from .conftest import compiled, expected_ref, header_of, pyarrow_or_skip, rendered
 
-pytest.importorskip("pyarrow")
+pyarrow_or_skip()
 pytest.importorskip("adbc_driver_manager")
 from flux_engine.sinks import adbc  # noqa: E402  (after the importorskip)
 from flux_engine.sinks.arrow import output_digest_of  # noqa: E402

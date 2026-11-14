@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
+
+import numpy
+import pytest
 
 from flux_engine.api.emit import EmitHeader
 from flux_engine.core.digest import DigestRef, digest_of_document
@@ -15,6 +19,26 @@ from flux_engine.seam.contract import CompiledExpose, compile_expose
 from flux_engine.seam.emit import emit_header_document, output_digest, row_line
 
 CONTRACT_DIGEST: DigestRef = digest_of_document({"id": "test.sim.widget"}, subject="contractDigest")
+
+
+def pyarrow_or_skip() -> ModuleType:
+    """pyarrow, or a skip of the calling module where this NumPy is too old for it.
+
+    pyarrow 26 raises ``ImportError`` at import on NumPy 1.x, and its wheel does
+    not declare the requirement, so pip installs the pair without a word. The
+    nightly's determinism cells pin NumPy 1.26.0 over an install that carries
+    pyarrow and collect the whole tree; pytest 9.1 skips only on
+    ``ModuleNotFoundError``, so these modules errored at collection and the
+    step that holds the pinned digest set exited non-zero.
+
+    Below NumPy 2 any ``ImportError`` is a skip. From NumPy 2 on, only a missing
+    pyarrow is: one that is installed and will not import there is a broken
+    environment, and a skip would read as a pass. Both calls name ``exc_type``,
+    because before pytest 9.1 the default skipped any ``ImportError`` too, with
+    a warning.
+    """
+    too_old = int(numpy.__version__.partition(".")[0]) < 2
+    return pytest.importorskip("pyarrow", exc_type=ImportError if too_old else ModuleNotFoundError)
 
 
 def compiled(schema: Sequence[Mapping[str, Any]], *, expose_id: str = "widget") -> CompiledExpose:
