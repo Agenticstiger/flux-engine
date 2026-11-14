@@ -8,8 +8,11 @@ Terraform's shape, on this engine: a plan runs the *entire* pipeline
 (:func:`flux_engine.stages.pipeline.execute`) exactly the way ``apply``
 will, and writes down what it saw -- ``inputDigest``, the seed-tree paths
 it materialised (``seedTreeDigest``), the per-emit seam digests (``H``,
-``G``), and, when an emit declares a fidelity block, the compiled
-tolerance margins. It writes two files: ``plan.json``, and the
+``G``), and, when an emit declares a fidelity block, its generator plan.
+The block is compiled first, as SEAM-FIDELITY-SPEC §3 says
+(:func:`flux_engine.stages.pipeline.compile_declared_fidelity`), so a
+block ``verify`` would refuse is refused before the population exists; the
+margins it computes are not written down. It writes two files: ``plan.json``, and the
 ``seed-paths.ndjson`` beside it that KERNEL-SPEC §3 puts the path list in.
 Everything else is ``apply``'s: it re-executes (KERNEL-SPEC's determinism
 promise says the second execution reaches the same trace and the same

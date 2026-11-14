@@ -4,7 +4,7 @@
 
 """``fluxsim validate``: schema-valid, seam-resolvable, and executable in principle.
 
-Three checks, in order, none of which materialises a population or draws
+Four checks, in order, none of which materialises a population or draws
 a single value:
 
 1. :func:`flux_engine.seam.resolve.load_bundle` -- the bundle is
@@ -16,6 +16,11 @@ a single value:
    (KERNEL-SPEC §8).
 3. Every ``Simulation``'s declared ``fidelity`` is one this engine
    version can execute (:func:`flux_engine.stages.pipeline.require_supported_fidelity`).
+4. Every emit's fidelity block keeps SEAM-FIDELITY-SPEC §2's rules, read
+   by the parser ``verify`` compiles with
+   (:func:`flux_engine.stages.pipeline.parse_declared_fidelity`), so a
+   refusal here is the one ``verify`` would give. A tolerance its margin
+   cannot meet is §3's, refused by ``plan``.
 
 Nothing here is written to disk; ``validate`` never creates a run
 directory, which is the difference between it and ``plan``.
@@ -24,13 +29,13 @@ directory, which is the difference between it and ``plan``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Set, Union
 
 from flux_engine.api.stages import StageResult
 from flux_engine.core.errors import FluxError
 from flux_engine.runtime import resolve_cast
 from flux_engine.seam.resolve import load_bundle, resolve_all_emits
-from flux_engine.stages.pipeline import require_supported_fidelity
+from flux_engine.stages.pipeline import parse_declared_fidelity, require_supported_fidelity
 
 __all__ = ["validate"]
 
@@ -51,12 +56,15 @@ def validate(bundle_directory: Union[str, Path], *, tolerate_additive: bool = Tr
 
     simulations: Dict[str, Any] = {}
     problems: List[str] = []
+    codes: Set[str] = set()
     for simulation_id in sorted(loaded.simulation_ids()):
         try:
             cast = resolve_cast(loaded.flux_documents, simulation_id=simulation_id)
             fidelity = str(cast.simulation.get("spec", {}).get("fidelity", "deterministic"))
             require_supported_fidelity(fidelity)
             resolved = resolve_all_emits(loaded, simulation_id=simulation_id)
+            for entry in resolved:
+                parse_declared_fidelity(entry)
             simulations[simulation_id] = {
                 "fidelity": fidelity,
                 "documents": len(cast.documents),
@@ -67,6 +75,7 @@ def validate(bundle_directory: Union[str, Path], *, tolerate_additive: bool = Tr
             }
         except FluxError as error:
             problems.append(f"{simulation_id}: {error}")
+            codes.add(error.code.code)
 
     if problems:
         return StageResult(
@@ -74,6 +83,11 @@ def validate(bundle_directory: Union[str, Path], *, tolerate_additive: bool = Tr
             exit_code=1,
             _artifacts={"simulations": simulations, "problems": problems},
             stderr="; ".join(problems),
+            # The code every problem shares, as a refusal of the whole bundle
+            # reports its own: a block refused with FLX-5030 is refused with
+            # the code `verify` gives it. Problems with different codes have
+            # no one code to report.
+            error_code=next(iter(codes)) if len(codes) == 1 else None,
         )
 
     return StageResult(
