@@ -161,10 +161,23 @@ Pass criteria:
     synthetic mean must sit within four standard errors of the within-bin
     uniform prediction, which shows that the whole shift comes from the
     declared shape.
-  - The generator draws columns independently. When the committed markets
-    differ in their amounts, ContingencySimilarity is capped by the committed
-    table's own distance from independence. The measured score must sit within
-    three sampling distances of that cap.
+  - Without `given`, the generator draws columns independently. When the
+    committed markets differ in their amounts, ContingencySimilarity is capped
+    by the committed table's own distance from independence. The measured
+    score must sit within three sampling distances of that cap.
+- **Conditional draws lift the cap.** The same dependent markets, with
+  `amount` declared `given` `market` and one bin-weight list per market taken
+  from the grouped histogram's (group, bin) counts, draw D' from S's own joint
+  table. ContingencySimilarity must then sit within three one-sample sampling
+  distances of 1, and the fixture must discriminate: its independence cap lies
+  further below 1 than that. The ungrouped histogram's TVComplement must stay
+  within its own sampling distance too, because the joint implies it. A chain (channel, then market given channel, then
+  amount given market) is declared from the tree
+  `flux_engine.calibrate.structure` suggests from the two-way count tables
+  (`tests/accuracy/fidelity/test_tree_draws.py`). The suggested tree must be
+  the true chain. Each table on a tree edge must sit within three one-sample
+  distances of the committed table, and the table off the tree and the
+  three-way table within three two-sample distances.
 
 ### 2. Goodness of fit, for every sampler and every declared distribution
 
@@ -286,6 +299,17 @@ property of `n` and `τ`, not of the gate.
   5. *Adding a column leaves sibling streams untouched*: under a fixed root
      for the generator, and end to end for a Persona trait, which is not part
      of `H`.
+  6. *A forest of conditional draws keeps every generator invariant*:
+     Hypothesis draws random valid forests of 2 to 7 columns (`given` links
+     from categorical columns of every kind, histogram leaves, chains, NFC
+     and NFD spellings of a parent's levels, zero weights, a shuffled declared
+     order). Two runs agree byte for byte; permuting the declared order
+     changes no column; column-first equals row-first; slices join; a longer
+     plan extends a shorter one; every drawn level and bin carries weight in
+     the row of its parent's level; replacing every conditional declaration
+     with an unconditional one leaves the root columns unchanged; and a
+     single corruption of a valid forest is refused at plan time with
+     `FLX-3402`, never with another exception type.
 - **Counterexamples** become regression cases. A falsifying example is written
   to `FLUX_ACCURACY_COUNTEREXAMPLES` and uploaded with the nightly artefact.
   Each one is then committed under `tests/accuracy/properties/regressions/`,
@@ -483,9 +507,15 @@ definitions, not code.
   construction, and its privacy is outside this program.
 - **The agentic tier and the stochastic sweep executor** are not built. The
   engine refuses them, and the existing suite tests those refusals.
-- **Joint structure in generated data**: the generator draws each column
-  independently. Family 1 measures the shortfall in ContingencySimilarity
-  and CorrelationSimilarity, and nothing here claims joint fidelity.
+- **Joint structure in generated data**: without `given`, the generator
+  draws each column independently, and Family 1 measures the shortfall in
+  ContingencySimilarity and CorrelationSimilarity. With `given`, Family 1
+  measures the declared links: a histogram drawn given a categorical, and a
+  three-column chain. Two numeric columns are never linked directly, because
+  a histogram column is a leaf. A link between two categorical columns comes
+  from the owner's own cross-tab, and S has no two-way count property for two
+  categorical columns yet, so the fidelity check does not test that link.
+  Nothing here claims joint fidelity beyond the declared links.
 - **Real data**: every record set here is synthetic, drawn from stated
   parameters (ADR 0003). A fit to an owner's real committed state is
   measured only by that owner's own fidelity check.

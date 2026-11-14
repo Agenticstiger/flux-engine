@@ -16,6 +16,8 @@ the type default:
 | identifier (STRING/uuid with `unique`) | derived deterministically from `(H, ordinal)` — never random | — |
 
 Every draw uses the §4 kernel samplers on the path `("sim", sim_id, "gen", exposeId, "row", rowIndex, column)`.
+A column declared `given` another (§2) keeps that path: what it reads from the other column is the level that
+column drew in the same row, which picks the weights it draws with.
 Rows are produced in `rowIndex` order; the number of rows is declared (`extensions["com.agentics.flux/1"].emits[<exposeId>].rows`,
 §2; default = population size when the emit is scenario-driven).
 
@@ -94,8 +96,8 @@ every property's parameters are present (a contract missing any of them is refus
 formed). Numbers are strings (exact decimals), never floats.
 
 **`columns.<name>` is one schema, read by two consumers.** `range`, `support`, `maxCardinality` and `null` are
-read by the check (§5); `bins`, `binWeights`, `family`, `identifierLength`, `levels`, `mean`, `nullFraction`,
-`rate`, `stddev` and `unique` are read by the §1 generator. The set is closed and shared
+read by the check (§5); `bins`, `binWeights`, `binWeightsGiven`, `family`, `given`, `identifierLength`,
+`levelWeightsGiven`, `levels`, `mean`, `nullFraction`, `rate`, `stddev` and `unique` are read by the §1 generator. The set is closed and shared
 (`concordance.predicate.COLUMN_KEYS`): a key outside it is refused by both, and neither refuses a key the other
 owns. A column entry that declares neither `range` nor `support` declares nothing the check can compare — it is
 legal (the generator still reads it), and a *property* naming such a column is `FLX-5034`.
@@ -106,6 +108,38 @@ carries (`validationRules[].constraint` is free text with no grammar). A column 
 type naming no levels is refused (`FLX-5034`) rather than resolved to an empty support, because an empty support
 makes every value a non-member and fails the check for the wrong reason. A bare list is refused: two spellings of
 one declaration would be two digests of one contract.
+
+**`given` draws a column conditionally on another.** `given` names one other column of the same expose, and the
+column declaring it carries one weight table per level of that column, in place of its unconditional weights:
+
+- a histogram column (declared `bins`) declares `binWeightsGiven` in place of `binWeights`: for each level of the
+  given column, one `binWeights` list over the same edges, P(bin | level). A grouped `marginalHistogram`
+  property (`groupBy` the given column, over the same bins) states exactly these lists: its (group, bin) counts;
+- a categorical column declares `levelWeightsGiven` in place of `levels`: for each level of the given column, one
+  mapping of level to weight, P(level | level), from a two-way count table. Every mapping names the same levels.
+
+The weights are counts or shares, normalised per level of the given column as `binWeights` is, and every list or
+mapping carries some weight. The given column is a categorical with no `nullFraction`, so each row has exactly
+one level to look up, and the table names exactly the levels it can draw. The links form a forest: a column has
+at most one `given`, a cycle is refused, and a histogram column is always a leaf, because a bin is not a level.
+A column is drawn after the column it is given, whatever the declared column order; every cell keeps its own
+§1 path, so column-first generation and slices are unchanged, and a root of the forest (a column drawn given
+nothing) draws exactly the values it drew without the links. A declaration the
+generator cannot draw is refused at plan time with `FLX-3402`. A plan that declares no `given` documents none of
+the three keys, so its `generatorDigest` and its rows are the ones it had before they existed.
+
+`flux_engine.calibrate.structure` suggests the forest offline, from two-way count tables alone: a Chow-Liu tree
+(Chow and Liu, 1968), the maximum spanning tree of pairwise mutual information, which is the selection step of
+the MST synthesizer (McKenna, Miklau and Sheldon, 2021) without its privacy noise, with every numeric column a
+leaf. It reads counts and writes the `columns.<name>` entries; it never reads a record. Counts can still single
+out a rare combination: a cell of one or two counts describes a handful of real records, so the owner applies
+their own disclosure rule, such as a minimum cell count, before declaring a table.
+
+**What the check covers of a `given` link.** A histogram drawn given a categorical is checked end to end: a
+grouped `marginalHistogram` property compares D′'s (group, bin) counts with S's. A categorical drawn given a
+categorical is not: its `levelWeightsGiven` table comes from the owner's own cross-tab, and S has no two-way
+count property for two categorical columns yet, so the check compares each column's own declarations (`support`,
+and any property on the column) but not the link between them.
 
 ## 3. Digests
 

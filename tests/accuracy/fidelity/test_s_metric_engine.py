@@ -33,6 +33,11 @@ so its contingency score is capped by the committed table's own distance
 from independence. That cap is *measured*: the score must sit within three
 sampling distances of it, so the shortfall is shown to be the independence
 assumption and nothing else.
+
+A third case draws the same dependent markets with ``amount`` declared
+``given`` ``market``: one ``binWeights`` list per market, from the grouped
+histogram's (group, bin) counts. D' is then drawn from S's own joint table,
+and its contingency score must sit within three sampling distances of 1.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ require("scipy")
 import math  # noqa: E402
 from decimal import Decimal  # noqa: E402
 from fractions import Fraction  # noqa: E402
-from typing import Any, Dict, List, Mapping, Sequence  # noqa: E402
+from typing import Any, Dict, List, Mapping, Sequence, Tuple  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -103,20 +108,26 @@ def _expected_tv(frequencies: Sequence[Fraction], *inverse_sizes: float) -> floa
     )
 
 
-def _loop(rows: List[Dict[str, Any]], n_synthetic: int, seed: int) -> Dict[str, Any]:
+def _loop(
+    rows: List[Dict[str, Any]], n_synthetic: int, seed: int, *, conditional: bool = False
+) -> Dict[str, Any]:
     first = compile_document(contract_document())
     statistic = compute_statistic(rows, first)
     hist_id = _by(first, "marginalHistogram")
     grouped_id = _by(first, "marginalHistogram", "market")
-    generator = {
-        "amount": {
-            "bins": list(AMOUNT_BINS),
-            "binWeights": [
-                str(count) for count in statistic.properties[hist_id].groups[0].bin_counts
-            ],
-        },
-        "market": {"levels": _levels(statistic, grouped_id)},
-    }
+    amount: Dict[str, Any] = {"bins": list(AMOUNT_BINS)}
+    if conditional:
+        # P(bin | market), from the grouped histogram's (group, bin) counts.
+        amount["given"] = "market"
+        amount["binWeightsGiven"] = {
+            group.group: [str(count) for count in group.bin_counts]
+            for group in statistic.properties[grouped_id].groups
+        }
+    else:
+        amount["binWeights"] = [
+            str(count) for count in statistic.properties[hist_id].groups[0].bin_counts
+        ]
+    generator = {"amount": amount, "market": {"levels": _levels(statistic, grouped_id)}}
     document = contract_document(generator=generator)
     compiled = compile_document(document)
     committed = committed_state(rows, compiled)
@@ -264,6 +275,36 @@ def _with_market_effect(
     return shifted
 
 
+def _joint_and_ceiling(
+    groups: Sequence[Any],
+) -> Tuple[Dict[Tuple[str, int], Fraction], Fraction]:
+    """A grouped histogram's (group, bin) table as shares, and its independence ceiling.
+
+    The ceiling is the ContingencySimilarity the product of the table's own
+    margins scores against the table: what a draw with the columns
+    independent can reach at best.
+    """
+    total = sum(group.k for group in groups)
+    joint = {
+        (group.group, index): Fraction(count, total)
+        for group in groups
+        for index, count in enumerate(group.bin_counts)
+    }
+    market_share = {group.group: Fraction(group.k, total) for group in groups}
+    bin_share = [
+        sum((joint[(group.group, index)] for group in groups), Fraction(0))
+        for index in range(len(AMOUNT_BINS) - 1)
+    ]
+    ceiling = 1 - Fraction(1, 2) * sum(
+        (
+            abs(joint[(market, index)] - market_share[market] * bin_share[index])
+            for market, index in joint
+        ),
+        Fraction(0),
+    )
+    return joint, ceiling
+
+
 def test_contingency_shortfall_is_the_independence_assumption(
     tier: Tier, accuracy_log: ResultLog
 ) -> None:
@@ -276,26 +317,7 @@ def test_contingency_shortfall_is_the_independence_assumption(
     )
     loop = _loop(rows, n, tier.seed("fidelity-engine", "dependent-generator"))
     grouped = loop["ids"]["grouped"]
-    committed_groups = loop["committed"].properties[grouped].groups
-    total = sum(group.k for group in committed_groups)
-    joint = {
-        (group.group, index): Fraction(count, total)
-        for group in committed_groups
-        for index, count in enumerate(group.bin_counts)
-    }
-    market_share = {group.group: Fraction(group.k, total) for group in committed_groups}
-    bins = len(AMOUNT_BINS) - 1
-    bin_share = [
-        sum((joint[(group.group, index)] for group in committed_groups), Fraction(0))
-        for index in range(bins)
-    ]
-    ceiling = 1 - Fraction(1, 2) * sum(
-        (
-            abs(joint[(market, index)] - market_share[market] * bin_share[index])
-            for market, index in joint
-        ),
-        Fraction(0),
-    )
+    joint, ceiling = _joint_and_ceiling(loop["committed"].properties[grouped].groups)
     score = contingency_similarity(
         loop["synthetic"].properties[grouped], loop["committed"].properties[grouped]
     )
@@ -314,6 +336,58 @@ def test_contingency_shortfall_is_the_independence_assumption(
         },
     )
     assert passed, (float(score), float(ceiling), noise)
+
+
+def test_conditional_draws_lift_the_contingency_score_to_the_sampling_distance(
+    tier: Tier, accuracy_log: ResultLog
+) -> None:
+    """The dependent markets again, with ``amount`` drawn given ``market``.
+
+    The per-market bin weights are the grouped histogram's (group, bin)
+    counts, so D' is drawn from S's own joint table: P(market) times
+    P(bin | market). Its contingency score must then sit within three
+    one-sample distances of 1, the noise of D' alone, rather than near the
+    independence ceiling the test above pins. The ungrouped histogram must
+    stay within its own sampling distance, because the joint implies it.
+    """
+    k = tier.pick(pr=5_000, nightly=50_000)
+    n = tier.pick(pr=5_000, nightly=100_000)
+    offsets = {"DE": -40.0, "FR": 0.0, "GB": 40.0, "IE": 120.0}
+    rows = _with_market_effect(
+        draw_rows(REFERENCE, k, tier.seed("fidelity-engine", "dependent")), offsets
+    )
+    loop = _loop(rows, n, tier.seed("fidelity-engine", "dependent-generator"), conditional=True)
+    ids = loop["ids"]
+    committed, synthetic = loop["committed"], loop["synthetic"]
+    joint, ceiling = _joint_and_ceiling(committed.properties[ids["grouped"]].groups)
+    score = contingency_similarity(
+        synthetic.properties[ids["grouped"]], committed.properties[ids["grouped"]]
+    )
+    noise = _expected_tv(list(joint.values()), 1 / n)
+    tvc = tv_complement(synthetic.properties[ids["hist"]], committed.properties[ids["hist"]])
+    histogram_bound = SPREAD * _expected_tv(_frequencies(committed, ids["hist"]), 1 / n)
+    # The fixture's dependence must exceed the noise, or this test could not
+    # tell conditional draws from independent ones.
+    discriminates = float(ceiling) < 1 - SPREAD * noise
+    passed = (
+        discriminates and float(1 - score) <= SPREAD * noise and float(1 - tvc) <= histogram_bound
+    )
+    accuracy_log.record(
+        family=FAMILY,
+        case="engine-contingency-conditional",
+        criterion="amount given market: 1 - ContingencySimilarity <= 3 x expected sampling distance",
+        passed=passed,
+        n=n,
+        metrics={
+            "ContingencySimilarity": float(score),
+            "independenceCeiling": float(ceiling),
+            "expectedDistance": noise,
+            "TVComplement": float(tvc),
+        },
+    )
+    assert discriminates, (float(ceiling), noise)
+    assert float(1 - score) <= SPREAD * noise, (float(score), float(ceiling), noise)
+    assert float(1 - tvc) <= histogram_bound, (float(tvc), histogram_bound)
 
 
 def test_histogram_family_mean_is_the_within_bin_uniform_mean(

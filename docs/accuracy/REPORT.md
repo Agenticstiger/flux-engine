@@ -492,7 +492,7 @@ Mutation testing runs weekly; this artefact is from a night without it.
 
 - **Simulation-based calibration.** It waits for the fitted calibrator. Today `calibrate` reads a declared scorecard and fits nothing, so there is no posterior to calibrate. The recovery tests above cover what the declared path does.
 - **Drift-detection accuracy.** It waits for drift detection on S, which does not exist yet.
-- **Joint structure in generated data.** The generator draws each column independently. Section 1 measures the resulting shortfall in ContingencySimilarity and CorrelationSimilarity; nothing here claims joint fidelity.
+- **Joint structure in generated data.** Without `given`, the generator draws each column independently, and Section 1 measures the resulting shortfall in ContingencySimilarity and CorrelationSimilarity. With `given`, it draws only the links a plan declares, and two numeric columns are never linked directly, because a histogram column is a leaf. A link between two categorical columns comes from the owner's own cross-tab, and S has no two-way count property for two categorical columns yet, so the fidelity check does not test that link. Nothing here claims joint fidelity beyond the declared links.
 - **Privacy and re-identification resistance.** S is aggregate by construction. Its privacy properties are outside this program.
 - **The agentic tier and the stochastic sweep executor.** Neither is built; the engine refuses both, and the main suite tests those refusals.
 - **Real data.** Every record set here is synthetic, drawn from stated parameters (ADR 0003). A fit to an owner's real committed state is measured only by that owner's own fidelity check.

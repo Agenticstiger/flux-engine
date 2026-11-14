@@ -21,9 +21,39 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ## Unreleased
 
-A FLUID `INTEGER` column takes a drawn count. No pinned digest moved:
-`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
-and `TRACE_VERSION` keep their values.
+A FLUID `INTEGER` column takes a drawn count, and a fidelity column can be
+drawn given another. No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new
+row, and `KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep their
+values.
+
+### Added
+
+- A fidelity column can be drawn given another column of the same expose
+  (SEAM-FIDELITY-SPEC §2). `given` names that column, and one weight table per
+  level of it takes the place of the column's own weights. A histogram column
+  declares `binWeightsGiven`: one `binWeights` list per level, which a grouped
+  `marginalHistogram`'s (group, bin) counts state directly. A categorical
+  column declares `levelWeightsGiven`: one mapping of level to weight per
+  level. The links form a forest: a column has at most one `given`, a cycle is
+  refused, a histogram column is a leaf, and each column is drawn after the
+  column it is given, whatever the declared order. Every cell keeps its own
+  stream, so column-first generation and slices are unchanged, and a root
+  column (one drawn given nothing) draws exactly the values it drew without
+  the links. A declaration the generator cannot draw is refused at plan
+  time with `FLX-3402`. A plan without `given` documents none of the new keys,
+  so its rows and its `generatorDigest` do not move.
+- `flux_engine.calibrate.structure` suggests which column each column is drawn
+  given, offline and from two-way count tables alone. It builds a Chow-Liu tree
+  (Chow and Liu, 1968), the selection step of the MST synthesizer (McKenna,
+  Miklau and Sheldon, 2021) without its privacy noise, with every numeric
+  column a leaf, and `declarations` writes the matching `columns.<name>`
+  entries.
+- A how-to, "Draw a column given another", declares `given` from a grouped
+  histogram's counts and shows the fidelity gate catch the link missing.
+- What the fidelity check covers: a histogram drawn given a categorical is
+  checked by a grouped `marginalHistogram`. A link between two categorical
+  columns comes from the owner's own cross-tab, and S has no two-way count
+  property for two categorical columns yet, so the check does not test that link.
 
 ### Changed
 

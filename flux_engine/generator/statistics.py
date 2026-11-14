@@ -225,6 +225,15 @@ class ColumnStatistics:
     bin_weights: Optional[Tuple[Decimal, ...]] = None
     family: Optional[str] = None
     identifier_length: Optional[int] = None
+    #: The column this one is drawn conditionally on (``given``), and, per
+    #: level of that column, the weights to draw with: one ``binWeights``
+    #: list for a histogram column (``binWeightsGiven``), or one level ->
+    #: weight mapping for a categorical column (``levelWeightsGiven``). They
+    #: come from (group, bin) or (level, level) counts, aggregates of S, so
+    #: a conditional draw is still aggregate-only.
+    given: Optional[str] = None
+    bin_weights_given: Optional[Mapping[str, Tuple[Decimal, ...]]] = None
+    level_weights_given: Optional[Mapping[str, Mapping[str, Decimal]]] = None
 
     @property
     def has_range(self) -> bool:
@@ -273,6 +282,18 @@ class ColumnStatistics:
             document["family"] = self.family
         if self.identifier_length is not None:
             document["identifierLength"] = self.identifier_length
+        if self.given is not None:
+            document["given"] = self.given
+        if self.bin_weights_given is not None:
+            document["binWeightsGiven"] = {
+                level: [str(weight) for weight in weights]
+                for level, weights in sorted(self.bin_weights_given.items())
+            }
+        if self.level_weights_given is not None:
+            document["levelWeightsGiven"] = {
+                level: {key: str(weight) for key, weight in sorted(weights.items())}
+                for level, weights in sorted(self.level_weights_given.items())
+            }
         return document
 
 
@@ -376,6 +397,163 @@ def _read_levels(value: Any, column: str) -> Mapping[str, Decimal]:
     return levels
 
 
+def _read_given(value: Any, column: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise FluxError(
+            FLX_3402, f"{column}: given names the column this one is drawn conditionally on"
+        )
+    parent = nfc(value)
+    if parent == column:
+        raise FluxError(FLX_3402, f"{column}: a column is not drawn conditionally on itself")
+    return parent
+
+
+def _read_bin_weights_given(
+    value: Any, column: str, bins: Optional[Tuple[Decimal, ...]]
+) -> Dict[str, Tuple[Decimal, ...]]:
+    """One ``binWeights`` list per level of the ``given`` column.
+
+    Each list is read exactly as ``binWeights`` is, against the same edges,
+    and must carry some mass: a level whose row could not be drawn would
+    fail on the first row that reaches it, so it is refused here instead.
+    """
+    if bins is None:
+        raise FluxError(FLX_3402, f"{column}: binWeightsGiven declared without bins")
+    if not isinstance(value, Mapping) or not value:
+        raise FluxError(
+            FLX_3402,
+            f"{column}: binWeightsGiven maps each level of the given column to a binWeights list",
+        )
+    table: Dict[str, Tuple[Decimal, ...]] = {}
+    for key, raw in value.items():
+        level = nfc(str(key))
+        if level in table:
+            raise FluxError(
+                FLX_3402, f"{column}: two binWeightsGiven levels normalise onto {level!r}"
+            )
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            raise FluxError(FLX_3402, f"{column}: binWeightsGiven[{level}] is a list of weights")
+        weights = tuple(
+            exact_decimal(weight, what=f"{column}: binWeightsGiven[{level}][{index}]")
+            for index, weight in enumerate(raw)
+        )
+        if len(weights) != len(bins) - 1:
+            raise FluxError(
+                FLX_3402,
+                f"{column}: {len(bins)} edges make {len(bins) - 1} bins; "
+                f"binWeightsGiven[{level}] carries {len(weights)}",
+            )
+        if any(weight < 0 for weight in weights):
+            raise FluxError(
+                FLX_3402, f"{column}: binWeightsGiven[{level}] carries a negative weight"
+            )
+        if sum(weights, Decimal(0)) <= 0:
+            raise FluxError(FLX_3402, f"{column}: binWeightsGiven[{level}] sums to zero")
+        table[level] = weights
+    return table
+
+
+def _read_level_weights_given(value: Any, column: str) -> Dict[str, Dict[str, Decimal]]:
+    """One level -> weight mapping per level of the ``given`` column.
+
+    The weights are counts or shares, normalised per given level when drawn,
+    like ``binWeights``. Every mapping names the same levels (the column's
+    own level set) and carries some mass, so every row can be drawn.
+    """
+    if not isinstance(value, Mapping) or not value:
+        raise FluxError(
+            FLX_3402,
+            f"{column}: levelWeightsGiven maps each level of the given column to a "
+            "level -> weight mapping",
+        )
+    table: Dict[str, Dict[str, Decimal]] = {}
+    names: Optional[Tuple[str, ...]] = None
+    for key, raw in value.items():
+        given_level = nfc(str(key))
+        if given_level in table:
+            raise FluxError(
+                FLX_3402, f"{column}: two levelWeightsGiven levels normalise onto {given_level!r}"
+            )
+        if not isinstance(raw, Mapping) or not raw:
+            raise FluxError(
+                FLX_3402,
+                f"{column}: levelWeightsGiven[{given_level}] is a non-empty level -> weight mapping",
+            )
+        weights: Dict[str, Decimal] = {}
+        for level_key, weight in raw.items():
+            level = nfc(str(level_key))
+            if level in weights:
+                raise FluxError(
+                    FLX_3402,
+                    f"{column}: two levels of levelWeightsGiven[{given_level}] normalise "
+                    f"onto {level!r}",
+                )
+            parsed = exact_decimal(
+                weight, what=f"{column}: levelWeightsGiven[{given_level}][{level}]"
+            )
+            if parsed < 0:
+                raise FluxError(
+                    FLX_3402, f"{column}: levelWeightsGiven[{given_level}][{level}] is negative"
+                )
+            weights[level] = parsed
+        if sum(weights.values(), Decimal(0)) <= 0:
+            raise FluxError(FLX_3402, f"{column}: levelWeightsGiven[{given_level}] sums to zero")
+        these = tuple(sorted(weights))
+        if names is None:
+            names = these
+        elif these != names:
+            raise FluxError(
+                FLX_3402,
+                f"{column}: levelWeightsGiven[{given_level}] names levels {list(these)}; "
+                f"the first given level names {list(names)}",
+            )
+        table[given_level] = weights
+    return table
+
+
+def _read_conditional(
+    block: Mapping[str, Any],
+    name: str,
+    bins: Optional[Tuple[Decimal, ...]],
+    bin_weights: Optional[Tuple[Decimal, ...]],
+) -> Tuple[
+    Optional[str],
+    Optional[Dict[str, Tuple[Decimal, ...]]],
+    Optional[Dict[str, Dict[str, Decimal]]],
+]:
+    """``given`` and its one weight table, read and paired, or three ``None``.
+
+    ``given`` names the column this one is drawn conditionally on, and it comes
+    with exactly one table: ``binWeightsGiven`` in place of ``binWeights``, or
+    ``levelWeightsGiven`` in place of ``levels``.
+    """
+    given = _read_given(block["given"], name) if "given" in block else None
+    bin_weights_given = (
+        _read_bin_weights_given(block["binWeightsGiven"], name, bins)
+        if "binWeightsGiven" in block
+        else None
+    )
+    level_weights_given = (
+        _read_level_weights_given(block["levelWeightsGiven"], name)
+        if "levelWeightsGiven" in block
+        else None
+    )
+    tables = (bin_weights_given is not None) + (level_weights_given is not None)
+    if tables > 1:
+        raise FluxError(FLX_3402, f"{name}: declare binWeightsGiven or levelWeightsGiven, not both")
+    if (given is None) != (tables == 0):
+        raise FluxError(
+            FLX_3402,
+            f"{name}: given is declared together with binWeightsGiven or levelWeightsGiven "
+            "(the column conditioned on, and one weight table per level of it)",
+        )
+    if bin_weights_given is not None and bin_weights is not None:
+        raise FluxError(FLX_3402, f"{name}: declare binWeights or binWeightsGiven, not both")
+    if level_weights_given is not None and "levels" in block:
+        raise FluxError(FLX_3402, f"{name}: declare levels or levelWeightsGiven, not both")
+    return given, bin_weights_given, level_weights_given
+
+
 def _read_positive_int(value: Any, column: str, what: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise FluxError(FLX_3402, f"{column}: {what} must be an integer >= 1")
@@ -464,6 +642,10 @@ def statistics_for(
                 "give at least one bin a weight above zero",
             )
 
+    given, bin_weights_given, level_weights_given = _read_conditional(
+        block, name, bins, bin_weights
+    )
+
     null_policy = block.get("null")
     if null_policy is not None and not isinstance(null_policy, str):
         raise FluxError(FLX_3402, f"{name}: null policy class {type(null_policy).__name__!r}")
@@ -505,6 +687,9 @@ def statistics_for(
             if "identifierLength" in block
             else None
         ),
+        given=given,
+        bin_weights_given=bin_weights_given,
+        level_weights_given=level_weights_given,
     )
 
 
