@@ -366,7 +366,7 @@ def _refuse_integers_no_read_can_form(path: Path) -> None:
     scalar resolved as an integer is constructed as :class:`ExactLoader`
     constructs one, in document order, before the next document is parsed:
     the order the validator's read meets them in. A file that does not
-    parse, or does not exist, is left to that read, which reports it.
+    parse, decode or open is left to that read, which meets it the same way.
     """
     try:
         with Path(path).open(encoding="utf-8") as handle:
@@ -376,7 +376,7 @@ def _refuse_integers_no_read_can_form(path: Path) -> None:
                     _construct_every_integer(loader, loader.get_node())
             finally:
                 loader.dispose()
-    except (yaml.YAMLError, OSError):
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
         return
 
 
@@ -503,14 +503,16 @@ def strip_additive_seam_fields(
 class SeamBundle(Bundle):
     """A :class:`Bundle` that validates documents modulo the additive fields.
 
-    Overrides exactly one method. :meth:`Bundle.load` reads the directory,
+    Overrides one method and wraps one check. :meth:`Bundle.load` reads the directory,
     validates each document against the FLUX schema and keeps only the
     schema-valid ones; this subclass performs the same walk but hands the
     schema a copy with :data:`ADDITIVE_SEAM_FIELDS` removed, while storing
     the document **as authored**. Every cross-document check the base class
     runs afterwards therefore sees the real document, and only the schema's
     ``additionalProperties: false`` is relaxed, only on ``emits[]``, only
-    for the enumerated fields.
+    for the enumerated fields. The wrapped check is
+    :meth:`check_supply_chain`, so that an integer in ``flux.lock`` no read
+    can form is refused by its position instead of escaping it.
 
     :attr:`tolerated` records what was removed from which document, so the
     relaxation appears in the resolution result instead of vanishing --
@@ -560,10 +562,24 @@ class SeamBundle(Bundle):
                 continue
             for doc in docs:
                 self._load_fluid_document(path, doc)
-        # RFC-03's supply-chain check reads the lockfile with the validator's
-        # loader later in this run, so its integers are refused here first.
-        _refuse_integers_no_read_can_form(self.dir / LOCK_FILE_NAME)
         self.load_errors = tuple(self.errors)
+
+    def check_supply_chain(self) -> None:
+        """RFC-03's supply-chain check, with a lockfile integer refused by its position.
+
+        The check reads ``flux.lock`` with the validator's own loader, and
+        only when a ref is versioned, so the lockfile is not checked up
+        front as the documents are: a lockfile the check never reads must
+        not change whether the bundle loads. When the read raises what
+        PyYAML raises for an integer it cannot build, the lockfile's
+        integers are refused as a document's are, by file, line and column.
+        Anything else is raised as it was.
+        """
+        try:
+            super().check_supply_chain()
+        except (ValueError, IndexError):
+            _refuse_integers_no_read_can_form(self.dir / LOCK_FILE_NAME)
+            raise
 
     def flux_paths(self) -> List[Path]:
         return [path for pattern in FLUX_DOCUMENT_GLOBS for path in sorted(self.dir.glob(pattern))]

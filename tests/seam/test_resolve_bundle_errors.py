@@ -166,6 +166,14 @@ _TOO_MANY_DIGITS = "9" * 5000
             id="in-the-lockfile-the-supply-chain-check-reads",
         ),
         pytest.param(
+            "flux.lock",
+            "lockVersion: 1",
+            "lockVersion: !!int ''",
+            "FLX-3105",
+            "flux.lock: a scalar read as an integer has no integer value (line 2, column 14)",
+            id="an-empty-tagged-integer-in-the-lockfile",
+        ),
+        pytest.param(
             "simulation.flux.yml",
             "rows: 64 ",
             "rows: 0b_ ",
@@ -190,6 +198,27 @@ def test_an_integer_no_read_can_form_is_refused_before_the_validator_reads_it(
         load_bundle(bundle_copy)
     assert raised.value.code.code == code
     assert raised.value.detail == detail
+
+
+@pytest.mark.parametrize(
+    "unread",
+    [
+        pytest.param(f"\nunread: {_TOO_MANY_DIGITS}\n".encode(), id="an-integer-too-long"),
+        pytest.param(b"\nunread: \xff\n", id="a-byte-that-is-not-utf-8"),
+    ],
+)
+def test_a_lockfile_the_supply_chain_check_never_reads_keeps_its_outcome(
+    bundle_copy: Path, unread: bytes
+) -> None:
+    """With no versioned ref the validator never opens ``flux.lock``, so
+    nothing in it can change whether the bundle loads."""
+    simulation = bundle_copy / "simulation.flux.yml"
+    text = simulation.read_text(encoding="utf-8")
+    assert text.count("module-payment-recovery@^2.1") == 1, "the fixture's versioned ref moved"
+    simulation.write_text(text.replace("@^2.1", ""), encoding="utf-8")
+    lock = bundle_copy / "flux.lock"
+    lock.write_bytes(lock.read_bytes() + unread)
+    assert load_bundle(bundle_copy).flux_documents
 
 
 def test_a_healthy_bundle_still_loads(bundle_copy: Path) -> None:
