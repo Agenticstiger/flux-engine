@@ -15,7 +15,10 @@ so the value in a cell depends on the run root, the expose, the row index
 and the column name -- and on nothing else. Generating column by column
 instead of row by row produces the same table; adding a column to the
 contract changes ``H`` and therefore every stream, but generating with a
-different *column order* under the same contract does not.
+different *column order* under the same contract does not. A column
+declared ``given`` another keeps its own stream; what it reads from the
+other column is the level that column drew in the same row, which picks
+the bin or level weights it draws with (:func:`_require_conditionals`).
 
 **Identifiers are derived, never drawn.** §1's identifier row says
 "derived deterministically from ``(H, ordinal)`` -- never random", and
@@ -45,7 +48,7 @@ from decimal import Decimal, localcontext
 from fractions import Fraction
 from functools import lru_cache
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple, Union
 
 from flux_engine.core.canonical import sha256_hex
 from flux_engine.core.clock import parse_rfc3339_ms
@@ -141,6 +144,7 @@ def clear_memos() -> None:
         _declared_levels,
         _declared_support,
         _bin_levels,
+        _weighted_levels,
     ):
         memo.cache_clear()
 
@@ -401,6 +405,7 @@ def build_plan(
                 statistics=column_statistics,
             )
         )
+    _require_conditionals(plans)
     return GeneratorPlan(
         sim_id=sim_id,
         expose=expose,
@@ -464,7 +469,11 @@ def _require_parameters(
             "nullFraction would produce rows the seam refuses",
         )
     if family is Family.CATEGORICAL:
-        if statistics.levels is None and not statistics.support:
+        if (
+            statistics.levels is None
+            and not statistics.support
+            and statistics.level_weights_given is None
+        ):
             # Both support spellings resolve to a non-empty level list or
             # are refused where they are read
             # (:func:`flux_engine.concordance.predicate.read_support_levels`),
@@ -474,7 +483,7 @@ def _require_parameters(
                 f"{name}: a categorical needs declared levels or a declared support",
             )
         if statistics.max_cardinality is not None:
-            size = len(statistics.levels or statistics.support or ())
+            size = len(_level_names(statistics))
             if size > statistics.max_cardinality:
                 raise FluxError(
                     FLX_3402,
@@ -508,7 +517,11 @@ def _require_parameters(
     elif family is Family.UNIFORM_EMPIRICAL:
         if statistics.bins is None and not statistics.has_range:
             raise FluxError(FLX_3402, f"{name}: a uniform needs a declared range or bins")
-        if statistics.bins is not None and statistics.bin_weights is None:
+        if (
+            statistics.bins is not None
+            and statistics.bin_weights is None
+            and statistics.bin_weights_given is None
+        ):
             raise FluxError(
                 FLX_3402,
                 f"{name}: declared bins need declared binWeights; the edges alone say "
@@ -524,10 +537,11 @@ def _require_renderable_levels(column: CompiledColumn, statistics: ColumnStatist
     A level such as ``"p"`` on a ``DECIMAL`` column used to pass the plan and
     fail on the first row with a bare ``decimal.InvalidOperation``. Each level
     is read here once, in the kernel's own context, exactly as a cell reads it.
-    The levels are the ones :func:`_column_levels` draws from: the declared
-    ``levels``, or else the declared support.
+    The levels are the ones the column can draw (:func:`_level_names`): the
+    declared ``levels``, the levels of ``levelWeightsGiven``, or else the
+    declared support.
     """
-    names = statistics.levels if statistics.levels is not None else statistics.support or ()
+    names = _level_names(statistics)
     with localcontext(_KERNEL_CONTEXT):
         for level in names:
             try:
@@ -539,6 +553,111 @@ def _require_renderable_levels(column: CompiledColumn, statistics: ColumnStatist
                     f"{column.logical_type.kind.value} value; declare levels the "
                     "column's type can hold",
                 ) from error
+
+
+def _require_conditionals(plans: Sequence[ColumnPlan]) -> None:
+    """Refuse a ``given`` this generator cannot draw, before any row is drawn.
+
+    A conditional column draws with the weights declared for the level its
+    ``given`` column drew in the same row: a histogram column with
+    ``binWeightsGiven`` (P(bin | level), from a grouped histogram's
+    (group, bin) counts), or a categorical column with ``levelWeightsGiven``
+    (P(level | level), from a two-way count table). The column it is given
+    is a categorical with no declared nulls, so each row has exactly one
+    level to look up, and the weight table names exactly the levels that
+    column can draw.
+
+    A given column may itself be drawn given another, so the columns form a
+    forest: each column has at most one parent, a cycle is refused, and a
+    histogram column is always a leaf, because a bin is not a level. That is
+    the shape of a Chow-Liu tree (Chow and Liu, 1968), the structure MST
+    (McKenna, Miklau and Sheldon, 2021) selects, without its privacy noise.
+    """
+    by_name = {plan.column.name: plan for plan in plans}
+    for plan in plans:
+        given = plan.statistics.given
+        if given is None:
+            continue
+        name = plan.column.name
+        statistics = plan.statistics
+        parent = by_name.get(given)
+        if parent is None:
+            raise FluxError(
+                FLX_3402, f"{name}: given names {given!r}, which is not a column of this expose"
+            )
+        if statistics.bin_weights_given is not None:
+            if plan.family is not Family.UNIFORM_EMPIRICAL or statistics.bins is None:
+                raise FluxError(
+                    FLX_3402,
+                    f"{name}: binWeightsGiven is drawn by a histogram column (declared bins)",
+                )
+            table, declared = "binWeightsGiven", sorted(statistics.bin_weights_given)
+        else:
+            if plan.family is not Family.CATEGORICAL:
+                raise FluxError(
+                    FLX_3402, f"{name}: levelWeightsGiven is drawn by a categorical column"
+                )
+            assert statistics.level_weights_given is not None  # statistics_for pairs them
+            table, declared = "levelWeightsGiven", sorted(statistics.level_weights_given)
+            # A declared support may list levels the committed state never
+            # holds; drawing a subset of it is legal, drawing outside it is not.
+            outside = sorted(set(_level_names(statistics)) - set(statistics.support or ()))
+            if statistics.support and outside:
+                raise FluxError(
+                    FLX_3402,
+                    f"{name}: levelWeightsGiven draws {outside}, outside the declared "
+                    f"support {sorted(statistics.support)}",
+                )
+        if parent.family is not Family.CATEGORICAL:
+            raise FluxError(
+                FLX_3402,
+                f"{name}: given column {given!r} is not categorical, so it has no level "
+                "to condition on",
+            )
+        if parent.statistics.null_fraction is not None:
+            raise FluxError(
+                FLX_3402,
+                f"{name}: given column {given!r} declares a nullFraction, and a null "
+                "has no level to condition on",
+            )
+        drawn = sorted(_level_names(parent.statistics))
+        if declared != drawn:
+            raise FluxError(
+                FLX_3402,
+                f"{name}: {table} declares levels {declared}; {given!r} draws {drawn}",
+            )
+    _require_acyclic(by_name)
+
+
+def _require_acyclic(by_name: Mapping[str, ColumnPlan]) -> None:
+    """Refuse ``given`` links that loop back, naming the loop.
+
+    Each column has at most one ``given``, so following the links from any
+    column either ends at a column with none or returns to one already seen.
+    """
+    for start in sorted(by_name):
+        seen: List[str] = []
+        current: Optional[str] = start
+        while current is not None:
+            if current in seen:
+                loop = seen[seen.index(current) :] + [current]
+                raise FluxError(FLX_3402, f"given forms a cycle: {' -> '.join(loop)}")
+            seen.append(current)
+            current = by_name[current].statistics.given
+
+
+def _level_names(statistics: ColumnStatistics) -> Tuple[str, ...]:
+    """The levels a categorical column can draw, however they are declared.
+
+    ``levelWeightsGiven`` names the same levels under every given level
+    (:func:`flux_engine.generator.statistics.statistics_for` refuses it
+    otherwise), so its first mapping names them all.
+    """
+    if statistics.level_weights_given is not None:
+        return tuple(next(iter(statistics.level_weights_given.values())))
+    if statistics.levels is not None:
+        return tuple(statistics.levels)
+    return tuple(statistics.support or ())
 
 
 def _bin_top(edges: Sequence[Decimal], index: int, step: Decimal) -> Decimal:
@@ -759,11 +878,26 @@ def _bin_keys(count: int) -> Tuple[str, ...]:
 
 
 def _draw_histogram(
-    stream: DrawStream, statistics: ColumnStatistics, column: CompiledColumn
+    stream: DrawStream,
+    statistics: ColumnStatistics,
+    column: CompiledColumn,
+    given_level: Optional[str] = None,
 ) -> Decimal:
-    """Pick a declared bin by its weight, then draw uniformly inside it."""
+    """Pick a declared bin by its weight, then draw uniformly inside it.
+
+    A conditional column picks with the weights declared for *given_level*,
+    the level its ``given`` column drew in the same row.
+    """
     bins = statistics.bins or ()
-    table = _bin_levels(tuple(statistics.bin_weights or ()))
+    if statistics.bin_weights_given is not None:
+        if given_level is None:
+            raise FluxError(
+                FLX_3402, f"{column.name}: a conditional column is drawn with a given level"
+            )
+        weights = statistics.bin_weights_given[given_level]
+    else:
+        weights = statistics.bin_weights or ()
+    table = _bin_levels(tuple(weights))
     if table is None:
         raise FluxError(FLX_3402, f"{column.name}: binWeights sum to zero")
     levels, positions = table
@@ -796,6 +930,33 @@ def _bin_levels(
     with localcontext(_KERNEL_CONTEXT):
         levels = _renormalised(normalised)
     return MappingProxyType(levels), MappingProxyType({key: i for i, key in enumerate(keys)})
+
+
+@lru_cache(maxsize=_MEMO_SIZE)
+def _weighted_levels(items: Tuple[Tuple[str, Decimal], ...]) -> Mapping[str, Decimal]:
+    """One given level's ``levelWeightsGiven`` mapping as drawable levels, once per set.
+
+    Counts or shares, normalised exactly as :func:`_bin_levels` normalises a
+    histogram's bin weights: exact shares, rendered once at a fixed number of
+    places, the residue folded by :func:`_renormalised`.
+    """
+    total = sum((Fraction(weight) for _, weight in items), Fraction(0))
+    normalised = {key: _fraction_as_decimal(Fraction(weight) / total) for key, weight in items}
+    with localcontext(_KERNEL_CONTEXT):
+        return MappingProxyType(_renormalised(normalised))
+
+
+def _categorical_levels(
+    statistics: ColumnStatistics, column: CompiledColumn, given_level: Optional[str]
+) -> Mapping[str, Decimal]:
+    """What a categorical cell draws from: its declared levels, or its row of ``levelWeightsGiven``."""
+    if statistics.level_weights_given is None:
+        return _column_levels(statistics)
+    if given_level is None:
+        raise FluxError(
+            FLX_3402, f"{column.name}: a conditional column is drawn with a given level"
+        )
+    return _weighted_levels(tuple(sorted(statistics.level_weights_given[given_level].items())))
 
 
 def _fraction_as_decimal(value: Fraction) -> Decimal:
@@ -904,13 +1065,13 @@ def _clamp(value: Decimal, statistics: ColumnStatistics) -> Decimal:
     return value
 
 
-def _draw_value(plan: ColumnPlan, stream: DrawStream) -> Any:
+def _draw_value(plan: ColumnPlan, stream: DrawStream, given_level: Optional[str] = None) -> Any:
     """Draw one value for a non-identifier column."""
     column, statistics, family = plan.column, plan.statistics, plan.family
     kind = column.logical_type.kind
 
     if family is Family.CATEGORICAL:
-        level = categorical(stream, _column_levels(statistics))
+        level = categorical(stream, _categorical_levels(statistics, column, given_level))
         return _level_to_value(level, column)
 
     if family is Family.BOUNDED_NORMAL:
@@ -931,7 +1092,7 @@ def _draw_value(plan: ColumnPlan, stream: DrawStream) -> Any:
         return _draw_rate(plan, stream)
 
     if statistics.bins is not None:
-        drawn = _draw_histogram(stream, statistics, column)
+        drawn = _draw_histogram(stream, statistics, column, given_level)
         return int(drawn) if kind is LogicalKind.INT else _from_grid(drawn, column)
 
     low = statistics.range_min
@@ -995,7 +1156,13 @@ _Source = Union[CellStreams, StreamSource]
 
 
 def _cell(
-    plan: ColumnPlan, source: _Source, sim_id: str, expose_id: str, row_index: int, h: str
+    plan: ColumnPlan,
+    source: _Source,
+    sim_id: str,
+    expose_id: str,
+    row_index: int,
+    h: str,
+    given_level: Optional[str] = None,
 ) -> Any:
     """Produce one cell: an identifier, a declared null, or a draw.
 
@@ -1008,11 +1175,17 @@ def _cell(
     different rows in two processes.
     """
     with localcontext(_KERNEL_CONTEXT):
-        return _cell_in_context(plan, source, sim_id, expose_id, row_index, h)
+        return _cell_in_context(plan, source, sim_id, expose_id, row_index, h, given_level)
 
 
 def _cell_in_context(
-    plan: ColumnPlan, source: _Source, sim_id: str, expose_id: str, row_index: int, h: str
+    plan: ColumnPlan,
+    source: _Source,
+    sim_id: str,
+    expose_id: str,
+    row_index: int,
+    h: str,
+    given_level: Optional[str] = None,
 ) -> Any:
     """:func:`_cell`'s body, with the kernel's ``decimal`` context installed.
 
@@ -1053,9 +1226,95 @@ def _cell_in_context(
         # The null draw comes first and always happens, so the value draw
         # lands on the same stream position whether or not the cell is null.
         is_null = bernoulli(stream, plan.statistics.null_fraction)
-        value = _draw_value(plan, stream)
+        value = _draw_value(plan, stream, given_level)
         return None if is_null else value
-    return _draw_value(plan, stream)
+    return _draw_value(plan, stream, given_level)
+
+
+def _given_cell(
+    plan: ColumnPlan,
+    source: _Source,
+    sim_id: str,
+    expose_id: str,
+    row_index: int,
+    given_level: Optional[str] = None,
+) -> Tuple[Any, str]:
+    """A given column's cell, and the level it drew, for the columns drawn given it.
+
+    Exactly the cell :func:`_cell` produces for this column (the same stream
+    at its first word, the same categorical draw, with *given_level* when the
+    column is itself drawn given another), because
+    :func:`_require_conditionals` lets only a categorical with no declared
+    nulls be given. The level is returned as well as the value: a level such
+    as ``"1.50"`` and the value it renders to are different keys.
+    """
+    column = plan.column
+    with localcontext(_KERNEL_CONTEXT):
+        if isinstance(source, CellStreams):
+            stream = source.stream_at(row_index, column.name)
+        else:
+            stream = source.stream(generator_column_path(sim_id, expose_id, row_index, column.name))
+        level = categorical(stream, _categorical_levels(plan.statistics, column, given_level))
+        return _level_to_value(level, column), level
+
+
+def _given_columns(plan: GeneratorPlan) -> FrozenSet[str]:
+    """The columns some other column of *plan* is drawn given."""
+    names = set()
+    for column_plan in plan.columns:
+        if column_plan.statistics.given is not None:
+            names.add(column_plan.statistics.given)
+    return frozenset(names)
+
+
+def _draw_order(plan: GeneratorPlan) -> Tuple[int, ...]:
+    """Column indices in an order that draws every given column before those given it.
+
+    By depth in the ``given`` forest (:func:`_require_conditionals` refused
+    every cycle), then by declared position, so the order is a function of
+    the plan alone.
+    """
+    by_name = {column_plan.column.name: column_plan for column_plan in plan.columns}
+
+    def depth(column_plan: ColumnPlan) -> int:
+        count, given = 0, column_plan.statistics.given
+        while given is not None:
+            count, given = count + 1, by_name[given].statistics.given
+        return count
+
+    depths = [depth(column_plan) for column_plan in plan.columns]
+    return tuple(sorted(range(len(plan.columns)), key=lambda index: (depths[index], index)))
+
+
+def _conditional_row(
+    plan: GeneratorPlan,
+    order: Sequence[int],
+    givens: FrozenSet[str],
+    source: _Source,
+    row_index: int,
+) -> Tuple[Any, ...]:
+    """One row of a plan with conditional columns, drawn in *order*.
+
+    Every cell is still drawn once, from its own stream, so the order the
+    cells are drawn in changes no value. Drawing parents before children only
+    puts each given level in hand before the columns that read it. The row is
+    returned in the expose's declared column order.
+    """
+    sim_id, expose_id, h = plan.sim_id, plan.expose.expose_id, plan.seam_digest
+    values: List[Any] = [None] * len(plan.columns)
+    levels: Dict[str, str] = {}
+    for index in order:
+        column_plan = plan.columns[index]
+        given = column_plan.statistics.given
+        given_level = None if given is None else levels[given]
+        name = column_plan.column.name
+        if name in givens:
+            values[index], levels[name] = _given_cell(
+                column_plan, source, sim_id, expose_id, row_index, given_level
+            )
+        else:
+            values[index] = _cell(column_plan, source, sim_id, expose_id, row_index, h, given_level)
+    return tuple(values)
 
 
 def _stream_source(
@@ -1119,6 +1378,13 @@ def generate_row_slice(
         )
     streams = _stream_source(plan, root, source)
     expose_id = plan.expose.expose_id
+    givens = _given_columns(plan)
+    if givens:
+        order = _draw_order(plan)
+        return tuple(
+            _conditional_row(plan, order, givens, streams, row_index)
+            for row_index in range(start, stop)
+        )
     return tuple(
         tuple(
             _cell(column_plan, streams, plan.sim_id, expose_id, row_index, plan.seam_digest)
@@ -1139,11 +1405,29 @@ def generate_column(
 
     Exists so a test can assert the property §1's per-cell addressing
     promises: the values produced column-first are the values produced
-    row-first, because no cell's stream depends on any other cell.
+    row-first, because no cell's stream depends on any other cell. A column
+    drawn ``given`` another reads that column's level in the same row, so
+    every column above it in the ``given`` chain is drawn here too, root
+    first, as :func:`generate_row_slice` does.
     """
     streams = _stream_source(plan, root, source)
     column_plan = plan.column_plan(column)
+    sim_id, expose_id, h = plan.sim_id, plan.expose.expose_id, plan.seam_digest
+    chain: List[ColumnPlan] = []
+    given = column_plan.statistics.given
+    while given is not None:
+        ancestor = plan.column_plan(given)
+        chain.append(ancestor)
+        given = ancestor.statistics.given
+    chain.reverse()
+
+    def level_at(index: int) -> Optional[str]:
+        level: Optional[str] = None
+        for ancestor in chain:
+            _, level = _given_cell(ancestor, streams, sim_id, expose_id, index, level)
+        return level
+
     return tuple(
-        _cell(column_plan, streams, plan.sim_id, plan.expose.expose_id, index, plan.seam_digest)
+        _cell(column_plan, streams, sim_id, expose_id, index, h, level_at(index))
         for index in range(plan.rows)
     )

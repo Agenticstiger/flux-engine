@@ -274,7 +274,12 @@ def choose_family(
     if declared is not None:
         return declared
 
-    if statistics.levels is not None or statistics.support or statistics.support_is_declared:
+    if (
+        statistics.levels is not None
+        or statistics.support
+        or statistics.support_is_declared
+        or statistics.level_weights_given is not None
+    ):
         # ``support: declared`` counts as declaring a categorical intent even
         # though it names no levels: the author asked for the contract's own
         # support set, and the refusal that follows says why the contract

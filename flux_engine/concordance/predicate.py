@@ -647,8 +647,11 @@ COLUMN_KEYS: Tuple[str, ...] = (
     # read by the generator (flux_engine.generator.statistics)
     "bins",
     "binWeights",
+    "binWeightsGiven",
     "family",
+    "given",
     "identifierLength",
+    "levelWeightsGiven",
     "levels",
     "mean",
     "nullFraction",
