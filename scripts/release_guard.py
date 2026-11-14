@@ -190,7 +190,7 @@ def check_tag_shape(tag: str) -> str:
         raise Refusal(
             f'REFUSED: "{tag}" is not a release tag. A release tag is '
             "v<major>.<minor>.<patch> with an optional a/b/rc pre-release suffix, "
-            'so a working version such as "v0.4.0.dev0" cannot be released.'
+            'so a working version such as "v0.5.0.dev0" cannot be released.'
         )
     return match.group("version")
 
@@ -373,9 +373,9 @@ def build_fixture(
     dest: Path,
     root: Path,
     *,
-    version: str = "0.4.0",
+    version: str = "0.5.0",
     fallback: Optional[str] = None,
-    changelog: Optional[str] = "0.4.0",
+    changelog: Optional[str] = "0.5.0",
     seed_tree: Optional[str] = None,
     trace: Optional[str] = None,
 ) -> Tuple[Path, str]:
@@ -505,9 +505,9 @@ def self_test(root: Path) -> int:
         git_repo, on_main_only, off_main = build_git_fixture(scratch / "git")
 
         mismatched, mismatched_head = build_fixture(
-            scratch / "mismatched-pyproject", root, version="0.4.0.dev0"
+            scratch / "mismatched-pyproject", root, version="0.5.0.dev0"
         )
-        stale, stale_head = build_fixture(scratch / "stale-fallback", root, fallback="0.4.0.dev0")
+        stale, stale_head = build_fixture(scratch / "stale-fallback", root, fallback="0.5.0.dev0")
         no_changelog, no_changelog_head = build_fixture(
             scratch / "no-changelog", root, changelog=None
         )
@@ -518,7 +518,7 @@ def self_test(root: Path) -> int:
         bent_seed, _ = build_fixture(scratch / "bent-seed", root, seed_tree="flux-seed/2")
         green, green_head = build_fixture(scratch / "green", root)
         prerelease, prerelease_head = build_fixture(
-            scratch / "prerelease", root, version="0.4.0rc1", changelog="0.4.0rc1"
+            scratch / "prerelease", root, version="0.5.0rc1", changelog="0.5.0rc1"
         )
         output = scratch / "github-output.txt"
 
@@ -526,27 +526,27 @@ def self_test(root: Path) -> int:
             (
                 "a .dev tag is not a release tag",
                 "is not a release tag",
-                lambda: check_tag_shape("v0.4.0.dev0"),
+                lambda: check_tag_shape("v0.5.0.dev0"),
             ),
             (
                 "a bare number is not a release tag",
                 "is not a release tag",
-                lambda: check_tag_shape("0.4.0"),
+                lambda: check_tag_shape("0.5.0"),
             ),
             (
                 "a .post tag is not a release tag",
                 "is not a release tag",
-                lambda: check_tag_shape("v0.4.0.post1"),
+                lambda: check_tag_shape("v0.5.0.post1"),
             ),
             (
                 "pyproject.toml disagreeing with the tag",
-                'declares version "0.4.0.dev0"',
-                lambda: run_release_checks(mismatched, "v0.4.0", mismatched_head),
+                'declares version "0.5.0.dev0"',
+                lambda: run_release_checks(mismatched, "v0.5.0", mismatched_head),
             ),
             (
                 "a stale __version__ fallback",
-                'falls back to "0.4.0.dev0"',
-                lambda: run_release_checks(stale, "v0.4.0", stale_head),
+                'falls back to "0.5.0.dev0"',
+                lambda: run_release_checks(stale, "v0.5.0", stale_head),
             ),
             (
                 "the two version literals disagreeing, with no tag in sight",
@@ -556,12 +556,12 @@ def self_test(root: Path) -> int:
             (
                 "no CHANGELOG.md at all",
                 "A release needs a record",
-                lambda: run_release_checks(no_changelog, "v0.4.0", no_changelog_head),
+                lambda: run_release_checks(no_changelog, "v0.5.0", no_changelog_head),
             ),
             (
                 "a CHANGELOG.md with no section for this version",
-                "has no `## 0.4.0` section",
-                lambda: run_release_checks(wrong_changelog, "v0.4.0", wrong_changelog_head),
+                "has no `## 0.5.0` section",
+                lambda: run_release_checks(wrong_changelog, "v0.5.0", wrong_changelog_head),
             ),
             (
                 "a TRACE_VERSION copy that disagrees",
@@ -580,14 +580,14 @@ def self_test(root: Path) -> int:
             ),
             (
                 "a describe.json whose version is not the tagged one",
-                "the installed wheel reports version '0.4.0.dev0'",
-                lambda: check_installed(_describe_fixture(scratch, "0.4.0.dev0"), "0.4.0"),
+                "the installed wheel reports version '0.5.0.dev0'",
+                lambda: check_installed(_describe_fixture(scratch, "0.5.0.dev0"), "0.5.0"),
             ),
             (
                 "a describe.json running the vendored spec fallback",
                 "resolved its spec through 'vendored'",
                 lambda: check_installed(
-                    _describe_fixture(scratch, "0.4.0", source="vendored"), "0.4.0"
+                    _describe_fixture(scratch, "0.5.0", source="vendored"), "0.5.0"
                 ),
             ),
         )
@@ -609,17 +609,17 @@ def self_test(root: Path) -> int:
         must_pass: Sequence[Tuple[str, Callable[[], object]]] = (
             (
                 "a consistent tree and tag, classified as a full release",
-                lambda: _expect_outputs(green, "v0.4.0", green_head, output, "false"),
+                lambda: _expect_outputs(green, "v0.5.0", green_head, output, "false"),
             ),
             ("a consistent tree with no tag", lambda: run_tree_checks(green)),
             ("a commit that is on main", lambda: check_ancestry(on_main_only, git_repo)),
             (
                 "a describe.json that agrees with the tag",
-                lambda: check_installed(_describe_fixture(scratch, "0.4.0"), "0.4.0"),
+                lambda: check_installed(_describe_fixture(scratch, "0.5.0"), "0.5.0"),
             ),
             (
                 "a pre-release tag, classified as a pre-release",
-                lambda: _expect_outputs(prerelease, "v0.4.0rc1", prerelease_head, output, "true"),
+                lambda: _expect_outputs(prerelease, "v0.5.0rc1", prerelease_head, output, "true"),
             ),
         )
 
@@ -699,7 +699,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="the tree to check")
     parser.add_argument("--self-test", action="store_true", help="every check refuses a fixture")
     parser.add_argument("--check-tree", action="store_true", help="the checks that need no tag")
-    parser.add_argument("--tag", help="the release tag, e.g. v0.4.0")
+    parser.add_argument("--tag", help="the release tag, e.g. v0.5.0")
     parser.add_argument("--commit", help="the commit the tag points at")
     parser.add_argument("--base", default="origin/main", help="the ref a release must come from")
     parser.add_argument("--github-output", type=Path, help="append version/prerelease here")

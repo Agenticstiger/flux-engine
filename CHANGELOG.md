@@ -19,7 +19,7 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.5.0 - 2026-11-14
 
 A FLUID `INTEGER` column takes a drawn count, a fidelity column can be drawn
 given another, the fidelity check counts two categorical columns together,
@@ -92,6 +92,10 @@ their values.
 
 ### Changed
 
+- `fluxsim describe --self` no longer reports a `synth` capability. ADR 0003
+  rules record-level synthesis out, its 2026-11-11 amendment removed the
+  `[synth]` extra, and nothing in the engine could use synthcity, so an
+  installed copy read as a feature.
 - A FLUID `INTEGER` column of a scenario-driven emit takes a drawn count, such
   as the towers `tenancyCount`. Whether the column's source is always a whole
   number is decided at plan time from the declared families: a rate count, a
