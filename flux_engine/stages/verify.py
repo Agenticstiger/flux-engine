@@ -777,6 +777,12 @@ def _failed_legs(outcomes: Mapping[str, Any], failed: Sequence[str]) -> List[str
     return lines
 
 
+def _failure_summary(expose_id: str, outcome: Mapping[str, Any]) -> str:
+    """The same facts on one line, for the ``--update-golden`` refusal that joins its problems."""
+    named = _failure_lines(outcome)
+    return f"{expose_id}: fidelity check failed" + (": " + ", ".join(named) if named else "")
+
+
 def packed_emit(
     attestation: Mapping[str, Any], expose_id: str, rows: Sequence[Sequence[Any]]
 ) -> "PackedEmit":
@@ -1023,7 +1029,7 @@ def verify(
                 *([artifact_detail] if artifact_detail else []),
                 *row_problems,
                 *vector_messages[:5],
-                *(f"{expose_id}: fidelity check failed" for expose_id in fidelity_failed),
+                *(_failure_summary(name, fidelity_outcomes[name]) for name in fidelity_failed),
             ]
             return StageResult(
                 stage="verify",

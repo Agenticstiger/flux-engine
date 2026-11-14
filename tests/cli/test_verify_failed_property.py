@@ -180,6 +180,27 @@ def test_a_grouped_property_names_its_column_and_the_failing_group_by_ordinal(
             assert value not in text, (value, text)
 
 
+def test_the_update_golden_refusal_names_the_property_too(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    applied = _applied(tmp_path, [UNGROUPED_MEAN, SUPPORT])
+    slice_rows = [{**row, "amount": FAR} for row in applied["rows"]]
+    refused = f"{EXPOSE_ID}: fidelity check failed: property 000:mean:amount (mean of amount)"
+
+    exit_code, _, stderr = _verify(
+        applied, slice_rows, tmp_path, capsys, "--update-golden", "--reason", "pin it"
+    )
+    assert exit_code == 1
+    assert f"a leg failed: {refused}: outside the declared margin" in stderr
+
+    _, stdout, _ = _verify(
+        applied, slice_rows, tmp_path, capsys, "--update-golden", "--reason", "pin it", "--json"
+    )
+    golden = json.loads(stdout)["artifacts"]["golden"]
+    assert golden["updated"] is False
+    assert golden["problems"] == [f"{refused}: outside the declared margin"]
+
+
 def test_a_check_that_passes_names_no_property(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

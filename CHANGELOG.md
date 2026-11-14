@@ -111,7 +111,9 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   stderr after `<exposeId>: fidelity check failed`, then one line per refusal
   with its code and reason. A line names fields, codes and group ordinals,
   never a record value. The `error.message` of the `--json` envelope is the
-  same text.
+  same text. The refusal of `--update-golden` over a failed leg names them on
+  its one line, and in `artifacts.golden.problems`, as `<exposeId>: fidelity
+  check failed: property ...`.
 
 ### Fixed
 
