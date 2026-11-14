@@ -185,6 +185,26 @@ def test_an_emit_without_a_fidelity_block_is_refused(document) -> None:
         assert caught.value.code.code == "FLX-5030"
 
 
+@pytest.mark.parametrize(("value", "kind"), [("oops", "str"), (["a"], "list"), (7, "int")])
+def test_a_fidelity_value_that_is_not_a_mapping_is_refused_as_what_it_is(
+    document, value: Any, kind: str
+) -> None:
+    """A declaration nobody can read is not the absence of one.
+
+    The compiler used to say the emit "declares no fidelity block", which
+    sent the reader looking for a block that is there. The parser names it.
+    """
+    with pytest.raises(FluxError) as caught:
+        compile_fidelity(
+            contract=document["contract"],
+            emit=document["emit"],
+            extension={**document["extension"], "fidelity": value},
+            expose=build_expose(document),
+        )
+    assert caught.value.code.code == "FLX-5030"
+    assert caught.value.detail == f"fidelity must be a mapping, got {kind}"
+
+
 # ---------------------------------------------------------------------------
 # epsilon and the margin, derived independently
 # ---------------------------------------------------------------------------

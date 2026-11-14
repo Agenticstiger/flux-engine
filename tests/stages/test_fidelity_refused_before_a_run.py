@@ -32,7 +32,7 @@ from flux_engine.core.errors import FluxError
 from flux_engine.seam.resolve import load_bundle, resolve_all_emits
 from flux_engine.stages.plan import plan
 from flux_engine.stages.validate import validate
-from tests.bundles import bundle_with_properties
+from tests.bundles import bundle_with_fidelity, bundle_with_properties
 
 from .conftest import FIXTURE_BUNDLE
 
@@ -246,3 +246,55 @@ def test_a_number_too_long_to_form_is_refused_at_once_by_validate_and_plan(
     assert validated.stderr == f"{SIMULATION_ID}: {expected}"
     assert planned.error_code == "FLX-5030"
     assert planned.stderr == str(expected)
+
+
+@pytest.mark.timeout(60)
+def test_a_draw_parameter_too_long_to_form_is_refused_by_plan_before_any_row(
+    tmp_path: Path,
+) -> None:
+    """``mean`` is a key only the generator reads, so the parser's bound on a
+    number's length never saw ``"1E+99999999"``, and ``plan`` stopped in
+    about a second on an uncaught ``decimal.Overflow`` while drawing rows.
+    The generator reads it by the parser's rule, before any row is drawn."""
+    bundle = _bundle(tmp_path, (MEAN,))
+    simulation = bundle / "simulation.flux.yml"
+    declared = "              null: exclude\n"
+    text = simulation.read_text()
+    assert text.count(declared) == 1, "the fixture's amount declaration moved"
+    simulation.write_text(text.replace(declared, declared + '              mean: "1E+99999999"\n'))
+    state = tmp_path / ".flux"
+
+    result = plan(bundle, state_dir=state)
+
+    assert not result.success
+    assert result.error_code == "FLX-5030"
+    assert result.stderr == (
+        "FLX-5030: the fidelity block is malformed -- amount: mean: written out, this "
+        "number needs 100000000 digits, and a number in a fidelity block may need at most 1000"
+    )
+    assert not state.exists(), "a refused plan writes no run directory"
+
+
+@pytest.mark.parametrize(
+    ("declared", "kind"), [("oops", "str"), ("[mean, support]", "list"), ("64", "int")]
+)
+def test_a_fidelity_value_that_is_not_a_mapping_is_refused_by_validate_and_plan(
+    tmp_path: Path, declared: str, kind: str
+) -> None:
+    """It counted as no block: ``validate`` passed it and ``verify`` reported
+    the emit ``not declared``, though the seam refuses a declaration it cannot
+    read rather than drop it. Every command now gives the parser's refusal."""
+    bundle = bundle_with_fidelity(FIXTURE_BUNDLE, tmp_path / "bundle", declared)
+    expected = refusal_verify_gives(bundle)
+    assert expected.code.code == "FLX-5030"
+    assert expected.detail == f"fidelity must be a mapping, got {kind}"
+    state = tmp_path / ".flux"
+
+    validated = validate(bundle)
+    planned = plan(bundle, state_dir=state)
+
+    assert validated.error_code == "FLX-5030"
+    assert validated.stderr == f"{SIMULATION_ID}: {expected}"
+    assert planned.error_code == "FLX-5030"
+    assert planned.stderr == str(expected)
+    assert not state.exists(), "a refused plan writes no run directory"

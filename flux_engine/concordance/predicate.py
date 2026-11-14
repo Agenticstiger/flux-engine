@@ -95,6 +95,7 @@ __all__ = [
     "parse_duration_ms",
     "parse_fidelity_block",
     "read_support_levels",
+    "require_number_length",
 ]
 
 
@@ -386,9 +387,23 @@ def _decimal_of(value: Any, subject: str) -> Optional[Decimal]:
         raise FluxError(FLX_5030, f"{subject}: value class {type(value).__name__!r}")
     if not parsed.is_finite():
         raise FluxError(FLX_5030, f"{subject}: a non-finite decimal has no value")
-    digits = len(parsed.as_tuple().digits)
-    exponent = parsed.adjusted() - digits + 1
-    if not parsed:
+    return require_number_length(parsed, subject)
+
+
+def require_number_length(number: Decimal, subject: str) -> Decimal:
+    """Return the finite *number*, or refuse it (``FLX-5030``) by its length.
+
+    Written out without an exponent, a number in a fidelity block needs at
+    most :data:`_MOST_NUMBER_DIGITS` digits. One rule for both readers of
+    the block's numbers: the check's (:func:`_decimal_of`) and the
+    generator's (:func:`flux_engine.generator.statistics.exact_decimal`),
+    which reads the draw parameters the check never sees. The digits are
+    counted from the decimal's own tuple, so no value is formed to count
+    them.
+    """
+    digits = len(number.as_tuple().digits)
+    exponent = number.adjusted() - digits + 1
+    if not number:
         needed = 1  # zero, however its exponent is spelled
     elif exponent >= 0:
         needed = digits + exponent
@@ -400,7 +415,7 @@ def _decimal_of(value: Any, subject: str) -> Optional[Decimal]:
             f"{subject}: written out, this number needs {needed} digits, and a number "
             f"in a fidelity block may need at most {_MOST_NUMBER_DIGITS}",
         )
-    return parsed
+    return number
 
 
 def _require_decimal(value: Any, subject: str) -> Decimal:

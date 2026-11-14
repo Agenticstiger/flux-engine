@@ -194,6 +194,66 @@ def test_the_exact_loader_refuses_a_number_with_no_digest(tmp_path: Path, text: 
     assert error.value.code.code == "FLX-3105"
 
 
+#: CPython's limit on the digits it converts between an ``int`` and its
+#: decimal text (``sys.int_info.default_max_str_digits``).
+_MOST_INTEGER_DIGITS = 4300
+
+
+@pytest.mark.parametrize(
+    "scalar",
+    [
+        pytest.param("9" * (_MOST_INTEGER_DIGITS + 1), id="one-digit-too-many"),
+        pytest.param("-" + "9" * (_MOST_INTEGER_DIGITS + 1), id="negative"),
+        pytest.param("1_" * _MOST_INTEGER_DIGITS + "1", id="grouped-by-underscores"),
+        pytest.param("1" * (_MOST_INTEGER_DIGITS + 1) + ":00", id="a-sexagesimal-part"),
+        pytest.param("!!int '" + "9" * (_MOST_INTEGER_DIGITS + 1) + "'", id="tagged-and-quoted"),
+        pytest.param(f"0x{10**_MOST_INTEGER_DIGITS:x}", id="hex-worth-one-digit-too-many"),
+    ],
+)
+def test_the_exact_loader_refuses_an_integer_too_long_to_read(tmp_path: Path, scalar: str) -> None:
+    """CPython converts at most 4300 digits between an ``int`` and its text.
+
+    PyYAML builds an integer with ``int()``, so a longer decimal one raised a
+    bare ``ValueError`` from inside the read, and a longer value spelled in
+    hex loaded, then broke the first message that printed it. Both are
+    refused where they are read, by their position, never their value.
+    """
+    path = tmp_path / "doc.yml"
+    path.write_text(f"a: 1\nb: {scalar}\n", encoding="utf-8")
+    with pytest.raises(FluxError) as error:
+        load_documents_exact(path)
+    assert error.value.code.code == "FLX-1003"
+    assert error.value.detail == (
+        f"doc.yml: an integer of more than {_MOST_INTEGER_DIGITS} digits is too long "
+        "to read (line 2, column 4)"
+    )
+
+
+@pytest.mark.parametrize("value", [10**_MOST_INTEGER_DIGITS - 1, 1 - 10**_MOST_INTEGER_DIGITS])
+def test_an_integer_of_at_most_the_most_digits_still_loads(tmp_path: Path, value: int) -> None:
+    """The longest integer of each sign, spelled in decimal and in hex."""
+    path = tmp_path / "doc.yml"
+    path.write_text(f"a: {value}\nb: {value:#x}\n", encoding="utf-8")
+    assert load_documents_exact(path) == ({"a": value, "b": value},)
+
+
+@pytest.mark.parametrize("scalar", ["0b_", "-0x_", "!!int abc", "!!int ''"])
+def test_the_exact_loader_refuses_an_integer_it_cannot_form(tmp_path: Path, scalar: str) -> None:
+    """YAML reads each of these as an integer, and PyYAML cannot build one.
+
+    It raised a bare ``ValueError`` or ``IndexError``; the scalar is
+    unreadable YAML, the loader's own refusal.
+    """
+    path = tmp_path / "doc.yml"
+    path.write_text(f"a: 1\nb: {scalar}\n", encoding="utf-8")
+    with pytest.raises(FluxError) as error:
+        load_documents_exact(path)
+    assert error.value.code.code == "FLX-3105"
+    assert error.value.detail == (
+        "doc.yml: a scalar read as an integer has no integer value (line 2, column 4)"
+    )
+
+
 def test_unreadable_yaml_is_reported_not_swallowed(tmp_path: Path) -> None:
     path = tmp_path / "doc.yml"
     path.write_text("a: [1, 2\n", encoding="utf-8")
@@ -412,6 +472,30 @@ def test_a_declared_row_count_that_is_not_an_integer_is_ignored(write_bundle: An
     )
     resolved = resolve_emit(load_bundle(root), simulation_id="sim-widget")
     assert resolved.declared_row_count is None
+
+
+@pytest.mark.parametrize("value", ["not a mapping", ["a", "b"], 7])
+def test_a_fidelity_value_that_is_not_a_mapping_is_still_a_declaration(
+    write_bundle: Any, value: Any
+) -> None:
+    """Handed on as declared, for the block's one parser to refuse (``FLX-5030``).
+
+    Read as ``None`` it was no block at all: ``validate`` passed the bundle
+    and ``verify`` reported the emit ``not declared``.
+    """
+    root = write_bundle(
+        flux_documents=minimal_simulation(extension_emits={"widget_stream": {"fidelity": value}})
+    )
+    resolved = resolve_emit(load_bundle(root), simulation_id="sim-widget")
+    assert resolved.fidelity == value
+
+
+def test_a_null_fidelity_value_declares_no_block(write_bundle: Any) -> None:
+    """As a null namespace, ``emits`` map or entry declares nothing."""
+    root = write_bundle(
+        flux_documents=minimal_simulation(extension_emits={"widget_stream": {"fidelity": None}})
+    )
+    assert resolve_emit(load_bundle(root), simulation_id="sim-widget").fidelity is None
 
 
 # ---------------------------------------------------------------------------
