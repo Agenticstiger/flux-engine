@@ -249,7 +249,7 @@ module = "flux_engine._vendor.*"
 ignore_errors = true
 
 [tool.pytest.ini_options]
-minversion = "7.0"
+minversion = "8.2"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

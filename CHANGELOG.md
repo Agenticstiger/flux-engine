@@ -26,7 +26,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - The sinks tests skip where pyarrow cannot import. pyarrow 26 needs NumPy 2.0
   or newer, raises `ImportError` at import on NumPy 1.x, and does not declare
   the requirement in its wheel, so pip installs the pair without a word. The
-  nightly's two NumPy 1.26.0 determinism cells install `.[dev]`, pin NumPy and
+  nightly's NumPy 1.26.0 determinism cells install `.[dev]`, pin NumPy and
   collect the whole tree for `make test-vectors`. pytest 9.1 skips only on
   `ModuleNotFoundError`, so the sinks modules failed at collection and the
   step that holds the pinned digest set exited non-zero. `pyarrow_or_skip`, in

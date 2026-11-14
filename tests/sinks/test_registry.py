@@ -151,12 +151,12 @@ def test_a_third_party_sink_is_found_through_its_entry_point(
 
 
 def test_a_third_party_sink_cannot_shadow_a_built_in(monkeypatch: pytest.MonkeyPatch) -> None:
-    pyarrow_or_skip()  # the last line loads the Parquet sink, which imports it
     monkeypatch.setattr(
         registry, "_entry_points", _points(("parquet", f"{__name__}:memory_factory"))
     )
     shadow = [sink for sink in registry.available() if sink.source != "built-in"]
     assert [(sink.name, sink.shadowed) for sink in shadow] == [("parquet", True)]
+    pyarrow_or_skip()  # the next line loads the Parquet sink, which imports it
     assert registry.load_factory("parquet").__module__ == "flux_engine.sinks.parquet"
 
 
