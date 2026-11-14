@@ -362,6 +362,11 @@ jobs:
       # checkout, as ci.yml's test cells do (see the comment there).
       - name: Install flux_spec from the sibling FLUX checkout
         run: pip install --no-deps ../FLUX
+      # `make test-vectors` collects the whole tree. The install steps above put
+      # pyarrow, a `.[dev]` dependency, beside the pinned NumPy, and pyarrow 26
+      # refuses NumPy 1.x at import. So the sinks tests skip on a floor cell
+      # (`pyarrow_or_skip` in tests/sinks/conftest.py) rather than fail the
+      # step that holds the pinned digest set.
       - name: Pinned digest set (NumPy floor cells)
         if: matrix.numpy != 'latest'
         run: |

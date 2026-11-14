@@ -109,7 +109,9 @@ adbc = [
 # (forge-cli/pyproject.toml) so both engines run the identical linter
 # versions in CI -- no "passes in forge-cli, fails in flux-engine" drift.
 dev = [
-  "pytest>=7.4",
+  # 8.2 is the first release whose pytest.importorskip takes exc_type, which
+  # tests/sinks/conftest.py uses to skip where pyarrow cannot import.
+  "pytest>=8.2",
   "pytest-cov>=4.1",
   "hypothesis>=6.100",
   "mypy>=1.10",

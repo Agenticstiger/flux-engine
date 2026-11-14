@@ -27,8 +27,10 @@ from typing import Any, Dict, Iterator
 
 import pytest
 
+from tests.sinks.conftest import pyarrow_or_skip
+
 pytest.importorskip("pytest_benchmark", reason="needs pytest-benchmark (the accuracy group)")
-pytest.importorskip("pyarrow")
+pyarrow_or_skip()
 pytest.importorskip("adbc_driver_manager")
 pytest.importorskip("adbc_driver_duckdb")
 

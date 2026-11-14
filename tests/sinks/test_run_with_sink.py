@@ -20,8 +20,10 @@ from flux_engine.sinks.receipts import SinkReceipt, StreamContext
 from flux_engine.stages.deliver import RECEIPTS_VERSION
 from flux_engine.stages.run import run
 
-pa = pytest.importorskip("pyarrow")
-from flux_engine.sinks import parquet  # noqa: E402  (after the importorskip)
+from .conftest import pyarrow_or_skip
+
+pa = pyarrow_or_skip()
+from flux_engine.sinks import parquet  # noqa: E402  (after the skip)
 from flux_engine.sinks.arrow import output_digest_of  # noqa: E402
 
 pytestmark = pytest.mark.unit

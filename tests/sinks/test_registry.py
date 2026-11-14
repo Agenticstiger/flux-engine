@@ -18,6 +18,8 @@ from flux_engine.sinks import registry
 from flux_engine.sinks._options import bool_option, int_option, require_known
 from flux_engine.sinks.receipts import SinkReceipt, StreamContext
 
+from .conftest import pyarrow_or_skip
+
 pytestmark = pytest.mark.unit
 
 
@@ -149,6 +151,7 @@ def test_a_third_party_sink_is_found_through_its_entry_point(
 
 
 def test_a_third_party_sink_cannot_shadow_a_built_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    pyarrow_or_skip()  # the last line loads the Parquet sink, which imports it
     monkeypatch.setattr(
         registry, "_entry_points", _points(("parquet", f"{__name__}:memory_factory"))
     )

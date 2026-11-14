@@ -29,10 +29,18 @@ from flux_engine.core.errors import FluxError
 from flux_engine.seam.contract import LogicalKind, parse_logical_type
 from flux_engine.seam.emit import emit_header_document
 
-from .conftest import CONTRACT_DIGEST, EVERY_TYPE, compiled, expected_digest, header_of, rendered
+from .conftest import (
+    CONTRACT_DIGEST,
+    EVERY_TYPE,
+    compiled,
+    expected_digest,
+    header_of,
+    pyarrow_or_skip,
+    rendered,
+)
 
-pa = pytest.importorskip("pyarrow")
-from flux_engine.sinks import arrow as sink_arrow  # noqa: E402  (after the importorskip)
+pa = pyarrow_or_skip()
+from flux_engine.sinks import arrow as sink_arrow  # noqa: E402  (after the skip)
 
 pytestmark = pytest.mark.unit
 

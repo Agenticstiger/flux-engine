@@ -19,6 +19,22 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+### Development
+
+- The sinks tests skip where pyarrow cannot import. pyarrow 26 needs NumPy 2.0
+  or newer, raises `ImportError` at import on NumPy 1.x, and does not declare
+  the requirement in its wheel, so pip installs the pair without a word. The
+  nightly's two NumPy 1.26.0 determinism cells install `.[dev]`, pin NumPy and
+  collect the whole tree for `make test-vectors`. pytest 9.1 skips only on
+  `ModuleNotFoundError`, so the sinks modules failed at collection and the
+  step that holds the pinned digest set exited non-zero. `pyarrow_or_skip`, in
+  `tests/sinks/conftest.py`, skips below NumPy 2 and lets an import failure
+  stand from NumPy 2 on, where a pyarrow that will not import is a broken
+  environment. `dev` asks for pytest 8.2 or newer, the first release whose
+  `importorskip` takes `exc_type`. No engine code, digest or golden moved.
+
 ## 0.5.0 - 2026-11-14
 
 A FLUID `INTEGER` column takes a drawn count, a fidelity column can be drawn
