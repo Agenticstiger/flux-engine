@@ -24,7 +24,7 @@ from decimal import Decimal
 from typing import Any, Dict, List
 
 import pytest
-from hypothesis import assume, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from flux_engine.core.canonical import canonical_bytes
@@ -377,6 +377,10 @@ def test_no_diagnostic_ever_carries_the_value(declared: str) -> None:
 
 
 @given(text=st.text(min_size=1))
+# Both texts are part of "got str", so assume() skips them under the str
+# control below. They are there to fail if the control ever loses that wording.
+@example(" s")
+@example("str")
 def test_a_bad_string_value_is_never_quoted_back(text: str) -> None:
     """Generated over real strings: the message names the class, not the text.
 
@@ -385,10 +389,17 @@ def test_a_bad_string_value_is_never_quoted_back(text: str) -> None:
     that fixed template -- otherwise a single generated character such as
     ``"0"`` would "appear in the message" by way of the row index, and the
     property would fail without anything having leaked.
+
+    That control value is a ``str`` too: the marker string, which the
+    ``replace`` strips again should it ever be quoted back. So the template
+    ends in the same "got str" that every generated text meets. A control
+    of another class would end it in that class's name instead, and a text
+    such as ``" s"`` or ``"str"``, part of "got str" but not of the
+    template, would fail the property although nothing leaked.
     """
     expose = expose_from_schema([{"name": "n", "type": "INT"}])
     with pytest.raises(FluxError) as control:
-        render_row({"n": _Marked()}, expose, row_index=0)
+        render_row({"n": _Marked.MARKER}, expose, row_index=0)
     template = str(control.value).replace(_Marked.MARKER, "")
     assume(text not in template)
 
