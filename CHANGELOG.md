@@ -64,7 +64,16 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
 - What the fidelity check covers: every declared link. A histogram drawn given
   a categorical is checked by a grouped `marginalHistogram`, and a categorical
   drawn given a categorical by a grouped `levelHistogram`.
-
+- `fluxsim verify --json` names each declared property of a fidelity check that
+  did not land within its margin, under `artifacts.fidelity.<exposeId>.outside`:
+  `propertyId`, `property` and `columns`, and for a grouped property `groupBy`
+  and `groupOrdinals`, the zero-based ordinals of the groups that landed
+  outside, in the sorted group order that the `group #N` of an `FLX-5005`
+  refusal uses. A property the check refused is listed too, as the fidelity
+  record's `outside` row lists it, and its `refusals` entry says why. A group
+  is named by its ordinal and never by its key. Before, a property outside its
+  margin left only `"status": "failed"`. The list is empty on a check that
+  passed.
 ### Changed
 
 - A FLUID `INTEGER` column of a scenario-driven emit takes a drawn count, such
@@ -81,6 +90,15 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   for a refusal of the whole bundle, and the text output points to the code's
   page. It reported `null` before. Problems with different codes still report
   `null`.
+- The failed fidelity leg of `fluxsim verify` names the property. It printed the
+  expose id and nothing else, on stdout and on stderr. It now prints one line
+  per property that did not land within its margin, worded as `ship` words
+  it, such as `property 003:mean:amount@market (mean of amount, grouped by
+  market): outside the declared margin in group #1`, under the leg line and on
+  stderr after `<exposeId>: fidelity check failed`, then one line per refusal
+  with its code and reason. A line names fields, codes and group ordinals,
+  never a record value. The `error.message` of the `--json` envelope is the
+  same text.
 
 ### Fixed
 

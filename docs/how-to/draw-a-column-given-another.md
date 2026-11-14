@@ -240,6 +240,18 @@ FLX-8001: withheld payment_recovery_moment
 more: fluxsim explain FLX-8001  https://agenticstiger.github.io/flux/engine/reference/errors/FLX-8001.html
 ```
 
+7. `fluxsim verify` runs the same check without writing a pack, and it names the property that failed: its id, its statistic and columns, the column it groups by, and the groups outside the margin. A group is counted by its place in the sorted groups, and never named by its market, because the market is a value from your slice.
+
+```console
+$ fluxsim verify . --run-id $(ls -t .flux/runs | head -1) --committed-slice payment_recovery_moment=file://$(dirname "$PWD")/slice.ndjson   # exit 1
+reproducible: not checked | validity: not asserted
+...
+  fidelity payment_recovery_moment: failed
+    property 000:marginalHistogram:amount@market (marginalHistogram of amount, grouped by market): outside the declared margin in group...
+payment_recovery_moment: fidelity check failed
+  property 000:marginalHistogram:amount@market (marginalHistogram of amount, grouped by market): outside the declared margin in group...
+```
+
 ## Pick the links from your tables
 
 With more columns, you choose which column each one is drawn given. `flux_engine.calibrate.structure` suggests the choice from two-way count tables alone. It builds a Chow-Liu tree: the spanning tree with the most mutual information between linked columns (Chow and Liu, 1968), the selection step of the MST synthesizer (McKenna, Miklau and Sheldon, 2021), without its privacy noise. A histogram column is always a leaf, because a bin is not a level another column can be drawn given. `declarations` turns the tree into the `columns` entries to declare. The module is outside the governed `flux_engine.api` surface (see the [Python API](../reference/python-api.md) reference), so its names can still change.
