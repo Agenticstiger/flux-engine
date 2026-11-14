@@ -8,11 +8,13 @@ Terraform's shape, on this engine: a plan runs the *entire* pipeline
 (:func:`flux_engine.stages.pipeline.execute`) exactly the way ``apply``
 will, and writes down what it saw -- ``inputDigest``, the seed-tree paths
 it materialised (``seedTreeDigest``), the per-emit seam digests (``H``,
-``G``), and, when an emit declares a fidelity block, its generator plan.
-The block is compiled first, as SEAM-FIDELITY-SPEC §3 says
-(:func:`flux_engine.stages.pipeline.compile_declared_fidelity`), so a
-block ``verify`` would refuse is refused before the population exists; the
-margins it computes are not written down. It writes two files: ``plan.json``, and the
+``G``), and, when an emit declares a fidelity block, its generator plan and
+the compiled block. The block is compiled first, as SEAM-FIDELITY-SPEC §3
+says (:func:`flux_engine.stages.pipeline.compile_declared_fidelity`), so a
+block ``verify`` would refuse is refused before the population exists, and
+the emit's entry records what the compile gave, under ``fidelity``: every
+property's epsilon, margin and magnitude bounds, because §3 writes "every
+``ε``" to ``plan.json``. It writes two files: ``plan.json``, and the
 ``seed-paths.ndjson`` beside it that KERNEL-SPEC §3 puts the path list in.
 Everything else is ``apply``'s: it re-executes (KERNEL-SPEC's determinism
 promise says the second execution reaches the same trace and the same
@@ -91,6 +93,15 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
                 "productRef": outcome.resolved.product_ref,
                 "declaresFidelity": outcome.resolved.fidelity is not None,
                 "generator": _fidelity_summary(outcome),
+                # SEAM-FIDELITY-SPEC §3: "every ε" is written to plan.json.
+                # The key is the one the block is declared under, and an
+                # emit that declares none gets no key, so its plan keeps
+                # the bytes and the planDigest it had.
+                **(
+                    {"fidelity": outcome.compiled_fidelity.plan_document()}
+                    if outcome.compiled_fidelity is not None
+                    else {}
+                ),
             }
             for outcome in result.emits
         },

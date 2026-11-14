@@ -47,7 +47,7 @@ FAMILY = "determinism"
 #: (``spec.seed: 42``), and of its one emit. Not the nightly's fresh seed: these are the same
 #: bytes every night. A change here is a change in what a run is, and goes through the
 #: golden changelog like any other (``GOLDEN-CHANGELOG.md``).
-PINNED_RUN_DIGEST = "2d1c6fafdb22d3ab785b1e418668a7a0bd4eb1f4447827bd01010087ad0249fb"
+PINNED_RUN_DIGEST = "e0ba53b525c66686a5a71348ddc9dbe53667f5485476ea215ba0de8ce1afbdbe"
 PINNED_EMIT_DIGEST = "6df957f18e20332f46e53964cf1c43794c5dde50297a4328f5b0afc691b24213"
 
 

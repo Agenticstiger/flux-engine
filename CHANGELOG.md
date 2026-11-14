@@ -22,10 +22,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 ## Unreleased
 
 A FLUID `INTEGER` column takes a drawn count, a fidelity column can be drawn
-given another, the fidelity check counts two categorical columns together, and
-`validate` and `plan` check a fidelity block before any run exists.
-No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
-`KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep their values.
+given another, the fidelity check counts two categorical columns together,
+`validate` and `plan` check a fidelity block before any run exists, and
+`plan.json` records every fidelity block's epsilons. That last change moves
+the `planDigest` of every bundle that declares a fidelity block, and
+`GOLDEN-CHANGELOG.md` has one new row for it. A bundle without a block keeps
+every digest. `KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep
+their values.
 
 ### Added
 
@@ -103,6 +106,24 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   for a refusal of the whole bundle, and the text output points to the code's
   page. It reported `null` before. Problems with different codes still report
   `null`.
+- `fluxsim plan` writes every fidelity block it compiles into `plan.json`, as
+  SEAM-FIDELITY-SPEC §3 says: "Both `H` and `G` and every `ε` are written to
+  `plan.json`." The emit's entry carries the block under `fidelity`, the key
+  the block is declared under: `exposeId`, `H`, `G`, the `encoding`,
+  `fieldCapacityBits`, and per property its `epsilon`, `margin`,
+  `maxNonMembers` and `magnitudeBits`. That is
+  `CompiledFidelity.plan_document()`, the fragment the published vectors pin
+  as `expect.plan`. Before, `plan` compiled the block and dropped the result,
+  so a plan recorded no epsilon, and a reader checking a fidelity record later
+  had no planned number to hold it against. The key moves the `planDigest` of
+  a bundle that declares a block, and so its run id: a fresh plan lands in a
+  new run directory. Its run's `runDigest` moves too, because `run-digest.json`
+  records `planDigest`, so a `replay --assert-digest` pin taken from a fresh
+  plan needs the new value. A recorded run replays to the `runDigest` it had.
+  An emit without a block gets no key, so its `plan.json` and its digests stay
+  as they were. A plan recorded by 0.4.0 still applies,
+  verifies, replays and ships under this version, under its own run id: no
+  stage after `plan` reads the key.
 - The failed fidelity leg of `fluxsim verify` names the property. It printed the
   expose id and nothing else, on stdout and on stderr. It now prints one line
   per property that did not land within its margin, worded after `ship`'s
@@ -157,8 +178,8 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   tolerance no larger than its encoding error (`FLX-5002`) and a comparison
   wider than its field (`FLX-5001`). `apply` and `run` plan the same way.
   Before, `plan` passed all of these, and the run wrote rows that no check
-  could accept. A bundle that planned before plans to the same `plan.json`,
-  digests and rows.
+  could accept. A bundle that planned before still plans, to the same rows.
+  Its `plan.json` also records the compiled block now: see Changed.
 - A number in a fidelity block that has more than 1000 digits written out,
   such as a range bound of `"1E+99999999"`, is refused with `FLX-5030` by its
   length, before its value is formed. Forming it exactly took minutes, so
