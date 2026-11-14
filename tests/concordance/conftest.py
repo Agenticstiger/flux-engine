@@ -18,7 +18,6 @@ import copy
 import json
 from fractions import Fraction
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any, Dict, Iterator, List, Mapping, Tuple
 
 import pytest
@@ -28,7 +27,6 @@ from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity
 from flux_engine.concordance.predicate import (
     DeclaredExpose,
     FidelityBlock,
-    PropertyKind,
     parse_fidelity_block,
 )
 from flux_engine.concordance.record import Ed25519Signer
@@ -50,15 +48,27 @@ TEST_PRIVATE_KEY = bytes(range(32, 64))
 
 _DOCUMENT: Dict[str, Any] = json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
 
-#: Property kinds added after the published vectors file (``vectorsVersion``
-#: 1), each with the module that pins it instead. The file is a pinning
-#: artefact, and a new kind added to its one block would move every digest
-#: it pins. The coverage tests over the file accept exactly these kinds as
-#: absent from it, and only while the named module exists, so a kind can be
-#: neither dropped from the file nor added to the engine without a pin.
-PINNED_OUTSIDE_THE_VECTORS: Mapping[PropertyKind, str] = MappingProxyType(
-    {PropertyKind.LEVEL_HISTOGRAM: "tests/concordance/test_level_histogram.py"}
-)
+
+#: The name of the block the document's own top-level keys form: version 1's.
+VERSION_1 = "version-1"
+
+
+def published_blocks(document: Mapping[str, Any]) -> List[Tuple[str, Mapping[str, Any]]]:
+    """Every block the vectors file publishes, as ``(name, block)``.
+
+    Version 1's block is the document's own top-level keys. Each property kind
+    added since is one self-contained block under ``kinds``, named for the kind
+    and carrying the same keys (a contract, a committed slice, the digests it
+    pins and its evaluations), so every helper below takes either. A kind is a
+    block of its own because a property added to version 1's one block would
+    move every digest that block pins.
+    """
+    return [(VERSION_1, document), *sorted(document.get("kinds", {}).items())]
+
+
+def published_block(name: str = VERSION_1) -> Dict[str, Any]:
+    """A deep copy of one published block by name: version 1's, or an added kind's."""
+    return copy.deepcopy(_DOCUMENT if name == VERSION_1 else _DOCUMENT["kinds"][name])
 
 
 def telco_example_dir() -> Path | None:
@@ -208,16 +218,16 @@ def evaluation_cases(document: Mapping[str, Any]) -> Iterator[Tuple[str, Mapping
         yield case["id"], case
 
 
-def evaluation_ids() -> List[str]:
-    """The published evaluation case ids, for parametrisation."""
-    return [case["id"] for case in _DOCUMENT["evaluations"]]
+def evaluation_ids(name: str = VERSION_1) -> List[str]:
+    """The published evaluation case ids of one block, for parametrisation."""
+    return [case["id"] for case in published_block(name)["evaluations"]]
 
 
-def evaluation_case(identifier: str) -> Mapping[str, Any]:
-    """One published evaluation case by id."""
-    for case in _DOCUMENT["evaluations"]:
+def evaluation_case(identifier: str, name: str = VERSION_1) -> Mapping[str, Any]:
+    """One published evaluation case by id, from one block."""
+    for case in published_block(name)["evaluations"]:
         if case["id"] == identifier:
-            return copy.deepcopy(case)
+            return case
     raise KeyError(identifier)
 
 

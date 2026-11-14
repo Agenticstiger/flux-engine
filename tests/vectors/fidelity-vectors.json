@@ -1,5 +1,5 @@
 {
-  "vectorsVersion": 1,
+  "vectorsVersion": 2,
   "note": "SEAM-FIDELITY-SPEC 2-8 vectors: one small contract, one committed slice, the digests and margins the compiler takes from them, per-property outcomes for four synthetic datasets, tolerance-rounding direction cases, and one case per fail-closed condition and per offline refusal. Numbers are exact decimal strings, or numerator/denominator where the value does not terminate in decimal.",
   "contract": {
     "fluidVersion": "0.7.5",
@@ -1294,5 +1294,997 @@
         }
       }
     }
-  ]
+  ],
+  "kinds": {
+    "levelHistogram": {
+      "since": 2,
+      "note": "levelHistogram, added in vectorsVersion 2: a support column's records counted per declared level, ungrouped and grouped by a second support column. One contract, one committed slice, the digests, plan fragment, counts and commitment they produce, then one case per outcome and per fail-closed condition of the kind. Declared levels are listed out of order on purpose: cells are taken sorted. Counts are integers; margins are exact decimal strings.",
+      "contract": {
+        "fluidVersion": "0.7.5",
+        "kind": "DataProduct",
+        "id": "example.gold.plan_moment",
+        "exposes": [
+          {
+            "exposeId": "plan_moment",
+            "kind": "stream",
+            "contract": {
+              "schema": [
+                {
+                  "name": "channel",
+                  "type": "STRING",
+                  "required": true
+                },
+                {
+                  "name": "plan",
+                  "type": "STRING"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "emit": {
+        "productRef": "example.gold.plan_moment",
+        "exposeId": "plan_moment",
+        "fluidVersion": "^0.7.3"
+      },
+      "extension": {
+        "rows": 16,
+        "fidelity": {
+          "encoding": {
+            "fractionalBits": 4,
+            "rounding": "floor"
+          },
+          "records": {
+            "min": 2,
+            "max": 64
+          },
+          "columns": {
+            "channel": {
+              "support": {
+                "values": [
+                  "web",
+                  "store"
+                ]
+              },
+              "maxCardinality": 4,
+              "null": "fail"
+            },
+            "plan": {
+              "support": {
+                "values": [
+                  "pro",
+                  "basic",
+                  "plus"
+                ]
+              },
+              "maxCardinality": 4,
+              "null": "exclude"
+            }
+          },
+          "properties": [
+            {
+              "property": "levelHistogram",
+              "column": "plan",
+              "groupBy": "channel",
+              "tolerance": {
+                "type": "distance",
+                "measure": "totalVariation",
+                "max": "0.25"
+              }
+            },
+            {
+              "property": "levelHistogram",
+              "column": "channel",
+              "tolerance": {
+                "type": "distance",
+                "measure": "totalVariation",
+                "max": "0.125"
+              }
+            }
+          ],
+          "budget": {
+            "maxChecksPerState": 3,
+            "maxStateAge": "P30D"
+          },
+          "failureAction": "withholdBundle"
+        }
+      },
+      "expose": {
+        "exposeId": "plan_moment",
+        "columns": [
+          "channel",
+          "plan"
+        ]
+      },
+      "committedSlice": [
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "plus"
+        },
+        {
+          "channel": "store",
+          "plan": "plus"
+        },
+        {
+          "channel": "web",
+          "plan": "basic"
+        },
+        {
+          "channel": "web",
+          "plan": "plus"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        }
+      ],
+      "blindingHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "committedAt": "2026-09-01T00:00:00.000Z",
+      "stateOrdinal": 1,
+      "expect": {
+        "H": "sha256:8ccf22fe3c03d1bd15f7336d6b5dc2c4b2c7a4b8e288000ec0fe09d3eb1fe86e",
+        "G": "sha256:107a29066f3aa8ccc25bd334e7e849225039cacbbc8f4a5a3d9d1dcf3ac44f41",
+        "plan": {
+          "exposeId": "plan_moment",
+          "H": "sha256:8ccf22fe3c03d1bd15f7336d6b5dc2c4b2c7a4b8e288000ec0fe09d3eb1fe86e",
+          "G": "sha256:107a29066f3aa8ccc25bd334e7e849225039cacbbc8f4a5a3d9d1dcf3ac44f41",
+          "encoding": {
+            "fractionalBits": 4,
+            "rounding": "floor"
+          },
+          "fieldCapacityBits": 253,
+          "properties": [
+            {
+              "propertyId": "000:levelHistogram:plan@channel",
+              "property": "levelHistogram",
+              "columns": [
+                "plan"
+              ],
+              "groupBy": "channel",
+              "epsilon": "0",
+              "margin": "0.25",
+              "maxNonMembers": null,
+              "magnitudeBits": {
+                "totalVariationComparison": 16
+              }
+            },
+            {
+              "propertyId": "001:levelHistogram:channel",
+              "property": "levelHistogram",
+              "columns": [
+                "channel"
+              ],
+              "epsilon": "0",
+              "margin": "0.125",
+              "maxNonMembers": null,
+              "magnitudeBits": {
+                "totalVariationComparison": 17
+              }
+            }
+          ]
+        },
+        "statistic": {
+          "exposeId": "plan_moment",
+          "recordCount": 16,
+          "properties": [
+            {
+              "propertyId": "000:levelHistogram:plan@channel",
+              "property": "levelHistogram",
+              "n": 16,
+              "groups": [
+                {
+                  "group": "store",
+                  "k": 8,
+                  "levelCounts": [
+                    6,
+                    2,
+                    0
+                  ]
+                },
+                {
+                  "group": "web",
+                  "k": 8,
+                  "levelCounts": [
+                    1,
+                    1,
+                    6
+                  ]
+                }
+              ]
+            },
+            {
+              "propertyId": "001:levelHistogram:channel",
+              "property": "levelHistogram",
+              "n": 16,
+              "groups": [
+                {
+                  "group": "",
+                  "k": 16,
+                  "levelCounts": [
+                    8,
+                    8
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "C2": "sha256:8da37edad97f016e050d32f97e399d3af4c52d71bbaa6acac456d1edd0150f53"
+      },
+      "evaluations": [
+        {
+          "id": "identical",
+          "note": "the synthetic dataset is the committed record set; both properties are within",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "on-the-margin",
+          "note": "two store records move from basic to plus: the store's total variation is exactly the margin 1/4, and the margin is inclusive, so the grouped property is within",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "one-record-past-the-margin",
+          "note": "one more store record moves from basic to plus: the store's total variation is 3/8, past the margin, so the grouped property is outside; the channel counts are unchanged",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "outside",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "link-lost",
+          "note": "both channels draw the same plan counts and the channel counts are as committed: each column looks right and the link between them is gone, so only the grouped property is outside",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "pro"
+            },
+            {
+              "channel": "store",
+              "plan": "pro"
+            },
+            {
+              "channel": "store",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "outside",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "channel-mix-drifted",
+          "note": "the store holds twice the committed records with the committed plan shares: every group's plan counts are within, and the channel counts are outside the margin 1/8",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "outside"
+            }
+          }
+        },
+        {
+          "id": "zero-cell-drawn",
+          "note": "one store record takes the declared level pro, which the committed store never holds: a declared level is a cell with a count of zero, not an undeclared level, so both properties are within",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "null-plan-excluded",
+          "note": "two store records carry a null plan under null: exclude: they leave the grouped property and stay in the channel counts, and both properties are within",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "store",
+              "plan": null
+            },
+            {
+              "channel": "store",
+              "plan": null
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "undeclared-level",
+          "note": "one store record carries the plan gold, which is not a declared level: the grouped property is refused, FLX-5005, and the channel property is still answered",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "store",
+              "plan": "gold"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": true,
+            "refusalCodes": [
+              "FLX-5005"
+            ],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "outside",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "group-not-held",
+          "note": "the synthetic dataset holds only the web channel: the two sides group into different sets and the grouped property is refused, FLX-5005",
+          "syntheticRows": [
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": true,
+            "refusalCodes": [
+              "FLX-5005"
+            ],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "outside",
+              "001:levelHistogram:channel": "outside"
+            }
+          }
+        }
+      ]
+    }
+  }
 }
