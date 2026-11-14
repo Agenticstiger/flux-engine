@@ -74,6 +74,19 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   is named by its ordinal and never by its key. Before, a property outside its
   margin left only `"status": "failed"`. The list is empty on a check that
   passed.
+- The published fidelity vectors, `tests/vectors/fidelity-vectors.json`, are
+  `vectorsVersion` 2. `kinds.levelHistogram` is a block of its own, with a
+  contract, a committed slice, the digests, plan fragment, counts and
+  commitment they pin, and nine evaluation cases for the ungrouped and the
+  grouped property: a total variation exactly on the margin and one record
+  past it, a link lost with the channel counts intact, a declared level a group
+  never holds, a null level under `null: exclude`, and the two refusals. Every
+  version 1 key is what it was, and a test pins it by digest. A kind is a
+  block of its own because a property added to version 1's block would move
+  every digest that block pins. The coverage test now asks that the published
+  blocks together name every property kind, and the exception that pinned
+  `levelHistogram` outside the file is gone.
+
 ### Changed
 
 - A FLUID `INTEGER` column of a scenario-driven emit takes a drawn count, such
