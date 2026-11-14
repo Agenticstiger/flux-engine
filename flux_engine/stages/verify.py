@@ -704,10 +704,14 @@ def _run_fidelity_check(layout: RunLayout, expose_id: str, slice_uri: str) -> Di
     evaluation = ClearStatistic(
         compiled=compiled, committed=state, synthetic_rows=synthetic_rows
     ).evaluate()
+    refused = {refusal.property_id for refusal in evaluation.refusals}
     return {
         "status": "passed" if evaluation.within else "failed",
         "refusals": [refusal.to_document() for refusal in evaluation.refusals],
-        "outside": [_outside_document(outcome) for outcome in evaluation.outside],
+        "outside": [
+            _outside_document(outcome, refused=outcome.property_id in refused)
+            for outcome in evaluation.outside
+        ],
     }
 
 
@@ -716,21 +720,23 @@ def _failed_before_comparing(detail: str) -> Dict[str, Any]:
     return {"status": "failed", "refusals": [], "outside": [], "detail": detail}
 
 
-def _outside_document(outcome: "PropertyOutcome") -> Dict[str, Any]:
+def _outside_document(outcome: "PropertyOutcome", *, refused: bool) -> Dict[str, Any]:
     """One property that is not within its margin, as ``--json`` and the failed line name it.
 
     Fields, never values (ADR 0003, KERNEL-SPEC section 9): the property's id,
     kind and columns, the column a grouped property groups by, and the groups
     that landed outside by ORDINAL in the NFC-sorted group order. That is the
     ``group #N`` an ``FLX-5005`` refusal already says, for the same reason: a
-    group's key is a value read out of the committed slice. A refused property
-    is listed too, as §6's record row has it (``outside``), with no group
-    compared, and its ``refusals`` entry says why.
+    group's key is a value read out of the committed slice. A property the
+    check refused is listed too, because §6's record row calls it ``outside``;
+    ``refused`` says the check declined to answer for it, as a whole or for
+    one group, and its ``refusals`` entry says why.
     """
     document: Dict[str, Any] = {
         "propertyId": outcome.property_id,
         "property": outcome.kind.value,
         "columns": list(outcome.columns),
+        "refused": refused,
     }
     if outcome.group_by is not None:
         document["groupBy"] = outcome.group_by
@@ -756,12 +762,15 @@ def _failure_lines(outcome: Mapping[str, Any]) -> List[str]:
         if "groupBy" in entry:
             subject += f", grouped by {entry['groupBy']}"
             ordinals = entry["groupOrdinals"]
-            if ordinals:
+            if ordinals and not entry["refused"]:
                 noun = "groups" if len(ordinals) > 1 else "group"
                 where = f" in {noun} " + ", ".join(f"#{ordinal}" for ordinal in ordinals)
-        lines.append(
-            f"property {entry['propertyId']} ({subject}): outside the declared margin{where}"
+        verdict = (
+            "refused, not within the declared margin"
+            if entry["refused"]
+            else "outside the declared margin"
         )
+        lines.append(f"property {entry['propertyId']} ({subject}): {verdict}{where}")
     for refusal in outcome.get("refusals", ()):
         names = f" on property {refusal['propertyId']}" if refusal.get("propertyId") else ""
         lines.append(f"refusal {refusal['code']}{names}: {refusal['reason']}")

@@ -133,7 +133,12 @@ def test_an_ungrouped_property_outside_its_margin_is_named(
     assert outcome["status"] == "failed"
     assert outcome["refusals"] == []
     assert outcome["outside"] == [
-        {"propertyId": "000:mean:amount", "property": "mean", "columns": ["amount"]}
+        {
+            "propertyId": "000:mean:amount",
+            "property": "mean",
+            "columns": ["amount"],
+            "refused": False,
+        }
     ]
     assert error["message"] == stderr.rstrip("\n")
 
@@ -168,6 +173,7 @@ def test_a_grouped_property_names_its_column_and_the_failing_group_by_ordinal(
             "columns": ["amount"],
             "groupBy": "market",
             "groupOrdinals": [1],
+            "refused": False,
         }
     ]
 
@@ -178,6 +184,35 @@ def test_a_grouped_property_names_its_column_and_the_failing_group_by_ordinal(
     for text in named:
         for value in (*markets, FAR, str(rows[0]["amount"])):
             assert value not in text, (value, text)
+
+
+def test_a_refused_property_is_named_as_refused_with_its_refusal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A slice that lacks a group the run holds: nothing is compared, and the line says so."""
+    applied = _applied(tmp_path, [GROUPED_MEAN])
+    rows: Rows = applied["rows"]
+    left_out = sorted({row["market"] for row in rows})[0]
+    slice_rows = [row for row in rows if row["market"] != left_out]
+
+    exit_code, _, stderr = _verify(applied, slice_rows, tmp_path, capsys)
+
+    lines = stderr.splitlines()
+    assert exit_code == 1
+    assert lines[:2] == [
+        f"{EXPOSE_ID}: fidelity check failed",
+        "  property 000:mean:amount@market (mean of amount, grouped by market): "
+        "refused, not within the declared margin",
+    ]
+    assert lines[2].startswith("  refusal FLX-5005 on property 000:mean:amount@market: ")
+    assert left_out not in stderr
+
+    _, stdout, _ = _verify(applied, slice_rows, tmp_path, capsys, "--json")
+    outcome, _ = _fidelity_json(stdout)
+    assert [entry["refused"] for entry in outcome["outside"]] == [True]
+    assert [entry["propertyId"] for entry in outcome["outside"]] == [
+        refusal["propertyId"] for refusal in outcome["refusals"]
+    ]
 
 
 def test_the_update_golden_refusal_names_the_property_too(
@@ -218,24 +253,31 @@ def test_a_check_that_passes_names_no_property(
 
 
 def test_every_property_outside_is_named_with_every_group_that_failed() -> None:
-    """Both kinds on one leg, a refusal after the properties, and a plural for groups."""
+    """Compared and refused properties on one leg, refusals after them, and a plural for groups."""
     outcome: Dict[str, Any] = {
         "status": "failed",
         "outside": [
-            {"propertyId": "001:mean:amount", "property": "mean", "columns": ["amount"]},
+            {
+                "propertyId": "001:mean:amount",
+                "property": "mean",
+                "columns": ["amount"],
+                "refused": False,
+            },
             {
                 "propertyId": "002:mean:amount@market",
                 "property": "mean",
                 "columns": ["amount"],
                 "groupBy": "market",
                 "groupOrdinals": [0, 2],
+                "refused": False,
             },
             {
                 "propertyId": "003:correlation:amount+attempts@market",
                 "property": "correlation",
                 "columns": ["amount", "attempts"],
                 "groupBy": "market",
-                "groupOrdinals": [],
+                "groupOrdinals": [1],
+                "refused": True,
             },
         ],
         "refusals": [
@@ -252,7 +294,8 @@ def test_every_property_outside_is_named_with_every_group_that_failed() -> None:
         "property 002:mean:amount@market (mean of amount, grouped by market): "
         "outside the declared margin in groups #0, #2",
         "property 003:correlation:amount+attempts@market "
-        "(correlation of amount, attempts, grouped by market): outside the declared margin",
+        "(correlation of amount, attempts, grouped by market): "
+        "refused, not within the declared margin",
         "refusal FLX-5005 on property 003:correlation:amount+attempts@market: "
         "column 'amount' row 3: value outside the declared range",
         "refusal FLX-5011: the committed state was formed under others",

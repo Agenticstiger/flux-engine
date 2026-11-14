@@ -66,14 +66,14 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   drawn given a categorical by a grouped `levelHistogram`.
 - `fluxsim verify --json` names each declared property of a fidelity check that
   did not land within its margin, under `artifacts.fidelity.<exposeId>.outside`:
-  `propertyId`, `property` and `columns`, and for a grouped property `groupBy`
-  and `groupOrdinals`, the zero-based ordinals of the groups that landed
-  outside, in the sorted group order that the `group #N` of an `FLX-5005`
-  refusal uses. A property the check refused is listed too, as the fidelity
-  record's `outside` row lists it, and its `refusals` entry says why. A group
-  is named by its ordinal and never by its key. Before, a property outside its
-  margin left only `"status": "failed"`. The list is empty on a check that
-  passed.
+  `propertyId`, `property`, `columns` and `refused`, and for a grouped
+  property `groupBy` and `groupOrdinals`, the zero-based ordinals of the groups
+  that landed outside, in the sorted group order that the `group #N` of an
+  `FLX-5005` refusal uses. A property the check refused is listed too, as the
+  fidelity record's `outside` row lists it, with `refused` true, and its
+  `refusals` entry says why. A group is named by its ordinal and never by its
+  key. Before, a property outside its margin left only `"status": "failed"`.
+  The list is there whenever the check ran, and empty when it passed.
 - The published fidelity vectors, `tests/vectors/fidelity-vectors.json`, are
   `vectorsVersion` 2. `kinds.levelHistogram` is a block of its own, with a
   contract, a committed slice, the digests, plan fragment, counts and
@@ -81,11 +81,11 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   grouped property: a total variation exactly on the margin and one record
   past it, a link lost with the channel counts intact, a declared level a group
   never holds, a null level under `null: exclude`, and the two refusals. Every
-  version 1 key is what it was, and a test pins it by digest. A kind is a
-  block of its own because a property added to version 1's block would move
-  every digest that block pins. The coverage test now asks that the published
-  blocks together name every property kind, and the exception that pinned
-  `levelHistogram` outside the file is gone.
+  version 1 key but `vectorsVersion` itself is what it was, and a test pins
+  them by digest. A kind is a block of its own because a property added to
+  version 1's block would move every digest that block pins. The coverage test
+  now asks that the published blocks together name every property kind, and the
+  exception that pinned `levelHistogram` outside the file is gone.
 
 ### Changed
 
@@ -105,8 +105,8 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   `null`.
 - The failed fidelity leg of `fluxsim verify` names the property. It printed the
   expose id and nothing else, on stdout and on stderr. It now prints one line
-  per property that did not land within its margin, worded as `ship` words
-  it, such as `property 003:mean:amount@market (mean of amount, grouped by
+  per property that did not land within its margin, worded after `ship`'s
+  lines, such as `property 003:mean:amount@market (mean of amount, grouped by
   market): outside the declared margin in group #1`, under the leg line and on
   stderr after `<exposeId>: fidelity check failed`, then one line per refusal
   with its code and reason. A line names fields, codes and group ordinals,
