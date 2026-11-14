@@ -22,7 +22,7 @@ CONTRACT_DIGEST: DigestRef = digest_of_document({"id": "test.sim.widget"}, subje
 
 
 def pyarrow_or_skip() -> ModuleType:
-    """pyarrow, or a skip of the calling module where this NumPy is too old for it.
+    """pyarrow, or a skip of the calling module or test where this NumPy is too old for it.
 
     pyarrow 26 raises ``ImportError`` at import on NumPy 1.x, and its wheel does
     not declare the requirement, so pip installs the pair without a word. The
