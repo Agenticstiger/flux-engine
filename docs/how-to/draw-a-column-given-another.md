@@ -240,7 +240,7 @@ FLX-8001: withheld payment_recovery_moment
 more: fluxsim explain FLX-8001  https://agenticstiger.github.io/flux/engine/reference/errors/FLX-8001.html
 ```
 
-7. `fluxsim verify` runs the same check without writing a pack, and it names the property that failed: its id, its statistic and columns, the column it groups by, and the groups outside the margin. A group is counted by its place in the sorted groups, and never named by its market, because the market is a value from your slice.
+7. `fluxsim verify` runs the same check without writing a pack, and it names the property that failed: its id, its statistic and columns, the column it groups by, and the groups outside the margin. The number before the first colon in the id is the property's place in your `properties` list, counted from zero. A group is named by its place in the sorted groups, counted from zero, and never by its market, because the market is a value from your slice.
 
 ```console
 $ fluxsim verify . --run-id $(ls -t .flux/runs | head -1) --committed-slice payment_recovery_moment=file://$(dirname "$PWD")/slice.ndjson   # exit 1
