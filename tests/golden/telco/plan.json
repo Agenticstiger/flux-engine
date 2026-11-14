@@ -4,6 +4,44 @@
       "G": "sha256:eee5c8c8c595a15e70d72360de2f422c4490594c1de4e1aade2e9ccbaed65cfb",
       "H": "sha256:72262c0093d040736a15cbda45e7c618578090be51f84a004ead8307ef181a39",
       "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:eee5c8c8c595a15e70d72360de2f422c4490594c1de4e1aade2e9ccbaed65cfb",
+        "H": "sha256:72262c0093d040736a15cbda45e7c618578090be51f84a004ead8307ef181a39",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "payment_recovery_moment",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "amount"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 79,
+              "sum": 46,
+              "value": 30
+            },
+            "margin": "49.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:amount"
+          },
+          {
+            "columns": [
+              "market"
+            ],
+            "epsilon": "0",
+            "magnitudeBits": {},
+            "margin": null,
+            "maxNonMembers": 0,
+            "property": "support",
+            "propertyId": "001:support:market"
+          }
+        ]
+      },
       "generator": {
         "columns": [
           "subscriber_id",
