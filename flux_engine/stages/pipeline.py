@@ -32,7 +32,14 @@ from dataclasses import dataclass
 from decimal import localcontext
 from typing import Any, Dict, FrozenSet, Iterator, List, Mapping, Optional, Sequence, Tuple
 
-from flux_engine.core.canonical import nfc
+from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity
+from flux_engine.concordance.predicate import (
+    DeclaredExpose,
+    FidelityBlock,
+    expose_from_contract,
+    parse_fidelity_block,
+)
+from flux_engine.core.canonical import canonicalise, nfc
 from flux_engine.core.clock import Phase, Scheduler, VirtualClock
 from flux_engine.core.digest import DigestedDocument, build_input_digest
 from flux_engine.core.errors import FluxError
@@ -111,8 +118,10 @@ __all__ = [
     "TRACE_VERSION",
     "EmitOutcome",
     "PipelineResult",
+    "compile_declared_fidelity",
     "execute",
     "input_digest_of",
+    "parse_declared_fidelity",
     "require_supported_fidelity",
 ]
 
@@ -274,6 +283,57 @@ def require_supported_fidelity(fidelity: str) -> None:
         )
 
 
+def _declared_contract(resolved: ResolvedEmit) -> Tuple[Any, DeclaredExpose]:
+    """The contract and the expose ``verify`` reads for *resolved*'s fidelity block.
+
+    ``apply`` records the contract canonicalised, in
+    ``fidelity-input-<exposeId>.json``, and ``verify`` takes the expose from
+    that record; this takes both the same way.
+    """
+    contract = canonicalise(resolved.contract_document)
+    return contract, expose_from_contract(contract, resolved.expose_id)
+
+
+def parse_declared_fidelity(resolved: ResolvedEmit) -> Optional[FidelityBlock]:
+    """Parse *resolved*'s fidelity block as ``verify`` does; ``None`` when it declares none.
+
+    SEAM-FIDELITY-SPEC §2 puts the block's rules on ``fluxsim validate``,
+    offline. They are :func:`~flux_engine.concordance.predicate.parse_fidelity_block`'s,
+    the one parser ``verify`` and ``ship`` compile with, and it is given the
+    block in the canonical form ``apply`` records for them: a YAML ``null:``
+    key is the string ``"null"`` there, and a decimal is its string
+    spelling. So a malformed property is refused before any run exists, with
+    the code and the message ``verify`` gives it. Nothing here forms a
+    statistic.
+    """
+    if resolved.fidelity is None:
+        return None
+    _, expose = _declared_contract(resolved)
+    return parse_fidelity_block(canonicalise(resolved.fidelity), expose=expose)
+
+
+def compile_declared_fidelity(resolved: ResolvedEmit) -> Optional[CompiledFidelity]:
+    """Compile *resolved*'s fidelity block as ``verify`` does; ``None`` when it declares none.
+
+    SEAM-FIDELITY-SPEC §3 computes every property's ``ε`` at plan time and
+    refuses one that is not smaller than its tolerance (``FLX-5002``), and
+    KERNEL-SPEC §12 bounds the intermediates at compile time (``FLX-5001``).
+    Both belong to :func:`~flux_engine.concordance.compiler.compile_fidelity`,
+    called here with what ``verify`` and ``ship`` call it with, and it parses
+    the block with the parser :func:`parse_declared_fidelity` uses. It reads
+    declarations only: no committed slice, no statistic.
+    """
+    if resolved.fidelity is None:
+        return None
+    contract, expose = _declared_contract(resolved)
+    return compile_fidelity(
+        contract=contract,
+        emit=canonicalise(resolved.emit),
+        expose=expose,
+        extension=canonicalise(dict(resolved.extension or {})),
+    )
+
+
 @contextmanager
 def _memos_for_one_run() -> Iterator[None]:
     """Clear the draws' memos when the run inside ends, however it ends."""
@@ -352,6 +412,11 @@ def execute(
         )
 
         resolved_emits = resolve_all_emits(loaded, simulation_id=cast.simulation_id)
+        # SEAM-FIDELITY-SPEC §3: a declared block is compiled at plan time,
+        # before the population exists, so a block `verify` would refuse is
+        # refused here, with its code and message.
+        for resolved in resolved_emits:
+            compile_declared_fidelity(resolved)
         per_emit_digests = tuple(
             seam_digests(
                 resolved.contract_document,

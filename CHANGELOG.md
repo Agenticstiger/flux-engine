@@ -22,7 +22,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 ## Unreleased
 
 A FLUID `INTEGER` column takes a drawn count, a fidelity column can be drawn
-given another, and the fidelity check counts two categorical columns together.
+given another, the fidelity check counts two categorical columns together, and
+`validate` and `plan` check a fidelity block before any run exists.
 No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
 `KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep their values.
 
@@ -75,6 +76,11 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   row with `FLX-3003`, or passed when it had no rows. The renderer still
   refuses a `Decimal` in an `INT` column from every other caller. KERNEL-SPEC
   §9 states the rule.
+- `fluxsim validate --json` names the code of a refusal found in one
+  Simulation, such as `FLX-4103` for `fidelity: stochastic`, as it already did
+  for a refusal of the whole bundle, and the text output points to the code's
+  page. It reported `null` before. Problems with different codes still report
+  `null`.
 
 ### Fixed
 
@@ -104,6 +110,22 @@ No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
   is outside the column's domain, and when it is the NFC-last level it takes
   any positive rounding residue, so a row can still draw it. A `BOOL` level
   other than `true` or `false` follows the same rule and keeps its message.
+- `fluxsim validate` checks a fidelity block's properties, as
+  SEAM-FIDELITY-SPEC §2 says it does. It read only the block's columns, so a
+  malformed property of any kind, such as a `levelHistogram` that carries
+  `bins` or a `marginalHistogram` over a `support` column, passed it and was
+  refused only by `verify` or `ship`, once a run and a committed slice
+  existed. It now runs the parser `verify` uses, offline, and refuses the
+  property with the code and the message `verify` gives (`FLX-5030`,
+  `FLX-5032`, `FLX-5033` or `FLX-5034`), under the Simulation's id.
+- `fluxsim plan` compiles every declared fidelity block before the population
+  exists, as SEAM-FIDELITY-SPEC §3 says it does. A malformed property is
+  refused there too, with the code and the message `verify` gives; so is a
+  tolerance no larger than its encoding error (`FLX-5002`) and a comparison
+  wider than its field (`FLX-5001`). `apply` and `run` plan the same way.
+  Before, `plan` passed all of these, and the run wrote rows that no check
+  could accept. A bundle that planned before plans to the same `plan.json`,
+  digests and rows.
 
 ## 0.4.0 - 2026-11-12
 
