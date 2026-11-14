@@ -51,10 +51,10 @@ NOT_TESTED: Tuple[str, ...] = (
     "each column independently, and Section 1 measures the resulting shortfall in "
     "ContingencySimilarity and CorrelationSimilarity. With `given`, it draws only "
     "the links a plan declares, and two numeric columns are never linked directly, "
-    "because a histogram column is a leaf. A link between two categorical columns "
-    "comes from the owner's own cross-tab, and S has no two-way count property for "
-    "two categorical columns yet, so the fidelity check does not test that link. "
-    "Nothing here claims joint fidelity beyond the declared links.",
+    "because a histogram column is a leaf. The fidelity check tests each declared "
+    "link through a grouped property: a grouped `marginalHistogram` for a histogram "
+    "drawn given a categorical, a grouped `levelHistogram` for a categorical drawn "
+    "given a categorical. Nothing here claims joint fidelity beyond the declared links.",
     "**Privacy and re-identification resistance.** S is aggregate by "
     "construction. Its privacy properties are outside this program.",
     "**The agentic tier and the stochastic sweep executor.** Neither is built; "

@@ -8,9 +8,9 @@ A synthetic committed record set (NumPy, stated parameters, never real data)
 is drawn from a chain: channel, then market given channel, then amount given
 market. Its two-way count tables, (channel, market), (market, amount bin)
 and (channel, amount bin), are the aggregates the generator is declared
-from. They stand in for two-way properties of S: S's grouped histograms
-already give the numeric tables, and a categorical-by-categorical count
-property is the spec work that would give the first one.
+from. S holds each of them: a grouped ``levelHistogram`` gives the first and
+grouped histograms the numeric ones. This test counts them from the records
+directly; ``test_level_pair_draws.py`` reads the categorical one from S.
 
 Three generators are compared on the same rows and seeds:
 
@@ -37,7 +37,6 @@ from __future__ import annotations
 import math
 from bisect import bisect_right
 from decimal import Decimal
-from fractions import Fraction
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
@@ -48,6 +47,7 @@ from flux_engine.core.seedtree import derive_root, digest_bytes
 from flux_engine.generator.rows import build_plan, generate_rows
 from tests.accuracy.harness.record import ResultLog
 from tests.accuracy.harness.tier import Tier
+from tests.concordance.conftest import total_variation
 from tests.generator.conftest import expose_from_schema
 
 FAMILY = "fidelity-s"
@@ -126,16 +126,7 @@ def _pair_tables(rows: Sequence[Row]) -> List[PairTable]:
 
 
 def _tv(committed: Mapping[Any, int], synthetic: Mapping[Any, int]) -> float:
-    k_c, k_s = sum(committed.values()), sum(synthetic.values())
-    keys = set(committed) | set(synthetic)
-    distance = sum(
-        (
-            abs(Fraction(synthetic.get(key, 0), k_s) - Fraction(committed.get(key, 0), k_c))
-            for key in keys
-        ),
-        Fraction(0),
-    )
-    return float(distance / 2)
+    return float(total_variation(committed, synthetic))
 
 
 def _expected(committed: Mapping[Any, int], *inverse_sizes: float) -> float:

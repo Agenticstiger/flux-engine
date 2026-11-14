@@ -12,7 +12,11 @@ synthesizer (R. McKenna, G. Miklau and D. Sheldon, "Winning the NIST
 Contest: A scalable and general approach to differentially private
 synthetic data", 2021, arXiv 2108.04978), but without privacy noise: this
 module is offline and reads aggregate pairwise count tables only
-(:class:`PairTable`), never records.
+(:class:`PairTable`), never records. A committed S holds those tables:
+a grouped ``levelHistogram``'s (group, level) counts for two categorical
+columns (:func:`pair_table_from_level_groups`), and a grouped
+``marginalHistogram``'s (group, bin) counts for a categorical and a
+numeric one (:func:`pair_table_from_groups`).
 
 Everything numeric is computed with :mod:`decimal` under one explicit
 local context, never the ambient one and never a float, so a result is
@@ -37,6 +41,7 @@ __all__ = [
     "declarations",
     "mutual_information",
     "pair_table_from_groups",
+    "pair_table_from_level_groups",
     "suggest_tree",
 ]
 
@@ -138,6 +143,56 @@ def pair_table_from_groups(
     if not counts:
         raise _refuse("no groups given")
     return PairTable((group_column, numeric_column), counts)
+
+
+def pair_table_from_level_groups(
+    group_column: str, column: str, levels: Iterable[str], groups: Iterable[Any]
+) -> PairTable:
+    """Build a two-categorical table from a grouped level histogram's groups (duck-typed).
+
+    The categorical twin of :func:`pair_table_from_groups`, for the groups of
+    a ``levelHistogram`` over *column* grouped by *group_column*. Each element
+    of *groups* has ``.group`` (a str level of *group_column*) and
+    ``.level_counts`` (one int per level of *column*). *levels* are the
+    column's declared support levels, in any order: S counts them in one order,
+    NFC-normalised and sorted, and they are sorted the same way here to name
+    the counts. Counts are keyed ``(group, level)``, and a level no group holds
+    is kept as a cell of zero.
+    """
+    names: List[str] = []
+    for declared in levels:
+        if not isinstance(declared, str):
+            raise _refuse(f"column {column!r}: level {declared!r} is not a string")
+        names.append(nfc(declared))
+    if not names:
+        raise _refuse(f"column {column!r} declares no level")
+    if len(set(names)) != len(names):
+        raise _refuse(f"column {column!r}: two declared levels normalise onto one")
+    ordered = sorted(names)
+    counts: Dict[Tuple[str, str], int] = {}
+    seen: Set[str] = set()
+    for item in groups:
+        group = getattr(item, "group", None)
+        level_counts = getattr(item, "level_counts", None)
+        if not isinstance(group, str):
+            raise _refuse("a group needs a string .group level")
+        if level_counts is None:
+            raise _refuse(f"group {group!r} has no .level_counts")
+        row = list(level_counts)
+        if len(row) != len(ordered):
+            raise _refuse(
+                f"group {group!r} has {len(row)} level counts, and {column!r} declares "
+                f"{len(ordered)} levels"
+            )
+        group = nfc(group)
+        if group in seen:
+            raise _refuse(f"group {group!r} appears twice")
+        seen.add(group)
+        for name, count in zip(ordered, row, strict=True):
+            counts[(group, name)] = count
+    if not counts:
+        raise _refuse("no groups given")
+    return PairTable((group_column, column), counts)
 
 
 def mutual_information(table: PairTable) -> Decimal:

@@ -16,14 +16,21 @@ from __future__ import annotations
 
 import copy
 import json
+from fractions import Fraction
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Dict, Iterator, List, Mapping, Tuple
 
 import pytest
 
 from flux_engine.concordance.boundary.slice import CommittedState, SliceReference, commit_state
 from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity
-from flux_engine.concordance.predicate import DeclaredExpose, FidelityBlock, parse_fidelity_block
+from flux_engine.concordance.predicate import (
+    DeclaredExpose,
+    FidelityBlock,
+    PropertyKind,
+    parse_fidelity_block,
+)
 from flux_engine.concordance.record import Ed25519Signer
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +50,16 @@ TEST_PRIVATE_KEY = bytes(range(32, 64))
 
 _DOCUMENT: Dict[str, Any] = json.loads(VECTORS_PATH.read_text(encoding="utf-8"))
 
+#: Property kinds added after the published vectors file (``vectorsVersion``
+#: 1), each with the module that pins it instead. The file is a pinning
+#: artefact, and a new kind added to its one block would move every digest
+#: it pins. The coverage tests over the file accept exactly these kinds as
+#: absent from it, and only while the named module exists, so a kind can be
+#: neither dropped from the file nor added to the engine without a pin.
+PINNED_OUTSIDE_THE_VECTORS: Mapping[PropertyKind, str] = MappingProxyType(
+    {PropertyKind.LEVEL_HISTOGRAM: "tests/concordance/test_level_histogram.py"}
+)
+
 
 def telco_example_dir() -> Path | None:
     """Return the shipped telco bundle directory, or ``None`` if absent."""
@@ -50,6 +67,21 @@ def telco_example_dir() -> Path | None:
         if (candidate / "payment-recovery.fluid.yml").is_file():
             return candidate
     return None
+
+
+def total_variation(a: Mapping[Any, int], b: Mapping[Any, int]) -> Fraction:
+    """Total variation between two count tables, in exact rationals.
+
+    The definition a total-variation verdict is held to: half the summed
+    absolute difference of the two sides' shares, over every cell either
+    side names. A cell one side lacks counts as zero there.
+    """
+    k_a, k_b = sum(a.values()), sum(b.values())
+    cells = set(a) | set(b)
+    return Fraction(1, 2) * sum(
+        (abs(Fraction(a.get(cell, 0), k_a) - Fraction(b.get(cell, 0), k_b)) for cell in cells),
+        Fraction(0),
+    )
 
 
 def vectors_document() -> Dict[str, Any]:

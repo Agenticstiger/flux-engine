@@ -91,7 +91,8 @@ spec:
 ```
 Rules enforced by `fluxsim validate` (offline): every `column` and `groupBy` is a member of the referenced expose
 schema; every key of `extensions[...].emits` is an `exposeId` the Simulation actually emits; bins are strictly
-increasing and partition the declared range; a `correlation` property declares two columns and a `minVariance`;
+increasing and partition the declared range; a `levelHistogram` names a `support` column and carries no `bins`;
+a `correlation` property declares two columns and a `minVariance`;
 every property's parameters are present (a contract missing any of them is refused before any statistic is
 formed). Numbers are strings (exact decimals), never floats.
 
@@ -108,6 +109,15 @@ carries (`validationRules[].constraint` is free text with no grammar). A column 
 type naming no levels is refused (`FLX-5034`) rather than resolved to an empty support, because an empty support
 makes every value a non-member and fails the check for the wrong reason. A bare list is refused: two spellings of
 one declaration would be two digests of one contract.
+
+**`levelHistogram` counts a categorical column.** It names a `support` column, whose declared levels, NFC-normalised
+and sorted, are its cells, as a `marginalHistogram`'s declared bins are its cells. It carries no `bins`, and its
+tolerance is a total-variation distance. With `groupBy` (a second `support` column) it is a two-way count table of
+the two columns: one count per (group, level) cell, compared group by group as a grouped `marginalHistogram` is.
+A value of either column outside its declared support has no cell, so it is refused (`FLX-5005`) rather than
+counted, as a value outside a declared range is. Every group needs `records.min` records, as every group does. A
+declared level the state never holds is a cell of count zero, so the table's shape comes from the declaration and
+never from the data.
 
 **`given` draws a column conditionally on another.** `given` names one other column of the same expose, and the
 column declaring it carries one weight table per level of that column, in place of its unconditional weights:
@@ -135,11 +145,15 @@ leaf. It reads counts and writes the `columns.<name>` entries; it never reads a 
 out a rare combination: a cell of one or two counts describes a handful of real records, so the owner applies
 their own disclosure rule, such as a minimum cell count, before declaring a table.
 
-**What the check covers of a `given` link.** A histogram drawn given a categorical is checked end to end: a
-grouped `marginalHistogram` property compares D′'s (group, bin) counts with S's. A categorical drawn given a
-categorical is not: its `levelWeightsGiven` table comes from the owner's own cross-tab, and S has no two-way
-count property for two categorical columns yet, so the check compares each column's own declarations (`support`,
-and any property on the column) but not the link between them.
+**What the check covers of a `given` link.** Both kinds of link are checked end to end, by a grouped property
+over the drawn column with `groupBy` the given column. A histogram drawn given a categorical is checked by a
+grouped `marginalHistogram` over the same bins, and a categorical drawn given a categorical by a grouped
+`levelHistogram`. Each compares D′'s (group, cell) counts with S's, group by group. They are the counts the link is
+declared from: a grouped `marginalHistogram`'s (group, bin) counts are `binWeightsGiven`'s lists, and a grouped
+`levelHistogram`'s (group, level) counts are `levelWeightsGiven`'s mappings. `flux_engine.calibrate.structure`
+reads them back as two-way tables (`pair_table_from_groups`, `pair_table_from_level_groups`), so the forest can be
+suggested and declared from a committed S. A root's own `levels` are checked by an ungrouped `levelHistogram` over
+it. A pair of columns that no declared property counts together is not checked.
 
 ## 3. Digests
 
@@ -152,7 +166,7 @@ and any property on the column) but not the link between them.
 
 - **Committed state**: the owner fixes the record set (`file://` slice in v0.1; partition/sequence boundary recorded); `stateOrdinal` increments per state.
 - **C1**: per-column Merkle root (sha256 in v0.1; the leaf function is a port so it can become circuit-friendly later) over fixed-point-encoded values padded to `records.max` with the reserved padding encoding; nulls carry the null encoding; a validity flag per position.
-- **S** (derived statistic): per property the aggregate quantities only — bucket counts on the declared edges, `Sx`, `Sy`, `Sxy`, `Sxx`, `Syy`, the sorted committed support, the quantile witness, `n`, `k` per property and per group.
+- **S** (derived statistic): per property the aggregate quantities only: bucket counts on the declared edges, level counts on the declared support, `Sx`, `Sy`, `Sxy`, `Sxx`, `Syy`, the sorted committed support, the quantile witness, `n`, `k` per property and per group.
 - **C2**: sha256 over canonical `S` plus a per-state blinding value that never leaves the boundary.
 - What leaves the boundary in v0.1: `S`, `C1`, `C2`, `stateOrdinal`, record count (or declared range), commitment time. **Never a record.** The check counter (`budget.maxChecksPerState`) lives here and refuses beyond budget (`FLX-5010`).
 
@@ -161,10 +175,11 @@ and any property on the column) but not the link between them.
 Inputs: the contract set (recomputes `H`, `G`), `S`, `C1`, `C2`, and D′ (recomputes D′'s statistics on the same grid and D′'s digest = `outputDigest`). Evaluates each property in the integer cross-multiplied form:
 - mean: `|Sx·n′ − Sx′·k| ≤ τ′·k·n′` (absolute) or the relative homogenised form;
 - total variation: `Σ_bins |n′·c − k·c′| ≤ 2·τ′·k·n′`;
+- level histogram: the same form over the declared levels, `Σ_levels |n′·c − k·c′| ≤ 2·τ′·k·n′`, with `ε = 0`;
 - correlation: `L·R ≤ A ≤ U·R` split by signs, with `Qx ≥ k²·v`, `Qy ≥ k²·v`;
 - quantile: order-statistic rule on both sides;
 - support: count of non-members ≤ `max`.
-Fail-closed conditions: `k = 0`, count outside `records`, group below `records.min`, a value outside its range, a column absent, `ε ≥ τ`. **No proof is generated in v0.1**; the `ProofSystem` port has one implementation, `none`, and the record says so.
+Fail-closed conditions: `k = 0`, count outside `records`, group below `records.min`, a value outside its range or its declared support, a column absent, `ε ≥ τ`. **No proof is generated in v0.1**; the `ProofSystem` port has one implementation, `none`, and the record says so.
 
 ## 6. The fidelity record (`concordance/record.py`) — one per verified emit, in the evidence pack
 

@@ -35,6 +35,7 @@ from flux_engine.concordance.predicate import (
 )
 from flux_engine.core.clock import parse_rfc3339_ms
 from flux_engine.core.errors import FluxError
+from tests.concordance.conftest import PINNED_OUTSIDE_THE_VECTORS
 
 pytestmark = pytest.mark.unit
 
@@ -82,7 +83,9 @@ def test_the_published_block_parses(block, document) -> None:
 
 def test_every_property_kind_the_spec_names_has_a_parsed_form(block) -> None:
     parsed = {declaration.kind for declaration in block.properties}
-    assert parsed == set(PropertyKind), "the published block must exercise every property"
+    assert parsed | set(PINNED_OUTSIDE_THE_VECTORS) == set(
+        PropertyKind
+    ), "the published block must exercise every property a later module does not pin"
 
 
 def test_columns_iterate_in_one_order_whatever_the_yaml_order_was(document, expose) -> None:
@@ -666,6 +669,7 @@ def test_the_closed_sets_have_exactly_the_members_the_spec_names() -> None:
         "support",
         "correlation",
         "quantile",
+        "levelHistogram",
     }
 
 

@@ -133,7 +133,7 @@ computes them from DataFrames. Here they are reimplemented on aggregates
 | TVComplement | `1 - 1/2 * sum(abs(c_a/k_a - c_b/k_b))` over the bins of a histogram property | Equal, with the bins as categories |
 | KSComplement | `1 - max(abs(F_a(e) - F_b(e)))` over the declared edges, from cumulative bin counts | A lower bound on the record-level KS distance: the supremum taken only at the edges |
 | CorrelationSimilarity | `1 - abs(r_a - r_b)/2`, with Pearson's r from `k`, `Sx`, `Sy`, `Sxx`, `Syy`, `Sxy` | Equal for Pearson, up to the declared grid's quantisation |
-| ContingencySimilarity | TVComplement of the (group, bin) table of a grouped histogram property | Equal, with the groups and bins as the two columns' categories |
+| ContingencySimilarity | TVComplement of the (group, bin) table of a grouped histogram property, or of the (group, level) table of a grouped level histogram | Equal, with the groups and the bins or levels as the two columns' categories |
 
 Pass criteria:
 
@@ -178,6 +178,18 @@ Pass criteria:
   the true chain. Each table on a tree edge must sit within three one-sample
   distances of the committed table, and the table off the tree and the
   three-way table within three two-sample distances.
+- **A categorical link, declared from S and checked by the gate.** A
+  committed pair draws market given channel, and S counts it with a grouped
+  `levelHistogram` (`tests/accuracy/fidelity/test_level_pair_draws.py`).
+  `pair_table_from_level_groups` reads that table back, and the tree and the
+  declarations come from it alone. The suggested tree must be the true link.
+  Drawn with `levelWeightsGiven`, the fidelity check must find every property
+  within, and ContingencySimilarity must sit within three one-sample
+  distances of 1. Drawn independently, the check must withhold on the grouped
+  property alone, and ContingencySimilarity must sit within three two-sample
+  distances of the independence cap. In both cases every group's verdict must
+  equal `TV <= margin` computed from the two S values, and the score from S
+  must equal the record-level crosstab value.
 
 ### 2. Goodness of fit, for every sampler and every declared distribution
 
@@ -269,7 +281,12 @@ Pass criteria:
   own rows ships with exit 0. The same slice with every amount raised by 200
   exits 1 with `FLX-8001` and writes no bundle. In both cases the outcome
   must match the declared rule, `|mean_synthetic - mean_committed| <= 50`,
-  evaluated on the two record sets.
+  evaluated on the two record sets. Through `python -m flux_engine.cli verify
+  --committed-slice` on a copy of that bundle whose `market` is drawn given a
+  new `channel` column with `levelWeightsGiven`, a slice holding the declared
+  (channel, market) counts passes with exit 0, and the same slice with the
+  two channels' market shares swapped fails with exit 1
+  (`tests/accuracy/fidelity/test_gate_verify_level_pair.py`).
 
 The rates near the tolerance itself, at 0.9 and 1.1 times it, are reported but
 not gated. They measure the sampling noise at the stated sizes, which is a
@@ -510,12 +527,13 @@ definitions, not code.
 - **Joint structure in generated data**: without `given`, the generator
   draws each column independently, and Family 1 measures the shortfall in
   ContingencySimilarity and CorrelationSimilarity. With `given`, Family 1
-  measures the declared links: a histogram drawn given a categorical, and a
-  three-column chain. Two numeric columns are never linked directly, because
-  a histogram column is a leaf. A link between two categorical columns comes
-  from the owner's own cross-tab, and S has no two-way count property for two
-  categorical columns yet, so the fidelity check does not test that link.
-  Nothing here claims joint fidelity beyond the declared links.
+  measures the declared links: a histogram drawn given a categorical, a
+  categorical drawn given a categorical, and a three-column chain. The
+  fidelity check tests each declared link through a grouped property: a
+  grouped `marginalHistogram` for a histogram link, a grouped
+  `levelHistogram` for a categorical one. Two numeric columns are never
+  linked directly, because a histogram column is a leaf. Nothing here claims
+  joint fidelity beyond the declared links.
 - **Real data**: every record set here is synthetic, drawn from stated
   parameters (ADR 0003). A fit to an owner's real committed state is
   measured only by that owner's own fidelity check.
