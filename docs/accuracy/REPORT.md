@@ -4,23 +4,23 @@
 
 What each family measures, and the pass criterion every number below is held to, is in [DESIGN.md](DESIGN.md). Results are measured at the stated sizes and seeds, not established in general.
 
-Latest nightly run: 2026-11-11, commit `bd36cc7dcad4`, base seed `8201423603942286921`, confirmation seed `8201423603942286922`, [nightly workflow](https://github.com/Agenticstiger/flux-engine/actions/workflows/accuracy-nightly.yml).
+Latest nightly run: 2026-11-14, commit `65befa32a245`, base seed `5373377673183447537`, confirmation seed `5373377673183447538`, [nightly workflow](https://github.com/Agenticstiger/flux-engine/actions/workflows/accuracy-nightly.yml).
 
 Verdict: **passed**.
 
 ## Summary
 
-pytest: 486 tests, 0 failed, 0 errored, 14 skipped, 0 expected failures (strict xfails).
+pytest: 505 tests, 0 failed, 0 errored, 14 skipped, 0 expected failures (strict xfails).
 
 | Family | Cases | Passed |
 |---|---|---|
-| 1. Fidelity metrics on the profile S | 9 | 9 |
+| 1. Fidelity metrics on the profile S | 13 | 13 |
 | 2. Goodness of fit: kernel samplers | 25 | 25 |
 | 2. Goodness of fit: power against a 2% shift | 4 | 4 |
 | 2. Goodness of fit: the decimal Φ and Φ⁻¹ | 3 | 3 |
 | 2. Goodness of fit: declared distributions, by kind | 94 | 94 |
-| 3. The fidelity gate's own accuracy | 9 | 9 |
-| 4. Properties and metamorphic relations | 32 | 32 |
+| 3. The fidelity gate's own accuracy | 11 | 11 |
+| 4. Properties and metamorphic relations | 40 | 40 |
 | 5. Seed-tree stream quality | 28 | 28 |
 | 6. Journey conformance | 18 | 18 |
 | 7. Determinism | 5 | 5 |
@@ -28,19 +28,23 @@ pytest: 486 tests, 0 failed, 0 errored, 14 skipped, 0 expected failures (strict 
 
 ## 1. Fidelity metrics on the profile S
 
-9 of 9 measured cases passed.
+13 of 13 measured cases passed.
 
 | Case | n | Result | Measured | Criterion |
 |---|---|---|---|---|
-| ContingencySimilarity-definition | 50,000 | pass | aggregate=0.8493, records=0.8493 | aggregate ContingencySimilarity equals the record-level crosstab value exactly |
-| CorrelationSimilarity-definition | 50,000 | pass | similarity=0.9339, worstEncodedError=3.33e-16, worstRawError=2.49e-09 | r from moments equals numpy corrcoef to 1e-12 (encoded) and 1e-6 (raw) |
-| KSComplement-definition | 50,000 | pass | aggregateDistance=0.1507, edgeDistance=0.1507, recordDistance=0.162 | aggregate KS equals the record KS at the edges; never exceeds the full record KS |
-| TVComplement-definition | 50,000 | pass | aggregate=0.8493, records=0.8493 | aggregate TVComplement equals the record-level value exactly |
-| engine-contingency-dependent | 100,000 | pass | ContingencySimilarity=0.8372, expectedDistance=0.008074, independenceCeiling=0.8392 | ContingencySimilarity within 3 x sampling distance of the independence ceiling |
-| engine-contingency-independent | 100,000 | pass | ContingencySimilarity=0.9894, expectedDistance=0.008327 | 1 - ContingencySimilarity <= 3 x expected two-sample distance |
-| engine-gate-agreement | 100,000 | pass | histogramDistance=0.00143, meanRelativeDeviation=0.1089 | the fidelity check's verdicts equal deviation <= margin computed from S |
-| engine-histogram-family-mean | 100,000 | pass | committedMean=300.5, predictedMean=332.7, relativeShiftFromCommitted=0.1089, standardError=0.5512 | synthetic mean within 4 standard errors of the within-bin uniform prediction |
-| engine-histogram-scores | 100,000 | pass | KSComplement=0.9986, TVComplement=0.9986, bound=0.006584, committedRecords=50,000 | 1 - TVComplement and 1 - KSComplement <= 3 x expected sampling distance |
+| ContingencySimilarity-definition | 50,000 | pass | aggregate=0.8477, records=0.8477 | aggregate ContingencySimilarity equals the record-level crosstab value exactly |
+| CorrelationSimilarity-definition | 50,000 | pass | similarity=0.9348, worstEncodedError=4.44e-16, worstRawError=2.09e-09 | r from moments equals numpy corrcoef to 1e-12 (encoded) and 1e-6 (raw) |
+| KSComplement-definition | 50,000 | pass | aggregateDistance=0.1523, edgeDistance=0.1523, recordDistance=0.1602 | aggregate KS equals the record KS at the edges; never exceeds the full record KS |
+| TVComplement-definition | 50,000 | pass | aggregate=0.8477, records=0.8477 | aggregate TVComplement equals the record-level value exactly |
+| engine-contingency-conditional | 100,000 | pass | ContingencySimilarity=0.9948, TVComplement=0.9975, expectedDistance=0.00465, independenceCeiling=0.8329 | amount given market: 1 - ContingencySimilarity <= 3 x expected sampling distance |
+| engine-contingency-dependent | 100,000 | pass | ContingencySimilarity=0.8323, expectedDistance=0.008054, independenceCeiling=0.8329 | ContingencySimilarity within 3 x sampling distance of the independence ceiling |
+| engine-contingency-independent | 100,000 | pass | ContingencySimilarity=0.9917, expectedDistance=0.00832 | 1 - ContingencySimilarity <= 3 x expected two-sample distance |
+| engine-gate-agreement | 100,000 | pass | histogramDistance=0.00195, meanRelativeDeviation=0.1058 | the fidelity check's verdicts equal deviation <= margin computed from S |
+| engine-histogram-family-mean | 100,000 | pass | committedMean=299.7, predictedMean=331.8, relativeShiftFromCommitted=0.1058, standardError=0.5516 | synthetic mean within 4 standard errors of the within-bin uniform prediction |
+| engine-histogram-scores | 100,000 | pass | KSComplement=0.9993, TVComplement=0.998, bound=0.006598, committedRecords=50,000 | 1 - TVComplement and 1 - KSComplement <= 3 x expected sampling distance |
+| engine-level-pair-conditional | 100,000 | pass | ContingencySimilarity=0.996, committedRecords=50,000, independenceCeiling=0.763, oneSampleDistance=0.003106 | market given channel, declared from S: the fidelity check passes and 1 - ContingencySimilarity <= 3 x one-sample distance |
+| engine-level-pair-independent | 100,000 | pass | ContingencySimilarity=0.7635, committedRecords=50,000, independenceCeiling=0.763, oneSampleDistance=0.003106 | independent draws: the fidelity check withholds on the grouped level histogram and ContingencySimilarity sits at the independence ceiling |
+| engine-tree-chain | 100,000 | pass | bound.channel-bin=0.01833, bound.channel-market=0.0093, bound.channel-market-bin=0.02925, bound.market-bin=0.01227 | tree draws: TV <= 3 x one-sample distance on tree edges, 3 x two-sample distance off them |
 
 ## 2. Goodness of fit: kernel samplers
 
@@ -48,31 +52,31 @@ pytest: 486 tests, 0 failed, 0 errored, 14 skipped, 0 expected failures (strict 
 
 | Case | n | Result | Measured | Criterion |
 |---|---|---|---|---|
-| bernoulli-0.001 | 250,000 | pass | binomial p=0.9244, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| bernoulli-0.35 | 250,000 | pass | binomial p=0.9615, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| bernoulli-0.5 | 250,000 | pass | binomial p=0.1984, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| bounded_uint-1000 | 100,000 | pass | chi2 p=0.3493, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| bounded_uint-2 | 100,000 | pass | chi2 p=0.4555, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| bounded_uint-3x2^61-residue | 100,000 | pass | chi2 p=0.9436, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| bounded_uint-7 | 100,000 | pass | chi2 p=0.5717, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| categorical-ten-with-a-rare-level | 100,000 | pass | chi2 p=0.1419, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| categorical-three | 100,000 | pass | chi2 p=0.9997, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| exponential-gap-ms | 100,000 | pass | cvm p=0.09709, ks p=0.1544, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
-| exponential-unit | 250,000 | pass | ad p=0.1401, cvm p=0.5162, ks p=0.4346, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
-| permutation-4 | 100,000 | pass | chi2 p=0.1167, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| permutation-6 | 50,000 | pass | chi2 p=0.07896, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| poisson-0.5 | 100,000 | pass | chi2 p=0.5647, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| poisson-1.5 | 100,000 | pass | chi2 p=0.4525, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| poisson-20 | 100,000 | pass | chi2 p=0.9212, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| poisson-250 | 50,000 | pass | chi2 p=0.4652, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| truncated_normal-above-mean | 50,000 | pass | cvm p=0.4244, ks p=0.3838, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
-| truncated_normal-integer | 50,000 | pass | chi2 p=0.998, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| truncated_normal-lower-tail | 50,000 | pass | cvm p=0.8619, ks p=0.7585, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
-| truncated_normal-one-digit | 50,000 | pass | chi2 p=0.6868, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
-| truncated_normal-two-sided | 50,000 | pass | cvm p=0.1296, ks p=0.2514, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
-| truncated_normal-upper-tail | 50,000 | pass | cvm p=0.3196, ks p=0.2673, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
-| truncated_normal-wide | 50,000 | pass | ad p=0.0655, cvm p=0.2072, ks p=0.1913, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
-| uniform53 | 250,000 | pass | cvm p=0.6337, ks p=0.7047, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
+| bernoulli-0.001 | 250,000 | pass | binomial p=0.6126, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| bernoulli-0.35 | 250,000 | pass | binomial p=0.6222, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| bernoulli-0.5 | 250,000 | pass | binomial p=0.9346, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| bounded_uint-1000 | 100,000 | pass | chi2 p=0.9531, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| bounded_uint-2 | 100,000 | pass | chi2 p=0.2445, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| bounded_uint-3x2^61-residue | 100,000 | pass | chi2 p=0.04202, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| bounded_uint-7 | 100,000 | pass | chi2 p=0.621, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| categorical-ten-with-a-rare-level | 100,000 | pass | chi2 p=0.5746, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| categorical-three | 100,000 | pass | chi2 p=0.2149, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| exponential-gap-ms | 100,000 | pass | cvm p=0.6925, ks p=0.4882, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
+| exponential-unit | 250,000 | pass | ad p=0.15, cvm p=0.6074, ks p=0.6367, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
+| permutation-4 | 100,000 | pass | chi2 p=0.2023, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| permutation-6 | 50,000 | pass | chi2 p=0.3634, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| poisson-0.5 | 100,000 | pass | chi2 p=0.863, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| poisson-1.5 | 100,000 | pass | chi2 p=0.745, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| poisson-20 | 100,000 | pass | chi2 p=0.5375, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| poisson-250 | 50,000 | pass | chi2 p=0.5943, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| truncated_normal-above-mean | 50,000 | pass | cvm p=0.4524, ks p=0.2742, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
+| truncated_normal-integer | 50,000 | pass | chi2 p=0.09263, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| truncated_normal-lower-tail | 50,000 | pass | cvm p=0.1741, ks p=0.1535, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
+| truncated_normal-one-digit | 50,000 | pass | chi2 p=0.641, method=bh | no statistic rejected by Benjamini-Hochberg at q=0.01 across the discrete battery |
+| truncated_normal-two-sided | 50,000 | pass | cvm p=0.3491, ks p=0.3644, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
+| truncated_normal-upper-tail | 50,000 | pass | cvm p=0.8369, ks p=0.6884, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
+| truncated_normal-wide | 50,000 | pass | ad p=0.15, cvm p=0.9119, ks p=0.5969, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
+| uniform53 | 250,000 | pass | cvm p=0.003607, ks p=0.002513, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the continuous battery |
 
 ## 2. Goodness of fit: power against a 2% shift
 
@@ -101,64 +105,64 @@ pytest: 486 tests, 0 failed, 0 errored, 14 skipped, 0 expected failures (strict 
 
 | Case | n | Result | Measured | Criterion |
 |---|---|---|---|---|
-| arrivals/burst-start | 34,959 | pass | cvm p=0.8535, ks p=0.9267, method=by, window_ms=7,948,799,000 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| arrivals/burst-start | 34,868 | pass | cvm p=0.8605, ks p=0.9224, method=by, window_ms=7,948,799,000 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
 | arrivals/emitters/engagement-0 | 20,000 | pass | emitters=7,000, expected=7,000 | the largest-remainder share is exact and the structural invariants hold |
 | arrivals/emitters/engagement-0.5-frozen | 20,000 | pass | emitters=7,000, expected=7,000 | the largest-remainder share is exact and the structural invariants hold |
-| arrivals/emitters/engagement-0.5-stochastic | 20,000 | pass | binomial p=0.5287, method=by, p=0.35 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| arrivals/emitters/engagement-1 | 100,000 | pass | binomial p=0.7883, emitters=34,959, method=by, p=0.35 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| arrivals/gaps | 52,252 | pass | cvm p=0.113, ks p=0.2497, mean_ms=3e+05, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| arrivals/occurrences | 34,959 | pass | chi2 p=0.8484, cells=9, mean=1.5, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| arrivals/structure | 34,959 | pass | emitters_whose_first_event_is_not_occurrence_0=0, occurrences_over_the_cap=0 | the largest-remainder share is exact and the structural invariants hold |
-| campaign-delivery/0.3 | 80,000 | pass | binomial p=0.6798, delivered=23,946, method=by, share=0.3 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| campaign-delivery/0.3/ledger | 80,000 | pass | delivered=23,946, suppressed=56,054 | the largest-remainder share is exact and the structural invariants hold |
-| campaign-delivery/default | 80,000 | pass | binomial p=0.8632, delivered=64,020, method=by, share=0.8 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| campaign-delivery/default/ledger | 80,000 | pass | delivered=64,020, suppressed=15,980 | the largest-remainder share is exact and the structural invariants hold |
+| arrivals/emitters/engagement-0.5-stochastic | 20,000 | pass | binomial p=0.8183, method=by, p=0.35 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| arrivals/emitters/engagement-1 | 100,000 | pass | binomial p=0.3833, emitters=34,868, method=by, p=0.35 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| arrivals/gaps | 52,471 | pass | cvm p=0.3886, ks p=0.4517, mean_ms=3e+05, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| arrivals/occurrences | 34,868 | pass | chi2 p=0.4826, cells=9, mean=1.5, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| arrivals/structure | 34,868 | pass | emitters_whose_first_event_is_not_occurrence_0=0, occurrences_over_the_cap=0 | the largest-remainder share is exact and the structural invariants hold |
+| campaign-delivery/0.3 | 80,000 | pass | binomial p=0.9018, delivered=24,016, method=by, share=0.3 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| campaign-delivery/0.3/ledger | 80,000 | pass | delivered=24,016, suppressed=55,984 | the largest-remainder share is exact and the structural invariants hold |
+| campaign-delivery/default | 80,000 | pass | binomial p=0.7909, delivered=63,970, method=by, share=0.8 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| campaign-delivery/default/ledger | 80,000 | pass | delivered=63,970, suppressed=16,030 | the largest-remainder share is exact and the structural invariants hold |
 | dial/0.5/frozen-share | 60 | pass | frozen=1,500, frozen_positives=450 | the largest-remainder share is exact and the structural invariants hold |
-| dial/0.5/stochastic-share | 90,000 | pass | binomial p=0.785, method=by, p=0.3 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| dial/0.5/stochastic-share | 90,000 | pass | binomial p=0.4111, method=by, p=0.3 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
 | dial/0/frozen-share | 60 | pass | frozen=3,000, frozen_positives=900 | the largest-remainder share is exact and the structural invariants hold |
 | dial/1/frozen-share | 60 | pass | frozen=0, frozen_positives=0 | the largest-remainder share is exact and the structural invariants hold |
-| dial/1/stochastic-share | 180,000 | pass | binomial p=0.3599, method=by, p=0.3 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| experiment/ordinal-0 | 2,000 | pass | chi2 p=0.6983, cells=3, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the experiment-assignment battery |
-| experiment/ordinal-49 | 2,000 | pass | chi2 p=0.831, cells=3, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the experiment-assignment battery |
-| experiment/ordinal-99 | 2,000 | pass | chi2 p=0.6408, cells=3, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the experiment-assignment battery |
+| dial/1/stochastic-share | 180,000 | pass | binomial p=0.8571, method=by, p=0.3 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| experiment/ordinal-0 | 2,000 | pass | chi2 p=0.6194, cells=3, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the experiment-assignment battery |
+| experiment/ordinal-49 | 2,000 | pass | chi2 p=0.7535, cells=3, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the experiment-assignment battery |
+| experiment/ordinal-99 | 2,000 | pass | chi2 p=0.9219, cells=3, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the experiment-assignment battery |
 | experiment/sizes | 4 | pass | - | the largest-remainder share is exact and the structural invariants hold |
 | experiment/sizes-every-assignment | 2,000 | pass | - | the largest-remainder share is exact and the structural invariants hold |
 | experiment/uniform | 4,000 | pass | method=by, smallest_adjusted=1 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the experiment-assignment battery |
 | generator/battery | 150,000 | pass | - | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/cat_levels | 150,000 | pass | chi2 p=0.1592, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/cat_support | 150,000 | pass | chi2 p=0.9465, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/hist_dec | 150,000 | pass | chi2-bins p=0.6445, chi2-within-bin0 p=0.3782, cvm-within-bin1 p=0.9599, cvm-within-bin2 p=0.3038 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/hist_int | 150,000 | pass | chi2-bins p=0.6364, chi2-within-bin0 p=0.4275, chi2-within-bin1 p=0.03643, chi2-within-bin2 p=0.05601 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/cat_levels | 150,000 | pass | chi2 p=0.319, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/cat_support | 150,000 | pass | chi2 p=0.4978, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/hist_dec | 150,000 | pass | chi2-bins p=0.5064, chi2-within-bin0 p=0.3755, cvm-within-bin1 p=0.1359, cvm-within-bin2 p=0.5052 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/hist_int | 150,000 | pass | chi2-bins p=0.3345, chi2-within-bin0 p=0.6786, chi2-within-bin1 p=0.7978, chi2-within-bin2 p=0.8468 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
 | generator/identifiers | 150,000 | pass | distinct=yes, repeatable=yes, seedFree=yes, seedMovesDraws=yes | identifiers are pairwise distinct, well formed, identical across runs and seeds, while a drawn column moves with the seed |
-| generator/norm_dec_declared | 150,000 | pass | chi2 p=0.9587, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/norm_dec_default | 150,000 | pass | chi2 p=0.5483, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/norm_int | 150,000 | pass | chi2 p=0.01226, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/null_cat | 119,951 | pass | binomial-null p=0.7518, chi2-nonnull p=0.1121, declared=0.2, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/null_norm | 97,391 | pass | binomial-null p=0.5552, chi2 p=0.1394, declared=0.35, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/power/cat_levels-1pt-moved | 150,000 | pass | defect=0.01 of probability moved from alpha to beta, pvalue=2.02e-10, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
-| generator/power/cat_levels-3pt-moved | 150,000 | pass | defect=0.03 of probability moved from alpha to beta, pvalue=1.22e-128, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/norm_dec_declared | 150,000 | pass | chi2 p=0.2354, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/norm_dec_default | 150,000 | pass | chi2 p=0.05796, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/norm_int | 150,000 | pass | chi2 p=0.9832, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/null_cat | 119,848 | pass | binomial-null p=0.3265, chi2-nonnull p=0.2355, declared=0.2, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/null_norm | 97,521 | pass | binomial-null p=0.9116, chi2 p=0.2673, declared=0.35, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/power/cat_levels-1pt-moved | 150,000 | pass | defect=0.01 of probability moved from alpha to beta, pvalue=1.17e-19, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/power/cat_levels-3pt-moved | 150,000 | pass | defect=0.03 of probability moved from alpha to beta, pvalue=4.52e-157, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
 | generator/power/hist_dec-bin-weights-swapped | 150,000 | pass | defect=bin weights 0.39 and 0.30 swapped, pvalue=0, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
-| generator/power/norm_dec_declared-floor-not-round | 150,000 | pass | defect=values floored to the grid instead of rounded (a half-step shift), pvalue=1.28e-23, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/power/norm_dec_declared-floor-not-round | 150,000 | pass | defect=values floored to the grid instead of rounded (a half-step shift), pvalue=2.41e-37, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
 | generator/power/norm_dec_declared-mean+2% | 150,000 | pass | defect=the declared mean 0.70 read 2% high, pvalue=0, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
-| generator/power/norm_dec_default-mean+2% | 150,000 | pass | defect=the midpoint mean 1.2 read 2% high, pvalue=3.14e-55, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
-| generator/power/norm_int-mean+2% | 150,000 | pass | defect=the declared INT mean 30 read 2% high, pvalue=9.92e-33, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
-| generator/power/null_cat-fraction-0.21 | 150,000 | pass | defect=nullFraction 0.21 where 0.20 is declared, pvalue=2.33e-20, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
-| generator/power/null_cat-fraction-0.23 | 150,000 | pass | defect=nullFraction 0.23 where 0.20 is declared, pvalue=1.88e-169, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/power/norm_dec_default-mean+2% | 150,000 | pass | defect=the midpoint mean 1.2 read 2% high, pvalue=7.36e-65, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/power/norm_int-mean+2% | 150,000 | pass | defect=the declared INT mean 30 read 2% high, pvalue=1.2e-21, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/power/null_cat-fraction-0.21 | 150,000 | pass | defect=nullFraction 0.21 where 0.20 is declared, pvalue=8.94e-18, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/power/null_cat-fraction-0.23 | 150,000 | pass | defect=nullFraction 0.23 where 0.20 is declared, pvalue=1.2e-161, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
 | generator/power/rate_dec_both-lower-clamp-mass-dropped | 150,000 | pass | defect=values below range.min not clamped onto it: the lower cell holds one cell's mass, pvalue=0, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
-| generator/power/rate_dec_both-rate+10% | 150,000 | pass | defect=the exponential rate 0.8 read 10% high, pvalue=4.74e-195, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
-| generator/power/rate_int_free-poisson-mean+2% | 150,000 | pass | defect=the Poisson mean 12 read 2% high, pvalue=1.73e-164, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/power/rate_dec_both-rate+10% | 150,000 | pass | defect=the exponential rate 0.8 read 10% high, pvalue=4.38e-168, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
+| generator/power/rate_int_free-poisson-mean+2% | 150,000 | pass | defect=the Poisson mean 12 read 2% high, pvalue=3.27e-145, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
 | generator/power/uni_dec-every-tenth-point | 150,000 | pass | defect=a uniform sampler snapped to every tenth grid point, pvalue=0, threshold=8.01e-05 | the module's own statistic rejects the defect at the battery's rank-one value |
 | generator/ranges | 150,000 | pass | outside=0 | no draw outside its declared range or off its declared scale |
-| generator/rate_dec_both | 150,000 | pass | chi2 p=0.3732, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/rate_dec_upper | 150,000 | pass | chi2 p=0.7925, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/rate_int_clamped | 150,000 | pass | chi2 p=0.4007, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/rate_int_free | 150,000 | pass | chi2 p=0.2585, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/uni_dec | 150,000 | pass | chi2 p=0.006871, chi2-mod10 p=0.2294, chi2-mod7 p=0.4649, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
-| generator/uni_int | 150,000 | pass | chi2 p=0.2109, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/rate_dec_both | 150,000 | pass | chi2 p=0.9783, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/rate_dec_upper | 150,000 | pass | chi2 p=0.9373, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/rate_int_clamped | 150,000 | pass | chi2 p=0.3004, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/rate_int_free | 150,000 | pass | chi2 p=0.5612, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/uni_dec | 150,000 | pass | chi2 p=0.4023, chi2-mod10 p=0.2696, chi2-mod7 p=0.9822, method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
+| generator/uni_int | 150,000 | pass | chi2 p=0.9696, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the generator battery |
 | generator/uniform-ends | 150,000 | pass | max=100.000, min=0.000 | the integer range reaches both of its declared ends |
-| journey-reaction/persona-high | 60,000 | pass | binomial p=0.1842, method=by, p=0.93, successes=55,717 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| journey-reaction/persona-low | 60,000 | pass | binomial p=0.8441, method=by, p=0.05, successes=2,989 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
-| journey-reaction/persona-pragmatic-family | 60,000 | pass | binomial p=0.7345, method=by, p=0.42, successes=25,241 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| journey-reaction/persona-high | 60,000 | pass | binomial p=0.8666, method=by, p=0.93, successes=55,811 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| journey-reaction/persona-low | 60,000 | pass | binomial p=0.1492, method=by, p=0.05, successes=3,077 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
+| journey-reaction/persona-pragmatic-family | 60,000 | pass | binomial p=0.6432, method=by, p=0.42, successes=25,256 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
 | journey-reaction/structure | 180,000 | pass | transitions=180,000 | the largest-remainder share is exact and the structural invariants hold |
 | population/battery | 150,001 | pass | violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
 | population/cohort-ties/declaration-order-is-not-key-order | 2 | pass | - | a tied remainder goes to the NFC-first key, whatever the seed |
@@ -166,44 +170,44 @@ pytest: 486 tests, 0 failed, 0 errored, 14 skipped, 0 expected failures (strict 
 | population/cohort-ties/key-order-differs-after-nfc | 1 | pass | - | a tied remainder goes to the NFC-first key, whatever the seed |
 | population/cohort-ties/two-halves-odd-size | 1,001 | pass | - | a tied remainder goes to the NFC-first key, whatever the seed |
 | population/cohorts | 150,001 | pass | - | cohort sizes equal largest_remainder(size, lifecycleMix) exactly |
-| population/market | 150,001 | pass | chi2 p=0.04885, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
+| population/market | 150,001 | pass | chi2 p=0.4219, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
 | population/personas | 150,001 | pass | - | persona split equals largest_remainder over equal weights exactly |
-| population/power/above_mean-sd+1% | 150,001 | pass | defect=the declared stddev 0.1 read 1% high on the mirrored branch, pvalue=3.24e-10, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
+| population/power/above_mean-sd+1% | 150,001 | pass | defect=the declared stddev 0.1 read 1% high on the mirrored branch, pvalue=9.4e-08, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
 | population/power/above_mean-sd+10% | 150,001 | pass | defect=the declared stddev 0.1 read 10% high on the mirrored branch, pvalue=0, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
-| population/power/above_mean-sd+3% | 150,001 | pass | defect=the declared stddev 0.1 read 3% high on the mirrored branch, pvalue=1.7e-58, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
-| population/power/appetite-mean+0.02 | 150,001 | pass | defect=the declared mean 0.5 read 0.02 high (4%), pvalue=4.94e-216, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
-| population/power/appetite-mean+1% | 150,001 | pass | defect=the declared mean 0.5 read 1% high, pvalue=7.41e-17, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
-| population/power/market-weight-0.01-moved | 150,001 | pass | defect=0.01 of the market probability moved from de to pl, pvalue=8.05e-40, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
-| population/power/market-weight-0.02-moved | 150,001 | pass | defect=0.02 of the market probability moved from de to pl, pvalue=5.18e-145, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
-| population/power/segment-3pt-moved | 150,001 | pass | defect=0.03 of probability moved from core to edge, pvalue=7.04e-151, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
-| population/power/tight-upper-bound-0.9-read-0.85 | 150,001 | pass | defect=the declared max 0.9 read as 0.85, pvalue=6.69e-85, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
+| population/power/above_mean-sd+3% | 150,001 | pass | defect=the declared stddev 0.1 read 3% high on the mirrored branch, pvalue=7.21e-54, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
+| population/power/appetite-mean+0.02 | 150,001 | pass | defect=the declared mean 0.5 read 0.02 high (4%), pvalue=9.59e-218, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
+| population/power/appetite-mean+1% | 150,001 | pass | defect=the declared mean 0.5 read 1% high, pvalue=1.74e-16, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
+| population/power/market-weight-0.01-moved | 150,001 | pass | defect=0.01 of the market probability moved from de to pl, pvalue=4.02e-27, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
+| population/power/market-weight-0.02-moved | 150,001 | pass | defect=0.02 of the market probability moved from de to pl, pvalue=2.47e-120, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
+| population/power/segment-3pt-moved | 150,001 | pass | defect=0.03 of probability moved from core to edge, pvalue=3.92e-164, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
+| population/power/tight-upper-bound-0.9-read-0.85 | 150,001 | pass | defect=the declared max 0.9 read as 0.85, pvalue=5.65e-88, threshold=0.00046 | the module's own statistic rejects the defect at the battery's rank-one value |
 | population/scalar-trait | 150,001 | pass | constant=yes, pathsForDrawnTrait=150,001, pathsForScalar=0 | a scalar trait is its declared constant and materialises no stream |
-| population/trait-above_mean | 150,001 | pass | cvm p=0.7743, ks p=0.6937, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
+| population/trait-above_mean | 150,001 | pass | cvm p=0.5891, ks p=0.6878, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
 | population/trait-above_mean-bounds | 150,001 | pass | hi=0.9, lo=0.45, offScale=0, outside=0 | every draw inside its declared interval, at the trait scale |
-| population/trait-appetite | 150,001 | pass | cvm p=0.5166, ks p=0.6717, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
+| population/trait-appetite | 150,001 | pass | cvm p=0.5951, ks p=0.4399, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
 | population/trait-appetite-bounds | 150,001 | pass | hi=2.1, lo=-1.1, offScale=0, outside=0 | every draw inside its declared interval, at the trait scale |
-| population/trait-segment | 150,001 | pass | chi2 p=0.8984, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
-| population/trait-tight | 150,001 | pass | cvm p=0.3756, ks p=0.3762, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
+| population/trait-segment | 150,001 | pass | chi2 p=0.2863, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
+| population/trait-tight | 150,001 | pass | cvm p=0.8464, ks p=0.8992, method=by, violations=0 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the population battery |
 | population/trait-tight-bounds | 150,001 | pass | hi=0.9, lo=0.4, offScale=0, outside=0 | every draw inside its declared interval, at the trait scale |
-| power/biased-ordinal | 63 | pass | defect=ordinal 0 arm probabilities (0.6, 0.25, 0.15), rank_one_threshold=3.36e-05, smallest_p=2.04e-23, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
-| power/burst-window | 14 | pass | defect=window cut by 0.03, rank_one_threshold=0.00022, smallest_p=2.04e-27, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
-| power/campaign | 14 | pass | defect=declared probability 0.8 moved by +0.01, rank_one_threshold=0.00022, smallest_p=2.85e-12, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
-| power/dial | 14 | pass | defect=declared probability 0.3 moved by +0.01, rank_one_threshold=0.00022, smallest_p=1.16e-16, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
-| power/emitter-share | 14 | pass | defect=declared probability 0.35 moved by +0.01, rank_one_threshold=0.00022, smallest_p=6.35e-12, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
-| power/gap-mean | 14 | pass | defect=gap mean x1.05, rank_one_threshold=0.00022, smallest_p=2.14e-11, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
-| power/poisson-mean | 14 | pass | defect=extra-occurrence mean x1.05, rank_one_threshold=0.00022, smallest_p=1.65e-27, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
-| power/reaction | 14 | pass | defect=declared probability 0.42 moved by +0.01, rank_one_threshold=0.00022, smallest_p=4.03e-06, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
-| power/skewed-shuffle | 63 | pass | defect=shuffle key skew 0.2, rank_one_threshold=3.36e-05, smallest_p=2.81e-10, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/biased-ordinal | 63 | pass | defect=ordinal 0 arm probabilities (0.6, 0.25, 0.15), rank_one_threshold=3.36e-05, smallest_p=2.49e-17, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/burst-window | 14 | pass | defect=window cut by 0.03, rank_one_threshold=0.00022, smallest_p=1.79e-29, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/campaign | 14 | pass | defect=declared probability 0.8 moved by +0.01, rank_one_threshold=0.00022, smallest_p=1.08e-13, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/dial | 14 | pass | defect=declared probability 0.3 moved by +0.01, rank_one_threshold=0.00022, smallest_p=1.91e-19, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/emitter-share | 14 | pass | defect=declared probability 0.35 moved by +0.01, rank_one_threshold=0.00022, smallest_p=7.94e-14, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/gap-mean | 14 | pass | defect=gap mean x1.05, rank_one_threshold=0.00022, smallest_p=2.22e-18, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/poisson-mean | 14 | pass | defect=extra-occurrence mean x1.05, rank_one_threshold=0.00022, smallest_p=4.62e-21, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/reaction | 14 | pass | defect=declared probability 0.42 moved by +0.01, rank_one_threshold=0.00022, smallest_p=7.26e-06, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
+| power/skewed-shuffle | 63 | pass | defect=shuffle key skew 0.2, rank_one_threshold=3.36e-05, smallest_p=1.25e-15, tier=nightly | the injected defect is rejected: smallest p at or below the battery's rank-one critical value q/(m*c(m)) |
 | runtime-kinds/battery | 14 | pass | method=by | no statistic rejected by Benjamini-Yekutieli at q=0.01 across the runtime-kind battery |
 
 ## 3. The fidelity gate's own accuracy
 
-9 of 9 measured cases passed.
+11 of 11 measured cases passed.
 
 | Case | n | Result | Measured | Criterion |
 |---|---|---|---|---|
 | mean-exactness | 10,000 | pass | trials=500 | every verdict equals the declared rule on the sample deviation, in rationals |
-| mean-roc | 10,000 | pass | auc=0.9999, committedRecords=10,000, falseAcceptRateAtTwice=0, falseAcceptUpper95=0.02429 | ROC area >= 0.99 between f <= 0.5 and f >= 1.5; nightly: FRR(f=0) and FAR(f=2) 95% upper bounds <= 5% |
+| mean-roc | 10,000 | pass | auc=1, committedRecords=10,000, falseAcceptRateAtTwice=0, falseAcceptUpper95=0.02429 | ROC area >= 0.99 between f <= 0.5 and f >= 1.5; nightly: FRR(f=0) and FAR(f=2) 95% upper bounds <= 5% |
 | quantile-exactness | 10,000 | pass | trials=500 | every verdict equals the declared rule on the sample deviation, in rationals |
 | quantile-roc | 10,000 | pass | auc=1, committedRecords=10,000, falseAcceptRateAtTwice=0, falseAcceptUpper95=0.02429 | ROC area >= 0.99 between f <= 0.5 and f >= 1.5; nightly: FRR(f=0) and FAR(f=2) 95% upper bounds <= 5% |
 | ship-end-to-end-offset-0 | 64 | pass | bundleWritten=yes, exitCode=0, meanDeviation=0, tolerance=50 | ship exits 0 within tolerance and 1 with FLX-8001 outside it, as the rule decides |
@@ -211,15 +215,17 @@ pytest: 486 tests, 0 failed, 0 errored, 14 skipped, 0 expected failures (strict 
 | support-exactness | 10,000 | pass | max=0 | withheld exactly when the off-support record count exceeds the declared max |
 | tv-exactness | 10,000 | pass | trials=500 | every verdict equals the declared rule on the sample deviation, in rationals |
 | tv-roc | 10,000 | pass | auc=1, committedRecords=10,000, falseAcceptRateAtTwice=0, falseAcceptUpper95=0.02429 | ROC area >= 0.99 between f <= 0.5 and f >= 1.5; nightly: FRR(f=0) and FAR(f=2) 95% upper bounds <= 5% |
+| verify-level-pair-matched | 2,000 | pass | exitCode=0, fidelity=passed, refusals=0 | verify passes a link drawn with levelWeightsGiven and fails a slice whose link is reversed |
+| verify-level-pair-mismatched | 2,000 | pass | exitCode=1, fidelity=failed, refusals=0 | verify passes a link drawn with levelWeightsGiven and fails a slice whose link is reversed |
 
-**mean**: tolerance 0.02, 10,000 committed and 10,000 synthetic records per trial; ROC area 0.9999.
+**mean**: tolerance 0.02, 10,000 committed and 10,000 synthetic records per trial; ROC area 1.
 
 | Injected deviation | Population deviation | Withheld | Withhold rate |
 |---|---|---|---|
 | 0 × tolerance | 0 | 0 of 150 | 0 |
 | 0.5 × tolerance | 0.009995 | 1 of 50 | 0.02 |
-| 0.9 × tolerance | 0.01799 | 11 of 50 | 0.22 |
-| 1.1 × tolerance | 0.02199 | 32 of 50 | 0.64 |
+| 0.9 × tolerance | 0.01799 | 14 of 50 | 0.28 |
+| 1.1 × tolerance | 0.02199 | 36 of 50 | 0.72 |
 | 1.5 × tolerance | 0.02999 | 50 of 50 | 1 |
 | 2 × tolerance | 0.03998 | 150 of 150 | 1 |
 
@@ -231,7 +237,7 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 |---|---|---|---|
 | 0 × tolerance | 0 | 0 of 150 | 0 |
 | 0.5 × tolerance | 5 | 0 of 50 | 0 |
-| 0.9 × tolerance | 9 | 20 of 50 | 0.4 |
+| 0.9 × tolerance | 9 | 14 of 50 | 0.28 |
 | 1.1 × tolerance | 11 | 40 of 50 | 0.8 |
 | 1.5 × tolerance | 15 | 50 of 50 | 1 |
 | 2 × tolerance | 20 | 150 of 150 | 1 |
@@ -244,8 +250,8 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 |---|---|---|---|
 | 0 × tolerance | 0 | 0 of 150 | 0 |
 | 0.5 × tolerance | 0.025 | 0 of 50 | 0 |
-| 0.9 × tolerance | 0.045 | 10 of 50 | 0.2 |
-| 1.1 × tolerance | 0.055 | 45 of 50 | 0.9 |
+| 0.9 × tolerance | 0.045 | 11 of 50 | 0.22 |
+| 1.1 × tolerance | 0.055 | 39 of 50 | 0.78 |
 | 1.5 × tolerance | 0.075 | 50 of 50 | 1 |
 | 2 × tolerance | 0.1 | 150 of 150 | 1 |
 
@@ -253,25 +259,33 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 
 ## 4. Properties and metamorphic relations
 
-32 of 32 measured cases passed.
+40 of 40 measured cases passed.
 
 | Case | n | Result | Measured | Criterion |
 |---|---|---|---|---|
 | mr1-generator-same-bytes | 200 | pass | - | rows and generatorDigest identical, in a hostile decimal context too |
-| mr1-run-child-hashseed | - | pass | pythonHashSeed=822991084, runDigest=sha256:2d1c6fafdb22d3ab785b1e418668a7a0bd4eb1f4447827bd01010087ad0249fb | byte-identical output under another PYTHONHASHSEED |
+| mr1-run-child-hashseed | - | pass | pythonHashSeed=3602872043, runDigest=sha256:e0ba53b525c66686a5a71348ddc9dbe53667f5485476ea215ba0de8ce1afbdbe | byte-identical output under another PYTHONHASHSEED |
 | mr1-run-hostile-decimal | - | pass | completed=yes | byte-identical output under prec=5 ROUND_UP |
-| mr1-run-twice | - | pass | runDigest=sha256:2d1c6fafdb22d3ab785b1e418668a7a0bd4eb1f4447827bd01010087ad0249fb | byte-identical output |
+| mr1-run-twice | - | pass | runDigest=sha256:e0ba53b525c66686a5a71348ddc9dbe53667f5485476ea215ba0de8ce1afbdbe | byte-identical output |
 | mr2-column-order | 24 | pass | columns=9, examples=400 | every column's values identical under any permutation of the column order |
 | mr3-arrival-gaps-1800000 | 600 | pass | - | each gap within 1 ms of twice the original; emitters, starts, payloads equal |
 | mr3-arrival-gaps-300000 | 600 | pass | - | each gap within 1 ms of twice the original; emitters, starts, payloads equal |
 | mr3-arrival-gaps-60000 | 600 | pass | - | each gap within 1 ms of twice the original; emitters, starts, payloads equal |
 | mr3-exponential-scaling | - | pass | examples=5,000 | \|exp(rate/c) - c*exp(rate)\| <= (1+c)*0.5*10^-scale on one stream |
-| mr3-truncated-normal-location-scale | - | pass | checked=5,000, vacuous=402 | \|tn(mean*b+a, sd*b, lo*b+a, hi*b+a) - (b*tn(mean, sd, lo, hi) + a)\| <= (1+b)*10^-scale |
+| mr3-truncated-normal-location-scale | - | pass | checked=5,000, vacuous=321 | \|tn(mean*b+a, sd*b, lo*b+a, hi*b+a) - (b*tn(mean, sd, lo, hi) + a)\| <= (1+b)*10^-scale |
 | mr4-marginals-ks | 10,000 | pass | method=bh, negativeControlP=0 | no two-sample KS rejected by Benjamini-Hochberg at q=0.01 across the numeric columns |
 | mr4-prefix-stable | - | pass | examples=200 | the first n rows of a 2n-row generation equal the n-row generation |
 | mr5-end-to-end-added-trait | - | pass | addedTraitRecords=1,000, population=3,504 | emits, events, decisions and every other population record byte-identical |
 | mr5-generator-added-column | - | pass | examples=400 | every other column's values identical after adding a column at any position |
 | mr5-world-added-trait | - | pass | examples=300 | every other trait of every subject identical after adding a trait |
+| mr6-column-first | 40 | pass | examples=250 | generate_column equals the row-first column under root= and source= |
+| mr6-column-order | 60 | pass | examples=300 | every column's values identical under any permutation of the declared order |
+| mr6-conditioning | 120 | pass | examples=400 | every drawn level and bin has positive weight in its parent's row |
+| mr6-more-rows | 40 | pass | examples=300 | a plan with more rows has the shorter plan's table as its prefix |
+| mr6-refusals | 4 | pass | examples=600 | exactly one corruption of a valid forest is refused with FLX-3402 |
+| mr6-roots-unchanged | 60 | pass | examples=300 | making every conditional column unconditional leaves each root column unchanged |
+| mr6-same-bytes | 60 | pass | examples=300 | two runs agree and root= equals source=GeneratorStreams(root=) |
+| mr6-slices | 80 | pass | examples=300 | slices at random cut points join to exactly the whole table |
 | regression-mr1_ambient_decimal_context--control-prec28 | - | pass | knownDefect=no, property=mr1_ambient_decimal_context | the committed counterexample for mr1_ambient_decimal_context passes |
 | regression-mr1_ambient_decimal_context--persona-quantise-prec5 | - | pass | knownDefect=no, property=mr1_ambient_decimal_context | the committed counterexample for mr1_ambient_decimal_context passes |
 | regression-mr1_ambient_decimal_context--signal-gap-prec6 | - | pass | knownDefect=no, property=mr1_ambient_decimal_context | the committed counterexample for mr1_ambient_decimal_context passes |
@@ -286,9 +300,9 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 | regression-schema_fluid_columns--decimal-and-timestamp | - | pass | knownDefect=no, property=schema_fluid_columns | the committed counterexample for schema_fluid_columns passes |
 | regression-schema_flux_persona--normal-stddev-overflow | - | pass | knownDefect=no, property=schema_flux_persona | the committed counterexample for schema_flux_persona passes |
 | regression-schema_flux_persona--scalar-categorical-normal | - | pass | knownDefect=no, property=schema_flux_persona | the committed counterexample for schema_flux_persona passes |
-| schema-fluid-columns-as-generated | - | pass | ok=25, refused=575 | FluxError or conforming rows, never another exception |
-| schema-fluid-columns-supported-types | - | pass | ok=521, refused=279 | FluxError or conforming rows, never another exception |
-| schema-flux-persona-specs | - | pass | ok=819, refused=681 | FluxError or a population conforming to its declared traits, never another exception |
+| schema-fluid-columns-as-generated | - | pass | ok=20, refused=580 | FluxError or conforming rows, never another exception |
+| schema-fluid-columns-supported-types | - | pass | ok=528, refused=272 | FluxError or conforming rows, never another exception |
+| schema-flux-persona-specs | - | pass | ok=789, refused=711 | FluxError or a population conforming to its declared traits, never another exception |
 
 ## 5. Seed-tree stream quality
 
@@ -296,14 +310,14 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 
 | Case | n | Result | Measured | Criterion |
 |---|---|---|---|---|
-| avalanche/name-bit/entropy | 20,000 | pass | bits=256, flipFraction=0.4996, intervalLevel=0.9988, maxBitFraction=0.5091 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
-| avalanche/name-bit/first-word | 20,000 | pass | bits=64, flipFraction=0.5006, intervalLevel=0.9988, maxBitFraction=0.5084 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
-| avalanche/occurrence+-1/entropy | 20,000 | pass | bits=256, flipFraction=0.4998, intervalLevel=0.9988, maxBitFraction=0.5111 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
-| avalanche/occurrence+-1/first-word | 20,000 | pass | bits=64, flipFraction=0.4995, intervalLevel=0.9988, maxBitFraction=0.5088 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
-| avalanche/ordinal+-1/entropy | 20,000 | pass | bits=256, flipFraction=0.5001, intervalLevel=0.9988, maxBitFraction=0.5111 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
-| avalanche/ordinal+-1/first-word | 20,000 | pass | bits=64, flipFraction=0.5002, intervalLevel=0.9988, maxBitFraction=0.5061 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
-| avalanche/root-seed-lsb/entropy | 20,000 | pass | bits=256, flipFraction=0.5001, intervalLevel=0.9988, maxBitFraction=0.5157 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
-| avalanche/root-seed-lsb/first-word | 20,000 | pass | bits=64, flipFraction=0.4993, intervalLevel=0.9988, maxBitFraction=0.5067 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
+| avalanche/name-bit/entropy | 20,000 | pass | bits=256, flipFraction=0.4998, intervalLevel=0.9988, maxBitFraction=0.5134 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
+| avalanche/name-bit/first-word | 20,000 | pass | bits=64, flipFraction=0.4994, intervalLevel=0.9988, maxBitFraction=0.5097 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
+| avalanche/occurrence+-1/entropy | 20,000 | pass | bits=256, flipFraction=0.5, intervalLevel=0.9988, maxBitFraction=0.511 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
+| avalanche/occurrence+-1/first-word | 20,000 | pass | bits=64, flipFraction=0.5002, intervalLevel=0.9988, maxBitFraction=0.5107 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
+| avalanche/ordinal+-1/entropy | 20,000 | pass | bits=256, flipFraction=0.5, intervalLevel=0.9988, maxBitFraction=0.5098 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
+| avalanche/ordinal+-1/first-word | 20,000 | pass | bits=64, flipFraction=0.5005, intervalLevel=0.9988, maxBitFraction=0.5075 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
+| avalanche/root-seed-lsb/entropy | 20,000 | pass | bits=256, flipFraction=0.5, intervalLevel=0.9988, maxBitFraction=0.5091 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
+| avalanche/root-seed-lsb/first-word | 20,000 | pass | bits=64, flipFraction=0.4997, intervalLevel=0.9988, maxBitFraction=0.5078 | every output bit flips with probability 1/2: no exact binomial test rejected by BY at q=0.01; overall flip fraction inside its Clopper-Pearson interval |
 | collisions/generator-row | 4,194,304 | pass | boundEntropy128BitPool=5.17e-26, entropyCollisions=0, expectedFirstWordCollisions=4.77e-07, firstWordCollisions=0 | no collision among sibling 256-bit entropies or among first 64-bit words |
 | collisions/nfc/'café' | - | pass | differsInCodePoints=yes | NFC-equivalent spellings give the same label and entropy |
 | collisions/nfc/'naïve-trait' | - | pass | differsInCodePoints=yes | NFC-equivalent spellings give the same label and entropy |
@@ -321,9 +335,9 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 | collisions/separator/U+001F/middle | - | pass | - | a part holding U+001F or U+001E is refused with FLX-2202 |
 | collisions/signal-occurrence | 4,194,304 | pass | boundEntropy128BitPool=5.17e-26, entropyCollisions=0, expectedFirstWordCollisions=4.77e-07, firstWordCollisions=0 | no collision among sibling 256-bit entropies or among first 64-bit words |
 | collisions/subject-trait | 4,194,304 | pass | boundEntropy128BitPool=5.17e-26, entropyCollisions=0, expectedFirstWordCollisions=4.77e-07, firstWordCollisions=0 | no collision among sibling 256-bit entropies or among first 64-bit words |
-| sibling-quality/bit-balance | 1,048,576 | pass | method=by, minAdjusted=1, minPvalue=0.03084 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across byte frequency, per-bit balance and lag-1 serial correlation of sibling first words |
-| sibling-quality/byte-frequency | 1,048,576 | pass | method=by, minAdjusted=1, minPvalue=0.3947 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across byte frequency, per-bit balance and lag-1 serial correlation of sibling first words |
-| sibling-quality/serial-correlation | 1,048,576 | pass | method=by, minAdjusted=1, minPvalue=0.5282 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across byte frequency, per-bit balance and lag-1 serial correlation of sibling first words |
+| sibling-quality/bit-balance | 1,048,576 | pass | method=by, minAdjusted=0.04975, minPvalue=0.000158 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across byte frequency, per-bit balance and lag-1 serial correlation of sibling first words |
+| sibling-quality/byte-frequency | 1,048,576 | pass | method=by, minAdjusted=1, minPvalue=0.8182 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across byte frequency, per-bit balance and lag-1 serial correlation of sibling first words |
+| sibling-quality/serial-correlation | 1,048,576 | pass | method=by, minAdjusted=1, minPvalue=0.6676 | no statistic rejected by Benjamini-Yekutieli at q=0.01 across byte frequency, per-bit balance and lag-1 serial correlation of sibling first words |
 
 ## 6. Journey conformance
 
@@ -331,10 +345,10 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 
 | Case | n | Result | Measured | Criterion |
 |---|---|---|---|---|
-| dwell/power-c1.1 | 10,000 | pass | caught=20, largest_smallest_p=1.1e-14, rank_one_threshold=0.0012, rate=1 | the unscaled c=1.1 comparison has min(KS, AD) p at or below the battery's rank-one critical value in >= 90% of repetitions |
+| dwell/power-c1.1 | 10,000 | pass | caught=20, largest_smallest_p=3.51e-13, rank_one_threshold=0.0012, rate=1 | the unscaled c=1.1 comparison has min(KS, AD) p at or below the battery's rank-one critical value in >= 90% of repetitions |
 | dwell/sample-sanity | 10,000 | pass | - | each sample has at least one dwell per emitter, all >= 1 ms, mean within 5 SE |
-| dwell/scaled-2 | 60,022 | pass | anderson_ksamp p=0.1939, ks_2samp p=0.2221, method=by | no two-sample KS or k-sample Anderson-Darling statistic rejected by Benjamini-Yekutieli at q=0.01 |
-| dwell/seeds | 59,638 | pass | anderson_ksamp p=0.25, ks_2samp p=0.3771, method=by | no two-sample KS or k-sample Anderson-Darling statistic rejected by Benjamini-Yekutieli at q=0.01 |
+| dwell/scaled-2 | 59,153 | pass | anderson_ksamp p=0.1818, ks_2samp p=0.1462, method=by | no two-sample KS or k-sample Anderson-Darling statistic rejected by Benjamini-Yekutieli at q=0.01 |
+| dwell/seeds | 59,389 | pass | anderson_ksamp p=0.25, ks_2samp p=0.9708, method=by | no two-sample KS or k-sample Anderson-Darling statistic rejected by Benjamini-Yekutieli at q=0.01 |
 | transitions/battery | 144,000 | pass | method=bh | no (Persona, from-state, step) cell rejected by the exact binomial test under Benjamini-Hochberg at q=0.01, both seeds in one battery |
 | transitions/dial/0 | 60,000 | pass | frozen=60,000, frozen_successes=22,200, stochastic=0 | frozen successes equal LRM(frozen count, p) and are the first frozen ordinals, in every (step, seed); no stochastic-share binomial rejected under Benjamini-Hochberg at q=0.01 |
 | transitions/dial/0.5 | 60,000 | pass | frozen=30,000, frozen_successes=11,100, stochastic=30,000 | frozen successes equal LRM(frozen count, p) and are the first frozen ordinals, in every (step, seed); no stochastic-share binomial rejected under Benjamini-Hochberg at q=0.01 |
@@ -343,12 +357,12 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 | transitions/persona-a/new | 144,000 | pass | cells=6, declared=0.42, method=bh | no (Persona, from-state, step) cell rejected by the exact binomial test under Benjamini-Hochberg at q=0.01, both seeds in one battery |
 | transitions/persona-b/atrisk | 144,000 | pass | cells=6, declared=0.65, method=bh | no (Persona, from-state, step) cell rejected by the exact binomial test under Benjamini-Hochberg at q=0.01, both seeds in one battery |
 | transitions/persona-c/active | 144,000 | pass | cells=6, declared=0.08, method=bh | no (Persona, from-state, step) cell rejected by the exact binomial test under Benjamini-Hochberg at q=0.01, both seeds in one battery |
-| transitions/power | 12,000 | pass | caught=8, of=8, rank_one_threshold=0.000417, worst_p=9.44e-101 | a 0.1 shift of the declared probability is caught in every row, both seeds |
-| transitions/structure | 144,000 | pass | transitions=193,457 | no transition from a row the taxonomy forbids; every success/failure recorded as declared |
-| transitions/two-seeds/persona-a/atrisk | 288,000 | pass | pvalue=0.6286 | no row's seed-vs-seed 2x2 chi-square rejected by Benjamini-Hochberg at q=0.01 |
-| transitions/two-seeds/persona-a/new | 288,000 | pass | pvalue=0.6101 | no row's seed-vs-seed 2x2 chi-square rejected by Benjamini-Hochberg at q=0.01 |
-| transitions/two-seeds/persona-b/atrisk | 288,000 | pass | pvalue=0.8385 | no row's seed-vs-seed 2x2 chi-square rejected by Benjamini-Hochberg at q=0.01 |
-| transitions/two-seeds/persona-c/active | 288,000 | pass | pvalue=0.6511 | no row's seed-vs-seed 2x2 chi-square rejected by Benjamini-Hochberg at q=0.01 |
+| transitions/power | 12,000 | pass | caught=8, of=8, rank_one_threshold=0.000417, worst_p=3.45e-90 | a 0.1 shift of the declared probability is caught in every row, both seeds |
+| transitions/structure | 144,000 | pass | transitions=193,479 | no transition from a row the taxonomy forbids; every success/failure recorded as declared |
+| transitions/two-seeds/persona-a/atrisk | 288,000 | pass | pvalue=0.2604 | no row's seed-vs-seed 2x2 chi-square rejected by Benjamini-Hochberg at q=0.01 |
+| transitions/two-seeds/persona-a/new | 288,000 | pass | pvalue=0.5396 | no row's seed-vs-seed 2x2 chi-square rejected by Benjamini-Hochberg at q=0.01 |
+| transitions/two-seeds/persona-b/atrisk | 288,000 | pass | pvalue=0.0909 | no row's seed-vs-seed 2x2 chi-square rejected by Benjamini-Hochberg at q=0.01 |
+| transitions/two-seeds/persona-c/active | 288,000 | pass | pvalue=0.9811 | no row's seed-vs-seed 2x2 chi-square rejected by Benjamini-Hochberg at q=0.01 |
 
 ## 7. Determinism
 
@@ -360,7 +374,7 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 | ambient-decimal-7:ROUND_UP | - | pass | ambient=7:ROUND_UP, differing=0, exit=0 | the end-to-end run does not depend on the ambient decimal context |
 | hostile-subprocess | - | pass | ambient=8:ROUND_UP, digests=35 | PYTHONHASHSEED, LC_ALL=C and an ambient decimal context change no digest |
 | in-process-twice | - | pass | differing=0, digests=35 | two builds in one process have identical digests |
-| pinned-run | - | pass | runDigest=2d1c6fafdb22d3ab785b1e418668a7a0bd4eb1f4447827bd01010087ad0249fb | the small fixture's run digest and emit digest equal their pins |
+| pinned-run | - | pass | runDigest=e0ba53b525c66686a5a71348ddc9dbe53667f5485476ea215ba0de8ce1afbdbe | the small fixture's run digest and emit digest equal their pins |
 
 ## Recovery tests: calibrate and accuracy
 
@@ -391,10 +405,10 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 | accuracy-boundary-zero-string-low | 1 | pass | - | verdict equals containment at the boundary |
 | accuracy-containment-c0.8 | 1,000 | pass | mismatches=0 | each verdict equals low <= observed <= high on exact decimals |
 | accuracy-containment-c0.95 | 1,000 | pass | mismatches=0 | each verdict equals low <= observed <= high on exact decimals |
-| accuracy-coverage-c0.8 | 1,000 | pass | ciHigh=0.8398, ciLow=0.7687, level=0.995, nominal=0.8 | nominal coverage lies inside the 99.5% Clopper-Pearson interval of the measured rate |
-| accuracy-coverage-c0.95 | 1,000 | pass | ciHigh=0.9649, ciLow=0.924, level=0.995, nominal=0.95 | nominal coverage lies inside the 99.5% Clopper-Pearson interval of the measured rate |
-| accuracy-record-c0.8 | 1,000 | pass | passed=806, registered=1,000 | the record covers every registered prediction and counts the independent passes |
-| accuracy-record-c0.95 | 1,000 | pass | passed=947, registered=1,000 | the record covers every registered prediction and counts the independent passes |
+| accuracy-coverage-c0.8 | 1,000 | pass | ciHigh=0.8481, ciLow=0.7783, level=0.995, nominal=0.8 | nominal coverage lies inside the 99.5% Clopper-Pearson interval of the measured rate |
+| accuracy-coverage-c0.95 | 1,000 | pass | ciHigh=0.9657, ciLow=0.9252, level=0.995, nominal=0.95 | nominal coverage lies inside the 99.5% Clopper-Pearson interval of the measured rate |
+| accuracy-record-c0.8 | 1,000 | pass | passed=815, registered=1,000 | the record covers every registered prediction and counts the independent passes |
+| accuracy-record-c0.95 | 1,000 | pass | passed=948, registered=1,000 | the record covers every registered prediction and counts the independent passes |
 | accuracy-record-seal-digests-c0.8 | 1,000 | pass | matching=1,000 | the record's predictionDigests are the sealDigests register returned |
 | accuracy-record-seal-digests-c0.95 | 1,000 | pass | matching=1,000 | the record's predictionDigests are the sealDigests register returned |
 | accuracy-zero-bound--5-0--1-interval_high | 1 | pass | - | a registered zero bound is scored, not dropped |
@@ -449,8 +463,8 @@ False rejects at no deviation: 0 (95% upper bound 0.02429). False accepts at twi
 
 | Feed | Bytes tested | Verdict | Anomalies by evaluation |
 |---|---|---|---|
-| first-words | 1,073,741,824 | pass | unusual: 2 |
-| interleave | 1,073,741,824 | pass | unusual: 1 |
+| first-words | 1,073,741,824 | pass | no anomalies |
+| interleave | 1,073,741,824 | pass | no anomalies |
 
 ## 7. Determinism matrix
 
@@ -471,18 +485,18 @@ Median wall time per call on the nightly runner. A benchmark more than 3 times s
 
 | Benchmark | Median | Rounds | Against snapshot |
 |---|---|---|---|
-| test_bench[fidelity-check-evaluate-x5000] | 115,699.4 µs | 9 | 0.98× |
-| test_bench[fidelity-compute-statistic-x5000] | 114,403.0 µs | 9 | 0.98× |
-| test_bench[generator-rows-x1000] | 354,828.8 µs | 5 | 0.99× |
-| test_bench[sampler-bernoulli-x500] | 8,244.1 µs | 120 | 0.99× |
-| test_bench[sampler-bounded_uint-x500] | 17,499.6 µs | 57 | 0.99× |
-| test_bench[sampler-categorical-x500] | 13,872.3 µs | 71 | 0.98× |
-| test_bench[sampler-exponential-x500] | 30,128.1 µs | 33 | 1.02× |
-| test_bench[sampler-poisson-x500] | 22,561.3 µs | 44 | 1.00× |
-| test_bench[sampler-truncated_normal-x500] | 135,834.5 µs | 8 | 0.98× |
-| test_bench[sampler-uniform53-x500] | 6,340.5 µs | 153 | 0.99× |
-| test_bench[stream-entropy-x1000] | 2,362.1 µs | 420 | 1.00× |
-| test_bench[stream-from-entropy-x1000] | 12,258.4 µs | 80 | 1.00× |
+| test_bench[fidelity-check-evaluate-x5000] | 86,784.2 µs | 12 | 0.75× |
+| test_bench[fidelity-compute-statistic-x5000] | 85,058.8 µs | 12 | 0.74× |
+| test_bench[generator-rows-x1000] | 93,897.4 µs | 11 | 0.26× |
+| test_bench[sampler-bernoulli-x500] | 4,687.5 µs | 208 | 0.57× |
+| test_bench[sampler-bounded_uint-x500] | 5,110.6 µs | 195 | 0.29× |
+| test_bench[sampler-categorical-x500] | 5,130.8 µs | 195 | 0.37× |
+| test_bench[sampler-exponential-x500] | 20,716.6 µs | 45 | 0.69× |
+| test_bench[sampler-poisson-x500] | 14,510.9 µs | 69 | 0.64× |
+| test_bench[sampler-truncated_normal-x500] | 28,861.8 µs | 35 | 0.21× |
+| test_bench[sampler-uniform53-x500] | 4,349.5 µs | 219 | 0.69× |
+| test_bench[stream-entropy-x1000] | 1,714.1 µs | 565 | 0.73× |
+| test_bench[stream-from-entropy-x1000] | 8,411.0 µs | 114 | 0.69× |
 
 ## Mutation testing
 
