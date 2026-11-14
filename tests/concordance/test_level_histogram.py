@@ -11,9 +11,11 @@ parser accepts and refuses, the margin and the magnitude bound the compiler
 gives it, the counts ``S`` holds and the fail-closed conditions that refuse
 them, and the verdict the verifier reaches.
 
-The published vectors file predates this property and its digests do not
-move when a property kind is added, so this module is where the kind is
-pinned (``tests/concordance/conftest.py`` registers it). Every expected
+The published vectors (``vectorsVersion`` 2, ``kinds.levelHistogram``) pin
+the kind's digests, counts and verdicts for one small published slice, and
+``tests/concordance/test_vectors.py`` recomputes them. This module pins the
+rest: the declaration the parser refuses, the magnitude bound, every refusal,
+the empty-level group and a hypothesis check of the verdict. Every expected
 count here is written out by hand or recounted from the rows with
 :class:`collections.Counter`, and every expected verdict comes from total
 variation computed in exact rational arithmetic, never from the code under

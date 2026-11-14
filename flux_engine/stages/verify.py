@@ -86,7 +86,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from flux_engine.api.stages import StageResult
 from flux_engine.api.verdict import Reproducibility, Validity, VerifyVerdict
@@ -120,6 +120,9 @@ from flux_engine.stages.layout import (
     POPULATION_LEDGER_COMPONENTS,
     RunLayout,
 )
+
+if TYPE_CHECKING:
+    from flux_engine.concordance.verifier import PropertyOutcome
 
 __all__ = [
     "GOLDEN_REMEDY",
@@ -688,7 +691,7 @@ def _run_fidelity_check(layout: RunLayout, expose_id: str, slice_uri: str) -> Di
     emit_path = layout.emit_path(expose_id)
     emitted_rows, decode_problems = _decoded_rows(emit_path, expose_id)
     if decode_problems:
-        return {"status": "failed", "refusals": [], "detail": "; ".join(decode_problems)}
+        return _failed_before_comparing("; ".join(decode_problems))
     # Through the catalogued guard, never a bare `zip(..., strict=True)`:
     # a row whose width does not match the header is `FLX-8001` naming the
     # row, the width and the declared column count, not a ValueError with
@@ -696,15 +699,97 @@ def _run_fidelity_check(layout: RunLayout, expose_id: str, slice_uri: str) -> Di
     try:
         synthetic_rows = packed_emit(attestation, expose_id, emitted_rows).as_mappings()
     except FluxError as error:
-        return {"status": "failed", "refusals": [], "detail": str(error)}
+        return _failed_before_comparing(str(error))
 
     evaluation = ClearStatistic(
         compiled=compiled, committed=state, synthetic_rows=synthetic_rows
     ).evaluate()
+    refused = {refusal.property_id for refusal in evaluation.refusals}
     return {
         "status": "passed" if evaluation.within else "failed",
         "refusals": [refusal.to_document() for refusal in evaluation.refusals],
+        "outside": [
+            _outside_document(outcome, refused=outcome.property_id in refused)
+            for outcome in evaluation.outside
+        ],
     }
+
+
+def _failed_before_comparing(detail: str) -> Dict[str, Any]:
+    """A failed leg that never compared a property: nothing outside, nothing refused."""
+    return {"status": "failed", "refusals": [], "outside": [], "detail": detail}
+
+
+def _outside_document(outcome: "PropertyOutcome", *, refused: bool) -> Dict[str, Any]:
+    """One property that is not within its margin, as ``--json`` and the failed line name it.
+
+    Fields, never values (ADR 0003, KERNEL-SPEC section 9): the property's id,
+    kind and columns, the column a grouped property groups by, and the groups
+    that landed outside by ORDINAL in the NFC-sorted group order. That is the
+    ``group #N`` an ``FLX-5005`` refusal already says, for the same reason: a
+    group's key is a value read out of the committed slice. A property the
+    check refused is listed too, because §6's record row calls it ``outside``;
+    ``refused`` says the check declined to answer for it, as a whole or for
+    one group, and its ``refusals`` entry says why.
+    """
+    document: Dict[str, Any] = {
+        "propertyId": outcome.property_id,
+        "property": outcome.kind.value,
+        "columns": list(outcome.columns),
+        "refused": refused,
+    }
+    if outcome.group_by is not None:
+        document["groupBy"] = outcome.group_by
+        document["groupOrdinals"] = [
+            ordinal for ordinal, group in enumerate(outcome.groups) if not group.within
+        ]
+    return document
+
+
+def _failure_lines(outcome: Mapping[str, Any]) -> List[str]:
+    """What a failed fidelity check says about its properties, one line each.
+
+    The wording is ``ship``'s (``property <id> (<kind> of <columns>)``), with
+    the column a grouped property groups by and the groups that failed added.
+    A refusal follows with its code and reason, which already name columns,
+    rows and counts and never a value. A leg that passed, was not checked, or
+    failed before any property was compared has neither, and gets no line.
+    """
+    lines: List[str] = []
+    for entry in outcome.get("outside", ()):
+        subject = f"{entry['property']} of {', '.join(entry['columns'])}"
+        where = ""
+        if "groupBy" in entry:
+            subject += f", grouped by {entry['groupBy']}"
+            ordinals = entry["groupOrdinals"]
+            if ordinals and not entry["refused"]:
+                noun = "groups" if len(ordinals) > 1 else "group"
+                where = f" in {noun} " + ", ".join(f"#{ordinal}" for ordinal in ordinals)
+        verdict = (
+            "refused, not within the declared margin"
+            if entry["refused"]
+            else "outside the declared margin"
+        )
+        lines.append(f"property {entry['propertyId']} ({subject}): {verdict}{where}")
+    for refusal in outcome.get("refusals", ()):
+        names = f" on property {refusal['propertyId']}" if refusal.get("propertyId") else ""
+        lines.append(f"refusal {refusal['code']}{names}: {refusal['reason']}")
+    return lines
+
+
+def _failed_legs(outcomes: Mapping[str, Any], failed: Sequence[str]) -> List[str]:
+    """The failure message for each expose whose fidelity leg failed, on stderr."""
+    lines: List[str] = []
+    for expose_id in failed:
+        lines.append(f"{expose_id}: fidelity check failed")
+        lines.extend(f"  {line}" for line in _failure_lines(outcomes[expose_id]))
+    return lines
+
+
+def _failure_summary(expose_id: str, outcome: Mapping[str, Any]) -> str:
+    """The same facts on one line, for the ``--update-golden`` refusal that joins its problems."""
+    named = _failure_lines(outcome)
+    return f"{expose_id}: fidelity check failed" + (": " + ", ".join(named) if named else "")
 
 
 def packed_emit(
@@ -774,6 +859,7 @@ def _leg_lines(
         status = outcome.get("status", "unknown")
         detail = outcome.get("detail")
         lines.append(f"  fidelity {expose_id}: {status}" + (f" -- {detail}" if detail else ""))
+        lines.extend(f"    {line}" for line in _failure_lines(outcome))
         record = outcome.get("record")
         if record:
             record_detail = record.get("detail")
@@ -952,7 +1038,7 @@ def verify(
                 *([artifact_detail] if artifact_detail else []),
                 *row_problems,
                 *vector_messages[:5],
-                *(f"{expose_id}: fidelity check failed" for expose_id in fidelity_failed),
+                *(_failure_summary(name, fidelity_outcomes[name]) for name in fidelity_failed),
             ]
             return StageResult(
                 stage="verify",
@@ -1032,7 +1118,7 @@ def verify(
             stderr_parts.append(artifact_detail)
         stderr_parts.extend(row_problems)
         stderr_parts.extend(vector_messages[:5])
-        stderr_parts.extend(fidelity_failed)
+        stderr_parts.extend(_failed_legs(fidelity_outcomes, fidelity_failed))
     # **The regression names what moved, to a human.** `movedComponents`
     # is the answer to the only question a red `reproducible: no` raises,
     # and it used to reach `--json` callers alone: the human output was
