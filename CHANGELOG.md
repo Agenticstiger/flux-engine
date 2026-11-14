@@ -192,6 +192,29 @@ their values.
   bound that a property reads already failed the field-capacity check
   (`FLX-5001`) long before that length, but a tolerance or a quantile `level`
   that long used to compile, and is now refused.
+- An unquoted integer of more than 4300 digits in a bundle document, or in
+  the `flux.lock` that a versioned ref makes the validator read, is refused
+  with `FLX-1003`, the code an integer outside the JSON safe-integer domain
+  already gets when its digest is taken. PyYAML builds an integer with
+  `int()`, and CPython converts at most 4300 digits, so `validate` and `plan`
+  stopped with a bare `ValueError` before any reader ran. A value that long
+  spelled in hex loaded, and then broke the first message that printed it; it
+  is refused the same way. The refusal names the file, the line and the
+  column, never the value. A scalar that YAML reads as an integer but that
+  has no integer value, such as `0b_` or `!!int ''`, is refused with
+  `FLX-3105` in place of a bare `ValueError` or `IndexError`. A lockfile the
+  validator never reads still has no say in whether a bundle loads.
+- A draw parameter that only the generator reads, such as
+  `mean: "1E+99999999"`, is refused by `plan` with `FLX-5030`, by the same
+  1000-digit rule and with the same message as a number the check reads.
+  Before, the check never saw it, and `plan` stopped in about a second on an
+  uncaught `decimal.Overflow` while it drew rows. `validate` does not read
+  draw parameters; `plan` is the first command that does.
+- A `fidelity` value that is not a mapping, such as `fidelity: oops`, is
+  refused with `FLX-5030` ("fidelity must be a mapping") by `validate`, `plan`
+  and every command after them. It counted as no block: `validate` passed it,
+  and `verify` reported the emit `not declared`. A null value still declares
+  no block, as a null extension namespace or entry does.
 
 ## 0.4.0 - 2026-11-12
 

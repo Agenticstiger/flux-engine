@@ -43,6 +43,7 @@ from flux_engine.concordance.predicate import (
     COLUMN_KEYS,
     SUPPORT_DECLARED,
     read_support_levels,
+    require_number_length,
 )
 from flux_engine.core.canonical import nfc
 from flux_engine.core.clock import parse_rfc3339_ms
@@ -105,6 +106,12 @@ def exact_decimal(value: Any, *, what: str) -> Decimal:
     is refused with ``FLX-3002``, because a binary float in a declared
     statistic would put an unreproducible number on the generator's own
     seed-addressed path.
+
+    A number too long to write out is refused by the check's own rule
+    (:func:`~flux_engine.concordance.predicate.require_number_length`,
+    ``FLX-5030``). A draw parameter such as ``mean`` is read by the
+    generator alone, so ``mean: "1E+99999999"`` used to pass the check and
+    stop ``plan`` on an uncaught ``decimal.Overflow`` while rows were drawn.
     """
     if isinstance(value, bool):
         raise FluxError(FLX_3402, f"{what}: a bool is not a number")
@@ -123,7 +130,7 @@ def exact_decimal(value: Any, *, what: str) -> Decimal:
         raise FluxError(FLX_3402, f"{what}: value class {type(value).__name__!r}")
     if not number.is_finite():
         raise FluxError(FLX_3402, f"{what}: an infinite or not-a-number value has no domain")
-    return number
+    return require_number_length(number, what)
 
 
 def domain_value(value: Any, column: CompiledColumn, *, what: str) -> Decimal:

@@ -519,14 +519,15 @@ def compile_fidelity(
         emit = {key: value for key, value in emit.items() if key != EXTENSION_TRANSPORT_KEY}
 
     if block is None:
-        candidate = (extension or {}).get(FIDELITY_BLOCK_KEY)
-        raw = candidate if isinstance(candidate, Mapping) else None
+        raw = (extension or {}).get(FIDELITY_BLOCK_KEY)
         if raw is None:
             raise FluxError(
                 FLX_5030,
                 "this emit declares no fidelity block under "
                 "extensions['com.agentics.flux/1'].emits[<exposeId>]",
             )
+        # A value that is not a mapping is a block nobody can read, not a
+        # missing one: the parser refuses it as what it is.
         block = parse_fidelity_block(raw, expose=expose)
 
     columns = tuple(nfc(str(name)) for name in expose.column_names)

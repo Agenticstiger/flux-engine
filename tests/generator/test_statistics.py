@@ -95,6 +95,38 @@ def test_a_value_that_is_not_an_exact_number_is_refused(value: Any) -> None:
     assert error.value.code.code in {"FLX-3402", "FLX-3002"}
 
 
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    ("value", "needed"),
+    [
+        pytest.param("1E+99999999", 10**8, id="an-exponent-of-1e8"),
+        pytest.param("1" * 1001, 1001, id="one-digit-too-many"),
+        pytest.param("0." + "1" * 1001, 1001, id="one-decimal-too-many"),
+        pytest.param(Decimal("1E+1000"), 1001, id="a-decimal-object"),
+        pytest.param(int("9" * 1001), 1001, id="an-int"),
+    ],
+)
+def test_a_draw_parameter_too_long_to_form_is_refused_by_the_check_s_own_rule(
+    value: Any, needed: int
+) -> None:
+    """``mean: "1E+99999999"`` is a key only the generator reads, so the
+    check's bound on a number's length never saw it, and ``plan`` stopped
+    on an uncaught ``decimal.Overflow``. The generator now reads its numbers
+    by the same rule, with the same refusal."""
+    with pytest.raises(FluxError) as error:
+        exact_decimal(value, what="amount: mean")
+    assert error.value.code.code == "FLX-5030"
+    assert error.value.detail == (
+        f"amount: mean: written out, this number needs {needed} digits, and a number "
+        "in a fidelity block may need at most 1000"
+    )
+
+
+@pytest.mark.parametrize("value", ["1" * 1000, "1E+999", "0." + "1" * 1000, "0E+99999999"])
+def test_a_draw_parameter_of_at_most_the_most_digits_is_read_exactly(value: str) -> None:
+    assert exact_decimal(value, what="amount: mean") == Decimal(value)
+
+
 def test_a_declared_float_reaches_the_reader_through_a_range() -> None:
     with pytest.raises(FluxError) as error:
         _read(range={"min": 0.0, "max": 1.0})

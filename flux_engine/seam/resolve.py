@@ -63,15 +63,16 @@ from __future__ import annotations
 
 import importlib
 import json
+import sys
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
+from typing import AbstractSet, Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple
 
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
-from flux_engine.core.canonical import nfc
+from flux_engine.core.canonical import FLX_1003, nfc
 from flux_engine.core.digest import DigestRef, digest_of_bytes, digest_of_document
 from flux_engine.core.errors import FluxError, register
 from flux_engine.seam.contract import CompiledExpose, compile_expose, find_expose
@@ -263,7 +264,8 @@ class ExactLoader(yaml.SafeLoader):
     ``Decimal("0.7")`` is 0.7. Only the second is what the contract says.
 
     Timestamps stay strings, matching the reference validator's loader and
-    the RFC 3339 grammar the schema declares.
+    the RFC 3339 grammar the schema declares. An integer is refused when it
+    is too long for CPython to form or print (:func:`_construct_exact_int`).
     """
 
 
@@ -295,11 +297,110 @@ def _construct_exact_float(loader: yaml.SafeLoader, node: yaml.Node) -> Decimal:
     return value
 
 
+#: The most digits an integer in a bundle may have: CPython's own limit on
+#: converting between an ``int`` and its decimal text
+#: (``sys.int_info.default_max_str_digits``, 4300, from CVE-2020-10735).
+#: PyYAML builds every integer scalar with ``int()``, so a longer decimal one
+#: raised a bare ``ValueError`` from inside either read, before any reader
+#: could refuse it, and a longer value spelled in hex loaded, then broke the
+#: first message that printed it. An integer past 2^53 - 1 is outside the
+#: JSON safe-integer domain and is refused when its digest is taken
+#: (``FLX-1003``); this refuses the ones too long to get that far, with the
+#: same code. Prior art: PyYAML issue yaml/pyyaml#1000 asks for this refusal
+#: at the scalar, with its position, and jackson-core's
+#: ``StreamReadConstraints`` bounds a number's length before converting it.
+_MOST_INTEGER_DIGITS: int = sys.int_info.default_max_str_digits
+
+#: The smallest magnitude with more than :data:`_MOST_INTEGER_DIGITS` digits.
+_TOO_LONG_INTEGER: int = 10**_MOST_INTEGER_DIGITS
+
+#: The tag YAML resolves an integer scalar to.
+_INTEGER_TAG = "tag:yaml.org,2002:int"
+
+
+def _construct_exact_int(loader: yaml.SafeLoader, node: yaml.Node) -> int:
+    """Construct a YAML integer scalar, or refuse one no reader can form.
+
+    The digits are counted before ``int()`` is called, so a decimal integer
+    too long for CPython is refused instead of raising from inside it; the
+    value is bounded afterwards, for the spellings ``int()`` forms at any
+    length (hex, octal, binary). A spelling PyYAML cannot build at all, such
+    as ``0x_`` or ``!!int ''``, raised a bare ``ValueError`` or
+    ``IndexError``: it is unreadable YAML (``FLX-3105``). Each refusal names
+    the file and the position, never the value.
+    """
+    mark = node.start_mark
+    where = f"(line {mark.line + 1}, column {mark.column + 1})"
+    name = Path(mark.name).name
+    too_long = f"{name}: an integer of more than {_MOST_INTEGER_DIGITS} digits is too long to read"
+    digits = sum(character.isdigit() for character in str(loader.construct_scalar(node)))
+    if digits > _MOST_INTEGER_DIGITS:
+        raise FluxError(FLX_1003, f"{too_long} {where}")
+    try:
+        value = loader.construct_yaml_int(node)
+    except (ValueError, IndexError) as exc:
+        raise FluxError(
+            FLX_3105, f"{name}: a scalar read as an integer has no integer value {where}"
+        ) from exc
+    if not -_TOO_LONG_INTEGER < value < _TOO_LONG_INTEGER:
+        raise FluxError(FLX_1003, f"{too_long} {where}")
+    return value
+
+
 ExactLoader.add_constructor("tag:yaml.org,2002:float", _construct_exact_float)
+ExactLoader.add_constructor(_INTEGER_TAG, _construct_exact_int)
 ExactLoader.add_constructor(
     "tag:yaml.org,2002:timestamp",
     lambda loader, node: loader.construct_scalar(node),
 )
+
+
+def _refuse_integers_no_read_can_form(path: Path) -> None:
+    """Refuse an integer in *path* that no read can form, before the validator reads it.
+
+    The validator's own read is borrowed (:func:`load_yaml_docs`), and it
+    catches YAML errors only, so each integer :func:`_construct_exact_int`
+    refuses escaped it as a bare ``ValueError``: from PyYAML's ``int()``, or
+    from the first schema message that printed a hex value too long to print.
+    Each document is composed here (parsed, nothing constructed) and every
+    scalar resolved as an integer is constructed as :class:`ExactLoader`
+    constructs one, in document order, before the next document is parsed:
+    the order the validator's read meets them in. A file that does not
+    parse, decode or open is left to that read, which meets it the same way.
+    """
+    try:
+        with Path(path).open(encoding="utf-8") as handle:
+            loader = ExactLoader(handle)
+            try:
+                while loader.check_node():
+                    _construct_every_integer(loader, loader.get_node())
+            finally:
+                loader.dispose()
+    except (yaml.YAMLError, OSError, UnicodeDecodeError):
+        return
+
+
+def _construct_every_integer(loader: ExactLoader, document: yaml.Node) -> None:
+    """Construct each integer scalar in *document*, depth first, in document order.
+
+    Iterative, and visiting each node once: an alias is the node it names,
+    so a recursive document is walked once rather than forever.
+    """
+    seen: Set[int] = set()
+    pending: List[yaml.Node] = [document]
+    while pending:
+        node = pending.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, yaml.ScalarNode):
+            if node.tag == _INTEGER_TAG:
+                _construct_exact_int(loader, node)
+        elif isinstance(node, yaml.SequenceNode):
+            pending.extend(reversed(node.value))
+        elif isinstance(node, yaml.MappingNode):
+            for key, value in reversed(node.value):
+                pending.extend((value, key))
 
 
 def _with_yaml_mark(path: Path, message: str) -> str:
@@ -402,14 +503,16 @@ def strip_additive_seam_fields(
 class SeamBundle(Bundle):
     """A :class:`Bundle` that validates documents modulo the additive fields.
 
-    Overrides exactly one method. :meth:`Bundle.load` reads the directory,
+    Overrides one method and wraps one check. :meth:`Bundle.load` reads the directory,
     validates each document against the FLUX schema and keeps only the
     schema-valid ones; this subclass performs the same walk but hands the
     schema a copy with :data:`ADDITIVE_SEAM_FIELDS` removed, while storing
     the document **as authored**. Every cross-document check the base class
     runs afterwards therefore sees the real document, and only the schema's
     ``additionalProperties: false`` is relaxed, only on ``emits[]``, only
-    for the enumerated fields.
+    for the enumerated fields. The wrapped check is
+    :meth:`check_supply_chain`, so that an integer in ``flux.lock`` no read
+    can form is refused by its position instead of escaping it.
 
     :attr:`tolerated` records what was removed from which document, so the
     relaxation appears in the resolution result instead of vanishing --
@@ -444,6 +547,7 @@ class SeamBundle(Bundle):
         errors asserting that a document sitting on disk is missing.
         """
         for path in self.flux_paths():
+            _refuse_integers_no_read_can_form(path)
             docs, load_error = load_yaml_docs(path)
             if load_error:
                 self.err(path.name, _with_yaml_mark(path, load_error))
@@ -451,6 +555,7 @@ class SeamBundle(Bundle):
             for doc in docs:
                 self._load_flux_document(path, doc)
         for path in self.fluid_paths():
+            _refuse_integers_no_read_can_form(path)
             docs, load_error = load_yaml_docs(path)
             if load_error:
                 self.err(path.name, _with_yaml_mark(path, load_error))
@@ -458,6 +563,23 @@ class SeamBundle(Bundle):
             for doc in docs:
                 self._load_fluid_document(path, doc)
         self.load_errors = tuple(self.errors)
+
+    def check_supply_chain(self) -> None:
+        """RFC-03's supply-chain check, with a lockfile integer refused by its position.
+
+        The check reads ``flux.lock`` with the validator's own loader, and
+        only when a ref is versioned, so the lockfile is not checked up
+        front as the documents are: a lockfile the check never reads must
+        not change whether the bundle loads. When the read raises what
+        PyYAML raises for an integer it cannot build, the lockfile's
+        integers are refused as a document's are, by file, line and column.
+        Anything else is raised as it was.
+        """
+        try:
+            super().check_supply_chain()
+        except (ValueError, IndexError):
+            _refuse_integers_no_read_can_form(self.dir / LOCK_FILE_NAME)
+            raise
 
     def flux_paths(self) -> List[Path]:
         return [path for pattern in FLUX_DOCUMENT_GLOBS for path in sorted(self.dir.glob(pattern))]
@@ -614,9 +736,9 @@ def load_bundle(directory: Path, *, tolerate_additive: bool = True) -> LoadedBun
 
     Raises ``FLX-3107`` when the path is not a directory at all,
     ``FLX-3108`` when the directory holds a regular file that is neither
-    a document nor a pack product, and ``FLX-3105`` carrying the
-    validator errors when the bundle does not validate. Nothing is
-    written.
+    a document nor a pack product, ``FLX-1003`` for an integer too long
+    to read, and ``FLX-3105`` carrying the validator errors when the
+    bundle does not validate. Nothing is written.
 
     The file-set refusal comes before validation on purpose: it is a
     statement about which files the validator is even going to consider,
@@ -842,15 +964,23 @@ class ResolvedEmit:
         return rows
 
     @property
-    def fidelity(self) -> Optional[Mapping[str, Any]]:
+    def fidelity(self) -> Any:
         """The declared fidelity block, or ``None`` when the emit declares none.
 
         ``None`` is the scenario-driven answer, not an error: an emit
         without a block draws its rows from the run's own moments
-        (SEAM-FIDELITY-SPEC §1).
+        (SEAM-FIDELITY-SPEC §1). A YAML null declares none, as a null
+        namespace, ``emits`` map or entry does in :func:`extension_block`.
+
+        Any other value is returned as declared, and not checked here. One
+        that is not a mapping is a declaration nobody can read, not the
+        absence of one: read as ``None`` it was no block at all, so
+        ``validate`` passed it and ``verify`` reported ``not declared``. The
+        block's one parser
+        (:func:`flux_engine.concordance.predicate.parse_fidelity_block`)
+        refuses it (``FLX-5030``) in every command that reads the block.
         """
-        block = (self.extension or {}).get(_FIDELITY_BLOCK_KEY)
-        return block if isinstance(block, Mapping) else None
+        return (self.extension or {}).get(_FIDELITY_BLOCK_KEY)
 
     @property
     def column_mapping(self) -> Optional[Mapping[str, Any]]:
