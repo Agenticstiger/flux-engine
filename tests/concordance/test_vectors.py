@@ -28,6 +28,8 @@ from flux_engine.core.canonical import canonical_bytes
 from flux_engine.core.errors import FluxError
 from flux_engine.core.fixedpoint import Grid, effective_tolerance
 from tests.concordance.conftest import (
+    PINNED_OUTSIDE_THE_VECTORS,
+    REPO_ROOT,
     blinding_of,
     build_committed,
     build_compiled,
@@ -71,7 +73,11 @@ def test_the_vectors_file_canonicalises(vectors) -> None:
 
 def test_the_published_block_exercises_every_property_the_spec_names(vectors) -> None:
     declared = {entry["property"] for entry in vectors["extension"]["fidelity"]["properties"]}
-    assert declared == {kind.value for kind in PropertyKind}
+    later = {kind.value for kind in PINNED_OUTSIDE_THE_VECTORS}
+    assert declared.isdisjoint(later), "a kind the file pins needs no second pin"
+    assert declared | later == {kind.value for kind in PropertyKind}
+    for path in PINNED_OUTSIDE_THE_VECTORS.values():
+        assert (REPO_ROOT / path).is_file(), f"{path} pins a kind the file does not"
 
 
 def test_the_published_block_exercises_both_column_kinds_and_both_null_policies(

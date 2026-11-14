@@ -15,7 +15,8 @@ everything §2 says ``fluxsim validate`` refuses:
     Rules enforced by ``fluxsim validate`` (offline): every ``column`` and
     ``groupBy`` is a member of the referenced expose schema; bins are
     strictly increasing and partition the declared range; a
-    ``correlation`` property declares two columns and a ``minVariance``;
+    ``levelHistogram`` names a ``support`` column and carries no ``bins``;
+    a ``correlation`` property declares two columns and a ``minVariance``;
     every property's parameters are present (a contract missing any of
     them is refused before any statistic is formed). Numbers are strings
     (exact decimals), never floats.
@@ -232,13 +233,20 @@ class ValueDomain(str, Enum):
 
 
 class PropertyKind(str, Enum):
-    """The five properties SEAM-FIDELITY-SPEC §5 gives a comparison for."""
+    """The six properties SEAM-FIDELITY-SPEC §5 gives a comparison for.
+
+    ``LEVEL_HISTOGRAM`` is the categorical twin of ``MARGINAL_HISTOGRAM``:
+    its cells are a support column's declared levels where a histogram's
+    are its declared bins, and grouped by another support column it is a
+    two-way count table of two categorical columns.
+    """
 
     MEAN = "mean"
     MARGINAL_HISTOGRAM = "marginalHistogram"
     SUPPORT = "support"
     CORRELATION = "correlation"
     QUANTILE = "quantile"
+    LEVEL_HISTOGRAM = "levelHistogram"
 
 
 class ToleranceKind(str, Enum):
@@ -272,10 +280,11 @@ DISTANCE_MEASURES = ("totalVariation",)
 
 #: Which tolerance kinds each property's comparison can consume. A mean
 #: compares in the value domain (absolute) or against its own reference
-#: (relative); a histogram compares a distance; a support check compares a
-#: count of non-members; a correlation and a quantile compare an absolute
-#: margin -- a correlation because it is already dimensionless, a quantile
-#: because it is compared in the column's units.
+#: (relative); a histogram, over bins or over levels, compares a distance;
+#: a support check compares a count of non-members; a correlation and a
+#: quantile compare an absolute margin -- a correlation because it is
+#: already dimensionless, a quantile because it is compared in the
+#: column's units.
 _TOLERANCE_KINDS: Mapping[PropertyKind, Tuple[ToleranceKind, ...]] = MappingProxyType(
     {
         PropertyKind.MEAN: (ToleranceKind.ABSOLUTE, ToleranceKind.RELATIVE),
@@ -283,12 +292,14 @@ _TOLERANCE_KINDS: Mapping[PropertyKind, Tuple[ToleranceKind, ...]] = MappingProx
         PropertyKind.SUPPORT: (ToleranceKind.COUNT,),
         PropertyKind.CORRELATION: (ToleranceKind.ABSOLUTE,),
         PropertyKind.QUANTILE: (ToleranceKind.ABSOLUTE,),
+        PropertyKind.LEVEL_HISTOGRAM: (ToleranceKind.DISTANCE,),
     }
 )
 
 #: The column kind each property's comparison needs. A support check
-#: compares member lists and needs a ``SUPPORT`` column; everything else
-#: encodes values and needs a ``RANGE``.
+#: compares member lists and a level histogram counts declared levels, so
+#: both need a ``SUPPORT`` column; everything else encodes values and
+#: needs a ``RANGE``.
 _COLUMN_KINDS: Mapping[PropertyKind, ColumnKind] = MappingProxyType(
     {
         PropertyKind.MEAN: ColumnKind.RANGE,
@@ -296,6 +307,7 @@ _COLUMN_KINDS: Mapping[PropertyKind, ColumnKind] = MappingProxyType(
         PropertyKind.SUPPORT: ColumnKind.SUPPORT,
         PropertyKind.CORRELATION: ColumnKind.RANGE,
         PropertyKind.QUANTILE: ColumnKind.RANGE,
+        PropertyKind.LEVEL_HISTOGRAM: ColumnKind.SUPPORT,
     }
 )
 
@@ -503,11 +515,13 @@ class ColumnDeclaration:
     upper: Optional[Fraction] = None
     max_cardinality: Optional[int] = None
     support_source: Optional[str] = None
-    #: The levels the declaration names, for a ``SUPPORT`` column. The
-    #: *check* does not read them -- SEAM-FIDELITY-SPEC §5 compares the
-    #: synthetic support against the **committed** state's support, not
-    #: against a declaration -- but the generator draws from them, and
-    #: carrying them here means one parse serves both readers.
+    #: The levels the declaration names, for a ``SUPPORT`` column. A
+    #: support *check* does not read them -- SEAM-FIDELITY-SPEC §5 compares
+    #: the synthetic support against the **committed** state's support, not
+    #: against a declaration. A level histogram does: the declared levels
+    #: are its cells, as a histogram's declared bins are its cells. The
+    #: generator draws from them too, and carrying them here means one
+    #: parse serves every reader.
     support_values: Tuple[str, ...] = ()
 
     @property
@@ -1096,6 +1110,14 @@ def _parse_property(
             raise FluxError(FLX_5034, f"{subject} needs bins")
         bins = _parse_bins(mapping["bins"], columns[names[0]], grid, subject)
     elif "bins" in mapping:
+        if kind is PropertyKind.LEVEL_HISTOGRAM:
+            # The column's declared support is the cell set; a second
+            # spelling of it here would be two digests of one contract.
+            raise FluxError(
+                FLX_5030,
+                f"{subject}: a levelHistogram counts its column's declared support "
+                "levels and carries no bins",
+            )
         raise FluxError(FLX_5030, f"{subject}: only a marginalHistogram carries bins")
 
     level: Optional[Fraction] = None

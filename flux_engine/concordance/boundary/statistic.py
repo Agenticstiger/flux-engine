@@ -5,9 +5,10 @@
 """The derived statistic ``S`` -- SEAM-FIDELITY-SPEC §4.
 
     **S** (derived statistic): per property the aggregate quantities only
-    -- bucket counts on the declared edges, ``Sx``, ``Sy``, ``Sxy``,
-    ``Sxx``, ``Syy``, the sorted committed support, the quantile witness,
-    ``n``, ``k`` per property and per group.
+    -- bucket counts on the declared edges, level counts on the declared
+    support, ``Sx``, ``Sy``, ``Sxy``, ``Sxx``, ``Syy``, the sorted
+    committed support, the quantile witness, ``n``, ``k`` per property and
+    per group.
 
 The same function runs on both sides. §5 says the verifier "recomputes
 D′'s statistics on the same grid", and the only way two sides can be
@@ -24,9 +25,10 @@ statistic, and nothing else. Diagnostics name a column, a row index and a
 value class, never a value (KERNEL-SPEC §9).
 
 Fail-closed conditions of §5 -- ``k = 0``, a count outside ``records``, a
-group below ``records.min``, a value outside its range, a column absent --
-are raised as ``FLX-5005`` (or ``FLX-5031`` for the absent column) from
-here, so a refusal can never be mistaken for a verdict.
+group below ``records.min``, a value outside its range or its declared
+support, a column absent -- are raised as ``FLX-5005`` (or ``FLX-5031``
+for the absent column) from here, so a refusal can never be mistaken for a
+verdict.
 """
 
 from __future__ import annotations
@@ -34,8 +36,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
+from functools import partial
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypeVar
 
 from flux_engine.concordance.compiler import CompiledFidelity, CompiledProperty
 from flux_engine.concordance.errors import FLX_5031
@@ -67,6 +70,7 @@ __all__ = [
     "compute_property_statistic",
     "compute_statistic",
     "encode_value",
+    "level_cells",
     "require_record_count",
 ]
 
@@ -77,10 +81,12 @@ __all__ = [
 #: hand over exact values.
 Row = Mapping[str, Any]
 
-#: The ungrouped group's key inside a :class:`PropertyStatistic`. An empty
-#: string is not a possible category name after NFC, and using a sentinel
-#: string rather than ``None`` keeps the canonical document's mapping keys
-#: uniformly strings.
+#: The ungrouped group's key inside a :class:`PropertyStatistic`. A string
+#: rather than ``None`` keeps the canonical document's mapping keys
+#: uniformly strings. It is not reserved: the empty string is also a
+#: category a grouped property can hold, as a row value or as a declared
+#: level, so whether a property is grouped is read from its declaration
+#: (``group_by``) and never from this key.
 UNGROUPED = ""
 
 
@@ -160,6 +166,21 @@ def _cell(row: Row, column: ColumnDeclaration, *, row_index: int) -> Any:
     return row[column.name]
 
 
+def level_cells(column: ColumnDeclaration) -> Tuple[str, ...]:
+    """The cells a level histogram counts over *column*, in their one order.
+
+    The column's declared support levels, sorted: NFC-normalised strings
+    ordered by code point, the order "the sorted committed support" uses.
+    Both support spellings resolve to distinct NFC levels where they are
+    read (:func:`flux_engine.concordance.predicate.read_support_levels`),
+    so the cells are distinct. They come from the declaration and never
+    from the data, so the shape of a ``levelCounts`` list is fixed by the
+    contract the way a histogram's bin count is, and a level the state
+    never holds is a cell of count zero rather than an absent one.
+    """
+    return tuple(sorted(column.support_values))
+
+
 def bin_index(units: int, edges: Sequence[int]) -> int:
     """The bin a grid value falls in, given encoded edges.
 
@@ -198,6 +219,9 @@ class GroupStatistic:
     sum_yy: int = 0
     sum_xy: int = 0
     bin_counts: Tuple[int, ...] = ()
+    #: Records per declared level of a level histogram's column, in
+    #: :func:`level_cells` order.
+    level_counts: Tuple[int, ...] = ()
     support: Tuple[str, ...] = ()
     #: Records carried by each member of :attr:`support`, in the same order.
     #: Held in process only -- §4 publishes "the sorted committed support"
@@ -209,6 +233,14 @@ class GroupStatistic:
     quantile_witness: Optional[int] = None
     quantile_below: int = 0
     quantile_at_or_below: int = 0
+
+    def cell_counts(self, kind: PropertyKind) -> Tuple[int, ...]:
+        """The counts a total-variation comparison reads for a *kind* property.
+
+        A histogram's bin counts, or a level histogram's level counts: one
+        count per declared cell, in the cell order both sides share.
+        """
+        return self.level_counts if kind is PropertyKind.LEVEL_HISTOGRAM else self.bin_counts
 
     @property
     def moments(self) -> SecondMoments:
@@ -237,6 +269,8 @@ class GroupStatistic:
             document["Sx"] = str(self.sum_x)
         elif kind is PropertyKind.MARGINAL_HISTOGRAM:
             document["binCounts"] = list(self.bin_counts)
+        elif kind is PropertyKind.LEVEL_HISTOGRAM:
+            document["levelCounts"] = list(self.level_counts)
         elif kind is PropertyKind.SUPPORT:
             document["support"] = list(self.support)
         elif kind is PropertyKind.QUANTILE:
@@ -328,6 +362,14 @@ def _group_keys(
     if group_by is None:
         return [(UNGROUPED, list(range(len(rows))))]
     column = statistic_columns[group_by]
+    # A level histogram is a table of declared cells on both axes: its
+    # groups, like its levels, must be levels the declaration names. The
+    # other grouped properties keep grouping by whatever the rows hold.
+    declared = (
+        frozenset(column.support_values)
+        if compiled.declaration.kind is PropertyKind.LEVEL_HISTOGRAM
+        else None
+    )
     buckets: Dict[str, List[int]] = {}
     for index, row in enumerate(rows):
         cell = _cell(row, column, row_index=index)
@@ -335,33 +377,71 @@ def _group_keys(
             if column.null_policy is NullPolicy.FAIL:
                 raise FluxError(FLX_5005, f"column {group_by!r} row {index}: null is refused")
             continue
-        buckets.setdefault(_category(cell, column, row_index=index), []).append(index)
+        key = _category(cell, column, row_index=index)
+        if declared is not None and key not in declared:
+            raise FluxError(
+                FLX_5005,
+                f"column {group_by!r} row {index}: value outside the declared support",
+            )
+        buckets.setdefault(key, []).append(index)
     return [(key, buckets[key]) for key in sorted(buckets)]
 
 
-def _encoded_column(
+_Read = TypeVar("_Read")
+
+
+def _read_column(
     rows: Sequence[Row],
     indices: Sequence[int],
     column: ColumnDeclaration,
-    grid: Grid,
-) -> Tuple[List[int], List[int]]:
-    """Encode one column over *indices*; return the values and their rows.
+    read: Callable[..., _Read],
+) -> List[_Read]:
+    """Read one column over *indices* with *read*; return what it read, in row order.
 
     A null under ``exclude`` drops the record from this property; a null
     under ``fail`` refuses the check. Both are decided by the column's own
-    declaration, never by what would make the comparison pass.
+    declaration, never by what would make the comparison pass. *read* is
+    handed each non-null cell and its ``row_index`` in row order, so the
+    first record that refuses is the one a refusal names, whichever rule it
+    breaks.
     """
-    values: List[int] = []
-    kept: List[int] = []
+    values: List[_Read] = []
     for index in indices:
         cell = _cell(rows[index], column, row_index=index)
         if cell is None:
             if column.null_policy is NullPolicy.FAIL:
                 raise FluxError(FLX_5005, f"column {column.name!r} row {index}: null is refused")
             continue
-        values.append(encode_value(cell, column, grid, row_index=index))
-        kept.append(index)
-    return values, kept
+        values.append(read(cell, row_index=index))
+    return values
+
+
+def _level_histogram_group(
+    rows: Sequence[Row],
+    indices: Sequence[int],
+    key: str,
+    column: ColumnDeclaration,
+) -> GroupStatistic:
+    """One group of a level histogram: records per declared level of *column*."""
+    slots = {level: slot for slot, level in enumerate(level_cells(column))}
+
+    def slot_of(cell: Any, *, row_index: int) -> int:
+        slot = slots.get(_category(cell, column, row_index=row_index))
+        if slot is None:
+            # A level the declaration does not name has no cell, as a value
+            # outside the declared range has no bin: refused, never dropped
+            # and never counted into a neighbour.
+            raise FluxError(
+                FLX_5005,
+                f"column {column.name!r} row {row_index}: value outside the declared support",
+            )
+        return slot
+
+    found = _read_column(rows, indices, column, slot_of)
+    level_counts = [0] * len(slots)
+    for slot in found:
+        level_counts[slot] += 1
+    return GroupStatistic(group=key, k=len(found), level_counts=tuple(level_counts))
 
 
 def _group_statistic(
@@ -378,18 +458,10 @@ def _group_statistic(
     if kind is PropertyKind.SUPPORT:
         column = block_columns[declaration.columns[0]]
         members: Dict[str, int] = {}
-        count = 0
-        for index in indices:
-            cell = _cell(rows[index], column, row_index=index)
-            if cell is None:
-                if column.null_policy is NullPolicy.FAIL:
-                    raise FluxError(
-                        FLX_5005, f"column {column.name!r} row {index}: null is refused"
-                    )
-                continue
-            category = _category(cell, column, row_index=index)
+        categories = _read_column(rows, indices, column, partial(_category, column=column))
+        for category in categories:
             members[category] = members.get(category, 0) + 1
-            count += 1
+        count = len(categories)
         support = tuple(sorted(members))
         maximum = column.max_cardinality
         if maximum is not None and len(support) > maximum:
@@ -404,6 +476,9 @@ def _group_statistic(
             support=support,
             support_counts=tuple(members[value] for value in support),
         )
+
+    if kind is PropertyKind.LEVEL_HISTOGRAM:
+        return _level_histogram_group(rows, indices, key, block_columns[declaration.columns[0]])
 
     if kind is PropertyKind.CORRELATION:
         first = block_columns[declaration.columns[0]]
@@ -440,7 +515,7 @@ def _group_statistic(
         )
 
     column = block_columns[declaration.columns[0]]
-    values, _ = _encoded_column(rows, indices, column, grid)
+    values = _read_column(rows, indices, column, partial(encode_value, column=column, grid=grid))
 
     if kind is PropertyKind.MEAN:
         return GroupStatistic(group=key, k=len(values), sum_x=sum(values))
@@ -505,6 +580,7 @@ def compute_property_statistic(
     comparison* declines, and a caller reading one refusal should not have
     to guess whether the rest would also have refused.
     """
+    grouped = compiled.declaration.group_by is not None
     groups: List[GroupStatistic] = []
     for ordinal, (key, indices) in enumerate(_group_keys(rows, compiled, block.columns)):
         group = _group_statistic(rows, indices, key, compiled, block.columns, block.grid)
@@ -514,11 +590,14 @@ def compute_property_statistic(
         # KERNEL-SPEC §9 keeps values out of diagnostics. This refusal in
         # particular fires only for groups below ``records.min``, which are
         # exactly the rare, re-identifying ones, and it travels all the way
-        # out to the operator's terminal and the ``--json`` envelope.
-        where = "" if key == UNGROUPED else f" group #{ordinal}"
+        # out to the operator's terminal and the ``--json`` envelope. The
+        # floor applies to every group of a grouped property, the group of
+        # an empty-string category included: it is decided by the
+        # declaration, never by the key (see UNGROUPED).
+        where = f" group #{ordinal}" if grouped else ""
         require_sample(
             group.k,
-            minimum=block.records.minimum if key != UNGROUPED else 1,
+            minimum=block.records.minimum if grouped else 1,
             subject=f"{subject}: {compiled.property_id}{where}",
         )
         groups.append(group)

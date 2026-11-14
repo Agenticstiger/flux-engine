@@ -66,6 +66,7 @@ from flux_engine.core.fixedpoint import (
     DEFAULT_FIELD_CAPACITY_BITS,
     FLX_5001,
     Grid,
+    Interval,
     effective_tolerance,
     epsilon_correlation,
     epsilon_marginal_histogram,
@@ -263,11 +264,14 @@ def strip_excluded(entry: Mapping[str, Any]) -> Dict[str, Any]:
 #: Which of :func:`~flux_engine.core.fixedpoint.magnitude_bits`'s named
 #: intermediates each comparison actually forms (SEAM-FIDELITY-SPEC §5).
 #: A support check forms none: it compares sorted member lists and counts
-#: non-members, and encodes no value.
+#: non-members, and encodes no value. A level histogram encodes no value
+#: either, so of a histogram's two it forms only the cross-multiplied
+#: total-variation inequality.
 _FORMED_INTERMEDIATES: Mapping[PropertyKind, Tuple[str, ...]] = MappingProxyType(
     {
         PropertyKind.MEAN: ("value", "sum", "meanComparison"),
         PropertyKind.MARGINAL_HISTOGRAM: ("value", "totalVariationComparison"),
+        PropertyKind.LEVEL_HISTOGRAM: ("totalVariationComparison",),
         PropertyKind.SUPPORT: (),
         PropertyKind.QUANTILE: ("value",),
         PropertyKind.CORRELATION: (
@@ -335,6 +339,19 @@ def property_magnitudes(
     formed = _FORMED_INTERMEDIATES[declaration.kind]
     if not formed:
         return {}
+    if declaration.kind is PropertyKind.LEVEL_HISTOGRAM:
+        # A support column has no range to bound an encoded value by, and
+        # the one intermediate a level histogram forms, ``2*d*k**2``, does
+        # not read one: the zero interval stands for "no value is
+        # encoded", so the bound comes from the record ceiling and the
+        # margin alone, through the same formula a histogram's does.
+        bounds = magnitude_bits(
+            grid=block.grid,
+            value_range=Interval(Fraction(0), Fraction(0)),
+            max_records=block.records.maximum,
+            tolerance=margin,
+        )
+        return {name: bounds[name] for name in formed}
     interval = block.column(declaration.columns[0]).interval
     for extra in declaration.columns[1:]:
         other = block.column(extra).interval
@@ -352,7 +369,11 @@ def property_magnitudes(
 def _epsilon_of(block: FidelityBlock, declaration: PropertyDeclaration) -> Fraction:
     grid: Grid = block.grid
     kind = declaration.kind
-    if kind is PropertyKind.SUPPORT:
+    if kind is PropertyKind.SUPPORT or kind is PropertyKind.LEVEL_HISTOGRAM:
+        # Neither encodes a value: a support check compares member lists,
+        # a level histogram counts records per declared level. A level is
+        # read as the string it is, so the grid moves no record across a
+        # cell and the bound is zero for the reason a support check's is.
         return epsilon_support()
     if kind is PropertyKind.MARGINAL_HISTOGRAM:
         return epsilon_marginal_histogram(grid, declaration.bins)

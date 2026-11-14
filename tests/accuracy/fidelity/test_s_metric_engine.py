@@ -67,6 +67,7 @@ from tests.accuracy.fidelity.contracts import (  # noqa: E402
     contract_document,
     draw_rows,
 )
+from tests.accuracy.fidelity.contracts import expected_total_variation as _expected_tv  # noqa: E402
 from tests.accuracy.fidelity.s_metrics import (  # noqa: E402
     contingency_similarity,
     ks_complement,
@@ -99,13 +100,6 @@ def _levels(statistic: Any, grouped_id: str) -> Dict[str, str]:
     rendered = {name: value.quantize(Decimal("1e-20")) for name, value in rendered.items()}
     rendered[names[-1]] = Decimal(1) - sum((rendered[name] for name in names[:-1]), Decimal(0))
     return {name: str(value) for name, value in rendered.items()}
-
-
-def _expected_tv(frequencies: Sequence[Fraction], *inverse_sizes: float) -> float:
-    spread = sum(inverse_sizes)
-    return 0.5 * sum(
-        math.sqrt(2 / math.pi) * math.sqrt(float(p) * (1 - float(p)) * spread) for p in frequencies
-    )
 
 
 def _loop(

@@ -128,8 +128,9 @@ FLX_5005 = register(
     "A fidelity comparison fails closed rather than reporting agreement "
     "over a sample it cannot stand behind: an empty sample, a record count "
     "outside the declared records range, a group below records.min, a "
-    "variance below the declared floor, or bin counts that do not account "
-    "for every record.",
+    "value outside its column's declared range or support, a variance "
+    "below the declared floor, or bin counts that do not account for every "
+    "record.",
 )
 
 #: KERNEL-SPEC §12's default grid.

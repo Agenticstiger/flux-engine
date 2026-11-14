@@ -23,7 +23,8 @@ KSComplement            ``1 - max_e |F_a(e) - F_b(e)|`` over the declared
 CorrelationSimilarity   ``1 - |r_a - r_b| / 2``, Pearson's ``r`` from
                         ``k, Sx, Sy, Sxx, Syy, Sxy``
 ContingencySimilarity   ``1 - TVD`` over the (group, bin) table of a
-                        grouped histogram property
+                        grouped histogram property, or the (group, level)
+                        table of a grouped level histogram
 ======================  ==================================================
 
 KSComplement is the one that is not equal to its record-level definition:
@@ -151,14 +152,19 @@ def correlation_similarity(
 
 
 def contingency_similarity(a: PropertyStatistic, b: PropertyStatistic) -> Fraction:
-    """SDMetrics ContingencySimilarity of (group, bin), from a grouped histogram property.
+    """SDMetrics ContingencySimilarity of (group, cell), from a grouped histogram property.
 
-    Each side's joint frequency of ``(group g, bin i)`` is ``c_{g,i} / sum_g k_g``.
-    A group present on one side only contributes its whole mass, as a group
-    absent from a contingency table does.
+    The cells are a ``marginalHistogram``'s bins or a ``levelHistogram``'s
+    declared levels, so the second case is the contingency table of two
+    categorical columns. Each side's joint frequency of ``(group g, cell i)``
+    is ``c_{g,i} / sum_g k_g``. A group present on one side only contributes
+    its whole mass, as a group absent from a contingency table does.
     """
-    _require(a, PropertyKind.MARGINAL_HISTOGRAM)
-    _require(b, PropertyKind.MARGINAL_HISTOGRAM)
+    if a.kind is PropertyKind.LEVEL_HISTOGRAM:
+        _require(b, PropertyKind.LEVEL_HISTOGRAM)
+    else:
+        _require(a, PropertyKind.MARGINAL_HISTOGRAM)
+        _require(b, PropertyKind.MARGINAL_HISTOGRAM)
 
     def joint(statistic: PropertyStatistic) -> Dict[Tuple[str, int], Fraction]:
         total = sum(group.k for group in statistic.groups)
@@ -167,7 +173,7 @@ def contingency_similarity(a: PropertyStatistic, b: PropertyStatistic) -> Fracti
         return {
             (group.group, index): Fraction(count, total)
             for group in statistic.groups
-            for index, count in enumerate(group.bin_counts)
+            for index, count in enumerate(group.cell_counts(statistic.kind))
         }
 
     left, right = joint(a), joint(b)

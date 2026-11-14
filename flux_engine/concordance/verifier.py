@@ -9,7 +9,7 @@
     digest = ``outputDigest``). Evaluates each property in the integer
     cross-multiplied form [...]. Fail-closed conditions: ``k = 0``, count
     outside ``records``, group below ``records.min``, a value outside its
-    range, a column absent, ``ε ≥ τ``. **No proof is generated in v0.1**;
+    range or its declared support, a column absent, ``ε ≥ τ``. **No proof is generated in v0.1**;
     the ``ProofSystem`` port has one implementation, ``none``, and the
     record says so.
 
@@ -275,12 +275,16 @@ def _group_outcome(
             tolerance=compiled.margin,
         )
 
-    if kind is PropertyKind.MARGINAL_HISTOGRAM:
+    if kind in (PropertyKind.MARGINAL_HISTOGRAM, PropertyKind.LEVEL_HISTOGRAM):
+        # One inequality over the declared cells: a histogram's bins or a
+        # level histogram's levels (``level_cells``), which both sides
+        # count in the same order. A value with no cell was refused while
+        # either side was formed.
         assert compiled.margin is not None
         return total_variation_within(
-            counts_a=synthetic.bin_counts,
+            counts_a=synthetic.cell_counts(kind),
             count_a=synthetic.k,
-            counts_b=committed.bin_counts,
+            counts_b=committed.cell_counts(kind),
             count_b=committed.k,
             tolerance=compiled.margin,
         )

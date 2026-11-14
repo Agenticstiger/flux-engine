@@ -20,6 +20,7 @@ from flux_engine.calibrate.structure import (
     declarations,
     mutual_information,
     pair_table_from_groups,
+    pair_table_from_level_groups,
     suggest_tree,
 )
 from flux_engine.core.errors import FluxError
@@ -350,3 +351,73 @@ def test_pair_table_from_groups_refuses_ragged_and_empty() -> None:
     ]
     refusal(lambda: pair_table_from_groups("region", "amount", ragged))
     refusal(lambda: pair_table_from_groups("region", "amount", []))
+
+
+# --- pair_table_from_level_groups ----------------------------------------
+
+
+def test_pair_table_from_level_groups_names_the_counts_in_s_order() -> None:
+    # S counts a support column's declared levels sorted, whatever order they
+    # were declared in, so the declared order here does not matter either.
+    groups = [
+        SimpleNamespace(group="store", level_counts=(6, 3, 1)),
+        SimpleNamespace(group="web", level_counts=[1, 3, 8]),
+    ]
+    table = pair_table_from_level_groups("channel", "plan", ["pro", "basic", "plus"], groups)
+    assert table.columns == ("channel", "plan")
+    assert dict(table.counts) == {
+        ("store", "basic"): 6,
+        ("store", "plus"): 3,
+        ("store", "pro"): 1,
+        ("web", "basic"): 1,
+        ("web", "plus"): 3,
+        ("web", "pro"): 8,
+    }
+    assert table.margin("plan") == {"basic": 7, "plus": 6, "pro": 9}
+    assert table.margin("channel") == {"store": 10, "web": 12}
+
+
+def test_pair_table_from_level_groups_keeps_a_zero_cell() -> None:
+    groups = [SimpleNamespace(group="store", level_counts=(6, 3, 0))]
+    table = pair_table_from_level_groups("channel", "plan", ("basic", "plus", "pro"), groups)
+    assert table.counts[("store", "pro")] == 0
+    assert table.total == 9
+
+
+def test_pair_table_from_level_groups_normalises_names() -> None:
+    decomposed, composed = "e\u0301", "\u00e9"
+    groups = [SimpleNamespace(group=decomposed, level_counts=(2, 1))]
+    table = pair_table_from_level_groups("channel", "plan", [decomposed, "a"], groups)
+    assert dict(table.counts) == {(composed, "a"): 2, (composed, composed): 1}
+
+
+@pytest.mark.parametrize(
+    ("levels", "groups"),
+    [
+        ([], [SimpleNamespace(group="store", level_counts=())]),
+        (["basic", 3], [SimpleNamespace(group="store", level_counts=(1, 1))]),
+        (["e\u0301", "\u00e9"], [SimpleNamespace(group="store", level_counts=(1, 1))]),
+        (["basic"], [SimpleNamespace(group=1, level_counts=(1,))]),
+        (["basic"], [SimpleNamespace(group="store")]),
+        (["basic", "plus"], [SimpleNamespace(group="store", level_counts=(1, 2, 3))]),
+        (
+            ["basic"],
+            [
+                SimpleNamespace(group="store", level_counts=(1,)),
+                SimpleNamespace(group="store", level_counts=(2,)),
+            ],
+        ),
+        (
+            ["basic"],
+            [
+                SimpleNamespace(group="e\u0301", level_counts=(1,)),
+                SimpleNamespace(group="\u00e9", level_counts=(2,)),
+            ],
+        ),
+        (["basic"], []),
+        (["basic"], [SimpleNamespace(group="store", level_counts=(-1,))]),
+        (["basic"], [SimpleNamespace(group="store", level_counts=(0,))]),
+    ],
+)
+def test_pair_table_from_level_groups_refuses(levels, groups) -> None:
+    refusal(lambda: pair_table_from_level_groups("channel", "plan", levels, groups))

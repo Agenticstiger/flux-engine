@@ -265,10 +265,59 @@ assert columns["amount"]["given"] == "market"
 assert columns["amount"]["binWeightsGiven"]["IE"] == ["0", "0", "10", "30", "60"]
 ```
 
+## Link two categorical columns
+
 A categorical column can be drawn given another categorical with `levelWeightsGiven`, one mapping of level to weight per level of the given column, in place of `levels`. Columns linked this way form a chain or a tree, and a cycle is refused.
+
+A grouped `levelHistogram` checks that link, as a grouped `marginalHistogram` checks a histogram's. It counts a `support` column's declared levels per level of its `groupBy` column, and the gate compares each group with your slice's. Its counts are the `levelWeightsGiven` table itself. For a `plan` column drawn given `market`, in a contract that has a `plan` column, the declaration and its check look like this:
+
+```yaml
+columns:
+  plan:
+    support:
+      values: ["basic", "plus", "pro"]
+    maxCardinality: 4
+    null: fail
+    given: market
+    levelWeightsGiven:
+      DE: { basic: "60", plus: "30", pro: "10" }
+      FR: { basic: "40", plus: "40", pro: "20" }
+      GB: { basic: "20", plus: "50", pro: "30" }
+      IE: { basic: "10", plus: "30", pro: "60" }
+properties:
+  - property: levelHistogram
+    column: plan
+    groupBy: market
+    tolerance: { type: distance, measure: totalVariation, max: "0.1" }
+```
+
+`pair_table_from_level_groups` reads a grouped `levelHistogram`'s counts as a two-way table, so `suggest_tree` and `declarations` work from the committed statistic. Each group carries one count per declared level, sorted, as the committed statistic keeps them, and the declared levels can be passed in any order.
+
+```python
+from dataclasses import dataclass
+from typing import List
+
+from flux_engine.calibrate.structure import declarations, pair_table_from_level_groups, suggest_tree
+
+
+@dataclass
+class LevelGroup:
+    group: str
+    level_counts: List[int]
+
+
+plans = {"DE": [60, 30, 10], "FR": [40, 40, 20], "GB": [20, 50, 30], "IE": [10, 30, 60]}
+groups = [LevelGroup(market, row) for market, row in plans.items()]
+plan_table = pair_table_from_level_groups("market", "plan", ["pro", "basic", "plus"], groups)
+plan_edges = suggest_tree([plan_table], categorical=["market", "plan"])
+plan_columns = declarations(plan_edges, [plan_table], categorical=["market", "plan"])
+assert [(edge.parent, edge.child) for edge in plan_edges] == [("market", "plan")]
+assert plan_columns["plan"]["levelWeightsGiven"]["IE"] == {"basic": "10", "plus": "30", "pro": "60"}
+```
 
 ## What the check covers
 
 - A histogram column drawn given a categorical one is checked end to end: a grouped `marginalHistogram` over the same bins compares the generated (market, bin) counts with your slice's.
-- A categorical column drawn given another is not. Its `levelWeightsGiven` table comes from your own cross-tab, and the committed statistic has no two-way count property for two categorical columns yet, so the gate checks each column's own levels but not the link between them.
+- A categorical column drawn given another is checked the same way: a grouped `levelHistogram` compares the generated (market, plan) counts with your slice's. A value outside a column's declared support is refused, not counted.
+- A column drawn given nothing is checked by an ungrouped `levelHistogram` over it. Two columns that no property counts together are not checked.
 - A pass says the generated rows sit inside the declared margins against this slice. It says nothing about rows the slice does not hold.

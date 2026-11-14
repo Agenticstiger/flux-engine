@@ -45,6 +45,7 @@ __all__ = [
     "contract_document",
     "decide_independently",
     "draw_rows",
+    "expected_total_variation",
     "population_truth",
 ]
 
@@ -272,6 +273,21 @@ class Population:
 
 
 REFERENCE = Population()
+
+
+def expected_total_variation(frequencies: Sequence[Fraction], *inverse_sizes: float) -> float:
+    """The expected total variation a sample of the stated sizes shows by noise alone.
+
+    ``E = 1/2 * sum_i sqrt(2/pi) * sqrt(p_i * (1 - p_i) * sum(1/n))``, the
+    mean absolute deviation of each cell's share under the normal
+    approximation. One inverse size gives the one-sample distance of a draw
+    from the table itself, two give the two-sample distance between two
+    draws.
+    """
+    spread = sum(inverse_sizes)
+    return 0.5 * sum(
+        math.sqrt(2 / math.pi) * math.sqrt(float(p) * (1 - float(p)) * spread) for p in frequencies
+    )
 
 
 def draw_rows(population: Population, n: int, seed: int) -> List[Dict[str, Any]]:

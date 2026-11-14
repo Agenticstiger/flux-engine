@@ -21,10 +21,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ## Unreleased
 
-A FLUID `INTEGER` column takes a drawn count, and a fidelity column can be
-drawn given another. No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new
-row, and `KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep their
-values.
+A FLUID `INTEGER` column takes a drawn count, a fidelity column can be drawn
+given another, and the fidelity check counts two categorical columns together.
+No pinned digest moved: `GOLDEN-CHANGELOG.md` has no new row, and
+`KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep their values.
 
 ### Added
 
@@ -50,10 +50,19 @@ values.
   entries.
 - A how-to, "Draw a column given another", declares `given` from a grouped
   histogram's counts and shows the fidelity gate catch the link missing.
-- What the fidelity check covers: a histogram drawn given a categorical is
-  checked by a grouped `marginalHistogram`. A link between two categorical
-  columns comes from the owner's own cross-tab, and S has no two-way count
-  property for two categorical columns yet, so the check does not test that link.
+- A `levelHistogram` fidelity property (SEAM-FIDELITY-SPEC §2, §4 and §5)
+  counts a support column's records per declared level. Grouped by a second
+  support column, it commits a two-way count table of two categorical columns
+  into S, and the check compares the synthetic table with it group by group,
+  in the total-variation form. Its cells are the declared levels, so a value
+  outside either column's declared support is refused with `FLX-5005`, and a
+  group below `records.min` is refused as every group is.
+  `pair_table_from_level_groups` reads its counts back as a two-way table for
+  `suggest_tree` and `declarations`. A bundle that declares no
+  `levelHistogram` keeps its S, its digests and its rows.
+- What the fidelity check covers: every declared link. A histogram drawn given
+  a categorical is checked by a grouped `marginalHistogram`, and a categorical
+  drawn given a categorical by a grouped `levelHistogram`.
 
 ### Changed
 
@@ -69,6 +78,12 @@ values.
 
 ### Fixed
 
+- A group whose category is the empty string was held to the ungrouped floor
+  of one record rather than to `records.min`, in every grouped fidelity
+  property, because the ungrouped group's key is the empty string too. A
+  one-record group could reach S. Whether a property is grouped is now read
+  from its `groupBy`, so that group is refused below `records.min` with
+  `FLX-5005` and named by its ordinal, as every group is.
 - Two kinds of fidelity weights that sum to one failed on every draw with
   `FLX-5021` ("categorical weight ... is negative"): a histogram whose
   `binWeights` render to a little more than one in total and whose last bin
