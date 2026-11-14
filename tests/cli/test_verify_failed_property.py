@@ -215,6 +215,38 @@ def test_a_refused_property_is_named_as_refused_with_its_refusal(
     ]
 
 
+@pytest.mark.parametrize(
+    ("corrupt", "expected"),
+    [
+        (lambda lines: [*lines, "this line is not JSON"], "is not JSON"),
+        (lambda lines: [*lines[:-1], "[1]"], "FLX-8001"),
+    ],
+    ids=["a line that is not JSON", "a row of the wrong width"],
+)
+def test_a_leg_that_fails_before_comparing_names_no_property(
+    corrupt: Any, expected: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The emitted rows cannot be read, so no property is compared: the sentence, no property line."""
+    applied = _applied(tmp_path, [UNGROUPED_MEAN, SUPPORT])
+    emit = RunLayout.for_state_dir(applied["state_dir"], applied["run_id"]).emit_path(EXPOSE_ID)
+    lines = emit.read_text(encoding="utf-8").splitlines()
+    emit.write_text("".join(line + "\n" for line in corrupt(lines)), encoding="utf-8")
+
+    exit_code, stdout, stderr = _verify(applied, applied["rows"], tmp_path, capsys)
+
+    assert exit_code == 1
+    leg = next(line for line in stdout.splitlines() if line.startswith(f"  fidelity {EXPOSE_ID}"))
+    assert leg.startswith(f"  fidelity {EXPOSE_ID}: failed -- ") and expected in leg
+    assert "    property " not in stdout
+    assert f"{EXPOSE_ID}: fidelity check failed" in stderr.splitlines()
+    assert "  property " not in stderr
+
+    _, stdout, _ = _verify(applied, applied["rows"], tmp_path, capsys, "--json")
+    outcome, _ = _fidelity_json(stdout)
+    assert (outcome["status"], outcome["refusals"], outcome["outside"]) == ("failed", [], [])
+    assert expected in outcome["detail"]
+
+
 def test_the_update_golden_refusal_names_the_property_too(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
