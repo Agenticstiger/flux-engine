@@ -8,7 +8,7 @@ editLink: false
 
 # `fluxsim plan`
 
-Execute the whole pipeline once, in memory, and write down what it saw: inputDigest, the seed-tree paths it materialised, the per-emit seam digests. Writes plan.json and seed-paths.ndjson under the run directory.
+Execute the whole pipeline once, in memory, and write down what it saw: inputDigest, the seed-tree paths it materialised, the per-emit seam digests, and each declared fidelity block as it compiled, every epsilon included. Writes plan.json and seed-paths.ndjson under the run directory.
 
 ## Synopsis
 
