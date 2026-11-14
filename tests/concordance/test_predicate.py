@@ -436,6 +436,74 @@ def test_a_float_range_bound_is_refused(document, expose) -> None:
     _refuses({**raw, "columns": columns}, expose, "FLX-5030")
 
 
+#: Written out without an exponent, a number may have this many digits at
+#: most, not counting a leading ``0.``: jackson-core's default longest number.
+_MOST_DIGITS = 1000
+
+
+def _with_bound(document: Mapping[str, Any], column: str, bound: str, value: Any) -> Dict[str, Any]:
+    raw = _block(document)
+    raw["columns"][column]["range"][bound] = value
+    return raw
+
+
+def _too_long(bound: str, needed: int) -> str:
+    return (
+        f"fidelity.columns.amount.range.{bound}: written out, this number needs {needed} "
+        f"digits, and a number in a fidelity block may need at most {_MOST_DIGITS}"
+    )
+
+
+@pytest.mark.timeout(10)
+@pytest.mark.parametrize(
+    ("bound", "value", "detail"),
+    [
+        pytest.param("max", "1E+99999999", _too_long("max", 10**8), id="an-exponent-of-1e8"),
+        pytest.param("min", "1E-99999999", _too_long("min", 10**8 - 1), id="a-negative-exponent"),
+        pytest.param("max", "1" * 1001, _too_long("max", 1001), id="one-digit-too-many"),
+        pytest.param("max", "0." + "1" * 1001, _too_long("max", 1001), id="one-decimal-too-many"),
+        pytest.param("max", "1" * 500 + "." + "1" * 501, _too_long("max", 1001), id="mixed"),
+        pytest.param("max", "1E+1000", _too_long("max", 1001), id="one-exponent-step-too-many"),
+        pytest.param("max", Decimal("1E+99999999"), _too_long("max", 10**8), id="a-decimal-object"),
+        pytest.param(
+            "max",
+            Decimal("NaN"),
+            "fidelity.columns.amount.range.max: a non-finite decimal has no value",
+            id="a-non-finite-decimal-object",
+        ),
+    ],
+)
+def test_a_number_too_long_to_form_is_refused_before_it_is_formed(
+    document, expose, bound: str, value: Any, detail: str
+) -> None:
+    """A short spelling can name a huge exact value: ``1E+99999999`` has a
+    hundred million digits, and forming it as a ``Fraction`` took minutes
+    before any rule could refuse it. It is refused at once, by its length,
+    whether it arrives as a string or as a ``Decimal``."""
+    error = _refuses(_with_bound(document, "amount", bound, value), expose, "FLX-5030")
+    assert error.detail == detail
+
+
+@pytest.mark.parametrize(
+    ("bound", "value"),
+    [
+        ("max", "1" * _MOST_DIGITS),
+        ("max", f"1E+{_MOST_DIGITS - 1}"),
+        ("max", "0." + "1" * _MOST_DIGITS),
+        ("min", "0E+99999999"),
+    ],
+)
+def test_a_number_of_at_most_the_most_digits_still_parses(
+    document, expose, bound: str, value: str
+) -> None:
+    """A fraction counts the digits after its point once, and zero is one
+    digit whatever its exponent: both are what the number writes out."""
+    interval = (
+        _parse(_with_bound(document, "attempts", bound, value), expose).column("attempts").interval
+    )
+    assert (interval.lo if bound == "min" else interval.hi) == Fraction(Decimal(value))
+
+
 def test_an_integer_bound_is_read_as_its_exact_decimal(document, expose) -> None:
     raw = _block(document)
     columns = dict(raw["columns"])
@@ -603,6 +671,16 @@ def test_a_duration_longer_than_the_decimal_context_is_still_exact(digits) -> No
     """
     quantity = int("9" * digits)
     assert parse_duration_ms(f"P{quantity}D") == quantity * 24 * 60 * 60 * 1000
+
+
+def test_the_longest_duration_a_block_may_declare_still_prints() -> None:
+    """A ``maxStateAge`` quantity as long as a number may be, in its largest
+    unit, is 1009 digits of milliseconds: inside CPython's 4300-digit limit
+    on printing an ``int``, which the gate's messages would otherwise trip."""
+    assert len(str(parse_duration_ms("P" + "9" * _MOST_DIGITS + "W"))) == _MOST_DIGITS + 9
+    with pytest.raises(FluxError) as caught:
+        parse_duration_ms("P" + "9" * (_MOST_DIGITS + 1) + "W")
+    assert caught.value.code.code == "FLX-5030"
 
 
 @pytest.mark.parametrize("seconds", ["0.5", "0.0005", "0.1", "0.001"])

@@ -94,7 +94,9 @@ schema; every key of `extensions[...].emits` is an `exposeId` the Simulation act
 increasing and partition the declared range; a `levelHistogram` names a `support` column and carries no `bins`;
 a `correlation` property declares two columns and a `minVariance`;
 every property's parameters are present (a contract missing any of them is refused before any statistic is
-formed). Numbers are strings (exact decimals), never floats.
+formed). Numbers are strings (exact decimals), never floats. Written out without an exponent, a number has at
+most 1000 digits, not counting a leading `0.`: `"1E+99999999"` names a number of a hundred million digits and
+is refused (`FLX-5030`) by its length, before its value is formed.
 
 **`columns.<name>` is one schema, read by two consumers.** `range`, `support`, `maxCardinality` and `null` are
 read by the check (§5); `bins`, `binWeights`, `binWeightsGiven`, `family`, `given`, `identifierLength`,

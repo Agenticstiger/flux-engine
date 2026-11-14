@@ -93,9 +93,10 @@ FLX_5030: ErrorCode = register(
     "the fidelity block is malformed",
     "The block's shape does not match SEAM-FIDELITY-SPEC §2: a required "
     "section is missing, a section is not a mapping, a value has the wrong "
-    "class, or a closed set (a property name, a tolerance type, a null "
-    "policy, a failure action) was given a member it does not have. The "
-    "block is refused before any statistic is formed.",
+    "class, a number needs more than 1000 digits written out, or a closed "
+    "set (a property name, a tolerance type, a null policy, a failure "
+    "action) was given a member it does not have. The block is refused "
+    "before any statistic is formed.",
 )
 
 FLX_5031: ErrorCode = register(

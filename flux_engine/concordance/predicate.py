@@ -343,6 +343,21 @@ def _require_int(value: Any, subject: str, *, minimum: int = 0) -> int:
     return value
 
 
+#: The most digits a number in a fidelity block may have, written out
+#: without an exponent and not counting a leading ``0.``. Its exact value
+#: becomes a ``Fraction``, which spells ``10**exponent`` out in full, so the
+#: twelve characters ``"1E+99999999"`` took minutes to read before any rule
+#: could refuse them. 1000 is jackson-core's default longest number
+#: (``StreamReadConstraints``), its bound for the same reason. It also keeps
+#: what an accepted number becomes, such as a ``maxStateAge`` in
+#: milliseconds or a tolerance's denominator, inside CPython's 4300-digit
+#: limit on printing an ``int`` (``sys.int_info.default_max_str_digits``,
+#: CVE-2020-10735), which a refusal message would otherwise trip over. A
+#: block whose numbers all have at most 1000 digits reads exactly as it did
+#: without the bound.
+_MOST_NUMBER_DIGITS = 1000
+
+
 def _decimal_of(value: Any, subject: str) -> Optional[Decimal]:
     """Read *value* as an exact decimal, or return ``None`` if it is not one.
 
@@ -350,7 +365,9 @@ def _decimal_of(value: Any, subject: str) -> Optional[Decimal]:
     is refused outright rather than converted, because the conversion is
     exactly the platform-dependent step the grid exists to remove. An
     ``int`` is accepted -- YAML spells a whole number without quotes and
-    an integer has one exact decimal reading.
+    an integer has one exact decimal reading. A decimal that needs more
+    than :data:`_MOST_NUMBER_DIGITS` digits written out is refused by its
+    length, before its value is formed.
     """
     if isinstance(value, bool):
         raise FluxError(FLX_5030, f"{subject}: a bool is not a number")
@@ -359,16 +376,31 @@ def _decimal_of(value: Any, subject: str) -> Optional[Decimal]:
     if isinstance(value, int):
         return Decimal(value)
     if isinstance(value, Decimal):
-        return value
-    if isinstance(value, str):
+        parsed = value
+    elif isinstance(value, str):
         try:
             parsed = Decimal(value)
         except InvalidOperation:
             return None
-        if not parsed.is_finite():
-            raise FluxError(FLX_5030, f"{subject}: a non-finite decimal has no value")
-        return parsed
-    raise FluxError(FLX_5030, f"{subject}: value class {type(value).__name__!r}")
+    else:
+        raise FluxError(FLX_5030, f"{subject}: value class {type(value).__name__!r}")
+    if not parsed.is_finite():
+        raise FluxError(FLX_5030, f"{subject}: a non-finite decimal has no value")
+    digits = len(parsed.as_tuple().digits)
+    exponent = parsed.adjusted() - digits + 1
+    if not parsed:
+        needed = 1  # zero, however its exponent is spelled
+    elif exponent >= 0:
+        needed = digits + exponent
+    else:
+        needed = max(digits, -exponent)
+    if needed > _MOST_NUMBER_DIGITS:
+        raise FluxError(
+            FLX_5030,
+            f"{subject}: written out, this number needs {needed} digits, and a number "
+            f"in a fidelity block may need at most {_MOST_NUMBER_DIGITS}",
+        )
+    return parsed
 
 
 def _require_decimal(value: Any, subject: str) -> Decimal:

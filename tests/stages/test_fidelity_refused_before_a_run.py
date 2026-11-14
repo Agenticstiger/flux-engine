@@ -216,3 +216,33 @@ def test_a_margin_the_block_cannot_meet_is_refused_at_plan_not_at_validate(
     assert not result.success
     assert result.error_code == code
     assert result.stderr == str(expected)
+
+
+@pytest.mark.timeout(60)
+def test_a_number_too_long_to_form_is_refused_at_once_by_validate_and_plan(
+    tmp_path: Path,
+) -> None:
+    """``1E+99999999`` is twelve characters for a hundred-million-digit number.
+
+    Forming it exactly took minutes, so a range bound spelled that way
+    stalled ``validate`` and ``plan``, and ``verify`` and ``ship`` after them.
+    All four read the block with one parser, and it refuses the number by
+    its length before forming it.
+    """
+    bundle = _bundle(tmp_path, (MEAN,))
+    simulation = bundle / "simulation.flux.yml"
+    declared = 'range: { min: "1", max: "10000" }'
+    text = simulation.read_text()
+    assert text.count(declared) == 1, "the fixture's amount range moved"
+    simulation.write_text(text.replace(declared, 'range: { min: "1", max: "1E+99999999" }'))
+    expected = refusal_verify_gives(bundle)
+    assert expected.code.code == "FLX-5030"
+    assert "needs 100000000 digits" in str(expected)
+
+    validated = validate(bundle)
+    planned = plan(bundle, state_dir=tmp_path / ".flux")
+
+    assert validated.error_code == "FLX-5030"
+    assert validated.stderr == f"{SIMULATION_ID}: {expected}"
+    assert planned.error_code == "FLX-5030"
+    assert planned.stderr == str(expected)

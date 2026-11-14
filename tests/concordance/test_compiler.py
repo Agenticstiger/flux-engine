@@ -317,11 +317,23 @@ def test_a_value_domain_margin_is_carried_in_grid_steps(compiled, block) -> None
             assert entry.margin_units is None
 
 
-def test_an_epsilon_at_or_above_the_tolerance_is_refused_at_compile_time(document) -> None:
+@pytest.mark.parametrize(
+    "value",
+    [
+        "0.0001",
+        # As long as a number may be (1000 decimals). The refusal prints it, a
+        # denominator of 1001 digits, inside CPython's 4300-digit limit on
+        # printing an int; at 1E-4300 that print raised a bare ValueError.
+        pytest.param("1E-1000", id="the-longest-tolerance-a-block-may-declare"),
+    ],
+)
+def test_an_epsilon_at_or_above_the_tolerance_is_refused_at_compile_time(
+    document, value: str
+) -> None:
     changed = copy.deepcopy(dict(document))
     for entry in changed["extension"]["fidelity"]["properties"]:
         if entry["property"] == PropertyKind.QUANTILE.value:
-            entry["tolerance"] = {"type": "absolute", "value": "0.0001"}
+            entry["tolerance"] = {"type": "absolute", "value": value}
     with pytest.raises(FluxError) as caught:
         _compiled_for(changed)
     assert caught.value.code.code == "FLX-5002"
