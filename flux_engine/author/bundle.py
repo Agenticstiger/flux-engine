@@ -28,6 +28,7 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass, field
 from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
@@ -42,10 +43,13 @@ from flux_engine.author.columns import (
     PropertyPlan,
     assumed_check,
     declared_span,
+    determine_column,
     draw_within_key,
+    drawn_span,
     plan_column,
     widen_key_span,
 )
+from flux_engine.author.derived import bounds, contract_derives, numeric
 from flux_engine.author.given import choose_givens
 from flux_engine.author.ledger import Ledger
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
@@ -360,6 +364,7 @@ def _plan_expose(
         authored.assumptions.append(("rows", rows_note))
     profiled = table.get("columns") if isinstance(table.get("columns"), Mapping) else {}
     schema = expose["contract"]["schema"]
+    contexts: Dict[str, ColumnContext] = {}
     for schema_index, column in enumerate(compiled.columns):
         if column.logical_type.kind.value in ("JSON", "BYTES"):
             authored.skipped = (
@@ -382,34 +387,86 @@ def _plan_expose(
             ),
             schema_index,
         )
-        plan = plan_column(
-            ColumnContext(
-                column=column,
-                expose_index=expose_index,
-                schema_index=position,
-                product_ref=str(contract["id"]),
-                profile_tokens=("tables", expose_id, "columns", column.name),
-                entry=profiled.get(column.name) if isinstance(profiled, Mapping) else None,
-                rows=rows,
-                minimum_cell=minimum_cell,
-                key=column.name in one_column_keys,
-                foreign=foreign.get(column.name),
-                keyed=column.name in keyed,
-                inner=column.name in inner,
-                nulls_follow=column.name in follow,
-                fractional_bits=fractional_bits,
-            )
+        context = ColumnContext(
+            column=column,
+            expose_index=expose_index,
+            schema_index=position,
+            product_ref=str(contract["id"]),
+            profile_tokens=("tables", expose_id, "columns", column.name),
+            entry=profiled.get(column.name) if isinstance(profiled, Mapping) else None,
+            rows=rows,
+            minimum_cell=minimum_cell,
+            key=column.name in one_column_keys,
+            foreign=foreign.get(column.name),
+            keyed=column.name in keyed,
+            inner=column.name in inner,
+            nulls_follow=column.name in follow,
+            fractional_bits=fractional_bits,
         )
+        plan = plan_column(context)
+        contexts[plan.name] = context
         authored.columns.append(plan)
         authored.kinds[plan.name] = column.logical_type.kind
+    derives = _determine(authored, contexts, contract_derives(expose), expose_index)
     choose_givens(
         authored.columns,
         authored.kinds,
         profiled if isinstance(profiled, Mapping) else {},
         ("tables", expose_id),
         minimum_cell=minimum_cell,
+        determined=derives,
     )
     return authored
+
+
+def _span_of(plan: ColumnPlan) -> Optional[Tuple[Fraction, Fraction]]:
+    """The values a column can take, for a rule that reads it: its range, else its draw."""
+    checked = plan.declaration.get("range")
+    if isinstance(checked, Mapping):
+        low, high = numeric(checked.get("min")), numeric(checked.get("max"))
+        if low is not None and high is not None:
+            return low, high
+    values = drawn_span(plan)
+    if values:
+        return Fraction(min(values)), Fraction(max(values))
+    return None
+
+
+def _determine(
+    authored: AuthoredExpose,
+    contexts: Mapping[str, ColumnContext],
+    derives: Mapping[str, Tuple[int, str]],
+    expose_index: int,
+) -> Set[str]:
+    """Make every column a contract ``derive`` sets a column the rule decides (ADR 0014).
+
+    A rule may read a column another rule sets, so the bounds are worked out in
+    rounds until none moves; a rule whose inputs never get bounds gets none.
+    """
+    plans = {plan.name: plan for plan in authored.columns}
+    determined = {name for name in derives if name in plans}
+    spans: Dict[str, Tuple[Fraction, Fraction]] = {}
+    for name, plan in plans.items():
+        if name not in determined:
+            span = _span_of(plan)
+            if span is not None:
+                spans[name] = span
+    found: Dict[str, Optional[Tuple[Fraction, Fraction]]] = {}
+    for _ in range(len(determined) + 1):
+        moved = False
+        for name in sorted(determined):
+            interval = bounds(derives[name][1], spans)
+            if interval is not None and spans.get(name) != interval:
+                spans[name] = interval
+                moved = True
+            found[name] = interval
+        if not moved:
+            break
+    for name in sorted(determined):
+        index = derives[name][0]
+        tokens = ("exposes", str(expose_index), "contract", "invariants", str(index), "expr")
+        determine_column(contexts[name], plans[name], tokens, found.get(name))
+    return determined
 
 
 @dataclass(frozen=True)

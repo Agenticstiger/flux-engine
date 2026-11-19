@@ -68,6 +68,7 @@ __all__ = [
     "cell_weights",
     "count_cells",
     "declared_span",
+    "determine_column",
     "draw_within_key",
     "drawn_span",
     "plan_column",
@@ -2131,6 +2132,128 @@ _PLACEHOLDER_REASON = (
     "The profile publishes no order statistic and no mean: the values are a placeholder, "
     "drawn evenly over the bins declared here, from 0."
 )
+
+
+# ---------------------------------------------------------------------------
+# A column a rule of the contract sets
+# ---------------------------------------------------------------------------
+
+#: The keys a column a rule sets declares none of: it is not drawn.
+_DRAW_KEYS = (
+    "bins",
+    "binWeights",
+    "binWeightsGiven",
+    "levels",
+    "levelWeightsGiven",
+    "given",
+    "nullFraction",
+    "range",
+    "unique",
+)
+
+_DETERMINED_REASON = (
+    "A rule of the contract sets the column, so it is not drawn; the range the check reads is "
+    "the exact bounds the rule gives over the ranges of the columns it reads (ADR 0014)."
+)
+_DETERMINED_UNBOUNDED = (
+    "A rule of the contract sets the column, so it is not drawn, and its range cannot be "
+    "bounded from the rule: no property reads it."
+)
+
+
+def determine_column(
+    ctx: ColumnContext,
+    plan: ColumnPlan,
+    rule_tokens: Tuple[str, ...],
+    interval: Optional[Tuple[Fraction, Fraction]],
+) -> None:
+    """Make *plan* the column a contract rule at *rule_tokens* sets (ADR 0014 section 6).
+
+    The column declares no draw and never its own profiled range. With exact
+    *interval* bounds of the rule, a number column declares a range the rule's
+    values always lie in: the edges of its published histogram when they hold
+    the bounds, else the bounds moved out to the column's grid. Its own
+    statistics then become properties, so ``verify`` checks them through the rule.
+    """
+    kind = ctx.column.logical_type.kind
+    for key in _DRAW_KEYS:
+        plan.declaration.pop(key, None)
+    plan.labels = [label for label in plan.labels if label.tokens[:1] in (("maxCardinality",),)]
+    plan.properties = []
+    plan.reads, plan.passed = [], []
+    plan.assumptions, plan.choices, plan.weight_notes = [], [], []
+    plan.placeholder = plan.key_span = False
+    plan.published_range = plan.time_span = None
+    plan.fixed = "set by a rule of the contract"
+    plan.how = "set by a rule of the contract, not drawn"
+    if ctx.column.required and _published(ctx.entry, "count") == ctx.rows:
+        _read(ctx, plan, "count", "checked: a required column holds a value per row")
+    if interval is None or kind not in (LogicalKind.INT, LogicalKind.DECIMAL):
+        plan.assumptions.append(_DETERMINED_UNBOUNDED)
+        plan.choices.append(_DETERMINED_UNBOUNDED)
+        return
+    low, high = interval
+    found = _ungrouped(ctx.entry, _HISTOGRAM)
+    edges = [Fraction(Decimal(str(edge))) for edge in found[1].get("bins", ())] if found else []
+    if len(edges) >= 2 and edges[0] <= low and high <= edges[-1]:
+        assert found is not None
+        _from_histogram(ctx, plan, found)
+        for key in ("bins", "binWeights"):
+            plan.declaration.pop(key, None)
+        plan.labels = [
+            label for label in plan.labels if label.tokens[:1] not in (("bins",), ("binWeights",))
+        ]
+        plan.assumptions = [
+            sentence for sentence in plan.assumptions if sentence not in plan.choices
+        ]
+        # A histogram property's bins would be the column's draw for the generator, which
+        # a rule's column has none of (FLX-3402): its edges are the range, and the mean the
+        # property the rule's values are scored on.
+        plan.properties = [
+            prop for prop in plan.properties if prop.document["property"] != "marginalHistogram"
+        ]
+        plan.reads.append(
+            (
+                ctx.profile_tokens + ("statistics", str(found[0])),
+                "its edges are the range the check holds the rule's values to",
+            )
+        )
+    else:
+        step = _grid(ctx)
+        grid = Fraction(step)
+        wide_low = math.floor(low / grid) * grid
+        wide_high = math.ceil(high / grid) * grid
+        if wide_high <= wide_low:
+            wide_high = wide_low + grid
+        plan.declaration["range"] = {
+            "min": format(_on_grid(wide_low, step), "f"),
+            "max": format(_on_grid(wide_high, step), "f"),
+        }
+        rule = from_contract(ctx.product_ref, rule_tokens)
+        plan.labels.append(Label(("range", "min"), rule))
+        plan.labels.append(Label(("range", "max"), rule))
+        plan.published_range = (_on_grid(wide_low, step), _on_grid(wide_high, step))
+        _mean_property(ctx, plan)
+    for name in ("min", "max"):
+        value = _published(ctx.entry, name)
+        if value is not None:
+            inside = low <= Fraction(Decimal(str(value))) <= high
+            plan.reads.append(
+                (
+                    _metric_tokens(ctx, name),
+                    (
+                        "checked: within the bounds the rule gives"
+                        if inside
+                        else "checked: it lies outside the bounds the rule gives, so the profile and "
+                        "the rule disagree"
+                    ),
+                )
+            )
+    if any(prop.document["property"] == "mean" for prop in plan.properties):
+        _read_mean(ctx, plan, "the mean property scores the rule's values against it")
+    plan.assumptions.append(_DETERMINED_REASON)
+    plan.choices.append(_DETERMINED_REASON)
+    plan.how = "set by a rule of the contract, not drawn; its range is the rule's exact bounds"
 
 
 # ---------------------------------------------------------------------------

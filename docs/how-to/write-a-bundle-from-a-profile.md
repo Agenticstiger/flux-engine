@@ -231,6 +231,7 @@ The rules run from the most the profile says to the least:
 | as many distinct values as values | `unique: true`: an identifier the engine derives | no number |
 | an `enum(...)` type | `support: declared`, with `maxCardinality` its number of levels | contract |
 | a key, in its `semantics` | no key of its own: the engine reads keys from the contract | no number |
+| a `derive` in the contract's `invariants`, with no `when` | no draw, and a `range` from the rule's exact bounds over the columns it reads (or its published histogram's edges when they hold them), with its published statistics scored through the rule | contract, or profile for the edges |
 | nothing, or a withheld value | an assumption, stated with its reason | assumption |
 
 These rules shape the assumptions:

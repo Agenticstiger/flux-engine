@@ -81,6 +81,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   The approximation is documented: about `e^-m` more parents of a class of mean
   `m` receive no child.
 
+- `fluxsim init` never draws a column a contract `derive` sets, and never gives
+  it its own profiled range, which made `verify` refuse the run (`FLX-5005`)
+  once a property read the column (ADR 0014 section 6). Its range is the exact
+  bounds of the rule over the ranges of the columns it reads, an interval in
+  fractions over the expression's syntax tree (`+`, `-`, `*`, `/` away from
+  zero, `ROUND`, `COALESCE`, `CASE`), or its published histogram's edges when
+  they hold those bounds; its published mean becomes a property the rule's
+  values are scored on. Bounds pass down a chain of rules, and a guarded
+  `derive` leaves its column drawn.
+
 ## 0.7.0 - 2026-11-19
 
 flux-stats exports the read of a FLUX bundle that the engine takes its digests
