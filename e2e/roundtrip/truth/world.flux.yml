@@ -1,0 +1,19 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# The least World a run needs: the generator emits read none of its numbers.
+# The engine ships only the telco and towers packs, so the World names one.
+fluxVersion: "0.5.0"
+kind: World
+id: world-b2b-billing
+name: World for B2B billing
+metadata:
+  owner:
+    team: data-platform
+spec:
+  seed: 42
+  vertical: telco
+  population:
+    size: 1
+    lifecycleMix: { active: 1 }

@@ -138,7 +138,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `FLX-3305`, which says what is not generated and what to do. `ship` works the
   list out again from the bundle, so no plan, record or digest of any bundle
   moves.
-
+- `e2e/roundtrip` is a local round trip against a generated truth, run by hand with no
+  cloud. It draws three related business-to-business tables from a contract and
+  a bundle it knows, profiles them with `fluid profile`, writes a bundle back
+  with `fluxsim init --contract --profile`, runs it with `--verify`, and judges
+  the copy against the truth: the scorecard and its coverage, a k-marginal
+  score, childless and top 1 % shares per relationship, grouped shares and
+  Cramér's V, the contract derives, init's unused statistics and any `CONSTANT`
+  shape flag. Each target prints PASS or FAIL, and `--record` appends one
+  line to a committed `history.jsonl`. It is its own uv project and no CI job
+  runs it.
 
 ## 0.7.0 - 2026-11-19
 

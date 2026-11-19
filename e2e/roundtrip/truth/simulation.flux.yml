@@ -1,0 +1,137 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# The truth: three related tables drawn from declared statistics. The harness
+# profiles what this bundle generates and then writes a second bundle from that
+# profile alone. `contractDigest` is pinned to truth/contract.fluid.yaml; the
+# offline tests check that it still is.
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-b2b-billing-truth
+name: B2B billing, the truth
+metadata:
+  owner:
+    team: data-platform
+spec:
+  worldRef: world-b2b-billing
+  fidelity: deterministic
+  seed: 7
+  timeBounds:
+    start: "2022-01-01T00:00:00Z"
+    end: "2025-12-31T23:59:59Z"
+  personaRefs: [persona-b2b-billing]
+  emits:
+    - productRef: b2b.billing
+      exposeId: organisation
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:9f6c9b4ea33d2ebc61ee89ccc6ebfa1bca072e556a98a55808cd3e0852d0a6fe" }
+    - productRef: b2b.billing
+      exposeId: account
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:9f6c9b4ea33d2ebc61ee89ccc6ebfa1bca072e556a98a55808cd3e0852d0a6fe" }
+    - productRef: b2b.billing
+      exposeId: invoice
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:9f6c9b4ea33d2ebc61ee89ccc6ebfa1bca072e556a98a55808cd3e0852d0a6fe" }
+extensions:
+  com.agentics.flux/1:
+    emits:
+      organisation:
+        rows: 1000
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            org_id: { range: { min: "1", max: "1000" } }
+            segment:
+              support: { values: [smb, mid, enterprise] }
+              maxCardinality: 3
+              levels: { smb: "0.6", mid: "0.3", enterprise: "0.1" }
+              null: fail
+            region:
+              support: { values: [emea, amer, apac] }
+              maxCardinality: 3
+              levels: { emea: "0.45", amer: "0.35", apac: "0.2" }
+              null: fail
+            tier:
+              support: { values: [basic, standard, premium] }
+              maxCardinality: 3
+              null: fail
+              given: segment
+              levelWeightsGiven:
+                smb: { basic: "70", standard: "25", premium: "5" }
+                mid: { basic: "25", standard: "55", premium: "20" }
+                enterprise: { basic: "5", standard: "30", premium: "65" }
+            seats:
+              range: { min: "1", max: "500" }
+              bins: ["1", "10", "50", "200", "500"]
+              binWeights: ["50", "30", "15", "5"]
+              null: fail
+          properties:
+            - property: mean
+              column: seats
+              tolerance: { type: absolute, value: "20" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      account:
+        rows: 5000
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            account_id: { range: { min: "1", max: "5000" } }
+            # A skewed spread over the organisations: the first ten hold three
+            # accounts in ten, and the last hundred hold none.
+            org_id:
+              range: { min: "1", max: "1000" }
+              bins: ["1", "11", "101", "301", "601", "901", "1000"]
+              binWeights: ["30", "15", "25", "20", "10", "0"]
+            plan:
+              support: { values: [free, team, business] }
+              maxCardinality: 3
+              levels: { free: "0.5", team: "0.35", business: "0.15" }
+              null: fail
+            opened_on:
+              range: { min: "2022-01-01", max: "2025-12-31" }
+              bins: ["2022-01-01", "2023-01-01", "2024-01-01", "2025-01-01", "2025-12-31"]
+              binWeights: ["15", "25", "30", "30"]
+              null: fail
+            monthly_fee:
+              range: { min: "0", max: "500" }
+              bins: ["0", "25", "100", "500"]
+              binWeights: ["40", "40", "20"]
+              null: fail
+          properties:
+            - property: mean
+              column: monthly_fee
+              tolerance: { type: absolute, value: "100" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      invoice:
+        rows: 20000
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            invoice_id: { range: { min: "1", max: "20000" } }
+            account_id:
+              range: { min: "1", max: "5000" }
+              bins: ["1", "51", "501", "1501", "3501", "5000"]
+              binWeights: ["25", "25", "25", "20", "5"]
+            issued_on:
+              range: { min: "2022-01-01", max: "2025-12-31" }
+              bins: ["2022-01-01", "2023-01-01", "2024-01-01", "2025-01-01", "2025-12-31"]
+              binWeights: ["10", "20", "30", "40"]
+              null: fail
+            net:
+              range: { min: "5", max: "5000" }
+              bins: ["5", "25", "50", "100", "250", "500", "1000", "2500", "5000"]
+              binWeights: ["10", "18", "22", "20", "14", "9", "5", "2"]
+              null: fail
+          properties:
+            - property: mean
+              column: net
+              tolerance: { type: absolute, value: "200" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
