@@ -1,0 +1,50 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "columns": [
+      {
+        "name": "amount",
+        "type": "DECIMAL(18,4)"
+      },
+      {
+        "name": "when",
+        "required": true,
+        "type": "timestamp"
+      },
+      {
+        "name": "kind",
+        "type": "text"
+      }
+    ],
+    "fidelity": {
+      "amount": {
+        "mean": "0",
+        "range": {
+          "max": "5",
+          "min": "-5"
+        },
+        "stddev": "2"
+      },
+      "kind": {
+        "nullFraction": "0.25",
+        "support": {
+          "values": [
+            "a",
+            "b"
+          ]
+        }
+      },
+      "when": {
+        "range": {
+          "max": "2026-12-31T23:59:59.999Z",
+          "min": "2026-01-01T00:00:00.000Z"
+        }
+      }
+    },
+    "rows": 8,
+    "seed": 1
+  },
+  "note": "the three outcomes of a success: decimal at scale, timestamp in range, nullable string",
+  "property": "schema_fluid_columns",
+  "tier": "hand-written"
+}

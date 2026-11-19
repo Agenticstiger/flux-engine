@@ -1,0 +1,341 @@
+{
+  "_producer": "https://github.com/Agenticstiger/flux-engine",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-0-0/FluxParameterRegister.json",
+  "counts": {
+    "assumption": 2,
+    "default": 30,
+    "profile": 3
+  },
+  "declared": 35,
+  "entries": [
+    {
+      "document": "sim-payment-recovery",
+      "index": 0,
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/rows",
+      "source": "profile",
+      "statistic": {
+        "pointer": "/tables/payment_recovery_moment/rowCount"
+      }
+    },
+    {
+      "document": "sim-payment-recovery",
+      "index": 1,
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/columns/amount/range/min",
+      "source": "profile",
+      "statistic": {
+        "definition": "min/1",
+        "pointer": "/tables/payment_recovery_moment/columns/amount/metrics/min"
+      }
+    },
+    {
+      "document": "sim-payment-recovery",
+      "index": 2,
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/columns/amount/range/max",
+      "source": "profile",
+      "statistic": {
+        "definition": "max/1",
+        "pointer": "/tables/payment_recovery_moment/columns/amount/metrics/max"
+      }
+    },
+    {
+      "document": "pb-billing-history",
+      "index": 3,
+      "pointer": "/spec/scorecard",
+      "reason": "The billing team's backtest of the last quarter, not recomputed here.",
+      "source": "assumption"
+    },
+    {
+      "document": "q3-retention-world",
+      "index": 4,
+      "pointer": "/spec/population/size",
+      "reason": "The template's population size.",
+      "source": "default"
+    }
+  ],
+  "parameters": [
+    {
+      "document": "ch-sms-primary",
+      "entry": null,
+      "kind": "Channel",
+      "pointer": "/spec/rateLimitPerSecond",
+      "source": "default",
+      "value": "50"
+    },
+    {
+      "document": "det-payment-aborted-burst",
+      "entry": null,
+      "kind": "Detector",
+      "pointer": "/spec/timeWindowMs",
+      "source": "default",
+      "value": "900000"
+    },
+    {
+      "document": "exp-recovery-ab",
+      "entry": null,
+      "kind": "Experiment",
+      "pointer": "/spec/variants/0/weight",
+      "source": "default",
+      "value": "0.5"
+    },
+    {
+      "document": "exp-recovery-ab",
+      "entry": null,
+      "kind": "Experiment",
+      "pointer": "/spec/variants/1/weight",
+      "source": "default",
+      "value": "0.5"
+    },
+    {
+      "document": "jr-payment-recovery",
+      "entry": null,
+      "kind": "Journey",
+      "pointer": "/spec/personaReactions/persona-pragmatic-family/successProbability",
+      "source": "default",
+      "value": "0.42"
+    },
+    {
+      "document": "pb-billing-history",
+      "entry": null,
+      "kind": "Playback",
+      "pointer": "/spec/drift/threshold",
+      "source": "default",
+      "value": "0.2"
+    },
+    {
+      "document": "pb-billing-history",
+      "entry": 3,
+      "kind": "Playback",
+      "pointer": "/spec/scorecard/credibility",
+      "source": "assumption",
+      "value": "0.78"
+    },
+    {
+      "document": "pb-billing-history",
+      "entry": 3,
+      "kind": "Playback",
+      "pointer": "/spec/scorecard/intervalCoverage",
+      "source": "assumption",
+      "value": "0.92"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/traits/digitalFluency",
+      "source": "default",
+      "value": "0.6"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/traits/financialLiteracy",
+      "source": "default",
+      "value": "0.4"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/traits/monthlySpend/mean",
+      "source": "default",
+      "value": "42.0"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/traits/monthlySpend/min",
+      "source": "default",
+      "value": "0"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/traits/monthlySpend/stddev",
+      "source": "default",
+      "value": "11.0"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/traits/priceSensitivity/levels/high",
+      "source": "default",
+      "value": "0.3"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/traits/priceSensitivity/levels/low",
+      "source": "default",
+      "value": "0.2"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/traits/priceSensitivity/levels/medium",
+      "source": "default",
+      "value": "0.5"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/worldview/trendFollowing",
+      "source": "default",
+      "value": "0.3"
+    },
+    {
+      "document": "persona-pragmatic-family",
+      "entry": null,
+      "kind": "Persona",
+      "pointer": "/spec/worldview/trustInInstitutions",
+      "source": "default",
+      "value": "0.55"
+    },
+    {
+      "document": "q3-retention-world",
+      "entry": null,
+      "kind": "World",
+      "pointer": "/spec/population/lifecycleMix/active",
+      "source": "default",
+      "value": "0.55"
+    },
+    {
+      "document": "q3-retention-world",
+      "entry": null,
+      "kind": "World",
+      "pointer": "/spec/population/lifecycleMix/atrisk",
+      "source": "default",
+      "value": "0.20"
+    },
+    {
+      "document": "q3-retention-world",
+      "entry": null,
+      "kind": "World",
+      "pointer": "/spec/population/lifecycleMix/churned",
+      "source": "default",
+      "value": "0.10"
+    },
+    {
+      "document": "q3-retention-world",
+      "entry": null,
+      "kind": "World",
+      "pointer": "/spec/population/lifecycleMix/new",
+      "source": "default",
+      "value": "0.15"
+    },
+    {
+      "document": "q3-retention-world",
+      "entry": 4,
+      "kind": "World",
+      "pointer": "/spec/population/size",
+      "source": "default",
+      "value": "500"
+    },
+    {
+      "document": "q3-retention-world",
+      "entry": null,
+      "kind": "World",
+      "pointer": "/spec/temperature/campaignResponse",
+      "source": "default",
+      "value": "0.5"
+    },
+    {
+      "document": "q3-retention-world",
+      "entry": null,
+      "kind": "World",
+      "pointer": "/spec/temperature/engagement",
+      "source": "default",
+      "value": "0.5"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": null,
+      "kind": "Simulation",
+      "pointer": "/spec/emits/0/minCredibility",
+      "source": "default",
+      "value": "0.7"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": 2,
+      "kind": "Simulation",
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/columns/amount/range/max",
+      "source": "profile",
+      "value": "10000"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": 1,
+      "kind": "Simulation",
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/columns/amount/range/min",
+      "source": "profile",
+      "value": "1"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": null,
+      "kind": "Simulation",
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/columns/market/maxCardinality",
+      "source": "default",
+      "value": "8"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": null,
+      "kind": "Simulation",
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/properties/0/tolerance/value",
+      "source": "default",
+      "value": "50"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": null,
+      "kind": "Simulation",
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/properties/1/tolerance/max",
+      "source": "default",
+      "value": "0"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": null,
+      "kind": "Simulation",
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/records/max",
+      "source": "default",
+      "value": "100000"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": null,
+      "kind": "Simulation",
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/fidelity/records/min",
+      "source": "default",
+      "value": "4"
+    },
+    {
+      "document": "sim-payment-recovery",
+      "entry": 0,
+      "kind": "Simulation",
+      "pointer": "/extensions/com.agentics.flux~11/emits/payment_recovery_moment/rows",
+      "source": "profile",
+      "value": "64"
+    },
+    {
+      "document": "tr-fast-recovery",
+      "entry": null,
+      "kind": "Treatment",
+      "pointer": "/spec/payloadTemplate/ttlHours",
+      "source": "default",
+      "value": "48"
+    }
+  ],
+  "profile": {
+    "digest": "sha256:72a1f98d1df0b98b41ab8a4223902604d267979ad1dd27e9d2dce991f84f61e9"
+  },
+  "simulationId": "sim-payment-recovery"
+}

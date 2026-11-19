@@ -1,0 +1,22 @@
+usage: fluxsim accuracy record [-h] --registered-at REGISTERED_AT --out OUT
+                               [--state-dir STATE_DIR] [-j]
+
+Publish the outcomes-only accuracy record for everything registered at one
+registration timestamp.
+
+examples:
+  # publish the outcomes-only record
+  fluxsim accuracy record --registered-at 2026-01-01T00:00:00Z --out accuracy.json
+
+options:
+  -h, --help            show this help message and exit
+  --registered-at REGISTERED_AT
+                        the registration timestamp to publish, as RFC 3339;
+                        only the predictions whose registered_at is exactly
+                        this are covered
+  --out OUT             path the accuracy record is written to
+  --state-dir STATE_DIR
+                        run-state directory (default: ./.flux)
+  -j, --json            emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/accuracy.html

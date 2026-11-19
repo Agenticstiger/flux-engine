@@ -1,0 +1,10 @@
+fluxVersion: "0.5.0"
+kind: Segment
+id: seg-atrisk-tv
+name: At-risk TV Subscribers
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  query: "lifecycle == 'atrisk' && products.has('tv')"
+  queryLanguage: flux-expr/1

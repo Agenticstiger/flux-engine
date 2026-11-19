@@ -1,0 +1,5182 @@
+{
+ "$comment": "flux-engine's own FLUID SQL/1 vectors (RFC-data-rules.md §2), beyond forge-cli's fluid-sql-vectors.json beside this file, in that file's shape: its models, its sites, its syntax-tree nodes and its closed set of reasons (its reasonCodes). Each refused vector also names the FLX code flux-engine reports (EXPR-SPEC-2 §12). Every vector here must pass in forge-cli's validator too, so each can move into the shared file.",
+ "language": "FLUID SQL/1",
+ "description": "Further FLUID SQL/1 vectors kept by flux-engine, in the shape of fluid-sql-vectors.json.",
+ "encoding": "No JSON number appears anywhere in this file: numbers, scales and limits are strings. A number is a decimal string; a result of static scale s is written with exactly s digits after the point, and one of unbounded scale as its shortest decimal, or as p/q in lowest terms when no decimal is exact (1/3). Compare numbers by value. A bool is true or false, a string is itself (compared by code points, never normalized), a date is YYYY-MM-DD, a timestamp is ISO 8601 without an offset, a timestamp with time zone ISO 8601 with one (compare instants), and NULL is null. A float column's value is the shortest decimal that converts back to the double.",
+ "models": {
+  "invoices": {
+   "columns": {
+    "invoice_id": {
+     "type": "string"
+    },
+    "contract_id": {
+     "type": "string"
+    },
+    "plan_id": {
+     "type": "string"
+    },
+    "net": {
+     "type": "decimal(12,2)"
+    },
+    "tax_rate": {
+     "type": "decimal(5,4)"
+    },
+    "gross": {
+     "type": "decimal(12,2)"
+    },
+    "qty": {
+     "type": "int"
+    },
+    "lo": {
+     "type": "int"
+    },
+    "hi": {
+     "type": "int"
+    },
+    "ratio": {
+     "type": "double"
+    },
+    "amount": {
+     "type": "numeric"
+    },
+    "flag": {
+     "type": "boolean"
+    },
+    "kind": {
+     "type": "string",
+     "enum": [
+      "base_fee",
+      "usage"
+     ]
+    },
+    "issue_date": {
+     "type": "date"
+    },
+    "due_date": {
+     "type": "date"
+    },
+    "created_at": {
+     "type": "timestamp"
+    },
+    "paid_at": {
+     "type": "timestamptz"
+    },
+    "settled_at": {
+     "type": "timestamptz"
+    },
+    "note": {
+     "type": "varchar(40)"
+    },
+    "Net Amount": {
+     "type": "decimal(10,2)"
+    },
+    "end": {
+     "type": "string"
+    },
+    "q\"uote": {
+     "type": "string"
+    },
+    "row": {
+     "type": "string"
+    },
+    "payload": {
+     "type": "json"
+    },
+    "starts": {
+     "type": "time"
+    }
+   },
+   "relationships": {
+    "contract": {
+     "to": "contracts"
+    },
+    "previous": {
+     "to": "contracts"
+    },
+    "plan": {
+     "to": "plans"
+    }
+   }
+  },
+  "contracts": {
+   "columns": {
+    "contract_id": {
+     "type": "string"
+    },
+    "monthly_fee": {
+     "type": "decimal(12,2)"
+    },
+    "start_date": {
+     "type": "date"
+    }
+   }
+  },
+  "plans": {
+   "columns": {
+    "plan_id": {
+     "type": "string"
+    },
+    "valid_from": {
+     "type": "date"
+    },
+    "valid_to": {
+     "type": "date"
+    },
+    "price": {
+     "type": "decimal(10,2)"
+    }
+   },
+   "validityWindow": true
+  }
+ },
+ "vectors": [
+  {
+   "id": "arith-add-scale",
+   "text": "net + 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "+",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net + 1",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "10.25"
+      },
+      "result": "11.25"
+     },
+     {
+      "row": {
+       "net": null
+      },
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-mul-scale",
+   "text": "net * tax_rate",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "*",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "column",
+      "name": "tax_rate"
+     }
+    },
+    "canonical": "net * tax_rate",
+    "type": "number",
+    "scale": "6",
+    "eval": [
+     {
+      "row": {
+       "net": "10.25",
+       "tax_rate": "0.2000"
+      },
+      "result": "2.050000"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-sub-int",
+   "text": "net - qty",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "-",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "column",
+      "name": "qty"
+     }
+    },
+    "canonical": "net - qty",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "1.50",
+       "qty": "2"
+      },
+      "result": "-0.50"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-div-exact",
+   "text": "net / 3",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "/",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "3"
+     }
+    },
+    "canonical": "net / 3",
+    "type": "number",
+    "scale": "unbounded",
+    "eval": [
+     {
+      "row": {
+       "net": "10"
+      },
+      "result": "10/3"
+     },
+     {
+      "row": {
+       "net": "-1.50"
+      },
+      "result": "-0.5"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-div-zero",
+   "text": "net / 0",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "/",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "0"
+     }
+    },
+    "canonical": "net / 0",
+    "type": "number",
+    "scale": "unbounded",
+    "eval": [
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-div-zero-scaled",
+   "text": "qty / 0.00",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "/",
+     "left": {
+      "node": "column",
+      "name": "qty"
+     },
+     "right": {
+      "node": "number",
+      "value": "0.00"
+     }
+    },
+    "canonical": "qty / 0.00",
+    "type": "number",
+    "scale": "unbounded",
+    "eval": [
+     {
+      "row": {
+       "qty": "5"
+      },
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-neg",
+   "text": "-net",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "neg",
+     "operand": {
+      "node": "column",
+      "name": "net"
+     }
+    },
+    "canonical": "-net",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "1.5"
+      },
+      "result": "-1.50"
+     },
+     {
+      "row": {
+       "net": null
+      },
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-double-negation",
+   "text": "net - -1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "-",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "neg",
+      "operand": {
+       "node": "number",
+       "value": "1"
+      }
+     }
+    },
+    "canonical": "net - -1",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": "2.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-exact-thirds",
+   "text": "1 / 3 * 3 = 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "arith",
+      "op": "*",
+      "left": {
+       "node": "arith",
+       "op": "/",
+       "left": {
+        "node": "number",
+        "value": "1"
+       },
+       "right": {
+        "node": "number",
+        "value": "3"
+       }
+      },
+      "right": {
+       "node": "number",
+       "value": "3"
+      }
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "1 / 3 * 3 = 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {},
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-exact-tenths",
+   "text": "0.1 + 0.2 = 0.3",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "arith",
+      "op": "+",
+      "left": {
+       "node": "number",
+       "value": "0.1"
+      },
+      "right": {
+       "node": "number",
+       "value": "0.2"
+      }
+     },
+     "right": {
+      "node": "number",
+      "value": "0.3"
+     }
+    },
+    "canonical": "0.1 + 0.2 = 0.3",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {},
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-float-shortest-decimal",
+   "text": "ratio = 0.1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "ratio"
+     },
+     "right": {
+      "node": "number",
+      "value": "0.1"
+     }
+    },
+    "canonical": "ratio = 0.1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "ratio": "0.1"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "ratio": "0.30000000000000004"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-null-propagates",
+   "text": "net + qty",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "+",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "column",
+      "name": "qty"
+     }
+    },
+    "canonical": "net + qty",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "1",
+       "qty": null
+      },
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-unbounded-column",
+   "text": "amount + 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "+",
+     "left": {
+      "node": "column",
+      "name": "amount"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "amount + 1",
+    "type": "number",
+    "scale": "unbounded",
+    "eval": [
+     {
+      "row": {
+       "amount": "2.5"
+      },
+      "result": "3.5"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-float-column-unbounded",
+   "text": "ratio * 2",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "*",
+     "left": {
+      "node": "column",
+      "name": "ratio"
+     },
+     "right": {
+      "node": "number",
+      "value": "2"
+     }
+    },
+    "canonical": "ratio * 2",
+    "type": "number",
+    "scale": "unbounded",
+    "eval": [
+     {
+      "row": {
+       "ratio": "0.5"
+      },
+      "result": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-precedence",
+   "text": "net + qty * 2",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "+",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "arith",
+      "op": "*",
+      "left": {
+       "node": "column",
+       "name": "qty"
+      },
+      "right": {
+       "node": "number",
+       "value": "2"
+      }
+     }
+    },
+    "canonical": "net + qty * 2",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "1",
+       "qty": "3"
+      },
+      "result": "7.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-parentheses-kept",
+   "text": "(net + qty) * 2",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "*",
+     "left": {
+      "node": "arith",
+      "op": "+",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "right": {
+       "node": "column",
+       "name": "qty"
+      }
+     },
+     "right": {
+      "node": "number",
+      "value": "2"
+     }
+    },
+    "canonical": "(net + qty) * 2",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "1",
+       "qty": "3"
+      },
+      "result": "8.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-left-associative",
+   "text": "net - qty - 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "-",
+     "left": {
+      "node": "arith",
+      "op": "-",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "right": {
+       "node": "column",
+       "name": "qty"
+      }
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net - qty - 1",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "10",
+       "qty": "3"
+      },
+      "result": "6.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-right-parentheses",
+   "text": "net - (qty - 1)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "-",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "arith",
+      "op": "-",
+      "left": {
+       "node": "column",
+       "name": "qty"
+      },
+      "right": {
+       "node": "number",
+       "value": "1"
+      }
+     }
+    },
+    "canonical": "net - (qty - 1)",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "10",
+       "qty": "3"
+      },
+      "result": "8.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-minus-binds-tightest",
+   "text": "-net * 2",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "*",
+     "left": {
+      "node": "neg",
+      "operand": {
+       "node": "column",
+       "name": "net"
+      }
+     },
+     "right": {
+      "node": "number",
+      "value": "2"
+     }
+    },
+    "canonical": "-net * 2",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "1.5"
+      },
+      "result": "-3.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-leading-zeros",
+   "text": "007.50 + 0",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "+",
+     "left": {
+      "node": "number",
+      "value": "007.50"
+     },
+     "right": {
+      "node": "number",
+      "value": "0"
+     }
+    },
+    "canonical": "007.50 + 0",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {},
+      "result": "7.50"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-redundant-parentheses",
+   "text": "((net)) + (1)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "arith",
+     "op": "+",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net + 1",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": "2.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "arith-string",
+   "text": "note + 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "arith-bool",
+   "text": "flag * 2",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "arith-double-minus",
+   "text": "- -net",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "round-ties-away-from-zero",
+   "text": "ROUND(net, 1)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "round",
+     "arg": {
+      "node": "column",
+      "name": "net"
+     },
+     "scale": "1",
+     "mode": "HALF_AWAY_FROM_ZERO"
+    },
+    "canonical": "ROUND(net, 1)",
+    "type": "number",
+    "scale": "1",
+    "eval": [
+     {
+      "row": {
+       "net": "0.25"
+      },
+      "result": "0.3"
+     },
+     {
+      "row": {
+       "net": "-0.25"
+      },
+      "result": "-0.3"
+     },
+     {
+      "row": {
+       "net": "0.35"
+      },
+      "result": "0.4"
+     },
+     {
+      "row": {
+       "net": "0.24"
+      },
+      "result": "0.2"
+     },
+     {
+      "row": {
+       "net": null
+      },
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "round-half-to-even",
+   "text": "ROUND(net, 1, 'HALF_TO_EVEN')",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "round",
+     "arg": {
+      "node": "column",
+      "name": "net"
+     },
+     "scale": "1",
+     "mode": "HALF_TO_EVEN"
+    },
+    "canonical": "ROUND(net, 1, 'HALF_TO_EVEN')",
+    "type": "number",
+    "scale": "1",
+    "eval": [
+     {
+      "row": {
+       "net": "0.25"
+      },
+      "result": "0.2"
+     },
+     {
+      "row": {
+       "net": "0.35"
+      },
+      "result": "0.4"
+     },
+     {
+      "row": {
+       "net": "-0.25"
+      },
+      "result": "-0.2"
+     },
+     {
+      "row": {
+       "net": "-0.35"
+      },
+      "result": "-0.4"
+     },
+     {
+      "row": {
+       "net": "0.26"
+      },
+      "result": "0.3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "round-default-mode-left-out",
+   "text": "ROUND(net, 0, 'HALF_AWAY_FROM_ZERO')",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "round",
+     "arg": {
+      "node": "column",
+      "name": "net"
+     },
+     "scale": "0",
+     "mode": "HALF_AWAY_FROM_ZERO"
+    },
+    "canonical": "ROUND(net, 0)",
+    "type": "number",
+    "scale": "0",
+    "eval": [
+     {
+      "row": {
+       "net": "2.50"
+      },
+      "result": "3"
+     },
+     {
+      "row": {
+       "net": "-2.50"
+      },
+      "result": "-3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "round-quotient",
+   "text": "ROUND(net / 3, 2)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "round",
+     "arg": {
+      "node": "arith",
+      "op": "/",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "right": {
+       "node": "number",
+       "value": "3"
+      }
+     },
+     "scale": "2",
+     "mode": "HALF_AWAY_FROM_ZERO"
+    },
+    "canonical": "ROUND(net / 3, 2)",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "10"
+      },
+      "result": "3.33"
+     },
+     {
+      "row": {
+       "net": "20"
+      },
+      "result": "6.67"
+     },
+     {
+      "row": {
+       "net": "-20"
+      },
+      "result": "-6.67"
+     }
+    ]
+   }
+  },
+  {
+   "id": "round-derive-gross",
+   "text": "ROUND(net * (1 + tax_rate), 2)",
+   "site": "value",
+   "model": "invoices",
+   "derive": "gross",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "round",
+     "arg": {
+      "node": "arith",
+      "op": "*",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "right": {
+       "node": "arith",
+       "op": "+",
+       "left": {
+        "node": "number",
+        "value": "1"
+       },
+       "right": {
+        "node": "column",
+        "name": "tax_rate"
+       }
+      }
+     },
+     "scale": "2",
+     "mode": "HALF_AWAY_FROM_ZERO"
+    },
+    "canonical": "ROUND(net * (1 + tax_rate), 2)",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": "10.25",
+       "tax_rate": "0.2000"
+      },
+      "result": "12.30"
+     },
+     {
+      "row": {
+       "net": "0.05",
+       "tax_rate": "0.0500"
+      },
+      "result": "0.05"
+     },
+     {
+      "row": {
+       "net": "0.10",
+       "tax_rate": "0.2500"
+      },
+      "result": "0.13"
+     }
+    ]
+   }
+  },
+  {
+   "id": "round-scale-38",
+   "text": "ROUND(net, 38)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "round",
+     "arg": {
+      "node": "column",
+      "name": "net"
+     },
+     "scale": "38",
+     "mode": "HALF_AWAY_FROM_ZERO"
+    },
+    "canonical": "ROUND(net, 38)",
+    "type": "number",
+    "scale": "38",
+    "eval": [
+     {
+      "row": {
+       "net": "1.5"
+      },
+      "result": "1.50000000000000000000000000000000000000"
+     }
+    ]
+   }
+  },
+  {
+   "id": "round-scale-39",
+   "text": "ROUND(net, 39)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "round-places",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "round-scale-fraction",
+   "text": "ROUND(net, 2.0)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "round-scale-negative",
+   "text": "ROUND(net, -1)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "round-scale-column",
+   "text": "ROUND(net, qty)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "round-mode-unknown",
+   "text": "ROUND(net, 2, 'half_to_even')",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "round-null",
+   "text": "ROUND(NULL, 2)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "round-not-a-number",
+   "text": "ROUND(note, 2)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "round-predicate-argument",
+   "text": "ROUND(net = 1, 2)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "cmp-scales-compare-by-value",
+   "text": "net = 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net = 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1.00"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": null
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-not-equal-null-false",
+   "text": "net <> 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "<>",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net <> 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "net": "2"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-not-of-equal-null-true",
+   "text": "NOT (net = 1)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "not",
+     "operand": {
+      "node": "compare",
+      "op": "=",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "right": {
+       "node": "number",
+       "value": "1"
+      }
+     }
+    },
+    "canonical": "NOT net = 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-bang-equals-is-not-equal",
+   "text": "net != 2",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "<>",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "2"
+     }
+    },
+    "canonical": "net <> 2",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "2"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-strings-by-code-point",
+   "text": "note < 'b'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "<",
+     "left": {
+      "node": "column",
+      "name": "note"
+     },
+     "right": {
+      "node": "string",
+      "value": "b"
+     }
+    },
+    "canonical": "note < 'b'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "note": "B"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "note": "é"
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "note": "a"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "note": null
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-strings-stored-text",
+   "text": "note = 'é'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "note"
+     },
+     "right": {
+      "node": "string",
+      "value": "é"
+     }
+    },
+    "canonical": "note = 'é'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "note": "é"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "note": "é"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-dates",
+   "text": "issue_date <= due_date",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "<=",
+     "left": {
+      "node": "column",
+      "name": "issue_date"
+     },
+     "right": {
+      "node": "column",
+      "name": "due_date"
+     }
+    },
+    "canonical": "issue_date <= due_date",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "issue_date": "2026-01-31",
+       "due_date": "2026-02-01"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "issue_date": null,
+       "due_date": "2026-02-01"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-timestamps",
+   "text": "paid_at < settled_at",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "<",
+     "left": {
+      "node": "column",
+      "name": "paid_at"
+     },
+     "right": {
+      "node": "column",
+      "name": "settled_at"
+     }
+    },
+    "canonical": "paid_at < settled_at",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "paid_at": "2026-11-16T10:00:00+01:00",
+       "settled_at": "2026-11-16T09:30:00+00:00"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "paid_at": "2026-11-16T10:00:00+00:00",
+       "settled_at": "2026-11-16T10:30:00+02:00"
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "paid_at": "2026-11-16T10:00:00Z",
+       "settled_at": null
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-timestamp-vs-timestamptz",
+   "text": "created_at < paid_at",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "cmp-date-vs-timestamp",
+   "text": "issue_date = created_at",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "cmp-bool-equal",
+   "text": "flag = TRUE",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "flag"
+     },
+     "right": {
+      "node": "bool",
+      "value": true
+     }
+    },
+    "canonical": "flag = TRUE",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": true
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "flag": null
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-bool-order",
+   "text": "flag < TRUE",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "cmp-mixed-types",
+   "text": "net > 'x'",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "cmp-enum-level",
+   "text": "kind = 'base_fee'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "kind"
+     },
+     "right": {
+      "node": "string",
+      "value": "base_fee"
+     }
+    },
+    "canonical": "kind = 'base_fee'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "kind": "base_fee"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "kind": "usage"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-enum-typo",
+   "text": "kind = 'base_fe'",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "enum-literal",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "cmp-enum-reversed",
+   "text": "'base_fe' = kind",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "enum-literal",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "cmp-enum-in",
+   "text": "kind IN ('usage', 'refund')",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "enum-literal",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "cmp-null-literal",
+   "text": "net = NULL",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "cmp-null-literal-left",
+   "text": "NULL <> net",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "cmp-chain",
+   "text": "1 < net < 3",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "cmp-double-equals",
+   "text": "net == 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "cmp-of-comparison",
+   "text": "(net = 1) = flag",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "compare",
+      "op": "=",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "right": {
+       "node": "number",
+       "value": "1"
+      }
+     },
+     "right": {
+      "node": "column",
+      "name": "flag"
+     }
+    },
+    "canonical": "(net = 1) = flag",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1",
+       "flag": true
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": null,
+       "flag": false
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "cmp-right-parentheses",
+   "text": "flag = (net = 1)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "flag"
+     },
+     "right": {
+      "node": "compare",
+      "op": "=",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "right": {
+       "node": "number",
+       "value": "1"
+      }
+     }
+    },
+    "canonical": "flag = (net = 1)",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "2",
+       "flag": false
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "is-null",
+   "text": "net IS NULL",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "is_null",
+     "operand": {
+      "node": "column",
+      "name": "net"
+     },
+     "negated": false
+    },
+    "canonical": "net IS NULL",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "is-not-null",
+   "text": "net IS NOT NULL",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "is_null",
+     "operand": {
+      "node": "column",
+      "name": "net"
+     },
+     "negated": true
+    },
+    "canonical": "net IS NOT NULL",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "is-distinct-from",
+   "text": "net IS DISTINCT FROM 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "distinct_from",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     },
+     "negated": false
+    },
+    "canonical": "net IS DISTINCT FROM 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": "1.0"
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "net": "2"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "is-not-distinct-from",
+   "text": "net IS NOT DISTINCT FROM gross",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "distinct_from",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "column",
+      "name": "gross"
+     },
+     "negated": true
+    },
+    "canonical": "net IS NOT DISTINCT FROM gross",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null,
+       "gross": null
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": null,
+       "gross": "1"
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "net": "1",
+       "gross": "1.00"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "is-not-distinct-from-null",
+   "text": "net IS NOT DISTINCT FROM NULL",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "distinct_from",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "null"
+     },
+     "negated": true
+    },
+    "canonical": "net IS NOT DISTINCT FROM NULL",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "is-true-not-in-subset",
+   "text": "flag IS TRUE",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "in-numbers",
+   "text": "net IN (1, 2.50)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "in",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "items": [
+      {
+       "node": "number",
+       "value": "1"
+      },
+      {
+       "node": "number",
+       "value": "2.50"
+      }
+     ],
+     "negated": false
+    },
+    "canonical": "net IN (1, 2.50)",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "2.5"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": null
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "net": "3"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "in-negative-item",
+   "text": "net IN (-1, 0)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "in",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "items": [
+      {
+       "node": "number",
+       "value": "-1"
+      },
+      {
+       "node": "number",
+       "value": "0"
+      }
+     ],
+     "negated": false
+    },
+    "canonical": "net IN (-1, 0)",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "-1"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "not-in-null-false",
+   "text": "net NOT IN (1, 2)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "in",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "items": [
+      {
+       "node": "number",
+       "value": "1"
+      },
+      {
+       "node": "number",
+       "value": "2"
+      }
+     ],
+     "negated": true
+    },
+    "canonical": "net NOT IN (1, 2)",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "net": "3"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "not-of-in-null-true",
+   "text": "NOT net IN (1, 2)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "not",
+     "operand": {
+      "node": "in",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "items": [
+       {
+        "node": "number",
+        "value": "1"
+       },
+       {
+        "node": "number",
+        "value": "2"
+       }
+      ],
+      "negated": false
+     }
+    },
+    "canonical": "NOT net IN (1, 2)",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": null
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "in-dates",
+   "text": "issue_date IN (DATE '2026-01-01', DATE '2026-02-01')",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "in",
+     "left": {
+      "node": "column",
+      "name": "issue_date"
+     },
+     "items": [
+      {
+       "node": "date",
+       "value": "2026-01-01"
+      },
+      {
+       "node": "date",
+       "value": "2026-02-01"
+      }
+     ],
+     "negated": false
+    },
+    "canonical": "issue_date IN (DATE '2026-01-01', DATE '2026-02-01')",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "issue_date": "2026-02-01"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "issue_date": "2026-02-02"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "in-bools",
+   "text": "flag IN (TRUE)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "in",
+     "left": {
+      "node": "column",
+      "name": "flag"
+     },
+     "items": [
+      {
+       "node": "bool",
+       "value": true
+      }
+     ],
+     "negated": false
+    },
+    "canonical": "flag IN (TRUE)",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": true
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "flag": null
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "in-null-item",
+   "text": "net IN (1, NULL)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "in-column-item",
+   "text": "net IN (qty)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "in-mixed-types",
+   "text": "net IN (1, 'a')",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "in-empty",
+   "text": "net IN ()",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "between",
+   "text": "net BETWEEN 1 AND 2",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "between",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "low": {
+      "node": "number",
+      "value": "1"
+     },
+     "high": {
+      "node": "number",
+      "value": "2"
+     },
+     "negated": false
+    },
+    "canonical": "net BETWEEN 1 AND 2",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1.5"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": null
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "net": "2"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": "2.01"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "not-between-null-bound",
+   "text": "qty NOT BETWEEN lo AND hi",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "between",
+     "left": {
+      "node": "column",
+      "name": "qty"
+     },
+     "low": {
+      "node": "column",
+      "name": "lo"
+     },
+     "high": {
+      "node": "column",
+      "name": "hi"
+     },
+     "negated": true
+    },
+    "canonical": "qty NOT BETWEEN lo AND hi",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "qty": "10",
+       "lo": null,
+       "hi": "5"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "qty": "3",
+       "lo": null,
+       "hi": "5"
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "qty": null,
+       "lo": "1",
+       "hi": "5"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "between-then-and",
+   "text": "net BETWEEN 1 AND 2 AND flag",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "and",
+     "left": {
+      "node": "between",
+      "left": {
+       "node": "column",
+       "name": "net"
+      },
+      "low": {
+       "node": "number",
+       "value": "1"
+      },
+      "high": {
+       "node": "number",
+       "value": "2"
+      },
+      "negated": false
+     },
+     "right": {
+      "node": "column",
+      "name": "flag"
+     }
+    },
+    "canonical": "net BETWEEN 1 AND 2 AND flag",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1.5",
+       "flag": true
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "between-null-bound-literal",
+   "text": "net BETWEEN NULL AND 2",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "between-bool",
+   "text": "flag BETWEEN FALSE AND TRUE",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "bool-column-as-predicate",
+   "text": "flag",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "column",
+     "name": "flag"
+    },
+    "canonical": "flag",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": null
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "flag": true
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "not-of-null-bool",
+   "text": "NOT flag",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "not",
+     "operand": {
+      "node": "column",
+      "name": "flag"
+     }
+    },
+    "canonical": "NOT flag",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": null
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "flag": true
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "and-binds-tighter-than-or",
+   "text": "flag OR net > 1 AND qty > 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "or",
+     "left": {
+      "node": "column",
+      "name": "flag"
+     },
+     "right": {
+      "node": "and",
+      "left": {
+       "node": "compare",
+       "op": ">",
+       "left": {
+        "node": "column",
+        "name": "net"
+       },
+       "right": {
+        "node": "number",
+        "value": "1"
+       }
+      },
+      "right": {
+       "node": "compare",
+       "op": ">",
+       "left": {
+        "node": "column",
+        "name": "qty"
+       },
+       "right": {
+        "node": "number",
+        "value": "1"
+       }
+      }
+     }
+    },
+    "canonical": "flag OR net > 1 AND qty > 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": false,
+       "net": "2",
+       "qty": "2"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "flag": false,
+       "net": "2",
+       "qty": "1"
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "not-binds-tighter-than-and",
+   "text": "NOT flag AND qty > 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "and",
+     "left": {
+      "node": "not",
+      "operand": {
+       "node": "column",
+       "name": "flag"
+      }
+     },
+     "right": {
+      "node": "compare",
+      "op": ">",
+      "left": {
+       "node": "column",
+       "name": "qty"
+      },
+      "right": {
+       "node": "number",
+       "value": "1"
+      }
+     }
+    },
+    "canonical": "NOT flag AND qty > 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": false,
+       "qty": "2"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "or-parentheses-kept",
+   "text": "flag AND (net > 1 OR qty > 1)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "and",
+     "left": {
+      "node": "column",
+      "name": "flag"
+     },
+     "right": {
+      "node": "or",
+      "left": {
+       "node": "compare",
+       "op": ">",
+       "left": {
+        "node": "column",
+        "name": "net"
+       },
+       "right": {
+        "node": "number",
+        "value": "1"
+       }
+      },
+      "right": {
+       "node": "compare",
+       "op": ">",
+       "left": {
+        "node": "column",
+        "name": "qty"
+       },
+       "right": {
+        "node": "number",
+        "value": "1"
+       }
+      }
+     }
+    },
+    "canonical": "flag AND (net > 1 OR qty > 1)",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": true,
+       "net": "0",
+       "qty": "2"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "keywords-any-case",
+   "text": "net is not null and flag",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "and",
+     "left": {
+      "node": "is_null",
+      "operand": {
+       "node": "column",
+       "name": "net"
+      },
+      "negated": true
+     },
+     "right": {
+      "node": "column",
+      "name": "flag"
+     }
+    },
+    "canonical": "net IS NOT NULL AND flag",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1",
+       "flag": true
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "not-not",
+   "text": "NOT NOT flag",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "not",
+     "operand": {
+      "node": "not",
+      "operand": {
+       "node": "column",
+       "name": "flag"
+      }
+     }
+    },
+    "canonical": "NOT NOT flag",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": null
+      },
+      "result": false
+     },
+     {
+      "row": {
+       "flag": true
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "not-of-number",
+   "text": "NOT net",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "and-of-number",
+   "text": "flag AND net",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "not-in-value-position",
+   "text": "net = NOT flag",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "case-first-true-when",
+   "text": "CASE WHEN net > 10 THEN 'big' WHEN net > 1 THEN 'mid' END",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "case",
+     "whens": [
+      {
+       "when": {
+        "node": "compare",
+        "op": ">",
+        "left": {
+         "node": "column",
+         "name": "net"
+        },
+        "right": {
+         "node": "number",
+         "value": "10"
+        }
+       },
+       "then": {
+        "node": "string",
+        "value": "big"
+       }
+      },
+      {
+       "when": {
+        "node": "compare",
+        "op": ">",
+        "left": {
+         "node": "column",
+         "name": "net"
+        },
+        "right": {
+         "node": "number",
+         "value": "1"
+        }
+       },
+       "then": {
+        "node": "string",
+        "value": "mid"
+       }
+      }
+     ]
+    },
+    "canonical": "CASE WHEN net > 10 THEN 'big' WHEN net > 1 THEN 'mid' END",
+    "type": "string",
+    "eval": [
+     {
+      "row": {
+       "net": "5"
+      },
+      "result": "mid"
+     },
+     {
+      "row": {
+       "net": "0"
+      },
+      "result": null
+     },
+     {
+      "row": {
+       "net": null
+      },
+      "result": null
+     },
+     {
+      "row": {
+       "net": "11"
+      },
+      "result": "big"
+     }
+    ]
+   }
+  },
+  {
+   "id": "case-null-condition-falls-through",
+   "text": "CASE WHEN flag THEN 1 ELSE 2.5 END",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "case",
+     "whens": [
+      {
+       "when": {
+        "node": "column",
+        "name": "flag"
+       },
+       "then": {
+        "node": "number",
+        "value": "1"
+       }
+      }
+     ],
+     "else": {
+      "node": "number",
+      "value": "2.5"
+     }
+    },
+    "canonical": "CASE WHEN flag THEN 1 ELSE 2.5 END",
+    "type": "number",
+    "scale": "1",
+    "eval": [
+     {
+      "row": {
+       "flag": null
+      },
+      "result": "2.5"
+     },
+     {
+      "row": {
+       "flag": true
+      },
+      "result": "1.0"
+     }
+    ]
+   }
+  },
+  {
+   "id": "case-only-null",
+   "text": "CASE WHEN flag THEN NULL END",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "case-else-null",
+   "text": "CASE WHEN flag THEN 1 ELSE NULL END",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "case",
+     "whens": [
+      {
+       "when": {
+        "node": "column",
+        "name": "flag"
+       },
+       "then": {
+        "node": "number",
+        "value": "1"
+       }
+      }
+     ],
+     "else": {
+      "node": "null"
+     }
+    },
+    "canonical": "CASE WHEN flag THEN 1 ELSE NULL END",
+    "type": "number",
+    "scale": "0",
+    "eval": [
+     {
+      "row": {
+       "flag": false
+      },
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "case-condition-not-bool",
+   "text": "CASE WHEN net THEN 1 END",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "case-mixed-types",
+   "text": "CASE WHEN flag THEN 1 ELSE 'x' END",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "case-simple-form",
+   "text": "CASE net WHEN 1 THEN 2 END",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "case-unbounded-branch",
+   "text": "CASE WHEN flag THEN net / 2 ELSE 1 END",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "case",
+     "whens": [
+      {
+       "when": {
+        "node": "column",
+        "name": "flag"
+       },
+       "then": {
+        "node": "arith",
+        "op": "/",
+        "left": {
+         "node": "column",
+         "name": "net"
+        },
+        "right": {
+         "node": "number",
+         "value": "2"
+        }
+       }
+      }
+     ],
+     "else": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "CASE WHEN flag THEN net / 2 ELSE 1 END",
+    "type": "number",
+    "scale": "unbounded",
+    "eval": [
+     {
+      "row": {
+       "flag": true,
+       "net": "1"
+      },
+      "result": "0.5"
+     }
+    ]
+   }
+  },
+  {
+   "id": "coalesce",
+   "text": "COALESCE(net, gross, 0)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "coalesce",
+     "args": [
+      {
+       "node": "column",
+       "name": "net"
+      },
+      {
+       "node": "column",
+       "name": "gross"
+      },
+      {
+       "node": "number",
+       "value": "0"
+      }
+     ]
+    },
+    "canonical": "COALESCE(net, gross, 0)",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {
+       "net": null,
+       "gross": "2.5"
+      },
+      "result": "2.50"
+     },
+     {
+      "row": {
+       "net": null,
+       "gross": null
+      },
+      "result": "0.00"
+     }
+    ]
+   }
+  },
+  {
+   "id": "coalesce-only-null",
+   "text": "COALESCE(NULL, NULL)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "coalesce-one-argument",
+   "text": "COALESCE(net)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "coalesce-mixed-types",
+   "text": "COALESCE(net, 'x')",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "coalesce-bool",
+   "text": "COALESCE(flag, FALSE)",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "coalesce",
+     "args": [
+      {
+       "node": "column",
+       "name": "flag"
+      },
+      {
+       "node": "bool",
+       "value": false
+      }
+     ]
+    },
+    "canonical": "COALESCE(flag, FALSE)",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": null
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "days-between",
+   "text": "DAYS_BETWEEN(issue_date, due_date)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "date_diff",
+     "unit": "day",
+     "from": {
+      "node": "column",
+      "name": "issue_date"
+     },
+     "to": {
+      "node": "column",
+      "name": "due_date"
+     }
+    },
+    "canonical": "DAYS_BETWEEN(issue_date, due_date)",
+    "type": "number",
+    "scale": "0",
+    "eval": [
+     {
+      "row": {
+       "issue_date": "2026-01-31",
+       "due_date": "2026-02-01"
+      },
+      "result": "1"
+     },
+     {
+      "row": {
+       "issue_date": "2026-03-01",
+       "due_date": "2026-02-01"
+      },
+      "result": "-28"
+     },
+     {
+      "row": {
+       "issue_date": null,
+       "due_date": "2026-02-01"
+      },
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "months-between-whole-months",
+   "text": "MONTHS_BETWEEN(issue_date, due_date)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "date_diff",
+     "unit": "month",
+     "from": {
+      "node": "column",
+      "name": "issue_date"
+     },
+     "to": {
+      "node": "column",
+      "name": "due_date"
+     }
+    },
+    "canonical": "MONTHS_BETWEEN(issue_date, due_date)",
+    "type": "number",
+    "scale": "0",
+    "eval": [
+     {
+      "row": {
+       "issue_date": "2026-01-31",
+       "due_date": "2026-02-01"
+      },
+      "result": "0"
+     },
+     {
+      "row": {
+       "issue_date": "2026-01-31",
+       "due_date": "2026-02-28"
+      },
+      "result": "1"
+     },
+     {
+      "row": {
+       "issue_date": "2026-02-28",
+       "due_date": "2026-01-31"
+      },
+      "result": "-1"
+     },
+     {
+      "row": {
+       "issue_date": "2026-01-15",
+       "due_date": "2027-03-14"
+      },
+      "result": "13"
+     },
+     {
+      "row": {
+       "issue_date": "2026-01-15",
+       "due_date": "2027-03-15"
+      },
+      "result": "14"
+     }
+    ]
+   }
+  },
+  {
+   "id": "years-between-leap-day",
+   "text": "YEARS_BETWEEN(DATE '2000-02-29', due_date)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "date_diff",
+     "unit": "year",
+     "from": {
+      "node": "date",
+      "value": "2000-02-29"
+     },
+     "to": {
+      "node": "column",
+      "name": "due_date"
+     }
+    },
+    "canonical": "YEARS_BETWEEN(DATE '2000-02-29', due_date)",
+    "type": "number",
+    "scale": "0",
+    "eval": [
+     {
+      "row": {
+       "due_date": "2026-02-28"
+      },
+      "result": "26"
+     },
+     {
+      "row": {
+       "due_date": "2026-02-27"
+      },
+      "result": "25"
+     },
+     {
+      "row": {
+       "due_date": "2001-02-28"
+      },
+      "result": "1"
+     },
+     {
+      "row": {
+       "due_date": "1999-03-01"
+      },
+      "result": "0"
+     }
+    ]
+   }
+  },
+  {
+   "id": "years-between-as-of-literal",
+   "text": "YEARS_BETWEEN(issue_date, DATE '2026-11-16')",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "date_diff",
+     "unit": "year",
+     "from": {
+      "node": "column",
+      "name": "issue_date"
+     },
+     "to": {
+      "node": "date",
+      "value": "2026-11-16"
+     }
+    },
+    "canonical": "YEARS_BETWEEN(issue_date, DATE '2026-11-16')",
+    "type": "number",
+    "scale": "0",
+    "eval": [
+     {
+      "row": {
+       "issue_date": "1990-11-17"
+      },
+      "result": "35"
+     },
+     {
+      "row": {
+       "issue_date": "1990-11-16"
+      },
+      "result": "36"
+     }
+    ]
+   }
+  },
+  {
+   "id": "date-difference-of-number",
+   "text": "DAYS_BETWEEN(net, issue_date)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "date-difference-arity",
+   "text": "DAYS_BETWEEN(issue_date)",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "date-literal-no-such-day",
+   "text": "issue_date = DATE '2026-02-30'",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "bad-date",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "date-literal-format",
+   "text": "issue_date = DATE '2026-1-5'",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "bad-date",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "date-literal-year-zero",
+   "text": "DATE '0000-01-01' = issue_date",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "bad-date",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "date-literal-last-day",
+   "text": "issue_date < DATE '9999-12-31'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "<",
+     "left": {
+      "node": "column",
+      "name": "issue_date"
+     },
+     "right": {
+      "node": "date",
+      "value": "9999-12-31"
+     }
+    },
+    "canonical": "issue_date < DATE '9999-12-31'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "issue_date": "2026-01-01"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "date-keyword-as-name",
+   "text": "date = issue_date",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "date-arithmetic",
+   "text": "issue_date + 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6109"
+   }
+  },
+  {
+   "id": "name-quoted-with-space",
+   "text": "\"Net Amount\" > 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": ">",
+     "left": {
+      "node": "column",
+      "name": "Net Amount"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "\"Net Amount\" > 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "Net Amount": "2"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "name-quoted-keyword",
+   "text": "\"end\" = 'x'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "end"
+     },
+     "right": {
+      "node": "string",
+      "value": "x"
+     }
+    },
+    "canonical": "\"end\" = 'x'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "end": "x"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "name-keyword-bare",
+   "text": "end = 'x'",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "name-needless-quotes",
+   "text": "\"net\" = 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net = 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "name-doubled-quote",
+   "text": "\"q\"\"uote\" = 'x'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "q\"uote"
+     },
+     "right": {
+      "node": "string",
+      "value": "x"
+     }
+    },
+    "canonical": "\"q\"\"uote\" = 'x'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "q\"uote": "x"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "name-case-sensitive",
+   "text": "NET = 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "unknown-column",
+    "code": "FLX-6113"
+   }
+  },
+  {
+   "id": "name-unknown",
+   "text": "nett > 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "unknown-column",
+    "code": "FLX-6113"
+   }
+  },
+  {
+   "id": "name-no-type-json",
+   "text": "payload IS NULL",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "untyped-column",
+    "code": "FLX-6111"
+   }
+  },
+  {
+   "id": "name-no-type-time",
+   "text": "starts IS NULL",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "untyped-column",
+    "code": "FLX-6111"
+   }
+  },
+  {
+   "id": "name-through-link",
+   "text": "net = contract.monthly_fee",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "column",
+      "name": "monthly_fee",
+      "relationship": "contract"
+     }
+    },
+    "canonical": "net = contract.monthly_fee",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "9.99"
+      },
+      "links": {
+       "contract": {
+        "monthly_fee": "9.99"
+       }
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": "9.99"
+      },
+      "links": {
+       "contract": null
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "name-link-unknown-column",
+   "text": "contract.fee > 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "unknown-column",
+    "code": "FLX-6113"
+   }
+  },
+  {
+   "id": "name-unknown-relationship",
+   "text": "contrakt.monthly_fee > 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "unknown-relationship",
+    "code": "FLX-6113"
+   }
+  },
+  {
+   "id": "name-validity-window",
+   "text": "plan.price > 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "validity-window",
+    "code": "FLX-6106"
+   }
+  },
+  {
+   "id": "name-root-words-are-names-in-core",
+   "text": "previous.monthly_fee > 1 AND row = 'x'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "and",
+     "left": {
+      "node": "compare",
+      "op": ">",
+      "left": {
+       "node": "column",
+       "name": "monthly_fee",
+       "relationship": "previous"
+      },
+      "right": {
+       "node": "number",
+       "value": "1"
+      }
+     },
+     "right": {
+      "node": "compare",
+      "op": "=",
+      "left": {
+       "node": "column",
+       "name": "row"
+      },
+      "right": {
+       "node": "string",
+       "value": "x"
+      }
+     }
+    },
+    "canonical": "previous.monthly_fee > 1 AND row = 'x'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "row": "x"
+      },
+      "links": {
+       "previous": {
+        "monthly_fee": "2"
+       }
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "name-multi-link-in-core",
+   "text": "contract.x.y = 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "multi-link-path",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-comment-dash",
+   "text": "net--1 > 0",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "comment-or-semicolon",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-comment-block",
+   "text": "net /* c */ > 0",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "comment-or-semicolon",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-semicolon",
+   "text": "net > 0;",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "comment-or-semicolon",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-comment-marks-inside-string",
+   "text": "note = '--/*;'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "note"
+     },
+     "right": {
+      "node": "string",
+      "value": "--/*;"
+     }
+    },
+    "canonical": "note = '--/*;'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "note": "--/*;"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "lex-white-space",
+   "text": "net\t=\n1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net = 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "lex-carriage-return",
+   "text": "net\r= 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-no-break-space",
+   "text": "net = 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-exponent",
+   "text": "net > 1e5",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-leading-point",
+   "text": "net > .5",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-trailing-point",
+   "text": "net > 1.",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-non-ascii-digit",
+   "text": "net > ٣",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-unterminated-string",
+   "text": "note = 'x",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-empty-quoted-name",
+   "text": "\"\" = 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-empty-text",
+   "text": "",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "lex-trailing-token",
+   "text": "net = 1 2",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "limit-length-4096",
+   "text": "net = 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         ",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net = 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "limit-length-4097",
+   "text": "net = 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          ",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "too-long",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "limit-length-after-nfc",
+   "text": "note = 'ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé'",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "note"
+     },
+     "right": {
+      "node": "string",
+      "value": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+     }
+    },
+    "canonical": "note = 'ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé'",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "note": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "limit-depth-64-parentheses",
+   "text": "((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((net)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) = 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net = 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "1"
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "limit-depth-65-parentheses",
+   "text": "(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((net))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) = 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "too-deep",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "limit-depth-64-and-chain",
+   "text": "flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "and",
+     "left": {
+      "node": "and",
+      "left": {
+       "node": "and",
+       "left": {
+        "node": "and",
+        "left": {
+         "node": "and",
+         "left": {
+          "node": "and",
+          "left": {
+           "node": "and",
+           "left": {
+            "node": "and",
+            "left": {
+             "node": "and",
+             "left": {
+              "node": "and",
+              "left": {
+               "node": "and",
+               "left": {
+                "node": "and",
+                "left": {
+                 "node": "and",
+                 "left": {
+                  "node": "and",
+                  "left": {
+                   "node": "and",
+                   "left": {
+                    "node": "and",
+                    "left": {
+                     "node": "and",
+                     "left": {
+                      "node": "and",
+                      "left": {
+                       "node": "and",
+                       "left": {
+                        "node": "and",
+                        "left": {
+                         "node": "and",
+                         "left": {
+                          "node": "and",
+                          "left": {
+                           "node": "and",
+                           "left": {
+                            "node": "and",
+                            "left": {
+                             "node": "and",
+                             "left": {
+                              "node": "and",
+                              "left": {
+                               "node": "and",
+                               "left": {
+                                "node": "and",
+                                "left": {
+                                 "node": "and",
+                                 "left": {
+                                  "node": "and",
+                                  "left": {
+                                   "node": "and",
+                                   "left": {
+                                    "node": "and",
+                                    "left": {
+                                     "node": "and",
+                                     "left": {
+                                      "node": "and",
+                                      "left": {
+                                       "node": "and",
+                                       "left": {
+                                        "node": "and",
+                                        "left": {
+                                         "node": "and",
+                                         "left": {
+                                          "node": "and",
+                                          "left": {
+                                           "node": "and",
+                                           "left": {
+                                            "node": "and",
+                                            "left": {
+                                             "node": "and",
+                                             "left": {
+                                              "node": "and",
+                                              "left": {
+                                               "node": "and",
+                                               "left": {
+                                                "node": "and",
+                                                "left": {
+                                                 "node": "and",
+                                                 "left": {
+                                                  "node": "and",
+                                                  "left": {
+                                                   "node": "and",
+                                                   "left": {
+                                                    "node": "and",
+                                                    "left": {
+                                                     "node": "and",
+                                                     "left": {
+                                                      "node": "and",
+                                                      "left": {
+                                                       "node": "and",
+                                                       "left": {
+                                                        "node": "and",
+                                                        "left": {
+                                                         "node": "and",
+                                                         "left": {
+                                                          "node": "and",
+                                                          "left": {
+                                                           "node": "and",
+                                                           "left": {
+                                                            "node": "and",
+                                                            "left": {
+                                                             "node": "and",
+                                                             "left": {
+                                                              "node": "and",
+                                                              "left": {
+                                                               "node": "and",
+                                                               "left": {
+                                                                "node": "and",
+                                                                "left": {
+                                                                 "node": "and",
+                                                                 "left": {
+                                                                  "node": "and",
+                                                                  "left": {
+                                                                   "node": "and",
+                                                                   "left": {
+                                                                    "node": "column",
+                                                                    "name": "flag"
+                                                                   },
+                                                                   "right": {
+                                                                    "node": "column",
+                                                                    "name": "flag"
+                                                                   }
+                                                                  },
+                                                                  "right": {
+                                                                   "node": "column",
+                                                                   "name": "flag"
+                                                                  }
+                                                                 },
+                                                                 "right": {
+                                                                  "node": "column",
+                                                                  "name": "flag"
+                                                                 }
+                                                                },
+                                                                "right": {
+                                                                 "node": "column",
+                                                                 "name": "flag"
+                                                                }
+                                                               },
+                                                               "right": {
+                                                                "node": "column",
+                                                                "name": "flag"
+                                                               }
+                                                              },
+                                                              "right": {
+                                                               "node": "column",
+                                                               "name": "flag"
+                                                              }
+                                                             },
+                                                             "right": {
+                                                              "node": "column",
+                                                              "name": "flag"
+                                                             }
+                                                            },
+                                                            "right": {
+                                                             "node": "column",
+                                                             "name": "flag"
+                                                            }
+                                                           },
+                                                           "right": {
+                                                            "node": "column",
+                                                            "name": "flag"
+                                                           }
+                                                          },
+                                                          "right": {
+                                                           "node": "column",
+                                                           "name": "flag"
+                                                          }
+                                                         },
+                                                         "right": {
+                                                          "node": "column",
+                                                          "name": "flag"
+                                                         }
+                                                        },
+                                                        "right": {
+                                                         "node": "column",
+                                                         "name": "flag"
+                                                        }
+                                                       },
+                                                       "right": {
+                                                        "node": "column",
+                                                        "name": "flag"
+                                                       }
+                                                      },
+                                                      "right": {
+                                                       "node": "column",
+                                                       "name": "flag"
+                                                      }
+                                                     },
+                                                     "right": {
+                                                      "node": "column",
+                                                      "name": "flag"
+                                                     }
+                                                    },
+                                                    "right": {
+                                                     "node": "column",
+                                                     "name": "flag"
+                                                    }
+                                                   },
+                                                   "right": {
+                                                    "node": "column",
+                                                    "name": "flag"
+                                                   }
+                                                  },
+                                                  "right": {
+                                                   "node": "column",
+                                                   "name": "flag"
+                                                  }
+                                                 },
+                                                 "right": {
+                                                  "node": "column",
+                                                  "name": "flag"
+                                                 }
+                                                },
+                                                "right": {
+                                                 "node": "column",
+                                                 "name": "flag"
+                                                }
+                                               },
+                                               "right": {
+                                                "node": "column",
+                                                "name": "flag"
+                                               }
+                                              },
+                                              "right": {
+                                               "node": "column",
+                                               "name": "flag"
+                                              }
+                                             },
+                                             "right": {
+                                              "node": "column",
+                                              "name": "flag"
+                                             }
+                                            },
+                                            "right": {
+                                             "node": "column",
+                                             "name": "flag"
+                                            }
+                                           },
+                                           "right": {
+                                            "node": "column",
+                                            "name": "flag"
+                                           }
+                                          },
+                                          "right": {
+                                           "node": "column",
+                                           "name": "flag"
+                                          }
+                                         },
+                                         "right": {
+                                          "node": "column",
+                                          "name": "flag"
+                                         }
+                                        },
+                                        "right": {
+                                         "node": "column",
+                                         "name": "flag"
+                                        }
+                                       },
+                                       "right": {
+                                        "node": "column",
+                                        "name": "flag"
+                                       }
+                                      },
+                                      "right": {
+                                       "node": "column",
+                                       "name": "flag"
+                                      }
+                                     },
+                                     "right": {
+                                      "node": "column",
+                                      "name": "flag"
+                                     }
+                                    },
+                                    "right": {
+                                     "node": "column",
+                                     "name": "flag"
+                                    }
+                                   },
+                                   "right": {
+                                    "node": "column",
+                                    "name": "flag"
+                                   }
+                                  },
+                                  "right": {
+                                   "node": "column",
+                                   "name": "flag"
+                                  }
+                                 },
+                                 "right": {
+                                  "node": "column",
+                                  "name": "flag"
+                                 }
+                                },
+                                "right": {
+                                 "node": "column",
+                                 "name": "flag"
+                                }
+                               },
+                               "right": {
+                                "node": "column",
+                                "name": "flag"
+                               }
+                              },
+                              "right": {
+                               "node": "column",
+                               "name": "flag"
+                              }
+                             },
+                             "right": {
+                              "node": "column",
+                              "name": "flag"
+                             }
+                            },
+                            "right": {
+                             "node": "column",
+                             "name": "flag"
+                            }
+                           },
+                           "right": {
+                            "node": "column",
+                            "name": "flag"
+                           }
+                          },
+                          "right": {
+                           "node": "column",
+                           "name": "flag"
+                          }
+                         },
+                         "right": {
+                          "node": "column",
+                          "name": "flag"
+                         }
+                        },
+                        "right": {
+                         "node": "column",
+                         "name": "flag"
+                        }
+                       },
+                       "right": {
+                        "node": "column",
+                        "name": "flag"
+                       }
+                      },
+                      "right": {
+                       "node": "column",
+                       "name": "flag"
+                      }
+                     },
+                     "right": {
+                      "node": "column",
+                      "name": "flag"
+                     }
+                    },
+                    "right": {
+                     "node": "column",
+                     "name": "flag"
+                    }
+                   },
+                   "right": {
+                    "node": "column",
+                    "name": "flag"
+                   }
+                  },
+                  "right": {
+                   "node": "column",
+                   "name": "flag"
+                  }
+                 },
+                 "right": {
+                  "node": "column",
+                  "name": "flag"
+                 }
+                },
+                "right": {
+                 "node": "column",
+                 "name": "flag"
+                }
+               },
+               "right": {
+                "node": "column",
+                "name": "flag"
+               }
+              },
+              "right": {
+               "node": "column",
+               "name": "flag"
+              }
+             },
+             "right": {
+              "node": "column",
+              "name": "flag"
+             }
+            },
+            "right": {
+             "node": "column",
+             "name": "flag"
+            }
+           },
+           "right": {
+            "node": "column",
+            "name": "flag"
+           }
+          },
+          "right": {
+           "node": "column",
+           "name": "flag"
+          }
+         },
+         "right": {
+          "node": "column",
+          "name": "flag"
+         }
+        },
+        "right": {
+         "node": "column",
+         "name": "flag"
+        }
+       },
+       "right": {
+        "node": "column",
+        "name": "flag"
+       }
+      },
+      "right": {
+       "node": "column",
+       "name": "flag"
+      }
+     },
+     "right": {
+      "node": "column",
+      "name": "flag"
+     }
+    },
+    "canonical": "flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": true
+      },
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "limit-depth-65-and-chain",
+   "text": "flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag AND flag",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "too-deep",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "limit-depth-64-not-chain",
+   "text": "NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT flag",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "not",
+     "operand": {
+      "node": "not",
+      "operand": {
+       "node": "not",
+       "operand": {
+        "node": "not",
+        "operand": {
+         "node": "not",
+         "operand": {
+          "node": "not",
+          "operand": {
+           "node": "not",
+           "operand": {
+            "node": "not",
+            "operand": {
+             "node": "not",
+             "operand": {
+              "node": "not",
+              "operand": {
+               "node": "not",
+               "operand": {
+                "node": "not",
+                "operand": {
+                 "node": "not",
+                 "operand": {
+                  "node": "not",
+                  "operand": {
+                   "node": "not",
+                   "operand": {
+                    "node": "not",
+                    "operand": {
+                     "node": "not",
+                     "operand": {
+                      "node": "not",
+                      "operand": {
+                       "node": "not",
+                       "operand": {
+                        "node": "not",
+                        "operand": {
+                         "node": "not",
+                         "operand": {
+                          "node": "not",
+                          "operand": {
+                           "node": "not",
+                           "operand": {
+                            "node": "not",
+                            "operand": {
+                             "node": "not",
+                             "operand": {
+                              "node": "not",
+                              "operand": {
+                               "node": "not",
+                               "operand": {
+                                "node": "not",
+                                "operand": {
+                                 "node": "not",
+                                 "operand": {
+                                  "node": "not",
+                                  "operand": {
+                                   "node": "not",
+                                   "operand": {
+                                    "node": "not",
+                                    "operand": {
+                                     "node": "not",
+                                     "operand": {
+                                      "node": "not",
+                                      "operand": {
+                                       "node": "not",
+                                       "operand": {
+                                        "node": "not",
+                                        "operand": {
+                                         "node": "not",
+                                         "operand": {
+                                          "node": "not",
+                                          "operand": {
+                                           "node": "not",
+                                           "operand": {
+                                            "node": "not",
+                                            "operand": {
+                                             "node": "not",
+                                             "operand": {
+                                              "node": "not",
+                                              "operand": {
+                                               "node": "not",
+                                               "operand": {
+                                                "node": "not",
+                                                "operand": {
+                                                 "node": "not",
+                                                 "operand": {
+                                                  "node": "not",
+                                                  "operand": {
+                                                   "node": "not",
+                                                   "operand": {
+                                                    "node": "not",
+                                                    "operand": {
+                                                     "node": "not",
+                                                     "operand": {
+                                                      "node": "not",
+                                                      "operand": {
+                                                       "node": "not",
+                                                       "operand": {
+                                                        "node": "not",
+                                                        "operand": {
+                                                         "node": "not",
+                                                         "operand": {
+                                                          "node": "not",
+                                                          "operand": {
+                                                           "node": "not",
+                                                           "operand": {
+                                                            "node": "not",
+                                                            "operand": {
+                                                             "node": "not",
+                                                             "operand": {
+                                                              "node": "not",
+                                                              "operand": {
+                                                               "node": "not",
+                                                               "operand": {
+                                                                "node": "not",
+                                                                "operand": {
+                                                                 "node": "not",
+                                                                 "operand": {
+                                                                  "node": "not",
+                                                                  "operand": {
+                                                                   "node": "not",
+                                                                   "operand": {
+                                                                    "node": "column",
+                                                                    "name": "flag"
+                                                                   }
+                                                                  }
+                                                                 }
+                                                                }
+                                                               }
+                                                              }
+                                                             }
+                                                            }
+                                                           }
+                                                          }
+                                                         }
+                                                        }
+                                                       }
+                                                      }
+                                                     }
+                                                    }
+                                                   }
+                                                  }
+                                                 }
+                                                }
+                                               }
+                                              }
+                                             }
+                                            }
+                                           }
+                                          }
+                                         }
+                                        }
+                                       }
+                                      }
+                                     }
+                                    }
+                                   }
+                                  }
+                                 }
+                                }
+                               }
+                              }
+                             }
+                            }
+                           }
+                          }
+                         }
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    "canonical": "NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT flag",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "flag": true
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "limit-depth-65-not-chain",
+   "text": "NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT NOT flag",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "too-deep",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "function-unknown",
+   "text": "ABS(net) > 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "function-like",
+   "text": "note LIKE 'a%'",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "function-cast",
+   "text": "CAST(net AS int) > 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "extension-aggregate-in-contract",
+   "text": "COUNT(CHILDREN.lines) > 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "extension-window-in-contract",
+   "text": "ROW_NUMBER() OVER (PARTITION BY contract ORDER BY invoice_id) = 1",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "syntax",
+    "code": "FLX-6103"
+   }
+  },
+  {
+   "id": "predicate-not-bool",
+   "text": "net + 1",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "type-mismatch",
+    "code": "FLX-6206"
+   }
+  },
+  {
+   "id": "value-only-null",
+   "text": "NULL",
+   "site": "value",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "predicate-null-literal",
+   "text": "NULL",
+   "site": "predicate",
+   "model": "invoices",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "derive-scale-too-large",
+   "text": "net * tax_rate",
+   "site": "value",
+   "model": "invoices",
+   "derive": "gross",
+   "expect": {
+    "verdict": "refused",
+    "reason": "derive-scale",
+    "code": "FLX-6110"
+   }
+  },
+  {
+   "id": "derive-unbounded-scale",
+   "text": "net / 2",
+   "site": "value",
+   "model": "invoices",
+   "derive": "gross",
+   "expect": {
+    "verdict": "refused",
+    "reason": "derive-scale",
+    "code": "FLX-6110"
+   }
+  },
+  {
+   "id": "derive-type-mismatch",
+   "text": "note",
+   "site": "value",
+   "model": "invoices",
+   "derive": "gross",
+   "expect": {
+    "verdict": "refused",
+    "reason": "derive-type",
+    "code": "FLX-6110"
+   }
+  },
+  {
+   "id": "derive-bool-column-not-bool",
+   "text": "net",
+   "site": "value",
+   "model": "invoices",
+   "derive": "flag",
+   "expect": {
+    "verdict": "refused",
+    "reason": "derive-type",
+    "code": "FLX-6206"
+   }
+  },
+  {
+   "id": "derive-bool-column",
+   "text": "net > 1",
+   "site": "value",
+   "model": "invoices",
+   "derive": "flag",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "compare",
+     "op": ">",
+     "left": {
+      "node": "column",
+      "name": "net"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "canonical": "net > 1",
+    "type": "bool",
+    "eval": [
+     {
+      "row": {
+       "net": "2"
+      },
+      "result": true
+     },
+     {
+      "row": {
+       "net": null
+      },
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "derive-float-target",
+   "text": "net",
+   "site": "value",
+   "model": "invoices",
+   "derive": "ratio",
+   "expect": {
+    "verdict": "refused",
+    "reason": "derive-target",
+    "code": "FLX-6110"
+   }
+  },
+  {
+   "id": "derive-decimal-without-scale-target",
+   "text": "net",
+   "site": "value",
+   "model": "invoices",
+   "derive": "amount",
+   "expect": {
+    "verdict": "refused",
+    "reason": "derive-target",
+    "code": "FLX-6110"
+   }
+  },
+  {
+   "id": "derive-integer-target",
+   "text": "ROUND(net, 0)",
+   "site": "value",
+   "model": "invoices",
+   "derive": "qty",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "round",
+     "arg": {
+      "node": "column",
+      "name": "net"
+     },
+     "scale": "0",
+     "mode": "HALF_AWAY_FROM_ZERO"
+    },
+    "canonical": "ROUND(net, 0)",
+    "type": "number",
+    "scale": "0",
+    "eval": [
+     {
+      "row": {
+       "net": "2.5"
+      },
+      "result": "3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "derive-integer-target-scale",
+   "text": "net",
+   "site": "value",
+   "model": "invoices",
+   "derive": "qty",
+   "expect": {
+    "verdict": "refused",
+    "reason": "derive-scale",
+    "code": "FLX-6110"
+   }
+  },
+  {
+   "id": "derive-null",
+   "text": "NULL",
+   "site": "value",
+   "model": "invoices",
+   "derive": "gross",
+   "expect": {
+    "verdict": "refused",
+    "reason": "null-literal",
+    "code": "FLX-6104"
+   }
+  },
+  {
+   "id": "derive-copy-through-link",
+   "text": "contract.monthly_fee",
+   "site": "value",
+   "model": "invoices",
+   "derive": "gross",
+   "expect": {
+    "verdict": "accepted",
+    "tree": {
+     "node": "column",
+     "name": "monthly_fee",
+     "relationship": "contract"
+    },
+    "canonical": "contract.monthly_fee",
+    "type": "number",
+    "scale": "2",
+    "eval": [
+     {
+      "row": {},
+      "links": {
+       "contract": {
+        "monthly_fee": "9.99"
+       }
+      },
+      "result": "9.99"
+     },
+     {
+      "row": {},
+      "links": {
+       "contract": null
+      },
+      "result": null
+     }
+    ]
+   }
+  }
+ ]
+}

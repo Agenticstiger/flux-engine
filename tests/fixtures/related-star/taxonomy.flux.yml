@@ -1,0 +1,17 @@
+# The lifecycle states a customer can be in, and the moves between them that a
+# journey is allowed to make. A journey that moves a customer anywhere else is
+# refused (FLX-2302).
+fluxVersion: "0.5.0"
+kind: JourneyTaxonomy
+id: jt-subscriber-lifecycle
+name: Subscriber Lifecycle Taxonomy
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  states: [new, active, atrisk, churned]
+  transitions:
+    - { from: new, to: active }
+    - { from: active, to: atrisk }
+    - { from: atrisk, to: active }
+    - { from: atrisk, to: churned }

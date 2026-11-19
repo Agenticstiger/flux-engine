@@ -1,0 +1,97 @@
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-payment-recovery
+name: Payment Recovery Simulation
+metadata:
+  owner:
+    team: growth-lab
+# RFC-02: dialect fields live under a versioned namespace — the core stays closed
+extensions:
+  com.example.flux/1:
+    semanticRef: semantic/telco-payment-recovery
+    audit: { required: true, retentionDays: 365 }
+  # SEAM-FIDELITY-SPEC section 2. FLUX 0.5.0 closes `spec.emits[]`
+  # (additionalProperties: false), so this engine's own declarations live
+  # in RFC-02's document-level extension namespace -- the one sanctioned
+  # place a dialect may extend without forking the schema. The bundle
+  # therefore validates against the UNMODIFIED published schema: the
+  # public scripts/validate.py and scripts/bundle.py verify accept it
+  # with nothing stripped and nothing relaxed.
+  com.agentics.flux/1:
+    emits:
+      payment_recovery_moment:
+        rows: 64                   # SEAM-FIDELITY-SPEC section 1: declared row count
+        # `subscriber_id` carries no column entry below: the fidelity
+        # block declares column statistics for the check, and an
+        # identifier column (marked on the CONTRACT via `tags:
+        # [identifier]`, never inferred from a name) needs none --
+        # flux_engine.generator.families derives it from `(H, ordinal)`,
+        # not from a draw.
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 4, max: 100000 }
+          columns:
+            amount:
+              range: { min: "1", max: "10000" }
+              null: exclude
+            market:
+              # One spelling, shared by the check and the generator:
+              # `support: { values: [...] }` writes the levels out.
+              # `support: declared` would take them from the FLUID column
+              # type's own enum(...), which `market: STRING` does not have.
+              support:
+                values: ["IE", "GB", "FR", "DE"]
+              maxCardinality: 8
+              null: fail
+            aborted_at:
+              range: { min: "2026-07-01T00:00:00Z", max: "2026-09-30T23:59:59Z" }
+              null: fail
+          # No marginalHistogram property: section 2's histogram property
+          # implies declared bins, and the generator reads those same bins
+          # back off `columns.<name>` -- which needs `binWeights` alongside
+          # them. Both keys are legal now (one shared column schema), but
+          # `mean` and `support` exercise the check end-to-end without a
+          # third declaration to keep consistent by hand.
+          properties:
+            - property: mean
+              column: amount
+              tolerance: { type: absolute, value: "50" }
+            - property: support
+              column: market
+              tolerance: { type: count, max: 0 }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+agentPolicy:
+  allowedModels: [local-sovereign-8b]
+  tokenBudget: 200000
+  allowedUseCases: [persona_variation]
+  purposeLimitation: true
+skills:
+  - name: journey-improviser
+    skillRef: flux.skills.journey_improviser
+    purpose: persona_variation
+    model: local-sovereign-8b
+    tokenBudget: 50000
+spec:
+  worldRef: q3-retention-world
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2026-07-01T00:00:00Z"
+    end: "2026-09-30T23:59:59Z"
+  personaRefs: [persona-pragmatic-family]
+  segmentRefs: [seg-atrisk-tv]
+  signalRefs: [sig-payment-aborted]
+  campaignRefs: [cam-payment-recovery]
+  experimentRefs: [exp-recovery-ab]
+  moduleRefs: [module-payment-recovery@^2.1]   # RFC-03: locked in flux.lock
+  emits:
+    - productRef: telco.gold.payment_recovery_moment
+      exposeId: payment_recovery_moment
+      fluidVersion: "^0.7.3"       # RFC-06: range, resolved against the vendored set
+      minCredibility: 0.7          # RFC-05: seam gate on the twin's scorecard
+      provenance:                  # RFC-06: proven bytes are the shipped bytes
+        # Recomputed for THIS fixture's copy of payment-recovery.fluid.yml
+        # (subscriber_id gained `tags: [identifier]` -- see that file's
+        # comment -- so the digest differs from the shipped example's).
+        contractDigest: "sha256:b9b5ee575a8b313f6f72d039653d8be5d76e7ecc0012d7bd6ad2d37e0e60435d"

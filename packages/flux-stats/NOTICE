@@ -1,0 +1,5 @@
+FLUX Statistics (flux-stats)
+Copyright 2026 Agentics Transformation Limited
+
+This package has no third-party runtime dependency: it imports the Python
+standard library alone.

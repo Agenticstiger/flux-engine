@@ -1,0 +1,12 @@
+fluxVersion: "0.5.0"
+kind: Signal
+id: sig-payment-aborted
+name: Payment Aborted Signal
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  envelope: cloudevents/1.0
+  source: "urn:flux:billing-gateway"
+  type: com.telco.payment.aborted
+  dataschema: https://example.com/schemas/payment-aborted.json

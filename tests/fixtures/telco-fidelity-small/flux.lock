@@ -1,0 +1,6 @@
+# RFC-03 lockfile: resolves every versioned ref to an exact version + content digest.
+lockVersion: 1
+modules:
+  module-payment-recovery:
+    version: 2.1.3
+    digest: sha256:1a0607e1480afe0d7e28b05c0f7009fbc7ffaca127c8d90d3329ac9ea61e55a8

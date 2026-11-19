@@ -1,0 +1,38 @@
+usage: fluxsim [-h] [--version] [-j] <command> ...
+
+FLUX Simulation Engine: runs a FLUX bundle deterministically against the FLUID
+contract it references, and packs the evidence.
+
+examples:
+  # start with a small working project
+  fluxsim init demo
+  cd demo
+  fluxsim run . --verify --ship -o out
+
+  # look up what an error code means
+  fluxsim explain FLX-3105
+
+options:
+  -h, --help  show this help message and exit
+  --version   print the version and exit
+  -j, --json  emit machine-readable JSON
+
+commands:
+  init        write a small working project into a new directory
+  validate    validate a FLUX bundle
+  plan        execute the loop once and record plan.json
+  apply       apply a recorded plan and write its run directory
+  run         plan + apply, with --verify/--sink/--ship sugar
+  verify      golden regression + row conformance + RFC-04 + fidelity
+  ship        the fidelity gate, then the evidence pack
+  replay      re-execute a recorded plan; assert its digest
+  calibrate   declared-scorecard calibration for a Playback
+  accuracy    outcome-accuracy gate: register, score, record
+  gate        RFC-04 enforcement gate: decide, conform
+  expr        flux-expr/1: evaluate an expression, print an attribute model
+  describe    self-describe this installation
+  plugins     list installed vertical packs and sinks
+  explain     print the catalog entry for one FLX-nnnn code, or list them all
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/
+issues: https://github.com/Agenticstiger/flux-engine/issues

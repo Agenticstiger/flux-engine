@@ -1,0 +1,2994 @@
+{
+  "vectorsVersion": 3,
+  "note": "SEAM-FIDELITY-SPEC 2-8 vectors: one small contract, one committed slice, the digests and margins the compiler takes from them, per-property outcomes for four synthetic datasets, tolerance-rounding direction cases, and one case per fail-closed condition and per offline refusal. Numbers are exact decimal strings, or numerator/denominator where the value does not terminate in decimal.",
+  "contract": {
+    "fluidVersion": "0.7.5",
+    "kind": "DataProduct",
+    "id": "example.gold.recovery_moment",
+    "exposes": [
+      {
+        "exposeId": "recovery_moment",
+        "kind": "stream",
+        "contract": {
+          "schema": [
+            {
+              "name": "subscriber_id",
+              "type": "STRING",
+              "required": true
+            },
+            {
+              "name": "aborted_at",
+              "type": "TIMESTAMP",
+              "required": true
+            },
+            {
+              "name": "amount",
+              "type": "DECIMAL(18,4)"
+            },
+            {
+              "name": "attempts",
+              "type": "INT"
+            },
+            {
+              "name": "market",
+              "type": "STRING"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "emit": {
+    "productRef": "example.gold.recovery_moment",
+    "exposeId": "recovery_moment",
+    "fluidVersion": "^0.7.3"
+  },
+  "extension": {
+    "rows": 8,
+    "fidelity": {
+      "encoding": {
+        "fractionalBits": 4,
+        "rounding": "floor"
+      },
+      "records": {
+        "min": 4,
+        "max": 8
+      },
+      "columns": {
+        "amount": {
+          "range": {
+            "min": "1",
+            "max": "8"
+          },
+          "null": "exclude"
+        },
+        "attempts": {
+          "range": {
+            "min": "0",
+            "max": "16"
+          },
+          "null": "fail"
+        },
+        "market": {
+          "support": {
+            "values": [
+              "ie",
+              "uk"
+            ]
+          },
+          "maxCardinality": 4,
+          "null": "fail"
+        },
+        "aborted_at": {
+          "range": {
+            "min": "2026-07-01T00:00:00Z",
+            "max": "2026-09-30T23:59:59Z"
+          },
+          "null": "fail"
+        }
+      },
+      "properties": [
+        {
+          "property": "mean",
+          "column": "amount",
+          "tolerance": {
+            "type": "relative",
+            "value": "0.25"
+          }
+        },
+        {
+          "property": "marginalHistogram",
+          "column": "amount",
+          "bins": [
+            "1",
+            "2",
+            "4",
+            "8"
+          ],
+          "tolerance": {
+            "type": "distance",
+            "measure": "totalVariation",
+            "max": "0.2"
+          }
+        },
+        {
+          "property": "support",
+          "column": "market",
+          "tolerance": {
+            "type": "count",
+            "max": 0
+          }
+        },
+        {
+          "property": "mean",
+          "column": "amount",
+          "groupBy": "market",
+          "tolerance": {
+            "type": "absolute",
+            "value": "2"
+          }
+        },
+        {
+          "property": "correlation",
+          "columns": [
+            "amount",
+            "attempts"
+          ],
+          "minVariance": "4",
+          "tolerance": {
+            "type": "absolute",
+            "value": "0.5"
+          }
+        },
+        {
+          "property": "quantile",
+          "column": "amount",
+          "level": "0.5",
+          "tolerance": {
+            "type": "absolute",
+            "value": "1"
+          }
+        }
+      ],
+      "budget": {
+        "maxChecksPerState": 3,
+        "maxStateAge": "P30D"
+      },
+      "failureAction": "withholdBundle"
+    }
+  },
+  "expose": {
+    "exposeId": "recovery_moment",
+    "columns": [
+      "subscriber_id",
+      "aborted_at",
+      "amount",
+      "attempts",
+      "market"
+    ]
+  },
+  "committedSlice": [
+    {
+      "subscriber_id": "s0",
+      "aborted_at": "2026-07-01T00:00:00.000Z",
+      "amount": "1",
+      "attempts": 1,
+      "market": "ie"
+    },
+    {
+      "subscriber_id": "s1",
+      "aborted_at": "2026-07-02T00:00:00.000Z",
+      "amount": "2",
+      "attempts": 2,
+      "market": "uk"
+    },
+    {
+      "subscriber_id": "s2",
+      "aborted_at": "2026-07-03T00:00:00.000Z",
+      "amount": "3",
+      "attempts": 3,
+      "market": "ie"
+    },
+    {
+      "subscriber_id": "s3",
+      "aborted_at": "2026-07-04T00:00:00.000Z",
+      "amount": "4",
+      "attempts": 4,
+      "market": "uk"
+    },
+    {
+      "subscriber_id": "s4",
+      "aborted_at": "2026-07-05T00:00:00.000Z",
+      "amount": "5",
+      "attempts": 5,
+      "market": "ie"
+    },
+    {
+      "subscriber_id": "s5",
+      "aborted_at": "2026-07-06T00:00:00.000Z",
+      "amount": "6",
+      "attempts": 6,
+      "market": "uk"
+    },
+    {
+      "subscriber_id": "s6",
+      "aborted_at": "2026-07-07T00:00:00.000Z",
+      "amount": "7",
+      "attempts": 7,
+      "market": "ie"
+    },
+    {
+      "subscriber_id": "s7",
+      "aborted_at": "2026-07-08T00:00:00.000Z",
+      "amount": "8",
+      "attempts": 8,
+      "market": "uk"
+    }
+  ],
+  "blindingHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "committedAt": "2026-09-01T00:00:00.000Z",
+  "stateOrdinal": 1,
+  "expect": {
+    "H": "sha256:404f5124404c2f273906fd2161a1f28641f7ba2d940fed6a3eb7e861760eb765",
+    "G": "sha256:da8a958865ed3a081742a042a8280a553d146a096ce8fc71c101dede6afb92fd",
+    "plan": {
+      "exposeId": "recovery_moment",
+      "H": "sha256:404f5124404c2f273906fd2161a1f28641f7ba2d940fed6a3eb7e861760eb765",
+      "G": "sha256:da8a958865ed3a081742a042a8280a553d146a096ce8fc71c101dede6afb92fd",
+      "encoding": {
+        "fractionalBits": 4,
+        "rounding": "floor"
+      },
+      "fieldCapacityBits": 253,
+      "properties": [
+        {
+          "propertyId": "000:mean:amount",
+          "property": "mean",
+          "columns": [
+            "amount"
+          ],
+          "epsilon": "0.078125",
+          "margin": "0.125",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "meanComparison": 17,
+            "sum": 11,
+            "value": 8
+          }
+        },
+        {
+          "propertyId": "001:marginalHistogram:amount",
+          "property": "marginalHistogram",
+          "columns": [
+            "amount"
+          ],
+          "epsilon": "0",
+          "margin": "0.1875",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "totalVariationComparison": 12,
+            "value": 8
+          }
+        },
+        {
+          "propertyId": "002:support:market",
+          "property": "support",
+          "columns": [
+            "market"
+          ],
+          "epsilon": "0",
+          "margin": null,
+          "maxNonMembers": 0,
+          "magnitudeBits": {}
+        },
+        {
+          "propertyId": "003:mean:amount@market",
+          "property": "mean",
+          "columns": [
+            "amount"
+          ],
+          "groupBy": "market",
+          "epsilon": "0.0625",
+          "margin": "1.9375",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "meanComparison": 18,
+            "sum": 11,
+            "value": 8
+          }
+        },
+        {
+          "propertyId": "004:correlation:amount+attempts",
+          "property": "correlation",
+          "columns": [
+            "amount",
+            "attempts"
+          ],
+          "epsilon": "0.25",
+          "margin": "0.25",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "centredSecondMoment": 23,
+            "correlationComparison": 51,
+            "correlationNumerator": 24,
+            "sum": 12,
+            "sumOfProducts": 20,
+            "value": 9
+          }
+        },
+        {
+          "propertyId": "005:quantile:amount",
+          "property": "quantile",
+          "columns": [
+            "amount"
+          ],
+          "epsilon": "0.0625",
+          "margin": "0.9375",
+          "maxNonMembers": null,
+          "magnitudeBits": {
+            "value": 8
+          }
+        }
+      ]
+    },
+    "statistic": {
+      "exposeId": "recovery_moment",
+      "recordCount": 8,
+      "properties": [
+        {
+          "propertyId": "000:mean:amount",
+          "property": "mean",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "Sx": "576"
+            }
+          ]
+        },
+        {
+          "propertyId": "001:marginalHistogram:amount",
+          "property": "marginalHistogram",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "binCounts": [
+                1,
+                2,
+                5
+              ]
+            }
+          ]
+        },
+        {
+          "propertyId": "002:support:market",
+          "property": "support",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "support": [
+                "ie",
+                "uk"
+              ]
+            }
+          ]
+        },
+        {
+          "propertyId": "003:mean:amount@market",
+          "property": "mean",
+          "n": 8,
+          "groups": [
+            {
+              "group": "ie",
+              "k": 4,
+              "Sx": "256"
+            },
+            {
+              "group": "uk",
+              "k": 4,
+              "Sx": "320"
+            }
+          ]
+        },
+        {
+          "propertyId": "004:correlation:amount+attempts",
+          "property": "correlation",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "Sx": "576",
+              "Sy": "576",
+              "Sxx": "52224",
+              "Sxy": "52224",
+              "Syy": "52224"
+            }
+          ]
+        },
+        {
+          "propertyId": "005:quantile:amount",
+          "property": "quantile",
+          "n": 8,
+          "groups": [
+            {
+              "group": "",
+              "k": 8,
+              "quantileWitness": "64",
+              "quantileBelow": 3,
+              "quantileAtOrBelow": 4
+            }
+          ]
+        }
+      ]
+    },
+    "C2": "sha256:7d27ce399140c7b4b5101b556265fd0cff367ea6925ac85333a3342957b1a050"
+  },
+  "roundingCases": [
+    {
+      "id": "floor-rounds-down",
+      "fractionalBits": 4,
+      "tolerance": "0.25",
+      "epsilon": "0.078125",
+      "expect": {
+        "margin": "0.125",
+        "notLooserThan": "0.171875",
+        "onGrid": true
+      }
+    },
+    {
+      "id": "already-on-grid",
+      "fractionalBits": 4,
+      "tolerance": "0.5",
+      "epsilon": "0.25",
+      "expect": {
+        "margin": "0.25",
+        "notLooserThan": "0.25",
+        "onGrid": true
+      }
+    },
+    {
+      "id": "tiny-epsilon",
+      "fractionalBits": 8,
+      "tolerance": "0.02",
+      "epsilon": "0.00390625",
+      "expect": {
+        "margin": "0.015625",
+        "notLooserThan": "0.01609375",
+        "onGrid": true
+      }
+    },
+    {
+      "id": "wide-grid",
+      "fractionalBits": 2,
+      "tolerance": "0.9",
+      "epsilon": "0.25",
+      "expect": {
+        "margin": "0.5",
+        "notLooserThan": "0.65",
+        "onGrid": true
+      }
+    },
+    {
+      "id": "rounds-to-zero",
+      "fractionalBits": 2,
+      "tolerance": "0.3",
+      "epsilon": "0.2",
+      "expect": {
+        "code": "FLX-5002"
+      }
+    },
+    {
+      "id": "epsilon-equals-tolerance",
+      "fractionalBits": 4,
+      "tolerance": "0.25",
+      "epsilon": "0.25",
+      "expect": {
+        "code": "FLX-5002"
+      }
+    },
+    {
+      "id": "epsilon-above-tolerance",
+      "fractionalBits": 4,
+      "tolerance": "0.25",
+      "epsilon": "0.5",
+      "expect": {
+        "code": "FLX-5002"
+      }
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "identical",
+      "note": "the synthetic dataset is the committed record set; every property is within",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": true,
+        "refused": false,
+        "refusalCodes": [],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "within",
+          "003:mean:amount@market": "within",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "one-grid-step",
+      "note": "one amount moved by exactly one grid step; every property is still within",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1.0625",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": true,
+        "refused": false,
+        "refusalCodes": [],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "within",
+          "003:mean:amount@market": "within",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "drifted-mean",
+      "note": "amounts pushed to the top of the declared range; the mean and the histogram land outside their margins",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": false,
+        "refusalCodes": [],
+        "outcomes": {
+          "000:mean:amount": "outside",
+          "001:marginalHistogram:amount": "outside",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "outside",
+          "005:quantile:amount": "outside"
+        }
+      }
+    },
+    {
+      "id": "unseen-category",
+      "note": "one record carries a category the committed support does not hold",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "de"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "outside",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "nulls-excluded",
+      "note": "two amounts are null under null: exclude and leave the amount properties",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": null,
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": null,
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "outside",
+          "001:marginalHistogram:amount": "outside",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "outside"
+        }
+      }
+    },
+    {
+      "id": "all-amounts-null",
+      "note": "every amount is null: k = 0 for every amount property",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": null,
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": null,
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": null,
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": null,
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": null,
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": null,
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": null,
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": null,
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "outside",
+          "001:marginalHistogram:amount": "outside",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "outside",
+          "005:quantile:amount": "outside"
+        }
+      }
+    },
+    {
+      "id": "too-few-records",
+      "note": "three records, below the declared records.min",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {}
+      }
+    },
+    {
+      "id": "too-many-records",
+      "note": "nine records, above the declared records.max",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s8",
+          "aborted_at": "2026-07-09T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "ie"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {}
+      }
+    },
+    {
+      "id": "group-below-min",
+      "note": "eight records but one group holds three, below the declared records.min",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "column-absent",
+      "note": "the market column is absent from the synthetic rows",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "4",
+          "attempts": 4
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5031"
+        ],
+        "outcomes": {
+          "000:mean:amount": "within",
+          "001:marginalHistogram:amount": "within",
+          "002:support:market": "outside",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "within",
+          "005:quantile:amount": "within"
+        }
+      }
+    },
+    {
+      "id": "value-out-of-range",
+      "note": "one amount is outside the declared range: a fail-closed refusal, not an outcome",
+      "syntheticRows": [
+        {
+          "subscriber_id": "s0",
+          "aborted_at": "2026-07-01T00:00:00.000Z",
+          "amount": "1",
+          "attempts": 1,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s1",
+          "aborted_at": "2026-07-02T00:00:00.000Z",
+          "amount": "2",
+          "attempts": 2,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s2",
+          "aborted_at": "2026-07-03T00:00:00.000Z",
+          "amount": "3",
+          "attempts": 3,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s3",
+          "aborted_at": "2026-07-04T00:00:00.000Z",
+          "amount": "9",
+          "attempts": 4,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s4",
+          "aborted_at": "2026-07-05T00:00:00.000Z",
+          "amount": "5",
+          "attempts": 5,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s5",
+          "aborted_at": "2026-07-06T00:00:00.000Z",
+          "amount": "6",
+          "attempts": 6,
+          "market": "uk"
+        },
+        {
+          "subscriber_id": "s6",
+          "aborted_at": "2026-07-07T00:00:00.000Z",
+          "amount": "7",
+          "attempts": 7,
+          "market": "ie"
+        },
+        {
+          "subscriber_id": "s7",
+          "aborted_at": "2026-07-08T00:00:00.000Z",
+          "amount": "8",
+          "attempts": 8,
+          "market": "uk"
+        }
+      ],
+      "expect": {
+        "within": false,
+        "refused": true,
+        "refusalCodes": [
+          "FLX-5005"
+        ],
+        "outcomes": {
+          "000:mean:amount": "outside",
+          "001:marginalHistogram:amount": "outside",
+          "002:support:market": "within",
+          "003:mean:amount@market": "outside",
+          "004:correlation:amount+attempts": "outside",
+          "005:quantile:amount": "outside"
+        }
+      }
+    }
+  ],
+  "kinds": {
+    "levelHistogram": {
+      "since": 2,
+      "note": "levelHistogram, added in vectorsVersion 2: a support column's records counted per declared level, ungrouped and grouped by a second support column. One contract, one committed slice, the digests, plan fragment, counts and commitment they produce, then one case per outcome and per fail-closed condition of the kind. Declared levels are listed out of order on purpose: cells are taken sorted. Counts are integers; margins are exact decimal strings.",
+      "contract": {
+        "fluidVersion": "0.7.5",
+        "kind": "DataProduct",
+        "id": "example.gold.plan_moment",
+        "exposes": [
+          {
+            "exposeId": "plan_moment",
+            "kind": "stream",
+            "contract": {
+              "schema": [
+                {
+                  "name": "channel",
+                  "type": "STRING",
+                  "required": true
+                },
+                {
+                  "name": "plan",
+                  "type": "STRING"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "emit": {
+        "productRef": "example.gold.plan_moment",
+        "exposeId": "plan_moment",
+        "fluidVersion": "^0.7.3"
+      },
+      "extension": {
+        "rows": 16,
+        "fidelity": {
+          "encoding": {
+            "fractionalBits": 4,
+            "rounding": "floor"
+          },
+          "records": {
+            "min": 2,
+            "max": 64
+          },
+          "columns": {
+            "channel": {
+              "support": {
+                "values": [
+                  "web",
+                  "store"
+                ]
+              },
+              "maxCardinality": 4,
+              "null": "fail"
+            },
+            "plan": {
+              "support": {
+                "values": [
+                  "pro",
+                  "basic",
+                  "plus"
+                ]
+              },
+              "maxCardinality": 4,
+              "null": "exclude"
+            }
+          },
+          "properties": [
+            {
+              "property": "levelHistogram",
+              "column": "plan",
+              "groupBy": "channel",
+              "tolerance": {
+                "type": "distance",
+                "measure": "totalVariation",
+                "max": "0.25"
+              }
+            },
+            {
+              "property": "levelHistogram",
+              "column": "channel",
+              "tolerance": {
+                "type": "distance",
+                "measure": "totalVariation",
+                "max": "0.125"
+              }
+            }
+          ],
+          "budget": {
+            "maxChecksPerState": 3,
+            "maxStateAge": "P30D"
+          },
+          "failureAction": "withholdBundle"
+        }
+      },
+      "expose": {
+        "exposeId": "plan_moment",
+        "columns": [
+          "channel",
+          "plan"
+        ]
+      },
+      "committedSlice": [
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "basic"
+        },
+        {
+          "channel": "store",
+          "plan": "plus"
+        },
+        {
+          "channel": "store",
+          "plan": "plus"
+        },
+        {
+          "channel": "web",
+          "plan": "basic"
+        },
+        {
+          "channel": "web",
+          "plan": "plus"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        },
+        {
+          "channel": "web",
+          "plan": "pro"
+        }
+      ],
+      "blindingHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "committedAt": "2026-09-01T00:00:00.000Z",
+      "stateOrdinal": 1,
+      "expect": {
+        "H": "sha256:8ccf22fe3c03d1bd15f7336d6b5dc2c4b2c7a4b8e288000ec0fe09d3eb1fe86e",
+        "G": "sha256:107a29066f3aa8ccc25bd334e7e849225039cacbbc8f4a5a3d9d1dcf3ac44f41",
+        "plan": {
+          "exposeId": "plan_moment",
+          "H": "sha256:8ccf22fe3c03d1bd15f7336d6b5dc2c4b2c7a4b8e288000ec0fe09d3eb1fe86e",
+          "G": "sha256:107a29066f3aa8ccc25bd334e7e849225039cacbbc8f4a5a3d9d1dcf3ac44f41",
+          "encoding": {
+            "fractionalBits": 4,
+            "rounding": "floor"
+          },
+          "fieldCapacityBits": 253,
+          "properties": [
+            {
+              "propertyId": "000:levelHistogram:plan@channel",
+              "property": "levelHistogram",
+              "columns": [
+                "plan"
+              ],
+              "groupBy": "channel",
+              "epsilon": "0",
+              "margin": "0.25",
+              "maxNonMembers": null,
+              "magnitudeBits": {
+                "totalVariationComparison": 16
+              }
+            },
+            {
+              "propertyId": "001:levelHistogram:channel",
+              "property": "levelHistogram",
+              "columns": [
+                "channel"
+              ],
+              "epsilon": "0",
+              "margin": "0.125",
+              "maxNonMembers": null,
+              "magnitudeBits": {
+                "totalVariationComparison": 17
+              }
+            }
+          ]
+        },
+        "statistic": {
+          "exposeId": "plan_moment",
+          "recordCount": 16,
+          "properties": [
+            {
+              "propertyId": "000:levelHistogram:plan@channel",
+              "property": "levelHistogram",
+              "n": 16,
+              "groups": [
+                {
+                  "group": "store",
+                  "k": 8,
+                  "levelCounts": [
+                    6,
+                    2,
+                    0
+                  ]
+                },
+                {
+                  "group": "web",
+                  "k": 8,
+                  "levelCounts": [
+                    1,
+                    1,
+                    6
+                  ]
+                }
+              ]
+            },
+            {
+              "propertyId": "001:levelHistogram:channel",
+              "property": "levelHistogram",
+              "n": 16,
+              "groups": [
+                {
+                  "group": "",
+                  "k": 16,
+                  "levelCounts": [
+                    8,
+                    8
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "C2": "sha256:8da37edad97f016e050d32f97e399d3af4c52d71bbaa6acac456d1edd0150f53"
+      },
+      "evaluations": [
+        {
+          "id": "identical",
+          "note": "the synthetic dataset is the committed record set; both properties are within",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "on-the-margin",
+          "note": "two store records move from basic to plus: the store's total variation is exactly the margin 1/4, and the margin is inclusive, so the grouped property is within",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "one-record-past-the-margin",
+          "note": "one more store record moves from basic to plus: the store's total variation is 3/8, past the margin, so the grouped property is outside; the channel counts are unchanged",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "outside",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "link-lost",
+          "note": "both channels draw the same plan counts and the channel counts are as committed: each column looks right and the link between them is gone, so only the grouped property is outside",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "pro"
+            },
+            {
+              "channel": "store",
+              "plan": "pro"
+            },
+            {
+              "channel": "store",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "outside",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "channel-mix-drifted",
+          "note": "the store holds twice the committed records with the committed plan shares: every group's plan counts are within, and the channel counts are outside the margin 1/8",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "outside"
+            }
+          }
+        },
+        {
+          "id": "zero-cell-drawn",
+          "note": "one store record takes the declared level pro, which the committed store never holds: a declared level is a cell with a count of zero, not an undeclared level, so both properties are within",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "null-plan-excluded",
+          "note": "two store records carry a null plan under null: exclude: they leave the grouped property and stay in the channel counts, and both properties are within",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "store",
+              "plan": null
+            },
+            {
+              "channel": "store",
+              "plan": null
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "within",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "undeclared-level",
+          "note": "one store record carries the plan gold, which is not a declared level: the grouped property is refused, FLX-5005, and the channel property is still answered",
+          "syntheticRows": [
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "basic"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "store",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "store",
+              "plan": "gold"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": true,
+            "refusalCodes": [
+              "FLX-5005"
+            ],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "outside",
+              "001:levelHistogram:channel": "within"
+            }
+          }
+        },
+        {
+          "id": "group-not-held",
+          "note": "the synthetic dataset holds only the web channel: the two sides group into different sets and the grouped property is refused, FLX-5005",
+          "syntheticRows": [
+            {
+              "channel": "web",
+              "plan": "basic"
+            },
+            {
+              "channel": "web",
+              "plan": "plus"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            },
+            {
+              "channel": "web",
+              "plan": "pro"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": true,
+            "refusalCodes": [
+              "FLX-5005"
+            ],
+            "outcomes": {
+              "000:levelHistogram:plan@channel": "outside",
+              "001:levelHistogram:channel": "outside"
+            }
+          }
+        }
+      ]
+    },
+    "quantileBins": {
+      "since": 3,
+      "note": "quantile with bins, added in vectorsVersion 3 (quantile/2): a range column's order statistic, published as the declared bin that holds it and the records below and through that bin, never the witness. The synthetic order statistic is within when it lies within the margin of that bin, which for every bin but the last runs from its lower edge to the last grid value below its upper edge, and for the last bin to its upper edge, closed. The grid has four fractional bits, so a value v is 16 * v units, and the margin is 31 units. Two properties over one column: a median that falls in the second bin and a level 0.9 quantile that falls in the last. Counts are integers; margins are exact decimal strings.",
+      "contract": {
+        "fluidVersion": "0.7.5",
+        "kind": "DataProduct",
+        "id": "example.gold.amount_moment",
+        "exposes": [
+          {
+            "exposeId": "amount_moment",
+            "kind": "stream",
+            "contract": {
+              "schema": [
+                {
+                  "name": "amount",
+                  "type": "DECIMAL(18,4)"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "emit": {
+        "productRef": "example.gold.amount_moment",
+        "exposeId": "amount_moment",
+        "fluidVersion": "^0.7.3"
+      },
+      "extension": {
+        "rows": 10,
+        "fidelity": {
+          "encoding": {
+            "fractionalBits": 4,
+            "rounding": "floor"
+          },
+          "records": {
+            "min": 2,
+            "max": 64
+          },
+          "columns": {
+            "amount": {
+              "range": {
+                "min": "0",
+                "max": "100"
+              },
+              "null": "fail"
+            }
+          },
+          "properties": [
+            {
+              "property": "quantile",
+              "column": "amount",
+              "level": "0.5",
+              "bins": [
+                "0",
+                "25",
+                "50",
+                "100"
+              ],
+              "tolerance": {
+                "type": "absolute",
+                "value": "2"
+              }
+            },
+            {
+              "property": "quantile",
+              "column": "amount",
+              "level": "0.9",
+              "bins": [
+                "0",
+                "25",
+                "50",
+                "100"
+              ],
+              "tolerance": {
+                "type": "absolute",
+                "value": "2"
+              }
+            }
+          ],
+          "budget": {
+            "maxChecksPerState": 20,
+            "maxStateAge": "P30D"
+          },
+          "failureAction": "withholdBundle"
+        }
+      },
+      "expose": {
+        "exposeId": "amount_moment",
+        "columns": [
+          "amount"
+        ]
+      },
+      "committedSlice": [
+        {
+          "amount": "5"
+        },
+        {
+          "amount": "12"
+        },
+        {
+          "amount": "20"
+        },
+        {
+          "amount": "30"
+        },
+        {
+          "amount": "33"
+        },
+        {
+          "amount": "80"
+        },
+        {
+          "amount": "90"
+        },
+        {
+          "amount": "100"
+        },
+        {
+          "amount": "100"
+        },
+        {
+          "amount": "100"
+        }
+      ],
+      "blindingHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "committedAt": "2026-09-01T00:00:00.000Z",
+      "stateOrdinal": 1,
+      "expect": {
+        "H": "sha256:bab11123e7123c94209cbcb800af59671a9d4b3a435cc19105ef7cbe514880e6",
+        "G": "sha256:1c404517d6b569c3102cbbdb2dcc2a4cd2105f9be8ee9bd0f8817237f9e823c7",
+        "plan": {
+          "exposeId": "amount_moment",
+          "H": "sha256:bab11123e7123c94209cbcb800af59671a9d4b3a435cc19105ef7cbe514880e6",
+          "G": "sha256:1c404517d6b569c3102cbbdb2dcc2a4cd2105f9be8ee9bd0f8817237f9e823c7",
+          "encoding": {
+            "fractionalBits": 4,
+            "rounding": "floor"
+          },
+          "fieldCapacityBits": 253,
+          "properties": [
+            {
+              "propertyId": "000:quantile:amount",
+              "property": "quantile",
+              "columns": [
+                "amount"
+              ],
+              "epsilon": "0.0625",
+              "margin": "1.9375",
+              "maxNonMembers": null,
+              "magnitudeBits": {
+                "value": 11
+              }
+            },
+            {
+              "propertyId": "001:quantile:amount",
+              "property": "quantile",
+              "columns": [
+                "amount"
+              ],
+              "epsilon": "0.0625",
+              "margin": "1.9375",
+              "maxNonMembers": null,
+              "magnitudeBits": {
+                "value": 11
+              }
+            }
+          ]
+        },
+        "statistic": {
+          "exposeId": "amount_moment",
+          "recordCount": 10,
+          "properties": [
+            {
+              "propertyId": "000:quantile:amount",
+              "property": "quantile",
+              "n": 10,
+              "groups": [
+                {
+                  "group": "",
+                  "k": 10,
+                  "quantileBin": 1,
+                  "binBelow": 3,
+                  "binThrough": 5
+                }
+              ]
+            },
+            {
+              "propertyId": "001:quantile:amount",
+              "property": "quantile",
+              "n": 10,
+              "groups": [
+                {
+                  "group": "",
+                  "k": 10,
+                  "quantileBin": 2,
+                  "binBelow": 5,
+                  "binThrough": 10
+                }
+              ]
+            }
+          ]
+        },
+        "C2": "sha256:d3608c27fe0ef94310ac66a9f6c0d2aed986c954a4d24a44ce6720d7136334a1"
+      },
+      "evaluations": [
+        {
+          "id": "identical",
+          "note": "the synthetic dataset is the committed record set; both order statistics are the committed ones",
+          "syntheticRows": [
+            {
+              "amount": "5"
+            },
+            {
+              "amount": "12"
+            },
+            {
+              "amount": "20"
+            },
+            {
+              "amount": "30"
+            },
+            {
+              "amount": "33"
+            },
+            {
+              "amount": "80"
+            },
+            {
+              "amount": "90"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "within",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "inside-the-bin",
+          "note": "the median is 40 (640 units), inside its bin [400, 800); the level 0.9 quantile is the declared maximum",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "within",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "margin-below-the-lower-edge",
+          "note": "the median is 23.0625 (369 units), exactly the margin of 31 below the bin's lower edge 400: within",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "23.0625"
+            },
+            {
+              "amount": "23.0625"
+            },
+            {
+              "amount": "23.0625"
+            },
+            {
+              "amount": "23.0625"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "within",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "past-the-margin-below-the-lower-edge",
+          "note": "the median is 23 (368 units), one grid step past the margin below the lower edge: outside",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "23"
+            },
+            {
+              "amount": "23"
+            },
+            {
+              "amount": "23"
+            },
+            {
+              "amount": "23"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "outside",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "margin-above-the-top",
+          "note": "the median is 51.875 (830 units), exactly the margin of 31 above the bin's top grid value 799: within",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "51.875"
+            },
+            {
+              "amount": "51.875"
+            },
+            {
+              "amount": "51.875"
+            },
+            {
+              "amount": "51.875"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "within",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "past-the-margin-above-the-top",
+          "note": "the median is 51.9375 (831 units), one grid step past the margin above the top: outside",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "51.9375"
+            },
+            {
+              "amount": "51.9375"
+            },
+            {
+              "amount": "51.9375"
+            },
+            {
+              "amount": "51.9375"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "outside",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "first-step-of-the-next-bin",
+          "note": "the median is 50 (800 units), the first grid value of the next bin and one above this bin's top: within, the slack a bin trades for publication",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "50"
+            },
+            {
+              "amount": "50"
+            },
+            {
+              "amount": "50"
+            },
+            {
+              "amount": "50"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "within",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "last-bin-margin-below-the-lower-edge",
+          "note": "the level 0.9 quantile is 48.0625 (769 units), exactly the margin of 31 below the last bin's lower edge 800: within",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "48.0625"
+            },
+            {
+              "amount": "48.0625"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "within",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "last-bin-past-the-margin-below-the-lower-edge",
+          "note": "the level 0.9 quantile is 48 (768 units), one grid step past the margin below the last bin's lower edge: outside",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "48"
+            },
+            {
+              "amount": "48"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "within",
+              "001:quantile:amount": "outside"
+            }
+          }
+        },
+        {
+          "id": "last-bin-closed-at-the-top",
+          "note": "the level 0.9 quantile is 100, the last bin's closed upper edge: within; the committed side holds all ten records through that bin",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "100"
+            }
+          ],
+          "expect": {
+            "within": true,
+            "refused": false,
+            "refusalCodes": [],
+            "outcomes": {
+              "000:quantile:amount": "within",
+              "001:quantile:amount": "within"
+            }
+          }
+        },
+        {
+          "id": "value-out-of-range",
+          "note": "one synthetic amount is 500, past the declared maximum: the check refuses both properties and is outside",
+          "syntheticRows": [
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "1"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "40"
+            },
+            {
+              "amount": "100"
+            },
+            {
+              "amount": "500"
+            }
+          ],
+          "expect": {
+            "within": false,
+            "refused": true,
+            "refusalCodes": [
+              "FLX-5005"
+            ],
+            "outcomes": {
+              "000:quantile:amount": "outside",
+              "001:quantile:amount": "outside"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

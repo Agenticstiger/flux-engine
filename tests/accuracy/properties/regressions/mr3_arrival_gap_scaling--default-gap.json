@@ -1,0 +1,12 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "factor": 2,
+    "gap_mean_ms": "300000",
+    "seed": 7,
+    "size": 150
+  },
+  "note": "the engine's default gap mean, doubled",
+  "property": "mr3_arrival_gap_scaling",
+  "tier": "hand-written"
+}

@@ -1,0 +1,30 @@
+# The FLUID contract the simulation emits rows for. FLUX refers to it and never
+# restates it, so the thing that ships is the thing that was checked.
+fluidVersion: "0.7.5"
+kind: DataProduct
+id: telco.gold.payment_recovery_moment
+name: Payment Recovery Moment
+metadata:
+  owner:
+    team: growth-lab
+exposes:
+  - exposeId: payment_recovery_moment
+    kind: stream
+    contract:
+      schema:
+        - name: subscriber_id
+          type: STRING
+          required: true
+          tags: [identifier]
+        - name: aborted_at
+          type: TIMESTAMP
+          required: true
+        - name: amount
+          type: "DECIMAL(18,4)"
+        - name: market
+          type: STRING
+    binding:
+      platform: kafka
+      format: kafka_topic
+      location:
+        topic: billing.payment-recovery.v1

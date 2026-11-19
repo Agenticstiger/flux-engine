@@ -1,0 +1,15 @@
+usage: fluxsim gate conform [-h] [--vectors VECTORS] [-j]
+
+Run the published RFC-04 conformance vectors and report the pass count.
+
+examples:
+  # run the published conformance vectors
+  fluxsim gate conform
+
+options:
+  -h, --help         show this help message and exit
+  --vectors VECTORS  path to an RFC-04 vectors file (default: the published
+                     set)
+  -j, --json         emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/gate.html

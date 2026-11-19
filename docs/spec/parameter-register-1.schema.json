@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-0-0/FluxParameterRegister.json",
+  "title": "FLUX parameter register, format 1-0-0",
+  "description": "What each number a run reads rests on: a statistic of the profile its Simulation pins, an assumption with its reason, or a default. Written by apply as run/parameter-register.json when the Simulation declares a register, bound by the plan's parameterRegisterDigest. Counts are JSON integers, and every number of the bundle is written as the exact decimal text it was declared as. The shape is checked here; docs/spec/PARAMETER-REGISTER-SPEC.md states the rules the schema cannot express, among them that the counts add up to declared and that each parameter's source is its entry's.",
+  "type": "object",
+  "required": [
+    "_producer",
+    "_schemaURL",
+    "simulationId",
+    "profile",
+    "declared",
+    "counts",
+    "entries",
+    "parameters"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_producer": {
+      "type": "string",
+      "format": "uri",
+      "description": "The tool that wrote the record (OpenLineage BaseFacet)."
+    },
+    "_schemaURL": {
+      "const": "https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-0-0/FluxParameterRegister.json",
+      "description": "This schema's $id (OpenLineage BaseFacet)."
+    },
+    "simulationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The Simulation whose run the record describes."
+    },
+    "profile": {
+      "description": "The profile the Simulation pins, or null when it pins none.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["digest"],
+          "additionalProperties": false,
+          "properties": {
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "The pinned profile's jcs-document digest."
+            }
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "declared": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many numbers the register counts: the length of parameters."
+    },
+    "counts": {
+      "type": "object",
+      "required": ["profile", "assumption", "default"],
+      "additionalProperties": false,
+      "description": "How many numbers rest on each source. They add up to declared.",
+      "properties": {
+        "profile": {"type": "integer", "minimum": 0},
+        "assumption": {"type": "integer", "minimum": 0},
+        "default": {"type": "integer", "minimum": 0}
+      }
+    },
+    "entries": {
+      "type": "array",
+      "description": "The register's entries as the Simulation declares them, in its order.",
+      "items": {"$ref": "#/$defs/entry"}
+    },
+    "parameters": {
+      "type": "array",
+      "description": "Every number the register counts, documents in NFC order of their ids, each document in key order.",
+      "items": {"$ref": "#/$defs/parameter"}
+    }
+  },
+  "$defs": {
+    "pointer": {
+      "type": "string",
+      "pattern": "^(/([^~]|~[01])*)*$",
+      "description": "An RFC 6901 JSON Pointer."
+    },
+    "source": {
+      "enum": ["profile", "assumption", "default"]
+    },
+    "entry": {
+      "type": "object",
+      "required": ["index", "document", "pointer", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The entry's place in the declared list."
+        },
+        "document": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The id of the document the pointer is read in."
+        },
+        "pointer": {
+          "$ref": "#/$defs/pointer",
+          "description": "The numbers the entry names: one, or every number under a mapping or a list."
+        },
+        "source": {"$ref": "#/$defs/source"},
+        "statistic": {
+          "type": "object",
+          "required": ["pointer"],
+          "additionalProperties": false,
+          "description": "A profile source's citation: a pointer into the pinned profile and the registered definition it lands in (a table's rowCount has none).",
+          "properties": {
+            "pointer": {"$ref": "#/$defs/pointer"},
+            "definition": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*/[1-9][0-9]*$"
+            }
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Why an assumption holds, or a default's note: one line of text."
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source": {"const": "profile"}}},
+          "then": {"required": ["statistic"], "not": {"required": ["reason"]}}
+        },
+        {
+          "if": {"properties": {"source": {"const": "assumption"}}},
+          "then": {"required": ["reason"], "not": {"required": ["statistic"]}}
+        },
+        {
+          "if": {"properties": {"source": {"const": "default"}}},
+          "then": {"not": {"required": ["statistic"]}}
+        }
+      ]
+    },
+    "parameter": {
+      "type": "object",
+      "required": ["document", "kind", "pointer", "value", "source", "entry"],
+      "additionalProperties": false,
+      "properties": {
+        "document": {"type": "string", "minLength": 1},
+        "kind": {
+          "type": "string",
+          "description": "The FLUX kind of the document."
+        },
+        "pointer": {"$ref": "#/$defs/pointer"},
+        "value": {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+          "description": "The number exactly as declared, as decimal text."
+        },
+        "source": {"$ref": "#/$defs/source"},
+        "entry": {
+          "description": "The index of the entry that decided the source, or null for a default no entry names.",
+          "oneOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]
+        }
+      }
+    }
+  }
+}

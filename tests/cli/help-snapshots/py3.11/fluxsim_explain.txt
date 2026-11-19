@@ -1,0 +1,23 @@
+usage: fluxsim explain [-h] [--list] [-j] [code]
+
+Print the title and operator-facing explanation of one FLX-nnnn code. With
+--list, print every registered code instead, so the catalog is discoverable
+without grepping the source.
+
+examples:
+  # print one code's explanation
+  fluxsim explain FLX-1001
+
+  # list every code
+  fluxsim explain --list
+
+arguments:
+  code        the FLX-nnnn code to explain (case-insensitive); omit it with
+              --list
+
+options:
+  -h, --help  show this help message and exit
+  --list      print every registered code as `code [family] title`
+  -j, --json  emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/explain.html

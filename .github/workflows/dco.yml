@@ -1,0 +1,68 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: DCO
+
+# Every commit in a pull request must carry a Signed-off-by line that matches
+# its author (https://developercertificate.org/), with one exception: a pull
+# request opened by someone in the organisation that maintains this repository
+# skips the check, because the organisation already owns that work. Outside
+# contributors are always checked, pull requests from forks included. To repair
+# a branch:
+#
+#   git rebase --signoff origin/main
+#   git push --force-with-lease
+#
+# The exemption is the job's `if:`, in two parts. The first reads
+# `author_association`, how GitHub describes the author to a workflow; OWNER and
+# MEMBER skip the job. It is the idea behind `require.members: false` in
+# dcoapp/app, done here because the action below has no such option (its
+# `exempt-authors` matches commit e-mail addresses, and anyone can put any
+# address on a commit). But GitHub reports a member whose membership is private
+# as a plain CONTRIBUTOR, so the second part names the members who keep it
+# private. Add a login there when someone joins; remove it when they leave or
+# rename the account, since a name can change hands. Anyone covered by neither
+# part is checked.
+#
+# A job skipped by `if:` reports success, so the exemption also holds once this
+# check is required. The whole pull request is skipped, so a maintainer who
+# carries an outside contributor's commits into one should keep their
+# Signed-off-by lines.
+#
+# Borrowed rather than built: KineticCafe/actions-dco v3.2.1 (Apache-2.0),
+# pinned by commit SHA. The alternatives looked at, and why not:
+#   cncf/dco2                     a GitHub App, so an org admin has to install it
+#   christophebedard/dco-check    its composite action calls actions/setup-python
+#                                 by a floating tag, which a SHA pin on the
+#                                 outer action does not cover
+#   tim-actions/dco               unmaintained since 2021
+#   dcoapp/app                    last release 2022
+#
+# Dependabot is the one bot exempted. Its commits carry no sign-off.
+#
+# Making this check required is a repository-settings step (branch ruleset), not
+# something a workflow file can do.
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  dco:
+    name: DCO
+    if: >-
+      ${{ !(contains(fromJSON('["OWNER","MEMBER"]'), github.event.pull_request.author_association)
+      || contains(fromJSON('["fas89"]'), github.event.pull_request.user.login)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: KineticCafe/actions-dco@a52e56727ec21d6cdba26513826e1ae4a752d2fc # v3.2.1
+        with:
+          config: |
+            [bot]
+            policy = "allowlist"
+            allow = ["dependabot[bot]"]

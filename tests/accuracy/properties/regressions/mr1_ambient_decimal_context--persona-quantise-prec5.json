@@ -1,0 +1,12 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "prec": 5,
+    "rounding": "ROUND_UP",
+    "seed": 42,
+    "size": 50
+  },
+  "note": "PersonaSpec.from_document quantised a scalar trait to 6 dp in the caller's context, so at prec<6 it signalled InvalidOperation and the run failed. Fixed: the run pins the kernel context.",
+  "property": "mr1_ambient_decimal_context",
+  "tier": "hand-written"
+}

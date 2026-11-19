@@ -1,0 +1,3970 @@
+{
+  "$comment": "flux-expr/3 vectors (EXPR-SPEC-3 §2 to §7): a date part, date arithmetic and string concatenation, in the shape of expr2-vectors.json (EXPR-SPEC-2 §11). Every vector is read for the file's 'language' unless it names its own, which is how the refusals under flux-expr/2 sit here; a vector with side 'core' is a contract's text. Every accepted vector also runs as a DuckDB query in the test suite and must agree: EXTRACT as extract(day FROM d), ADD_DAYS as d + n, ADD_MONTHS as CAST(d + to_months(n) AS DATE), ADD_YEARS as CAST(d + to_years(n) AS DATE), and || with CAST(x AS VARCHAR) for an integer. The model is a date dimension in dsdgen's shape (date_dim, whose key is the Julian day) and an expose of edge cases (quirks: columns named year, month and day, NULLs, dates at both ends of the calendar, an enum column). No JSON number appears: a number is a decimal string; a date is YYYY-MM-DD.",
+  "version": "1",
+  "language": "flux-expr/3",
+  "models": {
+    "calendar": {
+      "exposes": {
+        "date_dim": {
+          "columns": {
+            "d_date_sk": {
+              "type": "bigint"
+            },
+            "d_date": {
+              "type": "date"
+            },
+            "d_year": {
+              "type": "bigint"
+            },
+            "d_qoy": {
+              "type": "bigint"
+            },
+            "d_quarter_name": {
+              "type": "string"
+            }
+          },
+          "key": [
+            "d_date_sk"
+          ]
+        },
+        "quirks": {
+          "columns": {
+            "q_id": {
+              "type": "string"
+            },
+            "d": {
+              "type": "date"
+            },
+            "year": {
+              "type": "int"
+            },
+            "month": {
+              "type": "int"
+            },
+            "day": {
+              "type": "int"
+            },
+            "n": {
+              "type": "int"
+            },
+            "label": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            },
+            "price": {
+              "type": "decimal(10,2)"
+            },
+            "flag": {
+              "type": "boolean"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "a",
+                "b"
+              ]
+            }
+          },
+          "key": [
+            "q_id"
+          ]
+        }
+      }
+    }
+  },
+  "data": {
+    "calendar": {
+      "model": "calendar",
+      "rows": {
+        "date_dim": [
+          {
+            "d_date_sk": "2451545",
+            "d_date": "2000-01-01",
+            "d_year": "2000",
+            "d_qoy": "1",
+            "d_quarter_name": "2000Q1"
+          },
+          {
+            "d_date_sk": "2451604",
+            "d_date": "2000-02-29",
+            "d_year": "2000",
+            "d_qoy": "1",
+            "d_quarter_name": "2000Q1"
+          },
+          {
+            "d_date_sk": "2451238",
+            "d_date": "1999-02-28",
+            "d_year": "1999",
+            "d_qoy": "1",
+            "d_quarter_name": "1999Q1"
+          },
+          {
+            "d_date_sk": "2450888",
+            "d_date": "1998-03-15",
+            "d_year": "1998",
+            "d_qoy": "1",
+            "d_quarter_name": "1998Q1"
+          },
+          {
+            "d_date_sk": null,
+            "d_date": null,
+            "d_year": null,
+            "d_qoy": null,
+            "d_quarter_name": null
+          },
+          {
+            "d_date_sk": "2451941",
+            "d_date": "2001-01-31",
+            "d_year": "2001",
+            "d_qoy": "1",
+            "d_quarter_name": "2001Q1"
+          },
+          {
+            "d_date_sk": "5373484",
+            "d_date": "9999-12-31",
+            "d_year": "9999",
+            "d_qoy": "4",
+            "d_quarter_name": "9999Q4"
+          },
+          {
+            "d_date_sk": "1721426",
+            "d_date": "0001-01-01",
+            "d_year": "1",
+            "d_qoy": "1",
+            "d_quarter_name": "1Q1"
+          }
+        ],
+        "quirks": [
+          {
+            "q_id": "q1",
+            "d": "2001-01-31",
+            "year": "2001",
+            "month": "1",
+            "day": "31",
+            "n": "2",
+            "label": "x",
+            "note": "N",
+            "price": "1.50",
+            "flag": true,
+            "kind": "a"
+          },
+          {
+            "q_id": "q2",
+            "d": "2000-02-29",
+            "year": "2000",
+            "month": "2",
+            "day": "29",
+            "n": "-3",
+            "label": "ab",
+            "note": null,
+            "price": "2.00",
+            "flag": false,
+            "kind": "b"
+          },
+          {
+            "q_id": "q3",
+            "d": null,
+            "year": null,
+            "month": null,
+            "day": null,
+            "n": null,
+            "label": null,
+            "note": null,
+            "price": null,
+            "flag": null,
+            "kind": null
+          },
+          {
+            "q_id": "q4",
+            "d": "9999-12-31",
+            "year": "9999",
+            "month": "12",
+            "day": "31",
+            "n": "1",
+            "label": "z",
+            "note": "",
+            "price": "0.00",
+            "flag": true,
+            "kind": "a"
+          },
+          {
+            "q_id": "q5",
+            "d": "0001-01-01",
+            "year": "1",
+            "month": "1",
+            "day": "1",
+            "n": "-1",
+            "label": "",
+            "note": "n",
+            "price": "3.25",
+            "flag": false,
+            "kind": "b"
+          },
+          {
+            "q_id": "q6",
+            "d": "2023-03-31",
+            "year": "2023",
+            "month": "3",
+            "day": "31",
+            "n": "12",
+            "label": "m",
+            "note": "t",
+            "price": "9.99",
+            "flag": true,
+            "kind": "a"
+          },
+          {
+            "q_id": "q7",
+            "d": "2024-02-29",
+            "year": "2024",
+            "month": "2",
+            "day": "29",
+            "n": "0",
+            "label": "y",
+            "note": "u",
+            "price": "1.00",
+            "flag": null,
+            "kind": null
+          }
+        ]
+      }
+    }
+  },
+  "vectors": [
+    {
+      "id": "dim-day-of-month",
+      "expr": "EXTRACT(DAY FROM d_date)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "date_dim",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "day",
+          "arg": {
+            "node": "column",
+            "name": "d_date"
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "EXTRACT(DAY FROM d_date)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "1"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "29"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "28"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "15"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "31"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "31"
+          },
+          {
+            "data": "calendar",
+            "row": "7",
+            "result": "1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dim-same-day-last-year-key",
+      "expr": "d_date_sk - DAYS_BETWEEN(ADD_YEARS(d_date, -1), d_date)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "date_dim",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "arith",
+          "op": "-",
+          "left": {
+            "node": "column",
+            "name": "d_date_sk"
+          },
+          "right": {
+            "node": "date_diff",
+            "unit": "day",
+            "from": {
+              "node": "date_add",
+              "unit": "year",
+              "date": {
+                "node": "column",
+                "name": "d_date"
+              },
+              "count": {
+                "node": "neg",
+                "operand": {
+                  "node": "number",
+                  "value": "1"
+                }
+              }
+            },
+            "to": {
+              "node": "column",
+              "name": "d_date"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "d_date_sk - DAYS_BETWEEN(ADD_YEARS(d_date, -1), d_date)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2451180"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2451238"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "2450873"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "2450523"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2451575"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "5373119"
+          },
+          {
+            "data": "calendar",
+            "row": "7",
+            "result": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "dim-quarter-name",
+      "expr": "d_year || 'Q' || d_qoy",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "date_dim",
+      "position": "value",
+      "target": "d_quarter_name",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "d_year"
+            },
+            "right": {
+              "node": "string",
+              "value": "Q"
+            }
+          },
+          "right": {
+            "node": "column",
+            "name": "d_qoy"
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "d_year || 'Q' || d_qoy",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2000Q1"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2000Q1"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "1999Q1"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "1998Q1"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2001Q1"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "9999Q4"
+          },
+          {
+            "data": "calendar",
+            "row": "7",
+            "result": "1Q1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dim-julian-date",
+      "expr": "ADD_DAYS(DATE '1970-01-01', d_date_sk - 2440588)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "date_dim",
+      "position": "value",
+      "target": "d_date",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "date",
+            "value": "1970-01-01"
+          },
+          "count": {
+            "node": "arith",
+            "op": "-",
+            "left": {
+              "node": "column",
+              "name": "d_date_sk"
+            },
+            "right": {
+              "node": "number",
+              "value": "2440588"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_DAYS(DATE '1970-01-01', d_date_sk - 2440588)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2000-01-01"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2000-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "1999-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "1998-03-15"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2001-01-31"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "9999-12-31"
+          },
+          {
+            "data": "calendar",
+            "row": "7",
+            "result": "0001-01-01"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dim-month-end-clamp",
+      "expr": "ADD_MONTHS(DATE '2001-01-31', 1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "date_dim",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "month",
+          "date": {
+            "node": "date",
+            "value": "2001-01-31"
+          },
+          "count": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_MONTHS(DATE '2001-01-31', 1)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "7",
+            "result": "2001-02-28"
+          }
+        ]
+      }
+    },
+    {
+      "id": "extract-year",
+      "expr": "EXTRACT(YEAR FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "year",
+          "arg": {
+            "node": "column",
+            "name": "d"
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "EXTRACT(YEAR FROM d)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2001"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2000"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "9999"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2023"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2024"
+          }
+        ]
+      }
+    },
+    {
+      "id": "extract-month",
+      "expr": "EXTRACT(MONTH FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "month",
+          "arg": {
+            "node": "column",
+            "name": "d"
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "EXTRACT(MONTH FROM d)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "1"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "12"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "3"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "extract-day",
+      "expr": "EXTRACT(DAY FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "day",
+          "arg": {
+            "node": "column",
+            "name": "d"
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "EXTRACT(DAY FROM d)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "31"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "29"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "31"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "31"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "extract-lower-case",
+      "expr": "extract(month from d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "month",
+          "arg": {
+            "node": "column",
+            "name": "d"
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "EXTRACT(MONTH FROM d)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "1"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "12"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "3"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "extract-of-a-computed-date",
+      "expr": "EXTRACT(YEAR FROM ADD_MONTHS(d, n))",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "year",
+          "arg": {
+            "node": "date_add",
+            "unit": "month",
+            "date": {
+              "node": "column",
+              "name": "d"
+            },
+            "count": {
+              "node": "column",
+              "name": "n"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "EXTRACT(YEAR FROM ADD_MONTHS(d, n))",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2001"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "1999"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2024"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2024"
+          }
+        ]
+      }
+    },
+    {
+      "id": "column-named-year",
+      "expr": "year + 1",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "arith",
+          "op": "+",
+          "left": {
+            "node": "column",
+            "name": "year"
+          },
+          "right": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "year + 1",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2002"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2001"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "10000"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "2"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2024"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2025"
+          }
+        ]
+      }
+    },
+    {
+      "id": "column-named-year-in-extract",
+      "expr": "EXTRACT(YEAR FROM d) = year",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "=",
+          "left": {
+            "node": "extract",
+            "field": "year",
+            "arg": {
+              "node": "column",
+              "name": "d"
+            }
+          },
+          "right": {
+            "node": "column",
+            "name": "year"
+          }
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "EXTRACT(YEAR FROM d) = year",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "column-named-day-after-extract",
+      "expr": "EXTRACT(DAY FROM d) = day",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "=",
+          "left": {
+            "node": "extract",
+            "field": "day",
+            "arg": {
+              "node": "column",
+              "name": "d"
+            }
+          },
+          "right": {
+            "node": "column",
+            "name": "day"
+          }
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "EXTRACT(DAY FROM d) = day",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "extract-field-is-an-ordinary-name-elsewhere",
+      "expr": "month * 100 + day",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "arith",
+          "op": "+",
+          "left": {
+            "node": "arith",
+            "op": "*",
+            "left": {
+              "node": "column",
+              "name": "month"
+            },
+            "right": {
+              "node": "number",
+              "value": "100"
+            }
+          },
+          "right": {
+            "node": "column",
+            "name": "day"
+          }
+        },
+        "check": "ok",
+        "type": "number",
+        "scale": "0",
+        "unparse": "month * 100 + day",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "131"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "229"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "1231"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "101"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "331"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "229"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-days-column-count",
+      "expr": "ADD_DAYS(d, n)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "column",
+            "name": "n"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_DAYS(d, n)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2001-02-02"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2000-02-26"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2023-04-12"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2024-02-29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-months-column-count",
+      "expr": "ADD_MONTHS(d, n)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "month",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "column",
+            "name": "n"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_MONTHS(d, n)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2001-03-31"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "1999-11-29"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2024-03-31"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2024-02-29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-years-column-count",
+      "expr": "ADD_YEARS(d, n)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "year",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "column",
+            "name": "n"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_YEARS(d, n)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2003-01-31"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "1997-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2035-03-31"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2024-02-29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-months-negative",
+      "expr": "ADD_MONTHS(DATE '2023-03-31', -1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "month",
+          "date": {
+            "node": "date",
+            "value": "2023-03-31"
+          },
+          "count": {
+            "node": "neg",
+            "operand": {
+              "node": "number",
+              "value": "1"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_MONTHS(DATE '2023-03-31', -1)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2023-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2023-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "2023-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "2023-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "2023-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2023-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2023-02-28"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-years-back-from-feb-29",
+      "expr": "ADD_YEARS(DATE '2000-02-29', -1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "year",
+          "date": {
+            "node": "date",
+            "value": "2000-02-29"
+          },
+          "count": {
+            "node": "neg",
+            "operand": {
+              "node": "number",
+              "value": "1"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_YEARS(DATE '2000-02-29', -1)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "1999-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "1999-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "1999-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "1999-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "1999-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "1999-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "1999-02-28"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-years-forward-four-from-feb-29",
+      "expr": "ADD_YEARS(DATE '2000-02-29', 4)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "year",
+          "date": {
+            "node": "date",
+            "value": "2000-02-29"
+          },
+          "count": {
+            "node": "number",
+            "value": "4"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_YEARS(DATE '2000-02-29', 4)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2004-02-29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-years-forward-one-from-feb-29",
+      "expr": "ADD_YEARS(DATE '2000-02-29', 1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "year",
+          "date": {
+            "node": "date",
+            "value": "2000-02-29"
+          },
+          "count": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_YEARS(DATE '2000-02-29', 1)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2001-02-28"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2001-02-28"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-months-leap-day-target",
+      "expr": "ADD_MONTHS(DATE '2001-01-31', 37)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "month",
+          "date": {
+            "node": "date",
+            "value": "2001-01-31"
+          },
+          "count": {
+            "node": "number",
+            "value": "37"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_MONTHS(DATE '2001-01-31', 37)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2004-02-29"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2004-02-29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-days-zero-and-negative",
+      "expr": "ADD_DAYS(d, -n)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "neg",
+            "operand": {
+              "node": "column",
+              "name": "n"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_DAYS(d, -n)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2001-01-29"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2000-03-03"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "9999-12-30"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "0001-01-02"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2023-03-19"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2024-02-29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-days-out-of-range-is-null",
+      "expr": "ADD_DAYS(DATE '9999-12-31', 1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "date",
+            "value": "9999-12-31"
+          },
+          "count": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_DAYS(DATE '9999-12-31', 1)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-years-out-of-range-is-null",
+      "expr": "ADD_YEARS(DATE '0001-01-01', -1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "year",
+          "date": {
+            "node": "date",
+            "value": "0001-01-01"
+          },
+          "count": {
+            "node": "neg",
+            "operand": {
+              "node": "number",
+              "value": "1"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_YEARS(DATE '0001-01-01', -1)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-months-of-a-rounded-count",
+      "expr": "ADD_MONTHS(d, ROUND(price, 0))",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "month",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "round",
+            "arg": {
+              "node": "column",
+              "name": "price"
+            },
+            "scale": "0",
+            "mode": "HALF_AWAY_FROM_ZERO"
+          }
+        },
+        "check": "ok",
+        "type": "date",
+        "unparse": "ADD_MONTHS(d, ROUND(price, 0))",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2001-03-31"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "2000-04-29"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "9999-12-31"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "0001-04-01"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "2024-01-31"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "2024-03-29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "add-days-then-extract-and-compare",
+      "expr": "EXTRACT(DAY FROM ADD_DAYS(d, 1)) = 1",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "=",
+          "left": {
+            "node": "extract",
+            "field": "day",
+            "arg": {
+              "node": "date_add",
+              "unit": "day",
+              "date": {
+                "node": "column",
+                "name": "d"
+              },
+              "count": {
+                "node": "number",
+                "value": "1"
+              }
+            }
+          },
+          "right": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "EXTRACT(DAY FROM ADD_DAYS(d, 1)) = 1",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "months-between-inverts-add-months",
+      "expr": "MONTHS_BETWEEN(d, ADD_MONTHS(d, n)) = n",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "=",
+          "left": {
+            "node": "date_diff",
+            "unit": "month",
+            "from": {
+              "node": "column",
+              "name": "d"
+            },
+            "to": {
+              "node": "date_add",
+              "unit": "month",
+              "date": {
+                "node": "column",
+                "name": "d"
+              },
+              "count": {
+                "node": "column",
+                "name": "n"
+              }
+            }
+          },
+          "right": {
+            "node": "column",
+            "name": "n"
+          }
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "MONTHS_BETWEEN(d, ADD_MONTHS(d, n)) = n",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-string-and-integer",
+      "expr": "label || n",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "column",
+            "name": "n"
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "label || n",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "x2"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "ab-3"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "z1"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "-1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "m12"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "y0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-integer-then-string",
+      "expr": "n || label",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "n"
+          },
+          "right": {
+            "node": "column",
+            "name": "label"
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "n || label",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2x"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "-3ab"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "1z"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "-1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "12m"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "0y"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-null-column-is-null",
+      "expr": "note || 'Q'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "note"
+          },
+          "right": {
+            "node": "string",
+            "value": "Q"
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "note || 'Q'",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "NQ"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "Q"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "nQ"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "tQ"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "uQ"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-null-literal-is-null",
+      "expr": "NULL || 'Q'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "null"
+          },
+          "right": {
+            "node": "string",
+            "value": "Q"
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "NULL || 'Q'",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-precedence-over-plus",
+      "expr": "label || n + 1",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "arith",
+            "op": "+",
+            "left": {
+              "node": "column",
+              "name": "n"
+            },
+            "right": {
+              "node": "number",
+              "value": "1"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "label || n + 1",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "x3"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "ab-2"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "z2"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "0"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "m13"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "y1"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-precedence-under-comparison",
+      "expr": "label || 'Q' = 'xQ'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "=",
+          "left": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "label"
+            },
+            "right": {
+              "node": "string",
+              "value": "Q"
+            }
+          },
+          "right": {
+            "node": "string",
+            "value": "xQ"
+          }
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "label || 'Q' = 'xQ'",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-left-associative",
+      "expr": "label || '-' || n || '-' || label",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "concat",
+            "left": {
+              "node": "concat",
+              "left": {
+                "node": "concat",
+                "left": {
+                  "node": "column",
+                  "name": "label"
+                },
+                "right": {
+                  "node": "string",
+                  "value": "-"
+                }
+              },
+              "right": {
+                "node": "column",
+                "name": "n"
+              }
+            },
+            "right": {
+              "node": "string",
+              "value": "-"
+            }
+          },
+          "right": {
+            "node": "column",
+            "name": "label"
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "label || '-' || n || '-' || label",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "x-2-x"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "ab--3-ab"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "z-1-z"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "--1-"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "m-12-m"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "y-0-y"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-right-parentheses-stay",
+      "expr": "label || (n || 'y')",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "n"
+            },
+            "right": {
+              "node": "string",
+              "value": "y"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "label || (n || 'y')",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "x2y"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "ab-3y"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "z1y"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "-1y"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "m12y"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "y0y"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-left-parentheses-drop",
+      "expr": "(label || '-') || n",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "label"
+            },
+            "right": {
+              "node": "string",
+              "value": "-"
+            }
+          },
+          "right": {
+            "node": "column",
+            "name": "n"
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "label || '-' || n",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "x-2"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "ab--3"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "z-1"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "--1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "m-12"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "y-0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-negative-and-zero-integers",
+      "expr": "n || ''",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "n"
+          },
+          "right": {
+            "node": "string",
+            "value": ""
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "n || ''",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "2"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "-3"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "1"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "-1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "12"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "0"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-integer-literal-keeps-its-value",
+      "expr": "'v' || 007",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "string",
+            "value": "v"
+          },
+          "right": {
+            "node": "number",
+            "value": "007"
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "'v' || 007",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "v7"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "v7"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "v7"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "v7"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "v7"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "v7"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "v7"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-of-extract",
+      "expr": "'D' || EXTRACT(DAY FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "string",
+            "value": "D"
+          },
+          "right": {
+            "node": "extract",
+            "field": "day",
+            "arg": {
+              "node": "column",
+              "name": "d"
+            }
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "'D' || EXTRACT(DAY FROM d)",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "D31"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "D29"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "D31"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "D1"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "D31"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "D29"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-as-value-of-coalesce",
+      "expr": "COALESCE(note || 'Q', 'none')",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "coalesce",
+          "args": [
+            {
+              "node": "concat",
+              "left": {
+                "node": "column",
+                "name": "note"
+              },
+              "right": {
+                "node": "string",
+                "value": "Q"
+              }
+            },
+            {
+              "node": "string",
+              "value": "none"
+            }
+          ]
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "COALESCE(note || 'Q', 'none')",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "NQ"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "none"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": "none"
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "Q"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "nQ"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "tQ"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "uQ"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-in-is-null",
+      "expr": "note || label IS NULL",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "is_null",
+          "operand": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "note"
+            },
+            "right": {
+              "node": "column",
+              "name": "label"
+            }
+          },
+          "negated": false
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "note || label IS NULL",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-in-between",
+      "expr": "label || 'z' BETWEEN 'a' AND 'y'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "between",
+          "left": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "label"
+            },
+            "right": {
+              "node": "string",
+              "value": "z"
+            }
+          },
+          "low": {
+            "node": "string",
+            "value": "a"
+          },
+          "high": {
+            "node": "string",
+            "value": "y"
+          },
+          "negated": false
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "label || 'z' BETWEEN 'a' AND 'y'",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-in-distinct-from",
+      "expr": "label || 'Q' IS DISTINCT FROM note || 'Q'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "distinct_from",
+          "left": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "label"
+            },
+            "right": {
+              "node": "string",
+              "value": "Q"
+            }
+          },
+          "right": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "note"
+            },
+            "right": {
+              "node": "string",
+              "value": "Q"
+            }
+          },
+          "negated": false
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "label || 'Q' IS DISTINCT FROM note || 'Q'",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-inside-a-call-needs-parentheses",
+      "expr": "DAYS_BETWEEN(DATE '2000-01-01', d) || ''",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "date_diff",
+            "unit": "day",
+            "from": {
+              "node": "date",
+              "value": "2000-01-01"
+            },
+            "to": {
+              "node": "column",
+              "name": "d"
+            }
+          },
+          "right": {
+            "node": "string",
+            "value": ""
+          }
+        },
+        "check": "ok",
+        "type": "string",
+        "unparse": "DAYS_BETWEEN(DATE '2000-01-01', d) || ''",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": "396"
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": "59"
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": null
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": "2921939"
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": "-730119"
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": "8490"
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": "8825"
+          }
+        ]
+      }
+    },
+    {
+      "id": "concat-of-a-string-column-with-an-enum-compares-as-a-string",
+      "expr": "kind || 'x' = 'ax'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "=",
+          "left": {
+            "node": "concat",
+            "left": {
+              "node": "column",
+              "name": "kind"
+            },
+            "right": {
+              "node": "string",
+              "value": "x"
+            }
+          },
+          "right": {
+            "node": "string",
+            "value": "ax"
+          }
+        },
+        "check": "ok",
+        "type": "bool",
+        "unparse": "kind || 'x' = 'ax'",
+        "eval": [
+          {
+            "data": "calendar",
+            "row": "0",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "1",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "2",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "3",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "4",
+            "result": false
+          },
+          {
+            "data": "calendar",
+            "row": "5",
+            "result": true
+          },
+          {
+            "data": "calendar",
+            "row": "6",
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "refused-extract-week",
+      "expr": "EXTRACT(WEEK FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-extract-without-from",
+      "expr": "EXTRACT(DAY d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-extract-quoted-field",
+      "expr": "EXTRACT(\"day\" FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-extract-no-field",
+      "expr": "EXTRACT(FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-add-days-one-argument",
+      "expr": "ADD_DAYS(d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-add-months-three-arguments",
+      "expr": "ADD_MONTHS(d, 1, 2)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-single-pipe",
+      "expr": "label | label",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-leading-concat",
+      "expr": "|| label",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-trailing-concat",
+      "expr": "label ||",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-concat-under-flux-expr-2",
+      "expr": "label || n",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "language": "flux-expr/2",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-extract-under-flux-expr-2",
+      "expr": "EXTRACT(DAY FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "language": "flux-expr/2",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-add-days-under-flux-expr-2",
+      "expr": "ADD_DAYS(d, 1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "language": "flux-expr/2",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-add-months-under-flux-expr-2",
+      "expr": "ADD_MONTHS(d, 1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "language": "flux-expr/2",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-add-years-under-flux-expr-2",
+      "expr": "ADD_YEARS(d, 1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "language": "flux-expr/2",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-concat-in-a-core-text",
+      "expr": "label || n",
+      "side": "core",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-extract-in-a-core-text",
+      "expr": "EXTRACT(DAY FROM d)",
+      "side": "core",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-add-years-in-a-core-text",
+      "expr": "ADD_YEARS(d, 1)",
+      "side": "core",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": "FLX-6103"
+      }
+    },
+    {
+      "id": "refused-extract-of-a-number",
+      "expr": "EXTRACT(DAY FROM n)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "day",
+          "arg": {
+            "node": "column",
+            "name": "n"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-extract-of-a-string",
+      "expr": "EXTRACT(DAY FROM label)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "day",
+          "arg": {
+            "node": "column",
+            "name": "label"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-add-days-fractional-count",
+      "expr": "ADD_DAYS(d, 1.5)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "number",
+            "value": "1.5"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-add-days-decimal-column-count",
+      "expr": "ADD_DAYS(d, price)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "column",
+            "name": "price"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-add-days-unbounded-count",
+      "expr": "ADD_DAYS(d, n / 2)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "arith",
+            "op": "/",
+            "left": {
+              "node": "column",
+              "name": "n"
+            },
+            "right": {
+              "node": "number",
+              "value": "2"
+            }
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-add-months-of-a-number",
+      "expr": "ADD_MONTHS(n, 1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "month",
+          "date": {
+            "node": "column",
+            "name": "n"
+          },
+          "count": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-add-years-string-count",
+      "expr": "ADD_YEARS(d, label)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "year",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "column",
+            "name": "label"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-concat-bool",
+      "expr": "label || flag",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "column",
+            "name": "flag"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-concat-date",
+      "expr": "label || d",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "column",
+            "name": "d"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-concat-decimal",
+      "expr": "label || price",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "column",
+            "name": "price"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-concat-fractional-literal",
+      "expr": "label || 1.5",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "number",
+            "value": "1.5"
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-concat-quotient",
+      "expr": "label || n / 2",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "arith",
+            "op": "/",
+            "left": {
+              "node": "column",
+              "name": "n"
+            },
+            "right": {
+              "node": "number",
+              "value": "2"
+            }
+          }
+        },
+        "check": "FLX-6109"
+      }
+    },
+    {
+      "id": "refused-extract-of-null",
+      "expr": "EXTRACT(DAY FROM NULL)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "day",
+          "arg": {
+            "node": "null"
+          }
+        },
+        "check": "FLX-6104"
+      }
+    },
+    {
+      "id": "refused-add-days-null-count",
+      "expr": "ADD_DAYS(d, NULL)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "column",
+            "name": "d"
+          },
+          "count": {
+            "node": "null"
+          }
+        },
+        "check": "FLX-6104"
+      }
+    },
+    {
+      "id": "refused-add-days-null-date",
+      "expr": "ADD_DAYS(NULL, 1)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "date_add",
+          "unit": "day",
+          "date": {
+            "node": "null"
+          },
+          "count": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "FLX-6104"
+      }
+    },
+    {
+      "id": "refused-concat-of-two-nulls",
+      "expr": "NULL || NULL",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "null"
+          },
+          "right": {
+            "node": "null"
+          }
+        },
+        "check": "FLX-6104"
+      }
+    },
+    {
+      "id": "refused-concat-into-an-enum-column",
+      "expr": "label || 'Q'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "target": "kind",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "string",
+            "value": "Q"
+          }
+        },
+        "check": "FLX-6110"
+      }
+    },
+    {
+      "id": "refused-concat-in-a-case-into-an-enum-column",
+      "expr": "CASE WHEN flag THEN label || 'Q' END",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "target": "kind",
+      "expect": {
+        "parse": {
+          "node": "case",
+          "whens": [
+            {
+              "when": {
+                "node": "column",
+                "name": "flag"
+              },
+              "then": {
+                "node": "concat",
+                "left": {
+                  "node": "column",
+                  "name": "label"
+                },
+                "right": {
+                  "node": "string",
+                  "value": "Q"
+                }
+              }
+            }
+          ]
+        },
+        "check": "FLX-6110"
+      }
+    },
+    {
+      "id": "refused-concat-into-a-number-column",
+      "expr": "label || 'Q'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "target": "n",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "string",
+            "value": "Q"
+          }
+        },
+        "check": "FLX-6110"
+      }
+    },
+    {
+      "id": "refused-extract-into-a-date-column",
+      "expr": "EXTRACT(DAY FROM d)",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "value",
+      "target": "d",
+      "expect": {
+        "parse": {
+          "node": "extract",
+          "field": "day",
+          "arg": {
+            "node": "column",
+            "name": "d"
+          }
+        },
+        "check": "FLX-6110"
+      }
+    },
+    {
+      "id": "refused-concat-where-a-bool-is-needed",
+      "expr": "label || 'Q'",
+      "side": "flux",
+      "model_fragment": "calendar",
+      "expose": "quirks",
+      "position": "predicate",
+      "expect": {
+        "parse": {
+          "node": "concat",
+          "left": {
+            "node": "column",
+            "name": "label"
+          },
+          "right": {
+            "node": "string",
+            "value": "Q"
+          }
+        },
+        "check": "FLX-6206"
+      }
+    }
+  ]
+}

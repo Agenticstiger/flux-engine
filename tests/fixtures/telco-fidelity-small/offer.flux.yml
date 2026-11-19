@@ -1,0 +1,10 @@
+fluxVersion: "0.5.0"
+kind: Offer
+id: offer-sport-pack
+name: Sport Pack Winback Offer
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  catalogRef: cat-tv-addons
+  pricing: { amount: 9.99, currency: EUR }

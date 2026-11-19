@@ -1,0 +1,23 @@
+usage: fluxsim accuracy register [-h] --file FILE [--state-dir STATE_DIR] [-j]
+
+Seal a PredictionRecord so it cannot be edited after the outcome is known. A
+prediction id is registered once: the same claim again writes nothing, and a
+different claim under that id is refused (FLX-7007).
+
+examples:
+  # seal a prediction
+  fluxsim accuracy register --file prediction.json
+
+options:
+  -h, --help            show this help message and exit
+  --file FILE           a PredictionRecord as JSON -- fields: prediction_id
+                        (string), run_digest (string), metric_id (string),
+                        statement (string), predicted (decimal), horizon_end
+                        (string), registered_at (string), interval_low
+                        (decimal) [optional], interval_high (decimal)
+                        [optional]
+  --state-dir STATE_DIR
+                        run-state directory (default: ./.flux)
+  -j, --json            emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/accuracy.html

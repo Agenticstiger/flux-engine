@@ -1,0 +1,252 @@
+{
+  "_producer": "https://github.com/Agenticstiger/forge-cli/tree/main/fluid_build/profiler",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile/1-0-0/FluxProfile.json",
+  "disclosureRules": {
+    "acro-default": {
+      "dominance": {
+        "k": "0.90",
+        "n": 2
+      },
+      "minimumCell": 10,
+      "pRatio": "0.10",
+      "roundingBase": 5,
+      "zerosDisclosive": true
+    }
+  },
+  "encoding": {
+    "fractionalBits": 16,
+    "rounding": "floor"
+  },
+  "tables": {
+    "orders": {
+      "columns": {
+        "amount": {
+          "domain": "number",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": 600
+            },
+            "distinctCount": {
+              "definition": "distinctCount/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": 10
+            },
+            "max": {
+              "definition": "max/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": "100"
+            },
+            "min": {
+              "definition": "min/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": "10"
+            },
+            "nullCount": {
+              "definition": "nullCount/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "A"
+            },
+            "quantiles": {
+              "definition": "quantiles/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "values": {
+                "0.25": "20",
+                "0.5": "35",
+                "0.75": "50"
+              }
+            },
+            "sum": {
+              "definition": "sum/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": "27750"
+            }
+          },
+          "statistics": [
+            {
+              "definition": "mean/1",
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "Sx": "1818624000",
+                  "group": "",
+                  "k": 600,
+                  "status": "F"
+                }
+              ],
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              }
+            }
+          ]
+        },
+        "country": {
+          "domain": "category",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": 600
+            },
+            "distinctCount": {
+              "definition": "distinctCount/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": 5
+            },
+            "nullCount": {
+              "definition": "nullCount/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "A"
+            }
+          }
+        },
+        "created_at": {
+          "domain": "timestamp",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": 600
+            },
+            "distinctCount": {
+              "definition": "distinctCount/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": 310
+            },
+            "max": {
+              "definition": "max/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "A"
+            },
+            "min": {
+              "definition": "min/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "A"
+            },
+            "nullCount": {
+              "definition": "nullCount/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "A"
+            },
+            "quantiles": {
+              "definition": "quantiles/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "A"
+            }
+          }
+        },
+        "order_id": {
+          "domain": "category",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": 600
+            },
+            "distinctCount": {
+              "definition": "distinctCount/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "F",
+              "value": 600
+            },
+            "nullCount": {
+              "definition": "nullCount/1",
+              "disclosure": "acro-default",
+              "sampleSize": {
+                "max": 602,
+                "min": 598
+              },
+              "status": "A"
+            }
+          }
+        }
+      },
+      "rowCount": 600
+    }
+  }
+}

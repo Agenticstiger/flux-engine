@@ -1,0 +1,12 @@
+fluxVersion: "0.5.0"
+kind: Detector
+id: det-payment-aborted-burst
+name: Aborted Payment Burst Detector
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  timeWindowMs: 900000
+  pattern:
+    - { signalRef: sig-payment-aborted, predicate: "amount > 0" }
+    - { signalRef: sig-payment-aborted }

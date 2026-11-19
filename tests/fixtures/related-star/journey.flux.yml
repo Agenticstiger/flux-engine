@@ -1,0 +1,23 @@
+# What the business does when the signal arrives, and how each persona reacts:
+# the intervention, the chance it works, and the lifecycle state the customer
+# moves to afterwards.
+fluxVersion: "0.5.0"
+kind: Journey
+id: jr-payment-recovery
+name: Payment Recovery Journey
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  trigger:
+    signalRef: sig-payment-aborted
+    condition: "attempts >= 2"
+  intervention:
+    treatmentRef: tr-fast-recovery
+    action: offer_payment_link
+  taxonomyRef: jt-subscriber-lifecycle
+  personaReactions:
+    persona-pragmatic-family:
+      successProbability: 0.42
+      outcome: payment_completed
+      nextState: active

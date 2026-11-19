@@ -1,0 +1,30 @@
+{
+  "G": "sha256:eee5c8c8c595a15e70d72360de2f422c4490594c1de4e1aade2e9ccbaed65cfb",
+  "H": "sha256:72262c0093d040736a15cbda45e7c618578090be51f84a004ead8307ef181a39",
+  "columns": [
+    "subscriber_id",
+    "aborted_at",
+    "amount",
+    "market"
+  ],
+  "emitIndex": 0,
+  "reference": {
+    "contractDigest": "sha256:b9b5ee575a8b313f6f72d039653d8be5d76e7ecc0012d7bd6ad2d37e0e60435d",
+    "contractFileDigest": "sha256:0a6d63c244171a093919b4be9f8623256b4950f4b1be8ec9aee0d9112b0d9680",
+    "exposeId": "payment_recovery_moment",
+    "fluidVersion": "^0.7.3",
+    "productRef": "telco.gold.payment_recovery_moment"
+  },
+  "shippedContract": null,
+  "simulationId": "sim-payment-recovery",
+  "synthetic": {
+    "generatorDigest": "sha256:31b6cca91d3a5e4e981ec77b67fa56f03dcdf2f4d05daf4013c2311c0d4cee19",
+    "rows": 64
+  },
+  "types": [
+    "STRING",
+    "TIMESTAMP",
+    "DECIMAL(18,4)",
+    "STRING"
+  ]
+}

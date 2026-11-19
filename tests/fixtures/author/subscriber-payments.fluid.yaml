@@ -1,0 +1,57 @@
+fluidVersion: 0.7.7
+kind: DataProduct
+id: telco.silver.subscriber_payments
+name: Subscriber payments
+metadata:
+  owner:
+    team: billing
+exposes:
+- exposeId: subscriber
+  kind: table
+  contract:
+    schema:
+    - name: subscriber_id
+      type: STRING
+      required: true
+    - name: market
+      type: enum('DE','FR','GB','IE')
+      required: true
+    - name: tenure_months
+      type: INT
+  semantics:
+    entities:
+    - name: subscriber
+      type: primary
+      expr: subscriber_id
+  binding:
+    platform: local
+    format: parquet
+    location:
+      path: ./out/subscriber.parquet
+- exposeId: payment
+  kind: table
+  contract:
+    schema:
+    - name: subscriber_id
+      type: STRING
+      required: true
+    - name: amount
+      type: DECIMAL(18,4)
+    - name: attempts
+      type: INT
+    - name: paid_at
+      type: TIMESTAMP
+  semantics:
+    relationships:
+    - name: payment_to_subscriber
+      to: subscriber
+      fromColumns:
+      - subscriber_id
+      toColumns:
+      - subscriber_id
+      cardinality: many_to_one
+  binding:
+    platform: local
+    format: parquet
+    location:
+      path: ./out/payment.parquet
