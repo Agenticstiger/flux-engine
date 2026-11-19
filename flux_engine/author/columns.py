@@ -3347,6 +3347,22 @@ def _outside_range(
     plan.how = "evenly over the range the contract declares"
 
 
+def _wholly_outside(
+    lower: Fraction,
+    upper: Fraction,
+    closed: bool,
+    low: Optional[Fraction],
+    high: Optional[Fraction],
+) -> bool:
+    """Whether a bin's edge interval lies wholly outside the range, grid value or not.
+
+    A bin is half open, ``[lower, upper)``; the last one is closed at ``upper``.
+    """
+    if low is not None and (upper < low or (upper == low and not closed)):
+        return True
+    return high is not None and lower > high
+
+
 def _clip_bins(
     plan: ColumnPlan,
     low: Optional[Fraction],
@@ -3379,6 +3395,8 @@ def _clip_bins(
         kept_low = max(first, low) if low is not None else first
         kept_high = min(final, high) if high is not None else final
         if first <= final and kept_low > kept_high:
+            continue
+        if _wholly_outside(edges[index], edges[index + 1], index == count - 1, low, high):
             continue
         cells.append((index, first, final, kept_low, kept_high))
     live = [cell for cell in cells if cell[1] <= cell[2]]

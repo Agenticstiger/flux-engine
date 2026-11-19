@@ -6,16 +6,22 @@
 
 from __future__ import annotations
 
+import json
+import math
 from decimal import Decimal
 from fractions import Fraction
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
+import yaml
 
 from flux_engine.author.columns import ColumnContext, ColumnPlan, plan_column
 from flux_engine.author.ranges import RangeRule, column_range, grid_bounds, parse_range
+from flux_engine.cli._init import run_init
 from flux_engine.seam.contract import CompiledColumn, parse_logical_type
 from flux_engine.seam.parameters import Source
+from flux_engine.stages.validate import validate
 
 pytestmark = pytest.mark.unit
 
@@ -463,3 +469,65 @@ def test_a_range_that_leaves_only_withheld_cells_drops_the_histogram_property() 
     ) in plan.passed
     kept = _plan("INT", entry, ">= 500")
     assert [p for p in kept.properties if p.document["property"] == "marginalHistogram"]
+
+
+#: Edges every half unit, on a column whose grid is one: no bin of it holds two grid values.
+_SUB_GRID_BINS = ["1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5"]
+
+
+@pytest.mark.parametrize(
+    ("constraint", "low", "high"),
+    [(">= 3", 3, 5), ("between 3 and 4", 3, 4), ("<= 2", 1, 2), ("between 3 and 4.5", 3, 4)],
+)
+def test_a_range_over_a_sub_grid_histogram_keeps_the_edges_increasing(
+    constraint: str, low: int, high: int
+) -> None:
+    entry = {
+        "domain": "number",
+        "metrics": {},
+        "statistics": [_histogram(_SUB_GRID_BINS, [75] * 8)],
+    }
+    plan = _plan("INT", entry, constraint)
+    edges = [Decimal(text) for text in plan.declaration["bins"]]
+    assert all(left < right for left, right in zip(edges, edges[1:], strict=False))
+    # The last bin is closed: its edge holds the grid values up to it, so none passes the range.
+    assert edges[0] >= low and math.floor(edges[-1]) <= high
+    assert len(plan.declaration["binWeights"]) == len(edges) - 1
+
+
+@pytest.mark.parametrize("constraint", [">= 3", "between 3 and 4"])
+def test_a_range_over_a_sub_grid_histogram_writes_a_bundle_that_validates(
+    tmp_path: Path, constraint: str
+) -> None:
+    root = Path(__file__).resolve().parents[1] / "fixtures" / "author"
+    contract = (root / "orders.fluid.yaml").read_text(encoding="utf-8")
+    contract = contract.replace(
+        "    - name: amount\n      type: decimal(10,2)\n      required: false\n",
+        "    - name: amount\n      type: int\n      required: false\n"
+        f'      validationRules:\n      - type: range\n        constraint: "{constraint}"\n',
+    )
+    assert constraint in contract
+    (tmp_path / "orders.fluid.yaml").write_text(contract, encoding="utf-8")
+    profile = json.loads((root / "orders.profile.json").read_text(encoding="utf-8"))
+    column = profile["tables"]["orders"]["columns"]["amount"]
+    column["metrics"] = {"count": column["metrics"]["count"]}
+    column["statistics"] = [_histogram(_SUB_GRID_BINS, [75] * 8)]
+    (tmp_path / "p.json").write_text(json.dumps(profile), encoding="utf-8")
+    bundle = tmp_path / "bundle"
+    result = run_init(
+        str(bundle), contract=str(tmp_path / "orders.fluid.yaml"), profile=str(tmp_path / "p.json")
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "FLX-3402" not in (result.stderr or "")
+    assert validate(bundle).exit_code == 0
+    text = (bundle / "simulation.flux.yml").read_text(encoding="utf-8")
+    assert yaml.safe_load(text)
+
+
+def test_a_range_that_leaves_one_grid_value_of_a_sub_grid_histogram_declares_it() -> None:
+    entry = {
+        "domain": "number",
+        "metrics": {},
+        "statistics": [_histogram(_SUB_GRID_BINS, [75] * 8)],
+    }
+    assert _plan("INT", entry, "between 2.5 and 3.5").declaration["levels"] == {"3": "1"}

@@ -231,6 +231,8 @@ The rules run from the most the profile says to the least:
 | an `enum(...)` type | `support: declared`, with `maxCardinality` its number of levels | contract |
 | a key, in its `semantics` | no key of its own: the engine reads keys from the contract | no number |
 | a `derive` in the contract's `invariants`, with no `when` | no draw, and a `range` from the rule's exact bounds over the columns it reads (or its published histogram's edges when they hold them), with its published statistics scored through the rule | contract, or profile for the edges |
+| a `range` rule in the contract's `validationRules` (`between A and B`, or `>=`, `>`, `<=`, `<`) | the bound on the bins, levels and tails of a drawn number column; a column with nothing published draws evenly over it | contract |
+| a `dependency` in the contract | the column keeps its draw and gets no `mean` property, since the run draws it once per value of the columns it follows | contract |
 | nothing, or a withheld value | an assumption, stated with its reason | assumption |
 
 These rules shape the assumptions:

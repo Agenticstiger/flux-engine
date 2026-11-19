@@ -182,7 +182,7 @@ legal (the generator still reads it), and a *property* naming such a column is `
 
 **`support` has exactly two spellings.** `{ values: [...] }` writes the levels out. `declared` takes them from
 the FLUID column type's own enum list: `type: "enum('IE','GB')"`, the only structured value set FLUID 0.7.5
-carries (`validationRules[].constraint` is free text with no grammar). A column that spells `declared` over a
+carries (`validationRules[].constraint` is free text for `support`, with no grammar; `fluxsim init` reads the range grammar, `between A and B` or `>=`, `>`, `<=`, `<` joined by `and`, from a `range` rule). A column that spells `declared` over a
 type naming no levels is refused (`FLX-5034`) rather than resolved to an empty support, because an empty support
 makes every value a non-member and fails the check for the wrong reason. A bare list is refused: two spellings of
 one declaration would be two digests of one contract.
