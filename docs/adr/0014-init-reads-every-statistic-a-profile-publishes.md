@@ -194,6 +194,13 @@ column's own statistics are checked through the rule: they become properties tha
 scores against what the rule produced. A column a contract `dependency` sets is still drawn,
 once for each value of the columns it follows, so its mean rests on a few draws and it gets
 no mean property.
+Each published, ungrouped `quantile/2` of such a column is checked against the range the
+rule gives: it is used when the bin that holds the quantile overlaps that range, and unused
+with the reason when the bin lies outside it or the rule gives no range. It gets no
+`quantile` property, because the column is measured through the inputs the rule reads,
+whose bins do not line up with the column's own ladder, so the quantile can fall on either
+side of an edge. A published `distinctCount` is checked against the grid values the declared
+range holds.
 
 ### 7. DATE in one format
 

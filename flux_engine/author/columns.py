@@ -2784,6 +2784,7 @@ def determine_column(
     if interval is None or kind not in (LogicalKind.INT, LogicalKind.DECIMAL):
         plan.assumptions.append(_DETERMINED_UNBOUNDED)
         plan.choices.append(_DETERMINED_UNBOUNDED)
+        _check_quantile_bins(ctx, plan, None)
         return
     low, high = interval
     found = _ungrouped(ctx.entry, _HISTOGRAM)
@@ -2840,6 +2841,8 @@ def determine_column(
         plan.labels.append(Label(("range", "max"), ends["max"][1]))
         plan.published_range = (_on_grid(wide_low, step), _on_grid(wide_high, step))
         _mean_property(ctx, plan)
+    _check_quantile_bins(ctx, plan, plan.published_range)
+    _check_distinct_range(ctx, plan)
     for name in ("min", "max"):
         value = _published(ctx.entry, name)
         if value is not None:
@@ -2860,6 +2863,103 @@ def determine_column(
     plan.assumptions.append(_DETERMINED_REASON)
     plan.choices.append(_DETERMINED_REASON)
     plan.how = "set by a rule of the contract, not drawn; its range is the rule's exact bounds"
+
+
+def _published_ladders(
+    ctx: ColumnContext,
+) -> List[Tuple[int, Mapping[str, Any], Tuple[Decimal, ...]]]:
+    """Each published, ungrouped ``quantile/2`` of the column: its index, itself, its edge ladder."""
+    found: List[Tuple[int, Mapping[str, Any], Tuple[Decimal, ...]]] = []
+    for index, statistic in _statistics(ctx.entry):
+        if statistic.get("definition") != _QUANTILE_BINNED or "groupBy" in statistic:
+            continue
+        groups, bins = statistic.get("groups"), statistic.get("bins")
+        if not isinstance(groups, list) or len(groups) != 1 or not isinstance(bins, list):
+            continue
+        group = groups[0]
+        if not isinstance(group, Mapping) or group.get("status") != _FREE:
+            continue
+        try:
+            ladder = tuple(Decimal(str(edge)) for edge in bins)
+        except ArithmeticError:
+            continue
+        if len(ladder) >= 2 and all(low < high for low, high in pairwise(ladder)):
+            found.append((index, statistic, ladder))
+    return found
+
+
+def _check_quantile_bins(
+    ctx: ColumnContext, plan: ColumnPlan, declared: Optional[Tuple[Decimal, Decimal]]
+) -> None:
+    """Check each published ``quantile/2`` of a rule's column against the range it declares.
+
+    The bin the profile says holds the quantile must overlap the range the rule gives, or
+    the profile and the rule cannot describe the same column. The rule's values are not
+    scored on the bin itself: they are measured through inputs drawn from their own bins.
+    """
+    for index, statistic, ladder in _published_ladders(ctx):
+        position = statistic["groups"][0].get("quantileBin")
+        if not isinstance(position, int) or isinstance(position, bool):
+            continue
+        if not 0 <= position < len(ladder) - 1:
+            continue
+        tokens = ctx.profile_tokens + ("statistics", str(index))
+        if declared is None:
+            plan.passed.append(
+                (
+                    tokens,
+                    "no range can be declared for the column, so there is none to hold the bin "
+                    "that holds this quantile to",
+                )
+            )
+        elif ladder[position] <= declared[1] and ladder[position + 1] > declared[0]:
+            plan.reads.append(
+                (
+                    tokens,
+                    "checked: the bin that holds this quantile lies within the range "
+                    "the rule gives",
+                )
+            )
+        else:
+            plan.passed.append(
+                (
+                    tokens,
+                    "the bin the profile says holds this quantile lies outside the range the "
+                    "rule gives",
+                )
+            )
+
+
+def _check_distinct_range(ctx: ColumnContext, plan: ColumnPlan) -> None:
+    """Check a published ``distinctCount`` against the grid values the declared range holds."""
+    distinct = _published(ctx.entry, "distinctCount")
+    declared = plan.declaration.get("range")
+    if (
+        not isinstance(distinct, int)
+        or isinstance(distinct, bool)
+        or not isinstance(declared, dict)
+    ):
+        return
+    if ctx.column.logical_type.kind not in (LogicalKind.INT, LogicalKind.DECIMAL):
+        return
+    values = (
+        Fraction(Decimal(str(declared["max"]))) - Fraction(Decimal(str(declared["min"])))
+    ) / Fraction(_grid(ctx)) + 1
+    if values >= distinct:
+        _read(
+            ctx,
+            plan,
+            "distinctCount",
+            "checked: the declared range holds at least that many grid values",
+        )
+    else:
+        plan.passed.append(
+            (
+                _metric_tokens(ctx, "distinctCount"),
+                f"the declared range holds {math.floor(values)} grid values, fewer than the "
+                f"{distinct} distinct values the profile counts",
+            )
+        )
 
 
 #: The metric definition of each end of a range, for citing a published end.

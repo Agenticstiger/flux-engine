@@ -183,6 +183,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `fluxsim init` checks the level histogram of a column that another is drawn given
   against the sizes of the groups its weights come from, so it is used when they agree
   and unused with the differing counts when they do not.
+- `fluxsim init` checks each binned quantile a profile publishes for a column a contract
+  `derive` sets against the range the rule gives: the quantile is used when the bin that
+  holds it overlaps that range and unused with the reason when it lies outside. It also
+  checks a published `distinctCount` of that column against the grid values the range holds.
 
 ## 0.7.0 - 2026-11-19
 

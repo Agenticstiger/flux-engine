@@ -271,3 +271,84 @@ def test_a_histogram_that_holds_the_bounds_gives_the_range_and_a_property(tmp_pa
     kinds = {(prop["property"], prop["column"]) for prop in fidelity["properties"]}
     assert ("mean", "vat") in kinds
     assert ("marginalHistogram", "vat") not in kinds  # its bins would be a draw
+
+
+def _quantile(ladder: Any, position: int, below: int, through: int) -> Dict[str, Any]:
+    return {
+        "definition": "quantile/2",
+        "level": "0.5",
+        "bins": ladder,
+        "sampleSize": SAMPLE,
+        "disclosure": "acro-default",
+        "groups": [
+            {
+                "group": "",
+                "k": 5000,
+                "quantileBin": position,
+                "binBelow": below,
+                "binThrough": through,
+                "status": "F",
+            }
+        ],
+    }
+
+
+def _quantile_profile(ladder: Any = None) -> Dict[str, Any]:
+    profile = _profile()
+    profile["_schemaURL"] = profile["_schemaURL"].replace("1-0-0", "1-1-0")
+    vat = profile["tables"]["orders"]["columns"]["vat"]
+    vat["statistics"].append(
+        _quantile(ladder or ["0.00", "2.00", "4.00", "5.00", "10.00"], 2, 2190, 2875)
+    )
+    return profile
+
+
+def _vat_state(result: Any) -> Dict[str, Any]:
+    states = {entry["pointer"]: entry for entry in result.artifacts["ledger"]["statistics"]}
+    return states["/tables/orders/columns/vat/statistics/1"]
+
+
+@pytest.mark.integration
+def test_a_bin_that_overlaps_the_rule_s_range_is_read(tmp_path: Path) -> None:
+    result = _init(tmp_path, _quantile_profile())
+    state = _vat_state(result)
+    assert state["state"] == "used"
+    assert "the bin that holds this quantile lies within the range the rule gives" in state["note"]
+
+
+@pytest.mark.integration
+def test_a_bin_outside_the_rule_s_range_is_passed_with_the_reason(tmp_path: Path) -> None:
+    result = _init(tmp_path, _quantile_profile(["9.00", "10.00", "11.00", "12.00", "13.00"]))
+    state = _vat_state(result)
+    assert state["state"] == "unused"
+    assert "lies outside the range the rule gives" in state["note"]
+
+
+@pytest.mark.integration
+def test_the_range_is_the_rule_s_bounds_not_the_ladder_s_ends(tmp_path: Path) -> None:
+    _init(tmp_path, _quantile_profile())
+    fidelity = _fidelity(tmp_path)
+    assert fidelity["columns"]["vat"]["range"] == {"min": "0.81", "max": "8.10"}
+
+
+@pytest.mark.integration
+def test_no_quantile_property_is_declared_for_a_rule_s_column(tmp_path: Path) -> None:
+    _init(tmp_path, _quantile_profile())
+    fidelity = _fidelity(tmp_path)
+    assert not [item for item in fidelity["properties"] if item["property"] == "quantile"]
+
+
+@pytest.mark.integration
+def test_a_distinct_count_is_checked_against_the_grid_values_of_the_range(tmp_path: Path) -> None:
+    profile = _profile()
+    metrics = profile["tables"]["orders"]["columns"]["vat"]["metrics"]
+    metrics["distinctCount"] = _metric("distinctCount/1", 500)
+    states = {e["pointer"]: e for e in _init(tmp_path, profile).artifacts["ledger"]["statistics"]}
+    state = states["/tables/orders/columns/vat/metrics/distinctCount"]
+    assert state["state"] == "used" and "at least that many grid values" in state["note"]
+    other = tmp_path / "other"
+    other.mkdir()
+    metrics["distinctCount"] = _metric("distinctCount/1", 9000)
+    states = {e["pointer"]: e for e in _init(other, profile).artifacts["ledger"]["statistics"]}
+    state = states["/tables/orders/columns/vat/metrics/distinctCount"]
+    assert state["state"] == "unused" and "holds 730 grid values" in state["note"]
