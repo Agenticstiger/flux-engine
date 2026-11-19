@@ -49,7 +49,7 @@ from flux_engine.author.columns import (
     plan_column,
     widen_key_span,
 )
-from flux_engine.author.derived import bounds, contract_derives, numeric
+from flux_engine.author.derived import bounds, contract_dependents, contract_derives, numeric
 from flux_engine.author.given import choose_givens
 from flux_engine.author.ledger import Ledger
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
@@ -133,6 +133,8 @@ class AuthoredExpose:
     kinds: Dict[str, LogicalKind] = field(default_factory=dict)
     #: The columns a contract ``derive`` sets: column -> (invariant index, expr text).
     derives: Dict[str, Tuple[int, str]] = field(default_factory=dict)
+    #: The columns a contract ``dependency`` sets: one value per value of what they follow.
+    dependents: Set[str] = field(default_factory=set)
     #: What each column was declared from, kept for the rules that run once keys are laid out.
     contexts: Dict[str, ColumnContext] = field(default_factory=dict)
     #: The expose's place in the contract's ``exposes``.
@@ -423,6 +425,7 @@ def _plan_expose(
         for name, rule in contract_derives(expose).items()
         if any(plan.name == name for plan in authored.columns)
     }
+    authored.dependents = contract_dependents(expose)
     authored.contexts = contexts
     authored.index = expose_index
     choose_givens(
@@ -481,6 +484,26 @@ def _determine(authored: AuthoredExpose) -> None:
         index = derives[name][0]
         tokens = ("exposes", str(expose_index), "contract", "invariants", str(index), "expr")
         determine_column(contexts[name], plans[name], tokens, found.get(name))
+
+
+#: Why a column a contract dependency sets has no mean property.
+_DEPENDENT_REASON = (
+    "A dependency of the contract sets this column: the run draws one value for each value "
+    "of the columns it follows, so its mean rests on those few draws, and no mean property "
+    "holds it to a margin."
+)
+
+
+def _follow_dependencies(authored: AuthoredExpose) -> None:
+    """A column a contract ``dependency`` sets keeps its draw and loses its mean property."""
+    for plan in authored.columns:
+        if plan.name not in authored.dependents:
+            continue
+        kept = [prop for prop in plan.properties if prop.document["property"] != "mean"]
+        if len(kept) != len(plan.properties):
+            plan.properties = kept
+            plan.choices.append(_DEPENDENT_REASON)
+            plan.assumptions.append(_DEPENDENT_REASON)
 
 
 @dataclass(frozen=True)
@@ -1037,6 +1060,7 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
         for expose in exposes:
             if expose.skipped is None:
                 _determine(expose)
+                _follow_dependencies(expose)
         children = _spread_relationships(
             exposes,
             keys,

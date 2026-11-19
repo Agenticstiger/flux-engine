@@ -38,7 +38,7 @@ from flux_engine.author.bundle import AuthoredBundle, strict_findings
 from flux_engine.author.children import MOST_BUCKETS, _bucket_layout, _class_means, _merged
 from flux_engine.author.fill import drawn_mean, tilted_fill
 
-from .test_columns import _histogram, _metric, _plan
+from .test_columns import _histogram, _mean_statistic, _metric, _plan
 
 pytestmark = pytest.mark.unit
 F = Fraction
@@ -397,3 +397,23 @@ def test_a_decimal_beyond_its_digits_is_a_placeholder() -> None:
     }
     plan = _plan("decimal(9,2)", entry)
     assert plan.placeholder and plan.declaration["bins"] == ["0.00", "0.99"]
+
+
+def test_a_column_a_dependency_sets_has_no_mean_property() -> None:
+    from flux_engine.author.bundle import AuthoredExpose, _follow_dependencies
+    from flux_engine.author.derived import contract_dependents
+
+    rule = {"id": "plan_sets_fee", "dependency": {"from": ["plan"], "to": ["fee"]}}
+    assert contract_dependents({"contract": {"invariants": [rule]}}) == {"fee"}
+    entry = {
+        "domain": "number",
+        "metrics": {"min": _metric("min/1", "1"), "max": _metric("max/1", "100")},
+        "statistics": [_histogram(["1", "50", "100"], [300, 300]), _mean_statistic(40)],
+    }
+    plan = _plan("int", entry)
+    assert any(prop.document["property"] == "mean" for prop in plan.properties)
+    authored = AuthoredExpose(expose_id="accounts", columns=[plan], dependents={plan.name})
+    _follow_dependencies(authored)
+    # One fee per plan: the run's mean rests on a few draws, so no margin holds it.
+    assert not any(prop.document["property"] == "mean" for prop in plan.properties)
+    assert any("A dependency of the contract sets this column" in text for text in plan.choices)

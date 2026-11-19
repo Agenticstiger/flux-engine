@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 from decimal import Decimal
 from fractions import Fraction
-from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Set, Tuple
 
 from flux_engine.expr2.ast import Arith, Call, Case, Column, Neg, Node, Number
 from flux_engine.expr2.errors import Expr2Error
@@ -34,7 +34,7 @@ from flux_engine.expr2.functions import HALF_AWAY_FROM_ZERO, round_exact
 from flux_engine.expr2.parser import Side, parse
 from flux_stats.spelling import MOST_DIGITS
 
-__all__ = ["Interval", "bounds", "contract_derives", "numeric"]
+__all__ = ["Interval", "bounds", "contract_dependents", "contract_derives", "numeric"]
 
 Interval = Tuple[Fraction, Fraction]
 
@@ -56,6 +56,24 @@ def contract_derives(expose: Mapping[str, Any]) -> Dict[str, Tuple[int, str]]:
         if isinstance(column, str) and isinstance(text, str):
             derives.setdefault(column, (index, text))
     return derives
+
+
+def contract_dependents(expose: Mapping[str, Any]) -> Set[str]:
+    """The columns a contract ``dependency`` of *expose* sets (EXPR-SPEC-2 section 8).
+
+    A row takes the value its ``from`` columns' values already have, so the run
+    draws such a column once per value of the columns it follows.
+    """
+    contract = expose.get("contract")
+    found = contract.get("invariants") if isinstance(contract, Mapping) else None
+    dependents: Set[str] = set()
+    for entry in found if isinstance(found, list) else ():
+        rule = entry.get("dependency") if isinstance(entry, Mapping) else None
+        targets = rule.get("to") if isinstance(rule, Mapping) else None
+        for name in targets if isinstance(targets, list) else ():
+            if isinstance(name, str):
+                dependents.add(name)
+    return dependents
 
 
 def _hull(intervals: Sequence[Optional[Interval]]) -> Optional[Interval]:

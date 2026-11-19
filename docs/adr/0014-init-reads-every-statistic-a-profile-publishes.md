@@ -161,7 +161,9 @@ interval cannot follow gives no range. The bounds rest on the spans the bundle h
 columns the rule reads, which can be assumptions, so a published `min` or `max` of the column
 beyond them widens the range: the check reads the profile's own values against it too. The
 column's own statistics are checked through the rule: they become properties that `verify`
-scores against what the rule produced.
+scores against what the rule produced. A column a contract `dependency` sets is still drawn,
+once for each value of the columns it follows, so its mean rests on a few draws and it gets
+no mean property.
 
 ### 7. DATE in one format
 

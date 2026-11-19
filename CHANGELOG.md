@@ -97,6 +97,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   when they lie beyond, since the check reads those against the range too; its
   published mean becomes a property the rule's values are scored on. Bounds
   pass down a chain of rules, and a guarded `derive` leaves its column drawn.
+- A column a contract `dependency` sets gets no `mean` property from `fluxsim
+  init`: the run draws it once for each value of the columns it follows, so
+  its mean rests on those few draws, and a tenth of the mean is no margin.
 - A DATE column is spelled one way. Its fidelity `range` and `bins` can be
   `YYYY-MM-DD` (a whole number of days since 1970-01-01 still works), where a
   fidelity block that spelled them as dates was refused at `fluxsim validate`
