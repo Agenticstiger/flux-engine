@@ -90,7 +90,8 @@ They are exact and total. Given type-checked operands, each form returns a value
   with no normalization. A NULL operand makes the result NULL. `d_year || 'Q' || d_qoy` is `'1998Q1'` for 1998 and 1.
 
 The semantics are borrowed from SQL and checked against DuckDB 2.0.0 (section 6): the standard's `EXTRACT` and `||`,
-Db2's `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS`, the month-end clamping of PostgreSQL, DuckDB and Db2, and Substrait's
+Db2's names `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS`, the month-end clamping of PostgreSQL's `+ interval`, DuckDB and
+Db2's labeled duration `+ n MONTHS` (Db2's own `ADD_MONTHS` keeps a month end on a month end), and Substrait's
 `ACCEPT_NULLS` rule for a concatenation that gives NULL on a NULL operand.
 
 ## 5. Canonical form and the tree
