@@ -158,8 +158,10 @@ is refused (`FLX-5030`) by its length, before its value is formed.
 spelled `YYYY-MM-DD`, or as a whole number of days since 1970-01-01 (the two spell the same bound: `2026-01-01`
 is `20454`). Every bound of the column is in days: its range, its bins, a mean's absolute tolerance and the
 statistics formed over it, and a value is read as the day it names. Any other string is `FLX-5030`; a value
-that is no calendar date, or lies outside the range, is `FLX-5005`. A date-time is not a bound of a DATE column,
-and a TIMESTAMP column's bounds are still RFC 3339 instants or decimals (milliseconds). A profile holds a DATE
+that is no calendar date, or lies outside the range, is `FLX-5005`. A DATE column whose bounds are RFC 3339
+instants reads them as it did before days were a spelling: as a timestamp column in milliseconds, so a block a
+profiler declared with instants reads, and profiles, as before. A TIMESTAMP column's bounds are still RFC 3339
+instants or decimals (milliseconds). A profile holds a DATE
 column as a timestamp in milliseconds; PROFILE-SPEC §7 says how the check reads one.
 
 **A `quantile` may carry `bins`.** They follow a `marginalHistogram`'s rules: strictly increasing, partitioning

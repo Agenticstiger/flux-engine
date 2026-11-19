@@ -706,9 +706,12 @@ def _read_bound(value: Any, subject: str, *, date: bool = False) -> Tuple[Fracti
     timestamp parser, whose result is integer milliseconds. A string that
     is neither is ``FLX-5030``.
 
-    A bound of a column whose declared type is DATE (*date*) is a day: a
-    ``YYYY-MM-DD`` string, or a number of days since 1970-01-01. Both read
-    as days in the ``DATE`` domain; any other string is ``FLX-5030``.
+    A bound of a column whose declared type is DATE (*date*) may be a day: a
+    ``YYYY-MM-DD`` string, or a number of days since 1970-01-01. Both read as
+    days in the ``DATE`` domain. An RFC 3339 instant stays what it was before
+    the ``DATE`` domain existed, a ``TIMESTAMP`` bound in milliseconds, so a
+    block a profiler declared with instants reads, and profiles, as it did.
+    Any other string is ``FLX-5030``.
     """
     parsed = _decimal_of(value, subject)
     if date:
@@ -717,10 +720,14 @@ def _read_bound(value: Any, subject: str, *, date: bool = False) -> Tuple[Fracti
         try:
             return Fraction(parse_date_days(str(value))), ValueDomain.DATE
         except FluxError:
+            pass
+        try:
+            return Fraction(parse_rfc3339_ms(str(value))), ValueDomain.TIMESTAMP
+        except FluxError:
             raise FluxError(
                 FLX_5030,
-                f"{subject}: a DATE bound is a YYYY-MM-DD date or a number of days "
-                "since 1970-01-01",
+                f"{subject}: a DATE bound is a YYYY-MM-DD date, a number of days since "
+                "1970-01-01, or an RFC 3339 instant",
             ) from None
     if parsed is not None:
         return Fraction(parsed), ValueDomain.NUMBER

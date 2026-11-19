@@ -94,7 +94,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `YYYY-MM-DD` (a whole number of days since 1970-01-01 still works), where a
   fidelity block that spelled them as dates was refused at `fluxsim validate`
   with `FLX-5022`. `verify` reads the column's rows as dates, so a value
-  outside its range is refused as it is for an INT.
+  outside its range is refused as it is for an INT. A DATE column bounded by
+  RFC 3339 instants reads them as before, as a timestamp column in
+  milliseconds, so a block a profiler declares with instants still reads.
 - A profile holds a DATE column as a timestamp in milliseconds, and `verify
   --profile` now scores a mean, a marginal histogram and a quantile over it
   against that profile, where it refused every such property with `FLX-5037`.
