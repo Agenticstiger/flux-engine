@@ -421,6 +421,35 @@ def plan_column(ctx: ColumnContext) -> ColumnPlan:
     return plan
 
 
+def _required_nulls(ctx: ColumnContext, plan: ColumnPlan, nulls: Any, count: Any) -> None:
+    """What a ``required`` column makes of its published null count and count: checks only.
+
+    It declares no ``nullFraction``. A published null count above zero is the
+    contract and the data disagreeing, and the contract wins: the count is
+    passed over, and the person is told.
+    """
+    if isinstance(nulls, int) and not isinstance(nulls, bool) and nulls > 0:
+        plan.assumptions.append(
+            "The profile counts nulls, and the contract makes the column required, so it "
+            "is drawn with none."
+        )
+        plan.choices.append(plan.assumptions[-1])
+        plan.passed.append(
+            (
+                _metric_tokens(ctx, "nullCount"),
+                "the contract makes the column required, so it is drawn with no null",
+            )
+        )
+    elif isinstance(nulls, int) and not isinstance(nulls, bool):
+        plan.reads.append(
+            (_metric_tokens(ctx, "nullCount"), "checked: a required column holds no null")
+        )
+    if isinstance(count, int) and not isinstance(count, bool) and count == ctx.rows:
+        plan.reads.append(
+            (_metric_tokens(ctx, "count"), "checked: a required column holds a value per row")
+        )
+
+
 def _null_fraction(ctx: ColumnContext, plan: ColumnPlan) -> None:
     """``nullFraction``: the published null count, or none assumed.
 
@@ -439,26 +468,7 @@ def _null_fraction(ctx: ColumnContext, plan: ColumnPlan) -> None:
     count = _published(ctx.entry, "count")
     tokens = ("nullFraction",)
     if ctx.column.required:
-        if isinstance(nulls, int) and not isinstance(nulls, bool) and nulls > 0:
-            plan.assumptions.append(
-                "The profile counts nulls, and the contract makes the column required, so it "
-                "is drawn with none."
-            )
-            plan.choices.append(plan.assumptions[-1])
-            plan.passed.append(
-                (
-                    _metric_tokens(ctx, "nullCount"),
-                    "the contract makes the column required, so it is drawn with no null",
-                )
-            )
-        elif isinstance(nulls, int) and not isinstance(nulls, bool):
-            plan.reads.append(
-                (_metric_tokens(ctx, "nullCount"), "checked: a required column holds no null")
-            )
-        if isinstance(count, int) and not isinstance(count, bool) and count == ctx.rows:
-            plan.reads.append(
-                (_metric_tokens(ctx, "count"), "checked: a required column holds a value per row")
-            )
+        _required_nulls(ctx, plan, nulls, count)
         return
     if isinstance(nulls, int) and not isinstance(nulls, bool):
         total = nulls + count if isinstance(count, int) else ctx.rows
@@ -499,58 +509,75 @@ def _null_fraction(ctx: ColumnContext, plan: ColumnPlan) -> None:
 # --- categorical columns ----------------------------------------------------
 
 
+_Found = Optional[Tuple[int, Mapping[str, Any], Mapping[str, Any]]]
+
+
+def _scored_support(ctx: ColumnContext, plan: ColumnPlan, support_stat: _Found) -> None:
+    """A ``support`` property, scored against the published ``support/1`` when there is one."""
+    plan.properties.append(_support_property(ctx, scorable=support_stat is not None))
+    if support_stat is not None:
+        plan.properties[-1].reads.append(
+            (
+                ctx.profile_tokens + ("statistics", str(support_stat[0])),
+                "the support property is scored against it",
+            )
+        )
+
+
+def _enum_column(
+    ctx: ColumnContext,
+    plan: ColumnPlan,
+    enum: List[str],
+    levels_stat: _Found,
+    support_stat: _Found,
+) -> None:
+    """A STRING column whose type is an ``enum``: its levels, weighted by what is published.
+
+    A level histogram over exactly the enum weighs the levels and is the
+    property the run is scored on; one over some of them weighs them too, the
+    others sharing what its counts leave (:func:`_level_weights`); with none,
+    the levels are drawn at equal weights.
+    """
+    plan.level_names = tuple(enum)
+    plan.declaration["support"] = "declared"
+    plan.declaration["maxCardinality"] = len(enum)
+    plan.labels.append(
+        Label(("maxCardinality",), from_contract(ctx.product_ref, ctx.contract_tokens + ("type",)))
+    )
+    listed = [str(level) for level in levels_stat[1].get("levels", ())] if levels_stat else []
+    weighted = f"{len(enum)} levels the contract declares, weighted by the profile's counts"
+    if levels_stat is not None and sorted(listed) == sorted(enum):
+        _level_weights(ctx, plan, levels_stat)
+        plan.how = weighted
+        return
+    if levels_stat is not None and set(listed) & set(enum):
+        _level_weights(ctx, plan, levels_stat, declared=enum)
+        plan.how = weighted
+        _scored_support(ctx, plan, support_stat)
+        return
+    plan.how = f"{len(enum)} levels the contract declares, at equal weights"
+    plan.assumptions.append(
+        f"The profile publishes no counts for the {len(enum)} levels the contract "
+        "declares, so they are drawn at equal weights."
+    )
+    plan.weight_notes.append(plan.assumptions[-1])
+    if levels_stat is not None:
+        plan.passed.append(
+            (
+                ctx.profile_tokens + ("statistics", str(levels_stat[0])),
+                "its levels are not the levels the contract declares",
+            )
+        )
+    _scored_support(ctx, plan, support_stat)
+
+
 def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
     """A STRING column: declared levels, a published statistic, an identifier, or opaque levels."""
     enum = ctx.column.enum_values
     levels_stat = _ungrouped(ctx.entry, _LEVELS)
     support_stat = _ungrouped(ctx.entry, _SUPPORT)
     if enum:
-        plan.level_names = tuple(enum)
-        plan.declaration["support"] = "declared"
-        plan.declaration["maxCardinality"] = len(enum)
-        plan.labels.append(
-            Label(
-                ("maxCardinality",),
-                from_contract(ctx.product_ref, ctx.contract_tokens + ("type",)),
-            )
-        )
-        listed = [str(level) for level in levels_stat[1].get("levels", ())] if levels_stat else []
-        if levels_stat is not None and sorted(listed) == sorted(enum):
-            _level_weights(ctx, plan, levels_stat)
-            plan.how = f"{len(enum)} levels the contract declares, weighted by the profile's counts"
-        elif levels_stat is not None and set(listed) & set(enum):
-            _level_weights(ctx, plan, levels_stat, declared=list(enum))
-            plan.how = f"{len(enum)} levels the contract declares, weighted by the profile's counts"
-            plan.properties.append(_support_property(ctx, scorable=support_stat is not None))
-            if support_stat is not None:
-                plan.properties[-1].reads.append(
-                    (
-                        ctx.profile_tokens + ("statistics", str(support_stat[0])),
-                        "the support property is scored against it",
-                    )
-                )
-        else:
-            plan.how = f"{len(enum)} levels the contract declares, at equal weights"
-            plan.assumptions.append(
-                f"The profile publishes no counts for the {len(enum)} levels the contract "
-                "declares, so they are drawn at equal weights."
-            )
-            plan.weight_notes.append(plan.assumptions[-1])
-            if levels_stat is not None:
-                plan.passed.append(
-                    (
-                        ctx.profile_tokens + ("statistics", str(levels_stat[0])),
-                        "its levels are not the levels the contract declares",
-                    )
-                )
-            plan.properties.append(_support_property(ctx, scorable=support_stat is not None))
-            if support_stat is not None:
-                plan.properties[-1].reads.append(
-                    (
-                        ctx.profile_tokens + ("statistics", str(support_stat[0])),
-                        "the support property is scored against it",
-                    )
-                )
+        _enum_column(ctx, plan, list(enum), levels_stat, support_stat)
         return
     if levels_stat is not None:
         index, statistic, _group = levels_stat
@@ -841,6 +868,19 @@ _NOTHING_LEFT_REASON = (
 )
 
 
+def _absent_line(absent: Sequence[str], total: Optional[int]) -> str:
+    """What a person is told about the declared levels a count table does not list."""
+    names = ", ".join(printable(level) for level in absent)
+    many = len(absent) != 1
+    if total is not None:
+        what = ("they share" if many else "it shares") + (
+            " what the published counts leave of the table's records."
+        )
+    else:
+        what = ("each is" if many else "it is") + " assumed to be the mean of the published counts."
+    return f"The profile's counts do not list {names}, which the contract declares: {what}"
+
+
 def _withheld_lines(
     ctx: ColumnContext,
     cells: Sequence[_Cell],
@@ -850,22 +890,9 @@ def _withheld_lines(
     absent: Sequence[str] = (),
 ) -> List[str]:
     """What a person is told about a count table's withheld cells and absent levels."""
+    lines = [_absent_line(absent, total)] if absent else []
     small = sum(1 for cell in cells if cell.count is None and cell.status == _SMALL)
     other = sum(1 for cell in cells if cell.count is None and cell.status != _SMALL)
-    lines: List[str] = []
-    if absent:
-        names = ", ".join(printable(level) for level in absent)
-        many = len(absent) != 1
-        lines.append(
-            f"The profile's counts do not list {names}, which the contract declares: "
-            + (
-                ("they share" if many else "it shares")
-                + " what the published counts leave of the table's records."
-                if total is not None
-                else ("each is" if many else "it is")
-                + " assumed to be the mean of the published counts."
-            )
-        )
     if total is not None:
         if small or other:
             withheld = small + other
@@ -876,6 +903,14 @@ def _withheld_lines(
                 + (", a small one no more than half the minimum cell." if small else ".")
             )
         return lines
+    return lines + _status_lines(ctx, cells, noun, small, other)
+
+
+def _status_lines(
+    ctx: ColumnContext, cells: Sequence[_Cell], noun: str, small: int, other: int
+) -> List[str]:
+    """The 0.7.0 rule's lines, for a table that publishes no total: by withheld status."""
+    lines: List[str] = []
     if small:
         lines.append(
             f"The profile withheld {_count_of(small, noun)} as small (status {_SMALL}); each is "

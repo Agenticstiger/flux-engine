@@ -23,7 +23,6 @@ nothing is a float.
 
 from __future__ import annotations
 
-import math
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
@@ -33,7 +32,7 @@ from flux_engine.expr2.errors import Expr2Error
 from flux_engine.expr2.functions import HALF_AWAY_FROM_ZERO, round_exact
 from flux_engine.expr2.parser import Side, parse
 
-__all__ = ["Interval", "bounds", "contract_derives", "numeric", "outward"]
+__all__ = ["Interval", "bounds", "contract_derives", "numeric"]
 
 Interval = Tuple[Fraction, Fraction]
 
@@ -131,12 +130,6 @@ def bounds(text: str, ranges: Mapping[str, Interval]) -> Optional[Interval]:
     except Expr2Error:
         return None
     return _node_bounds(tree, ranges)
-
-
-def outward(interval: Interval, step: Fraction) -> Interval:
-    """*interval* with its ends moved out to the column's grid: no value of the rule is cut off."""
-    low, high = interval
-    return math.floor(low / step) * step, math.ceil(high / step) * step
 
 
 def numeric(value: Any) -> Optional[Fraction]:
