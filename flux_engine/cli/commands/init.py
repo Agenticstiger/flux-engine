@@ -67,8 +67,8 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         action="store_true",
         help=(
             "with --contract and --profile: write nothing, and exit 1, when a statistic the "
-            "profile publishes is unused or a number rests on a gap, an assumption standing "
-            "in for what the profile did not publish (docs/adr/0014); each one is named"
+            "profile publishes is unused or an assumption stands in for something the profile "
+            "did not publish, a gap (docs/adr/0014); each one is named"
         ),
     )
     init_p.add_argument(

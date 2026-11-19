@@ -258,9 +258,10 @@ def _strict_refusal(findings: Any) -> str:
             "the profile unused"
         )
     if findings.gaps:
+        many = len(findings.gaps) != 1
         parts.append(
-            f"{len(findings.gaps)} number{'s' if len(findings.gaps) != 1 else ''} resting on "
-            "a gap"
+            f"{len(findings.gaps)} assumption{'s' if many else ''} standing in for what the "
+            "profile did not publish"
         )
     if findings.stale:
         parts.append(

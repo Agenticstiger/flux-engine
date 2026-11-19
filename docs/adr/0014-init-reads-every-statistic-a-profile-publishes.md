@@ -54,8 +54,8 @@ declares `unused`, so every existing record keeps its bytes and its digest.
 ### 2. Strict mode
 
 `fluxsim init --strict` writes nothing and exits 1 when a statistic is unused
-or when a number rests on a gap: an assumption that stands in for something the
-profile did not publish. The settings of the check (each tolerance, the bounds
+or when the bundle rests on a gap: an assumption that stands in for something
+the profile did not publish. The settings of the check (each tolerance, the bounds
 on a committed state's size) are assumptions too and stay labelled as such, but
 no profile publishes them, so they are not gaps. `--allow POINTER`, repeatable,
 exempts one profile statistic or one register pointer. An `--allow` that

@@ -200,14 +200,14 @@ one is named with the reason no rule reads it, and the Simulation lists them und
 Proven".
 
 `--strict` turns the ledger into a gate. It writes nothing, and exits 1, when a statistic
-is unused or a number rests on a gap, an assumption standing in for something the profile
+is unused or an assumption stands in for something the profile
 did not publish; the tolerances and the bounds of a committed state are settings, not
 gaps. Each finding is named, and `--allow POINTER` accepts the ones at or below a profile
 pointer or a Simulation pointer. An `--allow` that accepts nothing is refused too:
 
 ```console
 $ fluxsim init strict --contract contract.orders.fluid.yaml --profile orders.profile.json --strict --allow /tables/orders/columns/created_at # exit 1
-init: --strict refuses this bundle (2 statistics of the profile unused, 6 numbers resting on a gap); nothing was written
+init: --strict refuses this bundle (2 statistics of the profile unused, 6 assumptions standing in for what the profile did not publish); nothing was written
   unused /tables/orders/columns/amount/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
   unused /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
 ...

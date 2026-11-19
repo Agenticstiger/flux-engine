@@ -36,8 +36,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   and `EVIDENCE.md` names each one under "What Was Not Proven". A register that
   lists none keeps its format 1-0-0 or 1-1-0 record, bytes and digest.
 - `fluxsim init --strict` writes nothing, and exits 1, when a statistic of the
-  profile is unused or a number rests on a gap, an assumption standing in for
-  what the profile did not publish. `--allow POINTER`, repeatable, accepts the
+  profile is unused or an assumption stands in for something the profile did
+  not publish, a gap. `--allow POINTER`, repeatable, accepts the
   findings at or below a profile pointer or a Simulation pointer, and one that
   accepts nothing is refused too.
 
