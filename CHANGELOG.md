@@ -34,6 +34,10 @@ locale, as the engine's own pre-reads of them do.
 
 ### Added
 
+- `docs/spec/profile-1-0.schema.json` keeps the profile schema of format 1-0-0, unchanged, beside format
+  1-1-0 (`docs/spec/profile-1.schema.json`), as the parameter register keeps both of its formats. A profile
+  written before this release names the 1-0-0 `$id` in its `_schemaURL`, so that id still resolves.
+
 - FLUX reads FLUX-side rules from a bundle, at `extensions["com.agentics.flux/1"].emits[<exposeId>].rules`
   (a new per-emit key, EXPR-SPEC-2 §1), and generates from the `derive` rules among them whose reads stay
   in the row, in flux-expr/2 or flux-expr/3 (ADR 0011 step 1, ADR 0013). Their ids are unique across a
