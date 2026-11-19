@@ -19,6 +19,7 @@ Pinned here:
 from __future__ import annotations
 
 import json
+from datetime import date
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -53,6 +54,56 @@ RANGES: Dict[str, Tuple[Fraction, Fraction]] = {"net": (F(10), F(100)), "qty": (
 )
 def test_the_bounds_of_a_rule(text: str, expected: Tuple[Fraction, Fraction]) -> None:
     assert bounds(text, RANGES) == expected
+
+
+def _ordinal(text: str) -> Fraction:
+    return Fraction(date.fromisoformat(text).toordinal())
+
+
+DATE_RANGES: Dict[str, Tuple[Fraction, Fraction]] = {
+    "issued_on": (_ordinal("2024-01-31"), _ordinal("2024-12-31")),
+    "term": (F(1), F(3)),
+    "days": (F(30), F(60)),
+    "late": (_ordinal("9999-12-01"), _ordinal("9999-12-31")),
+    "early": (_ordinal("0001-01-02"), _ordinal("0001-01-31")),
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("text", "low", "high"),
+    [
+        ("ADD_DAYS(issued_on, days)", "2024-03-01", "2025-03-01"),
+        ("ADD_DAYS(issued_on, 30)", "2024-03-01", "2025-01-30"),
+        ("ADD_DAYS(DATE '2024-01-01', 1)", "2024-01-02", "2024-01-02"),
+        ("ADD_MONTHS(issued_on, term)", "2024-02-29", "2025-03-31"),
+        ("ADD_MONTHS(DATE '2024-01-31', 1)", "2024-02-29", "2024-02-29"),
+        ("ADD_YEARS(issued_on, 1)", "2025-01-31", "2025-12-31"),
+        ("ADD_YEARS(DATE '2024-02-29', 1)", "2025-02-28", "2025-02-28"),
+        ("ADD_DAYS(ADD_MONTHS(issued_on, 1), 1)", "2024-03-01", "2025-02-01"),
+        ("ADD_DAYS(early, -1)", "0001-01-01", "0001-01-30"),
+    ],
+)
+def test_the_bounds_of_a_date_move(text: str, low: str, high: str) -> None:
+    assert bounds(text, DATE_RANGES) == (_ordinal(low), _ordinal(high))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ADD_DAYS(late, 1)",
+        "ADD_DAYS(late, days)",
+        "ADD_MONTHS(late, 1)",
+        "ADD_YEARS(late, 1)",
+        "ADD_DAYS(early, -2)",
+        "ADD_DAYS(issued_on, 1000000000000000000000000000000)",
+        "ADD_DAYS(missing, 1)",
+        "ADD_DAYS(issued_on, missing)",
+    ],
+)
+def test_a_date_move_that_leaves_the_range_has_no_bounds(text: str) -> None:
+    assert bounds(text, DATE_RANGES) is None
 
 
 @pytest.mark.unit

@@ -197,6 +197,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   range the rule gives and the contract's range together.
 - `fluxsim init` no longer fails on a foreign key whose binned quantile has one cut: it
   bounds no bucket, so the keys are laid out as without it and the statistic is unused.
+- A contract's texts take `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS`, with
+  flux-expr/3's meaning, parser, checker, evaluator and canonical text (a month or
+  year move clamps the day, and a result outside 0001 to 9999 is NULL), so a
+  contract `derive` such as `ADD_DAYS(issued_on, 30)` generates on every row and
+  its check holds. `EXTRACT` and `||` stay flux-expr/3's, `FLX-6103` in a
+  contract's text, and a FLUX-side flux-expr/2 text still refuses all of them. A
+  derived date's bounds follow the move.
 
 ## 0.7.0 - 2026-11-19
 

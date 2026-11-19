@@ -734,7 +734,8 @@ class _Checker:
 
     def _dateadd(self, node: DateAdd, ctx: _Ctx) -> _Typed:
         name = next(word for word, unit in DATE_ADD_FUNCTIONS.items() if unit == node.unit)
-        self._require_flux_expr_3(name, node.position)
+        if self.parsed.side is not Side.CORE:
+            self._require_flux_expr_3(name, node.position)
         start = self.typed(node.date, ctx)
         count = self.typed(node.count, ctx)
         for operand in (start, count):

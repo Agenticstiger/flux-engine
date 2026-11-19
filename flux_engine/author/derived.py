@@ -19,18 +19,42 @@ rule: they become the properties ``verify`` scores against what it wrote.
 The interval is the textbook one (R. E. Moore, "Interval Analysis", 1966), over
 the engine's own tree, in :class:`~fractions.Fraction`: nothing here rounds, and
 nothing is a float.
+
+A date is its day ordinal (``date.toordinal``, 1 for 0001-01-01), so a date
+column's range is an interval of ordinals. ``ADD_DAYS``, ``ADD_MONTHS`` and
+``ADD_YEARS`` are monotone non-decreasing in the date and in the count, so their
+bounds are the function at the two low ends and at the two high ends; a NULL
+there (the result leaves 0001 to 9999) means no bound.
 """
 
 from __future__ import annotations
 
 import math
+from datetime import date
 from decimal import Decimal
 from fractions import Fraction
+from math import ceil, floor
 from typing import Any, Dict, Mapping, Optional, Sequence, Set, Tuple
 
-from flux_engine.expr2.ast import Arith, Call, Case, Column, Neg, Node, Number
+from flux_engine.expr2.ast import (
+    Arith,
+    Call,
+    Case,
+    Column,
+    Date,
+    DateAdd,
+    Neg,
+    Node,
+    Number,
+)
 from flux_engine.expr2.errors import Expr2Error
-from flux_engine.expr2.functions import HALF_AWAY_FROM_ZERO, round_exact
+from flux_engine.expr2.functions import (
+    HALF_AWAY_FROM_ZERO,
+    add_days,
+    add_years,
+    round_exact,
+    try_add_months,
+)
 from flux_engine.expr2.parser import Side, parse
 from flux_stats.spelling import MOST_DIGITS
 
@@ -138,9 +162,39 @@ def _unbounded(node: Node, ranges: Mapping[str, Interval]) -> Optional[Interval]
         if node.otherwise is not None:
             branches.append(node.otherwise)
         return _hull([_node_bounds(branch, ranges) for branch in branches])
+    if isinstance(node, Date):
+        day = Fraction(date.fromisoformat(node.value).toordinal())
+        return day, day
+    if isinstance(node, DateAdd):
+        return _date_add_bounds(node, ranges)
     if isinstance(node, Call):
         return _call_bounds(node, ranges)
     return None
+
+
+_MOVES = {"day": add_days, "month": try_add_months, "year": add_years}
+
+
+def _date_add_bounds(node: DateAdd, ranges: Mapping[str, Interval]) -> Optional[Interval]:
+    start = _node_bounds(node.date, ranges)
+    count = _node_bounds(node.count, ranges)
+    if start is None or count is None:
+        return None
+    # A date and a count are whole numbers: only the integers inside an end-pair count.
+    first, last = ceil(start[0]), floor(start[1])
+    fewest, most = ceil(count[0]), floor(count[1])
+    if first > last or fewest > most:
+        return None
+    move = _MOVES[node.unit]
+    ends = []
+    for day, number in ((first, fewest), (last, most)):
+        if not 1 <= day <= date.max.toordinal():
+            return None
+        moved = move(date.fromordinal(day), number)
+        if moved is None:
+            return None
+        ends.append(Fraction(moved.toordinal()))
+    return ends[0], ends[1]
 
 
 def _call_bounds(node: Call, ranges: Mapping[str, Interval]) -> Optional[Interval]:

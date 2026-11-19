@@ -24,6 +24,7 @@ DuckDB is a test dependency only; the engine never imports it.
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from fractions import Fraction
@@ -43,6 +44,7 @@ from flux_engine.expr2.ast import (
     Column,
     Compare,
     Date,
+    DateAdd,
     In,
     IsDistinctFrom,
     IsNull,
@@ -196,6 +198,17 @@ class _Renderer:
                 node.name
             ]
             return f"date_sub('{unit}', {args[0]}, {args[1]})"
+        if isinstance(node, DateAdd):
+            moved = self.value(node.date, scope, alias)
+            count = self.value(node.count, scope, alias)
+            # DuckDB's interval counts are 32-bit; a count past them leaves the range
+            # whatever the date is, so TRY_CAST's NULL is the language's answer too.
+            if node.unit == "day":
+                return f"CAST(({moved} + to_days(TRY_CAST({count} AS INTEGER))) AS DATE)"
+            months = f"TRY_CAST({count} AS BIGINT)"
+            if node.unit == "year":
+                months = f"TRY_CAST(TRY_CAST({count} AS BIGINT) * 12 AS INTEGER)"
+            return f"CAST(({moved} + to_months(TRY_CAST({months} AS INTEGER))) AS DATE)"
         if isinstance(node, Aggregate):
             return self.aggregate(node, scope, alias)
         if isinstance(node, Window):
@@ -275,7 +288,7 @@ def _walk(node: Node) -> List[Node]:
 def _wants_oracle(tree: Node) -> bool:
     nodes = _walk(tree)
     names = {getattr(n, "name", None) for n in nodes}
-    borrowed = any(isinstance(n, (Aggregate, Window)) for n in nodes) or bool(
+    borrowed = any(isinstance(n, (Aggregate, Window, DateAdd)) for n in nodes) or bool(
         names & {"DAYS_BETWEEN", "MONTHS_BETWEEN", "YEARS_BETWEEN"}
     )
     exact_only = "AVG" in names or any(isinstance(n, Arith) and n.op == "/" for n in nodes)
@@ -301,9 +314,19 @@ def _connect(model: Model, tables: Mapping[str, List[Dict[str, Any]]]) -> Any:
 def _normal(value: Any) -> Any:
     if isinstance(value, bool) or value is None:
         return value
+    if isinstance(value, str) and re.fullmatch(r"\d+-\d\d-\d\d( \(BC\))?", value):
+        # DuckDB's DATE reaches past 9999-12-31 and before 0001-01-01; the language's does
+        # not (EXPR-SPEC-3 §4), and a result outside it is NULL.
+        return value if 1 <= int(value.split("-")[0]) <= 9999 and "BC" not in value else None
     if isinstance(value, (int, Decimal)):
         return Fraction(value)
     return value
+
+
+#: A vector whose ADD_* result leaves 0001-01-01 to 9999-12-31 inside a larger
+#: expression: DuckDB's DATE goes on past the range, so its difference is a number
+#: where the language's is NULL.
+_OUT_OF_THE_ORACLES_RANGE = {"add-months-then-months-between"}
 
 
 def _oracle_cases() -> List[Any]:
@@ -312,6 +335,8 @@ def _oracle_cases() -> List[Any]:
         for raw in load(path)["vectors"]:
             vector = normal(raw)
             if vector["refused"] is not None:
+                continue
+            if vector["id"] in _OUT_OF_THE_ORACLES_RANGE:
                 continue
             if _wants_oracle(parse(vector["text"], side=vector["side"]).tree):
                 cases.append(pytest.param(path, vector, id=vector["id"]))

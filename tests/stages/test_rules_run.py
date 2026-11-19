@@ -13,6 +13,7 @@ invariant is refused before a row is drawn.
 
 from __future__ import annotations
 
+import calendar
 import shutil
 from datetime import date, timedelta
 from pathlib import Path
@@ -95,6 +96,37 @@ def test_the_calendar_follows_its_key(result: pipeline.PipelineResult) -> None:
         assert row["d_date"] == day
         assert row["d_year"] == day.year
     assert len({row["d_date"] for row, _ in rows}) == 365
+
+
+@pytest.mark.integration
+def test_a_contract_derive_moves_a_date_by_days_months_and_years(tmp_path: Path) -> None:
+    columns = (
+        "        - { name: due_on, type: DATE, required: true }\n"
+        "        - { name: renews_on, type: DATE, required: true }\n"
+        "        - { name: expires_on, type: DATE, required: true }\n"
+    )
+    invariants = """        - id: due_of_date
+          derive: due_on
+          expr: "ADD_DAYS(d_date, 30)"
+        - id: renewal_of_date
+          derive: renews_on
+          expr: "ADD_MONTHS(d_date, 12)"
+        - id: expiry_of_date
+          derive: expires_on
+          expr: "ADD_YEARS(d_date, 1)"
+"""
+    outcome = _date_dim(pipeline.execute(_bundle(tmp_path, columns=columns, invariants=invariants)))
+    names = list(outcome.expose.column_names)
+    rows = [dict(zip(names, row, strict=True)) for row in outcome.rows]
+    assert len(rows) == 365
+    for row in rows:
+        start = row["d_date"]
+        assert row["due_on"] == start + timedelta(days=30)
+        # The same day a year on, or the month's last day when the year has no such day.
+        year = start.year + 1
+        day = min(start.day, calendar.monthrange(year, start.month)[1])
+        assert row["renews_on"] == date(year, start.month, day)
+        assert row["expires_on"] == date(year, start.month, day)
 
 
 @pytest.mark.integration

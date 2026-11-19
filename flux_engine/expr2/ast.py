@@ -106,7 +106,6 @@ CORE_KEYWORDS = frozenset(
         "WHEN",
     }
 )
-CORE_FUNCTIONS = frozenset({"ROUND", "COALESCE", "DAYS_BETWEEN", "MONTHS_BETWEEN", "YEARS_BETWEEN"})
 AGGREGATES = frozenset({"COUNT", "SUM", "MIN", "MAX", "AVG"})
 WINDOWS = frozenset(
     {"ROW_NUMBER", "RANK", "DENSE_RANK", "FIRST_VALUE", "LAST_VALUE", "LAG", "LEAD"}
@@ -122,8 +121,13 @@ ROUND_MODES = frozenset({DEFAULT_ROUND_MODE, "HALF_TO_EVEN"})
 LANGUAGES = ("flux-expr/2", "flux-expr/3")
 #: ``EXTRACT``'s fields (the SQL standard's extract expression, EXPR-SPEC-3 §2).
 EXTRACT_FIELDS = frozenset({"YEAR", "MONTH", "DAY"})
-#: Db2's date arithmetic, with the unit each moves by, spelled as ``date_diff``'s units.
+#: Db2's date arithmetic (FLUID SQL/1 has it too), with the unit each moves by, spelled as ``date_diff``'s units.
 DATE_ADD_FUNCTIONS = {"ADD_DAYS": "day", "ADD_MONTHS": "month", "ADD_YEARS": "year"}
+#: FLUID SQL/1's functions: ``ROUND``, ``COALESCE``, the three date differences and the
+#: three date moves (``EXTRACT`` and ``||`` are flux-expr/3's alone).
+CORE_FUNCTIONS = frozenset(
+    {"ROUND", "COALESCE", "DAYS_BETWEEN", "MONTHS_BETWEEN", "YEARS_BETWEEN"}
+) | frozenset(DATE_ADD_FUNCTIONS)
 
 _BARE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
