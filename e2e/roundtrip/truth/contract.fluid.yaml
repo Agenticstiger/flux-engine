@@ -30,6 +30,8 @@ exposes:
     semantics:
       entities:
         - { name: organisation, type: primary, expr: org_id }
+      dimensions:
+        - { name: segment, type: categorical, expr: segment }
   - exposeId: account
     kind: table
     binding:

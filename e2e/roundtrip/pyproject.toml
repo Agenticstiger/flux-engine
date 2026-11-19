@@ -16,15 +16,12 @@ dependencies = [
   "flux-sim-engine",
   "flux-stats",
   # `fluid profile`, the profiler on the data owner's side. The pin is a commit
-  # of forge-cli main. It moves to the merge commit of the forge-cli change that
-  # adds default histograms and children per parent, which this harness exists
-  # to measure.
-  "data-product-forge[profile] @ git+https://github.com/Agenticstiger/forge-cli@84c50ab54641b738d67fbc8d150cec59ce1d8c2d",
+  # of forge-cli main: the one that adds default histograms and several exposes
+  # in one call.
+  "data-product-forge[profile] @ git+https://github.com/Agenticstiger/forge-cli@1d7f6dc269795a8d7bbabdfe6f3f6e6c2ac43867",
   # The truth's rows go from NDJSON to Parquet here.
   "duckdb==2.0.0",
   "pyyaml>=6",
-  # The profile document's digest: RFC 8785 canonical JSON (Apache-2.0).
-  "rfc8785>=0.1",
 ]
 
 [dependency-groups]

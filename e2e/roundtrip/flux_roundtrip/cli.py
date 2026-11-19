@@ -7,8 +7,8 @@
 A run walks these steps in a fresh work directory:
 
 1. ``truth``: ``fluxsim run`` on the bundle under ``truth/``, which draws the truth's rows.
-2. ``profile``: the rows to Parquet, then ``fluid profile`` per table at its default
-   settings, joined into one profile.
+2. ``profile``: the rows to Parquet, then one ``fluid profile`` call for the whole
+   product at its default settings.
 3. ``init``: ``fluxsim init --contract C --profile P --json``.
 4. ``run``: ``fluxsim run <bundle> --profile P --verify --json``.
 5. ``judge``: the figures below, each against its target.
@@ -268,13 +268,12 @@ def run(work: Path, *, keep_going: bool = False) -> Tuple[Dict[str, Any], Dict[s
     contract = truth_bundle / contract_name
     truth_rows = _rows(truth_run, contract)
 
-    _say("profile: Parquet, then fluid profile per table")
+    _say("profile: Parquet, then one fluid profile call for the product")
     owner.export_parquet(truth_run, contract, work / "parquet", work / "scratch")
-    documents = owner.profile_tables(
-        owner.fluid_executable(), contract, work / "parquet", list(truth.TABLES), work / "profiles"
-    )
     profile_path = work / "profile.json"
-    owner.merge_profiles(documents, profile_path)
+    owner.profile_product(
+        owner.fluid_executable(), contract, work / "parquet", list(truth.TABLES), profile_path
+    )
     profile = json.loads(profile_path.read_text(encoding="utf-8"))
 
     _say("init: fluxsim init --contract --profile")

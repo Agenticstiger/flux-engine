@@ -25,15 +25,15 @@ spec:
     - productRef: b2b.billing
       exposeId: organisation
       fluidVersion: "0.7.7"
-      provenance: { contractDigest: "sha256:9f6c9b4ea33d2ebc61ee89ccc6ebfa1bca072e556a98a55808cd3e0852d0a6fe" }
+      provenance: { contractDigest: "sha256:489a59c76dc6e611a3a89796773d21054411b00da99f6badeb48d1667d808127" }
     - productRef: b2b.billing
       exposeId: account
       fluidVersion: "0.7.7"
-      provenance: { contractDigest: "sha256:9f6c9b4ea33d2ebc61ee89ccc6ebfa1bca072e556a98a55808cd3e0852d0a6fe" }
+      provenance: { contractDigest: "sha256:489a59c76dc6e611a3a89796773d21054411b00da99f6badeb48d1667d808127" }
     - productRef: b2b.billing
       exposeId: invoice
       fluidVersion: "0.7.7"
-      provenance: { contractDigest: "sha256:9f6c9b4ea33d2ebc61ee89ccc6ebfa1bca072e556a98a55808cd3e0852d0a6fe" }
+      provenance: { contractDigest: "sha256:489a59c76dc6e611a3a89796773d21054411b00da99f6badeb48d1667d808127" }
 extensions:
   com.agentics.flux/1:
     emits:

@@ -94,9 +94,11 @@ receive none (ADR 0014, section 5). The childless share therefore comes out
 larger than the profile says by about that much, and the exact counts need the
 parents drawn first. Targets of 0.10 leave room for it.
 
-`fluid profile` is pinned by commit in `pyproject.toml`. The pin moves to the
-merge commit of the forge-cli change that adds default histograms and children
-per parent, which this harness exists to measure.
+`fluid profile` is pinned by commit in `pyproject.toml`, and the harness profiles the
+whole product in one call. That profiler does not yet publish children per parent, so
+the two relationship targets (childless share, top 1 % share) measure what `init` does
+with a profile's `relationships`, which the engine's tests exercise with hand-written
+profiles. They stay red on the profiler's defaults until it publishes them.
 
 The baseline line in `history.jsonl` was recorded against a forge-cli that
 publishes no histogram and no children per parent by default. Its profile holds

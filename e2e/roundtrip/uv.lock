@@ -292,8 +292,8 @@ wheels = [
 
 [[package]]
 name = "data-product-forge"
-version = "0.35.0"
-source = { git = "https://github.com/Agenticstiger/forge-cli?rev=84c50ab54641b738d67fbc8d150cec59ce1d8c2d#84c50ab54641b738d67fbc8d150cec59ce1d8c2d" }
+version = "0.35.1.dev1"
+source = { git = "https://github.com/Agenticstiger/forge-cli?rev=1d7f6dc269795a8d7bbabdfe6f3f6e6c2ac43867#1d7f6dc269795a8d7bbabdfe6f3f6e6c2ac43867" }
 dependencies = [
     { name = "anyio" },
     { name = "click" },
@@ -365,7 +365,6 @@ dependencies = [
     { name = "flux-sim-engine" },
     { name = "flux-stats" },
     { name = "pyyaml" },
-    { name = "rfc8785" },
 ]
 
 [package.dev-dependencies]
@@ -377,12 +376,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "data-product-forge", extras = ["profile"], git = "https://github.com/Agenticstiger/forge-cli?rev=84c50ab54641b738d67fbc8d150cec59ce1d8c2d" },
+    { name = "data-product-forge", extras = ["profile"], git = "https://github.com/Agenticstiger/forge-cli?rev=1d7f6dc269795a8d7bbabdfe6f3f6e6c2ac43867" },
     { name = "duckdb", specifier = "==2.0.0" },
     { name = "flux-sim-engine", editable = "../../" },
     { name = "flux-stats", editable = "../../packages/flux-stats" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "rfc8785", specifier = ">=0.1" },
 ]
 
 [package.metadata.requires-dev]

@@ -2,12 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""The data owner's side: the truth's rows to Parquet, then `fluid profile` per table.
+"""The data owner's side: the truth's rows to Parquet, then one `fluid profile` call for the product.
 
 Everything here reads records, so on a real project it runs only where the data lives. What
-leaves for the generator side is the FLUID contract and the profile document. The profile
-merge follows ``e2e/aws/flux_e2e/owner.py``, which this harness does not import (each is its
-own uv project).
+leaves for the generator side is the FLUID contract and the profile document.
 """
 
 from __future__ import annotations
@@ -17,11 +15,9 @@ import json
 import re
 import shutil
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
-import rfc8785
 import yaml
 
 _DECIMAL = re.compile(r"^DECIMAL\(\d+,\s*\d+\)$", re.IGNORECASE)
@@ -86,57 +82,21 @@ def export_parquet(run_dir: Path, contract: Path, out_dir: Path, scratch: Path) 
     return counts
 
 
-def profile_tables(
-    fluid: str, contract: Path, parquet_dir: Path, tables: Sequence[str], out_dir: Path
-) -> List[Path]:
-    """Run ``fluid profile`` once per table with its default settings, in parallel."""
-    out_dir.mkdir(parents=True, exist_ok=True)
+def profile_product(
+    fluid: str, contract: Path, parquet_dir: Path, tables: Sequence[str], out: Path
+) -> str:
+    """Run ``fluid profile`` once for the whole product, with its default settings.
 
-    def one(table: str) -> Path:
-        target = out_dir / f"{table}.profile.json"
-        subprocess.run(
-            [
-                fluid,
-                "profile",
-                str(contract),
-                "--expose",
-                table,
-                "--source",
-                str(parquet_dir / f"{table}.parquet"),
-                "--out",
-                str(target),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-        )
-        return target
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        return list(pool.map(one, tables))
-
-
-def merge_profiles(documents: Sequence[Path], out: Path) -> str:
-    """One profile with every table: a Simulation pins exactly one.
-
-    ``fluid profile`` writes one expose per document. The documents share their producer,
-    grid and disclosure rules, so their tables are joined as they are, and a document that
-    differs in any of those is refused rather than mixed in.
+    Each expose gets its own ``--source <exposeId>=<location>``, so one call writes the one
+    document a Simulation pins. Returns the document's digest.
     """
-    merged: Dict[str, Any] = {}
-    for path in documents:
-        document = json.loads(path.read_text(encoding="utf-8"))
-        head = {key: value for key, value in document.items() if key != "tables"}
-        if not merged:
-            merged = {**head, "tables": {}}
-        elif head != {key: value for key, value in merged.items() if key != "tables"}:
-            raise ValueError(f"{path.name}: producer, grid or disclosure rules differ")
-        for table, entry in document["tables"].items():
-            if table in merged["tables"]:
-                raise ValueError(f"{path.name}: table {table!r} is profiled twice")
-            merged["tables"][table] = entry
-    canonical = rfc8785.dumps(merged)
-    out.write_bytes(canonical)
-    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    command = [fluid, "profile", str(contract)]
+    for table in tables:
+        command += ["--expose", table, "--source", f"{table}={parquet_dir / f'{table}.parquet'}"]
+    command += ["--out", str(out)]
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+    return "sha256:" + hashlib.sha256(out.read_bytes()).hexdigest()
 
 
 def fluid_executable() -> str:
