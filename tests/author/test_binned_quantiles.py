@@ -327,11 +327,11 @@ def test_a_tail_bound_off_the_grid_is_snapped_outward() -> None:
     assert Decimal("0.13") in bins  # 0.125 snapped up to the next cent
 
 
-def test_a_foreign_key_reads_no_binned_quantile() -> None:
+def test_a_foreign_key_reads_its_binned_quantile() -> None:
     entry = {
         "domain": "number",
         "metrics": {"count": _metric("count/1", 600)},
         "statistics": [_binned(_NUMBER_LADDER, 4, 200, 300, k=600)],
     }
     plan = _plan("int", entry, foreign="parent.id")
-    assert _statistic(0) not in _reads(plan)
+    assert _statistic(0) in _reads(plan)

@@ -1067,10 +1067,10 @@ def _binned_points(ctx: ColumnContext) -> List[_Point]:
     A group says ``binBelow`` of its ``k`` records lie below edge ``bins[i]`` and
     ``binThrough`` below ``bins[i + 1]``, so it is two points of the distribution
     (PROFILE-SPEC section 4). The ladder's first and last edges are skipped: they
-    are the type's extremes and say nothing of where the values lie. A key, or a
-    foreign key, keeps its own rules and reads none.
+    are the type's extremes and say nothing of where the values lie. A key keeps its
+    own rules and reads none; a foreign key reads them as any column does.
     """
-    if ctx.key or ctx.keyed or ctx.foreign is not None:
+    if ctx.key or ctx.keyed:
         return []
     return _binned_points_of(ctx.entry, ctx.profile_tokens)
 

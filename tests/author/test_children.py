@@ -436,3 +436,39 @@ def test_a_key_that_a_foreign_key_widens_is_checked_against_the_span_it_ends_wit
     state = _states(result)["/tables/customer/columns/customer_id/statistics/0"]
     assert state["state"] == "unused"
     assert "keys laid evenly over the span the bundle declares leave" in state["note"]
+
+
+def _own(tmp_path: Path, statistics: List[Dict[str, Any]]) -> Any:
+    """A foreign key the profile gives no relationship for, publishing only its own values."""
+    child = {
+        "domain": "number",
+        "metrics": {"count": _metric("count/1", 5000)},
+        "statistics": statistics,
+    }
+    profile = _profile([], child=child)
+    del profile["relationships"]
+    profile["_schemaURL"] = profile["_schemaURL"].replace("1-0-0", "1-1-0")
+    return _init(tmp_path, profile)
+
+
+def test_a_foreign_key_with_no_relationship_is_laid_out_by_its_own_quantiles(
+    tmp_path: Path,
+) -> None:
+    result = _own(tmp_path, [_quantile(LADDER, 2, 2000, 4000)])
+    spread = _foreign(tmp_path)
+    assert spread["bins"] == ["1", "251", "501", "1000"]
+    assert spread["binWeights"] == ["0.4", "0.4", "0.2"]
+    assert _states(result)["/tables/orders/columns/customer_id/statistics/0"]["state"] == "used"
+
+
+def test_its_mean_is_checked_against_the_layout(tmp_path: Path) -> None:
+    quantile = _quantile(LADDER, 2, 2000, 4000)
+    result = _own(tmp_path, [quantile, _mean(1752500, 5000)])
+    assert _states(result)["/tables/orders/columns/customer_id/statistics/1"]["state"] == "used"
+
+
+def test_a_quantile_with_one_cut_stays_unused_with_its_reason(tmp_path: Path) -> None:
+    ladder = ["-9223372036854775808", "500", "9223372036854775807"]
+    result = _own(tmp_path, [_quantile(ladder, 0, 0, 4000)])
+    state = _states(result)["/tables/orders/columns/customer_id/statistics/0"]
+    assert state["state"] == "unused" and state["note"]

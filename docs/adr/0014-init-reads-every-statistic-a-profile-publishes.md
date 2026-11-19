@@ -186,6 +186,10 @@ or `max` is checked against the parent's key span: inside it, used; outside it, 
 with the span in the reason. The reason that a foreign key with no spread is drawn
 evenly stays on the foreign keys that have none.
 
+A foreign key the profile gives no relationship for reads its binned quantiles like any
+other number column: with its other order statistics they cut its draw, and a `min`, `max`,
+mean and `distinctCount` are checked against the result.
+
 ### 6. Columns a derive determines
 
 A column a contract `derive` sets is not drawn. init declares no spread for it
