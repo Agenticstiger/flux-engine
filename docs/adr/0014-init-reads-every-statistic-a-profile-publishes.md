@@ -74,6 +74,15 @@ assumption is a number of the register with its reason.
 
 - **Keys and foreign keys** are never one value. A foreign key the profile gives
   no spread for is drawn uniformly over the parent's keys.
+- **A key is read as the rows' own layout.** A key's values are the row count's
+  consecutive grid values laid evenly. With its `min` or `max` withheld and a mean
+  published (`sum` with `count`, or `mean/1`), init centres them on the mean. In every
+  path a published `count` or `distinctCount` equal to the rows is checked as one value of
+  the key per row, a published mean over a published `min` and `max` is checked against
+  their middle, and each ungrouped `quantile/2` is checked against the even layout: the
+  keys below each of its two edges, within the profile's rounding (the disclosure rule's
+  `roundingBase`, plus one). A statistic the layout does not hold stays unused, and the
+  reason says what disagrees.
 - **A lone order statistic is a bound.** It is combined with the mean (from
   `sum` and `count`, or `mean/1`) and `distinctCount`, never drawn on its own.
 - **A mean with no spread is filled by maximum entropy.** Among the

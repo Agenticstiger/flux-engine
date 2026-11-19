@@ -171,6 +171,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   drawn number column (the check's range and a property's bins keep the profile's
   edges), and a column the profile publishes nothing for is drawn
   evenly over it instead of a placeholder.
+- `fluxsim init` reads a key's own statistics: with its `min` or `max` withheld the
+  keys are centred on the published mean, a `count` or `distinctCount` equal to the
+  rows is checked as one value per row, and a published mean, `min`, `max` or `quantile/2`
+  is checked against the even layout of the keys, unused with the reason when it
+  disagrees.
 
 ## 0.7.0 - 2026-11-19
 

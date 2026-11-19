@@ -281,6 +281,20 @@ def _contract_file_name(path: Path) -> str:
     return f"{path.stem}.fluid.yaml"
 
 
+def _rounding_base(profile: Mapping[str, Any]) -> int:
+    """The largest rounding base any disclosure rule names: a published count is off by less."""
+    rules = profile.get("disclosureRules")
+    bases = [
+        rule["roundingBase"]
+        for rule in (rules.values() if isinstance(rules, Mapping) else ())
+        if isinstance(rule, Mapping)
+        and isinstance(rule.get("roundingBase"), int)
+        and not isinstance(rule.get("roundingBase"), bool)
+        and rule["roundingBase"] > 0
+    ]
+    return max(bases) if bases else 1
+
+
 def _minimum_cell(profile: Mapping[str, Any]) -> int:
     """The smallest minimum cell any disclosure rule names; ACRO's 10 when none does."""
     rules = profile.get("disclosureRules")
@@ -338,6 +352,7 @@ def _plan_expose(
     *,
     minimum_cell: int,
     fractional_bits: int,
+    rounding_base: int = 1,
 ) -> AuthoredExpose:
     """Declare every column of one expose; its properties are chosen once every key is laid out."""
     expose_id = str(expose.get("exposeId"))
@@ -416,6 +431,7 @@ def _plan_expose(
             inner=column.name in inner,
             nulls_follow=column.name in follow,
             fractional_bits=fractional_bits,
+            rounding_base=rounding_base,
             range_rule=column_range(schema[position]),
         )
         plan = plan_column(context)
@@ -1051,6 +1067,7 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
                     keys.expose(expose_id) if keys is not None else None,
                     minimum_cell=minimum_cell,
                     fractional_bits=fractional_bits,
+                    rounding_base=_rounding_base(profile),
                 )
             )
         except FluxError as error:

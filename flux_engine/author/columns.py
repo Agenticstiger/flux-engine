@@ -150,6 +150,8 @@ class ColumnContext:
     nulls_follow: bool = False
     #: The grid the profile's encoded statistics are on (its ``encoding.fractionalBits``).
     fractional_bits: int = 16
+    #: The disclosure rule's rounding base: a published count is off by less than this.
+    rounding_base: int = 1
     #: The range the contract's ``validationRules`` declare for the column, if any.
     range_rule: Optional[RangeRule] = None
 
@@ -1040,6 +1042,9 @@ class _Point:
     #: A binned quantile's point: the statistic's edge ladder and this edge's place on it.
     ladder: Tuple[Decimal, ...] = ()
     index: int = -1
+    #: A binned quantile's point: the records below the value, of the group's ``k``.
+    below: int = -1
+    total: int = -1
 
 
 def _is_count(value: Any) -> TypeGuard[int]:
@@ -1058,8 +1063,15 @@ def _binned_points(ctx: ColumnContext) -> List[_Point]:
     """
     if ctx.key or ctx.keyed or ctx.foreign is not None:
         return []
+    return _binned_points_of(ctx.entry, ctx.profile_tokens)
+
+
+def _binned_points_of(
+    entry: Optional[Mapping[str, Any]], profile_tokens: Tuple[str, ...]
+) -> List[_Point]:
+    """The points of every published ``quantile/2`` group of a column's *entry*."""
     points: List[_Point] = []
-    for index, statistic in _statistics(ctx.entry):
+    for index, statistic in _statistics(entry):
         if statistic.get("definition") != _QUANTILE_BINNED or "groupBy" in statistic:
             continue
         groups, bins = statistic.get("groups"), statistic.get("bins")
@@ -1085,7 +1097,7 @@ def _binned_points(ctx: ColumnContext) -> List[_Point]:
             and 0 <= below <= through <= k
         ):
             continue
-        tokens = ctx.profile_tokens + ("statistics", str(index))
+        tokens = profile_tokens + ("statistics", str(index))
         for edge, count in ((current, below), (current + 1, through)):
             if 0 < edge < len(ladder) - 1:
                 points.append(
@@ -1096,6 +1108,8 @@ def _binned_points(ctx: ColumnContext) -> List[_Point]:
                         _QUANTILE_BINNED,
                         ladder,
                         edge,
+                        count,
+                        k,
                     )
                 )
     return points
@@ -2253,16 +2267,22 @@ def _key_range(ctx: ColumnContext, plan: ColumnPlan, *, beyond: bool) -> None:
 
     Between the published ``min`` and ``max`` when they hold one value per row
     and a row can carry them (*beyond* says it cannot), cited to the profile.
-    Otherwise the span is an assumption, 1 to the row count, which the bundle
-    then moves (:func:`widen_key_span`): out to the foreign keys that reference
-    the key, so each of their values lies inside it, and into the key it
-    references itself, when it is a foreign key too.
+    When one end is withheld and a mean is published, the keys are the rows'
+    consecutive grid values laid evenly, so they are centred on the mean. Otherwise
+    the span is an assumption, 1 to the row count, which the bundle then moves
+    (:func:`widen_key_span`): out to the foreign keys that reference the key, so each
+    of their values lies inside it, and into the key it references itself, when it is a
+    foreign key too. Whichever it is, the key's own count, distinct count and binned
+    quantiles are checked against the layout (ADR 0014 section 3).
     """
     kind = ctx.column.logical_type.kind
     low, high = _published(ctx.entry, "min"), _published(ctx.entry, "max")
     missing = [name for name, value in (("min", low), ("max", high)) if value is None]
     if missing:
         why = f"whose {' and '.join(missing)} the profile does not publish"
+        if not beyond and _centre_on_mean(ctx, plan, low, high):
+            _check_key_layout(ctx, plan)
+            return
     elif beyond:
         why = "whose published min and max lie beyond the integers a row carries exactly"
     else:
@@ -2277,13 +2297,12 @@ def _key_range(ctx: ColumnContext, plan: ColumnPlan, *, beyond: bool) -> None:
             plan.labels.append(Label(("bins", "1"), from_profile(last.tokens, _MAX)))
             layout = f"{_key_noun(ctx)}: {_KEY_LAYOUT}"
             plan.labels.append(Label(("binWeights",), assumed(layout)))
-            for name in ("count", "distinctCount"):
-                if _published(ctx.entry, name) == ctx.rows:
-                    _read(ctx, plan, name, "checked: one value of the key per row")
             _range(ctx, plan, first, last)
             plan.how = "a key the contract declares, between its published min and max"
             plan.assumptions.append(layout)
             plan.choices.append(layout)
+            _check_key_mean(ctx, plan, Fraction(first.value), Fraction(last.value))
+            _check_key_layout(ctx, plan)
             return
         why = "whose published min and max do not hold one value per row"
     reason = _key_reason(ctx, why)
@@ -2294,6 +2313,129 @@ def _key_range(ctx: ColumnContext, plan: ColumnPlan, *, beyond: bool) -> None:
     plan.how = "a key the contract declares, spanning 1 to the row count"
     plan.assumptions.append(reason)
     plan.key_span = True
+    _check_key_layout(ctx, plan)
+
+
+#: How a key centred on its published mean draws.
+_KEY_CENTRED = (
+    "its values are the row count's consecutive grid values, laid evenly and centred on the "
+    "published mean."
+)
+
+
+def _centre_on_mean(ctx: ColumnContext, plan: ColumnPlan, low: Any, high: Any) -> bool:
+    """Centre a key whose min or max is withheld on its published mean; whether it did.
+
+    The keys are the rows' consecutive grid values, so the lowest is the mean less half
+    the span of the other rows, on the grid. A published end that is not where that puts
+    it is left unused, with what disagrees.
+    """
+    mean = _published_mean(ctx)
+    if mean is None or ctx.rows < 2:
+        return False
+    kind = ctx.column.logical_type.kind
+    step = _grid(ctx)
+    grid = Fraction(step)
+    first = round((mean - Fraction(ctx.rows - 1, 2) * grid) / grid) * grid
+    last = first + (ctx.rows - 1) * grid
+    limit = _limit(ctx)
+    if limit is not None and max(abs(first), abs(last)) > limit:
+        return False
+    sources = _mean_sources(ctx)
+    cited = sources[0] if sources else None
+    if cited is None:
+        return False
+    definition = _MEAN if cited[-2:-1] == ("statistics",) or "statistics" in cited else "sum/1"
+    layout = f"{_key_noun(ctx)}: {_KEY_CENTRED}"
+    plan.declaration["bins"] = [
+        _spell(kind, _on_grid(first, step)),
+        _spell(kind, _on_grid(last, step)),
+    ]
+    plan.declaration["binWeights"] = ["1"]
+    basis = from_profile(cited, definition)
+    plan.labels.append(Label(("bins", "0"), basis))
+    plan.labels.append(Label(("bins", "1"), basis))
+    plan.labels.append(Label(("binWeights",), assumed(layout)))
+    _read_mean(ctx, plan, "the mean the keys are centred on")
+    plan.how = "a key the contract declares, centred on its published mean"
+    plan.assumptions.append(layout)
+    plan.choices.append(layout)
+    for name, value, edge in (("min", low, first), ("max", high, last)):
+        if value is None:
+            continue
+        tokens = _metric_tokens(ctx, name)
+        stated = Fraction(Decimal(str(value)))
+        if abs(stated - edge) <= grid:
+            plan.reads.append((tokens, "checked: the even layout holds it"))
+        else:
+            plan.passed.append(
+                (
+                    tokens,
+                    f"the keys centred on the published mean run from {_exact_text(first)} to "
+                    f"{_exact_text(last)}, and the published {name} is {_exact_text(stated)}",
+                )
+            )
+    return True
+
+
+def _check_key_mean(ctx: ColumnContext, plan: ColumnPlan, low: Fraction, high: Fraction) -> None:
+    """Check a published mean against the even layout over a published min and max."""
+    mean = _published_mean(ctx)
+    sources = _mean_sources(ctx)
+    if mean is None or not sources:
+        return
+    middle = (low + high) / 2
+    tolerance = max(Fraction(_grid(ctx)), (high - low) / max(ctx.rows, 1))
+    if abs(mean - middle) <= tolerance:
+        _read_mean(ctx, plan, "checked: the even layout holds it")
+        return
+    why = (
+        f"the published mean is {_exact_text(mean)}, and keys laid evenly from the published "
+        f"min to the published max have mean {_exact_text(middle)}"
+    )
+    plan.passed.extend((tokens, why) for tokens in sources)
+
+
+def _key_counts_below(plan: ColumnPlan, rows: int, edge: Fraction) -> Optional[Fraction]:
+    """How many of a key's *rows* values lie below *edge* when they are laid evenly."""
+    bins = plan.declaration.get("bins")
+    if not isinstance(bins, list) or len(bins) < 2 or rows < 1:
+        return None
+    low, high = Fraction(Decimal(str(bins[0]))), Fraction(Decimal(str(bins[-1])))
+    if rows == 1 or high <= low:
+        return Fraction(1 if low < edge else 0)
+    spacing = (high - low) / (rows - 1)
+    return Fraction(min(max(math.ceil((edge - low) / spacing), 0), rows))
+
+
+def _check_key_layout(ctx: ColumnContext, plan: ColumnPlan) -> None:
+    """Check a key's published counts and binned quantiles against how its values are laid."""
+    for name in ("count", "distinctCount"):
+        if _published(ctx.entry, name) == ctx.rows:
+            _read(ctx, plan, name, "checked: one value of the key per row")
+    by_statistic: Dict[Tuple[str, ...], List[_Point]] = {}
+    for point in _binned_points_of(ctx.entry, ctx.profile_tokens):
+        by_statistic.setdefault(point.tokens[:-2], []).append(point)
+    slack = ctx.rounding_base + 1
+    for tokens, points in by_statistic.items():
+        disagree: Optional[str] = None
+        for point in points:
+            expected = _key_counts_below(plan, ctx.rows, Fraction(point.value))
+            if expected is None:
+                disagree = "the bundle declares no span for the key"
+                break
+            scaled = expected * point.total / ctx.rows
+            if abs(scaled - point.below) > slack:
+                disagree = (
+                    f"the profile counts {point.below} of {point.total} records below "
+                    f"{_exact_text(Fraction(point.value))}, and keys laid evenly over the span "
+                    f"the bundle declares leave {_exact_text(scaled)} there"
+                )
+                break
+        if disagree is None:
+            plan.reads.append((tokens, "checked: the even layout holds it"))
+        else:
+            plan.passed.append((tokens, disagree))
 
 
 def declared_span(plan: ColumnPlan) -> List[Decimal]:
