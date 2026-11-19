@@ -168,3 +168,78 @@ def test_a_published_end_off_the_centred_layout_is_unused_with_the_reason() -> N
     why = next(why for tokens, why in plan.passed if tokens[-1] == "min")
     assert "published min is 7" in why
     assert _read(plan).get(TOKENS + ("metrics", "min")) is None
+
+
+def test_a_binned_quantile_at_the_edge_of_the_profile_s_rounding_is_held_not_past_it() -> None:
+    # Keys 1 to 100 laid evenly leave 19 of 100 records below 20; the profile rounds to 5, so
+    # a count within 6 of that (the base and one more) agrees, and 7 does not.
+    held = _plan(
+        {"domain": "number", "metrics": {}, "statistics": [_quantile(_ladder(), 2, 25, 55)]}
+    )
+    assert _read(held)[TOKENS + ("statistics", "0")] == "checked: the even layout holds it"
+    past = _plan(
+        {"domain": "number", "metrics": {}, "statistics": [_quantile(_ladder(), 2, 26, 55)]}
+    )
+    assert TOKENS + ("statistics", "0") not in _read(past)
+    assert "counts 26 of 100 records below 20" in next(
+        why for tokens, why in past.passed if tokens[-2:] == ("statistics", "0")
+    )
+    through = _plan(
+        {"domain": "number", "metrics": {}, "statistics": [_quantile(_ladder(), 2, 19, 56)]}
+    )
+    assert any("below 50" in why for _, why in through.passed)
+
+
+def test_a_mean_is_checked_against_the_span_a_key_ends_with() -> None:
+
+    from flux_engine.author.columns import recheck_key
+
+    entry = {
+        "domain": "number",
+        "metrics": {
+            "count": _metric("count/1", 100),
+            "sum": _metric("sum/1", "5050"),
+            "min": _metric("min/1", "1"),
+            "max": _metric("max/1", "50"),  # fewer than a hundred values: the span is assumed
+        },
+        "statistics": [_quantile(_ladder(), 2, 19, 49)],
+    }
+    column = CompiledColumn(
+        name="c",
+        logical_type=parse_logical_type("INT"),
+        required=False,
+        declared_type="INT",
+        key=True,
+    )
+    context = ColumnContext(
+        column=column,
+        expose_index=0,
+        schema_index=0,
+        product_ref="p",
+        profile_tokens=TOKENS,
+        entry=entry,
+        rows=100,
+        minimum_cell=10,
+        key=True,
+        rounding_base=5,
+    )
+    plan = plan_column(context)
+    # An assumed span 1 to 100 holds the mean of 50.5 and the quantile.
+    assert plan.key_span and plan.declaration["bins"] == ["1", "100"]
+    assert _read(plan)[TOKENS + ("metrics", "sum")] == "checked: the even layout holds it"
+    assert _read(plan)[TOKENS + ("statistics", "0")] == "checked: the even layout holds it"
+    # A foreign key widens it to 1 to 300: neither holds any longer, and the first results go.
+    plan.declaration["bins"] = ["1", "300"]
+    recheck_key(context, plan)
+    assert TOKENS + ("metrics", "sum") not in _read(plan)
+    assert TOKENS + ("statistics", "0") not in _read(plan)
+    why = {tokens: why for tokens, why in plan.passed}
+    assert "have mean 150.5" in why[TOKENS + ("metrics", "sum")]
+    assert "leave" in why[TOKENS + ("statistics", "0")]
+    # The count still holds, once.
+    assert [t for t, _ in plan.reads].count(TOKENS + ("metrics", "count")) == 1
+    # Back to a span that holds them: the results are the first ones again, none twice.
+    plan.declaration["bins"] = ["1", "100"]
+    recheck_key(context, plan)
+    assert _read(plan)[TOKENS + ("statistics", "0")] == "checked: the even layout holds it"
+    assert not [t for t, _ in plan.passed if t[-1] in ("sum", "0")]

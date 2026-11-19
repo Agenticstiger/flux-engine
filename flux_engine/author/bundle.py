@@ -47,6 +47,7 @@ from flux_engine.author.columns import (
     draw_within_key,
     drawn_span,
     plan_column,
+    recheck_key,
     widen_key_span,
 )
 from flux_engine.author.derived import bounds, contract_dependents, contract_derives, numeric
@@ -1077,6 +1078,10 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
             exposes.append(AuthoredExpose(expose_id=expose_id, skipped=_beyond_note(error)))
     try:
         _span_keys([expose for expose in exposes if expose.skipped is None], keys)
+        for expose in exposes:
+            if expose.skipped is None:
+                for plan in expose.columns:
+                    recheck_key(expose.contexts[plan.name], plan)
         for expose in exposes:
             if expose.skipped is None:
                 _determine(expose)

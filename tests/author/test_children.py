@@ -329,3 +329,110 @@ def test_a_foreign_key_that_gets_a_spread_keeps_no_passed_over_reason(tmp_path: 
     assert states[f"{prefix}/statistics/0"]["state"] == "used"  # its mean agrees with sum / count
     for name in ("min", "max", "sum", "count"):
         assert "gives no spread for" not in states[f"{prefix}/metrics/{name}"]["note"]
+
+
+def test_a_foreign_key_s_binned_quantile_with_one_cut_lays_the_keys_out_without_it(
+    tmp_path: Path,
+) -> None:
+    # One interior edge of the ladder is one point: it bounds no bucket, so the keys are laid
+    # out as without the statistic, and the ledger says it was passed over.
+    ladder = ["-9223372036854775808", "500", "9223372036854775807"]
+    child = {
+        "domain": "number",
+        "metrics": {"count": _metric("count/1", 5000)},
+        "statistics": [_quantile(ladder, 0, 0, 4000)],
+    }
+    profile = _profile([_histogram(BINS, PARENTS, 1000), _mean(5000, 1000)], child=child)
+    profile["_schemaURL"] = profile["_schemaURL"].replace("1-0-0", "1-1-0")
+    result = _init(tmp_path, profile)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    _init(plain, _profile([_histogram(BINS, PARENTS, 1000), _mean(5000, 1000)]))
+    assert _foreign(tmp_path) == _foreign(plain)
+    state = _states(result)["/tables/orders/columns/customer_id/statistics/0"]
+    assert state["state"] == "unused"
+
+
+def test_the_cuts_of_fewer_than_two_points_are_none() -> None:
+    from flux_engine.author.columns import binned_cuts
+
+    tokens = ("tables", "orders", "columns", "customer_id")
+    ladder = ["0", "500", "2000", "5000"]
+    one = {"statistics": [_quantile(["0", "500", "5000"], 0, 0, 4000)]}
+    assert binned_cuts(one, tokens) == []
+    twice = {"statistics": [_quantile(ladder, 1, 100, 100), _quantile(ladder, 1, 100, 100)]}
+    assert [cut[0] for cut in binned_cuts(twice, tokens)] == [500, 2000]
+    assert binned_cuts({"statistics": []}, tokens) == []
+
+
+def test_a_foreign_key_end_outside_the_parent_s_keys_is_passed_with_the_span() -> None:
+    from flux_engine.author.children import FOREIGN_OWN, _check_ends
+    from flux_engine.author.columns import ColumnPlan
+
+    tokens = ("tables", "orders", "columns", "customer_id")
+    entry = {"metrics": {"min": _metric("min/1", "0"), "max": _metric("max/1", "5000")}}
+    plan = ColumnPlan(name="customer_id", passed=[(tokens + ("metrics", "sum"), FOREIGN_OWN)])
+    used = _check_ends(plan, entry, tokens, 1, 1000)
+    assert used == []
+    why = {pointer[-1]: text for pointer, text in plan.passed}
+    assert (
+        why["min"]
+        == "the published min is 0, and the parent's keys span 1 to 1000: a foreign key is drawn over them only"
+    )  # noqa: E501
+    assert why["max"].startswith("the published max is 5000, and the parent's keys span 1 to 1000")
+    assert "adds no bound" in why["sum"]  # the passed-over reason a spread replaces
+    inside = {"metrics": {"min": _metric("min/1", "1"), "max": _metric("max/1", "5000")}}
+    plan = ColumnPlan(name="customer_id")
+    used = _check_ends(plan, inside, tokens, 1, 1000)
+    assert [pointer[-1] for pointer, _ in used] == ["min"]
+    assert [pointer[-1] for pointer, _ in plan.passed] == ["max"]
+
+
+def test_a_mean_statistic_that_disagrees_with_sum_over_count_is_not_read_beside_it() -> None:
+    from fractions import Fraction
+
+    from flux_engine.author.children import _foreign_mean
+
+    entry = {
+        "metrics": {"sum": _metric("sum/1", "2500000"), "count": _metric("count/1", 5000)},
+        "statistics": [_mean(2500000, 5000)],
+    }
+    mean, sources = _foreign_mean(entry, 16) or (None, [])
+    assert mean == 500
+    assert sources == [("metrics", "sum"), ("metrics", "count"), ("statistics", "0")]
+    entry["statistics"] = [_mean(4000000, 5000)]
+    mean, sources = _foreign_mean(entry, 16) or (None, [])
+    assert mean == 500 and sources == [("metrics", "sum"), ("metrics", "count")]
+    only = {"metrics": {}, "statistics": [_mean(4000000, 5000)]}
+    assert _foreign_mean(only, 16) == (Fraction(800), [("statistics", "0")])
+    assert _foreign_mean({"metrics": {}, "statistics": []}, 16) is None
+
+
+def test_a_key_that_a_foreign_key_widens_is_checked_against_the_span_it_ends_with(
+    tmp_path: Path,
+) -> None:
+    profile = _profile([_histogram(BINS, PARENTS, 1000)])
+    ladder = ["-9223372036854775808", "250", "500", "9223372036854775807"]
+    key = profile["tables"]["customer"]["columns"]["customer_id"]
+    key["metrics"].pop("min")
+    key["metrics"].pop("max")
+    # Keys 1 to 1000 leave 249 of 1000 records below 250: the span before it is widened.
+    key["statistics"] = [_quantile(ladder, 0, 0, 249)]
+    profile["_schemaURL"] = profile["_schemaURL"].replace("1-0-0", "1-1-0")
+    child = {
+        "domain": "number",
+        "metrics": {
+            "count": _metric("count/1", 5000),
+            "min": _metric("min/1", "1"),
+            "max": _metric("max/1", "3000"),
+        },
+    }
+    profile["tables"]["orders"]["columns"]["customer_id"] = child
+    key["statistics"][0]["groups"][0]["k"] = 1000
+    result = _init(tmp_path, profile)
+    block = yaml.safe_load((tmp_path / "bundle" / "simulation.flux.yml").read_text("utf-8"))
+    declared = block["extensions"][NAMESPACE]["emits"]["customer"]["fidelity"]["columns"]
+    assert declared["customer_id"]["bins"] == ["1", "3000"]
+    state = _states(result)["/tables/customer/columns/customer_id/statistics/0"]
+    assert state["state"] == "unused"
+    assert "keys laid evenly over the span the bundle declares leave" in state["note"]

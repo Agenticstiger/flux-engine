@@ -394,3 +394,30 @@ def test_a_parent_histogram_the_group_sizes_contradict_stays_unused_with_the_rea
     _check_marginal(plan, _own_histogram([600, 400]), _grouping({"A": 500, "B": 500}), ("c",), 6)
     assert plan.reads == []
     assert "counts 600 of A" in plan.passed[0][1] and "has 500 records" in plan.passed[0][1]
+
+
+SEGMENT_STATISTIC = "/tables/customer/columns/segment/statistics/0"
+
+
+def test_a_column_drawn_from_a_table_grouped_by_it_checks_its_own_histogram(
+    tmp_path: Path,
+) -> None:
+    # With the table of tier by region as well, the forest draws segment given tier from the
+    # table of tier grouped by segment, and segment's own histogram is checked against the
+    # sizes of that table's groups (600 and 400, as segment counts them).
+    result = _init(tmp_path, _profile(region_tier=True))
+    assert _fidelity(tmp_path)["columns"]["segment"]["given"] == "tier"
+    state = _states(result)[SEGMENT_STATISTIC]
+    assert state["state"] == "used"
+    assert "checked: its counts are the sizes of the groups" in state["note"]
+
+
+def test_a_column_s_histogram_the_groups_it_is_drawn_from_contradict_is_unused(
+    tmp_path: Path,
+) -> None:
+    groups = {"A": ([450, 50], 500), "B": ([50, 450], 500)}
+    result = _init(tmp_path, _profile(region_tier=True, tier_groups=groups))
+    assert _fidelity(tmp_path)["columns"]["segment"]["given"] == "tier"
+    state = _states(result)[SEGMENT_STATISTIC]
+    assert state["state"] == "unused"
+    assert "counts 600 of A" in state["note"] and "has 500 records" in state["note"]

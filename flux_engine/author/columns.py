@@ -75,6 +75,7 @@ __all__ = [
     "draw_within_key",
     "drawn_span",
     "plan_column",
+    "recheck_key",
     "shape_to_mean",
     "SHAPED_REASON",
     "share_texts",
@@ -207,6 +208,13 @@ class ColumnPlan:
     reads: List[Tuple[Tuple[str, ...], str]] = field(default_factory=list)
     #: Statistics the rules looked at and passed over, each with why (ADR 0014).
     passed: List[Tuple[Tuple[str, ...], str]] = field(default_factory=list)
+    #: A number key's checks against its layout were run (:func:`_key_range`), and the
+    #: bundle runs them again once the key's span is final (:func:`recheck_key`).
+    key_checked: bool = False
+    #: Whether the key's published mean is checked against the span the bundle declares.
+    key_mean: bool = False
+    #: What those checks wrote to ``reads`` (True) and ``passed`` (False), to replace.
+    key_notes: List[Tuple[bool, Tuple[str, ...], str]] = field(default_factory=list)
     #: The assumptions that are choices rather than gaps: how to meet what the profile
     #: does publish, or where the contract overrules it. ``--strict`` refuses every other
     #: assumption (ADR 0014 section 2).
@@ -1123,10 +1131,10 @@ def binned_cuts(
 
     The points :func:`_points` reads from ``quantile/2``, put through the histogram helper:
     ascending, one per distinct value, no share below an earlier one. A foreign key reads
-    them too, as its own buckets.
+    them too, as its own buckets. Fewer than two cuts bound no bucket: they give none.
     """
     points = _binned_points_of(entry, profile_tokens)
-    if not points:
+    if len({point.value for point in points}) < 2:
         return []
     edges, _ = _histogram(points)
     return [(edge.value, edge.level, edge.tokens) for edge in edges]
@@ -2336,6 +2344,7 @@ def _key_range(ctx: ColumnContext, plan: ColumnPlan, *, beyond: bool) -> None:
     plan.assumptions.append(reason)
     plan.key_span = True
     _check_key_layout(ctx, plan)
+    _check_key_mean_declared(ctx, plan)
 
 
 #: How a key centred on its published mean draws.
@@ -2400,8 +2409,15 @@ def _centre_on_mean(ctx: ColumnContext, plan: ColumnPlan, low: Any, high: Any) -
     return True
 
 
+def _key_note(plan: ColumnPlan, read: bool, tokens: Tuple[str, ...], text: str) -> None:
+    """Record a result of a key check, so a later run of the check can replace it."""
+    (plan.reads if read else plan.passed).append((tokens, text))
+    plan.key_notes.append((read, tokens, text))
+
+
 def _check_key_mean(ctx: ColumnContext, plan: ColumnPlan, low: Fraction, high: Fraction) -> None:
-    """Check a published mean against the even layout over a published min and max."""
+    """Check a published mean against the even layout over a key's first and last value."""
+    plan.key_mean = True
     mean = _published_mean(ctx)
     sources = _mean_sources(ctx)
     if mean is None or not sources:
@@ -2409,13 +2425,15 @@ def _check_key_mean(ctx: ColumnContext, plan: ColumnPlan, low: Fraction, high: F
     middle = (low + high) / 2
     tolerance = max(Fraction(_grid(ctx)), (high - low) / max(ctx.rows, 1))
     if abs(mean - middle) <= tolerance:
-        _read_mean(ctx, plan, "checked: the even layout holds it")
+        for tokens in sources:
+            _key_note(plan, True, tokens, "checked: the even layout holds it")
         return
     why = (
-        f"the published mean is {_exact_text(mean)}, and keys laid evenly from the published "
-        f"min to the published max have mean {_exact_text(middle)}"
+        f"the published mean is {_exact_text(mean)}, and keys laid evenly from the first "
+        f"value the bundle declares to the last have mean {_exact_text(middle)}"
     )
-    plan.passed.extend((tokens, why) for tokens in sources)
+    for tokens in sources:
+        _key_note(plan, False, tokens, why)
 
 
 def _key_counts_below(plan: ColumnPlan, rows: int, edge: Fraction) -> Optional[Fraction]:
@@ -2432,9 +2450,12 @@ def _key_counts_below(plan: ColumnPlan, rows: int, edge: Fraction) -> Optional[F
 
 def _check_key_layout(ctx: ColumnContext, plan: ColumnPlan) -> None:
     """Check a key's published counts and binned quantiles against how its values are laid."""
+    plan.key_checked = True
     for name in ("count", "distinctCount"):
         if _published(ctx.entry, name) == ctx.rows:
-            _read(ctx, plan, name, "checked: one value of the key per row")
+            _key_note(
+                plan, True, _metric_tokens(ctx, name), "checked: one value of the key per row"
+            )
     by_statistic: Dict[Tuple[str, ...], List[_Point]] = {}
     for point in _binned_points_of(ctx.entry, ctx.profile_tokens):
         by_statistic.setdefault(point.tokens[:-2], []).append(point)
@@ -2455,9 +2476,39 @@ def _check_key_layout(ctx: ColumnContext, plan: ColumnPlan) -> None:
                 )
                 break
         if disagree is None:
-            plan.reads.append((tokens, "checked: the even layout holds it"))
+            _key_note(plan, True, tokens, "checked: the even layout holds it")
         else:
-            plan.passed.append((tokens, disagree))
+            _key_note(plan, False, tokens, disagree)
+
+
+def _check_key_mean_declared(ctx: ColumnContext, plan: ColumnPlan) -> None:
+    """Check a published mean against the even layout over the span the key is declared over."""
+    bins = plan.declaration.get("bins")
+    if isinstance(bins, list) and len(bins) >= 2:
+        _check_key_mean(
+            ctx, plan, Fraction(Decimal(str(bins[0]))), Fraction(Decimal(str(bins[-1])))
+        )
+
+
+def recheck_key(ctx: ColumnContext, plan: ColumnPlan) -> None:
+    """Run a number key's checks again on the span the bundle ended with (ADR 0014 section 3).
+
+    The key's quantiles, mean, count and distinct count are checked when the key is planned,
+    against the span it is first declared over. A foreign key that references it, or the key
+    it references, can move that span (:func:`widen_key_span`, :func:`draw_within_key`), so
+    the bundle calls this once every key's span is final and the result replaces the first.
+    A key centred on its published mean keeps the mean it was centred on as its reading.
+    """
+    if not plan.key_checked:
+        return
+    for read, tokens, text in plan.key_notes:
+        held = plan.reads if read else plan.passed
+        if (tokens, text) in held:
+            held.remove((tokens, text))
+    plan.key_notes = []
+    _check_key_layout(ctx, plan)
+    if plan.key_mean:
+        _check_key_mean_declared(ctx, plan)
 
 
 def declared_span(plan: ColumnPlan) -> List[Decimal]:
@@ -2781,7 +2832,8 @@ def determine_column(
     plan.properties = []
     plan.reads, plan.passed = [], []
     plan.assumptions, plan.choices, plan.weight_notes = [], [], []
-    plan.placeholder = plan.key_span = False
+    plan.placeholder = plan.key_span = plan.key_checked = plan.key_mean = False
+    plan.key_notes = []
     plan.published_range = plan.time_span = None
     plan.fixed = "set by a rule of the contract"
     plan.how = "set by a rule of the contract, not drawn"
