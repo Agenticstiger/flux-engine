@@ -60,9 +60,9 @@ extensions:
               null: fail
               given: segment
               levelWeightsGiven:
-                smb: { basic: "70", standard: "25", premium: "5" }
-                mid: { basic: "25", standard: "55", premium: "20" }
-                enterprise: { basic: "5", standard: "30", premium: "65" }
+                smb: { basic: "70", standard: "24", premium: "6" }
+                mid: { basic: "14", standard: "26", premium: "60" }
+                enterprise: { basic: "34", standard: "33", premium: "33" }
             seats:
               range: { min: "1", max: "500" }
               bins: ["1", "10", "50", "200", "500"]
