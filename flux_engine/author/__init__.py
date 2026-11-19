@@ -17,7 +17,19 @@ from flux_engine.author.bundle import (
     AuthoredBundle,
     AuthoredExpose,
     AuthorError,
+    Gap,
+    StrictFindings,
     author_bundle,
+    strict_findings,
 )
 
-__all__ = ["FLUX_VERSION", "AuthorError", "AuthoredBundle", "AuthoredExpose", "author_bundle"]
+__all__ = [
+    "FLUX_VERSION",
+    "AuthorError",
+    "AuthoredBundle",
+    "AuthoredExpose",
+    "Gap",
+    "StrictFindings",
+    "author_bundle",
+    "strict_findings",
+]

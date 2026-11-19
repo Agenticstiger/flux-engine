@@ -80,7 +80,7 @@ def test_a_malformed_pin_is_refused(pin: Any) -> None:
     assert raised.value.detail.startswith("sim-x: extensions['com.agentics.flux/1'].profile")
 
 
-def test_the_namespace_carries_its_five_keys_and_nothing_else(write_bundle: Any) -> None:
+def test_the_namespace_carries_its_six_keys_and_nothing_else(write_bundle: Any) -> None:
     documents = minimal_simulation()
     documents[1]["extensions"] = {
         resolve_module.EXTENSION_NAMESPACE: {"profile": {"digest": DIGEST}, "profiles": {}}
@@ -91,7 +91,8 @@ def test_the_namespace_carries_its_five_keys_and_nothing_else(write_bundle: Any)
     assert raised.value.code.code == "FLX-3105"
     assert (
         "declares ['profiles']; this namespace carries "
-        "['emits', 'parameters', 'profile', 'scorecard', 'strictCoverage']" in raised.value.detail
+        "['emits', 'parameters', 'profile', 'scorecard', 'strictCoverage', 'unused']"
+        in raised.value.detail
     )
     documents[1]["extensions"] = {
         resolve_module.EXTENSION_NAMESPACE: {"profile": {"digest": DIGEST}}

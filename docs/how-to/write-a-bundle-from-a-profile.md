@@ -167,7 +167,13 @@ orders: 600 rows, 4 columns
   amount      a histogram over 5 published order statistics, shaped to the published mean
   created_at  uniform within the run's time window: the profile publishes no order statistic
 
-parameters: 34 declared -- 12 from the pinned profile, 19 assumed, 3 default
+profile: 21 statistics -- 10 used, 4 unused, 7 withheld
+unused (no number rests on these; the register lists them):
+  - /tables/orders/columns/amount/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
+  - /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
+  - /tables/orders/columns/created_at/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
+  - /tables/orders/columns/created_at/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
+parameters: 34 declared -- 12 from the pinned profile, 0 from the contract, 19 assumed, 3 default
 assumed (the register gives each assumed number its reason; replace what you know better):
   - country: The profile publishes how many distinct values the column holds and neither the values nor their counts: as many opaque levels, named country-<n>, at equal weights.
   - country, amount, created_at: The profile withheld nullCount (status A): a count withheld as small is zero or below the minimum cell, so no nulls are drawn.
@@ -184,6 +190,29 @@ profile stays outside the bundle, which holds only FLUX and FLUID documents; the
 Simulation pins its digest instead. Before it writes a file, the command checks the
 bundle as `fluxsim validate` does, and as `plan` does from the documents alone before a
 row is drawn, and writes nothing either refuses.
+
+The `profile:` line is the command's ledger ([ADR 0014](../adr/0014-init-reads-every-statistic-a-profile-publishes.md)):
+every statistic and metric of the profile, by its JSON Pointer, is used (a number of the
+bundle rests on it, a rule read it, a property is scored against it, or the bundle was
+checked against it), unused, or withheld (the profile published no value). Each unused
+one is named with the reason no rule reads it, and the Simulation lists them under
+`unused` beside the register, so `verify` and `ship` name them under "What Was Not
+Proven".
+
+`--strict` turns the ledger into a gate. It writes nothing, and exits 1, when a statistic
+is unused or a number rests on a gap, an assumption standing in for something the profile
+did not publish; the tolerances and the bounds of a committed state are settings, not
+gaps. Each finding is named, and `--allow POINTER` accepts the ones at or below a profile
+pointer or a Simulation pointer. An `--allow` that accepts nothing is refused too:
+
+```console
+$ fluxsim init strict --contract contract.orders.fluid.yaml --profile orders.profile.json --strict --allow /tables/orders/columns/created_at # exit 1
+init: --strict refuses this bundle (2 statistics of the profile unused, 6 numbers resting on a gap); nothing was written
+  unused /tables/orders/columns/amount/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
+  unused /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
+...
+accept one with --allow POINTER (a profile pointer for a statistic, a Simulation pointer for a gap), or publish what the profile left out
+```
 
 ## 3. What each number rests on
 
@@ -276,13 +305,13 @@ plan written to ...
 coverage: orders: 1 of 4 columns fell back to a type default
   created_at (TIMESTAMP): uniform within the simulation's time bounds: the column declares no draw of its own
 --strict-coverage refuses the run, and so does strictCoverage in the bundle; fluxsim explain FLX-3304 says how to cover a column
-parameters: 34 declared -- 12 from the pinned profile, 19 assumed, 3 default
+parameters: 34 declared -- 12 from the pinned profile, 0 from the contract, 19 assumed, 3 default; 4 statistics of the profile unused
 applied to ...
 emitted orders: 600 rows (generator)
 reproducible: not checked | validity: not asserted
 ...
   fidelity orders: passed -- 1 of 1 declared property within the margin against the pinned profile
-  parameters: 34 declared -- 12 from the pinned profile, 19 assumed, 3 default
+  parameters: 34 declared -- 12 from the pinned profile, 0 from the contract, 19 assumed, 3 default; 4 statistics of the profile unused
   scorecard: overall ... against profile sha256:...
 ...
 shipped out/bundle.flux.tgz

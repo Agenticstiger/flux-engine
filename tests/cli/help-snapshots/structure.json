@@ -251,6 +251,36 @@
       {
         "class": "_StoreTrueAction",
         "option_strings": [
+          "--strict"
+        ],
+        "dest": "strict",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "with --contract and --profile: write nothing, and exit 1, when a statistic the profile publishes is unused or a number rests on a gap, an assumption standing in for what the profile did not publish (docs/adr/0014); each one is named",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--allow"
+        ],
+        "dest": "allow",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "with --strict: accept the unused statistics of the profile, or the gaps of the Simulation, at or below this JSON Pointer; repeatable, and refused when it accepts nothing",
+        "metavar": "POINTER",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
           "-j",
           "--json"
         ],

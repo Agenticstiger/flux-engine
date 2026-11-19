@@ -120,6 +120,7 @@ from flux_engine.seam.resolve import (
     profile_reference,
     resolve_all_emits,
     strict_coverage_declared,
+    unused_statistics,
 )
 from flux_engine.seam.sinks import NullSink
 from flux_engine.stages._parallel import (
@@ -294,6 +295,7 @@ def parameter_register_of(loaded: LoadedBundle, cast: Cast) -> Optional[Paramete
         entries=entries,
         profile_digest=profile_reference(simulation, where=cast.simulation_id),
         code=FLX_3105,
+        unused=unused_statistics(simulation, where=cast.simulation_id),
     )
     if register.uses_contract:
         check_contract_citations(

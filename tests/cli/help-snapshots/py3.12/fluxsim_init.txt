@@ -1,4 +1,6 @@
-usage: fluxsim init [-h] [--contract FILE] [--profile FILE] [-j] directory
+usage: fluxsim init [-h] [--contract FILE] [--profile FILE] [--strict]
+                    [--allow POINTER] [-j]
+                    directory
 
 Write a small FLUX bundle and its FLUID contract into a directory, so a first
 run needs nothing else checked out. With --contract and --profile, write a
@@ -31,6 +33,14 @@ options:
                    SPEC.md), such as `fluid profile` writes: the Simulation
                    pins its digest and is declared from its published
                    aggregates; it stays outside the bundle (needs --contract)
+  --strict         with --contract and --profile: write nothing, and exit 1,
+                   when a statistic the profile publishes is unused or a
+                   number rests on a gap, an assumption standing in for what
+                   the profile did not publish (docs/adr/0014); each one is
+                   named
+  --allow POINTER  with --strict: accept the unused statistics of the profile,
+                   or the gaps of the Simulation, at or below this JSON
+                   Pointer; repeatable, and refused when it accepts nothing
   -j, --json       emit machine-readable JSON
 
 docs: https://agenticstiger.github.io/flux/engine/reference/cli/init.html

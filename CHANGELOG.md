@@ -21,6 +21,26 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+- `fluxsim init --contract --profile` keeps a ledger of the profile (ADR 0014):
+  every statistic and metric, by its JSON Pointer, is used, unused with the
+  reason no rule reads it, or withheld. The command prints the counts and every
+  unused statistic, and the Simulation lists the unused ones under
+  `extensions['com.agentics.flux/1'].unused`, beside the register. `--json`
+  carries the whole ledger and the gaps.
+- Parameter register format 1-2-0 (PARAMETER-REGISTER-SPEC section 1.1): a
+  Simulation may list the statistics of its pinned profile that no number rests
+  on, each with its reason. `plan` reads each citation in the profile
+  (`FLX-3113`), the record carries the list, the `parameters:` line counts it,
+  and `EVIDENCE.md` names each one under "What Was Not Proven". A register that
+  lists none keeps its format 1-0-0 or 1-1-0 record, bytes and digest.
+- `fluxsim init --strict` writes nothing, and exits 1, when a statistic of the
+  profile is unused or a number rests on a gap, an assumption standing in for
+  what the profile did not publish. `--allow POINTER`, repeatable, accepts the
+  findings at or below a profile pointer or a Simulation pointer, and one that
+  accepts nothing is refused too.
+
 ## 0.7.0 - 2026-11-19
 
 flux-stats exports the read of a FLUX bundle that the engine takes its digests

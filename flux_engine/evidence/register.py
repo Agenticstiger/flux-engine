@@ -8,8 +8,10 @@ docs/spec/PARAMETER-REGISTER-SPEC.md. A Simulation that declares a
 parameter register gets a record of every number its run reads, each with what
 it rests on: a statistic of the pinned profile, a place in the contract (format
 1-1-0), an assumption and its reason, or a default
-(:mod:`flux_engine.seam.parameters` decides which). ``apply`` writes the
-record next to the run, ``ship`` packs it, and the reports state the shares.
+(:mod:`flux_engine.seam.parameters` decides which), and, in format 1-2-0, the
+statistics of the pinned profile no number rests on, each with its reason.
+``apply`` writes the record next to the run, ``ship`` packs it, and the reports
+state the shares and name the unused statistics.
 
 **The plan holds its digest,** as it holds ``column-provenance.json``'s: ``plan``
 builds the record from its own execution and writes ``parameterRegisterDigest``,
@@ -45,9 +47,11 @@ __all__ = [
     "REGISTER_FILE",
     "REGISTER_SCHEMA_URL",
     "REGISTER_SCHEMA_URL_1_1",
+    "REGISTER_SCHEMA_URL_1_2",
     "Assumption",
     "BoundRegister",
     "RegisterSummary",
+    "UnusedNote",
     "build_register_document",
     "parse_register",
     "register_digest",
@@ -75,10 +79,19 @@ REGISTER_SCHEMA_URL_1_1 = (
     "FluxParameterRegister.json"
 )
 
+#: Format 1-2-0, which adds ``unused``: the statistics of the pinned profile no number
+#: rests on. A record names it only when the Simulation lists them, so every other
+#: record keeps the bytes it had.
+REGISTER_SCHEMA_URL_1_2 = (
+    "https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-2-0/"
+    "FluxParameterRegister.json"
+)
+
 #: The sources each format this build reads lists, in report order.
 _FORMAT_SOURCES: Mapping[str, Tuple[str, ...]] = {
     REGISTER_SCHEMA_URL: tuple(source.value for source in SOURCES_1_0),
     REGISTER_SCHEMA_URL_1_1: tuple(source.value for source in Source),
+    REGISTER_SCHEMA_URL_1_2: tuple(source.value for source in Source),
 }
 
 #: A pinned profile's digest, as the record names it (the pin's own spelling).
@@ -91,7 +104,8 @@ def build_register_document(register: ParameterRegister) -> Dict[str, Any]:
     A number's ``entry`` is the index of the entry that decided it, or ``null``
     for a default no entry names. ``counts`` holds every source of the record's
     format, so a share is a count over ``declared`` with nothing to infer. The
-    format is 1-1-0 when an entry names the contract, and 1-0-0 otherwise.
+    format is 1-2-0 when the Simulation lists the profile's unused statistics,
+    1-1-0 when an entry names the contract, and 1-0-0 otherwise.
     """
     entries = []
     for entry in register.entries:
@@ -119,9 +133,13 @@ def build_register_document(register: ParameterRegister) -> Dict[str, Any]:
         }
         for registered in register.numbers
     ]
-    return {
+    if register.lists_unused:
+        url = REGISTER_SCHEMA_URL_1_2
+    else:
+        url = REGISTER_SCHEMA_URL_1_1 if register.uses_contract else REGISTER_SCHEMA_URL
+    record: Dict[str, Any] = {
         "_producer": OPENLINEAGE_PRODUCER,
-        "_schemaURL": REGISTER_SCHEMA_URL_1_1 if register.uses_contract else REGISTER_SCHEMA_URL,
+        "_schemaURL": url,
         "simulationId": register.simulation_id,
         "profile": (
             {"digest": register.profile_digest} if register.profile_digest is not None else None
@@ -131,6 +149,9 @@ def build_register_document(register: ParameterRegister) -> Dict[str, Any]:
         "entries": entries,
         "parameters": numbers,
     }
+    if register.unused is not None:
+        record["unused"] = [item.as_document() for item in register.unused]
+    return record
 
 
 def render_register(register: ParameterRegister) -> str:
@@ -158,6 +179,15 @@ class Assumption:
 
 
 @dataclass(frozen=True)
+class UnusedNote:
+    """One statistic of the pinned profile no number rests on: its pointer, definition, reason."""
+
+    pointer: str
+    definition: Optional[str]
+    reason: str
+
+
+@dataclass(frozen=True)
 class RegisterSummary:
     """What the reports say of a record: its shares, and the assumptions behind them."""
 
@@ -168,10 +198,16 @@ class RegisterSummary:
     assumptions: Tuple[Assumption, ...]
     #: Defaults an entry states, as against defaults no entry names.
     stated_defaults: int
+    #: The statistics of the pinned profile no number rests on, when the record lists
+    #: them (format 1-2-0); ``None`` for a record of an earlier format.
+    unused: Optional[Tuple[UnusedNote, ...]] = None
 
     def as_document(self) -> Dict[str, Any]:
         """The shares as a stage's ``--json`` envelope carries them."""
-        return {"declared": self.declared, "counts": dict(self.counts)}
+        document: Dict[str, Any] = {"declared": self.declared, "counts": dict(self.counts)}
+        if self.unused is not None:
+            document["unused"] = len(self.unused)
+        return document
 
 
 @dataclass(frozen=True)
@@ -225,7 +261,35 @@ def parse_register(text: str) -> RegisterSummary:
         counts=shares,
         assumptions=assumptions,
         stated_defaults=stated,
+        unused=_unused_notes(document),
     )
+
+
+def _unused_notes(document: Mapping[str, Any]) -> Optional[Tuple[UnusedNote, ...]]:
+    """The record's ``unused`` list, which format 1-2-0 holds and no earlier one does."""
+    listed = document.get("unused")
+    if document.get("_schemaURL") != REGISTER_SCHEMA_URL_1_2:
+        if listed is not None:
+            raise ValueError("only a record of format 1-2-0 lists unused statistics")
+        return None
+    if not isinstance(listed, list):
+        raise ValueError("a record of format 1-2-0 lists its unused statistics")
+    notes: List[UnusedNote] = []
+    for item in listed:
+        statistic = item.get("statistic") if isinstance(item, Mapping) else None
+        pointer = statistic.get("pointer") if isinstance(statistic, Mapping) else None
+        reason = item.get("reason") if isinstance(item, Mapping) else None
+        if not isinstance(pointer, str) or not isinstance(reason, str):
+            raise ValueError("an unused statistic names its pointer and its reason")
+        definition = statistic.get("definition") if isinstance(statistic, Mapping) else None
+        notes.append(
+            UnusedNote(
+                pointer=pointer,
+                definition=definition if isinstance(definition, str) else None,
+                reason=reason,
+            )
+        )
+    return tuple(notes)
 
 
 def _totals(
@@ -328,7 +392,7 @@ def render_register_line(summary: RegisterSummary) -> str:
     """One line for ``plan``, ``verify`` and ``ship``: how many numbers, and what they rest on."""
     counts = summary.counts
     if not summary.declared:
-        return "parameters: the run reads no number the register counts"
+        return "parameters: the run reads no number the register counts" + _unused_clause(summary)
     return (
         f"parameters: {summary.declared} declared -- "
         f"{counts[Source.PROFILE.value]} from {_from_profile(summary)}, "
@@ -338,8 +402,17 @@ def render_register_line(summary: RegisterSummary) -> str:
             else ""
         )
         + f"{counts[Source.ASSUMPTION.value]} assumed, "
-        f"{counts[Source.DEFAULT.value]} default"
+        f"{counts[Source.DEFAULT.value]} default" + _unused_clause(summary)
     )
+
+
+def _unused_clause(summary: RegisterSummary) -> str:
+    """How many statistics of the profile no number rests on, when the record lists them."""
+    if summary.unused is None:
+        return ""
+    count = len(summary.unused)
+    noun = "statistic" if count == 1 else "statistics"
+    return f"; {count} {noun} of the profile unused"
 
 
 def _prose(reason: str) -> str:
@@ -420,6 +493,29 @@ def render_register_note(summary: RegisterSummary) -> str:
         )
         noun = "number" if assumption.numbers == 1 else "numbers"
         listed.append(f"- {where} ({assumption.numbers} {noun}): {_prose(assumption.reason)}")
-    if not listed:
-        return paragraph
-    return paragraph + "\n\nThe assumptions:\n\n" + "\n".join(listed)
+    text = paragraph
+    if listed:
+        text += "\n\nThe assumptions:\n\n" + "\n".join(listed)
+    return text + _render_unused(summary)
+
+
+def _render_unused(summary: RegisterSummary) -> str:
+    """The statistics of the pinned profile no number rests on, as the report lists them."""
+    if summary.unused is None:
+        return ""
+    if not summary.unused:
+        return (
+            "\n\nEvery statistic of the pinned profile is used: the register lists none that "
+            "no number rests on."
+        )
+    count = len(summary.unused)
+    lines = [
+        f"\n\nThe pinned profile publishes {count} "
+        f"statistic{'s' if count != 1 else ''} no number of this run rests on, so the run "
+        "shows nothing about " + ("it" if count == 1 else "them") + ":\n"
+    ]
+    for item in summary.unused:
+        name = quoted_name(item.pointer, "a statistic at a pointer this report does not print")
+        definition = f" ({quoted_name(item.definition, 'a definition')})" if item.definition else ""
+        lines.append(f"- {name}{definition}: {_prose(item.reason)}")
+    return "\n".join(lines)

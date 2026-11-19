@@ -161,6 +161,9 @@ class PropertyPlan:
     labels: List[Label]
     #: ``True`` when the profile holds the statistic the property compares with.
     scorable: bool
+    #: The statistics of the profile the property is scored against, each with how: the
+    #: ledger marks them used when the block carries the property (ADR 0014).
+    reads: List[Tuple[Tuple[str, ...], str]] = field(default_factory=list)
 
 
 @dataclass
@@ -185,6 +188,15 @@ class ColumnPlan:
     #: A number key whose span is assumed, so the foreign keys that reference it may
     #: widen it (:func:`widen_key_span`).
     key_span: bool = False
+    #: Statistics of the profile the rules read without citing them, each with how they
+    #: shaped, bounded or checked the declaration (the ledger marks them used).
+    reads: List[Tuple[Tuple[str, ...], str]] = field(default_factory=list)
+    #: Statistics the rules looked at and passed over, each with why (ADR 0014).
+    passed: List[Tuple[Tuple[str, ...], str]] = field(default_factory=list)
+    #: The assumptions that are choices rather than gaps: how to meet what the profile
+    #: does publish, or where the contract overrules it. ``--strict`` refuses every other
+    #: assumption (ADR 0014 section 2).
+    choices: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +230,16 @@ def _withheld_small(entry: Optional[Mapping[str, Any]], name: str) -> bool:
     """Whether a metric was withheld as a small count, the one status that bounds it."""
     metric = _metric(entry, name)
     return metric is not None and metric.get("status") == _SMALL
+
+
+def _metric_tokens(ctx: "ColumnContext", name: str) -> Tuple[str, ...]:
+    return ctx.profile_tokens + ("metrics", name)
+
+
+def _read(ctx: "ColumnContext", plan: "ColumnPlan", name: str, how: str) -> None:
+    """Record that the rules read the column's metric *name* when it is published."""
+    if _published(ctx.entry, name) is not None:
+        plan.reads.append((_metric_tokens(ctx, name), how))
 
 
 def _statistics(entry: Optional[Mapping[str, Any]]) -> List[Tuple[int, Mapping[str, Any]]]:
@@ -388,9 +410,26 @@ def _null_fraction(ctx: ColumnContext, plan: ColumnPlan) -> None:
                 "The profile counts nulls, and the contract makes the column required, so it "
                 "is drawn with none."
             )
+            plan.choices.append(plan.assumptions[-1])
+            plan.passed.append(
+                (
+                    _metric_tokens(ctx, "nullCount"),
+                    "the contract makes the column required, so it is drawn with no null",
+                )
+            )
+        elif isinstance(nulls, int) and not isinstance(nulls, bool):
+            plan.reads.append(
+                (_metric_tokens(ctx, "nullCount"), "checked: a required column holds no null")
+            )
+        if isinstance(count, int) and not isinstance(count, bool) and count == ctx.rows:
+            plan.reads.append(
+                (_metric_tokens(ctx, "count"), "checked: a required column holds a value per row")
+            )
         return
     if isinstance(nulls, int) and not isinstance(nulls, bool):
         total = nulls + count if isinstance(count, int) else ctx.rows
+        if isinstance(count, int):
+            _read(ctx, plan, "count", "with nullCount, the share of rows that hold a null")
         share = min(Fraction(nulls, total), Fraction(1)) if total else Fraction(0)
         plan.declaration["nullFraction"] = _share_text(share)
         plan.labels.append(
@@ -440,7 +479,21 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
                 f"The profile publishes no counts for the {len(enum)} levels the contract "
                 "declares, so they are drawn at equal weights."
             )
+            if levels_stat is not None:
+                plan.passed.append(
+                    (
+                        ctx.profile_tokens + ("statistics", str(levels_stat[0])),
+                        "its levels are not the levels the contract declares",
+                    )
+                )
             plan.properties.append(_support_property(ctx, scorable=support_stat is not None))
+            if support_stat is not None:
+                plan.properties[-1].reads.append(
+                    (
+                        ctx.profile_tokens + ("statistics", str(support_stat[0])),
+                        "the support property is scored against it",
+                    )
+                )
         return
     if levels_stat is not None:
         index, statistic, _group = levels_stat
@@ -490,6 +543,8 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
     ):
         plan.declaration["unique"] = True
         plan.how = f"an identifier: {distinct} distinct values in {count}, so the engine derives one per row"
+        _read(ctx, plan, "distinctCount", "as many distinct values as values: an identifier")
+        _read(ctx, plan, "count", "as many values as distinct values: an identifier")
         return
     _opaque_levels(ctx, plan, distinct)
     if ctx.foreign is not None:
@@ -653,6 +708,7 @@ def _opaque_levels(ctx: ColumnContext, plan: ColumnPlan, distinct: Any) -> None:
         # The reason names no number of the profile (PARAMETER-REGISTER-SPEC section 3):
         # how many levels there are is in the declaration itself.
         drawn = min(distinct, OPAQUE_LEVEL_CAP)
+        _read(ctx, plan, "distinctCount", "how many opaque levels are drawn")
         capped = f", more than {OPAQUE_LEVEL_CAP}," if drawn < distinct else ""
         reason = (
             f"The profile publishes how many distinct values the column holds{capped} and "
@@ -850,13 +906,22 @@ def _from_histogram(
         from_profile(stat_tokens + ("bins", str(position)), _HISTOGRAM)
         for position in range(len(edges))
     ]
-    drawn, drawn_bases = _drawn_edges(ctx, edges, edge_bases)
+    drawn, drawn_bases = _drawn_edges(ctx, plan, edges, edge_bases)
     cells = _cells(group, "binCounts")
     weights, bases = _cell_weights(ctx, cells, stat_tokens, "binCounts", _HISTOGRAM)
     mean = _published_mean(ctx)
     shaped = None
     if mean is not None and kind in (LogicalKind.INT, LogicalKind.DECIMAL) and _shapes(ctx):
         shaped = shape_to_mean(drawn, weights, mean, _grid(ctx))
+        _read_mean(
+            ctx,
+            plan,
+            (
+                "the histogram's bins are shaped to its mean"
+                if shaped is not None
+                else "checked against the histogram, which keeps it as near as its bins allow"
+            ),
+        )
     if shaped is None:
         plan.declaration["bins"] = [_spell(kind, edge) for edge in drawn]
         plan.declaration["binWeights"] = [_decimal_text(weight) for weight in weights]
@@ -910,7 +975,7 @@ def _scores_order(kind: LogicalKind) -> bool:
 
 
 def _drawn_edges(
-    ctx: ColumnContext, edges: Sequence[Decimal], bases: Sequence[Basis]
+    ctx: ColumnContext, plan: ColumnPlan, edges: Sequence[Decimal], bases: Sequence[Basis]
 ) -> Tuple[List[Decimal], List[Basis]]:
     """A histogram's edges for the draw: the outer two moved in to a published ``min`` and ``max``.
 
@@ -921,6 +986,9 @@ def _drawn_edges(
     drawn, drawn_bases = list(edges), list(bases)
     metrics = ctx.profile_tokens + ("metrics",)
     low, high = _published(ctx.entry, "min"), _published(ctx.entry, "max")
+    for name, value, edge in (("min", low, edges[0]), ("max", high, edges[-1])):
+        if value is not None and Decimal(str(value)) == edge:
+            plan.reads.append((metrics + (name,), "checked: it lies on the histogram's outer edge"))
     if low is not None and edges[0] < Decimal(str(low)) < edges[1]:
         drawn[0], drawn_bases[0] = Decimal(str(low)), from_profile(metrics + ("min",), _MIN)
     if high is not None and edges[-2] < Decimal(str(high)) < edges[-1]:
@@ -964,11 +1032,22 @@ def _mean_property(ctx: ColumnContext, plan: ColumnPlan) -> None:
             "type": "absolute",
             "value": format(_on_grid(units * Fraction(step), step), "f"),
         }
+    found = _ungrouped(ctx.entry, _MEAN)
     plan.properties.append(
         PropertyPlan(
             {"property": "mean", "column": ctx.column.name, "tolerance": tolerance},
             [Label(("tolerance", "value"), assumed(TOLERANCE_REASON))],
             scorable=True,
+            reads=(
+                [
+                    (
+                        ctx.profile_tokens + ("statistics", str(found[0])),
+                        "the mean property is scored against it",
+                    )
+                ]
+                if found is not None
+                else []
+            ),
         )
     )
 
@@ -1006,6 +1085,22 @@ def _published_mean(ctx: ColumnContext) -> Optional[Fraction]:
         if isinstance(k, int) and k > 0 and isinstance(total_on_grid, str):
             return Fraction(int(total_on_grid), k * 2**ctx.fractional_bits)
     return None
+
+
+def _mean_sources(ctx: ColumnContext) -> List[Tuple[str, ...]]:
+    """Where :func:`_published_mean` reads the mean: ``sum`` and ``count``, else ``mean/1``."""
+    total, count = _published(ctx.entry, "sum"), _published(ctx.entry, "count")
+    if total is not None and isinstance(count, int) and count > 0:
+        return [_metric_tokens(ctx, "sum"), _metric_tokens(ctx, "count")]
+    found = _ungrouped(ctx.entry, _MEAN)
+    if found is not None:
+        return [ctx.profile_tokens + ("statistics", str(found[0]))]
+    return []
+
+
+def _read_mean(ctx: ColumnContext, plan: ColumnPlan, how: str) -> None:
+    """Record that the rules read the column's published mean, wherever it came from."""
+    plan.reads.extend((tokens, how) for tokens in _mean_sources(ctx))
 
 
 #: How many halvings find the share that shapes a histogram to its mean: the share is
@@ -1177,6 +1272,15 @@ def _from_order_statistics(ctx: ColumnContext, plan: ColumnPlan, points: List[_P
             if _shapes(ctx)
             else None
         )
+        _read_mean(
+            ctx,
+            plan,
+            (
+                "the bins are shaped to its mean"
+                if shaped is not None
+                else "checked against the bins, which keep it as near as they allow"
+            ),
+        )
     if shaped is None:
         plan.declaration["bins"] = spelled
         plan.declaration["binWeights"] = [_decimal_text(weight) for weight in weights]
@@ -1269,11 +1373,13 @@ def _shaped_bins(
         "published mean"
     )
     plan.assumptions.append(_SHAPED_REASON)
+    plan.choices.append(_SHAPED_REASON)
 
 
 def _one_value(ctx: ColumnContext, plan: ColumnPlan, point: _Point) -> None:
     """One published value: every number takes it; a date or timestamp spans its day."""
     kind = ctx.column.logical_type.kind
+    plan.reads.append((point.tokens, "the one value the profile publishes"))
     if _temporal(kind):
         end = point.value + _DAY_MS
         plan.declaration["bins"] = [_spell(kind, point.value), _spell(kind, end)]
@@ -1352,6 +1458,7 @@ def _key_range(ctx: ColumnContext, plan: ColumnPlan, *, beyond: bool) -> None:
             _range(ctx, plan, first, last)
             plan.how = "a key the contract declares, between its published min and max"
             plan.assumptions.append(layout)
+            plan.choices.append(layout)
             return
         why = "whose published min and max do not hold one value per row"
     reason = _key_reason(ctx, why)
@@ -1548,6 +1655,8 @@ def _around_mean(ctx: ColumnContext, plan: ColumnPlan) -> None:
     total = _published(ctx.entry, "sum")
     count = _published(ctx.entry, "count")
     if total is not None and isinstance(count, int) and count > 0:
+        _read_mean(ctx, plan, "the mean the span is centred on")
+        _read(ctx, plan, "distinctCount", "how many values wide the span is")
         # Exact arithmetic on the grid: a decimal context would round a long value or a
         # fine scale (DECIMAL(38,30), say) before it reached the grid.
         mean = Fraction(Decimal(str(total))) / count

@@ -45,6 +45,7 @@ from flux_engine.author.columns import (
     plan_column,
     widen_key_span,
 )
+from flux_engine.author.ledger import Ledger
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
@@ -53,9 +54,12 @@ from flux_engine.seam.contract import LogicalKind, compile_expose
 from flux_engine.seam.coverage import printable
 from flux_engine.seam.keys import ContractKeys, ExposeKeys, compile_keys
 from flux_engine.seam.parameters import (
+    UNUSED_KEY,
     build_parameter_register,
     declared_numbers,
+    parse_pointer,
     read_parameters_block,
+    read_unused_block,
     render_pointer,
 )
 from flux_engine.seam.profile import load_profile
@@ -69,7 +73,10 @@ __all__ = [
     "AuthoredExpose",
     "AuthorError",
     "FLUX_VERSION",
+    "Gap",
+    "StrictFindings",
     "author_bundle",
+    "strict_findings",
 ]
 
 #: The FLUX version the authored documents declare: the starter's, so both
@@ -109,6 +116,8 @@ class AuthoredExpose:
     rows: int = 0
     #: What the row count rests on.
     rows_basis: Optional[Basis] = None
+    #: What a person is told about the row count, when it is not the published rowCount.
+    rows_note: Optional[str] = None
     columns: List[ColumnPlan] = field(default_factory=list)
     #: What each assumption is about (a column, ``rows``) and the sentence that states it.
     assumptions: List[Tuple[str, str]] = field(default_factory=list)
@@ -116,6 +125,19 @@ class AuthoredExpose:
     skipped: Optional[str] = None
     #: Each planned column's logical type, for the one assumed check a table may need.
     kinds: Dict[str, LogicalKind] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Gap:
+    """An assumption that stands in for something the profile did not publish (ADR 0014)."""
+
+    #: The position in the Simulation the assumption decides, as a JSON Pointer.
+    pointer: str
+    reason: str
+
+    @property
+    def tokens(self) -> Tuple[str, ...]:
+        return parse_pointer(self.pointer)
 
 
 @dataclass
@@ -131,6 +153,55 @@ class AuthoredBundle:
     notes: Tuple[Tuple[str, str], ...]
     profile_digest: str
     simulation_id: str
+    #: Every statistic and metric of the profile, and what the bundle made of it.
+    ledger: Ledger = field(default_factory=lambda: Ledger({}))
+    #: The assumptions that stand in for what the profile did not publish, in order.
+    gaps: Tuple[Gap, ...] = ()
+
+
+@dataclass(frozen=True)
+class StrictFindings:
+    """What ``--strict`` refuses: unused statistics and gaps no allow entry exempts."""
+
+    unused: Tuple[Tuple[str, Optional[str], str], ...]
+    gaps: Tuple[Gap, ...]
+    #: ``--allow`` pointers that exempt nothing.
+    stale: Tuple[str, ...]
+
+    @property
+    def refused(self) -> bool:
+        return bool(self.unused or self.gaps or self.stale)
+
+
+def _exempts(allowed: Tuple[str, ...], tokens: Tuple[str, ...]) -> bool:
+    return tokens[: len(allowed)] == allowed
+
+
+def strict_findings(bundle: AuthoredBundle, allow: Sequence[str]) -> StrictFindings:
+    """What ``fluxsim init --strict`` refuses, after the *allow* pointers exempt theirs.
+
+    An allow pointer exempts every unused statistic of the profile and every gap
+    of the Simulation at or below it. One that exempts nothing is a finding of
+    its own, as mypy's ``--warn-unused-ignores`` reports an ignore that ignores
+    nothing, so an allow-list cannot go stale. Raises ``ValueError`` for an
+    allow entry that is not a JSON Pointer.
+    """
+    pointers = [(text, parse_pointer(text)) for text in allow]
+    exempting = set()
+    unused = []
+    for entry in bundle.ledger.unused_entries():
+        hits = [text for text, tokens in pointers if _exempts(tokens, entry.tokens)]
+        exempting.update(hits)
+        if not hits:
+            unused.append((entry.pointer, entry.definition, entry.note))
+    gaps = []
+    for gap in bundle.gaps:
+        hits = [text for text, tokens in pointers if _exempts(tokens, gap.tokens)]
+        exempting.update(hits)
+        if not hits:
+            gaps.append(gap)
+    stale = tuple(text for text, _ in pointers if text not in exempting)
+    return StrictFindings(unused=tuple(unused), gaps=tuple(gaps), stale=stale)
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +351,9 @@ def _plan_expose(
     # A composite foreign key is null on all its columns or none: its first decides.
     follow = {column for relationship in relationships for column in relationship.from_columns[1:]}
     rows, rows_basis, rows_note = _emit_rows(expose_id, table, minimum_cell)
-    authored = AuthoredExpose(expose_id=expose_id, rows=rows, rows_basis=rows_basis)
+    authored = AuthoredExpose(
+        expose_id=expose_id, rows=rows, rows_basis=rows_basis, rows_note=rows_note
+    )
     if rows_note:
         authored.assumptions.append(("rows", rows_note))
     profiled = table.get("columns") if isinstance(table.get("columns"), Mapping) else {}
@@ -621,6 +694,87 @@ def _as_read(document: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# The ledger
+# ---------------------------------------------------------------------------
+
+
+def _cite(ledger: Ledger, basis: Optional[Basis]) -> None:
+    if basis is not None and basis.statistic is not None:
+        ledger.use(basis.statistic[0], "a number of the bundle rests on it")
+
+
+def _ledger(
+    profile: Mapping[str, Any], exposes: Sequence[AuthoredExpose], contract_ids: Set[str]
+) -> Ledger:
+    """Every statistic of *profile*, marked by what the written *exposes* rest on and read."""
+    ledger = Ledger(profile)
+    tables = profile.get("tables")
+    for name in tables if isinstance(tables, Mapping) else ():
+        if str(name) not in contract_ids:
+            ledger.unused_under(
+                ("tables", str(name)), "the contract declares no expose of this name"
+            )
+    for expose in exposes:
+        if expose.skipped is not None:
+            ledger.unused_under(
+                ("tables", expose.expose_id), f"the expose was not written: {expose.skipped}"
+            )
+            continue
+        _cite(ledger, expose.rows_basis)
+        for column in expose.columns:
+            for label in column.labels:
+                _cite(ledger, label.basis)
+            for tokens, how in column.reads:
+                ledger.use(tokens, how)
+            for tokens, why in column.passed:
+                ledger.unused(tokens, why)
+        for prop in expose.properties:
+            for label in prop.labels:
+                _cite(ledger, label.basis)
+            for tokens, how in prop.reads:
+                ledger.use(tokens, how)
+    return ledger
+
+
+def _unused_block(ledger: Ledger) -> List[Dict[str, Any]]:
+    """The register's ``unused`` list: each unused statistic with its definition and reason."""
+    block: List[Dict[str, Any]] = []
+    for entry in ledger.unused_entries():
+        statistic: Dict[str, Any] = {"pointer": entry.pointer}
+        if entry.definition is not None:
+            statistic["definition"] = entry.definition
+        block.append({"statistic": statistic, "reason": entry.note})
+    return block
+
+
+def _gaps(
+    exposes: Sequence[AuthoredExpose], window_note: Optional[Tuple[str, str]]
+) -> Tuple[Gap, ...]:
+    """The assumptions that stand in for what the profile did not publish, by position.
+
+    Every assumption a written expose states is one, but for the choices a
+    column names (how to meet what the profile publishes, or where the contract
+    overrules it). Each is placed at the emit's ``rows`` or at the column's
+    block in the Simulation, so one ``--allow`` can accept a column's gaps.
+    """
+    namespace = ("extensions", EXTENSION_NAMESPACE, "emits")
+    found: List[Gap] = []
+    for expose in exposes:
+        if expose.skipped is not None:
+            continue
+        base = namespace + (expose.expose_id,)
+        choices = {plan.name: set(plan.choices) for plan in expose.columns}
+        for subject, sentence in expose.assumptions:
+            if subject == "rows" and sentence == expose.rows_note:
+                found.append(Gap(render_pointer(base + ("rows",)), sentence))
+            elif sentence not in choices.get(subject, set()):
+                found.append(Gap(render_pointer(base + ("fidelity", "columns", subject)), sentence))
+    if window_note is not None:
+        found.append(Gap(render_pointer(("spec", "timeBounds")), window_note[1]))
+    return tuple(found)
+
+
+# ---------------------------------------------------------------------------
 # The bundle
 # ---------------------------------------------------------------------------
 
@@ -755,6 +909,10 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
         },
     )
     simulation["extensions"] = {EXTENSION_NAMESPACE: namespace}
+    contract_ids = {
+        str(expose.get("exposeId")) for expose in contract["exposes"] if isinstance(expose, Mapping)
+    }
+    ledger = _ledger(profile, exposes, contract_ids)
 
     template = (
         "fluxsim init writes the least World a run needs: the generator emits read none of "
@@ -783,6 +941,8 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
         simulation_id: _as_read(simulation),
     }
     namespace["parameters"] = _register(labels, documents, simulation_id)
+    namespace[UNUSED_KEY] = _unused_block(ledger)
+    documents[simulation_id] = _as_read(simulation)
 
     # A file name is any text: printable() keeps a newline in one from ending the comment.
     header = _HEADER.format(
@@ -809,7 +969,7 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
     )
     _check(files, profile)
     notes = tuple(note for note in (window_note, owner_note) if note)
-    counts = _counts(namespace["parameters"], documents, simulation_id)
+    counts = _counts(namespace["parameters"], namespace[UNUSED_KEY], documents, simulation_id)
     return AuthoredBundle(
         files=files,
         exposes=tuple(exposes),
@@ -817,11 +977,14 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
         notes=notes,
         profile_digest=pinned.digest.value,
         simulation_id=simulation_id,
+        ledger=ledger,
+        gaps=_gaps(exposes, window_note),
     )
 
 
 def _counts(
     entries: Sequence[Mapping[str, Any]],
+    unused: Sequence[Mapping[str, Any]],
     documents: Mapping[str, Mapping[str, Any]],
     simulation_id: str,
 ) -> Dict[str, int]:
@@ -833,6 +996,7 @@ def _counts(
         entries=read_parameters_block(entries, pinned=True, where="parameters", code=FLX_3105),
         profile_digest=None,
         code=FLX_3105,
+        unused=read_unused_block(unused, pinned=True, where=UNUSED_KEY, code=FLX_3105),
     )
     return register.counts()
 

@@ -42,6 +42,8 @@ fluxsim init bundle --contract contract.orders.fluid.yaml \
 |---|---|---|
 | `--contract` | `FILE` | a FLUID contract: the bundle generates rows for each of its exposes the profile describes; copied into the bundle unchanged (needs --profile) |
 | `--profile` | `FILE` | a profile document of that data (docs/spec/PROFILE-SPEC.md), such as `fluid profile` writes: the Simulation pins its digest and is declared from its published aggregates; it stays outside the bundle (needs --contract) |
+| `--strict` |  | with --contract and --profile: write nothing, and exit 1, when a statistic the profile publishes is unused or a number rests on a gap, an assumption standing in for what the profile did not publish (docs/adr/0014); each one is named |
+| `--allow` | `POINTER` | with --strict: accept the unused statistics of the profile, or the gaps of the Simulation, at or below this JSON Pointer; repeatable, and refused when it accepts nothing |
 | `-j, --json` |  | emit machine-readable JSON |
 
 [All commands](./README.md)

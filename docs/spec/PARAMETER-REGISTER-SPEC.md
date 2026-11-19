@@ -1,4 +1,4 @@
-# Parameter register: normative specification (format 1-1-0)
+# Parameter register: normative specification (format 1-2-0)
 
 A parameter register says what each number a run reads rests on. A number
 comes from a statistic of the profile the Simulation pins (PROFILE-SPEC.md),
@@ -6,10 +6,15 @@ from a place in the FLUID contract the run emits from, from an assumption the
 author states with its reason, or it is a default. A Simulation declares its
 register in the engine's extension namespace, `apply` writes the record of it
 as `run/parameter-register.json`, and `plan`, `verify` and `ship` report the
-shares. Format 1-1-0 adds the contract source to format 1-0-0 (section 7).
+shares. Format 1-1-0 adds the contract source to format 1-0-0, and format
+1-2-0 adds the statistics of the pinned profile that no number rests on
+(sections 1.1 and 7).
 
 Normative files beside this page:
 
+- [`parameter-register-1-2.schema.json`](parameter-register-1-2.schema.json):
+  the JSON Schema of a format 1-2-0 record, whose `$id` is
+  `https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-2-0/FluxParameterRegister.json`.
 - [`parameter-register-1-1.schema.json`](parameter-register-1-1.schema.json):
   the JSON Schema of a format 1-1-0 record, whose `$id` is
   `https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-1-0/FluxParameterRegister.json`.
@@ -109,6 +114,35 @@ anything is written:
 
 An empty list declares a register with no entry: every number is a default.
 A YAML null declares none, as a null namespace does.
+
+### 1.1 The statistics no number rests on
+
+Beside `parameters`, the namespace may list the statistics of the pinned
+profile that no number of the run rests on, each with its reason. `fluxsim
+init` writes the list from its ledger (ADR 0014), so a reader of the evidence
+sees what the profile said that the run does not show:
+
+```yaml
+extensions:
+  com.agentics.flux/1:
+    profile:
+      digest: sha256:a1b2...
+    parameters: [...]
+    unused:
+      - statistic: { pointer: /tables/orders/columns/tier/statistics/0, definition: levelHistogram/1 }
+        reason: tier is drawn given segment, whose mutual information with it is higher
+```
+
+An item holds `statistic`, a citation as a `profile` entry gives one
+(section 3), and `reason`, one line of text of at most 1000 characters, and
+nothing else. The list belongs to the register: it is refused with
+`FLX-3105` in a Simulation that declares no `parameters` or pins no profile,
+as are an item that is not a mapping, a key an item does not carry, a missing
+`statistic` or `reason`, and two items naming one statistic. `plan` reads each
+citation in the profile it is handed, as it reads an entry's: a pointer that
+reaches nothing, names another definition, or reaches a statistic the profile
+withheld is `FLX-3113`. An empty list says that every statistic of the
+profile is used. A YAML null lists none.
 
 ## 2. The numbers a register counts
 
@@ -224,12 +258,13 @@ handed the profile, write the same bytes.
 | Key | Holds |
 |---|---|
 | `_producer` | A URI naming the tool that wrote the record. |
-| `_schemaURL` | The schema's `$id`. The format version is part of it: format 1-1-0 when an entry names the contract, and format 1-0-0 otherwise, so a register with no contract entry is recorded as it was before. |
+| `_schemaURL` | The schema's `$id`. The format version is part of it: format 1-2-0 when the Simulation lists unused statistics, format 1-1-0 when an entry names the contract, and format 1-0-0 otherwise, so a register with neither is recorded as it was before. |
 | `simulationId` | The Simulation. |
 | `profile` | `{"digest": ...}`, the pinned profile's digest, or `null`. |
 | `declared` | How many numbers the register counts. |
-| `counts` | `profile`, `assumption` and `default`, and `contract` in format 1-1-0: how many numbers rest on each. They add up to `declared`. |
+| `counts` | `profile`, `assumption` and `default`, and `contract` in formats 1-1-0 and 1-2-0: how many numbers rest on each. They add up to `declared`. |
 | `entries` | The entries as declared, each with its `index` in the list, its `document`, `pointer` and `source`, and its `statistic`, `contract` or `reason`. |
+| `unused` | Format 1-2-0 only: the statistics of the pinned profile no number rests on, as the Simulation lists them, each `{"statistic": {"pointer", "definition"}, "reason"}` (section 1.1). |
 | `parameters` | Every counted number: `document`, `kind`, `pointer`, `value` (the number as declared, in the canonical decimal spelling of KERNEL-SPEC section 2.1: no exponent, the declared scale kept, so `1e4` is `10000` and `.50` is `0.50`), `source` and `entry`, the index of the entry that decided it, or `null` for a default no entry names. |
 
 A profile statistic is cited by a pointer and a definition, beside the pinned
@@ -267,12 +302,14 @@ parameters: 35 declared -- 3 from the pinned profile, 2 assumed, 30 default
 
 A register with a contract entry gives the contract's share after the
 profile's: `parameters: 35 declared -- 3 from the pinned profile, 1 from the
-contract, 2 assumed, 29 default`.
+contract, 2 assumed, 29 default`. A register of format 1-2-0 also gives the
+contract's share, and adds how many statistics of the profile are unused:
+`...; 2 statistics of the profile unused`.
 
 Their `--json` envelopes carry the same numbers: `parameter_register` in
 `plan`'s artifacts and `parameterRegister` in `verify`'s and `ship`'s, each
 `{"declared": n, "counts": {...}}`, the counts naming the sources of the
-register's format. `validate` reports the counts under each Simulation as
+register's format, and `"unused": n` for a register of format 1-2-0. `validate` reports the counts under each Simulation as
 `parameters`.
 
 `EVIDENCE.md`'s "What Was Not Proven" section gains one paragraph: the shares
@@ -288,7 +325,9 @@ code span, so a renderer reads none of it as markup or a link. A reason that
 holds a reserved word, a character that is not plain text or a backtick is left
 out of the prose and kept in the record. A run that reads no number the register
 counts says so in one sentence, and its line reads `parameters: the run reads
-no number the register counts`.
+no number the register counts`. A register of format 1-2-0 then lists every
+statistic of the profile no number rests on, with its definition and its
+reason, or says in one sentence that it lists none.
 
 ## 7. Compatibility and later additions
 
@@ -301,6 +340,10 @@ predates it refuses the record rather than reads it as something else.
   names 1-1-0 only when an entry names the contract, so every register that
   names none keeps its 1-0-0 record, bytes and digest. A reader of 1-1-0 reads
   1-0-0 records too.
+- **Format 1-2-0** adds `unused` (section 1.1), and its counts name all four
+  sources. A record names 1-2-0 only when the Simulation lists unused
+  statistics, so every other register keeps its 1-0-0 or 1-1-0 record, bytes
+  and digest. A reader of 1-2-0 reads both earlier formats.
 - A source added later, such as a fitted-parameters document (fitting), follows
   the same rule. Moving the block from the
 extension namespace into the FLUX specification is a change of where it is
@@ -322,3 +365,5 @@ declared, not of what it means.
 - Configuration tools that record where each value came from, among them
   Spring Boot's `env` endpoint (a value and its origin per property), for the
   shape of a value with its source beside it.
+- mypy's `--warn-unused-configs` and dbt's `--warn-error-options`, which name
+  every input that has no effect, for the `unused` list (ADR 0014).

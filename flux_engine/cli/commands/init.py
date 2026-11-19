@@ -62,6 +62,26 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "published aggregates; it stays outside the bundle (needs --contract)"
         ),
     )
+    init_p.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "with --contract and --profile: write nothing, and exit 1, when a statistic the "
+            "profile publishes is unused or a number rests on a gap, an assumption standing "
+            "in for what the profile did not publish (docs/adr/0014); each one is named"
+        ),
+    )
+    init_p.add_argument(
+        "--allow",
+        action="append",
+        default=None,
+        metavar="POINTER",
+        help=(
+            "with --strict: accept the unused statistics of the profile, or the gaps of the "
+            "Simulation, at or below this JSON Pointer; repeatable, and refused when it "
+            "accepts nothing"
+        ),
+    )
     _add_json_flag(init_p)
 
     init_p.set_defaults(stage_name="init")
@@ -71,5 +91,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     from flux_engine.cli._init import run_init
 
     return _print_result(
-        run_init(args.directory, contract=args.contract, profile=args.profile), as_json=args.json
+        run_init(
+            args.directory,
+            contract=args.contract,
+            profile=args.profile,
+            strict=args.strict,
+            allow=tuple(args.allow or ()),
+        ),
+        as_json=args.json,
     )
