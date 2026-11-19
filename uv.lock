@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15' and platform_machine == 'x86_64' and sys_platform == 'darwin'",
@@ -736,7 +736,7 @@ wheels = [
 
 [[package]]
 name = "flux-sim-engine"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "cloudevents" },
@@ -844,7 +844,7 @@ wheels = [
 
 [[package]]
 name = "flux-stats"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "packages/flux-stats" }
 
 [package.optional-dependencies]
