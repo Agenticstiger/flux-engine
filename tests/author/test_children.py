@@ -219,7 +219,7 @@ def test_a_mean_alone_leaves_the_spread_even(tmp_path: Path) -> None:
     spread = _foreign(tmp_path)
     assert spread["binWeights"] == ["1"]
     assert spread["bins"] == ["1", "1000"]
-    assert "a mean alone" in _states(result)["/relationships/0/statistics/0"]["note"]
+    assert "give this mean" in _states(result)["/relationships/0/statistics/0"]["note"]
 
 
 def test_a_relationship_the_contract_does_not_declare_is_unused(tmp_path: Path) -> None:

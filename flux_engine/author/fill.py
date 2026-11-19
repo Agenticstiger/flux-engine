@@ -71,6 +71,10 @@ def tail_steps(steps: Fraction, rows: int) -> int:
     with localcontext(Context(prec=_PRECISION, rounding=ROUND_HALF_EVEN)):
         mean = Decimal(steps.numerator) / Decimal(steps.denominator)
         ratio = ((mean + 1) / mean).ln()
+        if ratio <= 0:
+            # A mean past the precision: the tail reaches as far as the span can go, and
+            # the caller's limit decides where that is.
+            return 2**64
         needed = Decimal(2 * max(rows, 1)).ln() / ratio
     return max(int(math.ceil(needed)) - 1, 0)
 
@@ -101,23 +105,34 @@ def tilted_fill(
 ) -> Optional[Tuple[List[Fraction], List[Fraction]]]:
     """Bins from *bound* away toward *mean*, tilted so their mean as drawn is *mean*.
 
-    The span starts at *bound* and holds at least *distinct* grid values and at
-    least three, and reaches the point past which the geometric with that mean
-    leaves under half a row (:func:`tail_steps`). *limit* caps how far from zero
-    an end may lie. Returns ascending edges on the grid and a weight per bin, or
-    ``None`` when *mean* is not on the far side of *bound* or the bins cannot
-    reach it within *limit*.
+    The span starts at *bound* and reaches the point past which the geometric
+    with that mean leaves under half a row (:func:`tail_steps`), and at least
+    three grid values. It holds *distinct* grid values too, unless bins that wide
+    would put even the first bin's mean beyond *mean*: a mean near its bound
+    needs fine bins there. *limit* caps how far from zero an end may lie.
+    Returns ascending edges on the grid and a weight per bin, or ``None`` when
+    *mean* is not on the far side of *bound*, or the bins cannot reach it within
+    *limit* to one grid step.
     """
     if mean == bound or step <= 0:
         return None
     upward = mean > bound
-    steps = max(tail_steps(abs(mean - bound) / step, rows), (distinct or 0) - 1, 2)
+    tail = tail_steps(abs(mean - bound) / step, rows)
+    room: Optional[int] = None
     if limit is not None:
-        room = (limit - bound) / step if upward else (bound + limit) / step
-        steps = min(steps, math.floor(room))
+        room = math.floor((limit - bound) / step if upward else (bound + limit) / step)
+    for steps in (max(tail, (distinct or 0) - 1, 2), max(tail, 2)):
+        if room is not None:
+            steps = min(steps, room)
         if steps < 2:
             return None
-    edges = _edges(bound, steps, step, upward)
+        edges = _edges(bound, steps, step, upward)
+        near = edges[:2] if upward else edges[-2:]
+        first = part_mean(near[0], near[1], step, last=not upward)
+        if (first < mean) if upward else (first > mean):
+            break
+    else:
+        return None
     count = len(edges) - 1
 
     def toward_far(ratio: Fraction) -> bool:
@@ -142,4 +157,7 @@ def tilted_fill(
     )
     if best == 0:
         best = high
-    return edges, _weights(count, best, upward)
+    weights = _weights(count, best, upward)
+    if abs(drawn_mean(edges, weights, step) - mean) > step:
+        return None
+    return edges, weights

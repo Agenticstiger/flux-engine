@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from flux_engine.author.basis import Basis, Label, assumed, from_profile
 from flux_engine.author.columns import (
     DEFAULT_TOLERANCES,
+    SHAPED_REASON,
     TOLERANCE_REASON,
     ColumnPlan,
     PropertyPlan,
@@ -252,8 +253,9 @@ def _declare(
             for position in range(len(bins))
         ]
         child.assumptions = [
-            sentence for sentence in child.assumptions if sentence not in child.choices
+            sentence for sentence in child.assumptions if sentence != SHAPED_REASON
         ]
+        child.choices = [sentence for sentence in child.choices if sentence != SHAPED_REASON]
     child.labels += labels
     child.declaration["given"] = parent.name
     if table.numeric:
@@ -393,8 +395,9 @@ def choose_givens(
     categorical = {name for name in parents if name not in determined}
     leaves = {table.child for table in tables if table.child not in categorical}
     scored = [(_information(table), table.parent, table.child) for table in tables]
-    edges = spanning_forest(scored, categorical=categorical, numeric=leaves)
+    edges = _oriented_forest(scored, tables, plans, categorical, leaves)
     chosen: Dict[str, Tuple[str, _Table]] = {}
+    explained: Set[Tuple[str, ...]] = set()
     for edge in edges:
         found = _best(tables, edge.parent, edge.child)
         if found is None:
@@ -408,16 +411,31 @@ def choose_givens(
         else:
             drawn, prop = _transposed(found, plans[edge.child].level_names or ()), None
         if drawn is None:
+            plans[found.child].passed.append(
+                (
+                    found.tokens,
+                    f"the forest draws {printable(edge.child)} given {printable(edge.parent)}, "
+                    "and this table does not publish a group of every level, so it cannot "
+                    "be read that way",
+                )
+            )
+            explained.add(found.tokens)
             continue
         _declare(plans[edge.child], plans[edge.parent], drawn, parent_levels)
         chosen[edge.child] = (edge.parent, found)
         plans[found.child].reads.append(
-            (found.tokens, f"its group counts are the weights of {edge.child} given {edge.parent}")
+            (
+                found.tokens,
+                f"its group counts are the weights of {printable(edge.child)} given "
+                f"{printable(edge.parent)}",
+            )
         )
         if prop is not None:
             plans[edge.child].properties.append(prop)
     for table in tables:
-        if any(found.tokens == table.tokens for _, found in chosen.values()):
+        if table.tokens in explained or any(
+            found.tokens == table.tokens for _, found in chosen.values()
+        ):
             continue
         winner = chosen.get(table.child)
         if winner is not None:
@@ -435,6 +453,71 @@ def choose_givens(
                 "information"
             )
         plans[table.child].passed.append((table.tokens, why))
+
+
+def _drawable(
+    tables: Sequence[_Table], parent: str, child: str, plans: Mapping[str, ColumnPlan]
+) -> bool:
+    """Whether an edge *parent* -> *child* has a table to draw from: its own, or one read back."""
+    for table in tables:
+        if (table.parent, table.child) == (parent, child):
+            return True
+        levels = plans[table.parent].level_names or ()
+        if (table.child, table.parent) == (parent, child) and set(table.counts) == set(levels):
+            return not table.numeric
+    return False
+
+
+def _oriented_forest(
+    scored: Sequence[Tuple[Decimal, str, str]],
+    tables: Sequence[_Table],
+    plans: Mapping[str, ColumnPlan],
+    categorical: Set[str],
+    leaves: Set[str],
+) -> List[Any]:
+    """The Chow-Liu forest, each tree rooted where most of its links can be drawn.
+
+    A tree factorises the same whichever column is its root, but a link is drawn
+    from the profile's own table only in the table's direction, or read the other
+    way when every group of it is published (:func:`_transposed`). So each tree
+    is re-rooted at the column that leaves the most links drawable, the first in
+    name order of equals.
+    """
+    edges = list(spanning_forest(scored, categorical=categorical, numeric=leaves))
+    neighbours: Dict[str, Set[str]] = {}
+    for edge in edges:
+        neighbours.setdefault(edge.parent, set()).add(edge.child)
+        neighbours.setdefault(edge.child, set()).add(edge.parent)
+    seen: Set[str] = set()
+    result: List[Any] = []
+    for start in sorted(neighbours):
+        if start in seen:
+            continue
+        component: Set[str] = set()
+        stack = [start]
+        while stack:
+            node = stack.pop()
+            if node not in component:
+                component.add(node)
+                stack.extend(neighbours.get(node, ()))
+        seen |= component
+        inside = [item for item in scored if item[1] in component and item[2] in component]
+        best: Optional[List[Any]] = None
+        best_count = -1
+        for root in sorted(name for name in component if name in categorical):
+            tree = list(
+                spanning_forest(
+                    inside,
+                    categorical=categorical & component,
+                    numeric=leaves & component,
+                    root=root,
+                )
+            )
+            count = sum(1 for edge in tree if _drawable(tables, edge.parent, edge.child, plans))
+            if count > best_count:
+                best, best_count = tree, count
+        result.extend(best or [edge for edge in edges if edge.child in component])
+    return result
 
 
 def _best(tables: Sequence[_Table], one: str, other: str) -> Optional[_Table]:

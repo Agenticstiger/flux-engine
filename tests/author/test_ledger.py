@@ -269,7 +269,7 @@ def test_every_statistic_is_listed_once_with_its_state(inputs: Dict[str, Path]) 
     assert states[PAIR]["state"] == "unused"
     assert "correlation" in states[PAIR]["note"]
     assert states[CHILDREN]["state"] == "used"
-    assert "a mean alone" in states[CHILDREN]["note"]
+    assert "give this mean" in states[CHILDREN]["note"]
     assert states["/tables/customer/columns/customer_id/metrics/nullCount"]["state"] == "withheld"
     assert states["/tables/customer/columns/segment/statistics/0"]["state"] == "used"
     assert states["/tables/customer/rowCount"]["state"] == "used"

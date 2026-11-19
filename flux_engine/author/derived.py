@@ -79,7 +79,26 @@ def _arith(op: str, left: Interval, right: Interval) -> Optional[Interval]:
     return None
 
 
+#: The most bits an end of an interval may carry. A chain of products doubles them at
+#: every link, so past this the rule is given no bound rather than an exact one of
+#: millions of digits.
+MOST_BITS = 4096
+
+
+def _bounded(interval: Optional[Interval]) -> Optional[Interval]:
+    if interval is None:
+        return None
+    for end in interval:
+        if max(end.numerator.bit_length(), end.denominator.bit_length()) > MOST_BITS:
+            return None
+    return interval
+
+
 def _node_bounds(node: Node, ranges: Mapping[str, Interval]) -> Optional[Interval]:
+    return _bounded(_unbounded(node, ranges))
+
+
+def _unbounded(node: Node, ranges: Mapping[str, Interval]) -> Optional[Interval]:
     if isinstance(node, Number):
         return node.value, node.value
     if isinstance(node, Column):

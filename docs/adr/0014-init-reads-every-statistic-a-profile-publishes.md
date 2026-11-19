@@ -84,13 +84,14 @@ assumption is a number of the register with its reason.
   weights bin `k` by `r^k`, with `r = exp(λ·width)` found by bisection in exact
   fractions so that the mean as the generator draws it is the published one. A
   published bound is one end of the span. The other end is a second published
-  bound, else the point past which the geometric tail holds less than one row,
+  bound, else the point past which the geometric tail holds less than half a row,
   else, with no bound at all, 0 on the side of zero the mean lies on, stated as
   an assumption. With a published `distinctCount` and no bound, the 0.7.0 rule
   stays: an even span centred on the mean, as many values wide as
   `distinctCount`.
 - **Nothing published** gives a placeholder that is not constant: an even
-  spread over 0 to 99 on the column's grid (within its declared precision), or
+  spread over the first hundred values of the column's grid from 0 (0 to 99 for an
+  integer, 0.00 to 0.99 for two decimal places, within the declared precision), or
   the run's time window for a date or timestamp. The evidence lists every
   placeholder.
 - **Levels.** A declared level the histogram does not list, and a withheld cell,

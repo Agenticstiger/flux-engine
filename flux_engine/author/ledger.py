@@ -197,6 +197,14 @@ class Ledger:
         if entry is not None and entry.state == UNUSED:
             entry.note = reason
 
+    def reset_under(self, tokens: Tuple[str, ...], reason: str) -> None:
+        """Mark every published statistic under *tokens* unused, used or not: its use fell away."""
+        prefix = tuple(tokens)
+        for entry in self._entries.values():
+            if entry.tokens[: len(prefix)] == prefix and entry.state != WITHHELD:
+                entry.state = UNUSED
+                entry.note = reason
+
     def unused_under(self, tokens: Tuple[str, ...], reason: str) -> None:
         """Give every unused statistic under *tokens* the *reason* (a table left out, say)."""
         prefix = tuple(tokens)

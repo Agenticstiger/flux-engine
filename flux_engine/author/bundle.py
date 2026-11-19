@@ -131,6 +131,12 @@ class AuthoredExpose:
     skipped: Optional[str] = None
     #: Each planned column's logical type, for the one assumed check a table may need.
     kinds: Dict[str, LogicalKind] = field(default_factory=dict)
+    #: The columns a contract ``derive`` sets: column -> (invariant index, expr text).
+    derives: Dict[str, Tuple[int, str]] = field(default_factory=dict)
+    #: What each column was declared from, kept for the rules that run once keys are laid out.
+    contexts: Dict[str, ColumnContext] = field(default_factory=dict)
+    #: The expose's place in the contract's ``exposes``.
+    index: int = 0
 
 
 @dataclass(frozen=True)
@@ -193,6 +199,11 @@ def strict_findings(bundle: AuthoredBundle, allow: Sequence[str]) -> StrictFindi
     allow entry that is not a JSON Pointer.
     """
     pointers = [(text, parse_pointer(text)) for text in allow]
+    if any(not tokens for _, tokens in pointers):
+        raise ValueError(
+            "the empty pointer names the whole profile and the whole Simulation, so it would "
+            "accept every finding; name the part you accept"
+        )
     exempting = set()
     unused = []
     for entry in bundle.ledger.unused_entries():
@@ -407,14 +418,20 @@ def _plan_expose(
         contexts[plan.name] = context
         authored.columns.append(plan)
         authored.kinds[plan.name] = column.logical_type.kind
-    derives = _determine(authored, contexts, contract_derives(expose), expose_index)
+    authored.derives = {
+        name: rule
+        for name, rule in contract_derives(expose).items()
+        if any(plan.name == name for plan in authored.columns)
+    }
+    authored.contexts = contexts
+    authored.index = expose_index
     choose_givens(
         authored.columns,
         authored.kinds,
         profiled if isinstance(profiled, Mapping) else {},
         ("tables", expose_id),
         minimum_cell=minimum_cell,
-        determined=derives,
+        determined=set(authored.derives),
     )
     return authored
 
@@ -432,17 +449,15 @@ def _span_of(plan: ColumnPlan) -> Optional[Tuple[Fraction, Fraction]]:
     return None
 
 
-def _determine(
-    authored: AuthoredExpose,
-    contexts: Mapping[str, ColumnContext],
-    derives: Mapping[str, Tuple[int, str]],
-    expose_index: int,
-) -> Set[str]:
+def _determine(authored: AuthoredExpose) -> None:
     """Make every column a contract ``derive`` sets a column the rule decides (ADR 0014).
 
-    A rule may read a column another rule sets, so the bounds are worked out in
-    rounds until none moves; a rule whose inputs never get bounds gets none.
+    It runs once the keys are laid out (:func:`_span_keys`), so a rule that reads
+    a key reads the span the key is drawn over. A rule may read a column another
+    rule sets, so the bounds are worked out in rounds until none moves; a rule
+    whose inputs never get bounds gets none.
     """
+    derives, contexts, expose_index = authored.derives, authored.contexts, authored.index
     plans = {plan.name: plan for plan in authored.columns}
     determined = {name for name in derives if name in plans}
     spans: Dict[str, Tuple[Fraction, Fraction]] = {}
@@ -466,7 +481,6 @@ def _determine(
         index = derives[name][0]
         tokens = ("exposes", str(expose_index), "contract", "invariants", str(index), "expr")
         determine_column(contexts[name], plans[name], tokens, found.get(name))
-    return determined
 
 
 @dataclass(frozen=True)
@@ -814,6 +828,23 @@ def _ledger(
                 _cite(ledger, label.basis)
     for tokens, why in extra[1]:
         ledger.unused(tokens, why)
+    written = {expose.expose_id for expose in exposes if expose.skipped is None}
+    found = profile.get("relationships")
+    for index, entry in enumerate(found if isinstance(found, list) else ()):
+        tables = (
+            [
+                side.get("table")
+                for side in (entry.get("parent"), entry.get("child"))
+                if isinstance(side, Mapping)
+            ]
+            if isinstance(entry, Mapping)
+            else []
+        )
+        if any(str(table) not in written for table in tables):
+            ledger.reset_under(
+                ("relationships", str(index)),
+                "the bundle writes no generator emit of one of its two tables",
+            )
     return ledger
 
 
@@ -1003,6 +1034,9 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
             exposes.append(AuthoredExpose(expose_id=expose_id, skipped=_beyond_note(error)))
     try:
         _span_keys([expose for expose in exposes if expose.skipped is None], keys)
+        for expose in exposes:
+            if expose.skipped is None:
+                _determine(expose)
         children = _spread_relationships(
             exposes,
             keys,

@@ -47,6 +47,10 @@ from flux_stats.definitions import MARGINAL_HISTOGRAM, MEAN
 __all__ = ["CHILDREN_REASON", "Spread", "spread_children"]
 
 _HISTOGRAM = MARGINAL_HISTOGRAM.identifier
+
+#: The most of the foreign key's own bins the classes are laid out inside: more are merged
+#: in runs of neighbours, so a histogram of many narrow bins costs no more than this many.
+MOST_BUCKETS = 32
 _MEAN = MEAN.identifier
 _FREE = "F"
 
@@ -85,7 +89,8 @@ def _class_means(
 
     The last class is closed and often open-ended (top-coded): when the
     relationship's total of *children* is known, its mean is the one that makes
-    the classes add up to it, kept within the class.
+    the classes add up to it, kept within the class; when it is not, the class
+    takes its lower bound, the one count it is known to reach (ADR 0014).
     """
     count = len(parents)
     means: List[Fraction] = []
@@ -94,12 +99,38 @@ def _class_means(
         top = edges[position + 1] if position == count - 1 else edges[position + 1] - 1
         high = Fraction(math.floor(top))
         means.append((low + max(high, low)) / 2)
-    if children is not None and count and parents[-1] > 0:
+    if not count:
+        return means
+    low, high = Fraction(math.ceil(edges[-2])), Fraction(edges[-1])
+    if children is not None and parents[-1] > 0:
         rest = sum((parents[i] * means[i] for i in range(count - 1)), Fraction(0))
         solved = (children - rest) / parents[-1]
-        low, high = Fraction(math.ceil(edges[-2])), Fraction(edges[-1])
         means[-1] = min(max(solved, low), max(high, low))
+    else:
+        means[-1] = low
     return means
+
+
+def _merged_classes(
+    parents: Sequence[Fraction], means: Sequence[Fraction]
+) -> Tuple[List[Fraction], List[Fraction]]:
+    """At most :data:`MOST_BUCKETS` classes, neighbours merged: parents added, means weighted.
+
+    A merged class keeps its parents and its children, so the spread it gets is
+    the classes' together; only the split between them inside the run is lost.
+    """
+    count = len(parents)
+    if count <= MOST_BUCKETS:
+        return list(parents), list(means)
+    merged_parents: List[Fraction] = []
+    merged_means: List[Fraction] = []
+    for index in range(MOST_BUCKETS):
+        run = range(index * count // MOST_BUCKETS, (index + 1) * count // MOST_BUCKETS)
+        total = sum((parents[i] for i in run), Fraction(0))
+        children = sum((parents[i] * means[i] for i in run), Fraction(0))
+        merged_parents.append(total)
+        merged_means.append(children / total if total > 0 else Fraction(0))
+    return merged_parents, merged_means
 
 
 def _bucket_layout(
@@ -114,8 +145,13 @@ def _bucket_layout(
 
     The keys go to the classes by the Largest Remainder Method over their shares
     of the parents, and the bucket's *children* to the classes that got a key, by
-    their weights.
+    their weights. A bucket with no children is one part of weight 0, so a key
+    range the foreign key's own histogram publishes empty stays empty; and a
+    bucket whose keys all went to classes of no weight (too few keys for its
+    classes) keeps its children evenly over its keys, rather than losing them.
     """
+    if children <= 0:
+        return [(start, keys, Fraction(0))]
     names = [str(position).zfill(4) for position in range(len(shares))]
     texts = share_texts(list(shares))
     allotted = largest_remainder(
@@ -123,6 +159,8 @@ def _bucket_layout(
     )
     live = [position for position in order if allotted[names[position]] > 0]
     total = sum((weights[position] for position in live), Fraction(0))
+    if total <= 0:
+        return [(start, keys, children)]
     layout: List[Tuple[int, int, Fraction]] = []
     first = start
     for position in order:
@@ -147,7 +185,8 @@ def _edges(
     weights = [Fraction(weight) for _, _, weight in layout]
     while len(starts) > 1 and starts[-1] >= high:
         starts.pop()
-        weights[-2] += weights.pop()
+        last = weights.pop()
+        weights[-1] += last
     return starts + [high], weights
 
 
@@ -184,14 +223,34 @@ def _own_buckets(
             first = max(low, math.ceil(edges[position]))
             top = edges[position + 1] if position == last else edges[position + 1] - 1
             final = min(high, math.floor(top))
-            if final >= first and weight > 0:
-                buckets.append((first, final - first + 1, weight))
+            if final >= first:
+                buckets.append((first, final - first + 1, max(weight, Fraction(0))))
         scale = sum((bucket[2] for bucket in buckets), Fraction(0))
         if scale > 0:
             return [
-                (first, keys, Fraction(rows) * weight / scale) for first, keys, weight in buckets
+                (first, keys, Fraction(rows) * weight / scale)
+                for first, keys, weight in _merged(buckets)
             ]
     return None
+
+
+def _merged(buckets: Sequence[Tuple[int, int, Fraction]]) -> List[Tuple[int, int, Fraction]]:
+    """*buckets* in at most :data:`MOST_BUCKETS` runs of neighbours, their keys and weights added.
+
+    The buckets are consecutive key ranges, so a run of them is one range. Each
+    run takes about as many buckets as every other, in order.
+    """
+    if len(buckets) <= MOST_BUCKETS:
+        return list(buckets)
+    runs: List[Tuple[int, int, Fraction]] = []
+    count = len(buckets)
+    for index in range(MOST_BUCKETS):
+        part = buckets[index * count // MOST_BUCKETS : (index + 1) * count // MOST_BUCKETS]
+        if part:
+            first = part[0][0]
+            keys = part[-1][0] + part[-1][1] - first
+            runs.append((first, keys, sum((weight for _, _, weight in part), Fraction(0))))
+    return runs
 
 
 def _foreign_mean(
@@ -287,13 +346,37 @@ def spread_children(
         index, group = mean
         children_total = Fraction(int(str(group.get("Sx"))), 2**fractional_bits)
     if histogram is None:
-        if mean is not None:
-            used.append(
-                (
-                    tokens + ("statistics", str(mean[0])),
-                    "a mean alone leaves the children evenly over the parent's keys",
-                )
+        if mean is not None and children_total is not None:
+            parents_k = mean[1].get("k")
+            expected = (
+                Fraction(child_rows, parents_k)
+                if isinstance(parents_k, int) and parents_k > 0
+                else None
             )
+            stated = (
+                children_total / parents_k if isinstance(parents_k, int) and parents_k > 0 else None
+            )
+            pointer = tokens + ("statistics", str(mean[0]))
+            if (
+                expected is not None
+                and stated is not None
+                and abs(stated - expected) <= expected / 10
+            ):
+                used.append(
+                    (
+                        pointer,
+                        "checked: the children the run draws evenly over the parent's keys "
+                        "give this mean",
+                    )
+                )
+            else:
+                unused.append(
+                    (
+                        pointer,
+                        "its mean is not the child rows over the parent rows the bundle "
+                        "draws, and a mean alone does not shape the spread",
+                    )
+                )
         return Spread(tuple(used), tuple(unused))
     index, statistic, group = histogram
     edges = [Fraction(Decimal(str(edge))) for edge in statistic["bins"]]
@@ -306,7 +389,8 @@ def spread_children(
         total=group.get("k") if isinstance(group.get("k"), int) else None,
     )
     means = _class_means(edges, parents, children_total)
-    weights = [parents[i] * means[i] if edges[i] >= 1 else Fraction(0) for i in range(len(parents))]
+    parents, means = _merged_classes(parents, means)
+    weights = [parents[i] * means[i] for i in range(len(parents))]
     if sum(weights, Fraction(0)) <= 0:
         why = "the histogram gives no parent a child"
         return Spread((), tuple(unused) + _all(tokens, statistics, why))

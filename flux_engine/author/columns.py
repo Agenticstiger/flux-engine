@@ -74,6 +74,7 @@ __all__ = [
     "drawn_span",
     "plan_column",
     "shape_to_mean",
+    "SHAPED_REASON",
     "share_texts",
     "widen_key_span",
 ]
@@ -1108,9 +1109,10 @@ def _ordered(ctx: ColumnContext, plan: ColumnPlan) -> None:
 
 #: Why an integer column with values a run's rows cannot carry takes a placeholder.
 _BEYOND_REASON = (
-    "The profile publishes values further from zero than the integers a run's rows carry "
-    "exactly (2^53), so none of them is declared: the values are a placeholder, drawn "
-    "evenly over the bins declared here, from 0."
+    "The profile publishes values further from zero than the column's type holds (the "
+    "integers a run's rows carry exactly stop at 2^53, a DECIMAL at its digits), so none of "
+    "them is declared: the values are a placeholder, drawn evenly over the bins declared "
+    "here, from 0."
 )
 
 #: How many grid values a placeholder spans when nothing says how many.
@@ -1136,16 +1138,23 @@ def _span_bins(
     limit = _limit(ctx)
     if limit is not None:
         far = max(min(far, limit), -limit)
-    if far == start:  # a type with room for one value only: take the next one down
-        far = start - step if upward else start + step
+    # At the type's limit the span keeps to the bound: (start, start), one value.
     return (start, far) if upward else (far, start)
 
 
 def _even_bins(
     ctx: ColumnContext, plan: ColumnPlan, low: Fraction, high: Fraction, basis: Basis
 ) -> None:
-    """Declare one bin from *low* to *high*, drawn evenly, both resting on *basis*."""
+    """Declare one bin from *low* to *high*, drawn evenly, both resting on *basis*.
+
+    A span the column's type leaves no room for (*low* equal to *high*, a bound
+    at the type's limit) is that one value.
+    """
     step = _grid(ctx)
+    if high <= low:
+        plan.declaration["levels"] = {format(_on_grid(low, step), "f"): "1"}
+        plan.labels.append(Label(("levels",), basis))
+        return
     plan.declaration["bins"] = [format(_on_grid(low, step), "f"), format(_on_grid(high, step), "f")]
     plan.declaration["binWeights"] = ["1"]
     plan.labels.append(Label(("bins",), basis))
@@ -1229,20 +1238,27 @@ def _one_bound(ctx: ColumnContext, plan: ColumnPlan, points: Sequence[_Point]) -
     nothing: ``False``, and the column is drawn from its mean.
     """
     levels = {point.level for point in points}
-    point = points[0]
     if levels >= {Fraction(0), Fraction(1)}:
-        _one_value(ctx, plan, point)
+        _one_value(ctx, plan, next(point for point in points if point.level == 1))
         return True
     if not levels & {Fraction(0), Fraction(1)}:
         for quantile in points:
             plan.passed.append((quantile.tokens, "a lone quantile bounds no span"))
         return False
-    upward = Fraction(0) in levels  # a published minimum: the values lie above it
+    point = next(point for point in points if point.level in (Fraction(0), Fraction(1)))
+    for other in points:
+        if other is not point:
+            plan.reads.append((other.tokens, "checked: equal to the published bound"))
+    upward = point.level == 0  # a published minimum: the values lie above it
     bound = Fraction(point.value)
     mean = _published_mean(ctx)
     step = Fraction(_grid(ctx))
-    distinct = _published(ctx.entry, "distinctCount")
-    distinct = distinct if isinstance(distinct, int) and distinct >= 2 else None
+    counted = _published(ctx.entry, "distinctCount")
+    if counted == 1:
+        _one_value(ctx, plan, point)
+        _read(ctx, plan, "distinctCount", "one distinct value: every row takes the bound")
+        return True
+    distinct = counted if isinstance(counted, int) and counted >= 2 else None
     edge = from_profile(point.tokens, point.definition)
     if mean is not None and mean == bound:
         plan.declaration["levels"] = {format(_on_grid(bound, _grid(ctx)), "f"): "1"}
@@ -1261,7 +1277,16 @@ def _one_bound(ctx: ColumnContext, plan: ColumnPlan, points: Sequence[_Point]) -
             )
             _read_mean(ctx, plan, "the mean the fill is tilted to")
             if distinct is not None:
-                _read(ctx, plan, "distinctCount", "the fewest grid values the fill spans")
+                spanned = (edges[-1] - edges[0]) / step + 1
+                if spanned >= distinct:
+                    _read(ctx, plan, "distinctCount", "the fewest grid values the fill spans")
+                else:
+                    plan.passed.append(
+                        (
+                            _metric_tokens(ctx, "distinctCount"),
+                            "the mean lies too near the bound for a fill of that many values",
+                        )
+                    )
             plan.how = "the largest-entropy spread from the published bound with its mean"
             plan.assumptions.append(_FILL_REASON)
             return True
@@ -1308,12 +1333,15 @@ def _declare_fill(
 
 
 def _beyond_plan(ctx: ColumnContext) -> bool:
-    """Whether an integer column publishes a value a run's rows cannot carry exactly.
+    """Whether a number column publishes a value its rows cannot carry.
 
     A run writes its rows as canonical JSON, whose integers stop at 2^53 - 1
-    (RFC 8785), so an INT value drawn beyond it is refused (``FLX-1003``).
+    (RFC 8785), so an INT value drawn beyond it is refused (``FLX-1003``); a
+    DECIMAL value with more integer digits than its precision leaves is refused
+    too (``FLX-3003``). Either way no published value of the column is declared.
     """
-    if ctx.column.logical_type.kind is not LogicalKind.INT:
+    limit = _limit(ctx)
+    if ctx.column.logical_type.kind not in (LogicalKind.INT, LogicalKind.DECIMAL) or limit is None:
         return False
     values = [Fraction(point.value) for point in _points(ctx)]
     found = _ungrouped(ctx.entry, _HISTOGRAM)
@@ -1322,7 +1350,7 @@ def _beyond_plan(ctx: ColumnContext) -> bool:
     mean = _published_mean(ctx)
     if mean is not None:
         values.append(mean)
-    return any(abs(value) > JCS_MAX_SAFE_INTEGER for value in values)
+    return any(abs(value) > limit for value in values)
 
 
 def _range(ctx: ColumnContext, plan: ColumnPlan, low: _Point, high: _Point) -> None:
@@ -1774,7 +1802,7 @@ def _from_order_statistics(ctx: ColumnContext, plan: ColumnPlan, points: List[_P
 
 
 #: Why a histogram was shaped to the published mean.
-_SHAPED_REASON = (
+SHAPED_REASON = _SHAPED_REASON = (
     "Drawn evenly within its bins, the histogram would give a mean other than the one the "
     "profile publishes, so within each bin the values are drawn from the part on the mean's "
     "side: each bin keeps its share of the rows, so every published quantile or bin count "
@@ -2113,12 +2141,28 @@ def _around_mean(ctx: ColumnContext, plan: ColumnPlan) -> None:
     step = _grid(ctx)
     grid = Fraction(step)
     distinct = _published(ctx.entry, "distinctCount")
+    if distinct == 1:
+        # The profile shows one value, and the mean says which: every row takes it.
+        plan.declaration["levels"] = {format(_on_grid(round(mean / grid) * grid, step), "f"): "1"}
+        plan.labels.append(Label(("levels",), assumed(_ONE_DISTINCT_REASON)))
+        _read_mean(ctx, plan, "the one value every row takes")
+        _read(ctx, plan, "distinctCount", "one distinct value: every row takes the mean")
+        plan.how = "one value on every row: the profile counts one distinct value"
+        plan.assumptions.append(_ONE_DISTINCT_REASON)
+        return
     if isinstance(distinct, int) and distinct > 1:
         # Exact arithmetic on the grid: a decimal context would round a long value or a
         # fine scale (DECIMAL(38,30), say) before it reached the grid.
         half = grid * (distinct - 1) / 2
         low = math.floor((mean - half) / grid) * grid
         high = math.ceil((mean + half) / grid) * grid
+        limit = _limit(ctx)
+        if limit is not None:
+            # Kept within what the type holds, shifted rather than cut where it can be.
+            if high > limit:
+                low, high = max(low - (high - limit), -limit), limit
+            if low < -limit:
+                low, high = -limit, min(high + (-limit - low), limit)
         _even_bins(ctx, plan, low, high, assumed(_CENTRED_REASON))
         _read_mean(ctx, plan, "the mean the span is centred on")
         _read(ctx, plan, "distinctCount", "how many values wide the span is")
@@ -2159,6 +2203,10 @@ _FILL_FROM_ZERO = (
     "values are assumed to lie on the side of 0 the mean does, and are drawn by the "
     "distribution of largest entropy with that mean, a geometric tilt over the bins declared "
     "here (ADR 0014)."
+)
+_ONE_DISTINCT_REASON = (
+    "The profile counts one distinct value and publishes its mean, so every row takes the "
+    "mean, on the column's grid."
 )
 _CENTRED_ZERO = (
     "The profile publishes a mean of 0 and no order statistic or count of distinct values: "
@@ -2242,9 +2290,9 @@ def determine_column(
         plan.labels = [
             label for label in plan.labels if label.tokens[:1] not in (("bins",), ("binWeights",))
         ]
-        plan.assumptions = [
-            sentence for sentence in plan.assumptions if sentence not in plan.choices
-        ]
+        # The histogram's own notes (a withheld bin count, its shaping to the mean) speak of
+        # weights the column no longer declares.
+        plan.assumptions, plan.choices = [], []
         # A histogram property's bins would be the column's draw for the generator, which
         # a rule's column has none of (FLX-3402): its edges are the range, and the mean the
         # property the rule's values are scored on.
