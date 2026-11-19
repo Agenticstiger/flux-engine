@@ -47,6 +47,8 @@ from itertools import pairwise
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 from flux_engine.author.basis import Basis, Label, assumed, from_contract, from_profile
+from flux_engine.author.fill import drawn_mean as _drawn_mean
+from flux_engine.author.fill import tilted_fill
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
@@ -470,9 +472,21 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
                 from_contract(ctx.product_ref, ctx.contract_tokens + ("type",)),
             )
         )
-        if levels_stat is not None and sorted(levels_stat[1].get("levels", ())) == sorted(enum):
+        listed = [str(level) for level in levels_stat[1].get("levels", ())] if levels_stat else []
+        if levels_stat is not None and sorted(listed) == sorted(enum):
             _level_weights(ctx, plan, levels_stat)
             plan.how = f"{len(enum)} levels the contract declares, weighted by the profile's counts"
+        elif levels_stat is not None and set(listed) & set(enum):
+            _level_weights(ctx, plan, levels_stat, declared=list(enum))
+            plan.how = f"{len(enum)} levels the contract declares, weighted by the profile's counts"
+            plan.properties.append(_support_property(ctx, scorable=support_stat is not None))
+            if support_stat is not None:
+                plan.properties[-1].reads.append(
+                    (
+                        ctx.profile_tokens + ("statistics", str(support_stat[0])),
+                        "the support property is scored against it",
+                    )
+                )
         else:
             plan.how = f"{len(enum)} levels the contract declares, at equal weights"
             plan.assumptions.append(
@@ -551,25 +565,58 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
         plan.how += f"; a foreign key to {printable(ctx.foreign)}, whose values these do not match"
 
 
+def _group_total(group: Mapping[str, Any]) -> Optional[int]:
+    """How many records a published group counts (``k``), when it says."""
+    total = group.get("k")
+    return total if isinstance(total, int) and not isinstance(total, bool) and total > 0 else None
+
+
 def _level_weights(
     ctx: ColumnContext,
     plan: ColumnPlan,
     found: Tuple[int, Mapping[str, Any], Mapping[str, Any]],
     *,
     with_property: bool = True,
+    declared: Optional[Sequence[str]] = None,
 ) -> None:
-    """``levels`` from a published ``levelHistogram/1``, and, *with_property*, its property."""
+    """``levels`` from a published ``levelHistogram/1``, and, *with_property*, its property.
+
+    With *declared* levels (a contract's ``enum``, or ``false`` and ``true``) the
+    column draws exactly those: a declared level the histogram does not list
+    shares the remainder with the withheld cells, and a listed level the contract
+    does not declare is not drawn. The ``levelHistogram`` property needs the
+    histogram's levels to be the declared ones, so it is written only then.
+    """
     index, statistic, group = found
-    levels = [str(level) for level in statistic.get("levels", ())]
+    listed = [str(level) for level in statistic.get("levels", ())]
     cells = _cells(group, "levelCounts")
     stat_tokens = ctx.profile_tokens + ("statistics", str(index))
-    weights, bases = _cell_weights(ctx, cells, stat_tokens, "levelCounts", _LEVELS)
-    texts = share_texts(weights)
+    total = _group_total(group)
+    absent = [level for level in declared if level not in listed] if declared else []
+    outside = [level for level in listed if level not in declared] if declared else []
+    weights, bases = _cell_weights(
+        ctx, cells, stat_tokens, "levelCounts", _LEVELS, total=total, absent=len(absent)
+    )
+    found_levels = listed + absent
+    levels = list(declared) if declared else listed
+    by_level = dict(zip(found_levels, zip(weights, bases, strict=True), strict=True))
+    texts = share_texts([by_level[level][0] for level in levels])
     plan.declaration["levels"] = dict(zip(levels, texts, strict=True))
-    for level, basis in zip(levels, bases, strict=True):
-        plan.labels.append(Label(("levels", level), basis))
-    plan.assumptions.extend(_withheld_lines(ctx, cells, "level count"))
-    if not with_property:
+    for level in levels:
+        plan.labels.append(Label(("levels", level), by_level[level][1]))
+    plan.assumptions.extend(_withheld_lines(ctx, cells, "level count", total=total, absent=absent))
+    if total is not None and (absent or any(cell.count is None for cell in cells)):
+        plan.reads.append(
+            (stat_tokens + ("groups", "0", "k"), "the records the withheld counts share")
+        )
+    if outside:
+        names = ", ".join(printable(level) for level in outside)
+        plan.assumptions.append(
+            f"The profile counts levels the contract does not declare ({names}): they are not "
+            "drawn."
+        )
+        plan.choices.append(plan.assumptions[-1])
+    if not with_property or absent or outside:
         return
     plan.properties.append(
         PropertyPlan(
@@ -614,53 +661,167 @@ def _cell_weights(
     stat_tokens: Tuple[str, ...],
     key: str,
     definition: str,
+    *,
+    total: Optional[int] = None,
+    absent: int = 0,
+    group: str = "0",
 ) -> Tuple[List[Fraction], List[Basis]]:
-    """Each cell's weight and basis: its published count, or an assumed one and its reason.
+    """Each cell's weight and basis, then one for each of *absent* levels the table does not list.
 
-    A cell withheld as small (status ``A``) is half the minimum cell. Any other
-    status says nothing of the count's size: the cell is the mean of the
-    published ones, or half the minimum cell when the table publishes none.
+    A published cell is its count. The others, every withheld cell and every
+    absent level, share what the published counts leave of the group's *total*
+    records (``k``), so a level is never assumed to be zero (ADR 0014 section 3):
+    a cell withheld as small (status ``A``) takes at most half the minimum cell,
+    and the rest share the remainder evenly. When the remainder is none, or
+    rounding left it below zero, each takes half a record. Only when *total* is
+    unknown does the older rule hold: ``A`` is half the minimum cell, and any
+    other withheld cell or absent level the mean of the published cells (or half
+    the minimum cell when there are none).
     """
-    typical = _typical(cells)
+    published = [cell.count for cell in cells if cell.count is not None]
+    unknown = [cell for cell in cells if cell.count is None] + [_Cell(None, _ABSENT)] * absent
+    shares = _unknown_shares(ctx, unknown, published, total)
     weights: List[Fraction] = []
     bases: List[Basis] = []
+    filled = iter(shares)
     for position, cell in enumerate(cells):
         if cell.count is not None:
             weights.append(Fraction(cell.count))
             bases.append(
-                from_profile(stat_tokens + ("groups", "0", key, str(position)), definition)
+                from_profile(stat_tokens + ("groups", group, key, str(position)), definition)
             )
             continue
-        status = printable(cell.status)
-        if cell.status == _SMALL:
-            weights.append(_half(ctx))
-            reason = (
-                f"The profile withheld this count as a small one (status {status}): it lies "
-                f"below the minimum cell ({ctx.minimum_cell}), so it is assumed to be half of it."
-            )
-        elif typical is not None:
-            weights.append(Fraction(typical))
-            reason = (
-                f"The profile withheld this count (status {status}), which does not say how "
-                "large it is, so it is assumed to be the mean of the counts the table "
-                "publishes, to the nearest whole count."
-            )
-        else:
-            weights.append(_half(ctx))
-            reason = (
-                f"The profile withheld this count (status {status}), which does not say how "
-                f"large it is, and publishes no other: it is assumed to be half the minimum "
-                f"cell ({ctx.minimum_cell})."
-            )
+        weight, reason = next(filled)
+        weights.append(weight)
+        bases.append(assumed(reason))
+    for weight, reason in filled:
+        weights.append(weight)
         bases.append(assumed(reason))
     return weights, bases
 
 
-def _withheld_lines(ctx: ColumnContext, cells: Sequence[_Cell], noun: str) -> List[str]:
-    """What a person is told about a count table's withheld cells, one line per rule used."""
+#: The status an absent level is filled under: it is not a cell of the table at all.
+_ABSENT = "absent"
+
+
+def _unknown_shares(
+    ctx: ColumnContext,
+    unknown: Sequence[_Cell],
+    published: Sequence[int],
+    total: Optional[int],
+) -> List[Tuple[Fraction, str]]:
+    """The weight and reason of each cell the table does not publish, in order."""
+    if not unknown:
+        return []
+    if total is not None:
+        remainder = Fraction(total - sum(published))
+        if remainder <= 0:
+            return [(Fraction(1, 2), _NOTHING_LEFT_REASON)] * len(unknown)
+        small = [cell for cell in unknown if cell.status == _SMALL]
+        each = remainder / len(unknown)
+        small_each = min(_half(ctx), each)
+        others = len(unknown) - len(small)
+        rest = (remainder - small_each * len(small)) / others if others else Fraction(0)
+        shares: List[Tuple[Fraction, str]] = []
+        for cell in unknown:
+            if cell.status == _SMALL:
+                shares.append((small_each, _SMALL_SHARE_REASON))
+            else:
+                shares.append(
+                    (rest, _ABSENT_REASON if cell.status == _ABSENT else _REMAINDER_REASON)
+                )
+        return shares
+    typical = _typical([_Cell(count, _FREE) for count in published])
+    shares = []
+    for cell in unknown:
+        status = printable(cell.status)
+        if cell.status == _SMALL:
+            shares.append(
+                (
+                    _half(ctx),
+                    f"The profile withheld this count as a small one (status {status}): it lies "
+                    f"below the minimum cell ({ctx.minimum_cell}), so it is assumed to be half "
+                    "of it.",
+                )
+            )
+        elif typical is not None:
+            shares.append(
+                (
+                    Fraction(typical),
+                    "The profile does not publish this count, nor how many records the table "
+                    "holds, so it is assumed to be the mean of the counts the table publishes, "
+                    "to the nearest whole count.",
+                )
+            )
+        else:
+            shares.append(
+                (
+                    _half(ctx),
+                    "The profile does not publish this count, nor how many records the table "
+                    f"holds, nor any other count: it is assumed to be half the minimum cell "
+                    f"({ctx.minimum_cell}).",
+                )
+            )
+    return shares
+
+
+_REMAINDER_REASON = (
+    "The profile withheld this count: it shares, evenly with the other counts the table does "
+    "not publish, the records the published counts leave of the table's total, an estimate "
+    "since a rule may round each count and the total on their own."
+)
+_ABSENT_REASON = (
+    "The profile's table does not list this level: it shares, evenly with the counts the "
+    "table does not publish, the records the published counts leave of the table's total, an "
+    "estimate since a rule may round each count and the total on their own."
+)
+_SMALL_SHARE_REASON = (
+    "The profile withheld this count as a small one (status A): it takes an even share of the "
+    "records the published counts leave of the table's total, and no more than half the "
+    "minimum cell."
+)
+_NOTHING_LEFT_REASON = (
+    "The profile does not publish this count, and the published counts leave no record of "
+    "the table's total, so it is assumed to be half a record: a level is never assumed to "
+    "be zero."
+)
+
+
+def _withheld_lines(
+    ctx: ColumnContext,
+    cells: Sequence[_Cell],
+    noun: str,
+    *,
+    total: Optional[int] = None,
+    absent: Sequence[str] = (),
+) -> List[str]:
+    """What a person is told about a count table's withheld cells and absent levels."""
     small = sum(1 for cell in cells if cell.count is None and cell.status == _SMALL)
     other = sum(1 for cell in cells if cell.count is None and cell.status != _SMALL)
     lines: List[str] = []
+    if absent:
+        names = ", ".join(printable(level) for level in absent)
+        many = len(absent) != 1
+        lines.append(
+            f"The profile's counts do not list {names}, which the contract declares: "
+            + (
+                ("they share" if many else "it shares")
+                + " what the published counts leave of the table's records."
+                if total is not None
+                else ("each is" if many else "it is")
+                + " assumed to be the mean of the published counts."
+            )
+        )
+    if total is not None:
+        if small or other:
+            withheld = small + other
+            lines.append(
+                f"The profile withheld {_count_of(withheld, noun)}; "
+                + ("they share" if withheld != 1 else "it shares")
+                + " what the published counts leave of the table's records"
+                + (", a small one no more than half the minimum cell." if small else ".")
+            )
+        return lines
     if small:
         lines.append(
             f"The profile withheld {_count_of(small, noun)} as small (status {_SMALL}); each is "
@@ -751,8 +912,13 @@ def _boolean(ctx: ColumnContext, plan: ColumnPlan) -> None:
     ``support`` and carries no property.
     """
     found = _ungrouped(ctx.entry, _LEVELS)
-    if found is not None and list(found[1].get("levels", ())) == ["false", "true"]:
+    listed = [str(level) for level in found[1].get("levels", ())] if found is not None else []
+    if found is not None and listed == ["false", "true"]:
         _level_weights(ctx, plan, found, with_property=False)
+        plan.how = "false and true, weighted by the profile's counts"
+        return
+    if found is not None and set(listed) & {"false", "true"}:
+        _level_weights(ctx, plan, found, with_property=False, declared=["false", "true"])
         plan.how = "false and true, weighted by the profile's counts"
         return
     reason = "The profile publishes no counts of false and true: each is drawn half the time."
@@ -815,13 +981,10 @@ def _ordered(ctx: ColumnContext, plan: ColumnPlan) -> None:
         _key_range(ctx, plan, beyond=beyond)
         return
     if beyond:
-        plan.declaration["levels"] = {"0": "1"}
-        plan.labels.append(Label(("levels",), assumed(_BEYOND_REASON)))
+        _placeholder(ctx, plan, _BEYOND_REASON)
         plan.how = (
-            "a placeholder, 0 on every row: the profile's values are beyond what a row carries"
+            "a placeholder, evenly from 0: the profile's values are beyond what a row carries"
         )
-        plan.assumptions.append(_BEYOND_REASON)
-        plan.placeholder = True
         return
     points = _points(ctx)
     distinct_values = sorted({point.value for point in points})
@@ -833,8 +996,13 @@ def _ordered(ctx: ColumnContext, plan: ColumnPlan) -> None:
         # a placeholder every row shares, or the key could not hold one value per row.
         _key_range(ctx, plan, beyond=beyond)
         return
-    if points:
+    if ctx.foreign is not None and numeric:
+        _foreign_spread(ctx, plan, points)
+        return
+    if points and _temporal(kind):
         _one_value(ctx, plan, points[-1])
+        return
+    if points and _one_bound(ctx, plan, points):
         return
     if _temporal(kind):
         plan.how = "uniform within the run's time window: the profile publishes no order statistic"
@@ -849,8 +1017,202 @@ def _ordered(ctx: ColumnContext, plan: ColumnPlan) -> None:
 #: Why an integer column with values a run's rows cannot carry takes a placeholder.
 _BEYOND_REASON = (
     "The profile publishes values further from zero than the integers a run's rows carry "
-    "exactly (2^53), so none of them is declared: every row takes 0, a placeholder."
+    "exactly (2^53), so none of them is declared: the values are a placeholder, drawn "
+    "evenly over the bins declared here, from 0."
 )
+
+#: How many grid values a placeholder spans when nothing says how many.
+_PLACEHOLDER_VALUES = 100
+
+
+def _limit(ctx: ColumnContext) -> Optional[Fraction]:
+    """How far from zero a value of the column may lie: a row's integers, a decimal's digits."""
+    logical = ctx.column.logical_type
+    if logical.kind is LogicalKind.INT:
+        return Fraction(JCS_MAX_SAFE_INTEGER)
+    if logical.kind is LogicalKind.DECIMAL and isinstance(logical.precision, int):
+        return Fraction(10) ** (logical.precision - _scale(ctx)) - Fraction(_grid(ctx))
+    return None
+
+
+def _span_bins(
+    ctx: ColumnContext, start: Fraction, values: int, *, upward: bool = True
+) -> Tuple[Fraction, Fraction]:
+    """*values* grid values from *start*, away from it, kept within the column's type."""
+    step = Fraction(_grid(ctx))
+    far = start + (values - 1) * step if upward else start - (values - 1) * step
+    limit = _limit(ctx)
+    if limit is not None:
+        far = max(min(far, limit), -limit)
+    if far == start:  # a type with room for one value only: take the next one down
+        far = start - step if upward else start + step
+    return (start, far) if upward else (far, start)
+
+
+def _even_bins(
+    ctx: ColumnContext, plan: ColumnPlan, low: Fraction, high: Fraction, basis: Basis
+) -> None:
+    """Declare one bin from *low* to *high*, drawn evenly, both resting on *basis*."""
+    step = _grid(ctx)
+    plan.declaration["bins"] = [format(_on_grid(low, step), "f"), format(_on_grid(high, step), "f")]
+    plan.declaration["binWeights"] = ["1"]
+    plan.labels.append(Label(("bins",), basis))
+    plan.labels.append(Label(("binWeights",), basis))
+
+
+def _placeholder(ctx: ColumnContext, plan: ColumnPlan, reason: str, *, sized: bool = True) -> None:
+    """A spread the profile gives nothing for: evenly over values from 0, never one value.
+
+    As many grid values as a published ``distinctCount`` says, or a hundred, kept
+    within what the column's type holds (ADR 0014 section 3). The evidence lists
+    it with every other assumption, and a foreign key placed under its parent
+    later draws over the parent's keys instead (:func:`draw_within_key`).
+    """
+    distinct = _published(ctx.entry, "distinctCount") if sized else None
+    values = distinct if isinstance(distinct, int) and distinct >= 2 else _PLACEHOLDER_VALUES
+    if values != _PLACEHOLDER_VALUES:
+        _read(ctx, plan, "distinctCount", "how many values the placeholder spans")
+    low, high = _span_bins(ctx, Fraction(0), min(values, _PLACEHOLDER_VALUES * 10))
+    _even_bins(ctx, plan, low, high, assumed(reason))
+    plan.how = "a placeholder, evenly from 0"
+    plan.assumptions.append(reason)
+    plan.placeholder = True
+
+
+#: Why a foreign key's own metrics do not shape its draw.
+_FOREIGN_OWN = (
+    "a foreign key the profile gives no spread for is drawn evenly over the keys of its "
+    "parent; this statistic of its own values does not shape that draw"
+)
+
+
+def _foreign_spread(ctx: ColumnContext, plan: ColumnPlan, points: Sequence[_Point]) -> None:
+    """A number foreign key with no histogram and no two order statistics: over its parent's keys.
+
+    A lone ``min`` or ``max`` of a foreign key, or its mean, says where the busiest
+    parents lie, not how the children spread over them, so the key is never one
+    value: it is a placeholder the bundle then lays over the span of the key it
+    references (:func:`draw_within_key`), and its own statistics are passed over.
+    """
+    for point in points:
+        plan.passed.append((point.tokens, _FOREIGN_OWN))
+    for name in ("sum", "distinctCount"):
+        if _published(ctx.entry, name) is not None:
+            plan.passed.append((_metric_tokens(ctx, name), _FOREIGN_OWN))
+    found = _ungrouped(ctx.entry, _MEAN)
+    if found is not None:
+        plan.passed.append((ctx.profile_tokens + ("statistics", str(found[0])), _FOREIGN_OWN))
+    _placeholder(ctx, plan, _PLACEHOLDER_REASON, sized=False)
+    plan.how = "a foreign key, drawn over the span of the key it references"
+
+
+#: Why a column with one published bound and a mean is drawn as it is.
+_FILL_REASON = (
+    "The profile publishes one bound and the mean, and no other order statistic: the values "
+    "are drawn by the distribution of largest entropy with that bound and that mean, a "
+    "geometric tilt over the bins declared here, out to where less than half a row lies "
+    "beyond them (ADR 0014)."
+)
+_SPAN_FROM_BOUND = (
+    "The profile publishes one bound and the number of distinct values, and no mean: the "
+    "values are drawn evenly over that many grid values from the bound."
+)
+_PLACEHOLDER_FROM_BOUND = (
+    "The profile publishes one bound and no mean or count of distinct values: the values are "
+    "a placeholder, drawn evenly over the bins declared here, from the bound."
+)
+_ONE_VALUE_MEAN = (
+    "The profile publishes a bound and a mean equal to it, so every value is that bound."
+)
+
+
+def _one_bound(ctx: ColumnContext, plan: ColumnPlan, points: Sequence[_Point]) -> bool:
+    """A number column with one published value: a bound, combined with the mean and distinctCount.
+
+    A ``min`` and a ``max`` that are one value, or a mean equal to the one bound,
+    say every value is that value. A lone ``min`` or ``max`` with a mean on its
+    far side is filled by maximum entropy (:func:`~flux_engine.author.fill.tilted_fill`);
+    with ``distinctCount`` and no mean, that many grid values from it are drawn
+    evenly; with neither, a placeholder starts there. A lone quantile bounds
+    nothing: ``False``, and the column is drawn from its mean.
+    """
+    levels = {point.level for point in points}
+    point = points[0]
+    if levels >= {Fraction(0), Fraction(1)}:
+        _one_value(ctx, plan, point)
+        return True
+    if not levels & {Fraction(0), Fraction(1)}:
+        for quantile in points:
+            plan.passed.append((quantile.tokens, "a lone quantile bounds no span"))
+        return False
+    upward = Fraction(0) in levels  # a published minimum: the values lie above it
+    bound = Fraction(point.value)
+    mean = _published_mean(ctx)
+    step = Fraction(_grid(ctx))
+    distinct = _published(ctx.entry, "distinctCount")
+    distinct = distinct if isinstance(distinct, int) and distinct >= 2 else None
+    edge = from_profile(point.tokens, point.definition)
+    if mean is not None and mean == bound:
+        plan.declaration["levels"] = {format(_on_grid(bound, _grid(ctx)), "f"): "1"}
+        plan.labels.append(Label(("levels",), assumed(_ONE_VALUE_MEAN)))
+        _read_mean(ctx, plan, "equal to the published bound: every value is the bound")
+        plan.reads.append((point.tokens, "every value is this bound"))
+        plan.how = "one value on every row: the published mean is the published bound"
+        plan.assumptions.append(_ONE_VALUE_MEAN)
+        return True
+    if mean is not None and (mean > bound) == upward:
+        filled = tilted_fill(bound, mean, step, ctx.rows, distinct=distinct, limit=_limit(ctx))
+        if filled is not None:
+            edges, weights = filled
+            _declare_fill(
+                ctx, plan, edges, weights, edge if upward else None, edge if not upward else None
+            )
+            _read_mean(ctx, plan, "the mean the fill is tilted to")
+            if distinct is not None:
+                _read(ctx, plan, "distinctCount", "the fewest grid values the fill spans")
+            plan.how = "the largest-entropy spread from the published bound with its mean"
+            plan.assumptions.append(_FILL_REASON)
+            return True
+    if mean is not None:
+        for tokens in _mean_sources(ctx):
+            plan.passed.append((tokens, "the mean lies beyond the published bound"))
+    if distinct is not None:
+        low, high = _span_bins(ctx, bound, distinct, upward=upward)
+        reason = _SPAN_FROM_BOUND
+        _read(ctx, plan, "distinctCount", "how many grid values the span holds")
+    else:
+        low, high = _span_bins(ctx, bound, _PLACEHOLDER_VALUES, upward=upward)
+        reason = _PLACEHOLDER_FROM_BOUND
+    _even_bins(ctx, plan, low, high, assumed(reason))
+    plan.labels = [label for label in plan.labels if label.tokens != ("bins",)]
+    plan.labels.append(Label(("bins", "0" if upward else "1"), edge))
+    plan.labels.append(Label(("bins", "1" if upward else "0"), assumed(reason)))
+    plan.how = "evenly from the published bound"
+    plan.assumptions.append(reason)
+    return True
+
+
+def _declare_fill(
+    ctx: ColumnContext,
+    plan: ColumnPlan,
+    edges: Sequence[Fraction],
+    weights: Sequence[Fraction],
+    low: Optional[Basis],
+    high: Optional[Basis],
+) -> None:
+    """Declare a fill's bins and weights: a published bound cited, every other number assumed."""
+    step = _grid(ctx)
+    plan.declaration["bins"] = [format(_on_grid(edge, step), "f") for edge in edges]
+    plan.declaration["binWeights"] = share_texts(list(weights))
+    for position in range(len(edges)):
+        if position == 0 and low is not None:
+            basis = low
+        elif position == len(edges) - 1 and high is not None:
+            basis = high
+        else:
+            basis = assumed(_FILL_REASON)
+        plan.labels.append(Label(("bins", str(position)), basis))
+    plan.labels.append(Label(("binWeights",), assumed(_FILL_REASON)))
 
 
 def _beyond_plan(ctx: ColumnContext) -> bool:
@@ -908,7 +1270,8 @@ def _from_histogram(
     ]
     drawn, drawn_bases = _drawn_edges(ctx, plan, edges, edge_bases)
     cells = _cells(group, "binCounts")
-    weights, bases = _cell_weights(ctx, cells, stat_tokens, "binCounts", _HISTOGRAM)
+    total = _group_total(group)
+    weights, bases = _cell_weights(ctx, cells, stat_tokens, "binCounts", _HISTOGRAM, total=total)
     mean = _published_mean(ctx)
     shaped = None
     if mean is not None and kind in (LogicalKind.INT, LogicalKind.DECIMAL) and _shapes(ctx):
@@ -937,7 +1300,7 @@ def _from_histogram(
     high = _Point(Fraction(1), edges[-1], stat_tokens + ("bins", str(len(edges) - 1)), _HISTOGRAM)
     if low.value < high.value:
         _range(ctx, plan, low, high)
-    plan.assumptions.extend(_withheld_lines(ctx, cells, "bin count"))
+    plan.assumptions.extend(_withheld_lines(ctx, cells, "bin count", total=total))
     if "range" in plan.declaration and _scores_order(kind):
         plan.properties.append(
             PropertyPlan(
@@ -1088,14 +1451,29 @@ def _published_mean(ctx: ColumnContext) -> Optional[Fraction]:
 
 
 def _mean_sources(ctx: ColumnContext) -> List[Tuple[str, ...]]:
-    """Where :func:`_published_mean` reads the mean: ``sum`` and ``count``, else ``mean/1``."""
+    """Where the published mean is read: ``sum`` and ``count``, and a ``mean/1`` that agrees.
+
+    :func:`_published_mean` takes ``sum / count`` first; a ``mean/1`` beside it
+    is read too when it gives the same mean on the profile's grid, and passed
+    over otherwise, so either way the ledger says what became of it.
+    """
+    sources: List[Tuple[str, ...]] = []
     total, count = _published(ctx.entry, "sum"), _published(ctx.entry, "count")
-    if total is not None and isinstance(count, int) and count > 0:
-        return [_metric_tokens(ctx, "sum"), _metric_tokens(ctx, "count")]
+    by_sum = total is not None and isinstance(count, int) and count > 0
+    if by_sum:
+        sources += [_metric_tokens(ctx, "sum"), _metric_tokens(ctx, "count")]
     found = _ungrouped(ctx.entry, _MEAN)
     if found is not None:
-        return [ctx.profile_tokens + ("statistics", str(found[0]))]
-    return []
+        group = found[2]
+        k, on_grid = group.get("k"), group.get("Sx")
+        agrees = True
+        if by_sum and isinstance(k, int) and k > 0 and isinstance(on_grid, str):
+            grid = Fraction(1, 2**ctx.fractional_bits)
+            stated = Fraction(int(on_grid), k * 2**ctx.fractional_bits)
+            agrees = abs(stated - Fraction(Decimal(str(total))) / count) <= grid
+        if agrees:
+            sources.append(ctx.profile_tokens + ("statistics", str(found[0])))
+    return sources
 
 
 def _read_mean(ctx: ColumnContext, plan: ColumnPlan, how: str) -> None:
@@ -1106,30 +1484,6 @@ def _read_mean(ctx: ColumnContext, plan: ColumnPlan, how: str) -> None:
 #: How many halvings find the share that shapes a histogram to its mean: the share is
 #: then known to 2^-64, far finer than one grid step of any bin.
 _BISECTIONS = 64
-
-
-def _part_mean(low: Fraction, high: Fraction, step: Fraction, last: bool) -> Fraction:
-    """The mean of one bin as the generator draws it: evenly over its grid points.
-
-    A bin is half-open, its top grid point one step below its upper edge, and
-    the last bin is closed (``_bin_top`` in ``generator/rows.py``). A bin
-    narrower than one step holds its lower edge alone.
-    """
-    top = high if last else high - step
-    if top <= low:
-        return low
-    return low + step * ((top - low) // step) / 2
-
-
-def _drawn_mean(edges: Sequence[Fraction], weights: Sequence[Fraction], step: Fraction) -> Fraction:
-    """A histogram's mean as the generator draws it: each bin's mean, by the bin's weight."""
-    last = len(weights) - 1
-    parts = zip(weights, edges[:-1], edges[1:], strict=True)
-    total = sum(
-        (weight * _part_mean(low, high, step, position == last))
-        for position, (weight, low, high) in enumerate(parts)
-    )
-    return Fraction(total) / sum(weights, Fraction(0))
 
 
 def _cut(
@@ -1455,6 +1809,9 @@ def _key_range(ctx: ColumnContext, plan: ColumnPlan, *, beyond: bool) -> None:
             plan.labels.append(Label(("bins", "1"), from_profile(last.tokens, _MAX)))
             layout = f"{_key_noun(ctx)}: {_KEY_LAYOUT}"
             plan.labels.append(Label(("binWeights",), assumed(layout)))
+            for name in ("count", "distinctCount"):
+                if _published(ctx.entry, name) == ctx.rows:
+                    _read(ctx, plan, name, "checked: one value of the key per row")
             _range(ctx, plan, first, last)
             plan.how = "a key the contract declares, between its published min and max"
             plan.assumptions.append(layout)
@@ -1647,58 +2004,78 @@ def _grid(ctx: ColumnContext) -> Decimal:
 
 
 def _around_mean(ctx: ColumnContext, plan: ColumnPlan) -> None:
-    """No order statistic, but perhaps ``sum / count``: a span with that mean, or a placeholder.
+    """No order statistic: a span with the published mean, or a placeholder.
 
-    A span as wide as the published ``distinctCount`` keeps a query's totals and
-    averages; the spread itself is an assumption, and is said to be one.
+    A span as wide as the published ``distinctCount``, centred on the mean,
+    keeps a query's totals and averages. With a mean and no ``distinctCount``,
+    the values are filled by maximum entropy from 0, on the side of zero the mean
+    lies on (ADR 0014 section 3). With nothing at all, a placeholder spread. Each
+    is an assumption, and said to be one.
     """
-    total = _published(ctx.entry, "sum")
-    count = _published(ctx.entry, "count")
-    if total is not None and isinstance(count, int) and count > 0:
-        _read_mean(ctx, plan, "the mean the span is centred on")
-        _read(ctx, plan, "distinctCount", "how many values wide the span is")
+    mean = _published_mean(ctx)
+    if mean is None:
+        _placeholder(ctx, plan, _PLACEHOLDER_REASON)
+        return
+    step = _grid(ctx)
+    grid = Fraction(step)
+    distinct = _published(ctx.entry, "distinctCount")
+    if isinstance(distinct, int) and distinct > 1:
         # Exact arithmetic on the grid: a decimal context would round a long value or a
         # fine scale (DECIMAL(38,30), say) before it reached the grid.
-        mean = Fraction(Decimal(str(total))) / count
-        step = _grid(ctx)
-        grid = Fraction(step)
-        distinct = _published(ctx.entry, "distinctCount")
-        half = grid * (distinct - 1) / 2 if isinstance(distinct, int) and distinct > 1 else 0
-        low = _on_grid(math.floor((mean - half) / grid) * grid, step)
-        high = _on_grid(math.ceil((mean + half) / grid) * grid, step)
-        if high > low:
-            plan.declaration["bins"] = [format(low, "f"), format(high, "f")]
-            plan.declaration["binWeights"] = ["1"]
-            reason = (
-                "The profile publishes sum and count but no order statistic: the values are "
-                "drawn evenly over a span centred on the mean (sum / count), as many values "
-                "wide as distinctCount."
-            )
-            plan.labels.append(Label(("bins",), assumed(reason)))
-            plan.labels.append(Label(("binWeights",), assumed(reason)))
-            plan.how = "evenly around the published mean"
-        else:
-            plan.declaration["levels"] = {
-                format(_on_grid(round(mean / grid) * grid, step), "f"): "1"
-            }
-            reason = (
-                "The profile publishes sum and count but no order statistic or spread: every "
-                "row takes the mean (sum / count)."
-            )
-            plan.labels.append(Label(("levels",), assumed(reason)))
-            plan.how = "the published mean on every row"
-        plan.assumptions.append(reason)
+        half = grid * (distinct - 1) / 2
+        low = math.floor((mean - half) / grid) * grid
+        high = math.ceil((mean + half) / grid) * grid
+        _even_bins(ctx, plan, low, high, assumed(_CENTRED_REASON))
+        _read_mean(ctx, plan, "the mean the span is centred on")
+        _read(ctx, plan, "distinctCount", "how many values wide the span is")
+        plan.how = "evenly around the published mean"
+        plan.assumptions.append(_CENTRED_REASON)
         return
-    plan.declaration["levels"] = {"0": "1"}
-    plan.labels.append(Label(("levels",), assumed(_PLACEHOLDER_REASON)))
-    plan.how = "a placeholder, 0 on every row"
-    plan.assumptions.append(_PLACEHOLDER_REASON)
-    plan.placeholder = True
+    if mean != 0:
+        filled = tilted_fill(Fraction(0), mean, grid, ctx.rows, limit=_limit(ctx))
+        if filled is not None:
+            edges, weights = filled
+            _declare_fill(ctx, plan, edges, weights, None, None)
+            plan.labels = [
+                (
+                    label
+                    if label.tokens[:1] != ("bins",)
+                    else Label(label.tokens, assumed(_FILL_FROM_ZERO))
+                )
+                for label in plan.labels
+            ]
+            _read_mean(ctx, plan, "the mean the fill is tilted to")
+            plan.how = "the largest-entropy spread from 0 with the published mean"
+            plan.assumptions.append(_FILL_FROM_ZERO)
+            return
+    low, high = -(_PLACEHOLDER_VALUES // 2) * grid, (_PLACEHOLDER_VALUES // 2) * grid
+    _even_bins(ctx, plan, low, high, assumed(_CENTRED_ZERO))
+    _read_mean(ctx, plan, "the mean the span is centred on")
+    plan.how = "evenly around the published mean of 0"
+    plan.assumptions.append(_CENTRED_ZERO)
 
 
-#: Why a number column the profile says nothing of takes 0 on every row.
+_CENTRED_REASON = (
+    "The profile publishes a mean and the number of distinct values but no order statistic: "
+    "the values are drawn evenly over a span centred on the mean, as many values wide as "
+    "distinctCount."
+)
+_FILL_FROM_ZERO = (
+    "The profile publishes a mean and no order statistic or count of distinct values: the "
+    "values are assumed to lie on the side of 0 the mean does, and are drawn by the "
+    "distribution of largest entropy with that mean, a geometric tilt over the bins declared "
+    "here (ADR 0014)."
+)
+_CENTRED_ZERO = (
+    "The profile publishes a mean of 0 and no order statistic or count of distinct values: "
+    "the values are drawn evenly over a span centred on 0."
+)
+
+
+#: Why a number column the profile says nothing of takes a placeholder spread.
 _PLACEHOLDER_REASON = (
-    "The profile publishes no order statistic and no sum: every row takes 0, a placeholder."
+    "The profile publishes no order statistic and no mean: the values are a placeholder, "
+    "drawn evenly over the bins declared here, from 0."
 )
 
 

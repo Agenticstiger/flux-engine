@@ -41,6 +41,22 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   findings at or below a profile pointer or a Simulation pointer, and one that
   accepts nothing is refused too.
 
+- `fluxsim init` never draws a column as one value unless its profile shows one
+  (ADR 0014). A lone published `min` or `max` is a bound: with a mean it is
+  filled by the distribution of largest entropy from it, a geometric tilt over
+  bins found in exact fractions, whose mean as drawn is the published one; with
+  `distinctCount` alone, that many grid values from it. A mean with no spread
+  and no bound is filled from 0 on its side. A column with nothing published,
+  or with values beyond what a row carries, is a placeholder spread rather than
+  0 on every row, and a number foreign key with no spread of its own is drawn
+  over its parent's keys, never under one parent.
+- A declared level that a level histogram does not list, and a withheld cell,
+  share what the published counts leave of the group's `k`; a cell withheld as
+  small takes no more than half the minimum cell. The 0.7.0 rule, the mean of
+  the published cells, holds only when the group publishes no `k`. A histogram
+  whose levels are a subset of the contract's `enum` now weighs the draw, and the
+  message names the levels it did not list.
+
 ## 0.7.0 - 2026-11-19
 
 flux-stats exports the read of a FLUX bundle that the engine takes its digests

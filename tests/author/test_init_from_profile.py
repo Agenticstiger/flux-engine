@@ -689,7 +689,7 @@ def test_an_integer_a_row_cannot_carry_still_gives_a_bundle_that_runs(tmp_path: 
     result = _init(tmp_path / "b", contract, profile)
     assert result.exit_code == 0, result.stderr
     declared = _block(tmp_path / "b")["emits"]["orders"]["fidelity"]["columns"]
-    assert declared["event_id"] == {"levels": {"0": "1"}}
+    assert declared["event_id"] == {"bins": ["0", "99"], "binWeights": ["1"]}
     assert "2^53" in result.stdout
     # Drawn as the profile says, a value past 2^53 is refused when the rows are written.
     outcome = run(tmp_path / "b", state_dir=tmp_path / "state", profile=profile)
