@@ -167,6 +167,14 @@ change. A top-coded class takes the mean that makes the relationship's
 published mean hold, or its lower bound when none is published. A relationship
 that publishes only its mean gives an even spread, the 0.7.0 behaviour.
 
+A foreign key that gets a spread from a relationship reads its own statistics too. With
+no histogram of its own, its binned quantiles cut the parent's keys as a histogram's
+bins would, and the classes are laid out inside each cut. Its mean marks its source
+used, a `mean/1` beside `sum` and `count` among them when it agrees. A published `min`
+or `max` is checked against the parent's key span: inside it, used; outside it, unused
+with the span in the reason. The reason that a foreign key with no spread is drawn
+evenly stays on the foreign keys that have none.
+
 ### 6. Columns a derive determines
 
 A column a contract `derive` sets is not drawn. init declares no spread for it

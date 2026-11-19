@@ -1115,6 +1115,22 @@ def _binned_points_of(
     return points
 
 
+def binned_cuts(
+    entry: Optional[Mapping[str, Any]], profile_tokens: Tuple[str, ...]
+) -> List[Tuple[Decimal, Fraction, Tuple[str, ...]]]:
+    """The cuts of a column's binned quantiles: a value, the share of rows below it, its place.
+
+    The points :func:`_points` reads from ``quantile/2``, put through the histogram helper:
+    ascending, one per distinct value, no share below an earlier one. A foreign key reads
+    them too, as its own buckets.
+    """
+    points = _binned_points_of(entry, profile_tokens)
+    if not points:
+        return []
+    edges, _ = _histogram(points)
+    return [(edge.value, edge.level, edge.tokens) for edge in edges]
+
+
 def _points(ctx: ColumnContext) -> List[_Point]:
     """The published ``min``, quartiles, ``max`` and binned quantiles, in level order."""
     points: List[_Point] = []
@@ -1288,7 +1304,7 @@ def _placeholder(ctx: ColumnContext, plan: ColumnPlan, reason: str, *, sized: bo
 
 
 #: Why a foreign key's own metrics do not shape its draw.
-_FOREIGN_OWN = (
+FOREIGN_OWN = (
     "a foreign key the profile gives no spread for is drawn evenly over the keys of its "
     "parent; this statistic of its own values does not shape that draw"
 )
@@ -1303,13 +1319,13 @@ def _foreign_spread(ctx: ColumnContext, plan: ColumnPlan, points: Sequence[_Poin
     references (:func:`draw_within_key`), and its own statistics are passed over.
     """
     for point in points:
-        plan.passed.append((point.tokens, _FOREIGN_OWN))
+        plan.passed.append((point.tokens, FOREIGN_OWN))
     for name in ("sum", "distinctCount"):
         if _published(ctx.entry, name) is not None:
-            plan.passed.append((_metric_tokens(ctx, name), _FOREIGN_OWN))
+            plan.passed.append((_metric_tokens(ctx, name), FOREIGN_OWN))
     found = _ungrouped(ctx.entry, _MEAN)
     if found is not None:
-        plan.passed.append((ctx.profile_tokens + ("statistics", str(found[0])), _FOREIGN_OWN))
+        plan.passed.append((ctx.profile_tokens + ("statistics", str(found[0])), FOREIGN_OWN))
     _placeholder(ctx, plan, _PLACEHOLDER_REASON, sized=False)
     plan.how = "a foreign key, drawn over the span of the key it references"
 

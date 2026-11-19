@@ -261,3 +261,71 @@ def test_many_classes_keep_the_childless_share(tmp_path: Path) -> None:
     bins = [str(edge) for edge in range(101)]
     _init(tmp_path, _profile([_histogram(bins, parents, 1000), _mean(5000, 1000)]))
     assert abs(_children(tmp_path).count(0) / 1000 - 0.4) < 0.05
+
+
+def _quantile(bins: List[str], position: int, below: int, through: int) -> Dict[str, Any]:
+    return {
+        "definition": "quantile/2",
+        "level": "0.5",
+        "bins": bins,
+        "sampleSize": SAMPLE,
+        "disclosure": "acro-default",
+        "groups": [
+            {
+                "group": "",
+                "k": 5000,
+                "quantileBin": position,
+                "binBelow": below,
+                "binThrough": through,
+                "status": "F",
+            }
+        ],
+    }
+
+
+LADDER = ["-9223372036854775808", "1", "251", "501", "1000", "9223372036854775807"]
+
+
+def test_a_foreign_key_s_binned_quantile_cuts_the_keys_the_classes_are_laid_in(
+    tmp_path: Path,
+) -> None:
+    child = {
+        "domain": "number",
+        "metrics": {"count": _metric("count/1", 5000)},
+        "statistics": [_quantile(LADDER, 2, 2000, 4000)],
+    }
+    profile = _profile([_histogram(BINS, PARENTS, 1000), _mean(5000, 1000)], child=child)
+    profile["_schemaURL"] = profile["_schemaURL"].replace("1-0-0", "1-1-0")
+    result = _init(tmp_path, profile)
+    spread = _foreign(tmp_path)
+    edges = [int(edge) for edge in spread["bins"]]
+    weights = [float(weight) for weight in spread["binWeights"]]
+    below = lambda cut: sum(  # noqa: E731
+        weight for edge, weight in zip(edges, weights, strict=False) if edge < cut
+    )
+    assert abs(below(251) - 0.4) < 1e-6  # 2000 of 5000 children lie below key 251
+    assert abs(below(501) - 0.8) < 1e-6
+    note = _states(result)["/tables/orders/columns/customer_id/statistics/0"]
+    assert note["state"] == "used"
+
+
+def test_a_foreign_key_that_gets_a_spread_keeps_no_passed_over_reason(tmp_path: Path) -> None:
+    child = {
+        "domain": "number",
+        "metrics": {
+            "count": _metric("count/1", 5000),
+            "sum": _metric("sum/1", "2500000"),
+            "min": _metric("min/1", "1"),
+            "max": _metric("max/1", "5000"),
+        },
+        "statistics": [_mean(2500000, 5000)],
+    }
+    profile = _profile([_histogram(BINS, PARENTS, 1000), _mean(5000, 1000)], child=child)
+    result = _init(tmp_path, profile)
+    states = _states(result)
+    prefix = "/tables/orders/columns/customer_id"
+    assert states[f"{prefix}/metrics/min"]["state"] == "used"
+    assert "within the parent's keys" in states[f"{prefix}/metrics/min"]["note"]
+    assert states[f"{prefix}/statistics/0"]["state"] == "used"  # its mean agrees with sum / count
+    for name in ("min", "max", "sum", "count"):
+        assert "gives no spread for" not in states[f"{prefix}/metrics/{name}"]["note"]

@@ -33,7 +33,9 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.author.basis import Label, assumed
 from flux_engine.author.columns import (
+    FOREIGN_OWN,
     ColumnPlan,
+    binned_cuts,
     cell_weights,
     count_cells,
     drawn_span,
@@ -244,6 +246,37 @@ def _own_buckets(
     return None
 
 
+def _quantile_buckets(
+    entry: Optional[Mapping[str, Any]],
+    low: int,
+    high: int,
+    rows: int,
+    tokens: Tuple[str, ...],
+) -> Optional[Tuple[List[Tuple[int, int, Fraction]], List[Tuple[str, ...]]]]:
+    """The foreign key's binned quantiles as (first key, keys, children) buckets within the keys.
+
+    Each cut says what share of the rows lies below a value, so the keys below it hold
+    that share, as a histogram's bins would. Returns the buckets and the statistics whose
+    cuts fall inside the parent's keys, or ``None`` when none does.
+    """
+    cuts = binned_cuts(entry, tokens)
+    buckets: List[Tuple[int, int, Fraction]] = []
+    used: List[Tuple[str, ...]] = []
+    start, below = low, Fraction(0)
+    for value, level, place in cuts:
+        key = math.ceil(Fraction(value))
+        if key <= start or key > high:
+            continue
+        buckets.append((start, key - start, Fraction(rows) * (level - below)))
+        start, below = key, level
+        if place[:-2] not in used:
+            used.append(place[:-2])
+    if not used:
+        return None
+    buckets.append((start, high - start + 1, Fraction(rows) * (1 - below)))
+    return _merged(buckets), used
+
+
 def _merged(buckets: Sequence[Tuple[int, int, Fraction]]) -> List[Tuple[int, int, Fraction]]:
     """*buckets* in at most :data:`MOST_BUCKETS` runs of neighbours, their keys and weights added.
 
@@ -273,25 +306,34 @@ def _whole(value: Any) -> Optional[int]:
 def _foreign_mean(
     entry: Optional[Mapping[str, Any]], bits: int
 ) -> Optional[Tuple[Fraction, List[Tuple[str, ...]]]]:
-    """The foreign key's published mean, and the metrics or statistic it was read from."""
+    """The foreign key's published mean, and the metrics or statistics it was read from.
+
+    ``sum`` over ``count`` first, with a ``mean/1`` statistic that gives the same mean on the
+    profile's grid read beside it; else the ``mean/1`` statistic alone.
+    """
     found = entry.get("metrics") if isinstance(entry, Mapping) else None
     metrics: Mapping[str, Any] = found if isinstance(found, Mapping) else {}
+    mean: Optional[Fraction] = None
+    sources: List[Tuple[str, ...]] = []
     total, count = metrics.get("sum"), metrics.get("count")
     if isinstance(total, Mapping) and isinstance(count, Mapping):
         value = _whole(count.get("value"))
         if total.get("status") == _FREE and count.get("status") == _FREE and value is not None:
             mean = Fraction(Decimal(str(total.get("value")))) / value
-            return mean, [("metrics", "sum"), ("metrics", "count")]
+            sources = [("metrics", "sum"), ("metrics", "count")]
     statistics = entry.get("statistics") if isinstance(entry, Mapping) else None
     for index, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
         if isinstance(statistic, Mapping) and statistic.get("definition") == _MEAN:
             group = _published(statistic)
             k = _whole(group.get("k")) if group is not None else None
             if group is not None and k is not None:
-                return Fraction(int(str(group.get("Sx"))), k * 2**bits), [
-                    ("statistics", str(index))
-                ]
-    return None
+                stated = Fraction(int(str(group.get("Sx"))), k * 2**bits)
+                if mean is None:
+                    return stated, [("statistics", str(index))]
+                if abs(stated - mean) <= Fraction(1, 2**bits):
+                    sources.append(("statistics", str(index)))
+                break
+    return (mean, sources) if mean is not None else None
 
 
 def spread_children(
@@ -400,9 +442,13 @@ def spread_children(
     if sum(weights, Fraction(0)) <= 0:
         why = "the histogram gives no parent a child"
         return Spread((), tuple(unused) + _all(tokens, statistics, why))
-    buckets = _own_buckets(child_entry, low, high, child_rows, minimum_cell, child_tokens) or [
-        (low, high - low + 1, Fraction(child_rows))
-    ]
+    whole = [(low, high - low + 1, Fraction(child_rows))]
+    buckets = _own_buckets(child_entry, low, high, child_rows, minimum_cell, child_tokens)
+    quantiles: Optional[Tuple[List[Tuple[int, int, Fraction]], List[Tuple[str, ...]]]] = None
+    if buckets is None:
+        quantiles = _quantile_buckets(child_entry, low, high, child_rows, child_tokens)
+        buckets = quantiles[0] if quantiles is not None else None
+    buckets = buckets or whole
     descending = sorted(range(len(parents)), key=lambda i: (-means[i], i))
     ascending = list(reversed(descending))
     target = _foreign_mean(child_entry, fractional_bits)
@@ -444,7 +490,12 @@ def spread_children(
                     "decides which end of the parent's keys the parents with more children lie at",
                 )
             )
-    if buckets != [(low, high - low + 1, Fraction(child_rows))]:
+    if quantiles is not None:
+        for place in quantiles[1]:
+            used.append(
+                (place, "children per parent are laid out inside the key ranges its quantiles cut")
+            )
+    elif buckets != whole:
         statistics_of = child_entry.get("statistics") if isinstance(child_entry, Mapping) else None
         for position, entry in enumerate(statistics_of if isinstance(statistics_of, list) else ()):
             if (
@@ -459,6 +510,7 @@ def spread_children(
                     )
                 )
                 break
+    used += _check_ends(child, child_entry, child_tokens, low, high)
     return Spread(tuple(used), tuple(unused))
 
 
@@ -494,3 +546,49 @@ def _declare(child: ColumnPlan, edges: Sequence[int], weights: Sequence[Fraction
     child.choices.append(CHILDREN_REASON)
     child.placeholder = False
     child.how = "a foreign key, spread over its parent's keys by the profile's children per parent"
+
+
+_RELATED = (
+    "the relationship's children per parent shape the foreign key's draw; this statistic of "
+    "its own values adds no bound to it"
+)
+
+
+def _check_ends(
+    child: ColumnPlan,
+    entry: Optional[Mapping[str, Any]],
+    tokens: Tuple[str, ...],
+    low: int,
+    high: int,
+) -> List[Tuple[Tuple[str, ...], str]]:
+    """Check a foreign key's published ``min`` and ``max`` against its parent's key span.
+
+    Returns the ones inside it, as used. The rest are left to the plan's unused passes, each
+    with the key span it lies outside. A foreign key that now has a spread no longer says its
+    own statistics are passed over for want of one (:data:`FOREIGN_OWN`).
+    """
+    used: List[Tuple[Tuple[str, ...], str]] = []
+    metrics = entry.get("metrics") if isinstance(entry, Mapping) else None
+    kept = [item for item in child.passed if item[1] != FOREIGN_OWN]
+    for pointer, reason in child.passed:
+        if reason == FOREIGN_OWN:
+            kept.append((pointer, _RELATED))
+    for name in ("min", "max"):
+        metric = metrics.get(name) if isinstance(metrics, Mapping) else None
+        if not isinstance(metric, Mapping) or metric.get("status") != _FREE:
+            continue
+        value = Fraction(Decimal(str(metric.get("value"))))
+        place = tokens + ("metrics", name)
+        if low <= value <= high:
+            used.append((place, "checked: it lies within the parent's keys"))
+            continue
+        kept = [item for item in kept if item[0] != place]
+        kept.append(
+            (
+                place,
+                f"the published {name} is {value}, and the parent's keys span {low} to {high}: "
+                "a foreign key is drawn over them only",
+            )
+        )
+    child.passed = kept
+    return used

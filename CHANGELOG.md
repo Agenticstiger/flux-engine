@@ -176,6 +176,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   rows is checked as one value per row, and a published mean, `min`, `max` or `quantile/2`
   is checked against the even layout of the keys, unused with the reason when it
   disagrees.
+- `fluxsim init` reads the statistics of a foreign key that a relationship gives a
+  spread: its binned quantiles cut the parent's keys when it has no histogram, its mean
+  is read from `sum` and `count` and a `mean/1` that agrees, and a published `min` or
+  `max` is checked against the parent's key span.
 
 ## 0.7.0 - 2026-11-19
 
