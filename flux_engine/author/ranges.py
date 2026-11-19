@@ -19,7 +19,7 @@ import math
 import re
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Tuple
 
 __all__ = ["LONGEST_NUMBER", "RangeRule", "column_range", "grid_bounds", "parse_range"]
 
@@ -27,7 +27,6 @@ __all__ = ["LONGEST_NUMBER", "RangeRule", "column_range", "grid_bounds", "parse_
 LONGEST_NUMBER = 1000
 
 _NUMBER = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)")
-_AND = re.compile(r"\s+and\s+", re.IGNORECASE)
 _BETWEEN = re.compile(r"between\s+(.+)", re.IGNORECASE | re.DOTALL)
 _CLAUSE = re.compile(r"(>=|<=|>|<)\s*(.+)", re.DOTALL)
 
@@ -65,6 +64,25 @@ def _number(text: str) -> Optional[Fraction]:
         return None
 
 
+def _and_parts(text: str) -> List[str]:
+    """*text* cut at each word ``and``, in any case, in one pass over its words.
+
+    The same parts as splitting at whitespace, ``and``, whitespace; a regular
+    expression for that backtracks over a long run of spaces, and a contract
+    can hold one.
+    """
+    parts: List[str] = []
+    words: List[str] = []
+    for word in text.split():
+        if word.lower() == "and":
+            parts.append(" ".join(words))
+            words = []
+        else:
+            words.append(word)
+    parts.append(" ".join(words))
+    return parts
+
+
 def parse_range(constraint: Any) -> Optional[RangeRule]:
     """The bounds a range rule's text declares, or ``None`` when it declares nothing."""
     if not isinstance(constraint, str):
@@ -72,7 +90,7 @@ def parse_range(constraint: Any) -> Optional[RangeRule]:
     text = constraint.strip()
     between = _BETWEEN.fullmatch(text)
     if between is not None:
-        parts = _AND.split(between.group(1))
+        parts = _and_parts(between.group(1))
         if len(parts) != 2:
             return None
         low, high = _number(parts[0]), _number(parts[1])
@@ -80,7 +98,7 @@ def parse_range(constraint: Any) -> Optional[RangeRule]:
             return None
         return RangeRule(low, False, high, False)
     rule = RangeRule()
-    for clause in _AND.split(text):
+    for clause in _and_parts(text):
         found = _CLAUSE.fullmatch(clause.strip())
         value = _number(found.group(2)) if found is not None else None
         if found is None or value is None:

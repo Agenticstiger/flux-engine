@@ -169,3 +169,15 @@ def test_a_column_with_nothing_published_draws_over_the_declared_range() -> None
     sources = {label.tokens: label.basis.source for label in plan.labels}
     assert sources[("bins",)] is Source.CONTRACT
     assert not any("placeholder" in sentence for sentence in plan.assumptions)
+
+
+def test_a_long_run_of_spaces_is_read_in_linear_time() -> None:
+    import time
+
+    from flux_engine.author.ranges import parse_range
+
+    started = time.perf_counter()
+    assert parse_range(">= 1" + " " * 200_000 + "x") is None
+    assert parse_range("between 1" + " " * 200_000 + "x") is None
+    assert time.perf_counter() - started < 2
+    assert parse_range(">= 1" + " " * 1000 + "and <= 5") == parse_range(">= 1 and <= 5")
