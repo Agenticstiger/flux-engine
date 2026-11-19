@@ -2610,17 +2610,30 @@ def determine_column(
     else:
         step = _grid(ctx)
         grid = Fraction(step)
-        wide_low = math.floor(low / grid) * grid
-        wide_high = math.ceil(high / grid) * grid
+        rule = from_contract(ctx.product_ref, rule_tokens)
+        ends: Dict[str, Tuple[Fraction, Basis]] = {
+            "min": (math.floor(low / grid) * grid, rule),
+            "max": (math.ceil(high / grid) * grid, rule),
+        }
+        # The rule's bounds rest on the spans of the columns it reads, which can be
+        # assumptions; the check reads the profile's own values of the column against the
+        # range too (FLX-5005), so a published end beyond the bounds widens the range.
+        for name in ("min", "max"):
+            value = _published(ctx.entry, name)
+            if value is None:
+                continue
+            point = Fraction(Decimal(str(value)))
+            if point < ends[name][0] if name == "min" else point > ends[name][0]:
+                ends[name] = (point, from_profile(_metric_tokens(ctx, name), _ENDS[name]))
+        wide_low, wide_high = ends["min"][0], ends["max"][0]
         if wide_high <= wide_low:
             wide_high = wide_low + grid
         plan.declaration["range"] = {
             "min": format(_on_grid(wide_low, step), "f"),
             "max": format(_on_grid(wide_high, step), "f"),
         }
-        rule = from_contract(ctx.product_ref, rule_tokens)
-        plan.labels.append(Label(("range", "min"), rule))
-        plan.labels.append(Label(("range", "max"), rule))
+        plan.labels.append(Label(("range", "min"), ends["min"][1]))
+        plan.labels.append(Label(("range", "max"), ends["max"][1]))
         plan.published_range = (_on_grid(wide_low, step), _on_grid(wide_high, step))
         _mean_property(ctx, plan)
     for name in ("min", "max"):
@@ -2633,8 +2646,8 @@ def determine_column(
                     (
                         "checked: within the bounds the rule gives"
                         if inside
-                        else "checked: it lies outside the bounds the rule gives, so the profile and "
-                        "the rule disagree"
+                        else "checked: it lies outside the bounds the rule gives over the spans the "
+                        "bundle has for the columns it reads, so the range holds it too"
                     ),
                 )
             )
@@ -2644,6 +2657,9 @@ def determine_column(
     plan.choices.append(_DETERMINED_REASON)
     plan.how = "set by a rule of the contract, not drawn; its range is the rule's exact bounds"
 
+
+#: The metric definition of each end of a range, for citing a published end.
+_ENDS: Mapping[str, str] = {"min": _MIN, "max": _MAX}
 
 # ---------------------------------------------------------------------------
 # A table with nothing published for the check to read

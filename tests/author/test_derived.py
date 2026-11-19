@@ -236,6 +236,25 @@ def test_a_derived_column_is_checked_through_its_rule(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+def test_a_published_end_beyond_the_rule_s_bounds_widens_the_range(tmp_path: Path) -> None:
+    # The rule's bounds come from the span the bundle has for net; the profile's own vat
+    # minimum lies below them, and the check reads it against the range (FLX-5005).
+    profile = _profile()
+    profile["tables"]["orders"]["columns"]["vat"]["metrics"]["min"] = _metric("min/1", "0.41")
+    result = _init(tmp_path, profile)
+    assert _fidelity(tmp_path)["columns"]["vat"] == {"range": {"min": "0.41", "max": "8.10"}}
+    states = {entry["pointer"]: entry for entry in result.artifacts["ledger"]["statistics"]}
+    assert "so the range holds it too" in states["/tables/orders/columns/vat/metrics/min"]["note"]
+    outcome = run(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "shop.profile.json",
+        verify=True,
+    )
+    assert outcome.success, outcome.stderr
+
+
+@pytest.mark.integration
 def test_bounds_pass_down_a_chain_of_rules(tmp_path: Path) -> None:
     _init(tmp_path, _profile())
     gross = _fidelity(tmp_path)["columns"]["gross"]

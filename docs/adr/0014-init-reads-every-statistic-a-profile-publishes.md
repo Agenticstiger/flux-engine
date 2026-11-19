@@ -157,8 +157,11 @@ from exact bounds of the rule: an interval in exact fractions evaluated over
 the expression's syntax tree, with the ranges of the columns it reads. The sum,
 difference and product of two intervals have exact interval results, and
 `ROUND` is monotone, so its bounds are the rounded ends; an expression the
-interval cannot follow gives no range. The column's own statistics are checked through the rule:
-they become properties that `verify` scores against what the rule produced.
+interval cannot follow gives no range. The bounds rest on the spans the bundle has for the
+columns the rule reads, which can be assumptions, so a published `min` or `max` of the column
+beyond them widens the range: the check reads the profile's own values against it too. The
+column's own statistics are checked through the rule: they become properties that `verify`
+scores against what the rule produced.
 
 ### 7. DATE in one format
 

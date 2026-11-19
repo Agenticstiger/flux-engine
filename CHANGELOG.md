@@ -93,9 +93,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   bounds of the rule over the ranges of the columns it reads, an interval in
   fractions over the expression's syntax tree (`+`, `-`, `*`, `/` away from
   zero, `ROUND`, `COALESCE`, `CASE`), or its published histogram's edges when
-  they hold those bounds; its published mean becomes a property the rule's
-  values are scored on. Bounds pass down a chain of rules, and a guarded
-  `derive` leaves its column drawn.
+  they hold those bounds, widened to the column's own published `min` and `max`
+  when they lie beyond, since the check reads those against the range too; its
+  published mean becomes a property the rule's values are scored on. Bounds
+  pass down a chain of rules, and a guarded `derive` leaves its column drawn.
 - A DATE column is spelled one way. Its fidelity `range` and `bins` can be
   `YYYY-MM-DD` (a whole number of days since 1970-01-01 still works), where a
   fidelity block that spelled them as dates was refused at `fluxsim validate`
