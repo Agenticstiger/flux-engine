@@ -2805,6 +2805,10 @@ _DETERMINED_REASON = (
     "A rule of the contract sets the column, so it is not drawn; the range the check reads is "
     "the exact bounds the rule gives over the ranges of the columns it reads (ADR 0014)."
 )
+_DETERMINED_PAST_RANGE = (
+    "A rule of the contract sets the column, and the values it gives can pass the range the "
+    "contract declares for the column: the rule's values are not clipped to it."
+)
 _DETERMINED_UNBOUNDED = (
     "A rule of the contract sets the column, so it is not drawn, and its range cannot be "
     "bounded from the rule: no property reads it."
@@ -2920,6 +2924,12 @@ def determine_column(
         _read_mean(ctx, plan, "the mean property scores the rule's values against it")
     plan.assumptions.append(_DETERMINED_REASON)
     plan.choices.append(_DETERMINED_REASON)
+    held = _range_bounds(ctx)
+    if held is not None and (
+        (held[0] is not None and low < held[0]) or (held[1] is not None and high > held[1])
+    ):
+        plan.assumptions.append(_DETERMINED_PAST_RANGE)
+        plan.choices.append(_DETERMINED_PAST_RANGE)
     plan.how = "set by a rule of the contract, not drawn; its range is the rule's exact bounds"
 
 
@@ -2955,6 +2965,7 @@ def _check_quantile_bins(
     the profile and the rule cannot describe the same column. The rule's values are not
     scored on the bin itself: they are measured through inputs drawn from their own bins.
     """
+    held = _range_bounds(ctx)
     for index, statistic, ladder in _published_ladders(ctx):
         position = statistic["groups"][0].get("quantileBin")
         if not isinstance(position, int) or isinstance(position, bool):
@@ -2970,12 +2981,26 @@ def _check_quantile_bins(
                     "that holds this quantile to",
                 )
             )
-        elif ladder[position] <= declared[1] and ladder[position + 1] > declared[0]:
+            continue
+        # The rule's values are not clipped to the contract's range, so the bin has to meet
+        # both: the values the rule gives that the contract's range allows.
+        lowest, highest = Fraction(declared[0]), Fraction(declared[1])
+        narrowed = False
+        if held is not None:
+            if held[0] is not None and held[0] > lowest:
+                lowest, narrowed = held[0], True
+            if held[1] is not None and held[1] < highest:
+                highest, narrowed = held[1], True
+        if (
+            lowest <= highest
+            and Fraction(ladder[position]) <= highest
+            and Fraction(ladder[position + 1]) > lowest
+        ):
             plan.reads.append(
                 (
                     tokens,
                     "checked: the bin that holds this quantile lies within the range "
-                    "the rule gives",
+                    "the rule gives" + (", held to the contract's range" if narrowed else ""),
                 )
             )
         else:
@@ -2983,7 +3008,8 @@ def _check_quantile_bins(
                 (
                     tokens,
                     "the bin the profile says holds this quantile lies outside the range the "
-                    "rule gives",
+                    "rule gives"
+                    + (", held to the contract's range for the column" if narrowed else ""),
                 )
             )
 

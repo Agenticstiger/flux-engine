@@ -82,7 +82,8 @@ assumption is a number of the register with its reason.
   their middle, and each ungrouped `quantile/2` is checked against the even layout: the
   keys below each of its two edges, within the profile's rounding (the disclosure rule's
   `roundingBase`, plus one). A statistic the layout does not hold stays unused, and the
-  reason says what disagrees.
+  reason says what disagrees. The checks run once the keys' spans are final, against the
+  span the bundle declares, and replace what an earlier span gave.
 - **A lone order statistic is a bound.** It is combined with the mean (from
   `sum` and `count`, or `mean/1`) and `distinctCount`, never drawn on its own.
 - **A mean with no spread is filled by maximum entropy.** Among the
@@ -117,8 +118,14 @@ assumption is a number of the register with its reason.
   maximum-entropy tail of a drawn number column reaches past it; the range the check
   reads and a property's bins keep the profile's edges, which the check compares. A bin left with no grid
   value is dropped and the weights scaled, stated as an assumption only when weight is
-  lost. A column with nothing published draws evenly over the declared range, cited to
-  the contract.
+  lost. A range that leaves the profile no weight is drawn evenly within what it leaves,
+  and one that leaves a single grid value gives that value as the column's one value. A
+  range that lies wholly outside the profile's values draws evenly over the range, cited
+  to the contract, and every statistic the draw had read is unused: the profile's values
+  lie outside the range the contract declares, so none of them shapes the draw. The
+  range is held to what the column's type holds; a range beyond it keeps the placeholder,
+  and an assumption says so. A column with nothing published draws evenly over the
+  declared range, cited to the contract.
 - **Nothing published** (and no contract range) gives a placeholder that is not constant: an even
   spread over the first hundred values of the column's grid from 0 (0 to 99 for an
   integer, 0.00 to 0.99 for two decimal places, within the declared precision), or
@@ -200,7 +207,9 @@ with the reason when the bin lies outside it or the rule gives no range. It gets
 `quantile` property, because the column is measured through the inputs the rule reads,
 whose bins do not line up with the column's own ladder, so the quantile can fall on either
 side of an edge. A published `distinctCount` is checked against the grid values the declared
-range holds.
+range holds. The rule's values are not clipped to a range the contract also declares for the
+column; when the rule's bounds pass it, an assumption says so, and a binned quantile's bin is
+checked against the intersection of both ranges.
 
 ### 7. DATE in one format
 

@@ -170,12 +170,17 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `<` joined by `and`) bounds the bins, the levels and the maximum-entropy tail of a
   drawn number column (the check's range and a property's bins keep the profile's
   edges), and a column the profile publishes nothing for is drawn
-  evenly over it instead of a placeholder.
+  evenly over it instead of a placeholder. A range that leaves the profile no weight is
+  drawn evenly within what it leaves, one that leaves a single grid value gives that
+  value, and one that lies wholly outside the profile's values is drawn evenly over the
+  range, each statistic the draw had read then unused with that reason. A range the
+  column's type cannot hold keeps the placeholder and says so.
 - `fluxsim init` reads a key's own statistics: with its `min` or `max` withheld the
   keys are centred on the published mean, a `count` or `distinctCount` equal to the
   rows is checked as one value per row, and a published mean, `min`, `max` or `quantile/2`
   is checked against the even layout of the keys, unused with the reason when it
-  disagrees.
+  disagrees. The checks run on the span the bundle ends with, after the foreign keys
+  that reference a key have widened it.
 - `fluxsim init` reads the statistics of a foreign key that a relationship gives a
   spread: its binned quantiles cut the parent's keys when it has no histogram, its mean
   is read from `sum` and `count` and a `mean/1` that agrees, and a published `min` or
@@ -187,6 +192,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `derive` sets against the range the rule gives: the quantile is used when the bin that
   holds it overlaps that range and unused with the reason when it lies outside. It also
   checks a published `distinctCount` of that column against the grid values the range holds.
+  A column under a range its contract declares is not clipped: the rule's values are, and
+  an assumption says so when they can pass it. A quantile's bin is checked against the
+  range the rule gives and the contract's range together.
+- `fluxsim init` no longer fails on a foreign key whose binned quantile has one cut: it
+  bounds no bucket, so the keys are laid out as without it and the statistic is unused.
 
 ## 0.7.0 - 2026-11-19
 

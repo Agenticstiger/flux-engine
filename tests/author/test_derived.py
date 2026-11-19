@@ -352,3 +352,110 @@ def test_a_distinct_count_is_checked_against_the_grid_values_of_the_range(tmp_pa
     states = {e["pointer"]: e for e in _init(other, profile).artifacts["ledger"]["statistics"]}
     state = states["/tables/orders/columns/vat/metrics/distinctCount"]
     assert state["state"] == "unused" and "holds 730 grid values" in state["note"]
+
+
+def _rule_column(constraint: Optional[str], statistics: Any = ()) -> Tuple[Any, Any]:
+    """A DECIMAL column a rule sets, with the range its contract declares and its statistics."""
+    from flux_engine.author.columns import ColumnContext, ColumnPlan
+    from flux_engine.author.ranges import parse_range
+    from flux_engine.seam.contract import CompiledColumn, parse_logical_type
+
+    column = CompiledColumn(
+        name="vat",
+        logical_type=parse_logical_type("DECIMAL(10,2)"),
+        required=False,
+        declared_type="DECIMAL(10,2)",
+        key=False,
+    )
+    context = ColumnContext(
+        column=column,
+        expose_index=0,
+        schema_index=3,
+        product_ref="shop.orders",
+        profile_tokens=("tables", "orders", "columns", "vat"),
+        entry={"domain": "number", "metrics": {}, "statistics": list(statistics)},
+        rows=1000,
+        minimum_cell=10,
+        range_rule=parse_range(constraint) if constraint is not None else None,
+    )
+    return context, ColumnPlan(name="vat")
+
+
+@pytest.mark.unit
+def test_a_rule_whose_values_pass_the_contract_s_range_says_they_are_not_clipped() -> None:
+    from flux_engine.author.columns import determine_column
+
+    interval = (F("0.81"), F("8.1"))
+    for constraint, passes in (("<= 5", True), (">= 2", True), ("between 0 and 10", False)):
+        context, plan = _rule_column(constraint)
+        determine_column(context, plan, ("rule",), interval)
+        said = [s for s in plan.assumptions if "values it gives can pass the range" in s]
+        assert bool(said) is passes, constraint
+        assert (said[0] in plan.choices) if passes else not said
+    context, plan = _rule_column(None)
+    determine_column(context, plan, ("rule",), interval)
+    assert not any("can pass the range" in sentence for sentence in plan.assumptions)
+
+
+def _binned_quantile(ladder: Any, position: int) -> Dict[str, Any]:
+    return {
+        "definition": "quantile/2",
+        "level": "0.5",
+        "bins": ladder,
+        "sampleSize": SAMPLE,
+        "disclosure": "acro-default",
+        "groups": [
+            {
+                "group": "",
+                "k": 1000,
+                "quantileBin": position,
+                "binBelow": 400,
+                "binThrough": 600,
+                "status": "F",
+            }
+        ],
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("constraint", "read"),
+    [
+        (None, True),  # no contract range: the rule's alone, 0.81 to 8.10
+        ("<= 4.5", True),  # the bin [4, 5) meets both
+        ("<= 3.5", False),  # the rule gives it, the contract's range does not
+        (">= 5", False),
+        (">= 9", False),  # the contract's range lies past the rule's: nothing is both
+    ],
+)
+def test_a_bin_is_held_to_the_rule_and_the_contract_s_range_together(
+    constraint: Optional[str], read: bool
+) -> None:
+    from flux_engine.author.columns import determine_column
+
+    ladder = ["0.00", "2.00", "4.00", "5.00", "10.00"]
+    context, plan = _rule_column(constraint, [_binned_quantile(ladder, 2)])
+    determine_column(context, plan, ("rule",), (F("0.81"), F("8.1")))
+    tokens = ("tables", "orders", "columns", "vat", "statistics", "0")
+    held = [how for found, how in plan.reads if found == tokens]
+    lost = [why for found, why in plan.passed if found == tokens]
+    assert bool(held) is read and bool(lost) is not read
+    if constraint is not None:
+        assert "contract's range" in (held or lost)[0]
+    else:
+        assert "contract's range" not in (held or lost)[0]
+
+
+@pytest.mark.unit
+def test_a_rule_with_no_bounds_holds_a_binned_quantile_to_no_range() -> None:
+    from flux_engine.author.columns import determine_column
+
+    ladder = ["0.00", "2.00", "4.00", "5.00", "10.00"]
+    context, plan = _rule_column("<= 4.5", [_binned_quantile(ladder, 2)])
+    determine_column(context, plan, ("rule",), None)
+    tokens = ("tables", "orders", "columns", "vat", "statistics", "0")
+    assert [why for found, why in plan.passed if found == tokens] == [
+        "no range can be declared for the column, so there is none to hold the bin that "
+        "holds this quantile to"
+    ]
+    assert not plan.reads
