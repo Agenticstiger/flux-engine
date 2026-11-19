@@ -242,3 +242,96 @@ def test_a_key_reads_no_binned_quantile() -> None:
     }
     plan = _plan("int", entry, key=True)
     assert _statistic(0) not in _reads(plan)
+
+
+def test_a_ladder_edge_beyond_the_published_ends_moves_neither_end() -> None:
+    # The quantile's bins straddle the data: 2 lies below min 3 and 100 above max 40.
+    entry = {
+        "domain": "number",
+        "metrics": {"min": _metric("min/1", "3"), "max": _metric("max/1", "40")},
+        "statistics": [_binned(_NUMBER_LADDER, 2, 0, 300), _binned(_NUMBER_LADDER, 6, 700, 1000)],
+    }
+    plan = _plan("int", entry)
+    assert plan.declaration["range"] == {"min": "3", "max": "40"}
+    assert Decimal(plan.declaration["bins"][0]) == 3
+    assert Decimal(plan.declaration["bins"][-1]) == 40
+
+
+def test_a_decimal_near_the_top_of_its_type_keeps_its_bins() -> None:
+    # DECIMAL(5,2) holds at most 999.99; the ladder's edge at 1000 bounds the values all the same.
+    ladder = ["-9223372036854775808", "100", "200", "500", "1000", "2000", "9223372036854775807"]
+    entry = {
+        "domain": "number",
+        "metrics": {"min": _metric("min/1", "510"), "max": _metric("max/1", status="A")},
+        "statistics": [_binned(ladder, 3, 0, 1000)],
+    }
+    plan = _plan("decimal(5,2)", entry)
+    assert not plan.placeholder
+    assert Decimal(plan.declaration["bins"][0]) == Decimal("510")
+    assert Decimal(plan.declaration["bins"][-1]) == Decimal("999.99")
+
+
+def test_only_valid_groups_give_points() -> None:
+    def plan_of(group: Dict[str, Any], quantile_bin: int = 4) -> ColumnPlan:
+        statistic = _binned(_NUMBER_LADDER, quantile_bin, 200, 300)
+        statistic["groups"][0].update(group)
+        entry = {"domain": "number", "metrics": {}, "statistics": [statistic]}
+        return _plan("int", entry)
+
+    for group in (
+        {"k": True},
+        {"binBelow": True},
+        {"binBelow": 400},  # more below the bin than through it
+        {"binThrough": 2000},  # more than k
+        {"k": 0},
+        {"status": "C"},
+    ):
+        assert _statistic(0) not in _reads(plan_of(group)), group
+    assert _statistic(0) in _reads(plan_of({}))
+    # The ladder's first and last edges say nothing of where the values lie: a group in
+    # the first bin gives its upper edge only.
+    first = plan_of({"binBelow": 0, "binThrough": 300}, quantile_bin=0)
+    assert all(Decimal(edge) > -(2**62) for edge in first.declaration.get("bins", ["0"]))
+
+
+def test_binned_points_are_never_a_published_end() -> None:
+    entry = {
+        "domain": "number",
+        "metrics": {"sum": _metric("sum/1", "80000"), "count": _metric("count/1", 1000)},
+        "statistics": [_binned(_NUMBER_LADDER, 4, 200, 300), _binned(_NUMBER_LADDER, 6, 450, 650)],
+    }
+    plan = _plan("int", entry)
+    # Both ends withheld: each is the ladder bin out, an assumption, and no range is declared.
+    assert "range" not in plan.declaration
+    bins = [Decimal(edge) for edge in plan.declaration["bins"]]
+    assert bins[0] == 5 and bins[-1] == 200  # the ladder's bins below 10 and above 100
+    sources = _sources(plan)
+    assert sources[("bins", "0")] is Source.ASSUMPTION
+    assert sources[("bins", str(len(bins) - 1))] is Source.ASSUMPTION
+
+
+def test_a_tail_bound_off_the_grid_is_snapped_outward() -> None:
+    ladder = ["-9223372036854775808", "0.0625", "0.125", "0.25", "9223372036854775807"]
+    entry = {
+        "domain": "number",
+        "metrics": {
+            "min": _metric("min/1", "0.01"),
+            "sum": _metric("sum/1", "300"),
+            "count": _metric("count/1", 1000),
+        },
+        "statistics": [_binned(ladder, 1, 100, 400)],
+    }
+    plan = _plan("decimal(10,2)", entry)
+    bins = [Decimal(edge) for edge in plan.declaration["bins"]]
+    assert all(edge == edge.quantize(Decimal("0.01")) for edge in bins[2:])  # tail on the grid
+    assert Decimal("0.13") in bins  # 0.125 snapped up to the next cent
+
+
+def test_a_foreign_key_reads_no_binned_quantile() -> None:
+    entry = {
+        "domain": "number",
+        "metrics": {"count": _metric("count/1", 600)},
+        "statistics": [_binned(_NUMBER_LADDER, 4, 200, 300, k=600)],
+    }
+    plan = _plan("int", entry, foreign="parent.id")
+    assert _statistic(0) not in _reads(plan)

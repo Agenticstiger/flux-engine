@@ -1118,9 +1118,33 @@ def _points(ctx: ColumnContext) -> List[_Point]:
     high = _published(ctx.entry, "max")
     if high is not None:
         points.append(_Point(Fraction(1), Decimal(str(high)), metrics + ("max",), _MAX))
-    points.extend(_binned_points(ctx))
+    points.extend(_within(ctx, _binned_points(ctx), low, high))
     points.sort(key=lambda point: point.level)
     return points
+
+
+def _within(ctx: ColumnContext, binned: Sequence[_Point], low: Any, high: Any) -> List[_Point]:
+    """The binned points that say where the values lie, kept to what a row can hold.
+
+    A published ``min`` or ``max`` is exact: a ladder edge beyond it only says
+    that no record lies past it, and is dropped. An edge past the values the
+    column's type carries (the ladder always has one at a DECIMAL's ``10^(p-s)``)
+    bounds them all the same, so it becomes the last value the type holds.
+    """
+    lowest = Decimal(str(low)) if low is not None else None
+    highest = Decimal(str(high)) if high is not None else None
+    limit = _limit(ctx)
+    kept: List[_Point] = []
+    for point in binned:
+        if (lowest is not None and point.value < lowest) or (
+            highest is not None and point.value > highest
+        ):
+            continue
+        if limit is not None and abs(Fraction(point.value)) > limit:
+            end = _on_grid(limit, _grid(ctx))
+            point = replace(point, value=end if point.value > 0 else -end)
+        kept.append(point)
+    return kept
 
 
 def _ordered(ctx: ColumnContext, plan: ColumnPlan) -> None:
