@@ -65,6 +65,8 @@ __all__ = [
     "ColumnPlan",
     "PropertyPlan",
     "assumed_check",
+    "cell_weights",
+    "count_cells",
     "declared_span",
     "draw_within_key",
     "drawn_span",
@@ -199,6 +201,14 @@ class ColumnPlan:
     #: does publish, or where the contract overrules it. ``--strict`` refuses every other
     #: assumption (ADR 0014 section 2).
     choices: List[str] = field(default_factory=list)
+    #: The levels a categorical column draws, when they are real values (the contract's
+    #: enum, the profile's levels); ``None`` for opaque levels and for other columns.
+    level_names: Optional[Tuple[str, ...]] = None
+    #: Why the column is never drawn given another, nor another given it: a key, a
+    #: foreign key, an identifier the engine derives. ``None`` for every other column.
+    fixed: Optional[str] = None
+    #: The sentences that speak of the column's own weights, which a ``given`` replaces.
+    weight_notes: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +305,11 @@ class _Cell:
     status: str
 
 
+def count_cells(group: Mapping[str, Any], key: str) -> List["_Cell"]:
+    """A count table's cells, each with its count when published (:func:`_cells`)."""
+    return _cells(group, key)
+
+
 def _cells(group: Mapping[str, Any], key: str) -> List[_Cell]:
     """A count table's cells, each with its count when it was published."""
     counts = group.get(key)
@@ -381,6 +396,10 @@ def plan_column(ctx: ColumnContext) -> ColumnPlan:
     """Declare one column from its profile entry and its contract declaration."""
     kind = ctx.column.logical_type.kind
     plan = ColumnPlan(name=ctx.column.name)
+    if ctx.key or ctx.keyed:
+        plan.fixed = "a key the contract declares"
+    elif ctx.foreign is not None:
+        plan.fixed = "a foreign key"
     if ctx.key and kind is LogicalKind.STRING:
         plan.how = "an identifier: the contract makes it a key, and the engine derives it"
         return plan
@@ -390,6 +409,8 @@ def plan_column(ctx: ColumnContext) -> ColumnPlan:
         _boolean(ctx, plan)
     else:
         _ordered(ctx, plan)
+    if "unique" in plan.declaration:
+        plan.fixed = "an identifier the engine derives"
     if "unique" not in plan.declaration and not (ctx.keyed or ctx.inner or ctx.nulls_follow):
         _null_fraction(ctx, plan)
     return plan
@@ -402,7 +423,13 @@ def _null_fraction(ctx: ColumnContext, plan: ColumnPlan) -> None:
     null, and the seam refuses a ``nullFraction`` on it (``FLX-3402``). If the
     profile counts nulls there, the contract and the data disagree, and the
     contract wins.
+
+    A categorical column never declares one the profile does not give, nor a
+    published share of zero: an absent ``nullFraction`` already draws no null,
+    and a declared one, even ``'0'``, keeps the column from being the column
+    another is drawn given (``FLX-3402``, ADR 0014 section 3).
     """
+    categorical = ctx.column.logical_type.kind in (LogicalKind.STRING, LogicalKind.BOOL)
     nulls = _published(ctx.entry, "nullCount")
     count = _published(ctx.entry, "count")
     tokens = ("nullFraction",)
@@ -433,12 +460,19 @@ def _null_fraction(ctx: ColumnContext, plan: ColumnPlan) -> None:
         if isinstance(count, int):
             _read(ctx, plan, "count", "with nullCount, the share of rows that hold a null")
         share = min(Fraction(nulls, total), Fraction(1)) if total else Fraction(0)
+        if categorical and share == 0:
+            plan.reads.append(
+                (
+                    _metric_tokens(ctx, "nullCount"),
+                    "checked: the column holds no null, so it declares none",
+                )
+            )
+            return
         plan.declaration["nullFraction"] = _share_text(share)
         plan.labels.append(
             Label(tokens, from_profile(ctx.profile_tokens + ("metrics", "nullCount"), _NULL_COUNT))
         )
         return
-    plan.declaration["nullFraction"] = "0"
     if _metric(ctx.entry, "nullCount") is None:
         reason = "The profile has no nullCount, so no nulls are drawn."
     elif _withheld_small(ctx.entry, "nullCount"):
@@ -451,7 +485,9 @@ def _null_fraction(ctx: ColumnContext, plan: ColumnPlan) -> None:
             f"{_withheld_note(ctx.entry, 'nullCount')}, which does not say how many: no nulls "
             "are drawn."
         )
-    plan.labels.append(Label(tokens, assumed(reason)))
+    if not categorical:
+        plan.declaration["nullFraction"] = "0"
+        plan.labels.append(Label(tokens, assumed(reason)))
     plan.assumptions.append(reason)
 
 
@@ -464,6 +500,7 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
     levels_stat = _ungrouped(ctx.entry, _LEVELS)
     support_stat = _ungrouped(ctx.entry, _SUPPORT)
     if enum:
+        plan.level_names = tuple(enum)
         plan.declaration["support"] = "declared"
         plan.declaration["maxCardinality"] = len(enum)
         plan.labels.append(
@@ -493,6 +530,7 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
                 f"The profile publishes no counts for the {len(enum)} levels the contract "
                 "declares, so they are drawn at equal weights."
             )
+            plan.weight_notes.append(plan.assumptions[-1])
             if levels_stat is not None:
                 plan.passed.append(
                     (
@@ -512,6 +550,7 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
     if levels_stat is not None:
         index, statistic, _group = levels_stat
         levels = [str(level) for level in statistic.get("levels", ())]
+        plan.level_names = tuple(levels)
         plan.declaration["support"] = {"values": levels}
         plan.declaration["maxCardinality"] = len(levels)
         plan.labels.append(
@@ -527,6 +566,7 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
         index, _statistic, group = support_stat
         members = [str(member) for member in group.get("support", ())]
         if members:
+            plan.level_names = tuple(members)
             plan.declaration["support"] = {"values": members}
             plan.declaration["maxCardinality"] = len(members)
             plan.labels.append(
@@ -543,6 +583,7 @@ def _categorical(ctx: ColumnContext, plan: ColumnPlan) -> None:
                 "The profile lists the levels but not their counts, so they are drawn at "
                 "equal weights."
             )
+            plan.weight_notes.append(plan.assumptions[-1])
             plan.properties.append(_support_property(ctx, scorable=True))
             return
     distinct = _published(ctx.entry, "distinctCount")
@@ -594,8 +635,14 @@ def _level_weights(
     total = _group_total(group)
     absent = [level for level in declared if level not in listed] if declared else []
     outside = [level for level in listed if level not in declared] if declared else []
-    weights, bases = _cell_weights(
-        ctx, cells, stat_tokens, "levelCounts", _LEVELS, total=total, absent=len(absent)
+    weights, bases = cell_weights(
+        ctx.minimum_cell,
+        cells,
+        stat_tokens,
+        "levelCounts",
+        _LEVELS,
+        total=total,
+        absent=len(absent),
     )
     found_levels = listed + absent
     levels = list(declared) if declared else listed
@@ -604,7 +651,9 @@ def _level_weights(
     plan.declaration["levels"] = dict(zip(levels, texts, strict=True))
     for level in levels:
         plan.labels.append(Label(("levels", level), by_level[level][1]))
-    plan.assumptions.extend(_withheld_lines(ctx, cells, "level count", total=total, absent=absent))
+    notes = _withheld_lines(ctx, cells, "level count", total=total, absent=absent)
+    plan.assumptions.extend(notes)
+    plan.weight_notes.extend(notes)
     if total is not None and (absent or any(cell.count is None for cell in cells)):
         plan.reads.append(
             (stat_tokens + ("groups", "0", "k"), "the records the withheld counts share")
@@ -655,8 +704,8 @@ def _typical(cells: Sequence[_Cell]) -> Optional[int]:
     return max(1, round(Fraction(sum(published), len(published))))
 
 
-def _cell_weights(
-    ctx: ColumnContext,
+def cell_weights(
+    minimum_cell: int,
     cells: Sequence[_Cell],
     stat_tokens: Tuple[str, ...],
     key: str,
@@ -680,7 +729,7 @@ def _cell_weights(
     """
     published = [cell.count for cell in cells if cell.count is not None]
     unknown = [cell for cell in cells if cell.count is None] + [_Cell(None, _ABSENT)] * absent
-    shares = _unknown_shares(ctx, unknown, published, total)
+    shares = _unknown_shares(minimum_cell, unknown, published, total)
     weights: List[Fraction] = []
     bases: List[Basis] = []
     filled = iter(shares)
@@ -705,7 +754,7 @@ _ABSENT = "absent"
 
 
 def _unknown_shares(
-    ctx: ColumnContext,
+    minimum_cell: int,
     unknown: Sequence[_Cell],
     published: Sequence[int],
     total: Optional[int],
@@ -719,7 +768,7 @@ def _unknown_shares(
             return [(Fraction(1, 2), _NOTHING_LEFT_REASON)] * len(unknown)
         small = [cell for cell in unknown if cell.status == _SMALL]
         each = remainder / len(unknown)
-        small_each = min(_half(ctx), each)
+        small_each = min(Fraction(minimum_cell, 2), each)
         others = len(unknown) - len(small)
         rest = (remainder - small_each * len(small)) / others if others else Fraction(0)
         shares: List[Tuple[Fraction, str]] = []
@@ -738,9 +787,9 @@ def _unknown_shares(
         if cell.status == _SMALL:
             shares.append(
                 (
-                    _half(ctx),
+                    Fraction(minimum_cell, 2),
                     f"The profile withheld this count as a small one (status {status}): it lies "
-                    f"below the minimum cell ({ctx.minimum_cell}), so it is assumed to be half "
+                    f"below the minimum cell ({minimum_cell}), so it is assumed to be half "
                     "of it.",
                 )
             )
@@ -756,10 +805,10 @@ def _unknown_shares(
         else:
             shares.append(
                 (
-                    _half(ctx),
+                    Fraction(minimum_cell, 2),
                     "The profile does not publish this count, nor how many records the table "
                     f"holds, nor any other count: it is assumed to be half the minimum cell "
-                    f"({ctx.minimum_cell}).",
+                    f"({minimum_cell}).",
                 )
             )
     return shares
@@ -913,6 +962,7 @@ def _boolean(ctx: ColumnContext, plan: ColumnPlan) -> None:
     """
     found = _ungrouped(ctx.entry, _LEVELS)
     listed = [str(level) for level in found[1].get("levels", ())] if found is not None else []
+    plan.level_names = ("false", "true")
     if found is not None and listed == ["false", "true"]:
         _level_weights(ctx, plan, found, with_property=False)
         plan.how = "false and true, weighted by the profile's counts"
@@ -921,11 +971,13 @@ def _boolean(ctx: ColumnContext, plan: ColumnPlan) -> None:
         _level_weights(ctx, plan, found, with_property=False, declared=["false", "true"])
         plan.how = "false and true, weighted by the profile's counts"
         return
+    plan.level_names = ("false", "true")
     reason = "The profile publishes no counts of false and true: each is drawn half the time."
     plan.declaration["levels"] = {"false": "0.5", "true": "0.5"}
     plan.labels.append(Label(("levels",), assumed(reason)))
     plan.how = "false and true, at equal weights"
     plan.assumptions.append(reason)
+    plan.weight_notes.append(reason)
 
 
 # --- ordered columns: numbers, dates and timestamps -------------------------
@@ -1271,7 +1323,9 @@ def _from_histogram(
     drawn, drawn_bases = _drawn_edges(ctx, plan, edges, edge_bases)
     cells = _cells(group, "binCounts")
     total = _group_total(group)
-    weights, bases = _cell_weights(ctx, cells, stat_tokens, "binCounts", _HISTOGRAM, total=total)
+    weights, bases = cell_weights(
+        ctx.minimum_cell, cells, stat_tokens, "binCounts", _HISTOGRAM, total=total
+    )
     mean = _published_mean(ctx)
     shaped = None
     if mean is not None and kind in (LogicalKind.INT, LogicalKind.DECIMAL) and _shapes(ctx):

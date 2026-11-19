@@ -135,7 +135,8 @@ def test_every_number_the_run_reads_is_decided_by_an_entry(orders: Authored) -> 
     assert record["declared"] == sum(record["counts"].values()) > 0
     unnamed = [row["pointer"] for row in record["parameters"] if row["entry"] is None]
     assert unnamed == []
-    assert record["counts"] == {"profile": 17, "contract": 0, "assumption": 19, "default": 3}
+    # country declares no assumed nullFraction: an absent one draws no null (ADR 0014).
+    assert record["counts"] == {"profile": 17, "contract": 0, "assumption": 18, "default": 3}
 
 
 def test_published_metrics_become_cited_declarations(orders: Authored) -> None:
@@ -217,7 +218,7 @@ def test_a_timestamp_range_is_the_published_min_and_max(keyed: Authored) -> None
 def test_the_report_names_what_came_from_where_and_the_next_command(orders: Authored) -> None:
     out = orders.init.stdout
     assert (
-        "parameters: 39 declared -- 17 from the pinned profile, 0 from the contract, 19 assumed, "
+        "parameters: 38 declared -- 17 from the pinned profile, 0 from the contract, 18 assumed, "
         "3 default" in out
     )
     assert "country, amount, created_at: The profile withheld nullCount (status A)" in out

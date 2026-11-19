@@ -421,9 +421,27 @@ def test_a_boolean_without_counts_is_drawn_half_the_time() -> None:
 def test_the_null_fraction_rests_on_the_null_count(
     metrics: Dict[str, Any], expected: str, source: Source
 ) -> None:
-    plan = _plan("string", {"domain": "category", "metrics": metrics})
+    plan = _plan("int", {"domain": "number", "metrics": metrics})
     assert plan.declaration["nullFraction"] == expected
     assert _sources(plan)[("nullFraction",)] is source
+
+
+@pytest.mark.parametrize(
+    "metrics",
+    [
+        {"nullCount": _metric("nullCount/1", 0)},
+        {"nullCount": _metric("nullCount/1", status="A")},
+        {},
+    ],
+)
+def test_a_categorical_declares_no_null_fraction_it_is_not_given(metrics: Dict[str, Any]) -> None:
+    """An absent nullFraction draws no null, and a declared one keeps the column from being given."""
+    plan = _plan("string", {"domain": "category", "metrics": metrics})
+    assert "nullFraction" not in plan.declaration
+    counted = _plan(
+        "string", {"domain": "category", "metrics": {"nullCount": _metric("nullCount/1", 30)}}
+    )
+    assert counted.declaration["nullFraction"] == "0.05"
 
 
 def test_a_required_column_declares_no_null_fraction() -> None:
@@ -532,7 +550,13 @@ def test_a_column_of_a_key_or_an_inner_join_declares_no_null_fraction() -> None:
     entry = {"domain": "category", "metrics": {"nullCount": _metric("nullCount/1", status="A")}}
     assert "nullFraction" not in _keyed_plan("string", entry, keyed=True).declaration
     assert "nullFraction" not in _keyed_plan("string", entry, inner=True).declaration
-    assert _keyed_plan("string", entry).declaration["nullFraction"] == "0"
+    assert (
+        _keyed_plan("int", {"domain": "number", "metrics": entry["metrics"]}).declaration[
+            "nullFraction"
+        ]
+        == "0"
+    )
+    assert "nullFraction" not in _keyed_plan("string", entry).declaration
 
 
 def test_a_column_of_a_key_is_never_declared_an_identifier_of_its_own() -> None:
@@ -811,11 +835,14 @@ def share_texts_of(counts: List[int], levels: List[str]) -> Dict[str, str]:
 
 
 def test_a_null_count_withheld_under_another_status_is_said_to_be_of_unknown_size() -> None:
-    entry = {"domain": "category", "metrics": {"nullCount": _metric("nullCount/1", status="C")}}
-    plan = _plan("string", entry)
+    entry = {"domain": "number", "metrics": {"nullCount": _metric("nullCount/1", status="C")}}
+    plan = _plan("int", entry)
     assert plan.declaration["nullFraction"] == "0"
     reason = next(label.basis.reason for label in plan.labels if label.tokens == ("nullFraction",))
     assert reason is not None and "status C" in reason and "does not say how many" in reason
+    categorical = _plan("string", {"domain": "category", "metrics": entry["metrics"]})
+    assert "nullFraction" not in categorical.declaration
+    assert any("status C" in sentence for sentence in categorical.assumptions)
 
 
 def test_a_placeholder_foreign_key_draws_over_its_parent_s_span() -> None:

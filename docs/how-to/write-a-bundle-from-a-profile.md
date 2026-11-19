@@ -173,7 +173,7 @@ unused (no number rests on these; the register lists them):
   - /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
   - /tables/orders/columns/created_at/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
   - /tables/orders/columns/created_at/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
-parameters: 34 declared -- 12 from the pinned profile, 0 from the contract, 19 assumed, 3 default
+parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default
 assumed (the register gives each assumed number its reason; replace what you know better):
   - country: The profile publishes how many distinct values the column holds and neither the values nor their counts: as many opaque levels, named country-<n>, at equal weights.
   - country, amount, created_at: The profile withheld nullCount (status A): a count withheld as small is zero or below the minimum cell, so no nulls are drawn.
@@ -226,6 +226,7 @@ The rules run from the most the profile says to the least:
 | a mean: `sum` and `count`, or a `mean/1` statistic | the histogram shaped to that mean and, for a `mean/1` over a number column with a published range, a `mean` property the run is checked against | profile, with the shape assumed |
 | `nullCount` | `nullFraction` | profile |
 | a histogram, level counts or a list of levels | `bins` and weights, `levels`, and a property the run is scored on | profile |
+| a histogram or level counts grouped by a categorical column | `given` that column, with `binWeightsGiven` or `levelWeightsGiven` from the group counts, and a grouped property | profile |
 | as many distinct values as values | `unique: true`: an identifier the engine derives | no number |
 | an `enum(...)` type | `support: declared`, with `maxCardinality` its number of levels | contract |
 | a key, in its `semantics` | no key of its own: the engine reads keys from the contract | no number |
@@ -251,6 +252,11 @@ These rules shape the assumptions:
   the foreign keys that reference it are declared over, or moved inside the key it
   references when that key's span is published, down a chain of keys. A foreign key the
   profile says nothing of is drawn over the span of the key it references.
+- Grouped statistics are read as two-way tables. Each pair of columns is scored by its
+  mutual information, and the tree of the most informative links that makes no cycle
+  decides which column is drawn given which: at most one `given` per column, a number
+  column only at the end of a link, and never given a column that holds nulls. A grouping
+  the tree leaves out is unused, and the output says why.
 - A column of a key over several columns spans its rows the same way, and a text one
   takes as many opaque levels as rows, so the key can hold one value per row. A key's
   columns declare no `nullFraction`, nor does an `inner` foreign key, and a composite
@@ -305,13 +311,13 @@ plan written to ...
 coverage: orders: 1 of 4 columns fell back to a type default
   created_at (TIMESTAMP): uniform within the simulation's time bounds: the column declares no draw of its own
 --strict-coverage refuses the run, and so does strictCoverage in the bundle; fluxsim explain FLX-3304 says how to cover a column
-parameters: 34 declared -- 12 from the pinned profile, 0 from the contract, 19 assumed, 3 default; 4 statistics of the profile unused
+parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default; 4 statistics of the profile unused
 applied to ...
 emitted orders: 600 rows (generator)
 reproducible: not checked | validity: not asserted
 ...
   fidelity orders: passed -- 1 of 1 declared property within the margin against the pinned profile
-  parameters: 34 declared -- 12 from the pinned profile, 0 from the contract, 19 assumed, 3 default; 4 statistics of the profile unused
+  parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default; 4 statistics of the profile unused
   scorecard: overall ... against profile sha256:...
 ...
 shipped out/bundle.flux.tgz

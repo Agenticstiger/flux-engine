@@ -45,6 +45,7 @@ from flux_engine.author.columns import (
     plan_column,
     widen_key_span,
 )
+from flux_engine.author.given import choose_givens
 from flux_engine.author.ledger import Ledger
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
@@ -400,6 +401,13 @@ def _plan_expose(
         )
         authored.columns.append(plan)
         authored.kinds[plan.name] = column.logical_type.kind
+    choose_givens(
+        authored.columns,
+        authored.kinds,
+        profiled if isinstance(profiled, Mapping) else {},
+        ("tables", expose_id),
+        minimum_cell=minimum_cell,
+    )
     return authored
 
 
@@ -720,19 +728,22 @@ def _ledger(
                 ("tables", expose.expose_id), f"the expose was not written: {expose.skipped}"
             )
             continue
+        # What a rule says it read comes first: it is more specific than a citation.
+        for column in expose.columns:
+            for tokens, how in column.reads:
+                ledger.use(tokens, how)
+        for prop in expose.properties:
+            for tokens, how in prop.reads:
+                ledger.use(tokens, how)
         _cite(ledger, expose.rows_basis)
         for column in expose.columns:
             for label in column.labels:
                 _cite(ledger, label.basis)
-            for tokens, how in column.reads:
-                ledger.use(tokens, how)
             for tokens, why in column.passed:
                 ledger.unused(tokens, why)
         for prop in expose.properties:
             for label in prop.labels:
                 _cite(ledger, label.basis)
-            for tokens, how in prop.reads:
-                ledger.use(tokens, how)
     return ledger
 
 

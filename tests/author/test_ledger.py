@@ -186,7 +186,34 @@ def _profile() -> Dict[str, Any]:
         },
         "tables": {
             "customer": {"rowCount": 100, "columns": customer},
-            "orders": {"rowCount": 500, "columns": orders},
+            "orders": {
+                "rowCount": 500,
+                "columns": orders,
+                "columnPairs": [
+                    {
+                        "columns": ["order_id", "amount"],
+                        "statistics": [
+                            {
+                                "definition": "correlation/1",
+                                "sampleSize": SAMPLE,
+                                "disclosure": "acro-default",
+                                "groups": [
+                                    {
+                                        "group": "",
+                                        "k": 500,
+                                        "Sx": "0",
+                                        "Sy": "0",
+                                        "Sxx": "0",
+                                        "Syy": "0",
+                                        "Sxy": "0",
+                                        "status": "F",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
         },
         "relationships": [
             {
@@ -209,6 +236,8 @@ def _profile() -> Dict[str, Any]:
 
 GROUPED = "/tables/customer/columns/tier/statistics/1"
 CHILDREN = "/relationships/0/statistics/0"
+#: A correlation between two number columns: no declaration of a generator emit reads it.
+PAIR = "/tables/orders/columnPairs/0/statistics/0"
 
 
 @pytest.fixture
@@ -235,8 +264,10 @@ def test_every_statistic_is_listed_once_with_its_state(inputs: Dict[str, Path]) 
     ledger = result.artifacts["ledger"]
     states = {entry["pointer"]: entry for entry in ledger["statistics"]}
     assert len(states) == len(ledger["statistics"])
-    assert states[GROUPED]["state"] == "unused"
-    assert "grouped by another column" in states[GROUPED]["note"]
+    assert states[GROUPED]["state"] == "used"
+    assert "weights of tier given segment" in states[GROUPED]["note"]
+    assert states[PAIR]["state"] == "unused"
+    assert "correlation" in states[PAIR]["note"]
     assert states[CHILDREN]["state"] == "unused"
     assert "children per parent" in states[CHILDREN]["note"]
     assert states["/tables/customer/columns/customer_id/metrics/nullCount"]["state"] == "withheld"
@@ -245,7 +276,7 @@ def test_every_statistic_is_listed_once_with_its_state(inputs: Dict[str, Path]) 
     counts = ledger["counts"]
     assert sum(counts.values()) == len(states)
     assert f"profile: {len(states)} statistics -- {counts['used']} used" in result.stdout
-    assert f"  - {GROUPED} (levelHistogram/1): " in result.stdout
+    assert f"  - {PAIR} (correlation/1): " in result.stdout
     assert f"  - {CHILDREN} (mean/1): " in result.stdout
 
 
@@ -259,7 +290,7 @@ def test_the_register_lists_them_and_the_evidence_names_them(inputs: Dict[str, P
     unused = [
         e["pointer"] for e in result.artifacts["ledger"]["statistics"] if e["state"] == "unused"
     ]
-    assert pointers == unused and GROUPED in pointers and CHILDREN in pointers
+    assert pointers == unused and PAIR in pointers and CHILDREN in pointers
     state = inputs["root"] / "state"
     out = inputs["root"] / "out"
     outcome = run(
@@ -274,7 +305,7 @@ def test_the_register_lists_them_and_the_evidence_names_them(inputs: Dict[str, P
     assert [item["statistic"]["pointer"] for item in record["unused"]] == pointers
     evidence = (state / "runs" / run_id / "EVIDENCE.md").read_text(encoding="utf-8")
     assert "no number of this run rests on" in evidence
-    assert f"`{GROUPED}`" in evidence
+    assert f"`{PAIR}`" in evidence
 
 
 def test_strict_writes_nothing_and_names_each_finding(inputs: Dict[str, Path]) -> None:
@@ -282,13 +313,13 @@ def test_strict_writes_nothing_and_names_each_finding(inputs: Dict[str, Path]) -
     assert result.exit_code == 1
     assert not (inputs["root"] / "strict").exists()
     assert "--strict refuses this bundle" in result.stderr
-    assert f"  unused {GROUPED} (levelHistogram/1): " in result.stderr
+    assert f"  unused {PAIR} (correlation/1): " in result.stderr
     assert f"  unused {CHILDREN} (mean/1): " in result.stderr
     assert "  gap /extensions/com.agentics.flux~11/emits/orders/fidelity/columns/customer_id" in (
         result.stderr
     )
     found = result.artifacts["strict"]
-    assert GROUPED in [item["pointer"] for item in found["unused"]]
+    assert PAIR in [item["pointer"] for item in found["unused"]]
     assert found["staleAllow"] == []
 
 

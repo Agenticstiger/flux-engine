@@ -57,6 +57,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   whose levels are a subset of the contract's `enum` now weighs the draw, and the
   message names the levels it did not list.
 
+- `fluxsim init` reads grouped statistics (ADR 0014 section 4). A level or
+  marginal histogram grouped by a categorical column is a two-way table; each
+  is scored by its mutual information, and the Chow-Liu forest under the
+  generator's rules decides which column is drawn `given` which. The child
+  declares `levelWeightsGiven` or `binWeightsGiven` from the group counts, a
+  withheld cell filled from its group's `k`, and a grouped property the run is
+  scored on. A grouping the forest leaves out is unused in the ledger, with the
+  reason. `calibrate.structure.spanning_forest` is the selection step of
+  `suggest_tree`, callable with scores of the caller's own.
+- A categorical column is written with no assumed `nullFraction`, and none for a
+  published null count of zero: an absent one draws no null, and a declared one
+  kept the column from being drawn on (`FLX-3402`).
+
 ## 0.7.0 - 2026-11-19
 
 flux-stats exports the read of a FLUX bundle that the engine takes its digests
