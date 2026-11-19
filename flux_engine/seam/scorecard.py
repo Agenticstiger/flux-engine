@@ -22,8 +22,12 @@ and ``ship`` withholds a run that misses one:
               marginals: { mustBeGreaterOrEqualTo: "0.95" }
             tables:
               payment_recovery_moment: { mustBeGreaterThan: "0.8" }
+          coverage:
+            columns: "0.8"
+            relationships: "0.5"
 
-This module holds what the declaration and the scorecard share, so the two
+``coverage`` floors the share of the contract the score speaks for
+(docs/spec/SCORECARD-SPEC.md §5), not how well the run scored. This module holds what the declaration and the scorecard share, so the two
 cannot disagree: the eight dimensions in their fixed order, the dimension each
 property kind is scored in, and the thresholds. It reads the block, never a
 record or a profile.
@@ -48,6 +52,7 @@ from flux_engine.core.canonical import nfc
 from flux_engine.core.errors import ErrorCode, FluxError
 
 __all__ = [
+    "COVERAGE_KINDS",
     "DIMENSIONS",
     "SCORED_DIMENSIONS",
     "THRESHOLD_OPERATORS",
@@ -80,6 +85,10 @@ DIMENSIONS: Tuple[str, ...] = (
 #: five have no property kind yet, so a scorecard reports them as not measured
 #: and a threshold on one is refused: it could only ever withhold.
 SCORED_DIMENSIONS: FrozenSet[str] = frozenset({"structure", "marginals", "joint"})
+
+#: What coverage counts: the contract's columns that carry a scored property, and
+#: its declared relationships the profile constrains.
+COVERAGE_KINDS: Tuple[str, ...] = ("columns", "relationships")
 
 #: A threshold's operator: ODCS's two floors.
 THRESHOLD_OPERATORS: Tuple[str, ...] = ("mustBeGreaterOrEqualTo", "mustBeGreaterThan")
@@ -138,9 +147,11 @@ class DeclaredProperty:
 class Threshold:
     """One declared floor on one score.
 
-    ``scope`` is ``overall``, ``dimension`` or ``table``, and ``name`` is the
-    dimension or the ``exposeId`` (``None`` for ``overall``). ``declared`` is
-    the operand as written, and ``value`` its exact reading.
+    ``scope`` is ``overall``, ``dimension``, ``table`` or ``coverage``, and
+    ``name`` is the dimension, the ``exposeId`` or the coverage kind (``None``
+    for ``overall``). A ``coverage`` floor reads a share of the contract, not a
+    score, and its operator is ``mustBeGreaterOrEqualTo``. ``declared`` is the
+    operand as written, and ``value`` its exact reading.
     """
 
     scope: str
@@ -154,7 +165,7 @@ class Threshold:
         """Where the threshold sits in the block: ``overall``, ``dimensions.<name>``..."""
         if self.scope == "overall":
             return "overall"
-        prefix = "dimensions" if self.scope == "dimension" else "tables"
+        prefix = {"dimension": "dimensions", "table": "tables"}.get(self.scope, self.scope)
         return f"{prefix}.{self.name}"
 
     def met_by(self, score: Optional[Fraction]) -> bool:
@@ -168,7 +179,7 @@ class Threshold:
 
 @dataclass(frozen=True)
 class ScorecardDeclaration:
-    """The validated ``scorecard`` block: its thresholds, overall first."""
+    """The validated ``scorecard`` block: its thresholds, overall first, coverage floors last."""
 
     thresholds: Tuple[Threshold, ...]
 
@@ -358,6 +369,41 @@ def _table_thresholds(
     return found
 
 
+def _coverage_thresholds(
+    value: Any,
+    emits: Mapping[str, Optional[Sequence[DeclaredProperty]]],
+    *,
+    where: str,
+    code: ErrorCode,
+) -> List[Threshold]:
+    """``coverage``: one floor per named kind, in the order of :data:`COVERAGE_KINDS`."""
+    declared = _mapping(value, where, code)
+    if not declared:
+        raise _refuse(code, f"{where} names at least one of {list(COVERAGE_KINDS)}")
+    _keys(declared, COVERAGE_KINDS, where, code)
+    normalised = _normalised(declared, where, code)
+    if not _scored_dimensions(emits):
+        raise _refuse(
+            code,
+            f"{where}: no emit declares a fidelity property this engine scores, so no column "
+            "carries a scored property and the floor could only withhold; declare one under "
+            "emits, or remove the floor",
+        )
+    found: List[Threshold] = []
+    for kind in (name for name in COVERAGE_KINDS if name in normalised):
+        exact, text = _operand(normalised[kind], f"{where}.{kind}", code)
+        found.append(
+            Threshold(
+                scope="coverage",
+                name=kind,
+                operator="mustBeGreaterOrEqualTo",
+                value=exact,
+                declared=text,
+            )
+        )
+    return found
+
+
 def read_scorecard_block(
     block: Any,
     *,
@@ -383,7 +429,9 @@ def read_scorecard_block(
     * a table the Simulation does not emit, and one that declares no fidelity
       block, whose score is never formed;
     * an operator other than :data:`THRESHOLD_OPERATORS`, and an operand that
-      is not an exact decimal between 0 and 1.
+      is not an exact decimal between 0 and 1;
+    * a ``coverage`` key other than :data:`COVERAGE_KINDS`, and a coverage
+      floor that is not an exact decimal between 0 and 1.
     """
     root = _mapping(block, where, code)
     if not pinned:
@@ -392,11 +440,11 @@ def read_scorecard_block(
             f"{where} declares thresholds on a scorecard, and a scorecard is formed "
             "against a pinned profile; pin one under profile, or remove the block",
         )
-    _keys(root, ("thresholds",), where, code)
-    if "thresholds" not in root:
-        raise _refuse(code, f"{where} holds thresholds")
+    _keys(root, ("thresholds", "coverage"), where, code)
+    if "thresholds" not in root and "coverage" not in root:
+        raise _refuse(code, f"{where} holds thresholds or coverage")
     thresholds_where = f"{where}.thresholds"
-    declared = _mapping(root["thresholds"], thresholds_where, code)
+    declared = _mapping(root["thresholds"], thresholds_where, code) if "thresholds" in root else {}
     _keys(declared, ("overall", "dimensions", "tables"), thresholds_where, code)
 
     found: List[Threshold] = []
@@ -430,8 +478,12 @@ def read_scorecard_block(
             )
         )
 
-    if not found:
+    if "thresholds" in root and not found:
         raise _refuse(code, f"{thresholds_where} declares at least one threshold")
+    if "coverage" in root:
+        found.extend(
+            _coverage_thresholds(root["coverage"], emits, where=f"{where}.coverage", code=code)
+        )
     return ScorecardDeclaration(thresholds=tuple(found))
 
 
@@ -440,7 +492,8 @@ def thresholds_document(declaration: ScorecardDeclaration) -> Dict[str, Any]:
 
     The plan holds what the run is gated on, so ``verify`` and ``ship`` read
     the thresholds through the plan's digest rather than from a bundle
-    directory nothing binds to the run.
+    directory nothing binds to the run. A coverage floor is a row of the same
+    list, targeted ``coverage.columns`` or ``coverage.relationships``.
     """
     return {
         "thresholds": [
@@ -481,9 +534,13 @@ def declaration_from_plan(document: Any, *, code: ErrorCode) -> Optional[Scoreca
             scope_name = ("dimension", name)
         elif scope == "tables" and name:
             scope_name = ("table", name)
+        elif scope == "coverage" and name in COVERAGE_KINDS:
+            scope_name = ("coverage", name)
         else:
             raise _refuse(
-                code, f"{where}.target is overall, dimensions.<name> or tables.<exposeId>"
+                code,
+                f"{where}.target is overall, dimensions.<name>, tables.<exposeId> or "
+                "coverage.<columns|relationships>",
             )
         exact, declared = _operand(entry.get("value"), f"{where}.value", code)
         found.append(

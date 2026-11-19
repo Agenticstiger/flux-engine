@@ -27,6 +27,8 @@ from flux_engine.concordance.compiler import CompiledFidelity
 from flux_engine.concordance.scorecard import (
     REFUSED,
     SCHEMA_URL,
+    ContractShape,
+    DeclaredLink,
     Scorecard,
     TableInput,
     build_scorecard,
@@ -46,7 +48,7 @@ pytestmark = pytest.mark.unit
 
 EXPOSE = "recovery_moment"
 SPEC = Path(__file__).resolve().parents[2] / "docs" / "spec"
-SCHEMA = json.loads((SPEC / "scorecard-1.schema.json").read_text(encoding="utf-8"))
+SCHEMA = json.loads((SPEC / "scorecard-1-2.schema.json").read_text(encoding="utf-8"))
 DIGEST = "sha256:" + "a" * 64
 
 
@@ -65,9 +67,11 @@ def _scorecard(
     declaration: ScorecardDeclaration | None = None,
     min_credibility: str | None = None,
     extra: List[TableInput] | None = None,
+    contract: ContractShape | None = None,
 ) -> Scorecard:
+    profile = parse_profile(document)
     evaluation = ClearProfile(
-        compiled=compiled, profile=parse_profile(document), synthetic_rows=list(rows)
+        compiled=compiled, profile=profile, synthetic_rows=list(rows)
     ).evaluate()
     tables = [
         TableInput(
@@ -75,6 +79,7 @@ def _scorecard(
             compiled=compiled,
             evaluation=evaluation,
             min_credibility=min_credibility,
+            contract=contract,
         ),
         *(extra or []),
     ]
@@ -85,6 +90,7 @@ def _scorecard(
         profile_digest=DIGEST,
         tables=tables,
         declaration=declaration,
+        profile=profile,
     )
 
 
@@ -452,3 +458,189 @@ def test_the_published_example_is_a_valid_scorecard() -> None:
         if column.get("flags")
     }
     assert "subscriber_snapshot" in flagged, "a table with no fidelity block is checked too"
+
+
+# ---------------------------------------------------------------------------
+# Coverage: how much of the contract the score speaks for
+# ---------------------------------------------------------------------------
+
+#: The contract's columns: three carry a scored property in the block, two do not.
+CONTRACT_COLUMNS = ("amount", "attempts", "market", "note", "region")
+LINK = DeclaredLink(
+    parent="customer",
+    parent_columns=("id",),
+    child=EXPOSE,
+    child_columns=("attempts",),
+)
+
+
+def _with_relationship(document: Dict[str, Any], *, published: bool = True) -> Dict[str, Any]:
+    """*document* with a ``customer`` table and children-per-parent statistics for ``LINK``."""
+    found = edited(document)
+    found["tables"]["customer"] = {"rowCount": 10, "columns": {"id": {"domain": "number"}}}
+    statistic = edited(found["tables"][EXPOSE]["columns"]["amount"]["statistics"][0])
+    if not published:
+        statistic["groups"] = [
+            {"group": group["group"], "status": "A"} for group in statistic["groups"]
+        ]
+    found["relationships"] = [
+        {
+            "parent": {"table": "customer", "columns": ["id"]},
+            "child": {"table": EXPOSE, "columns": ["attempts"]},
+            "statistics": [statistic],
+        }
+    ]
+    return found
+
+
+def test_a_profile_that_constrains_no_relationship_covers_none_of_them(
+    compiled: CompiledFidelity,
+    committed_rows: List[Dict[str, Any]],
+    profile_document: Dict[str, Any],
+) -> None:
+    contract = ContractShape(columns=CONTRACT_COLUMNS, relationships=(LINK,))
+    scorecard = _scorecard(compiled, profile_document, committed_rows, contract=contract)
+    coverage = scorecard.coverage.coverage
+    assert (coverage.relationships.covered, coverage.relationships.of) == (0, 1)
+    assert coverage.relationships.share == 0
+    assert "0 of 1 relationship" in scorecard.coverage.text()
+    document = scorecard.to_document()
+    Draft202012Validator(SCHEMA).validate(document)
+    assert document["coverage"]["relationships"] == {"covered": 0, "of": 1, "share": "0"}
+
+
+def test_a_published_statistic_for_the_pair_constrains_the_relationship(
+    compiled: CompiledFidelity,
+    committed_rows: List[Dict[str, Any]],
+    profile_document: Dict[str, Any],
+) -> None:
+    contract = ContractShape(columns=CONTRACT_COLUMNS, relationships=(LINK,))
+    published = _scorecard(
+        compiled, _with_relationship(profile_document), committed_rows, contract=contract
+    )
+    assert published.coverage.coverage.relationships.covered == 1
+    withheld = _scorecard(
+        compiled,
+        _with_relationship(profile_document, published=False),
+        committed_rows,
+        contract=contract,
+    )
+    assert withheld.coverage.coverage.relationships.covered == 0, "nothing was published"
+    other = DeclaredLink(
+        parent="customer", parent_columns=("id",), child=EXPOSE, child_columns=("market",)
+    )
+    elsewhere = _scorecard(
+        compiled,
+        _with_relationship(profile_document),
+        committed_rows,
+        contract=ContractShape(columns=CONTRACT_COLUMNS, relationships=(other,)),
+    )
+    assert elsewhere.coverage.coverage.relationships.covered == 0, "another key is not this one"
+
+
+def test_columns_count_only_where_a_property_was_scored(
+    compiled: CompiledFidelity,
+    committed_rows: List[Dict[str, Any]],
+    profile_document: Dict[str, Any],
+) -> None:
+    contract = ContractShape(columns=CONTRACT_COLUMNS)
+    scorecard = _scorecard(compiled, profile_document, committed_rows, contract=contract)
+    table = scorecard.table(EXPOSE)
+    assert table is not None and table.coverage is not None
+    assert (table.coverage.columns.covered, table.coverage.columns.of) == (3, 5)
+    assert table.coverage.columns.share == Fraction(3, 5)
+    assert table.coverage.relationships.share is None, "none declared, so no share"
+    assert (scorecard.coverage.tables_counted, scorecard.coverage.tables_total) == (1, 1)
+    assert scorecard.summary_lines()[0].endswith("(covers 3 of 5 columns, 0 of 0 relationships)")
+    # A column whose every property is censored carries no scored property.
+    document = edited(profile_document)
+    support = document["tables"][EXPOSE]["columns"]["market"]["statistics"][0]
+    support["groups"] = [{"group": group["group"], "status": "A"} for group in support["groups"]]
+    censored = _scorecard(compiled, document, committed_rows, contract=contract)
+    assert censored.coverage.coverage.columns.covered == 2
+
+
+def test_a_table_with_no_recorded_contract_is_not_counted(
+    compiled: CompiledFidelity,
+    committed_rows: List[Dict[str, Any]],
+    profile_document: Dict[str, Any],
+) -> None:
+    scorecard = _scorecard(
+        compiled,
+        profile_document,
+        committed_rows,
+        contract=ContractShape(columns=CONTRACT_COLUMNS),
+        extra=[TableInput(expose_id="subscriber_snapshot")],
+    )
+    snapshot = scorecard.table("subscriber_snapshot")
+    assert snapshot is not None and snapshot.coverage is None
+    assert (scorecard.coverage.tables_counted, scorecard.coverage.tables_total) == (1, 2)
+    assert "1 of 2 tables not counted" in scorecard.coverage.text()
+    document = scorecard.to_document()
+    Draft202012Validator(SCHEMA).validate(document)
+    assert document["coverage"]["tables"] == {"counted": 1, "total": 2}
+    assert [table["coverage"] is None for table in document["tables"]] == [False, True]
+    bare = build_scorecard(
+        run_id="0123456789abcdef",
+        plan_digest=DIGEST,
+        run_digest=DIGEST,
+        profile_digest=DIGEST,
+        tables=[TableInput(expose_id="x")],
+    )
+    assert "coverage not known" in bare.coverage.text()
+
+
+def test_a_coverage_floor_is_met_or_missed_by_the_share(
+    compiled: CompiledFidelity,
+    committed_rows: List[Dict[str, Any]],
+    profile_document: Dict[str, Any],
+) -> None:
+    contract = ContractShape(columns=CONTRACT_COLUMNS, relationships=(LINK,))
+    floors = ScorecardDeclaration(
+        thresholds=(
+            _threshold("coverage", "columns", "mustBeGreaterOrEqualTo", "0.6"),
+            _threshold("coverage", "columns", "mustBeGreaterOrEqualTo", "0.61"),
+            _threshold("coverage", "relationships", "mustBeGreaterOrEqualTo", "0.5"),
+        )
+    )
+    scorecard = _scorecard(
+        compiled, profile_document, committed_rows, declaration=floors, contract=contract
+    )
+    assert [result.met for result in scorecard.thresholds] == [True, False, False]
+    assert [result.score for result in scorecard.thresholds] == [
+        Fraction(3, 5),
+        Fraction(3, 5),
+        Fraction(0),
+    ]
+    assert not scorecard.met
+    assert len(scorecard.failure_lines()) == 2
+    assert scorecard.thresholds[1].line() == (
+        "threshold coverage.columns mustBeGreaterOrEqualTo 0.61: not met (0.6)"
+    )
+    assert "covers 3 of 5 columns" in scorecard.failure_lines()[0]
+    assert scorecard.contributors(floors.thresholds[1]) == (EXPOSE,)
+    Draft202012Validator(SCHEMA).validate(scorecard.to_document())
+    constrained = _scorecard(
+        compiled,
+        _with_relationship(profile_document),
+        committed_rows,
+        declaration=ScorecardDeclaration(thresholds=(floors.thresholds[2],)),
+        contract=contract,
+    )
+    assert constrained.met, "one of one relationship is constrained"
+
+
+def test_a_coverage_floor_with_nothing_declared_is_not_met(
+    compiled: CompiledFidelity,
+    committed_rows: List[Dict[str, Any]],
+    profile_document: Dict[str, Any],
+) -> None:
+    floor = _threshold("coverage", "relationships", "mustBeGreaterOrEqualTo", "0")
+    scorecard = _scorecard(
+        compiled,
+        profile_document,
+        committed_rows,
+        declaration=ScorecardDeclaration(thresholds=(floor,)),
+        contract=ContractShape(columns=CONTRACT_COLUMNS),
+    )
+    assert scorecard.thresholds[0].score is None and not scorecard.thresholds[0].met

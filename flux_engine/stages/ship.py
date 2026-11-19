@@ -365,7 +365,7 @@ def _decide_emit(
 
     from flux_engine.concordance.compiler import compile_fidelity
     from flux_engine.concordance.predicate import expose_from_contract
-    from flux_engine.stages._scorecard import min_credibility
+    from flux_engine.stages._scorecard import contract_shape, min_credibility
 
     if slice_uri is None and pinned is None:
         return EmitOutcome(
@@ -412,7 +412,15 @@ def _decide_emit(
             ),
         )
     compiled = compile_fidelity(contract=contract_document, emit=emit_entry, expose=expose)
-    scored = ProfileCheck(expose_id=expose_id, compiled=compiled) if pinned is not None else None
+    scored = (
+        ProfileCheck(
+            expose_id=expose_id,
+            compiled=compiled,
+            contract=contract_shape(contract_document, expose_id),
+        )
+        if pinned is not None
+        else None
+    )
 
     binding = _binding_checks(
         bundle_directory, compiled, contract_document, attestation, planned_emit
@@ -1014,7 +1022,7 @@ def _scorecard_summary_text(scorecard: "Scorecard") -> str:
         f"\n\nScorecard (`run/{SCORECARD_FILE}`), against the pinned profile "
         f"`{scorecard.profile_digest}`:",
         "",
-        f"- overall: {display(scorecard.overall.score)}",
+        f"- overall: {display(scorecard.overall.score)} ({scorecard.coverage.text()})",
     ]
     lines.extend(f"- {line}" for line in scorecard.detail_lines())
     for result in scorecard.credibility:
@@ -1038,7 +1046,10 @@ def _scorecard_not_proven(scorecard: "Scorecard") -> str:
         text += " These dimensions were not measured at all: " + ", ".join(unmeasured) + "."
     text += (
         " A score says how close the run is to the profile, not that the profile "
-        "describes its source accurately."
+        "describes its source accurately. Coverage counts how much of the contract the "
+        "score speaks for: a column counts when a scored property covers it, and a declared "
+        "relationship counts when the profile constrains it. No property scores children per "
+        "parent yet, so a relationship is counted, not scored."
     )
     if scorecard.shape is not None:
         text += (

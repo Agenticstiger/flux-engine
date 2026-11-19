@@ -158,7 +158,7 @@ from flux_engine.stages.plan import read_column_provenance, read_parameter_regis
 if TYPE_CHECKING:
     from flux_engine.concordance.compiler import CompiledFidelity
     from flux_engine.concordance.sampling import SampledEvaluation, SampleRequest
-    from flux_engine.concordance.scorecard import Scorecard, TableInput
+    from flux_engine.concordance.scorecard import ContractShape, Scorecard, TableInput
     from flux_engine.concordance.shape import ShapeReport
     from flux_engine.concordance.verifier import FidelityEvaluation, PropertyOutcome
     from flux_engine.seam.profile import PinnedProfile
@@ -663,6 +663,8 @@ class ProfileCheck:
     compiled: Optional["CompiledFidelity"] = None
     evaluation: Optional["FidelityEvaluation"] = None
     min_credibility: Optional[str] = None
+    #: The emit's contract columns and declared relationships, for coverage.
+    contract: Optional["ContractShape"] = None
 
     def table_input(self) -> "TableInput":
         """This emit as the scorecard reads it."""
@@ -674,6 +676,7 @@ class ProfileCheck:
             evaluation=self.evaluation,
             min_credibility=self.min_credibility,
             declares_fidelity=self.compiled is not None or self.evaluation is not None,
+            contract=self.contract,
         )
 
     def leg_outcome(self) -> Dict[str, Any]:
@@ -714,6 +717,7 @@ def _profile_checks(
     from flux_engine.concordance.errors import FLX_8001
     from flux_engine.concordance.predicate import expose_from_contract
     from flux_engine.stages._scorecard import (
+        contract_shape,
         evaluate_against_profile,
         min_credibility,
         refused_evaluation,
@@ -734,9 +738,11 @@ def _profile_checks(
                 evaluation=refused_evaluation(expose_id, FLX_8001.code, reason),
             )
             continue
+        shape: Optional["ContractShape"] = None
         try:
             fidelity_input = _read_json(fidelity_input_path)
             contract_document = fidelity_input["contract"]
+            shape = contract_shape(contract_document, expose_id)
             expose = expose_from_contract(contract_document, expose_id)
             compiled = compile_fidelity(
                 contract=contract_document, emit=fidelity_input["emit"], expose=expose
@@ -747,6 +753,7 @@ def _profile_checks(
             checks[expose_id] = ProfileCheck(
                 expose_id=expose_id,
                 evaluation=refused_evaluation(expose_id, error.code.code, error.detail),
+                contract=shape,
             )
             continue
         except _UNREADABLE as error:
@@ -755,6 +762,7 @@ def _profile_checks(
             checks[expose_id] = ProfileCheck(
                 expose_id=expose_id,
                 evaluation=refused_evaluation(expose_id, FLX_8001.code, reason),
+                contract=shape,
             )
             continue
         checks[expose_id] = ProfileCheck(
@@ -766,6 +774,7 @@ def _profile_checks(
                 else evaluate_against_profile(compiled, pinned, synthetic_rows)
             ),
             min_credibility=floor,
+            contract=shape,
         )
     return checks
 

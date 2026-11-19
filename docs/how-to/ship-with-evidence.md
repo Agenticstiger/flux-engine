@@ -273,9 +273,9 @@ fluxsim run . --profile ../source.profile.json --verify --ship -o ../out
 `verify` and `ship` then compare each emit's declared properties with the profile and score the run, per property, per table, per dimension and overall ([SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md)). `verify` prints the scores under its legs:
 
 ```text
-  scorecard: overall 0.9871 against profile sha256:...
+  scorecard: overall 0.9871 against profile sha256:... (covers 3 of 5 columns, 0 of 1 relationship)
     dimensions: structure 1, marginals 0.9744; not measured: joint, crossTable, temporal, invariants, queries, defects
-    table payment_recovery_moment: 0.9871 (2 of 2 properties scored)
+    table payment_recovery_moment: 0.9871 (2 of 2 properties scored); covers 3 of 5 columns, 0 of 1 relationship
     shape: no flags in 3 profiled columns (no count table to test)
 ```
 
@@ -291,6 +291,8 @@ extensions:
     scorecard:
       thresholds:
         overall: { mustBeGreaterOrEqualTo: "0.95" }
+      coverage:   # a floor on how much of the contract the score speaks for
+        columns: "0.8"
 ```
 
 A shipped pack carries the scores as `run/scorecard.json`, and `EVIDENCE.md` summarises them. A run whose Simulation pins a profile is refused by `ship` without it (`FLX-3109`), and with another profile (`FLX-3110`).

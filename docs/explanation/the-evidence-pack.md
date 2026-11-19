@@ -51,8 +51,8 @@ packed with the bundle; pass `--state-dir` outside the bundle if you want it lef
 
 A run whose Simulation pins a profile, shipped with `--profile`, also carries
 `run/scorecard.json`: the run's scores against that profile, per property, per table, per
-dimension and overall, with any declared thresholds and the shape flags of every profiled
-column ([SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md)). The pack holds the bytes `ship`
+dimension and overall, how much of the contract those scores cover, any declared
+thresholds, and the shape flags of every profiled column ([SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md)). The pack holds the bytes `ship`
 computed: the scores the gate decided on, and beside them the shape flags, which gate nothing.
 
 A run whose Simulation declares a parameter register also carries

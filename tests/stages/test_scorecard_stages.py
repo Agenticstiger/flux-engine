@@ -42,7 +42,7 @@ from .conftest import FIXTURE_BUNDLE, write_committed_slice
 
 EXPOSE = "payment_recovery_moment"
 SCHEMA = json.loads(
-    (Path(__file__).resolve().parents[2] / "docs" / "spec" / "scorecard-1.schema.json").read_text(
+    (Path(__file__).resolve().parents[2] / "docs" / "spec" / "scorecard-1-2.schema.json").read_text(
         encoding="utf-8"
     )
 )
@@ -728,3 +728,45 @@ def test_an_empty_bin_is_flagged_through_verify_and_ship(
     evidence = _packed(Path(shipped.artifacts["archive"]), "EVIDENCE.md").decode("utf-8")
     assert f"- shape of {EXPOSE}.amount: EMPTY_BINS (cells 1)" in evidence
     assert "The shape flags test every profiled column at a level of 1/1000" in evidence
+
+
+def test_the_overall_score_is_printed_with_what_it_covers(
+    tmp_path: Path, own_pinned: Pinned
+) -> None:
+    pinned = own_pinned
+    verified = pinned.verify(profile=pinned.profile)
+    document = verified.artifacts["scorecard"]["document"]
+    Draft202012Validator(SCHEMA).validate(document)
+    columns, relationships = document["coverage"]["columns"], document["coverage"]["relationships"]
+    assert columns["covered"] <= columns["of"] and columns["of"] > 0
+    assert (relationships["covered"], relationships["of"]) == (0, 0)
+    covers = (
+        f"covers {columns['covered']} of {columns['of']} columns, "
+        f"{relationships['covered']} of {relationships['of']} relationships"
+    )
+    assert f"  scorecard: overall 1 against profile {pinned.digest} ({covers})" in verified.stdout
+    table = next(entry for entry in document["tables"] if entry["exposeId"] == EXPOSE)
+    assert table["coverage"] == {"columns": columns, "relationships": relationships}
+    shipped = pinned.ship(tmp_path / "out", profile=pinned.profile)
+    evidence = _packed(Path(shipped.artifacts["archive"]), "EVIDENCE.md").decode("utf-8")
+    assert f"- overall: 1 ({covers})" in evidence
+    assert "a relationship is counted, not scored" in evidence
+
+
+def test_a_coverage_floor_the_run_falls_short_of_withholds_it(
+    tmp_path: Path, own_profile: Dict[str, Any]
+) -> None:
+    block = '    scorecard:\n      coverage:\n        columns: "1"\n'
+    pinned = Pinned(tmp_path, own_profile, scorecard=block)
+    document = pinned.verify(profile=pinned.profile).artifacts["scorecard"]["document"]
+    columns = document["coverage"]["columns"]
+    if columns["covered"] == columns["of"]:
+        pytest.skip("the fixture's profile scores every column of its contract")
+    shipped = pinned.ship(tmp_path / "out", profile=pinned.profile)
+    assert shipped.exit_code == 1, shipped.stderr
+    failed = [
+        check for check in shipped.artifacts["decisions"][EXPOSE]["checks"] if not check["passed"]
+    ]
+    assert [check["check"] for check in failed] == ["scorecard.threshold"]
+    assert "threshold coverage.columns mustBeGreaterOrEqualTo 1: not met" in failed[0]["detail"]
+    assert f"covers {columns['covered']} of {columns['of']} columns" in failed[0]["detail"]

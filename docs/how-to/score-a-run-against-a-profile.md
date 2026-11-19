@@ -180,9 +180,9 @@ emitted payment_recovery_moment: 4000 rows (generator)
 reproducible: not checked | validity: not asserted
 ...
   fidelity payment_recovery_moment: passed -- 1 of 1 declared property within the margin against the pinned profile
-  scorecard: overall 0.9846 against profile sha256:...
+  scorecard: overall 0.9846 against profile sha256:... (covers 1 of 4 columns, 0 of 0 relationships)
     dimensions: marginals 0.9846; not measured: structure, joint, crossTable, temporal, invariants, queries, defects
-    table payment_recovery_moment: 0.9846 (1 of 1 property scored)
+    table payment_recovery_moment: 0.9846 (1 of 1 property scored); covers 1 of 4 columns, 0 of 0 relationships
     shape: no flags in 1 profiled column (no count table to test)
 run ... complete
 ```
@@ -196,6 +196,15 @@ measured ([SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md)). The shape flags check
 column the profile describes for cells the run leaves empty, one value holding an unlikely
 share of the rows, a constant column, and a distinct count far from the one the profile
 predicts. They withhold nothing.
+
+The overall score speaks only for what was scored. The parenthesis after it says how much
+of the contract that is: the run scored one property, over one of the contract's four
+columns, and the contract declares no relationship. A column counts when a scored
+property covers it, and a declared relationship counts when the profile constrains it
+(the number of child rows per parent). A relationship is counted, not scored. A high score
+over a low coverage is a high score about little, so declare a property for each column
+that matters, and see [SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md) §5 to floor the
+coverage.
 
 `ship` needs the profile too, and packs the scores as `run/scorecard.json`. A property
 outside its margin withholds the ship ([Ship with

@@ -105,6 +105,27 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `fluxsim init` spells a DATE column's bounds `YYYY-MM-DD`, and a DATE column
   now carries the properties a number or a timestamp does, scored against the
   profile's dates.
+- The scorecard states how much of the contract its score speaks for. Per table
+  and for the run, `coverage` counts the contract's columns that carry at least
+  one scored property, and the relationships the contract declares (the child
+  expose's `semantics.relationships`, FLUID 0.7.7) that the profile constrains:
+  its `relationships` list holds an entry for that parent and child with at
+  least one published statistic. No property scores children per parent yet, so
+  a relationship is counted as constrained, not scored. The overall line of
+  `verify`, `ship` and `EVIDENCE.md` prints it with the score, for example
+  `scorecard: overall 0.93 against profile sha256:... (covers 12 of 20 columns, 0 of 3 relationships)`,
+  and each table's line ends with its own counts. A table with no fidelity
+  block records no contract, so it is left out of the run's coverage and the
+  line says how many tables are.
+- The `scorecard` block of a Simulation may floor the coverage:
+  `coverage: {columns: "0.8", relationships: "0.5"}`. A run below a floor is
+  withheld as a score below a threshold is, and the plan records the floors
+  beside the thresholds as `coverage.columns` and `coverage.relationships`.
+  A plan whose Simulation declares none keeps its bytes and its `planDigest`.
+- The scorecard record is format 1-2-0, which adds `coverage`. Its schema is
+  `docs/spec/scorecard-1-2.schema.json`; `docs/spec/scorecard-1.schema.json`
+  stays as published for the documents of formats 1-0-0 and 1-1-0, and a test
+  pins its bytes. No digest of a bundle, a plan or a golden moves.
 
 
 ## 0.7.0 - 2026-11-19
