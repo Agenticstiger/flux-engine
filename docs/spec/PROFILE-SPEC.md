@@ -369,6 +369,27 @@ missing:
   edge, a value within one grid step below that edge falls in the bin above
   it. Counts per level and member lists do not depend on the grid.
 
+**A DATE column.** A profile has no date domain: it reads a column whose values
+are calendar dates as a `timestamp`, in integer milliseconds, and nothing in
+the format changes for it. The declaration reads the column in days
+(SEAM-FIDELITY-SPEC §2), so the check converts the profile's numbers to days,
+exactly, before it compares anything:
+
+- a sum (`mean/1`'s `Sx`) and an order statistic (`quantile/1`'s
+  `quantileWitness`) are divided by 86,400,000, and so are a `marginalHistogram/1`
+  or `quantile/2` statistic's bin edges before they are matched with the
+  declared ones. Counts, ranks and bin indexes are not values and are read as
+  they are;
+- a published `min` or `max` is compared with the declared range as the day
+  it falls in, exactly, without rounding;
+- a sum or an order statistic that is not a whole number of days is refused
+  (`FLX-5037`), and is never floored: it can only come from a column that
+  holds more than dates, and a floored number would be a different
+  statistic from the one the profile publishes. A profile of a date column
+  holds whole days, so its statistics always divide;
+- a `correlation/1` over a DATE column is refused (`FLX-5037`);
+- a profile that reads the column as a `number` holds days, and is read as such.
+
 The fail-closed conditions of SEAM-FIDELITY-SPEC §5 hold on the profile's
 side as they do on a committed state's:
 

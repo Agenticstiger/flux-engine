@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from fractions import Fraction
@@ -42,6 +42,7 @@ from flux_stats.spelling import MOST_DIGITS
 __all__ = [
     "FLX_5022",
     "FLX_5031",
+    "MS_PER_DAY",
     "UNGROUPED",
     "Column",
     "NamedColumn",
@@ -57,6 +58,7 @@ __all__ = [
     "group_keys",
     "level_cells",
     "nfc",
+    "parse_date_days",
     "parse_rfc3339_ms",
     "read_column",
     "read_exact",
@@ -108,11 +110,16 @@ class ValueDomain(str, Enum):
     ``NUMBER`` values are exact decimals. ``TIMESTAMP`` values are RFC
     3339 strings converted to integer milliseconds by KERNEL-SPEC §7's
     parser (:func:`parse_rfc3339_ms`), which is the only spelling of an
-    instant the engine has.
+    instant the engine has. ``DATE`` values are ``YYYY-MM-DD`` calendar
+    dates (:func:`parse_date_days`), read as whole days since 1970-01-01, so
+    a day is the unit of the column's range, bins and statistics. A column is
+    ``DATE`` when its declared type is DATE; a profile reads it as a
+    timestamp in milliseconds (:data:`MS_PER_DAY`).
     """
 
     NUMBER = "number"
     TIMESTAMP = "timestamp"
+    DATE = "date"
 
 
 class NamedColumn(Protocol):
@@ -193,6 +200,34 @@ _RFC3339 = re.compile(
     r"(?P<fraction>\.\d+)?"
     r"(?P<offset>[Zz]|[+-]\d{2}:\d{2})$"
 )
+
+
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
+
+#: Milliseconds in a day: a profile reads a DATE column as a timestamp, so a
+#: day of the column's own unit is this many of the profile's.
+MS_PER_DAY = 86_400_000
+
+
+def parse_date_days(text: str) -> int:
+    """Read a ``YYYY-MM-DD`` calendar date as whole days since 1970-01-01.
+
+    Refuses (``FLX-5022``) anything else: a date-time, a date with another
+    separator, digits of another script, a trailing newline, and a date that
+    does not exist (``2026-02-30``, year ``0000``). It never calls
+    ``date.fromisoformat``, whose accepted forms differ between the Pythons
+    this package supports.
+    """
+    if not isinstance(text, str):
+        raise FluxError(FLX_5022, f"date must be a string, got {type(text).__name__}")
+    if _DATE.fullmatch(text) is None:
+        raise FluxError(FLX_5022, "date is not a YYYY-MM-DD calendar date")
+    year, month, day = (int(part) for part in text.split("-"))
+    try:
+        return date(year, month, day).toordinal() - _EPOCH_ORDINAL
+    except ValueError:
+        raise FluxError(FLX_5022, "date is not a calendar date") from None
 
 
 def nfc(text: str) -> str:
@@ -357,7 +392,8 @@ def read_exact(value: Any, column: ValueColumn, *, row_index: int) -> Fraction:
 
     A ``NUMBER`` value through :func:`exact`; a ``TIMESTAMP`` value, which
     must be a string (``FLX-5005`` otherwise), as its milliseconds since
-    the epoch (:func:`parse_rfc3339_ms`). This is the value
+    the epoch (:func:`parse_rfc3339_ms`); a ``DATE`` value, a ``YYYY-MM-DD``
+    string (or a number of days), as its days since the epoch. This is the value
     :func:`encode_value` checks against the declared range and puts on the
     grid, so a statistic formed over exact values reads the same number.
     """
@@ -366,6 +402,17 @@ def read_exact(value: Any, column: ValueColumn, *, row_index: int) -> Fraction:
         if not isinstance(value, str):
             raise FluxError(FLX_5005, f"{subject}: value class {type(value).__name__!r}")
         return Fraction(parse_rfc3339_ms(value))
+    if column.domain is ValueDomain.DATE:
+        # A calendar date is read as days. A number is days already, as it was
+        # when a DATE column was read as a number, and a string that is no
+        # date is a number or is refused by exact().
+        if isinstance(value, str) and _DATE.fullmatch(value) is not None:
+            try:
+                return Fraction(parse_date_days(value))
+            except FluxError:
+                raise FluxError(FLX_5005, f"{subject}: value is not a calendar date") from None
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return Fraction(value.toordinal() - _EPOCH_ORDINAL)
     return exact(value, subject)
 
 

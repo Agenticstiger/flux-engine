@@ -276,7 +276,8 @@ These rules shape the assumptions:
 - The World and the Persona are the least a run needs. Their numbers are `default` in
   the register: the generator emits read none of them.
 
-A date or timestamp bound is RFC 3339 text, which the register does not count, so an
+A timestamp bound is RFC 3339 text and a date bound `YYYY-MM-DD`, which the register
+does not count, so an
 assumed time window is in the command's output and nowhere else. Here no time column
 publishes its range, because no single instant is held by ten orders, and `created_at`
 is drawn within the run's `timeBounds`.

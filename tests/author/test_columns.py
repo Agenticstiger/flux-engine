@@ -737,7 +737,7 @@ def test_a_boolean_s_counts_shape_the_draw_and_nothing_the_check_reads() -> None
     assert _sources(plan)[("levels", "true")] is Source.PROFILE
 
 
-def test_a_date_column_carries_no_property() -> None:
+def test_a_date_column_is_spelled_in_days_of_the_calendar_and_scored() -> None:
     day = 86_400_000
     entry = {
         "domain": "timestamp",
@@ -750,9 +750,10 @@ def test_a_date_column_carries_no_property() -> None:
         ],
     }
     plan = _plan("date", entry)
-    # A profile reads a date as a timestamp, the block declares days: no property could score.
-    assert plan.declaration["range"] == {"min": 19_000, "max": 19_400}
-    assert plan.properties == []
+    # The profile holds the dates in milliseconds; the block spells them YYYY-MM-DD, which
+    # the check reads as days, so the histogram is a property it scores (ADR 0014).
+    assert plan.declaration["range"] == {"min": "2022-01-08", "max": "2023-02-12"}
+    assert [prop.document["property"] for prop in plan.properties] == ["marginalHistogram"]
 
 
 def test_a_key_lies_between_its_published_min_and_max() -> None:
@@ -969,7 +970,7 @@ def test_a_date_histogram_keeps_its_edges_when_moving_them_would_merge_two_days(
     }
     plan = _plan("date", entry)
     # Moved in to the published min, the first two edges would both be day 1.
-    assert plan.declaration["bins"] == [0, 1, 3]
+    assert plan.declaration["bins"] == ["1970-01-01", "1970-01-02", "1970-01-04"]
 
 
 def test_a_column_of_a_key_of_several_columns_spans_its_rows() -> None:

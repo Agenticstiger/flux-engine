@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal, localcontext
 from fractions import Fraction
 from itertools import pairwise
@@ -372,16 +373,19 @@ def share_texts(weights: Sequence[Fraction]) -> List[str]:
 def _spell(kind: LogicalKind, value: Decimal) -> Any:
     """A bound or a bin edge as the fidelity block reads it for a column of *kind*.
 
-    A timestamp is RFC 3339 text. A date is whole days since the epoch: the
-    generator reads a DATE bound as ``YYYY-MM-DD`` or integer days and the check
-    as a decimal or an RFC 3339 instant, and an integer is the one spelling both
-    read. A number keeps its exact decimal text.
+    A timestamp is RFC 3339 text. A date is ``YYYY-MM-DD``, the one spelling the
+    generator and the check both read for a DATE column; the profile holds a
+    date as milliseconds since the epoch, so the day is the one they fall in. A
+    number keeps its exact decimal text.
     """
     if kind is LogicalKind.TIMESTAMP:
         return format_rfc3339_ms(int(value))
     if kind is LogicalKind.DATE:
-        return int(value) // _DAY_MS
+        return (_EPOCH + timedelta(days=int(value) // _DAY_MS)).isoformat()
     return format(value, "f")
+
+
+_EPOCH = date(1970, 1, 1)
 
 
 def _temporal(kind: LogicalKind) -> bool:
@@ -1385,11 +1389,11 @@ def _from_histogram(
 def _scores_order(kind: LogicalKind) -> bool:
     """Whether a property over a column of *kind* can be scored against a profile.
 
-    A profile reads a DATE column as a timestamp in milliseconds, and the block
-    declares its bounds in days (:func:`_spell`), so the check refuses every
-    property over one (``FLX-5037``): a DATE column carries none.
+    Every ordered kind can: a profile holds a DATE column as a timestamp in
+    milliseconds, and the check reads those as days for a DATE column whose
+    bounds are spelled ``YYYY-MM-DD`` (:func:`_spell`).
     """
-    return kind is not LogicalKind.DATE
+    return kind in (LogicalKind.INT, LogicalKind.DECIMAL, LogicalKind.DATE, LogicalKind.TIMESTAMP)
 
 
 def _drawn_edges(

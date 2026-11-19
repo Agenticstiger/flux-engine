@@ -90,6 +90,22 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   they hold those bounds; its published mean becomes a property the rule's
   values are scored on. Bounds pass down a chain of rules, and a guarded
   `derive` leaves its column drawn.
+- A DATE column is spelled one way. Its fidelity `range` and `bins` can be
+  `YYYY-MM-DD` (a whole number of days since 1970-01-01 still works), where a
+  fidelity block that spelled them as dates was refused at `fluxsim validate`
+  with `FLX-5022`. `verify` reads the column's rows as dates, so a value
+  outside its range is refused as it is for an INT.
+- A profile holds a DATE column as a timestamp in milliseconds, and `verify
+  --profile` now scores a mean, a marginal histogram and a quantile over it
+  against that profile, where it refused every such property with `FLX-5037`.
+  The check converts the profile's numbers to days exactly and refuses one that
+  is not a whole day. The shape flags read a `YYYY-MM-DD` value against a
+  profile's timestamp column. No profile format, digest or golden baseline
+  changes.
+- `fluxsim init` spells a DATE column's bounds `YYYY-MM-DD`, and a DATE column
+  now carries the properties a number or a timestamp does, scored against the
+  profile's dates.
+
 
 ## 0.7.0 - 2026-11-19
 

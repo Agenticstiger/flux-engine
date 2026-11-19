@@ -281,7 +281,9 @@ withholds anything.
 in it every column the profile describes, whether or not a fidelity property
 is declared on it (shape flags). A value is read as the profile reads its
 column's domain: an exact decimal, integer milliseconds since the epoch, or
-an NFC string. A value that cannot be read so refuses its column with
+an NFC string. A `YYYY-MM-DD` value of a timestamp column is the millisecond its day starts
+at, in UTC, which is how a profile holds a date column (PROFILE-SPEC §7). A value that cannot be read so
+refuses its column with
 `FLX-5005` (a timestamp with `FLX-5022`), naming the row and the value's
 class, and no other column. An emit whose rows cannot be read is refused as
 a whole, as §5 refuses it, and a column the rows do not carry is `absent`.
