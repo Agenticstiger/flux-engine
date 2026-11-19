@@ -350,3 +350,47 @@ def test_a_parent_level_with_no_group_draws_the_child_s_own_shares(tmp_path: Pat
     assert "whose levels B the profile publishes no group for" in result.stdout
     grouped = [prop for prop in _fidelity(tmp_path)["properties"] if prop.get("groupBy")]
     assert grouped == []  # a grouped property needs a group of every level
+
+
+def _grouping(sizes: Dict[str, int]) -> Any:
+    from flux_engine.author.given import _Table
+
+    statistic = _statistic(
+        "levelHistogram/1",
+        [_with_k(_group(level, [1, 1]), size) for level, size in sizes.items()],
+        levels=["gold", "silver"],
+        groupBy="segment",
+    )
+    return _Table("segment", "tier", ("t",), statistic, False, ("gold", "silver"))
+
+
+def _own_histogram(counts: List[int]) -> Dict[str, Any]:
+    group = _with_k(_group("", list(counts)), sum(counts))
+    return {
+        "statistics": [_statistic("levelHistogram/1", [group], levels=["A", "B"])],
+    }
+
+
+def test_a_parent_histogram_the_group_sizes_hold_is_checked(tmp_path: Path) -> None:
+    from flux_engine.author.columns import ColumnPlan
+    from flux_engine.author.given import _check_marginal
+
+    plan = ColumnPlan(name="segment")
+    _check_marginal(plan, _own_histogram([600, 400]), _grouping({"A": 598, "B": 402}), ("c",), 6)
+    assert [how for _, how in plan.reads] == [
+        "checked: its counts are the sizes of the groups the column is drawn from"
+    ]
+    assert plan.reads[0][0] == ("c", "statistics", "0")
+    assert plan.passed == []
+
+
+def test_a_parent_histogram_the_group_sizes_contradict_stays_unused_with_the_reason(
+    tmp_path: Path,
+) -> None:
+    from flux_engine.author.columns import ColumnPlan
+    from flux_engine.author.given import _check_marginal
+
+    plan = ColumnPlan(name="segment")
+    _check_marginal(plan, _own_histogram([600, 400]), _grouping({"A": 500, "B": 500}), ("c",), 6)
+    assert plan.reads == []
+    assert "counts 600 of A" in plan.passed[0][1] and "has 500 records" in plan.passed[0][1]

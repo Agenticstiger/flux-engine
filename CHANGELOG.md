@@ -180,6 +180,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   spread: its binned quantiles cut the parent's keys when it has no histogram, its mean
   is read from `sum` and `count` and a `mean/1` that agrees, and a published `min` or
   `max` is checked against the parent's key span.
+- `fluxsim init` checks the level histogram of a column that another is drawn given
+  against the sizes of the groups its weights come from, so it is used when they agree
+  and unused with the differing counts when they do not.
 
 ## 0.7.0 - 2026-11-19
 

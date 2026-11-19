@@ -453,6 +453,7 @@ def _plan_expose(
         ("tables", expose_id),
         minimum_cell=minimum_cell,
         determined=set(authored.derives),
+        rounding_base=rounding_base,
     )
     return authored
 

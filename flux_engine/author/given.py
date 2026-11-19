@@ -213,6 +213,59 @@ def _transposed(table: _Table, levels: Tuple[str, ...]) -> Optional[_Table]:
     return flipped
 
 
+def _check_marginal(
+    plan: ColumnPlan,
+    entry: Optional[Mapping[str, Any]],
+    table: _Table,
+    tokens: Tuple[str, ...],
+    slack: int,
+) -> None:
+    """Check a column's own level histogram against the sizes of the groups it is read through.
+
+    A column drawn given another from a table grouped by it takes its weights from that
+    table's groups, one for each of its levels, so its own histogram is not a weight of
+    its own: it is checked against the groups' sizes, within the profile's rounding.
+    """
+    statistics = entry.get("statistics") if isinstance(entry, Mapping) else None
+    for index, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
+        if (
+            not isinstance(statistic, Mapping)
+            or statistic.get("definition") != _LEVELS
+            or "groupBy" in statistic
+        ):
+            continue
+        groups = statistic.get("groups")
+        group = groups[0] if isinstance(groups, list) and len(groups) == 1 else None
+        if not isinstance(group, Mapping) or group.get("status") != "F":
+            continue
+        levels, counts = statistic.get("levels"), group.get("levelCounts")
+        if not isinstance(levels, list) or not isinstance(counts, list):
+            continue
+        sizes = {
+            str(each.get("group")): each.get("k")
+            for each in table.statistic.get("groups", ())
+            if isinstance(each, Mapping)
+        }
+        place = tokens + ("statistics", str(index))
+        for level, count in zip(levels, counts, strict=False):
+            size = sizes.get(str(level))
+            if not isinstance(count, int) or not isinstance(size, int):
+                continue
+            if abs(count - size) > slack:
+                plan.passed.append(
+                    (
+                        place,
+                        f"the histogram counts {count} of {printable(str(level))}, and the "
+                        f"table the column is drawn from has {size} records in that group",
+                    )
+                )
+                return
+        plan.reads.append(
+            (place, "checked: its counts are the sizes of the groups the column is drawn from")
+        )
+        return
+
+
 def _declare(
     child: ColumnPlan,
     parent: ColumnPlan,
@@ -346,6 +399,7 @@ def choose_givens(
     *,
     minimum_cell: int,
     determined: Optional[Set[str]] = None,
+    rounding_base: int = 1,
 ) -> None:
     """Draw columns given others where the profile's grouped statistics say how.
 
@@ -410,6 +464,14 @@ def choose_givens(
             prop = _grouped_property(plans[edge.child], found, parent_levels)
         else:
             drawn, prop = _transposed(found, plans[edge.child].level_names or ()), None
+            if drawn is not None:
+                _check_marginal(
+                    plans[edge.child],
+                    entries.get(edge.child) if isinstance(entries, Mapping) else None,
+                    found,
+                    table_tokens + ("columns", edge.child),
+                    rounding_base + 1,
+                )
         if drawn is None:
             plans[found.child].passed.append(
                 (

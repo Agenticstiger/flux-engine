@@ -148,6 +148,10 @@ a histogram column only as a leaf, and a categorical parent with no
 level rules above, within its group. A parent level the table holds no group
 for draws the child's own shares, stated as an assumption. Every grouping the
 forest leaves out is unused in the ledger, with the grouping that won.
+A column drawn given another from a table grouped by it takes its weights from the
+table's groups, so its own level histogram is no weight of its own. It is checked against
+the groups' sizes, within the profile's rounding: agreeing, it is used; else unused, and
+the reason names the counts that differ.
 
 ### 5. Children per parent become key spreads
 
