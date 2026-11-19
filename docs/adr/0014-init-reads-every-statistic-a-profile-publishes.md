@@ -188,7 +188,9 @@ evenly stays on the foreign keys that have none.
 
 A foreign key the profile gives no relationship for reads its binned quantiles like any
 other number column: with its other order statistics they cut its draw, and a `min`, `max`,
-mean and `distinctCount` are checked against the result.
+mean and `distinctCount` are checked against the result. A column drawn given another from
+a grouped table also checks its own level histogram against what the table's groups add up
+to.
 
 ### 6. Columns a derive determines
 

@@ -266,6 +266,56 @@ def _check_marginal(
         return
 
 
+def _check_implied(
+    plan: ColumnPlan,
+    entry: Optional[Mapping[str, Any]],
+    table: _Table,
+    tokens: Tuple[str, ...],
+    slack: int,
+) -> None:
+    """Check a column's own level histogram against the counts its grouped table adds up to.
+
+    A column drawn given the column its table is grouped by takes its weights from the
+    groups, so each level's own count is checked against the sum of that level over the
+    groups, within the profile's rounding of each.
+    """
+    statistics = entry.get("statistics") if isinstance(entry, Mapping) else None
+    for index, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
+        if (
+            not isinstance(statistic, Mapping)
+            or statistic.get("definition") != _LEVELS
+            or "groupBy" in statistic
+        ):
+            continue
+        groups = statistic.get("groups")
+        group = groups[0] if isinstance(groups, list) and len(groups) == 1 else None
+        if not isinstance(group, Mapping) or group.get("status") != "F":
+            continue
+        levels, counts = statistic.get("levels"), group.get("levelCounts")
+        if not isinstance(levels, list) or not isinstance(counts, list):
+            continue
+        place = tokens + ("statistics", str(index))
+        for level, count in zip(levels, counts, strict=False):
+            if not isinstance(count, int) or str(level) not in table.cells:
+                continue
+            position = table.cells.index(str(level))
+            implied = sum((row[position] for row in table.counts.values()), Fraction(0))
+            if abs(count - implied) > slack * len(table.counts):
+                plan.passed.append(
+                    (
+                        place,
+                        f"the histogram counts {count} of {printable(str(level))}, and the "
+                        f"groups of the table the column is drawn from add up to "
+                        f"{float(implied):g}",
+                    )
+                )
+                return
+        plan.reads.append(
+            (place, "checked: its counts are what the groups the column is drawn from add up to")
+        )
+        return
+
+
 def _declare(
     child: ColumnPlan,
     parent: ColumnPlan,
@@ -462,6 +512,14 @@ def choose_givens(
         if found.parent == edge.parent:
             drawn = found
             prop = _grouped_property(plans[edge.child], found, parent_levels)
+            if not found.numeric:
+                _check_implied(
+                    plans[edge.child],
+                    entries.get(edge.child) if isinstance(entries, Mapping) else None,
+                    found,
+                    table_tokens + ("columns", edge.child),
+                    rounding_base + 1,
+                )
         else:
             drawn, prop = _transposed(found, plans[edge.child].level_names or ()), None
             if drawn is not None:

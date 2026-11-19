@@ -198,7 +198,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `fluxsim init` no longer fails on a foreign key whose binned quantile has one cut: it
   bounds no bucket, so the keys are laid out as without it and the statistic is unused.
 - `fluxsim init` reads the binned quantiles of a number foreign key that has no relationship
-  in the profile, like any other number column's. They were left unused.
+  in the profile, like any other number column's, and checks a level histogram of a column
+  drawn given another against the sums of the groups it is drawn from. Both statistics were
+  left unused.
 - A contract's texts take `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS`, with
   flux-expr/3's meaning, parser, checker, evaluator and canonical text (a month or
   year move clamps the day, and a result outside 0001 to 9999 is NULL), so a

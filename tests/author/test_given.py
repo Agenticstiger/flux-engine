@@ -421,3 +421,37 @@ def test_a_column_s_histogram_the_groups_it_is_drawn_from_contradict_is_unused(
     state = _states(result)[SEGMENT_STATISTIC]
     assert state["state"] == "unused"
     assert "counts 600 of A" in state["note"] and "has 500 records" in state["note"]
+
+
+def _table_of_counts(rows: Dict[str, List[int]]) -> Any:
+    from fractions import Fraction
+
+    from flux_engine.author.given import _Table
+
+    table = _Table("segment", "tier", ("t",), {}, False, ("A", "B"))
+    table.counts = {level: [Fraction(n) for n in row] for level, row in rows.items()}
+    return table
+
+
+def test_a_child_histogram_the_groups_add_up_to_is_checked() -> None:
+    from flux_engine.author.columns import ColumnPlan
+    from flux_engine.author.given import _check_implied
+
+    plan = ColumnPlan(name="tier")
+    table = _table_of_counts({"x": [300, 100], "y": [100, 500]})
+    _check_implied(plan, _own_histogram([400, 600]), table, ("c",), 6)
+    assert [how for _, how in plan.reads] == [
+        "checked: its counts are what the groups the column is drawn from add up to"
+    ]
+    assert plan.passed == []
+
+
+def test_a_child_histogram_the_groups_contradict_stays_unused_with_the_reason() -> None:
+    from flux_engine.author.columns import ColumnPlan
+    from flux_engine.author.given import _check_implied
+
+    plan = ColumnPlan(name="tier")
+    table = _table_of_counts({"x": [300, 100], "y": [100, 500]})
+    _check_implied(plan, _own_histogram([700, 300]), table, ("c",), 6)
+    assert plan.reads == []
+    assert "counts 700 of A" in plan.passed[0][1] and "add up to 400" in plan.passed[0][1]
