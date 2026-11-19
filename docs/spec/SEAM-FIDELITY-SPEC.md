@@ -62,7 +62,9 @@ parent row its relationship picks), `profile` (reserved; nothing produces it yet
 mapping resolves to nothing (`null`), or a DATE or TIMESTAMP column that declares no draw of its own (§1's table:
 uniform within `timeBounds`). A `default` is named by `plan`, recorded by `apply` in `column-provenance.json` and
 listed under "What Was Not Proven" in `EVIDENCE.md`. Under `--strict-coverage` it is `FLX-3304`, naming every such
-column of every emit, before any row exists. `plan.json` records the digest of the record as
+column of every emit, before any row exists. Strict coverage also refuses, with `FLX-3305`, a declaration the
+contract makes and the run does not generate (`sharedColumns`, a check that determines no column, a check over a
+link), which `plan` otherwise names. `plan.json` records the digest of the record as
 `columnProvenanceDigest` (the `raw-bytes` digest of the file, as `seedTreeDigest` is of `seed-paths.ndjson`), so
 `planDigest`, the run id and the run digest cover it. `apply` refuses to write a record the plan does not name, and
 `ship` and `verify` read the record only through that digest and refuse a missing or moved one with `FLX-2115`; a plan

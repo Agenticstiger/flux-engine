@@ -459,7 +459,7 @@ def render_register_note(summary: RegisterSummary) -> str:
         return (
             "Parameter register: this run reads no number the register counts, so it states "
             "no share."
-        )
+        ) + _render_unused(summary)
     counts = summary.counts
     profile = counts[Source.PROFILE.value]
     assumed = counts[Source.ASSUMPTION.value]

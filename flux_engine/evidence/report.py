@@ -223,8 +223,8 @@ def render_evidence_report(
     adds nothing, so a run with no register gets the report it got before.
 
     *not_generated* is what the run's contract declares and the engine does not
-    generate (:mod:`flux_engine.seam.declared`), read back from the record the
-    plan binds. It adds one sentence to "What Was Not Proven" naming each
+    generate (:mod:`flux_engine.seam.declared`), worked out again from the bundle
+    ``ship`` packs, whose digest the plan binds. It adds one sentence to "What Was Not Proven" naming each
     declaration; empty, the default, adds nothing, so a run that declares none gets
     the report it got before.
 

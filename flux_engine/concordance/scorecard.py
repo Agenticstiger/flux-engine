@@ -406,7 +406,7 @@ def _coverage_of(
         nfc(column) for entry in properties if entry.score is not None for column in entry.columns
     }
     names = {nfc(column) for column in contract.columns}
-    links = set(contract.relationships)
+    links = list(contract.relationships)
     return Coverage(
         columns=Share(len(names & scored), len(names)),
         relationships=Share(

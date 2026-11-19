@@ -140,6 +140,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `FLX-3305`, which says what is not generated and what to do. `ship` works the
   list out again from the bundle, so no plan, record or digest of any bundle
   moves.
+- Migration: a Simulation with `strictCoverage: true` (or a run with
+  `--strict-coverage`) whose contract has a `check` with no `generates`
+  setting, `sharedColumns`, `sharedAttribute` or a check over a link planned
+  before and is now refused with `FLX-3305`. Drop strict coverage, or the
+  declaration, or set `generates` on the check.
 - `e2e/roundtrip` is a local round trip against a generated truth, run by hand with no
   cloud. It draws three related business-to-business tables from a contract and
   a bundle it knows, profiles them with `fluid profile`, writes a bundle back

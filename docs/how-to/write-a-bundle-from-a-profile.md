@@ -196,8 +196,8 @@ every statistic and metric of the profile, by its JSON Pointer, is used (a numbe
 bundle rests on it, a rule read it, a property is scored against it, or the bundle was
 checked against it), unused, or withheld (the profile published no value). Each unused
 one is named with the reason no rule reads it, and the Simulation lists them under
-`unused` beside the register, so `verify` and `ship` name them under "What Was Not
-Proven".
+`unused` beside the register: `plan`, `verify` and `ship` count them, and `ship` names
+each one under "What Was Not Proven" in `EVIDENCE.md`.
 
 `--strict` turns the ledger into a gate. It writes nothing, and exits 1, when a statistic
 is unused or an assumption stands in for something the profile

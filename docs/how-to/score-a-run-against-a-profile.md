@@ -203,7 +203,7 @@ columns, and the contract declares no relationship. A column counts when a score
 property covers it, and a declared relationship counts when the profile constrains it
 (the number of child rows per parent). A relationship is counted, not scored. A high score
 over a low coverage is a high score about little, so declare a property for each column
-that matters, and see [SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md) §5 to floor the
+that matters, and see [SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md) §4 to floor the
 coverage.
 
 `ship` needs the profile too, and packs the scores as `run/scorecard.json`. A property

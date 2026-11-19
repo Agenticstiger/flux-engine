@@ -27,7 +27,7 @@ and ``ship`` withholds a run that misses one:
             relationships: "0.5"
 
 ``coverage`` floors the share of the contract the score speaks for
-(docs/spec/SCORECARD-SPEC.md §5), not how well the run scored. This module holds what the declaration and the scorecard share, so the two
+(docs/spec/SCORECARD-SPEC.md §4), not how well the run scored. This module holds what the declaration and the scorecard share, so the two
 cannot disagree: the eight dimensions in their fixed order, the dimension each
 property kind is scored in, and the thresholds. It reads the block, never a
 record or a profile.

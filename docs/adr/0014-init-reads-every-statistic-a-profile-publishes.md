@@ -47,8 +47,9 @@ init prints the counts and every unused pointer with its reason. The bundle
 records the unused ones in the Simulation's register, under the engine's
 namespace key `unused`, each with its pointer, its definition and the reason
 (PARAMETER-REGISTER-SPEC, format 1-2-0). `apply` copies them into
-`run/parameter-register.json`, and `verify` and `ship` list them under "What
-Was Not Proven". A register names format 1-2-0 only when the Simulation
+`run/parameter-register.json`; `plan`, `verify` and `ship` count them in their
+`parameters:` line, and `ship` names each one under "What Was Not Proven" in
+`EVIDENCE.md`. A register names format 1-2-0 only when the Simulation
 declares `unused`, so every existing record keeps its bytes and its digest.
 
 ### 2. Strict mode

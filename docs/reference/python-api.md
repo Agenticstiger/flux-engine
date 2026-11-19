@@ -204,7 +204,9 @@ path either.
 **Strict coverage**. `plan`, `apply` and `run` take `strict_coverage`
 (default `False`). A column that falls back to a type default is named by the
 plan either way; with `strict_coverage=True` it is refused instead, with
-`FLX-3304` and a table of every such column, before any row is drawn. The
+`FLX-3304` and a table of every such column, before any row is drawn. So is
+a declaration the contract makes and the run does not generate, with
+`FLX-3305`. The
 setting changes whether a run is accepted and never what an accepted run
 produces. A Simulation that declares `strictCoverage: true` in its extensions
 asks for the same refusal, and `strict_coverage=False` does not turn that off.

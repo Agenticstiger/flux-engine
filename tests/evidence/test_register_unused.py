@@ -218,3 +218,20 @@ def test_a_record_of_an_earlier_format_cannot_list_them() -> None:
     document["unused"] = UNUSED
     with pytest.raises(ValueError, match="only a record of format 1-2-0"):
         parse_register(json.dumps(document))
+
+
+def test_a_register_that_counts_no_number_still_names_the_unused_statistics() -> None:
+    from flux_engine.evidence.register import RegisterSummary, UnusedNote
+
+    summary = RegisterSummary(
+        simulation_id="sim",
+        profile_digest=DIGEST,
+        declared=0,
+        counts={"profile": 0, "contract": 0, "assumption": 0, "default": 0},
+        assumptions=(),
+        stated_defaults=0,
+        unused=(UnusedNote(pointer="/tables/orders/rowCount", definition=None, reason="r"),),
+    )
+    note = render_register_note(summary)
+    assert note.startswith("Parameter register: this run reads no number")
+    assert "- `/tables/orders/rowCount`: `r`" in note
