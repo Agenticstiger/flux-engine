@@ -306,7 +306,7 @@ def _emit_rows(
         metric = (column.get("metrics") or {}).get("count") if isinstance(column, Mapping) else None
         if isinstance(metric, Mapping) and metric.get("status") == "F":
             value = metric.get("value")
-            if isinstance(value, int) and value > 0:
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
                 counts.append((value, name))
     if counts:
         value, name = max(counts)

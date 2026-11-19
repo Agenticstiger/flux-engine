@@ -245,3 +245,19 @@ def test_a_foreign_key_s_own_histogram_keeps_each_bin_s_children(tmp_path: Path)
     assert abs(below - 0.8) < 1e-6  # the first of its own bins keeps 4000 of 5000 children
     states = _states(result)
     assert states["/tables/orders/columns/customer_id/statistics/0"]["state"] == "used"
+
+
+def test_one_parent_with_every_child_at_the_top_keeps_them(tmp_path: Path) -> None:
+    child = {
+        "domain": "number",
+        "metrics": {"count": _metric("count/1", 5000), "sum": _metric("sum/1", "2500000")},
+    }
+    _init(tmp_path, _profile([_histogram(["0", "1", "2"], [999, 1], 1000)], child=child))
+    assert _children(tmp_path).count(0) >= 990  # all but the top keys stay childless
+
+
+def test_many_classes_keep_the_childless_share(tmp_path: Path) -> None:
+    parents = [400] + [60] * 10 + [0] * 89
+    bins = [str(edge) for edge in range(101)]
+    _init(tmp_path, _profile([_histogram(bins, parents, 1000), _mean(5000, 1000)]))
+    assert abs(_children(tmp_path).count(0) / 1000 - 0.4) < 0.05

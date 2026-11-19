@@ -15,12 +15,12 @@ Pinned here:
   children takes its share, an empty bin of the foreign key's own histogram
   stays empty, few keys for many classes keep the children, an open class
   with no published mean takes its lower bound, a histogram of many narrow
-  bins is laid out inside at most 32 of them, the last part of a layout joins
-  the part before it, and many classes merge in runs;
+  bins is laid out inside at most 32 of them, a top key of its own keeps its
+  children, and many classes merge in runs, never the class of none;
 * a grouped link is drawn in the direction its table can be read;
 * a column a rule sets keeps none of its histogram's notes, a rule over a key
-  reads the span the key is laid out over, and a chain of products past its
-  size gets no bound;
+  reads the span the key is laid out over, and a chain of products gets no
+  bound past what the bundle can write;
 * a DECIMAL whose values reach past its digits is a placeholder, as an INT is;
 * ``--allow ""`` would accept everything, so it is refused.
 """
@@ -323,12 +323,16 @@ exposes:
     assert Decimal(columns["twice"]["range"]["max"]) >= 2 * key_high
 
 
-def test_the_last_part_of_a_layout_joins_the_part_before_it() -> None:
+def test_the_top_key_takes_the_key_below_it_and_keeps_its_weight() -> None:
     from flux_engine.author.children import _edges
 
-    assert _edges([(1, 999, F(0)), (1000, 1, F(3))], 1000) == ([1, 1000], [F(3)])
+    # One key with every child, at the top, after 999 with none: not spread over all 1000.
+    assert _edges([(1, 999, F(0)), (1000, 1, F(3))], 1000) == ([1, 999, 1000], [F(0), F(3)])
     edges, weights = _edges([(1, 950, F(0)), (951, 49, F(2)), (1000, 1, F(1))], 1000)
-    assert edges == [1, 951, 1000] and weights == [F(0), F(3)]
+    assert edges == [1, 951, 999, 1000] and weights == [F(0), F(2), F(1)]
+    # Two parts of one key at the top are one bin of two keys.
+    edges, weights = _edges([(1, 998, F(0)), (999, 1, F(2)), (1000, 1, F(1))], 1000)
+    assert edges == [1, 999, 1000] and weights == [F(0), F(3)]
 
 
 def test_many_classes_are_merged_in_runs() -> None:
@@ -341,6 +345,18 @@ def test_many_classes_are_merged_in_runs() -> None:
     assert sum(p * m for p, m in zip(merged_parents, merged_means, strict=True)) == sum(means)
 
 
+def test_the_class_of_no_children_is_never_merged() -> None:
+    from flux_engine.author.children import _merged_classes
+
+    parents = [F(400)] + [F(60)] * 10 + [F(0)] * 89
+    means = _class_means([F(edge) for edge in range(101)], parents, None)
+    merged_parents, merged_means = _merged_classes(parents, means)
+    assert len(merged_parents) == MOST_BUCKETS and sum(merged_parents) == 1000
+    assert (merged_parents[0], merged_means[0]) == (F(400), F(0))
+    rest = zip(merged_parents[1:], merged_means[1:], strict=True)
+    assert all(mean > 0 for count, mean in rest if count)
+
+
 def test_a_chain_of_products_gets_no_bound_past_its_size() -> None:
     from flux_engine.author.derived import bounds
 
@@ -351,6 +367,23 @@ def test_a_chain_of_products_gets_no_bound_past_its_size() -> None:
     started = time.perf_counter()
     assert bounds(text, spans) is None
     assert time.perf_counter() - started < 2
+
+
+def test_a_count_is_never_a_boolean() -> None:
+    from flux_engine.author.children import _whole
+
+    # The profile reader refuses a boolean count (FLX-5036); the layout does not rely on it.
+    assert _whole(True) is None and _whole(0) is None and _whole(3) == 3
+
+
+def test_a_bound_is_one_the_bundle_can_write() -> None:
+    from flux_engine.author.derived import MOST_BITS, bounds
+    from flux_stats.spelling import MOST_DIGITS
+
+    assert len(str(2**MOST_BITS)) + 38 <= MOST_DIGITS
+    assert bounds("a * a", {"a": (F(0), F(10) ** 400)}) == (F(0), F(10) ** 800)
+    # 10^1200 has more digits than a fidelity block's number may: no bound, not a refusal.
+    assert bounds("a * a", {"a": (F(0), F(10) ** 600)}) is None
 
 
 def test_a_decimal_beyond_its_digits_is_a_placeholder() -> None:

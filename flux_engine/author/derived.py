@@ -23,6 +23,7 @@ nothing is a float.
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 from fractions import Fraction
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
@@ -31,6 +32,7 @@ from flux_engine.expr2.ast import Arith, Call, Case, Column, Neg, Node, Number
 from flux_engine.expr2.errors import Expr2Error
 from flux_engine.expr2.functions import HALF_AWAY_FROM_ZERO, round_exact
 from flux_engine.expr2.parser import Side, parse
+from flux_stats.spelling import MOST_DIGITS
 
 __all__ = ["Interval", "bounds", "contract_derives", "numeric"]
 
@@ -79,10 +81,14 @@ def _arith(op: str, left: Interval, right: Interval) -> Optional[Interval]:
     return None
 
 
+#: The widest scale a DECIMAL column declares: the digits a bound may need after its point.
+_WIDEST_SCALE = 38
+
 #: The most bits an end of an interval may carry. A chain of products doubles them at
-#: every link, so past this the rule is given no bound rather than an exact one of
-#: millions of digits.
-MOST_BITS = 4096
+#: every link, so past this the rule is given no bound rather than one the bundle could
+#: not write: ``2**MOST_BITS`` has no more digits than a fidelity block's number may
+#: (:data:`flux_stats.spelling.MOST_DIGITS`), less a DECIMAL's widest scale.
+MOST_BITS = math.floor((MOST_DIGITS - _WIDEST_SCALE) * math.log2(10))
 
 
 def _bounded(interval: Optional[Interval]) -> Optional[Interval]:

@@ -484,6 +484,19 @@ def _oriented_forest(
     name order of equals.
     """
     edges = list(spanning_forest(scored, categorical=categorical, numeric=leaves))
+    by_pair: Dict[Tuple[str, str], List[_Table]] = {}
+    for table in tables:
+        by_pair.setdefault((table.parent, table.child), []).append(table)
+        by_pair.setdefault((table.child, table.parent), []).append(table)
+    known: Dict[Tuple[str, str], bool] = {}
+
+    def drawable(parent: str, child: str) -> bool:
+        """:func:`_drawable` over the pair's own tables, worked out once per direction."""
+        if (parent, child) not in known:
+            pair = by_pair.get((parent, child), [])
+            known[(parent, child)] = _drawable(pair, parent, child, plans)
+        return known[(parent, child)]
+
     neighbours: Dict[str, Set[str]] = {}
     for edge in edges:
         neighbours.setdefault(edge.parent, set()).add(edge.child)
@@ -513,7 +526,7 @@ def _oriented_forest(
                     root=root,
                 )
             )
-            count = sum(1 for edge in tree if _drawable(tables, edge.parent, edge.child, plans))
+            count = sum(1 for edge in tree if drawable(edge.parent, edge.child))
             if count > best_count:
                 best, best_count = tree, count
         result.extend(best or [edge for edge in edges if edge.child in component])

@@ -118,14 +118,19 @@ def _merged_classes(
 
     A merged class keeps its parents and its children, so the spread it gets is
     the classes' together; only the split between them inside the run is lost.
+    The class of parents with no child, the first, is never merged: its keys
+    take no child, so the childless share holds whatever the merge.
     """
     count = len(parents)
     if count <= MOST_BUCKETS:
         return list(parents), list(means)
-    merged_parents: List[Fraction] = []
-    merged_means: List[Fraction] = []
-    for index in range(MOST_BUCKETS):
-        run = range(index * count // MOST_BUCKETS, (index + 1) * count // MOST_BUCKETS)
+    alone = 1 if means[0] == 0 else 0
+    runs = MOST_BUCKETS - alone
+    rest = count - alone
+    merged_parents: List[Fraction] = list(parents[:alone])
+    merged_means: List[Fraction] = list(means[:alone])
+    for index in range(runs):
+        run = range(alone + index * rest // runs, alone + (index + 1) * rest // runs)
         total = sum((parents[i] for i in run), Fraction(0))
         children = sum((parents[i] * means[i] for i in run), Fraction(0))
         merged_parents.append(total)
@@ -179,11 +184,16 @@ def _edges(
     """Bin edges and weights from consecutive (first key, keys, weight) parts.
 
     Bins are half-open and the last is closed, so a part's keys are exactly the
-    grid points of its bin; a last part of one key joins the part before it.
+    grid points of its bin. A last part of one key, the top key, cannot be a bin
+    of its own: it takes the key below it from the part before, so both keep
+    their weights, and only when that part is one key too do the two join.
     """
     starts = [first for first, _, _ in layout]
     weights = [Fraction(weight) for _, _, weight in layout]
     while len(starts) > 1 and starts[-1] >= high:
+        if starts[-2] < high - 1:
+            starts[-1] = high - 1
+            break
         starts.pop()
         last = weights.pop()
         weights[-1] += last
@@ -215,7 +225,7 @@ def _own_buckets(
             tokens + ("statistics", str(index)),
             "binCounts",
             _HISTOGRAM,
-            total=total if isinstance(total, int) else None,
+            total=_whole(total),
         )
         buckets: List[Tuple[int, int, Fraction]] = []
         last = len(weights) - 1
@@ -253,6 +263,13 @@ def _merged(buckets: Sequence[Tuple[int, int, Fraction]]) -> List[Tuple[int, int
     return runs
 
 
+def _whole(value: Any) -> Optional[int]:
+    """*value* when it is a whole number above zero; a boolean is not a count."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
 def _foreign_mean(
     entry: Optional[Mapping[str, Any]], bits: int
 ) -> Optional[Tuple[Fraction, List[Tuple[str, ...]]]]:
@@ -261,21 +278,16 @@ def _foreign_mean(
     metrics: Mapping[str, Any] = found if isinstance(found, Mapping) else {}
     total, count = metrics.get("sum"), metrics.get("count")
     if isinstance(total, Mapping) and isinstance(count, Mapping):
-        value = count.get("value")
-        if (
-            total.get("status") == _FREE
-            and count.get("status") == _FREE
-            and isinstance(value, int)
-            and value > 0
-        ):
+        value = _whole(count.get("value"))
+        if total.get("status") == _FREE and count.get("status") == _FREE and value is not None:
             mean = Fraction(Decimal(str(total.get("value")))) / value
             return mean, [("metrics", "sum"), ("metrics", "count")]
     statistics = entry.get("statistics") if isinstance(entry, Mapping) else None
     for index, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
         if isinstance(statistic, Mapping) and statistic.get("definition") == _MEAN:
             group = _published(statistic)
-            k = group.get("k") if group is not None else None
-            if group is not None and isinstance(k, int) and k > 0:
+            k = _whole(group.get("k")) if group is not None else None
+            if group is not None and k is not None:
                 return Fraction(int(str(group.get("Sx"))), k * 2**bits), [
                     ("statistics", str(index))
                 ]
@@ -347,15 +359,9 @@ def spread_children(
         children_total = Fraction(int(str(group.get("Sx"))), 2**fractional_bits)
     if histogram is None:
         if mean is not None and children_total is not None:
-            parents_k = mean[1].get("k")
-            expected = (
-                Fraction(child_rows, parents_k)
-                if isinstance(parents_k, int) and parents_k > 0
-                else None
-            )
-            stated = (
-                children_total / parents_k if isinstance(parents_k, int) and parents_k > 0 else None
-            )
+            parents_k = _whole(mean[1].get("k"))
+            expected = Fraction(child_rows, parents_k) if parents_k is not None else None
+            stated = children_total / parents_k if parents_k is not None else None
             pointer = tokens + ("statistics", str(mean[0]))
             if (
                 expected is not None
@@ -386,7 +392,7 @@ def spread_children(
         tokens + ("statistics", str(index)),
         "binCounts",
         _HISTOGRAM,
-        total=group.get("k") if isinstance(group.get("k"), int) else None,
+        total=_whole(group.get("k")),
     )
     means = _class_means(edges, parents, children_total)
     parents, means = _merged_classes(parents, means)
