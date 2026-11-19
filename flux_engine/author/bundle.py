@@ -52,6 +52,7 @@ from flux_engine.author.columns import (
 from flux_engine.author.derived import bounds, contract_dependents, contract_derives, numeric
 from flux_engine.author.given import choose_givens
 from flux_engine.author.ledger import Ledger
+from flux_engine.author.ranges import column_range
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
@@ -415,6 +416,7 @@ def _plan_expose(
             inner=column.name in inner,
             nulls_follow=column.name in follow,
             fractional_bits=fractional_bits,
+            range_rule=column_range(schema[position]),
         )
         plan = plan_column(context)
         contexts[plan.name] = context

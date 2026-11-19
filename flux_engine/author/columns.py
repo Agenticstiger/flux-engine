@@ -50,6 +50,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, TypeGuar
 from flux_engine.author.basis import Basis, Label, assumed, from_contract, from_profile
 from flux_engine.author.fill import drawn_mean as _drawn_mean
 from flux_engine.author.fill import part_mean, tilted_fill
+from flux_engine.author.ranges import RangeRule, grid_bounds
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
@@ -149,6 +150,8 @@ class ColumnContext:
     nulls_follow: bool = False
     #: The grid the profile's encoded statistics are on (its ``encoding.fractionalBits``).
     fractional_bits: int = 16
+    #: The range the contract's ``validationRules`` declare for the column, if any.
+    range_rule: Optional[RangeRule] = None
 
     @property
     def contract_tokens(self) -> Tuple[str, ...]:
@@ -416,6 +419,7 @@ def plan_column(ctx: ColumnContext) -> ColumnPlan:
         _boolean(ctx, plan)
     else:
         _ordered(ctx, plan)
+        _within_range(ctx, plan)
     if "unique" in plan.declaration:
         plan.fixed = "an identifier the engine derives"
     if "unique" not in plan.declaration and not (ctx.keyed or ctx.inner or ctx.nulls_follow):
@@ -1358,7 +1362,15 @@ def _one_bound(ctx: ColumnContext, plan: ColumnPlan, points: Sequence[_Point]) -
         plan.assumptions.append(_ONE_VALUE_MEAN)
         return True
     if mean is not None and (mean > bound) == upward:
-        filled = tilted_fill(bound, mean, step, ctx.rows, distinct=distinct, limit=_limit(ctx))
+        filled = tilted_fill(
+            bound,
+            mean,
+            step,
+            ctx.rows,
+            distinct=distinct,
+            limit=_limit(ctx),
+            bounds=_range_bounds(ctx),
+        )
         if filled is not None:
             edges, weights = filled
             _declare_fill(
@@ -1863,7 +1875,9 @@ def _tail_fill(
     rest = (mean - inner) / share
     if (rest <= snapped) if high else (rest >= snapped):
         return None
-    filled = tilted_fill(snapped, rest, step, ctx.rows, limit=_limit(ctx))
+    filled = tilted_fill(
+        snapped, rest, step, ctx.rows, limit=_limit(ctx), bounds=_range_bounds(ctx)
+    )
     if filled is None:
         return None
     fill_edges, fill_weights = filled
@@ -1914,6 +1928,12 @@ def _ladder_bin(
     limit = _limit(ctx)
     numeric = ctx.column.logical_type.kind in (LogicalKind.INT, LogicalKind.DECIMAL)
     if numeric and limit is not None and abs(Fraction(edge)) > limit:
+        return None
+    bounds = _range_bounds(ctx)
+    if bounds is not None and (
+        (bounds[0] is not None and Fraction(edge) < bounds[0])
+        or (bounds[1] is not None and Fraction(edge) > bounds[1])
+    ):
         return None
     reason = _LADDER_REASON.format(end="max" if high else "min", side="above" if high else "below")
     assumption = assumed(reason)
@@ -2496,7 +2516,9 @@ def _around_mean(ctx: ColumnContext, plan: ColumnPlan) -> None:
         plan.assumptions.append(_CENTRED_REASON)
         return
     if mean != 0:
-        filled = tilted_fill(Fraction(0), mean, grid, ctx.rows, limit=_limit(ctx))
+        filled = tilted_fill(
+            Fraction(0), mean, grid, ctx.rows, limit=_limit(ctx), bounds=_range_bounds(ctx)
+        )
         if filled is not None:
             edges, weights = filled
             _declare_fill(ctx, plan, edges, weights, None, None)
@@ -2684,6 +2706,220 @@ def determine_column(
 
 #: The metric definition of each end of a range, for citing a published end.
 _ENDS: Mapping[str, str] = {"min": _MIN, "max": _MAX}
+
+
+# --- the range a contract declares ------------------------------------------
+
+#: Why bins or levels the contract's range leaves no grid value in are dropped.
+_RANGE_LOST = (
+    "The contract's range for the column leaves no value in {count} of the profile's bins or "
+    "levels: they are dropped and the weights of the rest are scaled to add up to one."
+)
+_RANGE_ONE_SIDED = (
+    "The contract's range for the column has one bound: the values are a placeholder, drawn "
+    "evenly over a hundred grid values from it."
+)
+
+
+def _range_bounds(
+    ctx: ColumnContext,
+) -> Optional[Tuple[Optional[Fraction], Optional[Fraction]]]:
+    """The lowest and highest value the contract's range lets the column hold, on its grid.
+
+    ``None`` for a column with no range rule, one that is not a plain number, or rules no
+    grid value satisfies (they declare nothing).
+    """
+    if ctx.range_rule is None or ctx.column.logical_type.kind not in (
+        LogicalKind.INT,
+        LogicalKind.DECIMAL,
+    ):
+        return None
+    return grid_bounds(ctx.range_rule, Fraction(_grid(ctx)))
+
+
+def _exact_text(value: Fraction) -> str:
+    """*value* as an exact decimal text: a bound or a half step has a finite expansion."""
+    with localcontext() as context:
+        context.prec = 200
+        return format(Decimal(value.numerator) / Decimal(value.denominator), "f")
+
+
+def _within_range(ctx: ColumnContext, plan: ColumnPlan) -> None:
+    """Keep a drawn number column inside the range its contract declares (ADR 0014 section 3).
+
+    A column the profile published nothing for is drawn evenly over the declared range
+    instead of the placeholder. Any other draw is clipped to the range: its bin edges and its
+    levels. A bin left with no grid value is dropped, and the loss of weight is an assumption.
+    The range the check reads and a property's bins keep the profile's edges: the check
+    compares the profile's statistic over exactly those (``FLX-5037``), and a value drawn
+    inside the contract's range lies inside them.
+    """
+    if ctx.key or ctx.keyed or ctx.foreign is not None:
+        return
+    bounds = _range_bounds(ctx)
+    if bounds is None:
+        return
+    low, high = bounds
+    basis = from_contract(ctx.product_ref, ctx.contract_tokens + ("validationRules",))
+    if plan.placeholder:
+        _declared_range_draw(ctx, plan, low, high, basis)
+        return
+    step = Fraction(_grid(ctx))
+    lost = _clip_bins(plan, low, high, basis, step) + _clip_levels(plan, low, high)
+    if lost:
+        reason = _RANGE_LOST.format(count=lost)
+        plan.assumptions.append(reason)
+        plan.choices.append(reason)
+
+
+def _declared_range_draw(
+    ctx: ColumnContext,
+    plan: ColumnPlan,
+    low: Optional[Fraction],
+    high: Optional[Fraction],
+    basis: Basis,
+) -> None:
+    """Draw evenly over the declared range, in place of a placeholder."""
+    if low is None and high is None:
+        return
+    used = basis
+    if low is not None and high is not None:
+        first, last = low, high
+    else:
+        used = assumed(_RANGE_ONE_SIDED)
+        if low is not None:
+            first, last = _span_bins(ctx, low, _PLACEHOLDER_VALUES)
+        else:
+            assert high is not None
+            first, last = _span_bins(ctx, high, _PLACEHOLDER_VALUES, upward=False)
+    plan.declaration.pop("levels", None)
+    plan.declaration.pop("bins", None)
+    plan.declaration.pop("binWeights", None)
+    shape = (("bins",), ("binWeights",), ("levels",))
+    plan.labels = [label for label in plan.labels if label.tokens[:1] not in shape]
+    plan.assumptions = [
+        sentence
+        for sentence in plan.assumptions
+        if "placeholder" not in sentence and sentence != _BEYOND_REASON
+    ]
+    plan.reads = [read for read in plan.reads if "placeholder spans" not in read[1]]
+    _even_bins(ctx, plan, first, last, used)
+    if used is not basis:
+        plan.assumptions.append(_RANGE_ONE_SIDED)
+        plan.choices.append(_RANGE_ONE_SIDED)
+        plan.how = "a placeholder over a hundred values from the contract's one bound"
+    else:
+        plan.how = "evenly over the range the contract declares"
+    plan.placeholder = False
+
+
+def _clip_bins(
+    plan: ColumnPlan,
+    low: Optional[Fraction],
+    high: Optional[Fraction],
+    basis: Basis,
+    step: Fraction,
+) -> int:
+    """Clip the declared bins to the range; returns how many bins it dropped."""
+    bins, weights = plan.declaration.get("bins"), plan.declaration.get("binWeights")
+    if not isinstance(bins, list) or len(bins) < 2 or not isinstance(weights, list):
+        return 0
+    count = len(bins) - 1
+    if len(weights) != count:
+        return 0
+    edges = [Fraction(Decimal(str(edge))) for edge in bins]
+    share = [Fraction(Decimal(str(weight))) for weight in weights]
+    # Each bin as the grid values it draws, [first, final], and what the range leaves of them.
+    cells: List[Tuple[int, Fraction, Fraction, Fraction, Fraction]] = []
+    for index in range(count):
+        first = math.ceil(edges[index] / step) * step
+        if index == count - 1:
+            final = math.floor(edges[index + 1] / step) * step
+        else:
+            final = math.ceil(edges[index + 1] / step) * step - step
+        kept_low = max(first, low) if low is not None else first
+        kept_high = min(final, high) if high is not None else final
+        if first <= final and kept_low > kept_high:
+            continue
+        cells.append((index, first, final, kept_low, kept_high))
+    if not cells or (len(cells) == count and all(c[1] == c[3] and c[2] == c[4] for c in cells)):
+        return 0
+    dropped = count - len(cells)
+    first_cell, last_cell = cells[0], cells[-1]
+    old: Dict[int, Basis] = {
+        int(label.tokens[1]): label.basis
+        for label in plan.labels
+        if label.tokens[:1] == ("bins",) and len(label.tokens) == 2
+    }
+    old_weights: Dict[int, Basis] = {
+        int(label.tokens[1]): label.basis
+        for label in plan.labels
+        if label.tokens[:1] == ("binWeights",) and len(label.tokens) == 2
+    }
+    moved = first_cell[3] != first_cell[1]
+    new_edges: List[Fraction] = [first_cell[3] if moved else edges[first_cell[0]]]
+    new_bases: List[Optional[Basis]] = [basis if moved else old.get(first_cell[0])]
+    for cell in cells[1:]:
+        new_edges.append(edges[cell[0]])
+        new_bases.append(old.get(cell[0]))
+    if last_cell[0] == count - 1 and last_cell[4] == last_cell[2]:
+        new_edges.append(edges[count])
+        new_bases.append(old.get(count))
+    else:
+        top = last_cell[4]
+        new_edges.append(top if top > new_edges[-1] else new_edges[-1] + step / 2)
+        new_bases.append(basis)
+    plan.declaration["bins"] = [_exact_text(edge) for edge in new_edges]
+    kept = [share[cell[0]] for cell in cells]
+    total = sum(kept, Fraction(0))
+    scaled = dropped > 0 and total > 0
+    plan.declaration["binWeights"] = (
+        share_texts([weight / total for weight in kept])
+        if scaled
+        else [str(weights[cell[0]]) for cell in cells]
+    )
+    plan.labels = [
+        label
+        for label in plan.labels
+        if label.tokens[:1] not in (("bins",), ("binWeights",)) or len(label.tokens) != 2
+    ]
+    for position, edge_basis in enumerate(new_bases):
+        if edge_basis is not None:
+            plan.labels.append(Label(("bins", str(position)), edge_basis))
+    for position, cell in enumerate(cells):
+        if scaled:
+            plan.labels.append(
+                Label(("binWeights", str(position)), assumed(_RANGE_LOST.format(count=dropped)))
+            )
+        elif cell[0] in old_weights:
+            plan.labels.append(Label(("binWeights", str(position)), old_weights[cell[0]]))
+    return dropped
+
+
+def _clip_levels(plan: ColumnPlan, low: Optional[Fraction], high: Optional[Fraction]) -> int:
+    """Clip the declared levels to the range; returns how many it dropped."""
+    levels = plan.declaration.get("levels")
+    if not isinstance(levels, dict) or not levels:
+        return 0
+    inside: Dict[str, Fraction] = {}
+    dropped = 0
+    for text, weight in levels.items():
+        value = Fraction(Decimal(str(text)))
+        if (low is not None and value < low) or (high is not None and value > high):
+            dropped += 1
+            continue
+        inside[text] = Fraction(Decimal(str(weight)))
+    if not dropped:
+        return 0
+    if not inside:
+        nearest = low if low is not None else high
+        assert nearest is not None
+        inside = {_exact_text(nearest): Fraction(1)}
+    total = sum(inside.values(), Fraction(0))
+    texts = share_texts([weight / total for weight in inside.values()])
+    plan.declaration["levels"] = dict(zip(inside, texts, strict=True))
+    return dropped
+
 
 # ---------------------------------------------------------------------------
 # A table with nothing published for the check to read

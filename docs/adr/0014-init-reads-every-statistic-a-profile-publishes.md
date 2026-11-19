@@ -101,7 +101,16 @@ assumption is a number of the register with its reason.
   maximum entropy, with the mean the rest leaves. Otherwise the part lies in the next
   bin of the profile's own ladder, drawn evenly. Each end is an assumption, stated
   as one. A published `distinctCount` is checked against the bins' span.
-- **Nothing published** gives a placeholder that is not constant: an even
+- **A contract's range bounds the draw.** A column's `validationRules` of type
+  `range` (`between A and B`, or `>=`, `>`, `<=`, `<` joined by `and`; several rules
+  hold together, the tightest bound on each side) are read exactly, and a strict bound
+  is not reached: the first grid value inside it is. No bin, level or
+  maximum-entropy tail of a drawn number column reaches past it; the range the check
+  reads and a property's bins keep the profile's edges, which the check compares. A bin left with no grid
+  value is dropped and the weights scaled, stated as an assumption only when weight is
+  lost. A column with nothing published draws evenly over the declared range, cited to
+  the contract.
+- **Nothing published** (and no contract range) gives a placeholder that is not constant: an even
   spread over the first hundred values of the column's grid from 0 (0 to 99 for an
   integer, 0.00 to 0.99 for two decimal places, within the declared precision), or
   the run's time window for a date or timestamp. The evidence lists every

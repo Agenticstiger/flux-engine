@@ -102,6 +102,7 @@ def tilted_fill(
     *,
     distinct: Optional[int] = None,
     limit: Optional[Fraction] = None,
+    bounds: Optional[Tuple[Optional[Fraction], Optional[Fraction]]] = None,
 ) -> Optional[Tuple[List[Fraction], List[Fraction]]]:
     """Bins from *bound* away toward *mean*, tilted so their mean as drawn is *mean*.
 
@@ -112,7 +113,8 @@ def tilted_fill(
     needs fine bins there. *limit* caps how far from zero an end may lie.
     Returns ascending edges on the grid and a weight per bin, or ``None`` when
     *mean* is not on the far side of *bound*, or the bins cannot reach it within
-    *limit* to one grid step.
+    *limit* to one grid step. *bounds* are the lowest and highest value the column may
+    hold (a contract's range): the span stops at the one on the side of *mean*.
     """
     if mean == bound or step <= 0:
         return None
@@ -121,6 +123,10 @@ def tilted_fill(
     room: Optional[int] = None
     if limit is not None:
         room = math.floor((limit - bound) / step if upward else (bound + limit) / step)
+    cap = (bounds[1] if upward else bounds[0]) if bounds is not None else None
+    if cap is not None:
+        reach = math.floor((cap - bound) / step if upward else (bound - cap) / step)
+        room = reach if room is None else min(room, reach)
     for steps in (max(tail, (distinct or 0) - 1, 2), max(tail, 2)):
         if room is not None:
             steps = min(steps, room)

@@ -165,6 +165,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   shape flag. Each target prints PASS or FAIL, and `--record` appends one
   line to a committed `history.jsonl`. It is its own uv project and no CI job
   runs it.
+- `fluxsim init` keeps a column inside the range its contract declares: a
+  `validationRules` entry of type `range` (`between A and B`, or `>=`, `>`, `<=`,
+  `<` joined by `and`) bounds the bins, the levels and the maximum-entropy tail of a
+  drawn number column (the check's range and a property's bins keep the profile's
+  edges), and a column the profile publishes nothing for is drawn
+  evenly over it instead of a placeholder.
 
 ## 0.7.0 - 2026-11-19
 
