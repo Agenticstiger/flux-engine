@@ -72,6 +72,7 @@ from flux_engine.evidence.register import (
 from flux_engine.lineage.emitter import dataset_for_expose
 from flux_engine.safeio import read_bytes_nofollow, write_bytes_atomic, write_text_atomic
 from flux_engine.seam.coverage import ExposeCoverage, printable
+from flux_engine.seam.declared import NotGenerated, render_not_generated
 from flux_engine.seam.parameters import check_profile_citations
 from flux_engine.seam.profile import require_profile
 from flux_engine.seam.resolve import profile_reference, scorecard_declaration
@@ -135,6 +136,11 @@ def column_provenance_text(result: "_pipeline.PipelineResult") -> str:
             ),
         )
     )
+
+
+def _not_generated_of(result: "_pipeline.PipelineResult") -> Tuple[NotGenerated, ...]:
+    """Every declaration of the run's emits that is accepted and not generated, in emit order."""
+    return tuple(row for outcome in result.emits for row in outcome.not_generated)
 
 
 def parameter_register_text(result: "_pipeline.PipelineResult") -> Optional[str]:
@@ -388,6 +394,14 @@ def plan_with_result(
                     for outcome in result.emits
                     if outcome.coverage is not None
                 },
+                # Declared and not generated (flux_engine.seam.declared): reported here
+                # only. Nothing the plan binds or hashes carries it, so no bundle's
+                # plan.json or planDigest moves; `ship` works it out again from the bundle.
+                **(
+                    {"declared_not_generated": [r.as_document() for r in _not_generated_of(result)]}
+                    if _not_generated_of(result)
+                    else {}
+                ),
                 **({"profile_digest": pinned.digest.value} if pinned is not None else {}),
                 **({"parameter_register": register.as_document()} if register is not None else {}),
             },
@@ -399,6 +413,7 @@ def plan_with_result(
                         digested.ref.value,
                         result.files_not_hashed,
                         tuple(o.coverage for o in result.emits if o.coverage is not None),
+                        _not_generated_of(result),
                     ),
                     # Parameter register: the shares, for a Simulation that declares a register.
                     *([render_register_line(register)] if register is not None else []),
@@ -421,6 +436,7 @@ def _plan_stdout(
     plan_digest: str,
     files_not_hashed: Sequence[str],
     coverage: Sequence[ExposeCoverage] = (),
+    not_generated: Sequence[NotGenerated] = (),
 ) -> str:
     """Where the plan landed, which files it did not hash, and which columns defaulted.
 
@@ -438,6 +454,10 @@ def _plan_stdout(
     it fell back to: the plan's own output is where an author is looking
     when a column they expected to be declared is not. Nothing is printed
     when every column was produced by a declaration, a copy or a derivation.
+
+    A declaration the engine accepts and does not generate (a relationship's
+    ``sharedColumns``, a ``check`` that determines no column) is named too, per expose,
+    after the columns. Nothing is printed when the bundle declares none.
     """
     lines = [f"plan written to {layout.plan_path} (runId={run_id}, planDigest={plan_digest})"]
     if files_not_hashed:
@@ -464,6 +484,12 @@ def _plan_stdout(
         lines.append(
             "--strict-coverage refuses the run, and so does strictCoverage in the bundle; "
             "fluxsim explain FLX-3304 says how to cover a column"
+        )
+    if not_generated:
+        lines.extend(render_not_generated(not_generated))
+        lines.append(
+            "--strict-coverage refuses the run, and so does strictCoverage in the bundle; "
+            "fluxsim explain FLX-3305 says what to do about a declaration"
         )
     return "\n".join(lines)
 

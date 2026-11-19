@@ -54,8 +54,13 @@ from flux_engine.api.claims import Claim, ClaimBasis, ClaimType
 from flux_engine.api.digests import DigestRef
 from flux_engine.api.verdict import Reproducibility, Validity
 from flux_engine.core.errors import FluxError, register
-from flux_engine.evidence.provenance import render_provenance_section, render_uncovered_columns
+from flux_engine.evidence.provenance import (
+    render_not_generated_sentence,
+    render_provenance_section,
+    render_uncovered_columns,
+)
 from flux_engine.seam.coverage import ExposeCoverage
+from flux_engine.seam.declared import NotGenerated
 
 __all__ = [
     "DEFAULT_AUTHORED_DIALS",
@@ -129,6 +134,7 @@ def _render_not_proven_section(
     uncovered: str,
     scorecard_note: Optional[str] = None,
     register_note: Optional[str] = None,
+    not_generated_note: Optional[str] = None,
 ) -> str:
     """Render the mandatory last section from its fixed template.
 
@@ -172,6 +178,8 @@ def _render_not_proven_section(
             f"the world regardless: {dial_list}."
         )
     lines.append(uncovered)
+    if not_generated_note is not None:
+        lines.append(not_generated_note)
     if register_note is not None:
         lines.append(register_note)
     if scorecard_note is not None:
@@ -193,6 +201,7 @@ def render_evidence_report(
     authored_dials: Sequence[str] = DEFAULT_AUTHORED_DIALS,
     scorecard_note: Optional[str] = None,
     register_note: Optional[str] = None,
+    not_generated: Sequence[NotGenerated] = (),
 ) -> str:
     """Render ``EVIDENCE.md``'s six fixed sections for one bundle.
 
@@ -212,6 +221,12 @@ def render_evidence_report(
     :func:`flux_engine.evidence.register.render_register_note`), added to "What
     Was Not Proven" when the run's plan binds a register. ``None``, the default,
     adds nothing, so a run with no register gets the report it got before.
+
+    *not_generated* is what the run's contract declares and the engine does not
+    generate (:mod:`flux_engine.seam.declared`), read back from the record the
+    plan binds. It adds one sentence to "What Was Not Proven" naming each
+    declaration; empty, the default, adds nothing, so a run that declares none gets
+    the report it got before.
 
     Raises ``FLX-8030`` if the rendered text contains a reserved
     word -- most likely introduced through a caller-supplied
@@ -235,6 +250,7 @@ def render_evidence_report(
             render_uncovered_columns(coverage),
             scorecard_note,
             register_note,
+            render_not_generated_sentence(not_generated),
         ),
     ]
     report = "\n\n".join(sections) + "\n"

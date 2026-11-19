@@ -126,6 +126,18 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `docs/spec/scorecard-1-2.schema.json`; `docs/spec/scorecard-1.schema.json`
   stays as published for the documents of formats 1-0-0 and 1-1-0, and a test
   pins its bytes. No digest of a bundle, a plan or a golden moves.
+- `fluxsim plan` names what a bundle declares and the run does not
+  generate. Three declarations are accepted and were drawn as if absent: a
+  relationship's `sharedColumns` (and a column's `sharedAttribute`), a `check`
+  that determines no column (a contract `check` with no `generates` setting, or
+  a FLUX-side `check`), and a `check` that reads another row through a
+  relationship. `plan` names each per expose after the coverage lines and in a
+  `declared_not_generated` artifact, the evidence report lists them under "What
+  Was Not Proven", and `--strict-coverage`, or `strictCoverage: true` in the
+  Simulation's extensions, refuses the run before any row exists with the new
+  `FLX-3305`, which says what is not generated and what to do. `ship` works the
+  list out again from the bundle, so no plan, record or digest of any bundle
+  moves.
 
 
 ## 0.7.0 - 2026-11-19
@@ -203,8 +215,9 @@ locale, as the engine's own pre-reads of them do.
   The new forms are `FLX-6103` under flux-expr/2 and in a contract's text, a
   concatenation derived into an enum column is `FLX-6110`, `check_language` accepts
   `flux-expr/3`, and a flux-expr/3 rule that uses none of the seven extensions is
-  `FLX-6209`. Nothing reads these rules from a bundle yet, so no bundle, digest or
-  golden moves.
+  `FLX-6209`. A bundle's FLUX-side rules are read in either language (see the
+  FLUX-side rules entry above), and a bundle that declares none keeps every byte,
+  digest and golden.
 - `flux_stats.canonical` is the canonical form a digest is taken over
   (KERNEL-SPEC §2.1), standard library only. `flux_stats.exact_yaml` is the
   exact read of a bundle's YAML text, behind a new `yaml` extra

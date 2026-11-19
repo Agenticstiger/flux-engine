@@ -80,6 +80,7 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-3302](./FLX-3302.md) | a required expose column has no runtime attribute mapped onto it |
 | [FLX-3303](./FLX-3303.md) | an INT expose column is mapped onto a source that is not always a whole number |
 | [FLX-3304](./FLX-3304.md) | a column fell back to a type default and coverage is strict |
+| [FLX-3305](./FLX-3305.md) | a declaration is accepted but not generated and coverage is strict |
 | [FLX-3401](./FLX-3401.md) | no distribution family is available for this column |
 | [FLX-3402](./FLX-3402.md) | declared statistics do not parameterise the chosen family |
 | [FLX-3403](./FLX-3403.md) | the related tables cannot be generated as declared |

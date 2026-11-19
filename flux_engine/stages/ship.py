@@ -132,6 +132,7 @@ from flux_engine.safeio import (
     write_text_atomic,
 )
 from flux_engine.seam.coverage import ExposeCoverage
+from flux_engine.seam.declared import NotGenerated
 from flux_engine.stages.apply import (
     load_recorded_plan,
     plan_kernel,
@@ -1116,6 +1117,18 @@ def _signature_text(
     )
 
 
+def _declared_not_generated(directory: Path, simulation_id: str) -> Tuple[NotGenerated, ...]:
+    """What the bundle declares and the engine does not generate, worked out from the bundle.
+
+    A pure function of the bundle's documents, so nothing the plan binds records it.
+    """
+    from flux_engine.seam.resolve import load_bundle, resolve_all_emits
+    from flux_engine.stages.pipeline import emit_not_generated
+
+    resolved = resolve_all_emits(load_bundle(directory), simulation_id=simulation_id)
+    return tuple(row for emit in resolved for row in emit_not_generated(emit, where=simulation_id))
+
+
 def _write_evidence_report(
     layout: RunLayout,
     *,
@@ -1129,6 +1142,7 @@ def _write_evidence_report(
     coverage: Optional[Sequence[ExposeCoverage]] = None,
     scored: Optional["_ScoredRun"] = None,
     register: Optional[RegisterSummary] = None,
+    not_generated: Sequence[NotGenerated] = (),
 ) -> None:
     """Write ``EVIDENCE.md`` into the run directory, ahead of packing.
 
@@ -1172,6 +1186,7 @@ def _write_evidence_report(
             + (_scorecard_summary_text(scored.scorecard) if scored else "")
         ),
         coverage=coverage,
+        not_generated=not_generated,
         scorecard_note=_scorecard_not_proven(scored.scorecard) if scored else None,
         register_note=render_register_note(register) if register is not None else None,
     )
@@ -1456,6 +1471,7 @@ def ship(
             ephemeral_signing=signing_key is None,
             self_attested=trust_key is None,
             coverage=coverage,
+            not_generated=_declared_not_generated(directory, simulation_id),
             scored=_scored_run(layout, scorecard, outcomes, slices),
             register=summary,
         )
