@@ -89,6 +89,18 @@ assumption is a number of the register with its reason.
   an assumption. With a published `distinctCount` and no bound, the 0.7.0 rule
   stays: an even span centred on the mean, as many values wide as
   `distinctCount`.
+- **A binned quantile is two points.** A `quantile/2` group says `binBelow` of
+  its `k` records lie below one edge of its ladder and `binThrough` below the next,
+  so it gives the column two points of its distribution, level `binBelow / k` at
+  the one edge and `binThrough / k` at the other, as a published quartile does. The
+  ladder's first and last edges say nothing of where the values lie and give none.
+  Counts are rounded, so two points can disagree: a level never falls below the one
+  before it. When `min` or `max` is withheld and the outermost point on that side is
+  a binned quantile, the rows beyond it are no longer put in the outermost bin. A
+  number column with a published mean and one end withheld fills that part by
+  maximum entropy, with the mean the rest leaves. Otherwise the part lies in the next
+  bin of the profile's own ladder, drawn evenly. Each end is an assumption, stated
+  as one. A published `distinctCount` is checked against the bins' span.
 - **Nothing published** gives a placeholder that is not constant: an even
   spread over the first hundred values of the column's grid from 0 (0 to 99 for an
   integer, 0.00 to 0.99 for two decimal places, within the declared precision), or

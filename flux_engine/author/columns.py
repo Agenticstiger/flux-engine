@@ -40,22 +40,22 @@ exactly (beyond 2^53, ``FLX-1003``) is never declared.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal, localcontext
 from fractions import Fraction
 from itertools import pairwise
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, TypeGuard, Union
 
 from flux_engine.author.basis import Basis, Label, assumed, from_contract, from_profile
 from flux_engine.author.fill import drawn_mean as _drawn_mean
-from flux_engine.author.fill import tilted_fill
+from flux_engine.author.fill import part_mean, tilted_fill
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
 from flux_engine.seam.coverage import printable
 from flux_stats.column_metrics import MAX, MIN, NULL_COUNT, QUANTILES
-from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM, MEAN
+from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM, MEAN, QUANTILE_BINNED
 from flux_stats.definitions import SUPPORT as SUPPORT_STATISTIC
 
 __all__ = [
@@ -87,6 +87,7 @@ _MEAN = MEAN.identifier
 _MIN = MIN.identifier
 _MAX = MAX.identifier
 _QUANTILES = QUANTILES.identifier
+_QUANTILE_BINNED = QUANTILE_BINNED.identifier
 _NULL_COUNT = NULL_COUNT.identifier
 
 #: How many opaque levels a string column whose values the profile does not
@@ -1032,10 +1033,72 @@ class _Point:
     value: Decimal
     tokens: Tuple[str, ...]
     definition: str
+    #: A binned quantile's point: the statistic's edge ladder and this edge's place on it.
+    ladder: Tuple[Decimal, ...] = ()
+    index: int = -1
+
+
+def _is_count(value: Any) -> TypeGuard[int]:
+    """Whether *value* is a JSON integer: a bool is not a count."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _binned_points(ctx: ColumnContext) -> List[_Point]:
+    """The two points of every published ``quantile/2`` group of the column.
+
+    A group says ``binBelow`` of its ``k`` records lie below edge ``bins[i]`` and
+    ``binThrough`` below ``bins[i + 1]``, so it is two points of the distribution
+    (PROFILE-SPEC section 4). The ladder's first and last edges are skipped: they
+    are the type's extremes and say nothing of where the values lie. A key, or a
+    foreign key, keeps its own rules and reads none.
+    """
+    if ctx.key or ctx.keyed or ctx.foreign is not None:
+        return []
+    points: List[_Point] = []
+    for index, statistic in _statistics(ctx.entry):
+        if statistic.get("definition") != _QUANTILE_BINNED or "groupBy" in statistic:
+            continue
+        groups, bins = statistic.get("groups"), statistic.get("bins")
+        if not isinstance(groups, list) or len(groups) != 1 or not isinstance(bins, list):
+            continue
+        group = groups[0]
+        if not isinstance(group, Mapping) or group.get("status") != _FREE:
+            continue
+        try:
+            ladder = tuple(Decimal(str(edge)) for edge in bins)
+        except ArithmeticError:
+            continue
+        k, current, below, through = (
+            group.get(key) for key in ("k", "quantileBin", "binBelow", "binThrough")
+        )
+        if not (_is_count(k) and _is_count(current) and _is_count(below) and _is_count(through)):
+            continue
+        if not (
+            len(ladder) >= 2
+            and all(low < high for low, high in pairwise(ladder))
+            and k > 0
+            and 0 <= current < len(ladder) - 1
+            and 0 <= below <= through <= k
+        ):
+            continue
+        tokens = ctx.profile_tokens + ("statistics", str(index))
+        for edge, count in ((current, below), (current + 1, through)):
+            if 0 < edge < len(ladder) - 1:
+                points.append(
+                    _Point(
+                        Fraction(count, k),
+                        ladder[edge],
+                        tokens + ("bins", str(edge)),
+                        _QUANTILE_BINNED,
+                        ladder,
+                        edge,
+                    )
+                )
+    return points
 
 
 def _points(ctx: ColumnContext) -> List[_Point]:
-    """The published ``min``, quartiles and ``max``, in level order."""
+    """The published ``min``, quartiles, ``max`` and binned quantiles, in level order."""
     points: List[_Point] = []
     metrics = ctx.profile_tokens + ("metrics",)
     low = _published(ctx.entry, "min")
@@ -1055,6 +1118,8 @@ def _points(ctx: ColumnContext) -> List[_Point]:
     high = _published(ctx.entry, "max")
     if high is not None:
         points.append(_Point(Fraction(1), Decimal(str(high)), metrics + ("max",), _MAX))
+    points.extend(_binned_points(ctx))
+    points.sort(key=lambda point: point.level)
     return points
 
 
@@ -1552,6 +1617,11 @@ def _histogram(points: Sequence[_Point]) -> Tuple[List[_Point], List[Fraction]]:
         if held is None or point.level >= held.level:
             reach[point.value] = point
     edges = [reach[value] for value in sorted(reach)]
+    # Counts are rounded, so two points can disagree: a level never falls.
+    for position in range(1, len(edges)):
+        floor = edges[position - 1].level
+        if edges[position].level < floor:
+            edges[position] = replace(edges[position], level=floor)
     weights = [high.level - low.level for low, high in pairwise(edges)]
     weights[0] += edges[0].level
     weights[-1] += 1 - edges[-1].level
@@ -1712,20 +1782,230 @@ def shape_to_mean(
     return spelled, cut_weights, inserted
 
 
-def _from_order_statistics(ctx: ColumnContext, plan: ColumnPlan, points: List[_Point]) -> None:
-    """Bins over the published ``min``, quartiles and ``max``: what ``fluid profile`` writes.
+#: How the part beyond a binned quantile's outermost point is closed, per end (ADR 0014).
+_LADDER_REASON = (
+    "The profile withheld {end}: the rows {side} its outermost binned quantile are assumed to "
+    "lie in the next bin of the edge ladder the profile counts over, drawn evenly."
+)
+_TAIL_REASON = (
+    "The profile withheld {end} and publishes the mean: the rows {side} its outermost binned "
+    "quantile are drawn by the distribution of largest entropy with the mean the rest leaves, "
+    "a geometric tilt over the bins declared here, out to where less than half a row lies "
+    "beyond them (ADR 0014)."
+)
 
-    With both ends and a mean published, the bins are shaped to the mean
-    (:func:`shape_to_mean`), and the mean becomes a property when the profile
-    publishes ``mean/1``, one it can score.
+
+@dataclass
+class _Closed:
+    """The bins over the published points, with the ends a profile withheld closed."""
+
+    values: List[Decimal]
+    weights: List[Fraction]
+    edge_bases: List[Basis]
+    #: A basis per bin's weight, or ``None`` where every weight rests on one basis.
+    weight_bases: Optional[List[Optional[Basis]]] = None
+    #: The mean was used to fill a tail.
+    mean_used: bool = False
+    #: The sentences of the ends closed, each an assumption.
+    notes: List[str] = field(default_factory=list)
+    low_closed: bool = False
+    high_closed: bool = False
+
+
+def _tail_fill(
+    ctx: ColumnContext, closed: _Closed, edges: Sequence[_Point], high: bool, mean: Fraction
+) -> Optional[_Closed]:
+    """The part beyond the outermost point, as the largest-entropy fill with the mean the rest leaves."""
+    point = edges[-1] if high else edges[0]
+    share = (1 - point.level) if high else point.level
+    step = Fraction(_grid(ctx))
+    if share <= 0:
+        return None
+    raw = Fraction(point.value)
+    snapped = (math.ceil(raw / step) if high else math.floor(raw / step)) * step
+    bounds = [Fraction(value) for value in closed.values]
+    bounds[-1 if high else 0] = snapped
+    if any(low >= up for low, up in pairwise(bounds)):
+        return None
+    weights = list(closed.weights)
+    weights[-1 if high else 0] -= share
+    last = len(weights) - 1
+    inner = sum(
+        weight * part_mean(low, up, step, position == last and not high)
+        for position, (weight, low, up) in enumerate(
+            zip(weights, bounds[:-1], bounds[1:], strict=True)
+        )
+    )
+    rest = (mean - inner) / share
+    if (rest <= snapped) if high else (rest >= snapped):
+        return None
+    filled = tilted_fill(snapped, rest, step, ctx.rows, limit=_limit(ctx))
+    if filled is None:
+        return None
+    fill_edges, fill_weights = filled
+    total = sum(fill_weights, Fraction(0))
+    scaled = [weight * share / total for weight in fill_weights]
+    if high:
+        all_edges, all_weights = bounds + fill_edges[1:], weights + scaled
+    else:
+        all_edges, all_weights = fill_edges[:-1] + bounds, scaled + weights
+    if abs(_drawn_mean(all_edges, all_weights, step) - mean) > step:
+        return None
+    grid = _grid(ctx)
+    exact = [_on_grid(edge, grid) for edge in fill_edges]
+    grown = len(fill_edges) - 1
+    reason = _TAIL_REASON.format(end="max" if high else "min", side="above" if high else "below")
+    assumption = assumed(reason)
+    kept: List[Optional[Basis]] = list(closed.weight_bases or [None] * len(closed.weights))
+    new: List[Optional[Basis]] = [assumption] * (len(fill_edges) - 1)
+    if high:
+        values = closed.values[:-1] + exact
+        edge_bases = closed.edge_bases + [assumption] * grown
+        weight_bases = kept + new
+    else:
+        values = exact + closed.values[1:]
+        edge_bases = [assumption] * grown + closed.edge_bases
+        weight_bases = new + kept
+    return replace(
+        closed,
+        values=values,
+        weights=all_weights,
+        edge_bases=edge_bases,
+        weight_bases=weight_bases,
+        mean_used=True,
+        notes=closed.notes + [reason],
+    )
+
+
+def _ladder_bin(
+    ctx: ColumnContext, closed: _Closed, edges: Sequence[_Point], high: bool
+) -> Optional[_Closed]:
+    """The part beyond the outermost point, in the next bin out of the profile's own ladder."""
+    point = edges[-1] if high else edges[0]
+    share = (1 - point.level) if high else point.level
+    nearer = point.index + 1 if high else point.index - 1
+    if share <= 0 or not 0 < nearer < len(point.ladder) - 1:
+        return None
+    edge = point.ladder[nearer]
+    limit = _limit(ctx)
+    numeric = ctx.column.logical_type.kind in (LogicalKind.INT, LogicalKind.DECIMAL)
+    if numeric and limit is not None and abs(Fraction(edge)) > limit:
+        return None
+    reason = _LADDER_REASON.format(end="max" if high else "min", side="above" if high else "below")
+    assumption = assumed(reason)
+    weights = list(closed.weights)
+    weights[-1 if high else 0] -= share
+    bases: List[Optional[Basis]] = list(closed.weight_bases or [None] * len(weights))
+    one: List[Optional[Basis]] = [assumption]
+    if high:
+        return replace(
+            closed,
+            values=closed.values + [edge],
+            weights=weights + [share],
+            edge_bases=closed.edge_bases + [assumption],
+            weight_bases=bases + one,
+            notes=closed.notes + [reason],
+        )
+    return replace(
+        closed,
+        values=[edge] + closed.values,
+        weights=[share] + weights,
+        edge_bases=[assumption] + closed.edge_bases,
+        weight_bases=one + bases,
+        notes=closed.notes + [reason],
+    )
+
+
+def _close_ends(
+    ctx: ColumnContext,
+    edges: Sequence[_Point],
+    weights: Sequence[Fraction],
+    missing: Sequence[bool],
+) -> _Closed:
+    """Close each end the profile withheld whose outermost point is a binned quantile.
+
+    *missing* says whether the low and the high end are withheld. A number column
+    with a published mean and only one end withheld fills that part by maximum
+    entropy; otherwise the part lies in the next bin of the ladder; an end neither
+    closes is left to the outermost bin.
+    """
+    closed = _Closed(
+        [edge.value for edge in edges],
+        list(weights),
+        [from_profile(edge.tokens, edge.definition) for edge in edges],
+    )
+    mean = _published_mean(ctx)
+    numeric = ctx.column.logical_type.kind in (LogicalKind.INT, LogicalKind.DECIMAL)
+    for high in (False, True):
+        point = edges[-1] if high else edges[0]
+        if not missing[1 if high else 0] or point.definition != _QUANTILE_BINNED:
+            continue
+        # The end beyond the point is withheld: its share is not in the outermost bin.
+        grown = None
+        if numeric and mean is not None and sum(missing) == 1:
+            grown = _tail_fill(ctx, closed, edges, high, mean)
+        if grown is None:
+            grown = _ladder_bin(ctx, closed, edges, high)
+        if grown is not None:
+            closed = replace(grown, high_closed=True) if high else replace(grown, low_closed=True)
+    return closed
+
+
+def _read_binned(ctx: ColumnContext, plan: ColumnPlan, binned: Sequence[_Point]) -> None:
+    """Record every ``quantile/2`` statistic whose points the bins are laid over."""
+    seen: List[Tuple[str, ...]] = []
+    for point in binned:
+        statistic = point.tokens[:-2]
+        if statistic not in seen:
+            seen.append(statistic)
+            plan.reads.append((statistic, "points of the distribution the bins are laid over"))
+
+
+def _check_distinct(ctx: ColumnContext, plan: ColumnPlan, values: Sequence[Decimal]) -> None:
+    """A published ``distinctCount`` no rule read: the final bins must span that many values."""
+    counted = _published(ctx.entry, "distinctCount")
+    tokens = _metric_tokens(ctx, "distinctCount")
+    if not isinstance(counted, int) or isinstance(counted, bool) or counted < 1:
+        return
+    if any(held == tokens for held, _ in plan.reads + plan.passed):
+        return
+    kind = ctx.column.logical_type.kind
+    width = Fraction(values[-1]) - Fraction(values[0])
+    if kind is LogicalKind.DATE:
+        span = width / _DAY_MS + 1
+    elif kind is LogicalKind.TIMESTAMP:
+        span = width + 1
+    else:
+        span = width / Fraction(_grid(ctx)) + 1
+    if span >= counted:
+        _read(ctx, plan, "distinctCount", "checked: the bins span that many values")
+    else:
+        plan.passed.append((tokens, "the bins span fewer values than the profile counts"))
+
+
+def _from_order_statistics(ctx: ColumnContext, plan: ColumnPlan, points: List[_Point]) -> None:
+    """Bins over the published ``min``, quartiles, binned quantiles and ``max``.
+
+    That is what ``fluid profile`` writes. With both ends and a mean published, the
+    bins are shaped to the mean (:func:`shape_to_mean`), and the mean becomes a
+    property when the profile publishes ``mean/1``, one it can score.
     """
     kind = ctx.column.logical_type.kind
     edges, weights = _histogram(points)
-    has_low = any(point.level == 0 for point in points)
-    has_high = any(point.level == 1 for point in points)
+    has_low = any(point.level == 0 and point.definition != _QUANTILE_BINNED for point in points)
+    has_high = any(point.level == 1 and point.definition != _QUANTILE_BINNED for point in points)
     has_quantiles = any(point.definition == _QUANTILES for point in points)
-    spelled = [_spell(kind, edge.value) for edge in edges]
-    clipped = [name for name, held in (("min", has_low), ("max", has_high)) if not held]
+    binned = [point for point in points if point.definition == _QUANTILE_BINNED]
+    closed = _close_ends(ctx, edges, weights, (not has_low, not has_high))
+    spelled = [_spell(kind, value) for value in closed.values]
+    clipped = [
+        name
+        for name, held in (
+            ("min", has_low or closed.low_closed),
+            ("max", has_high or closed.high_closed),
+        )
+        if not held
+    ]
     if clipped:
         weights_basis = assumed(
             f"The profile withheld {' and '.join(clipped)}: the rows beyond the outermost "
@@ -1733,21 +2013,30 @@ def _from_order_statistics(ctx: ColumnContext, plan: ColumnPlan, points: List[_P
         )
     elif has_quantiles:
         weights_basis = from_profile(ctx.profile_tokens + ("metrics", "quantiles"), _QUANTILES)
+    elif binned:
+        weights_basis = from_profile(binned[0].tokens[:-2], _QUANTILE_BINNED)
     else:
         weights_basis = assumed(
             "Only min and max are published: the values are drawn evenly between them."
         )
     if weights_basis.reason is not None:
         plan.assumptions.append(weights_basis.reason)
-    edge_bases = [from_profile(edge.tokens, edge.definition) for edge in edges]
+    plan.assumptions.extend(closed.notes)
+    edge_bases = closed.edge_bases
+    weights = closed.weights
     mean = _published_mean(ctx)
     shaped = None
-    if not clipped and mean is not None and kind in (LogicalKind.INT, LogicalKind.DECIMAL):
-        shaped = (
-            shape_to_mean([edge.value for edge in edges], weights, mean, _grid(ctx))
-            if _shapes(ctx)
-            else None
+    if (
+        not clipped
+        and not closed.mean_used
+        and mean is not None
+        and kind
+        in (
+            LogicalKind.INT,
+            LogicalKind.DECIMAL,
         )
+    ):
+        shaped = shape_to_mean(closed.values, weights, mean, _grid(ctx)) if _shapes(ctx) else None
         _read_mean(
             ctx,
             plan,
@@ -1757,15 +2046,28 @@ def _from_order_statistics(ctx: ColumnContext, plan: ColumnPlan, points: List[_P
                 else "checked against the bins, which keep it as near as they allow"
             ),
         )
+    elif closed.mean_used:
+        _read_mean(ctx, plan, "the mean the tail beyond the published quantiles is tilted to")
+    per_bin: Union[Basis, List[Basis]] = weights_basis
+    if closed.weight_bases is not None:
+        per_bin = [basis or weights_basis for basis in closed.weight_bases]
     if shaped is None:
         plan.declaration["bins"] = spelled
         plan.declaration["binWeights"] = [_decimal_text(weight) for weight in weights]
         for position, basis in enumerate(edge_bases):
             plan.labels.append(Label(("bins", str(position)), basis))
-        plan.labels.append(Label(("binWeights",), weights_basis))
+        if isinstance(per_bin, Basis):
+            plan.labels.append(Label(("binWeights",), per_bin))
+        else:
+            for position, basis in enumerate(per_bin):
+                plan.labels.append(Label(("binWeights", str(position)), basis))
         plan.how = f"a histogram over {len(edges)} published order statistics"
+        if closed.mean_used:
+            plan.how += ", its tail filled to the published mean"
     else:
-        _shaped_bins(ctx, plan, shaped, edge_bases, weights_basis)
+        _shaped_bins(ctx, plan, shaped, edge_bases, per_bin)
+    _read_binned(ctx, plan, binned)
+    _check_distinct(ctx, plan, closed.values)
     if has_low and has_high:
         # The published ends, unless a quantile lies beyond one: the property's bins
         # run over every published value, and they partition the range (FLX-5032).

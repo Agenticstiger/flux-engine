@@ -167,9 +167,8 @@ orders: 600 rows, 4 columns
   amount      a histogram over 5 published order statistics, shaped to the published mean
   created_at  uniform within the run's time window: the profile publishes no order statistic
 
-profile: 21 statistics -- 10 used, 4 unused, 7 withheld
+profile: 21 statistics -- 11 used, 3 unused, 7 withheld
 unused (no number rests on these; the register lists them):
-  - /tables/orders/columns/amount/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
   - /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
   - /tables/orders/columns/created_at/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
   - /tables/orders/columns/created_at/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
@@ -207,8 +206,7 @@ pointer or a Simulation pointer. An `--allow` that accepts nothing is refused to
 
 ```console
 $ fluxsim init strict --contract contract.orders.fluid.yaml --profile orders.profile.json --strict --allow /tables/orders/columns/created_at # exit 1
-init: --strict refuses this bundle (2 statistics of the profile unused, 6 assumptions standing in for what the profile did not publish); nothing was written
-  unused /tables/orders/columns/amount/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
+init: --strict refuses this bundle (1 statistic of the profile unused, 6 assumptions standing in for what the profile did not publish); nothing was written
   unused /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
 ...
 accept one with --allow POINTER (a profile pointer for a statistic, a Simulation pointer for a gap), or publish what the profile left out
@@ -224,6 +222,7 @@ The rules run from the most the profile says to the least:
 | a column's `min` and `max` | its `range`, which the fidelity check holds the run to | profile |
 | `min`, the quartiles and `max` | histogram `bins` and `binWeights`, a quarter of the rows in each | profile |
 | a mean: `sum` and `count`, or a `mean/1` statistic | the histogram shaped to that mean and, for a `mean/1` over a number column with a published range, a `mean` property the run is checked against | profile, with the shape assumed |
+| a binned quantile (`quantile/2`) | two points of the column's distribution for the histogram: where the profile withholds `min` or `max` beyond them, a tail from the published mean or the profile's next bin out, each assumed | profile, with the tail assumed |
 | `nullCount` | `nullFraction` | profile |
 | a histogram, level counts or a list of levels | `bins` and weights, `levels`, and a property the run is scored on | profile |
 | a histogram or level counts grouped by a categorical column | `given` that column, with `binWeightsGiven` or `levelWeightsGiven` from the group counts, and a grouped property | profile |
@@ -317,13 +316,13 @@ plan written to ...
 coverage: orders: 1 of 4 columns fell back to a type default
   created_at (TIMESTAMP): uniform within the simulation's time bounds: the column declares no draw of its own
 --strict-coverage refuses the run, and so does strictCoverage in the bundle; fluxsim explain FLX-3304 says how to cover a column
-parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default; 4 statistics of the profile unused
+parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default; 3 statistics of the profile unused
 applied to ...
 emitted orders: 600 rows (generator)
 reproducible: not checked | validity: not asserted
 ...
   fidelity orders: passed -- 1 of 1 declared property within the margin against the pinned profile
-  parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default; 4 statistics of the profile unused
+  parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default; 3 statistics of the profile unused
   scorecard: overall ... against profile sha256:...
 ...
 shipped out/bundle.flux.tgz

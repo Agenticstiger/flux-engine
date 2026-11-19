@@ -23,6 +23,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ## Unreleased
 
+- `fluxsim init` reads `quantile/2`, the binned quantile `fluid profile` publishes
+  by default: each group is two points of a number, date or timestamp column's
+  distribution, and the bins are laid over them. A withheld `min` or `max` beyond
+  such a point is closed by a maximum-entropy tail with the published mean, or by
+  the next bin of the profile's ladder, and each is an assumption. A published
+  `distinctCount` is checked against the bins' span.
 - `fluxsim init --contract --profile` keeps a ledger of the profile (ADR 0014):
   every statistic and metric, by its JSON Pointer, is used, unused with the
   reason no rule reads it, or withheld. The command prints the counts and every
