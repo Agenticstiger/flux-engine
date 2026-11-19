@@ -3473,17 +3473,6 @@
       }
     },
     {
-      "id": "refused-add-years-in-a-core-text",
-      "expr": "ADD_YEARS(d, 1)",
-      "side": "core",
-      "model_fragment": "calendar",
-      "expose": "quirks",
-      "position": "value",
-      "expect": {
-        "parse": "FLX-6103"
-      }
-    },
-    {
       "id": "refused-extract-of-a-number",
       "expr": "EXTRACT(DAY FROM n)",
       "side": "flux",

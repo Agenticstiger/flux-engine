@@ -16,12 +16,13 @@ extensions is a parse error (`FLX-6103`). A form that FLUID SQL comes to cover i
 
 ## 1. Where texts come from
 
-The three extensions are FLUX's, and never sit in a contract. A text uses them only as a FLUX-side rule that declares
-`language: flux-expr/3`. A contract's texts are FLUID SQL/1 and carry no language key. The engine generates a column
+`EXTRACT` and `||` are FLUX's, and never sit in a contract. A text uses them only as a FLUX-side rule that declares
+`language: flux-expr/3`. `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS` are also FLUID SQL/1's: a contract's text takes them, with
+the meaning of §4, and only a FLUX-side text under `flux-expr/2` refuses them. A contract's texts are FLUID SQL/1 and carry no language key. The engine generates a column
 from such a rule (a `derive` whose reads stay in the row), as EXPR-SPEC-2 §1 and §6 say.
 
-- Under `language: flux-expr/2`, and in a core (contract) text, each new form is `FLX-6103`, exactly as any word
-  outside the grammar is now.
+- Under `language: flux-expr/2`, each new form is `FLX-6103`, exactly as any word outside the grammar is now. In a
+  core (contract) text `EXTRACT` and `||` are `FLX-6103`, and the three `ADD_` functions parse.
 - `FLX-6102` accepts `flux-expr/2` and `flux-expr/3` for a FLUX-side rule, and no other language.
 - A FLUX-side text that declares flux-expr/3 is `FLX-6209` when it uses none of the seven extensions: the four of
   EXPR-SPEC-2 (`previous` and paths over several links, aggregates over children, windows over siblings) and these
@@ -90,7 +91,8 @@ They are exact and total. Given type-checked operands, each form returns a value
   with no normalization. A NULL operand makes the result NULL. `d_year || 'Q' || d_qoy` is `'1998Q1'` for 1998 and 1.
 
 The semantics are borrowed from SQL and checked against DuckDB 2.0.0 (section 6): the standard's `EXTRACT` and `||`,
-Db2's `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS`, the month-end clamping of PostgreSQL, DuckDB and Db2, and Substrait's
+Db2's names `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS`, the month-end clamping of PostgreSQL's `+ interval`, DuckDB and
+Db2's labeled duration `+ n MONTHS` (Db2's own `ADD_MONTHS` keeps a month end on a month end), and Substrait's
 `ACCEPT_NULLS` rule for a concatenation that gives NULL on a NULL operand.
 
 ## 5. Canonical form and the tree
@@ -135,7 +137,7 @@ No new code is raised. The codes of EXPR-SPEC-2 section 12 apply:
 | Code | When |
 |---|---|
 | `FLX-6102` | a FLUX-side rule declares a language other than `flux-expr/2` and `flux-expr/3` |
-| `FLX-6103` | an extension form in a core text, or under `flux-expr/2`; a field other than `YEAR`, `MONTH` and `DAY`; an `ADD_` call or an `EXTRACT` with the wrong shape |
+| `FLX-6103` | `EXTRACT` or `||` in a core text, or any extension form under `flux-expr/2`; a field other than `YEAR`, `MONTH` and `DAY`; an `ADD_` call or an `EXTRACT` with the wrong shape |
 | `FLX-6104` | a NULL literal as the operand of `EXTRACT`, as an argument of an `ADD_` function, or as every operand of `\|\|` |
 | `FLX-6109` | an operand of another type than section 3 gives |
 | `FLX-6110` | a concatenation derived into an enum column |

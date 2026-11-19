@@ -21,6 +21,194 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+- `fluxsim init` reads `quantile/2`, the binned quantile `fluid profile` publishes
+  by default: each group is two points of a number, date or timestamp column's
+  distribution, and the bins are laid over them. A withheld `min` or `max` beyond
+  such a point is closed by a maximum-entropy tail with the published mean, or by
+  the next bin of the profile's ladder, and each is an assumption. A published
+  `distinctCount` is checked against the bins' span.
+- `fluxsim init --contract --profile` keeps a ledger of the profile (ADR 0014):
+  every statistic and metric, by its JSON Pointer, is used, unused with the
+  reason no rule reads it, or withheld. The command prints the counts and every
+  unused statistic, and the Simulation lists the unused ones under
+  `extensions['com.agentics.flux/1'].unused`, beside the register. `--json`
+  carries the whole ledger and the gaps.
+- Parameter register format 1-2-0 (PARAMETER-REGISTER-SPEC section 1.1): a
+  Simulation may list the statistics of its pinned profile that no number rests
+  on, each with its reason. `plan` reads each citation in the profile
+  (`FLX-3113`), the record carries the list, the `parameters:` line counts it,
+  and `EVIDENCE.md` names each one under "What Was Not Proven". A register that
+  lists none keeps its format 1-0-0 or 1-1-0 record, bytes and digest.
+- `fluxsim init --strict` writes nothing, and exits 1, when a statistic of the
+  profile is unused or an assumption stands in for something the profile did
+  not publish, a gap. `--allow POINTER`, repeatable, accepts the
+  findings at or below a profile pointer or a Simulation pointer, and one that
+  accepts nothing is refused too.
+
+- `fluxsim init` never draws a column as one value unless its profile shows one
+  (ADR 0014). A lone published `min` or `max` is a bound: with a mean it is
+  filled by the distribution of largest entropy from it, a geometric tilt over
+  bins found in exact fractions, whose mean as drawn is the published one; with
+  `distinctCount` alone, that many grid values from it. A mean with no spread
+  and no bound is filled from 0 on its side. A column with nothing published,
+  or with values beyond what a row carries, is a placeholder spread rather than
+  0 on every row, and a number foreign key with no spread of its own is drawn
+  over its parent's keys, never under one parent.
+- A declared level that a level histogram does not list, and a withheld cell,
+  share what the published counts leave of the group's `k`; a cell withheld as
+  small takes no more than half the minimum cell. The 0.7.0 rule, the mean of
+  the published cells, holds only when the group publishes no `k`. A histogram
+  whose levels are a subset of the contract's `enum` now weighs the draw, and the
+  message names the levels it did not list.
+
+- `fluxsim init` reads grouped statistics (ADR 0014 section 4). A level or
+  marginal histogram grouped by a categorical column is a two-way table; each
+  is scored by its mutual information, and the Chow-Liu forest under the
+  generator's rules decides which column is drawn `given` which. The child
+  declares `levelWeightsGiven` or `binWeightsGiven` from the group counts, a
+  withheld cell filled from its group's `k`, and a grouped property the run is
+  scored on. A grouping the forest leaves out is unused in the ledger, with the
+  reason. `calibrate.structure.spanning_forest` is the selection step of
+  `suggest_tree`, callable with scores of the caller's own.
+- A categorical column is written with no assumed `nullFraction`, and none for a
+  published null count of zero: an absent one draws no null, and a declared one
+  kept the column from being drawn on (`FLX-3402`).
+
+- `fluxsim init` reads a profile's `relationships` (ADR 0014 section 5). For a
+  one-column number foreign key the contract declares, the classes of a
+  children-per-parent histogram are laid over the parent's key range, each a
+  share of the keys equal to its share of the parents (the Largest Remainder
+  Method) and weighted by its parents times their mean number of children, the
+  class of none at 0; the open class's mean is solved from the relationship's
+  mean. With a histogram of the foreign key's own values the classes are laid
+  inside each of its bins, so both hold. A mean alone leaves the spread even.
+  The approximation is documented: about `e^-m` more parents of a class of mean
+  `m` receive no child.
+
+- `fluxsim init` never draws a column a contract `derive` sets, and never gives
+  it its own profiled range, which made `verify` refuse the run (`FLX-5005`)
+  once a property read the column (ADR 0014 section 6). Its range is the exact
+  bounds of the rule over the ranges of the columns it reads, an interval in
+  fractions over the expression's syntax tree (`+`, `-`, `*`, `/` away from
+  zero, `ROUND`, `COALESCE`, `CASE`), or its published histogram's edges when
+  they hold those bounds, widened to the column's own published `min` and `max`
+  when they lie beyond, since the check reads those against the range too; its
+  published mean becomes a property the rule's values are scored on. Bounds
+  pass down a chain of rules, and a guarded `derive` leaves its column drawn.
+- A column a contract `dependency` sets gets no `mean` property from `fluxsim
+  init`: the run draws it once for each value of the columns it follows, so
+  its mean rests on those few draws, and a tenth of the mean is no margin.
+- A DATE column is spelled one way. Its fidelity `range` and `bins` can be
+  `YYYY-MM-DD` (a whole number of days since 1970-01-01 still works), where a
+  fidelity block that spelled them as dates was refused at `fluxsim validate`
+  with `FLX-5022`. `verify` reads the column's rows as dates, so a value
+  outside its range is refused as it is for an INT. A DATE column bounded by
+  RFC 3339 instants reads them as before, as a timestamp column in
+  milliseconds, so a block a profiler declares with instants still reads.
+- A profile holds a DATE column as a timestamp in milliseconds, and `verify
+  --profile` now scores a mean, a marginal histogram and a quantile over it
+  against that profile, where it refused every such property with `FLX-5037`.
+  The check converts the profile's numbers to days exactly and refuses one that
+  is not a whole day. The shape flags read a `YYYY-MM-DD` value against a
+  profile's timestamp column. No profile format, digest or golden baseline
+  changes.
+- `fluxsim init` spells a DATE column's bounds `YYYY-MM-DD`, and a DATE column
+  now carries the properties a number or a timestamp does, scored against the
+  profile's dates.
+- The scorecard states how much of the contract its score speaks for. Per table
+  and for the run, `coverage` counts the contract's columns that carry at least
+  one scored property, and the relationships the contract declares (the child
+  expose's `semantics.relationships`, FLUID 0.7.7) that the profile constrains:
+  its `relationships` list holds an entry for that parent and child with at
+  least one published statistic. No property scores children per parent yet, so
+  a relationship is counted as constrained, not scored. The overall line of
+  `verify`, `ship` and `EVIDENCE.md` prints it with the score, for example
+  `scorecard: overall 0.93 against profile sha256:... (covers 12 of 20 columns, 0 of 3 relationships)`,
+  and each table's line ends with its own counts. A table with no fidelity
+  block records no contract, so it is left out of the run's coverage and the
+  line says how many tables are.
+- The `scorecard` block of a Simulation may floor the coverage:
+  `coverage: {columns: "0.8", relationships: "0.5"}`. A run below a floor is
+  withheld as a score below a threshold is, and the plan records the floors
+  beside the thresholds as `coverage.columns` and `coverage.relationships`.
+  A plan whose Simulation declares none keeps its bytes and its `planDigest`.
+- The scorecard record is format 1-2-0, which adds `coverage`. Its schema is
+  `docs/spec/scorecard-1-2.schema.json`; `docs/spec/scorecard-1.schema.json`
+  stays as published for the documents of formats 1-0-0 and 1-1-0, and a test
+  pins its bytes. No digest of a bundle, a plan or a golden moves.
+- `fluxsim plan` names what a bundle declares and the run does not
+  generate. Three declarations are accepted and were drawn as if absent: a
+  relationship's `sharedColumns` (and a column's `sharedAttribute`), a `check`
+  that determines no column (a contract `check` with no `generates` setting, or
+  a FLUX-side `check`), and a `check` that reads another row through a
+  relationship. `plan` names each per expose after the coverage lines and in a
+  `declared_not_generated` artifact, the evidence report lists them under "What
+  Was Not Proven", and `--strict-coverage`, or `strictCoverage: true` in the
+  Simulation's extensions, refuses the run before any row exists with the new
+  `FLX-3305`, which says what is not generated and what to do. `ship` works the
+  list out again from the bundle, so no plan, record or digest of any bundle
+  moves.
+- Migration: a Simulation with `strictCoverage: true` (or a run with
+  `--strict-coverage`) whose contract has a `check` with no `generates`
+  setting, `sharedColumns`, `sharedAttribute` or a check over a link planned
+  before and is now refused with `FLX-3305`. Drop strict coverage, or the
+  declaration, or set `generates` on the check.
+- `e2e/roundtrip` is a local round trip against a generated truth, run by hand with no
+  cloud. It draws three related business-to-business tables from a contract and
+  a bundle it knows, profiles them with `fluid profile`, writes a bundle back
+  with `fluxsim init --contract --profile`, runs it with `--verify`, and judges
+  the copy against the truth: the scorecard and its coverage, a k-marginal
+  score, childless and top 1 % shares per relationship, grouped shares and
+  Cramér's V, the contract derives, init's unused statistics and any `CONSTANT`
+  shape flag. Each target prints PASS or FAIL, and `--record` appends one
+  line to a committed `history.jsonl`. It is its own uv project and no CI job
+  runs it.
+- `fluxsim init` keeps a column inside the range its contract declares: a
+  `validationRules` entry of type `range` (`between A and B`, or `>=`, `>`, `<=`,
+  `<` joined by `and`) bounds the bins, the levels and the maximum-entropy tail of a
+  drawn number column (the check's range and a property's bins keep the profile's
+  edges), and a column the profile publishes nothing for is drawn
+  evenly over it instead of a placeholder. A range that leaves the profile no weight is
+  drawn evenly within what it leaves, one that leaves a single grid value gives that
+  value, and one that lies wholly outside the profile's values is drawn evenly over the
+  range, each statistic the draw had read then unused with that reason. A range the
+  column's type cannot hold keeps the placeholder and says so.
+- `fluxsim init` reads a key's own statistics: with its `min` or `max` withheld the
+  keys are centred on the published mean, a `count` or `distinctCount` equal to the
+  rows is checked as one value per row, and a published mean, `min`, `max` or `quantile/2`
+  is checked against the even layout of the keys, unused with the reason when it
+  disagrees. The checks run on the span the bundle ends with, after the foreign keys
+  that reference a key have widened it.
+- `fluxsim init` reads the statistics of a foreign key that a relationship gives a
+  spread: its binned quantiles cut the parent's keys when it has no histogram, its mean
+  is read from `sum` and `count` and a `mean/1` that agrees, and a published `min` or
+  `max` is checked against the parent's key span.
+- `fluxsim init` checks the level histogram of a column that another is drawn given
+  against the sizes of the groups its weights come from, so it is used when they agree
+  and unused with the differing counts when they do not.
+- `fluxsim init` checks each binned quantile a profile publishes for a column a contract
+  `derive` sets against the range the rule gives: the quantile is used when the bin that
+  holds it overlaps that range and unused with the reason when it lies outside. It also
+  checks a published `distinctCount` of that column against the grid values the range holds.
+  A column under a range its contract declares is not clipped: the rule's values are, and
+  an assumption says so when they can pass it. A quantile's bin is checked against the
+  range the rule gives and the contract's range together.
+- `fluxsim init` no longer fails on a foreign key whose binned quantile has one cut: it
+  bounds no bucket, so the keys are laid out as without it and the statistic is unused.
+- `fluxsim init` reads the binned quantiles of a number foreign key that has no relationship
+  in the profile, like any other number column's, and checks a level histogram of a column
+  drawn given another against the sums of the groups it is drawn from. Both statistics were
+  left unused.
+- A contract's texts take `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS`, with
+  flux-expr/3's meaning, parser, checker, evaluator and canonical text (a month or
+  year move clamps the day, and a result outside 0001 to 9999 is NULL), so a
+  contract `derive` such as `ADD_DAYS(issued_on, 30)` generates on every row and
+  its check holds. `EXTRACT` and `||` stay flux-expr/3's, `FLX-6103` in a
+  contract's text, and a FLUX-side flux-expr/2 text still refuses all of them. A
+  derived date's bounds follow the move.
+
 ## 0.7.0 - 2026-11-19
 
 flux-stats exports the read of a FLUX bundle that the engine takes its digests
@@ -96,8 +284,9 @@ locale, as the engine's own pre-reads of them do.
   The new forms are `FLX-6103` under flux-expr/2 and in a contract's text, a
   concatenation derived into an enum column is `FLX-6110`, `check_language` accepts
   `flux-expr/3`, and a flux-expr/3 rule that uses none of the seven extensions is
-  `FLX-6209`. Nothing reads these rules from a bundle yet, so no bundle, digest or
-  golden moves.
+  `FLX-6209`. A bundle's FLUX-side rules are read in either language (see the
+  FLUX-side rules entry above), and a bundle that declares none keeps every byte,
+  digest and golden.
 - `flux_stats.canonical` is the canonical form a digest is taken over
   (KERNEL-SPEC §2.1), standard library only. `flux_stats.exact_yaml` is the
   exact read of a bundle's YAML text, behind a new `yaml` extra

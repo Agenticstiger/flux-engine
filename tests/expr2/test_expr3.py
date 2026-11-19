@@ -265,10 +265,19 @@ def test_the_new_forms_are_refused_under_flux_expr_2(text: str) -> None:
     assert _code(lambda: parse(text, side=Side.FLUX, language="flux-expr/2")) == "FLX-6103"
 
 
-@pytest.mark.parametrize("text", NEW_FORMS)
+CORE_REFUSED_FORMS = [text for text in NEW_FORMS if not text.startswith("ADD_")]
+
+
+@pytest.mark.parametrize("text", CORE_REFUSED_FORMS)
 def test_the_new_forms_are_refused_in_a_core_text(text: str) -> None:
     assert _code(lambda: parse(text, side=Side.CORE)) == "FLX-6103"
     assert _code(lambda: parse(text, side=Side.CORE, language=LANGUAGE_3)) == "FLX-6103"
+
+
+@pytest.mark.parametrize("text", [t for t in NEW_FORMS if t.startswith("ADD_")])
+def test_the_date_moves_parse_in_a_core_text(text: str) -> None:
+    assert parse(text, side=Side.CORE).side is Side.CORE
+    assert parse(text, side=Side.CORE, language=LANGUAGE_3).side is Side.CORE
 
 
 @pytest.mark.parametrize("text", NEW_FORMS)

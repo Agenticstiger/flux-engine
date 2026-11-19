@@ -90,7 +90,14 @@ from flux_engine.core.digest import DigestRef, digest_of_bytes, digest_of_docume
 from flux_engine.core.errors import FluxError, register
 from flux_engine.seam.contract import CompiledExpose, compile_expose, find_expose
 from flux_engine.seam.keys import ExposeKeys, check_no_key_blocks, keys_for_emit, mark_key_columns
-from flux_engine.seam.parameters import PARAMETERS_KEY, RegisterEntry, read_parameters_block
+from flux_engine.seam.parameters import (
+    PARAMETERS_KEY,
+    UNUSED_KEY,
+    RegisterEntry,
+    UnusedStatistic,
+    read_parameters_block,
+    read_unused_block,
+)
 from flux_engine.seam.scorecard import DeclaredProperty, ScorecardDeclaration, read_scorecard_block
 from flux_engine.spec.bundle import MANIFEST_NAME
 from flux_engine.spec.validate import Bundle, canonical_digest, load_yaml_docs, semver_satisfies
@@ -135,6 +142,7 @@ __all__ = [
     "flux_schema_validator",
     "load_bundle",
     "parameter_entries",
+    "unused_statistics",
     "profile_reference",
     "resolve_all_emits",
     "resolve_emit",
@@ -280,11 +288,16 @@ _SCORECARD_KEY = "scorecard"
 #: the register covers every document of the run, not one expose.
 _PARAMETERS_KEY = PARAMETERS_KEY
 
+#: The top-level key that lists the statistics of the pinned profile no number of
+#: the run rests on (docs/spec/PARAMETER-REGISTER-SPEC.md, register format 1-2-0).
+#: It belongs to the register, so it is read only beside ``parameters``.
+_UNUSED_KEY = UNUSED_KEY
+
 #: Every key the namespace itself may carry. Closed for the reason the
 #: per-expose block is: a key nothing reads is a declaration that goes
 #: missing without anyone noticing.
 _NAMESPACE_KEYS: FrozenSet[str] = frozenset(
-    {_EMITS_KEY, _PROFILE_KEY, _STRICT_COVERAGE_KEY, _SCORECARD_KEY, _PARAMETERS_KEY}
+    {_EMITS_KEY, _PROFILE_KEY, _STRICT_COVERAGE_KEY, _SCORECARD_KEY, _PARAMETERS_KEY, _UNUSED_KEY}
 )
 
 #: A pinned profile digest: ``jcs-document`` over the profile, KERNEL-SPEC §2.
@@ -1359,6 +1372,38 @@ def parameter_entries(
     )
 
 
+def unused_statistics(
+    simulation: Mapping[str, Any], *, where: str = ""
+) -> Optional[Tuple[UnusedStatistic, ...]]:
+    """The statistics *simulation* lists as unused, or ``None`` when it lists none.
+
+    Reads ``extensions["com.agentics.flux/1"].unused``
+    (docs/spec/PARAMETER-REGISTER-SPEC.md,
+    :func:`flux_engine.seam.parameters.read_unused_block`) and refuses, with
+    ``FLX-3105``, a malformed list, a list in a Simulation that pins no profile,
+    and a list in one that declares no register: the list is part of the
+    register's record. A YAML null lists none.
+    """
+    block = _namespace_value(simulation, _UNUSED_KEY)
+    if block is None:
+        return None
+    prefix = f"{where}: " if where else ""
+    at = f"{prefix}extensions[{EXTENSION_NAMESPACE!r}].{_UNUSED_KEY}"
+    if _namespace_value(simulation, _PARAMETERS_KEY) is None:
+        raise FluxError(
+            FLX_3105,
+            f"{at} belongs to the parameter register, and the Simulation declares none: "
+            f"declare extensions[{EXTENSION_NAMESPACE!r}].{_PARAMETERS_KEY} (an empty list "
+            "is a register with no entry)",
+        )
+    return read_unused_block(
+        block,
+        pinned=profile_reference(simulation, where=where) is not None,
+        where=at,
+        code=FLX_3105,
+    )
+
+
 def _require_namespace(simulation: Mapping[str, Any], simulation_id: str) -> None:
     """Refuse a namespace key this engine does not read, a malformed pin, flag, scorecard or register."""
     extensions = simulation.get("extensions")
@@ -1377,6 +1422,7 @@ def _require_namespace(simulation: Mapping[str, Any], simulation_id: str) -> Non
     strict_coverage_declared(simulation, where=simulation_id)
     scorecard_declaration(simulation, where=simulation_id)
     parameter_entries(simulation, where=simulation_id)
+    unused_statistics(simulation, where=simulation_id)
 
 
 def _require_extension_emits_resolve(simulation: Mapping[str, Any], simulation_id: str) -> None:

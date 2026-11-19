@@ -1,0 +1,93 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# A small business-to-business product in FLUID 0.7.7: organisations, their
+# accounts and the invoices of those accounts. The harness generates the truth
+# from this contract and truth/simulation.flux.yml, profiles it, and then asks
+# `fluxsim init` to write a bundle back from the profile.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: b2b.billing
+name: B2B billing
+metadata:
+  owner:
+    team: data-platform
+exposes:
+  - exposeId: organisation
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/organisation.parquet }
+    contract:
+      schema:
+        - { name: org_id, type: INT, required: true }
+        - { name: segment, type: "enum('smb', 'mid', 'enterprise')", required: true }
+        - { name: region, type: "enum('emea', 'amer', 'apac')", required: true }
+        - { name: tier, type: "enum('basic', 'standard', 'premium')", required: true }
+        - { name: seats, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: organisation, type: primary, expr: org_id }
+      dimensions:
+        - { name: segment, type: categorical, expr: segment }
+  - exposeId: account
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/account.parquet }
+    contract:
+      schema:
+        - { name: account_id, type: INT, required: true }
+        - { name: org_id, type: INT, required: true }
+        - { name: plan, type: "enum('free', 'team', 'business')", required: true }
+        - { name: opened_on, type: DATE, required: true }
+        - { name: monthly_fee, type: "DECIMAL(10,2)", required: true }
+      # One way: a plan has one monthly fee, so every account of a plan carries
+      # the same one (EXPR-SPEC-2 section 8).
+      invariants:
+        - id: plan_sets_fee
+          dependency:
+            from: [plan]
+            to: [monthly_fee]
+    semantics:
+      entities:
+        - { name: account, type: primary, expr: account_id }
+      relationships:
+        - name: organisation
+          to: organisation
+          fromColumns: [org_id]
+          toColumns: [org_id]
+          cardinality: many_to_one
+  - exposeId: invoice
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/invoice.parquet }
+    contract:
+      schema:
+        - { name: invoice_id, type: INT, required: true }
+        - { name: account_id, type: INT, required: true }
+        - { name: issued_on, type: DATE, required: true }
+        - { name: net, type: "DECIMAL(10,2)", required: true }
+        - { name: vat, type: "DECIMAL(10,2)", required: true }
+        - { name: gross, type: "DECIMAL(10,2)", required: true }
+      invariants:
+        - id: vat_of_net
+          derive: vat
+          expr: ROUND(net * 0.081, 2)
+        - id: gross_of_net
+          derive: gross
+          expr: net + vat
+    semantics:
+      entities:
+        - { name: invoice, type: primary, expr: invoice_id }
+      relationships:
+        - name: account
+          to: account
+          fromColumns: [account_id]
+          toColumns: [account_id]
+          cardinality: many_to_one

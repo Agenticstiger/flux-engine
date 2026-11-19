@@ -61,7 +61,7 @@ from flux_stats.column_metrics import CATEGORY, TIMESTAMP
 from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM
 from flux_stats.fixedpoint import FLX_5005, Grid
 from flux_stats.profile import FREE, ColumnEntry, Profile
-from flux_stats.reading import exact, nfc, parse_rfc3339_ms
+from flux_stats.reading import MS_PER_DAY, exact, nfc, parse_date_days, parse_rfc3339_ms
 from flux_stats.tails import occupancy_compare, power_at_most, upper_tail_at_most
 
 __all__ = [
@@ -275,13 +275,20 @@ class EmitSummary:
 
 
 def _value(value: Any, domain: str, subject: str) -> Any:
-    """A cell read as the profile reads its column: exact decimal, epoch ms, or NFC text."""
+    """A cell read as the profile reads its column: exact decimal, epoch ms, or NFC text.
+
+    A profile reads a DATE column as a timestamp, so a ``YYYY-MM-DD`` cell of a
+    timestamp column is the millisecond its day starts at (UTC), which is how
+    the profile holds that column's values. A date-time is read as ever.
+    """
     if domain == CATEGORY:
         if not isinstance(value, str):
             raise FluxError(FLX_5005, f"{subject}: value class {type(value).__name__!r}")
         return nfc(value)
     if domain == TIMESTAMP:
         try:
+            if isinstance(value, str) and len(value) == 10:
+                return Fraction(parse_date_days(value) * MS_PER_DAY)
             return Fraction(parse_rfc3339_ms(value))
         except FluxError as error:
             raise FluxError(error.code, f"{subject}: {error.detail}") from None

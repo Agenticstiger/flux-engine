@@ -28,12 +28,14 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass, field
 from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import yaml
 
 from flux_engine.author.basis import Basis, Label, assumed, default, from_profile
+from flux_engine.author.children import spread_children
 from flux_engine.author.columns import (
     MOST_PLACES,
     ColumnContext,
@@ -41,10 +43,17 @@ from flux_engine.author.columns import (
     PropertyPlan,
     assumed_check,
     declared_span,
+    determine_column,
     draw_within_key,
+    drawn_span,
     plan_column,
+    recheck_key,
     widen_key_span,
 )
+from flux_engine.author.derived import bounds, contract_dependents, contract_derives, numeric
+from flux_engine.author.given import choose_givens
+from flux_engine.author.ledger import Ledger
+from flux_engine.author.ranges import column_range
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
@@ -53,9 +62,12 @@ from flux_engine.seam.contract import LogicalKind, compile_expose
 from flux_engine.seam.coverage import printable
 from flux_engine.seam.keys import ContractKeys, ExposeKeys, compile_keys
 from flux_engine.seam.parameters import (
+    UNUSED_KEY,
     build_parameter_register,
     declared_numbers,
+    parse_pointer,
     read_parameters_block,
+    read_unused_block,
     render_pointer,
 )
 from flux_engine.seam.profile import load_profile
@@ -69,7 +81,10 @@ __all__ = [
     "AuthoredExpose",
     "AuthorError",
     "FLUX_VERSION",
+    "Gap",
+    "StrictFindings",
     "author_bundle",
+    "strict_findings",
 ]
 
 #: The FLUX version the authored documents declare: the starter's, so both
@@ -109,6 +124,8 @@ class AuthoredExpose:
     rows: int = 0
     #: What the row count rests on.
     rows_basis: Optional[Basis] = None
+    #: What a person is told about the row count, when it is not the published rowCount.
+    rows_note: Optional[str] = None
     columns: List[ColumnPlan] = field(default_factory=list)
     #: What each assumption is about (a column, ``rows``) and the sentence that states it.
     assumptions: List[Tuple[str, str]] = field(default_factory=list)
@@ -116,6 +133,27 @@ class AuthoredExpose:
     skipped: Optional[str] = None
     #: Each planned column's logical type, for the one assumed check a table may need.
     kinds: Dict[str, LogicalKind] = field(default_factory=dict)
+    #: The columns a contract ``derive`` sets: column -> (invariant index, expr text).
+    derives: Dict[str, Tuple[int, str]] = field(default_factory=dict)
+    #: The columns a contract ``dependency`` sets: one value per value of what they follow.
+    dependents: Set[str] = field(default_factory=set)
+    #: What each column was declared from, kept for the rules that run once keys are laid out.
+    contexts: Dict[str, ColumnContext] = field(default_factory=dict)
+    #: The expose's place in the contract's ``exposes``.
+    index: int = 0
+
+
+@dataclass(frozen=True)
+class Gap:
+    """An assumption that stands in for something the profile did not publish (ADR 0014)."""
+
+    #: The position in the Simulation the assumption decides, as a JSON Pointer.
+    pointer: str
+    reason: str
+
+    @property
+    def tokens(self) -> Tuple[str, ...]:
+        return parse_pointer(self.pointer)
 
 
 @dataclass
@@ -131,6 +169,60 @@ class AuthoredBundle:
     notes: Tuple[Tuple[str, str], ...]
     profile_digest: str
     simulation_id: str
+    #: Every statistic and metric of the profile, and what the bundle made of it.
+    ledger: Ledger = field(default_factory=lambda: Ledger({}))
+    #: The assumptions that stand in for what the profile did not publish, in order.
+    gaps: Tuple[Gap, ...] = ()
+
+
+@dataclass(frozen=True)
+class StrictFindings:
+    """What ``--strict`` refuses: unused statistics and gaps no allow entry exempts."""
+
+    unused: Tuple[Tuple[str, Optional[str], str], ...]
+    gaps: Tuple[Gap, ...]
+    #: ``--allow`` pointers that exempt nothing.
+    stale: Tuple[str, ...]
+
+    @property
+    def refused(self) -> bool:
+        return bool(self.unused or self.gaps or self.stale)
+
+
+def _exempts(allowed: Tuple[str, ...], tokens: Tuple[str, ...]) -> bool:
+    return tokens[: len(allowed)] == allowed
+
+
+def strict_findings(bundle: AuthoredBundle, allow: Sequence[str]) -> StrictFindings:
+    """What ``fluxsim init --strict`` refuses, after the *allow* pointers exempt theirs.
+
+    An allow pointer exempts every unused statistic of the profile and every gap
+    of the Simulation at or below it. One that exempts nothing is a finding of
+    its own, as mypy's ``--warn-unused-ignores`` reports an ignore that ignores
+    nothing, so an allow-list cannot go stale. Raises ``ValueError`` for an
+    allow entry that is not a JSON Pointer.
+    """
+    pointers = [(text, parse_pointer(text)) for text in allow]
+    if any(not tokens for _, tokens in pointers):
+        raise ValueError(
+            "the empty pointer names the whole profile and the whole Simulation, so it would "
+            "accept every finding; name the part you accept"
+        )
+    exempting = set()
+    unused = []
+    for entry in bundle.ledger.unused_entries():
+        hits = [text for text, tokens in pointers if _exempts(tokens, entry.tokens)]
+        exempting.update(hits)
+        if not hits:
+            unused.append((entry.pointer, entry.definition, entry.note))
+    gaps = []
+    for gap in bundle.gaps:
+        hits = [text for text, tokens in pointers if _exempts(tokens, gap.tokens)]
+        exempting.update(hits)
+        if not hits:
+            gaps.append(gap)
+    stale = tuple(text for text, _ in pointers if text not in exempting)
+    return StrictFindings(unused=tuple(unused), gaps=tuple(gaps), stale=stale)
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +282,20 @@ def _contract_file_name(path: Path) -> str:
     return f"{path.stem}.fluid.yaml"
 
 
+def _rounding_base(profile: Mapping[str, Any]) -> int:
+    """The largest rounding base any disclosure rule names: a published count is off by less."""
+    rules = profile.get("disclosureRules")
+    bases = [
+        rule["roundingBase"]
+        for rule in (rules.values() if isinstance(rules, Mapping) else ())
+        if isinstance(rule, Mapping)
+        and isinstance(rule.get("roundingBase"), int)
+        and not isinstance(rule.get("roundingBase"), bool)
+        and rule["roundingBase"] > 0
+    ]
+    return max(bases) if bases else 1
+
+
 def _minimum_cell(profile: Mapping[str, Any]) -> int:
     """The smallest minimum cell any disclosure rule names; ACRO's 10 when none does."""
     rules = profile.get("disclosureRules")
@@ -218,7 +324,7 @@ def _emit_rows(
         metric = (column.get("metrics") or {}).get("count") if isinstance(column, Mapping) else None
         if isinstance(metric, Mapping) and metric.get("status") == "F":
             value = metric.get("value")
-            if isinstance(value, int) and value > 0:
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
                 counts.append((value, name))
     if counts:
         value, name = max(counts)
@@ -247,6 +353,7 @@ def _plan_expose(
     *,
     minimum_cell: int,
     fractional_bits: int,
+    rounding_base: int = 1,
 ) -> AuthoredExpose:
     """Declare every column of one expose; its properties are chosen once every key is laid out."""
     expose_id = str(expose.get("exposeId"))
@@ -280,11 +387,14 @@ def _plan_expose(
     # A composite foreign key is null on all its columns or none: its first decides.
     follow = {column for relationship in relationships for column in relationship.from_columns[1:]}
     rows, rows_basis, rows_note = _emit_rows(expose_id, table, minimum_cell)
-    authored = AuthoredExpose(expose_id=expose_id, rows=rows, rows_basis=rows_basis)
+    authored = AuthoredExpose(
+        expose_id=expose_id, rows=rows, rows_basis=rows_basis, rows_note=rows_note
+    )
     if rows_note:
         authored.assumptions.append(("rows", rows_note))
     profiled = table.get("columns") if isinstance(table.get("columns"), Mapping) else {}
     schema = expose["contract"]["schema"]
+    contexts: Dict[str, ColumnContext] = {}
     for schema_index, column in enumerate(compiled.columns):
         if column.logical_type.kind.value in ("JSON", "BYTES"):
             authored.skipped = (
@@ -307,27 +417,113 @@ def _plan_expose(
             ),
             schema_index,
         )
-        plan = plan_column(
-            ColumnContext(
-                column=column,
-                expose_index=expose_index,
-                schema_index=position,
-                product_ref=str(contract["id"]),
-                profile_tokens=("tables", expose_id, "columns", column.name),
-                entry=profiled.get(column.name) if isinstance(profiled, Mapping) else None,
-                rows=rows,
-                minimum_cell=minimum_cell,
-                key=column.name in one_column_keys,
-                foreign=foreign.get(column.name),
-                keyed=column.name in keyed,
-                inner=column.name in inner,
-                nulls_follow=column.name in follow,
-                fractional_bits=fractional_bits,
-            )
+        context = ColumnContext(
+            column=column,
+            expose_index=expose_index,
+            schema_index=position,
+            product_ref=str(contract["id"]),
+            profile_tokens=("tables", expose_id, "columns", column.name),
+            entry=profiled.get(column.name) if isinstance(profiled, Mapping) else None,
+            rows=rows,
+            minimum_cell=minimum_cell,
+            key=column.name in one_column_keys,
+            foreign=foreign.get(column.name),
+            keyed=column.name in keyed,
+            inner=column.name in inner,
+            nulls_follow=column.name in follow,
+            fractional_bits=fractional_bits,
+            rounding_base=rounding_base,
+            range_rule=column_range(schema[position]),
         )
+        plan = plan_column(context)
+        contexts[plan.name] = context
         authored.columns.append(plan)
         authored.kinds[plan.name] = column.logical_type.kind
+    authored.derives = {
+        name: rule
+        for name, rule in contract_derives(expose).items()
+        if any(plan.name == name for plan in authored.columns)
+    }
+    authored.dependents = contract_dependents(expose)
+    authored.contexts = contexts
+    authored.index = expose_index
+    choose_givens(
+        authored.columns,
+        authored.kinds,
+        profiled if isinstance(profiled, Mapping) else {},
+        ("tables", expose_id),
+        minimum_cell=minimum_cell,
+        determined=set(authored.derives),
+        rounding_base=rounding_base,
+    )
     return authored
+
+
+def _span_of(plan: ColumnPlan) -> Optional[Tuple[Fraction, Fraction]]:
+    """The values a column can take, for a rule that reads it: its range, else its draw."""
+    checked = plan.declaration.get("range")
+    if isinstance(checked, Mapping):
+        low, high = numeric(checked.get("min")), numeric(checked.get("max"))
+        if low is not None and high is not None:
+            return low, high
+    values = drawn_span(plan)
+    if values:
+        return Fraction(min(values)), Fraction(max(values))
+    return None
+
+
+def _determine(authored: AuthoredExpose) -> None:
+    """Make every column a contract ``derive`` sets a column the rule decides (ADR 0014).
+
+    It runs once the keys are laid out (:func:`_span_keys`), so a rule that reads
+    a key reads the span the key is drawn over. A rule may read a column another
+    rule sets, so the bounds are worked out in rounds until none moves; a rule
+    whose inputs never get bounds gets none.
+    """
+    derives, contexts, expose_index = authored.derives, authored.contexts, authored.index
+    plans = {plan.name: plan for plan in authored.columns}
+    determined = {name for name in derives if name in plans}
+    spans: Dict[str, Tuple[Fraction, Fraction]] = {}
+    for name, plan in plans.items():
+        if name not in determined:
+            span = _span_of(plan)
+            if span is not None:
+                spans[name] = span
+    found: Dict[str, Optional[Tuple[Fraction, Fraction]]] = {}
+    for _ in range(len(determined) + 1):
+        moved = False
+        for name in sorted(determined):
+            interval = bounds(derives[name][1], spans)
+            if interval is not None and spans.get(name) != interval:
+                spans[name] = interval
+                moved = True
+            found[name] = interval
+        if not moved:
+            break
+    for name in sorted(determined):
+        index = derives[name][0]
+        tokens = ("exposes", str(expose_index), "contract", "invariants", str(index), "expr")
+        determine_column(contexts[name], plans[name], tokens, found.get(name))
+
+
+#: Why a column a contract dependency sets has no mean property.
+_DEPENDENT_REASON = (
+    "A dependency of the contract sets this column: the run draws one value for each value "
+    "of the columns it follows, so its mean rests on those few draws, and no mean property "
+    "holds it to a margin."
+)
+
+
+def _follow_dependencies(authored: AuthoredExpose) -> None:
+    """A column a contract ``dependency`` sets keeps its draw and loses its mean property."""
+    for plan in authored.columns:
+        if plan.name not in authored.dependents:
+            continue
+        kept = [prop for prop in plan.properties if prop.document["property"] != "mean"]
+        if len(kept) != len(plan.properties):
+            plan.properties = kept
+            plan.choices.append(_DEPENDENT_REASON)
+            plan.assumptions.append(_DEPENDENT_REASON)
 
 
 @dataclass(frozen=True)
@@ -621,6 +817,207 @@ def _as_read(document: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# The ledger
+# ---------------------------------------------------------------------------
+
+
+def _cite(ledger: Ledger, basis: Optional[Basis]) -> None:
+    if basis is not None and basis.statistic is not None:
+        ledger.use(basis.statistic[0], "a number of the bundle rests on it")
+
+
+def _ledger(
+    profile: Mapping[str, Any],
+    exposes: Sequence[AuthoredExpose],
+    contract_ids: Set[str],
+    extra: Tuple[List[_Note], List[_Note]] = ([], []),
+) -> Ledger:
+    """Every statistic of *profile*, marked by what the written *exposes* rest on and read.
+
+    *extra* holds what the bundle made of statistics no column plan carries (a
+    relationship's children per parent): the used ones, and the unused ones with
+    their reasons.
+    """
+    ledger = Ledger(profile)
+    for tokens, how in extra[0]:
+        ledger.use(tokens, how)
+    tables = profile.get("tables")
+    for name in tables if isinstance(tables, Mapping) else ():
+        if str(name) not in contract_ids:
+            ledger.unused_under(
+                ("tables", str(name)), "the contract declares no expose of this name"
+            )
+    for expose in exposes:
+        if expose.skipped is not None:
+            ledger.unused_under(
+                ("tables", expose.expose_id), f"the expose was not written: {expose.skipped}"
+            )
+            continue
+        # What a rule says it read comes first: it is more specific than a citation.
+        for column in expose.columns:
+            for tokens, how in column.reads:
+                ledger.use(tokens, how)
+        for prop in expose.properties:
+            for tokens, how in prop.reads:
+                ledger.use(tokens, how)
+        _cite(ledger, expose.rows_basis)
+        for column in expose.columns:
+            for label in column.labels:
+                _cite(ledger, label.basis)
+            for tokens, why in column.passed:
+                ledger.unused(tokens, why)
+        for prop in expose.properties:
+            for label in prop.labels:
+                _cite(ledger, label.basis)
+    for tokens, why in extra[1]:
+        ledger.unused(tokens, why)
+    written = {expose.expose_id for expose in exposes if expose.skipped is None}
+    found = profile.get("relationships")
+    for index, entry in enumerate(found if isinstance(found, list) else ()):
+        tables = (
+            [
+                side.get("table")
+                for side in (entry.get("parent"), entry.get("child"))
+                if isinstance(side, Mapping)
+            ]
+            if isinstance(entry, Mapping)
+            else []
+        )
+        if any(str(table) not in written for table in tables):
+            ledger.reset_under(
+                ("relationships", str(index)),
+                "the bundle writes no generator emit of one of its two tables",
+            )
+    return ledger
+
+
+#: A pointer into the profile, with how it was used or why it was not.
+_Note = Tuple[Tuple[str, ...], str]
+
+
+def _spread_relationships(
+    exposes: Sequence[AuthoredExpose],
+    keys: Optional[ContractKeys],
+    profile: Mapping[str, Any],
+    *,
+    minimum_cell: int,
+    fractional_bits: int,
+) -> Tuple[List[_Note], List[_Note]]:
+    """Lay each relationship's children per parent out as its foreign key's spread (ADR 0014).
+
+    A profile ``relationships`` entry is read when the contract declares the same
+    one-column relationship between two exposes the bundle writes
+    (:func:`flux_engine.author.children.spread_children`). Returns what was used
+    and, with the reasons, what was not.
+    """
+    used: List[_Note] = []
+    unused: List[_Note] = []
+    found = profile.get("relationships")
+    found_tables = profile.get("tables")
+    tables: Mapping[str, Any] = found_tables if isinstance(found_tables, Mapping) else {}
+    planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
+    for index, entry in enumerate(found if isinstance(found, list) else ()):
+        if not isinstance(entry, Mapping):
+            continue
+        tokens = ("relationships", str(index))
+        statistics = entry.get("statistics")
+        every = [
+            tokens + ("statistics", str(position))
+            for position, _ in enumerate(statistics if isinstance(statistics, list) else ())
+        ]
+        found_parent, found_child = entry.get("parent"), entry.get("child")
+        parent: Mapping[str, Any] = found_parent if isinstance(found_parent, Mapping) else {}
+        child: Mapping[str, Any] = found_child if isinstance(found_child, Mapping) else {}
+        parent_table, child_table = str(parent.get("table")), str(child.get("table"))
+        parent_columns = [nfc(str(name)) for name in parent.get("columns") or ()]
+        child_columns = [nfc(str(name)) for name in child.get("columns") or ()]
+        why: Optional[str] = None
+        if len(parent_columns) != 1 or len(child_columns) != 1:
+            why = "a key of several columns: its children per parent are not laid out"
+        elif child_table not in planned or parent_table not in planned:
+            why = "the bundle writes no generator emit of one of its two tables"
+        elif keys is None or not any(
+            relationship.target == parent_table
+            and relationship.from_columns == tuple(child_columns)
+            and relationship.to_columns == tuple(parent_columns)
+            for relationship in _relationships_of(keys, child_table)
+        ):
+            why = "the contract declares no such relationship between the two exposes"
+        if why is not None:
+            unused += [(pointer, why) for pointer in every]
+            continue
+        child_expose, parent_expose = planned[child_table], planned[parent_table]
+        child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
+        parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
+        child_entries = (
+            tables.get(child_table, {}).get("columns")
+            if isinstance(tables.get(child_table), Mapping)
+            else None
+        )
+        spread = spread_children(
+            entry,
+            tokens,
+            child_plan,
+            child_expose.kinds[child_plan.name],
+            child_expose.rows,
+            child_entries.get(child_plan.name) if isinstance(child_entries, Mapping) else None,
+            ("tables", child_table, "columns", child_plan.name),
+            parent_plan,
+            parent_expose.kinds[parent_plan.name],
+            minimum_cell=minimum_cell,
+            fractional_bits=fractional_bits,
+        )
+        used += spread.used
+        unused += spread.unused
+    return used, unused
+
+
+def _relationships_of(keys: ContractKeys, expose_id: str) -> Sequence[Any]:
+    try:
+        return keys.expose(expose_id).relationships
+    except (KeyError, LookupError):
+        return ()
+
+
+def _unused_block(ledger: Ledger) -> List[Dict[str, Any]]:
+    """The register's ``unused`` list: each unused statistic with its definition and reason."""
+    block: List[Dict[str, Any]] = []
+    for entry in ledger.unused_entries():
+        statistic: Dict[str, Any] = {"pointer": entry.pointer}
+        if entry.definition is not None:
+            statistic["definition"] = entry.definition
+        block.append({"statistic": statistic, "reason": entry.note})
+    return block
+
+
+def _gaps(
+    exposes: Sequence[AuthoredExpose], window_note: Optional[Tuple[str, str]]
+) -> Tuple[Gap, ...]:
+    """The assumptions that stand in for what the profile did not publish, by position.
+
+    Every assumption a written expose states is one, but for the choices a
+    column names (how to meet what the profile publishes, or where the contract
+    overrules it). Each is placed at the emit's ``rows`` or at the column's
+    block in the Simulation, so one ``--allow`` can accept a column's gaps.
+    """
+    namespace = ("extensions", EXTENSION_NAMESPACE, "emits")
+    found: List[Gap] = []
+    for expose in exposes:
+        if expose.skipped is not None:
+            continue
+        base = namespace + (expose.expose_id,)
+        choices = {plan.name: set(plan.choices) for plan in expose.columns}
+        for subject, sentence in expose.assumptions:
+            if subject == "rows" and sentence == expose.rows_note:
+                found.append(Gap(render_pointer(base + ("rows",)), sentence))
+            elif sentence not in choices.get(subject, set()):
+                found.append(Gap(render_pointer(base + ("fidelity", "columns", subject)), sentence))
+    if window_note is not None:
+        found.append(Gap(render_pointer(("spec", "timeBounds")), window_note[1]))
+    return tuple(found)
+
+
+# ---------------------------------------------------------------------------
 # The bundle
 # ---------------------------------------------------------------------------
 
@@ -672,6 +1069,7 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
                     keys.expose(expose_id) if keys is not None else None,
                     minimum_cell=minimum_cell,
                     fractional_bits=fractional_bits,
+                    rounding_base=_rounding_base(profile),
                 )
             )
         except FluxError as error:
@@ -680,6 +1078,21 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
             exposes.append(AuthoredExpose(expose_id=expose_id, skipped=_beyond_note(error)))
     try:
         _span_keys([expose for expose in exposes if expose.skipped is None], keys)
+        for expose in exposes:
+            if expose.skipped is None:
+                for plan in expose.columns:
+                    recheck_key(expose.contexts[plan.name], plan)
+        for expose in exposes:
+            if expose.skipped is None:
+                _determine(expose)
+                _follow_dependencies(expose)
+        children = _spread_relationships(
+            exposes,
+            keys,
+            profile,
+            minimum_cell=minimum_cell,
+            fractional_bits=fractional_bits,
+        )
     except (ArithmeticError, ValueError) as error:
         raise AuthorError(_beyond_note(error)) from error
     for expose in exposes:
@@ -755,6 +1168,10 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
         },
     )
     simulation["extensions"] = {EXTENSION_NAMESPACE: namespace}
+    contract_ids = {
+        str(expose.get("exposeId")) for expose in contract["exposes"] if isinstance(expose, Mapping)
+    }
+    ledger = _ledger(profile, exposes, contract_ids, children)
 
     template = (
         "fluxsim init writes the least World a run needs: the generator emits read none of "
@@ -783,6 +1200,8 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
         simulation_id: _as_read(simulation),
     }
     namespace["parameters"] = _register(labels, documents, simulation_id)
+    namespace[UNUSED_KEY] = _unused_block(ledger)
+    documents[simulation_id] = _as_read(simulation)
 
     # A file name is any text: printable() keeps a newline in one from ending the comment.
     header = _HEADER.format(
@@ -809,7 +1228,7 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
     )
     _check(files, profile)
     notes = tuple(note for note in (window_note, owner_note) if note)
-    counts = _counts(namespace["parameters"], documents, simulation_id)
+    counts = _counts(namespace["parameters"], namespace[UNUSED_KEY], documents, simulation_id)
     return AuthoredBundle(
         files=files,
         exposes=tuple(exposes),
@@ -817,11 +1236,14 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
         notes=notes,
         profile_digest=pinned.digest.value,
         simulation_id=simulation_id,
+        ledger=ledger,
+        gaps=_gaps(exposes, window_note),
     )
 
 
 def _counts(
     entries: Sequence[Mapping[str, Any]],
+    unused: Sequence[Mapping[str, Any]],
     documents: Mapping[str, Mapping[str, Any]],
     simulation_id: str,
 ) -> Dict[str, int]:
@@ -833,6 +1255,7 @@ def _counts(
         entries=read_parameters_block(entries, pinned=True, where="parameters", code=FLX_3105),
         profile_digest=None,
         code=FLX_3105,
+        unused=read_unused_block(unused, pinned=True, where=UNUSED_KEY, code=FLX_3105),
     )
     return register.counts()
 

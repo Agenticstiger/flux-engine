@@ -78,7 +78,7 @@ def _refusal(error: pytest.ExceptionInfo[FluxError]) -> Tuple[str, str]:
 
 def test_the_closed_sets_spell_the_declaration_words() -> None:
     assert [policy.value for policy in NullPolicy] == ["exclude", "fail"]
-    assert [domain.value for domain in ValueDomain] == ["number", "timestamp"]
+    assert [domain.value for domain in ValueDomain] == ["number", "timestamp", "date"]
     assert NullPolicy("fail") is NullPolicy.FAIL
     assert ValueDomain("timestamp") is ValueDomain.TIMESTAMP
 
@@ -475,6 +475,48 @@ def test_a_timestamp_cell_the_parser_refuses_keeps_the_parser_code() -> None:
     with pytest.raises(FluxError) as caught:
         read_exact("1970-01-01", column, row_index=3)
     assert _refusal(caught) == ("FLX-5022", NOT_RFC3339)
+
+
+def test_a_date_is_read_as_the_days_since_the_epoch() -> None:
+    from flux_stats.reading import parse_date_days
+
+    assert parse_date_days("1970-01-01") == 0
+    assert parse_date_days("2026-01-01") == 20454
+    assert parse_date_days("1969-12-31") == -1
+    assert read_exact("2026-01-01", Col("d", domain=ValueDomain.DATE), row_index=0) == Fraction(
+        20454
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "2026-02-30",
+        "0000-01-01",
+        "2026-1-1",
+        "2026-01-01\n",
+        "2026-01-01T00:00:00Z",
+        "",
+        "٢٠٢٦-٠١-٠١",
+    ],
+)
+def test_a_date_that_is_no_calendar_date_is_refused(text: str) -> None:
+    from flux_stats.reading import parse_date_days
+
+    with pytest.raises(FluxError) as caught:
+        parse_date_days(text)
+    assert caught.value.code.code == "FLX-5022"
+
+
+def test_a_date_cell_keeps_a_number_of_days_and_never_quotes_a_bad_value() -> None:
+    column = Col("d", domain=ValueDomain.DATE)
+    assert read_exact(20454, column, row_index=0) == Fraction(20454)
+    with pytest.raises(FluxError) as caught:
+        read_exact("2026-02-30", column, row_index=4)
+    assert _refusal(caught) == ("FLX-5005", "column 'd' row 4: value is not a calendar date")
+    with pytest.raises(FluxError) as caught:
+        read_exact("soon", column, row_index=4)
+    assert _refusal(caught) == ("FLX-5005", "column 'd' row 4: value class 'non-numeric string'")
 
 
 # ---------------------------------------------------------------------------

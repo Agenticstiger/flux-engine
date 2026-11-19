@@ -72,6 +72,7 @@ CORE_NODES = {
     "coalesce",
     "round",
     "date_diff",
+    "date_add",
 }
 
 

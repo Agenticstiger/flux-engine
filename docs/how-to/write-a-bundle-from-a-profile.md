@@ -167,7 +167,12 @@ orders: 600 rows, 4 columns
   amount      a histogram over 5 published order statistics, shaped to the published mean
   created_at  uniform within the run's time window: the profile publishes no order statistic
 
-parameters: 34 declared -- 12 from the pinned profile, 19 assumed, 3 default
+profile: 21 statistics -- 11 used, 3 unused, 7 withheld
+unused (no number rests on these; the register lists them):
+  - /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
+  - /tables/orders/columns/created_at/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
+  - /tables/orders/columns/created_at/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
+parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default
 assumed (the register gives each assumed number its reason; replace what you know better):
   - country: The profile publishes how many distinct values the column holds and neither the values nor their counts: as many opaque levels, named country-<n>, at equal weights.
   - country, amount, created_at: The profile withheld nullCount (status A): a count withheld as small is zero or below the minimum cell, so no nulls are drawn.
@@ -185,6 +190,28 @@ Simulation pins its digest instead. Before it writes a file, the command checks 
 bundle as `fluxsim validate` does, and as `plan` does from the documents alone before a
 row is drawn, and writes nothing either refuses.
 
+The `profile:` line is the command's ledger ([ADR 0014](../adr/0014-init-reads-every-statistic-a-profile-publishes.md)):
+every statistic and metric of the profile, by its JSON Pointer, is used (a number of the
+bundle rests on it, a rule read it, a property is scored against it, or the bundle was
+checked against it), unused, or withheld (the profile published no value). Each unused
+one is named with the reason no rule reads it, and the Simulation lists them under
+`unused` beside the register: `plan`, `verify` and `ship` count them, and `ship` names
+each one under "What Was Not Proven" in `EVIDENCE.md`.
+
+`--strict` turns the ledger into a gate. It writes nothing, and exits 1, when a statistic
+is unused or an assumption stands in for something the profile
+did not publish; the tolerances and the bounds of a committed state are settings, not
+gaps. Each finding is named, and `--allow POINTER` accepts the ones at or below a profile
+pointer or a Simulation pointer. An `--allow` that accepts nothing is refused too:
+
+```console
+$ fluxsim init strict --contract contract.orders.fluid.yaml --profile orders.profile.json --strict --allow /tables/orders/columns/created_at # exit 1
+init: --strict refuses this bundle (1 statistic of the profile unused, 6 assumptions standing in for what the profile did not publish); nothing was written
+  unused /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
+...
+accept one with --allow POINTER (a profile pointer for a statistic, a Simulation pointer for a gap), or publish what the profile left out
+```
+
 ## 3. What each number rests on
 
 The rules run from the most the profile says to the least:
@@ -195,11 +222,17 @@ The rules run from the most the profile says to the least:
 | a column's `min` and `max` | its `range`, which the fidelity check holds the run to | profile |
 | `min`, the quartiles and `max` | histogram `bins` and `binWeights`, a quarter of the rows in each | profile |
 | a mean: `sum` and `count`, or a `mean/1` statistic | the histogram shaped to that mean and, for a `mean/1` over a number column with a published range, a `mean` property the run is checked against | profile, with the shape assumed |
+| a binned quantile (`quantile/2`) | two points of the column's distribution for the histogram: where the profile withholds `min` or `max` beyond them, a tail from the published mean or the profile's next bin out, each assumed | profile, with the tail assumed |
 | `nullCount` | `nullFraction` | profile |
 | a histogram, level counts or a list of levels | `bins` and weights, `levels`, and a property the run is scored on | profile |
+| a histogram or level counts grouped by a categorical column | `given` that column, with `binWeightsGiven` or `levelWeightsGiven` from the group counts, and a grouped property | profile |
+| children per parent of a relationship the contract declares (`relationships`) | the foreign key's `bins` and `binWeights`: each class of parents a share of the parent's keys, weighted by its children | assumption, from the profile's counts |
 | as many distinct values as values | `unique: true`: an identifier the engine derives | no number |
 | an `enum(...)` type | `support: declared`, with `maxCardinality` its number of levels | contract |
 | a key, in its `semantics` | no key of its own: the engine reads keys from the contract | no number |
+| a `derive` in the contract's `invariants`, with no `when` | no draw, and a `range` from the rule's exact bounds over the columns it reads (or its published histogram's edges when they hold them), with its published statistics scored through the rule | contract, or profile for the edges |
+| a `range` rule in the contract's `validationRules` (`between A and B`, or `>=`, `>`, `<=`, `<`) | the bound on the bins, levels and tails of a drawn number column; a column with nothing published draws evenly over it | contract |
+| a `dependency` in the contract | the column keeps its draw and gets no `mean` property, since the run draws it once per value of the columns it follows | contract |
 | nothing, or a withheld value | an assumption, stated with its reason | assumption |
 
 These rules shape the assumptions:
@@ -222,6 +255,14 @@ These rules shape the assumptions:
   the foreign keys that reference it are declared over, or moved inside the key it
   references when that key's span is published, down a chain of keys. A foreign key the
   profile says nothing of is drawn over the span of the key it references.
+- Grouped statistics are read as two-way tables. Each pair of columns is scored by its
+  mutual information, and the tree of the most informative links that makes no cycle
+  decides which column is drawn given which: at most one `given` per column, a number
+  column only at the end of a link, and never given a column that holds nulls. A grouping
+  the tree leaves out is unused, and the output says why.
+- Children per parent are an approximation: a parent of a class whose mean is `m`
+  receives a Poisson-like number of children, so about `e^-m` of them receive none, and
+  the run's share of parents with no child comes out that much larger than published.
 - A column of a key over several columns spans its rows the same way, and a text one
   takes as many opaque levels as rows, so the key can hold one value per row. A key's
   columns declare no `nullFraction`, nor does an `inner` foreign key, and a composite
@@ -236,7 +277,8 @@ These rules shape the assumptions:
 - The World and the Persona are the least a run needs. Their numbers are `default` in
   the register: the generator emits read none of them.
 
-A date or timestamp bound is RFC 3339 text, which the register does not count, so an
+A timestamp bound is RFC 3339 text and a date bound `YYYY-MM-DD`, which the register
+does not count, so an
 assumed time window is in the command's output and nowhere else. Here no time column
 publishes its range, because no single instant is held by ten orders, and `created_at`
 is drawn within the run's `timeBounds`.
@@ -276,13 +318,13 @@ plan written to ...
 coverage: orders: 1 of 4 columns fell back to a type default
   created_at (TIMESTAMP): uniform within the simulation's time bounds: the column declares no draw of its own
 --strict-coverage refuses the run, and so does strictCoverage in the bundle; fluxsim explain FLX-3304 says how to cover a column
-parameters: 34 declared -- 12 from the pinned profile, 19 assumed, 3 default
+parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default; 3 statistics of the profile unused
 applied to ...
 emitted orders: 600 rows (generator)
 reproducible: not checked | validity: not asserted
 ...
   fidelity orders: passed -- 1 of 1 declared property within the margin against the pinned profile
-  parameters: 34 declared -- 12 from the pinned profile, 19 assumed, 3 default
+  parameters: 33 declared -- 12 from the pinned profile, 0 from the contract, 18 assumed, 3 default; 3 statistics of the profile unused
   scorecard: overall ... against profile sha256:...
 ...
 shipped out/bundle.flux.tgz

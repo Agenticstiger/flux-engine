@@ -97,6 +97,14 @@ from flux_engine.expr2.scope import Expose, Link, Model, Versions
 from flux_engine.expr2.types import ColumnType, Kind, column_type, fit
 from flux_engine.generator.statistics import DATE_EPOCH_ORDINAL
 from flux_engine.seam.contract import declared_enum_values
+from flux_engine.seam.coverage import SOURCE_FLUX_RULE_PREFIX, SOURCE_RULE_PREFIX
+from flux_engine.seam.declared import (
+    KIND_CHECK,
+    KIND_CHECK_OVER_LINK,
+    KIND_SHARED_ATTRIBUTE,
+    KIND_SHARED_COLUMNS,
+    NotGenerated,
+)
 from flux_engine.seam.keys import ExposeKeys, compile_keys, declared_exposes
 from flux_engine.seam.resolve import FLX_3105
 
@@ -111,6 +119,7 @@ __all__ = [
     "PlannedRule",
     "RulePlan",
     "apply_rules",
+    "declared_not_generated",
     "flux_rule_entries",
     "model_from_contract",
     "plan_rules",
@@ -1332,6 +1341,129 @@ def plan_rules(
     determined = frozenset(column for rule in determining for column in rule.determines)
     order = _order(rules, list(model.exposes[target].columns), determined)
     return RulePlan(contract_id, target, model, rules, order)
+
+
+#: The ways a read crosses a relationship; ``previous`` stays on the entity's own rows.
+_LINK_REACHES = frozenset({"link", "children", "siblings"})
+
+
+def _shared_declarations(entry: Mapping[str, Any], expose_id: str) -> List[NotGenerated]:
+    """The ``sharedColumns`` of the expose's relationships and the ``sharedAttribute`` of its columns."""
+    found: List[NotGenerated] = []
+    semantics = entry.get("semantics")
+    relationships = semantics.get("relationships") if isinstance(semantics, Mapping) else None
+    if isinstance(relationships, Sequence) and not isinstance(relationships, (str, bytes)):
+        for relationship in relationships:
+            if not isinstance(relationship, Mapping):
+                continue
+            name, shared = relationship.get("name"), relationship.get("sharedColumns")
+            if (
+                isinstance(name, str)
+                and isinstance(shared, Sequence)
+                and not isinstance(shared, (str, bytes))
+                and shared
+            ):
+                found.append(
+                    NotGenerated(
+                        expose_id,
+                        KIND_SHARED_COLUMNS,
+                        f"semantics.relationships.{name}.sharedColumns",
+                        tuple(nfc(column) for column in shared if isinstance(column, str)),
+                    )
+                )
+    contract = entry.get("contract")
+    schema = contract.get("schema") if isinstance(contract, Mapping) else None
+    if isinstance(schema, Sequence) and not isinstance(schema, (str, bytes)):
+        for column in schema:
+            if not isinstance(column, Mapping):
+                continue
+            name, attribute = column.get("name"), column.get("sharedAttribute")
+            if isinstance(name, str) and isinstance(attribute, str) and attribute:
+                found.append(
+                    NotGenerated(
+                        expose_id,
+                        KIND_SHARED_ATTRIBUTE,
+                        f"contract.schema.{nfc(name)}.sharedAttribute",
+                        (attribute,),
+                    )
+                )
+    return found
+
+
+def _check_not_generated(
+    expose_id: str, locator: str, texts: Sequence[Optional[Checked]]
+) -> NotGenerated:
+    """One check that determines no column: over a link when a text reads through a relationship."""
+    links = sorted(
+        {
+            ".".join((*read.path, read.column))
+            for text in texts
+            if text is not None
+            for read in text.reads
+            if read.reach in _LINK_REACHES
+        }
+    )
+    kind = KIND_CHECK_OVER_LINK if links else KIND_CHECK
+    return NotGenerated(expose_id, kind, locator, tuple(links))
+
+
+def declared_not_generated(
+    *,
+    contract_document: Mapping[str, Any],
+    expose_id: str,
+    settings: Any,
+    flux_rules: Any = None,
+    where: str = "",
+) -> Tuple[NotGenerated, ...]:
+    """What the expose declares that this version accepts and does not generate.
+
+    A relationship's ``sharedColumns`` and a column's ``sharedAttribute`` are read
+    by nothing. A ``check`` is generated only through a FLUX ``generates`` setting
+    (a difference over days), so a contract ``check`` with none, and a FLUX-side
+    ``check``, determine no column and are not enforced on the rows. Each is listed
+    once, in a fixed order. A declaration this version refuses (``FLX-6210`` and its
+    kin) is not listed: ``plan`` raised before this is read.
+    """
+    prefix = f"{where}: " if where else ""
+    target = nfc(expose_id)
+    entry = declared_exposes(contract_document).get(target)
+    if entry is None:
+        return ()
+    found = _shared_declarations(entry, target)
+    invariants = _invariants(entry)
+    entries = _flux_entries(flux_rules, f"{prefix}emit {target!r}")
+    if invariants or entries:
+        ids = [str(invariant["id"]) for invariant in invariants]
+        declared_settings = _settings_for(settings, ids, where=f"{prefix}emit {target!r}")
+        model = model_from_contract(contract_document)
+        reader = _Reader(model, target, declared_settings)
+        for invariant in invariants:
+            rule_id = str(invariant["id"])
+            if "check" not in invariant or declared_settings.get(rule_id, {}).get("generates"):
+                continue
+            when = (
+                reader._predicate(invariant["when"], f"rule {rule_id!r} when")
+                if invariant.get("when") is not None
+                else None
+            )
+            found.append(
+                _check_not_generated(
+                    target,
+                    f"{SOURCE_RULE_PREFIX}{rule_id}",
+                    [reader._predicate(invariant["check"], f"rule {rule_id!r} check"), when],
+                )
+            )
+        for flux_entry in entries:
+            flux_rule = check_flux_side_rule(flux_entry, model, target)
+            if flux_rule.derive is None:
+                found.append(
+                    _check_not_generated(
+                        target,
+                        f"{SOURCE_FLUX_RULE_PREFIX}{flux_rule.id}",
+                        [flux_rule.value, flux_rule.when],
+                    )
+                )
+    return tuple(sorted(found, key=NotGenerated.sort_key))
 
 
 def _check_contract_ids(

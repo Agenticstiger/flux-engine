@@ -315,3 +315,53 @@ def test_an_overall_threshold_needs_a_scored_property_somewhere() -> None:
             code=FLX_3105,
         )
     assert "the overall score is never formed" in raised.value.detail
+
+
+def test_a_coverage_block_declares_floors_on_how_much_of_the_contract_is_covered() -> None:
+    declaration = _read(
+        {
+            "thresholds": {"overall": {"mustBeGreaterOrEqualTo": "0.9"}},
+            "coverage": {"relationships": "0.5", "columns": Decimal("0.8")},
+        }
+    )
+    assert [
+        (threshold.target, threshold.operator, threshold.value, threshold.declared)
+        for threshold in declaration.thresholds
+    ] == [
+        ("overall", "mustBeGreaterOrEqualTo", Fraction(9, 10), "0.9"),
+        ("coverage.columns", "mustBeGreaterOrEqualTo", Fraction(4, 5), "0.8"),
+        ("coverage.relationships", "mustBeGreaterOrEqualTo", Fraction(1, 2), "0.5"),
+    ]
+    alone = _read({"coverage": {"columns": "0.8"}})
+    assert [threshold.target for threshold in alone.thresholds] == ["coverage.columns"]
+    assert alone.thresholds[0].met_by(Fraction(4, 5)) and not alone.thresholds[0].met_by(None)
+    again = declaration_from_plan(thresholds_document(declaration), code=FLX_3105)
+    assert again == declaration, "the plan records coverage floors beside the thresholds"
+
+
+@pytest.mark.parametrize(
+    "block, needle",
+    [
+        ({"coverage": {}}, "names at least one of"),
+        ({"coverage": {"rows": "0.5"}}, "declares ['rows']"),
+        ({"coverage": {"columns": {"mustBeGreaterOrEqualTo": "0.5"}}}, "exact decimal"),
+        ({"coverage": {"columns": "1.5"}}, "between 0 and 1"),
+        ({"coverage": {"columns": 0.5}}, "never a float"),
+        ({"coverage": ["columns"]}, "is a mapping"),
+    ],
+)
+def test_a_malformed_coverage_floor_is_refused(block: Any, needle: str) -> None:
+    assert needle in _refusal(block)
+
+
+def test_a_coverage_floor_needs_a_pinned_profile_and_a_scored_property() -> None:
+    assert "pinned profile" in _refusal({"coverage": {"columns": "0.5"}}, pinned=False)
+    with pytest.raises(FluxError) as raised:
+        read_scorecard_block(
+            {"coverage": {"columns": "0.5"}},
+            pinned=True,
+            emits={"plain": None},
+            where="sim",
+            code=FLX_3105,
+        )
+    assert "could only withhold" in raised.value.detail

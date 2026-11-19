@@ -28,11 +28,12 @@ from flux_engine.stages.plan import PROFILE_PIN_KEY, SCORECARD_PLAN_KEY
 
 if TYPE_CHECKING:
     from flux_engine.concordance.compiler import CompiledFidelity
-    from flux_engine.concordance.scorecard import Scorecard, TableInput
+    from flux_engine.concordance.scorecard import ContractShape, Scorecard, TableInput
     from flux_engine.concordance.verifier import FidelityEvaluation, Row
 
 __all__ = [
     "build_run_scorecard",
+    "contract_shape",
     "refused_evaluation",
     "evaluate_against_profile",
     "min_credibility",
@@ -117,6 +118,40 @@ def min_credibility(fidelity_input: Mapping[str, Any]) -> Optional[str]:
     return text
 
 
+def contract_shape(contract_document: Any, expose_id: str) -> Optional["ContractShape"]:
+    """One emit's contract columns and declared relationships, for the scorecard's coverage.
+
+    The columns are the expose's contract schema; the relationships are the
+    ones the expose declares as the child (``semantics.relationships``,
+    FLUID 0.7.7). ``None`` for a contract this engine cannot read, which
+    coverage then leaves out rather than guess at: the plan refused such a
+    contract before the run existed.
+    """
+    from flux_engine.concordance.scorecard import ContractShape, DeclaredLink
+    from flux_engine.core.canonical import nfc
+    from flux_engine.seam.keys import compile_keys
+    from flux_stats.fidelity import expose_from_contract
+
+    try:
+        expose = expose_from_contract(contract_document, expose_id)
+        keys = compile_keys(contract_document)
+    except FluxError:
+        return None
+    declared = keys.expose(expose_id).relationships if keys is not None else ()
+    return ContractShape(
+        columns=tuple(expose.column_names),
+        relationships=tuple(
+            DeclaredLink(
+                parent=link.target,
+                parent_columns=tuple(nfc(column) for column in link.to_columns),
+                child=link.source,
+                child_columns=tuple(nfc(column) for column in link.from_columns),
+            )
+            for link in declared
+        ),
+    )
+
+
 def evaluate_against_profile(
     compiled: "CompiledFidelity", pinned: PinnedProfile, synthetic_rows: Sequence["Row"]
 ) -> "FidelityEvaluation":
@@ -194,4 +229,5 @@ def build_run_scorecard(
         profile_digest=pinned.digest.value,
         tables=tables,
         declaration=plan_declaration(plan_document),
+        profile=pinned.profile,
     )

@@ -62,7 +62,9 @@ parent row its relationship picks), `profile` (reserved; nothing produces it yet
 mapping resolves to nothing (`null`), or a DATE or TIMESTAMP column that declares no draw of its own (§1's table:
 uniform within `timeBounds`). A `default` is named by `plan`, recorded by `apply` in `column-provenance.json` and
 listed under "What Was Not Proven" in `EVIDENCE.md`. Under `--strict-coverage` it is `FLX-3304`, naming every such
-column of every emit, before any row exists. `plan.json` records the digest of the record as
+column of every emit, before any row exists. Strict coverage also refuses, with `FLX-3305`, a declaration the
+contract makes and the run does not generate (`sharedColumns`, a check that determines no column, a check over a
+link), which `plan` otherwise names. `plan.json` records the digest of the record as
 `columnProvenanceDigest` (the `raw-bytes` digest of the file, as `seedTreeDigest` is of `seed-paths.ndjson`), so
 `planDigest`, the run id and the run digest cover it. `apply` refuses to write a record the plan does not name, and
 `ship` and `verify` read the record only through that digest and refuse a missing or moved one with `FLX-2115`; a plan
@@ -154,6 +156,16 @@ formed). Numbers are strings (exact decimals), never floats. Written out without
 most 1000 digits, not counting a leading `0.`: `"1E+99999999"` names a number of a hundred million digits and
 is refused (`FLX-5030`) by its length, before its value is formed.
 
+**A DATE column's bounds are days.** A `range` bound or a `bins` edge of a column whose declared type is DATE is
+spelled `YYYY-MM-DD`, or as a whole number of days since 1970-01-01 (the two spell the same bound: `2026-01-01`
+is `20454`). Every bound of the column is in days: its range, its bins, a mean's absolute tolerance and the
+statistics formed over it, and a value is read as the day it names. Any other string is `FLX-5030`; a value
+that is no calendar date, or lies outside the range, is `FLX-5005`. A DATE column whose bounds are RFC 3339
+instants reads them as it did before days were a spelling: as a timestamp column in milliseconds, so a block a
+profiler declared with instants reads, and profiles, as before. A TIMESTAMP column's bounds are still RFC 3339
+instants or decimals (milliseconds). A profile holds a DATE
+column as a timestamp in milliseconds; PROFILE-SPEC §7 says how the check reads one.
+
 **A `quantile` may carry `bins`.** They follow a `marginalHistogram`'s rules: strictly increasing, partitioning
 the declared range, on the grid. A quantile with bins is formed and compared by `quantile/2` (ADR 0012), which
 takes the order statistic as `quantile/1` does and states, in place of its value, the bin that holds it and the
@@ -170,7 +182,7 @@ legal (the generator still reads it), and a *property* naming such a column is `
 
 **`support` has exactly two spellings.** `{ values: [...] }` writes the levels out. `declared` takes them from
 the FLUID column type's own enum list: `type: "enum('IE','GB')"`, the only structured value set FLUID 0.7.5
-carries (`validationRules[].constraint` is free text with no grammar). A column that spells `declared` over a
+carries (`validationRules[].constraint` is free text for `support`, with no grammar; `fluxsim init` reads the range grammar, `between A and B` or `>=`, `>`, `<=`, `<` joined by `and`, from a `range` rule). A column that spells `declared` over a
 type naming no levels is refused (`FLX-5034`) rather than resolved to an empty support, because an empty support
 makes every value a non-member and fails the check for the wrong reason. A bare list is refused: two spellings of
 one declaration would be two digests of one contract.

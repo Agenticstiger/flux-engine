@@ -42,6 +42,7 @@ __all__ = [
     "mutual_information",
     "pair_table_from_groups",
     "pair_table_from_level_groups",
+    "spanning_forest",
     "suggest_tree",
 ]
 
@@ -309,6 +310,31 @@ def suggest_tree(
     cat, num = _normalise_sets(categorical, numeric)
     tbls = list(tables)
     _check_tables(tbls, cat | num)
+    return spanning_forest(
+        ((mutual_information(table), *table.columns) for table in tbls),
+        categorical=cat,
+        numeric=num,
+        root=root,
+    )
+
+
+def spanning_forest(
+    scores: Iterable[Tuple[Decimal, str, str]],
+    *,
+    categorical: Iterable[str],
+    numeric: Iterable[str] = (),
+    root: Optional[str] = None,
+) -> Tuple[TreeEdge, ...]:
+    """The tree :func:`suggest_tree` chooses, from a mutual information per pair of columns.
+
+    Each score is ``(mutual information, column, column)``; a pair scored more
+    than once keeps its highest score. The selection, its tie-breaking and the
+    order of the edges are :func:`suggest_tree`'s, which calls this after it has
+    checked that its tables come from one committed state. A caller that scores
+    tables of its own (``fluxsim init``, from a profile's grouped statistics,
+    whose rounded counts need not share a total) calls this directly.
+    """
+    cat, num = _normalise_sets(categorical, numeric)
     if root is not None:
         root = nfc(root)
         if root not in cat:
@@ -316,9 +342,14 @@ def suggest_tree(
 
     cat_candidates: List[Tuple[Decimal, Tuple[str, str]]] = []
     best_attach: Dict[str, Tuple[Decimal, str]] = {}
-    for table in tbls:
-        first, second = table.columns
-        mi = mutual_information(table)
+    best_pair: Dict[Tuple[str, str], Decimal] = {}
+    for mi, one, other in scores:
+        pair = (min(nfc(one), nfc(other)), max(nfc(one), nfc(other)))
+        if pair[0] == pair[1]:
+            continue
+        if pair not in best_pair or mi > best_pair[pair]:
+            best_pair[pair] = mi
+    for (first, second), mi in sorted(best_pair.items()):
         if first in cat and second in cat:
             cat_candidates.append((mi, (min(first, second), max(first, second))))
         elif (first in cat) != (second in cat):

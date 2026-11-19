@@ -14,8 +14,9 @@ Pinned here, through the command and a real run:
   rules give it: the profile, the contract, an assumption or a template default;
 * the declarations the check reads (``range``, ``support``) rest only on
   published values or the contract, so a guess can never refuse real data;
-* a profile with statistics gives properties the run is scored on, and an enum
-  the contract declares makes the record register format 1-1-0;
+* a profile with statistics gives properties the run is scored on, an enum
+  the contract declares is cited from the contract, and the record is register
+  format 1-2-0, since init lists the statistics no number rests on;
 * the same inputs write the same bytes;
 * an input that cannot be used is refused, and nothing is written.
 """
@@ -31,7 +32,7 @@ import pytest
 import yaml
 
 from flux_engine.cli._init import run_init
-from flux_engine.evidence.register import REGISTER_SCHEMA_URL, REGISTER_SCHEMA_URL_1_1
+from flux_engine.evidence.register import REGISTER_SCHEMA_URL_1_2
 from flux_engine.seam.parameters import parse_pointer
 from flux_engine.stages.run import run
 from flux_engine.stages.validate import validate
@@ -130,11 +131,12 @@ def test_the_simulation_pins_the_profile_and_emits_its_table(orders: Authored) -
 
 def test_every_number_the_run_reads_is_decided_by_an_entry(orders: Authored) -> None:
     record = orders.record
-    assert record["_schemaURL"] == REGISTER_SCHEMA_URL  # no contract entry: format 1-0-0
+    assert record["_schemaURL"] == REGISTER_SCHEMA_URL_1_2  # init lists the unused statistics
     assert record["declared"] == sum(record["counts"].values()) > 0
     unnamed = [row["pointer"] for row in record["parameters"] if row["entry"] is None]
     assert unnamed == []
-    assert record["counts"] == {"profile": 17, "assumption": 19, "default": 3}
+    # country declares no assumed nullFraction: an absent one draws no null (ADR 0014).
+    assert record["counts"] == {"profile": 17, "contract": 0, "assumption": 18, "default": 3}
 
 
 def test_published_metrics_become_cited_declarations(orders: Authored) -> None:
@@ -215,7 +217,10 @@ def test_a_timestamp_range_is_the_published_min_and_max(keyed: Authored) -> None
 
 def test_the_report_names_what_came_from_where_and_the_next_command(orders: Authored) -> None:
     out = orders.init.stdout
-    assert "parameters: 39 declared -- 17 from the pinned profile, 19 assumed, 3 default" in out
+    assert (
+        "parameters: 38 declared -- 17 from the pinned profile, 0 from the contract, 18 assumed, "
+        "3 default" in out
+    )
     assert "country, amount, created_at: The profile withheld nullCount (status A)" in out
     assert "FLX-5037" in out  # the metrics give no statistic a property can be scored on
     assert out.rstrip().endswith(f"run {orders.bundle} --profile {ORDERS_PROFILE}")
@@ -279,7 +284,7 @@ def test_an_enum_the_contract_declares_is_cited_from_the_contract(keyed: Authore
     for token in parse_pointer(cited[0]["contract"]["pointer"]):
         node = node[int(token)] if isinstance(node, list) else node[token]
     assert node == "enum('DE','FR','GB','IE')"
-    assert keyed.record["_schemaURL"] == REGISTER_SCHEMA_URL_1_1
+    assert keyed.record["_schemaURL"] == REGISTER_SCHEMA_URL_1_2
     assert keyed.record["counts"]["contract"] == 1
 
 
@@ -685,7 +690,7 @@ def test_an_integer_a_row_cannot_carry_still_gives_a_bundle_that_runs(tmp_path: 
     result = _init(tmp_path / "b", contract, profile)
     assert result.exit_code == 0, result.stderr
     declared = _block(tmp_path / "b")["emits"]["orders"]["fidelity"]["columns"]
-    assert declared["event_id"] == {"levels": {"0": "1"}}
+    assert declared["event_id"] == {"bins": ["0", "99"], "binWeights": ["1"]}
     assert "2^53" in result.stdout
     # Drawn as the profile says, a value past 2^53 is refused when the rows are written.
     outcome = run(tmp_path / "b", state_dir=tmp_path / "state", profile=profile)

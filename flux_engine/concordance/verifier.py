@@ -66,6 +66,7 @@ from flux_stats.profile import (
     StatisticEntry,
     TableEntry,
 )
+from flux_stats.reading import MS_PER_DAY
 
 __all__ = [
     "CENSORED",
@@ -575,10 +576,56 @@ class ClearStatistic:
 
 
 def _domain_of(column: ColumnDeclaration) -> str:
-    """The profile domain a declared column is read in (docs/spec/PROFILE-SPEC.md)."""
+    """The profile domain a declared column is read in (docs/spec/PROFILE-SPEC.md).
+
+    A DATE column is a timestamp to a profile, in milliseconds (a day of the
+    declaration is :data:`~flux_stats.reading.MS_PER_DAY` of them).
+    """
     if column.kind is ColumnKind.SUPPORT:
         return "category"
-    return "timestamp" if column.domain is ValueDomain.TIMESTAMP else "number"
+    if column.domain in (ValueDomain.TIMESTAMP, ValueDomain.DATE):
+        return "timestamp"
+    return "number"
+
+
+def _is_date(column: ColumnDeclaration) -> bool:
+    return column.kind is ColumnKind.RANGE and column.domain is ValueDomain.DATE
+
+
+def _whole_days(value: int, what: str) -> int:
+    """*value*, a profile's milliseconds, as days; refused (``FLX-5037``) unless it is exact.
+
+    A statistic of a DATE column is converted exactly or not at all. One that is
+    not a whole number of days came from a column that holds more than dates,
+    and flooring it would score a different statistic than the profile holds.
+    """
+    days, remainder = divmod(value, MS_PER_DAY)
+    if remainder:
+        raise FluxError(
+            FLX_5037,
+            f"the profile's {what} for a DATE column is not a whole number of days",
+        )
+    return days
+
+
+def _group_in_days(group: ProfileGroup) -> ProfileGroup:
+    """A published group of a DATE column, read in the days of the declaration.
+
+    A sum and an order statistic are encoded values, so each is divided by
+    the day's milliseconds; counts and ranks are unchanged.
+    """
+    state = group.statistic
+    if not group.published or state is None:
+        return group
+    witness = state.quantile_witness
+    return replace(
+        group,
+        statistic=replace(
+            state,
+            sum_x=_whole_days(state.sum_x, "sum"),
+            quantile_witness=None if witness is None else _whole_days(witness, "order statistic"),
+        ),
+    )
 
 
 def _with_cells(
@@ -709,7 +756,9 @@ class ClearProfile:
             if found is None:
                 raise FluxError(FLX_5037, f"the profile holds no column {name!r} for this expose")
             expected = _domain_of(column)
-            if found.domain != expected:
+            # A profile that reads a DATE column as a number holds days, as the
+            # declaration does: that was the only reading before DATE had its own.
+            if found.domain != expected and not (_is_date(column) and found.domain == "number"):
                 raise FluxError(
                     FLX_5037,
                     f"the profile reads column {name!r} as {found.domain}, the declaration as "
@@ -720,12 +769,21 @@ class ClearProfile:
                 for bound in ("min", "max"):
                     metric = found.metrics.get(bound)
                     if metric is not None and metric.value is not None:
-                        if not interval.contains(metric.value):
+                        published = Fraction(metric.value)
+                        if _is_date(column) and found.domain == "timestamp":
+                            published /= MS_PER_DAY
+                        if not interval.contains(published):
                             raise FluxError(
                                 FLX_5005,
                                 f"the profile's values of column {name!r} lie outside the "
                                 "declared range",
                             )
+
+    def _read_in_days(self, name: str, table: TableEntry) -> bool:
+        """Whether column *name* is a DATE column the profile holds as milliseconds."""
+        column = self.compiled.block.columns[name]
+        found = table.columns.get(name)
+        return _is_date(column) and found is not None and found.domain == "timestamp"
 
     def _reference(self, entry: CompiledProperty, table: TableEntry) -> StatisticEntry:
         """The profile's statistic for *entry*, or refuse (``FLX-5037``)."""
@@ -743,18 +801,33 @@ class ClearProfile:
         levels: Tuple[str, ...] = ()
         if declaration.kind is PropertyKind.LEVEL_HISTOGRAM:
             levels = level_cells(block.columns[declaration.columns[0]])
+        in_days = self._read_in_days(declaration.columns[0], table)
         if declaration.kind is PropertyKind.CORRELATION:
+            if any(self._read_in_days(name, table) for name in declaration.columns):
+                raise FluxError(
+                    FLX_5037,
+                    "a correlation over a DATE column is not scored against a profile",
+                )
             candidates = self.profile.pair_statistics(block.expose_id, declaration.columns)
         else:
             candidates = self.profile.column_statistics(block.expose_id, declaration.columns[0])
         for candidate in candidates:
+            bins = candidate.bins
+            if in_days:
+                bins = tuple(Fraction(edge) / MS_PER_DAY for edge in bins)
             if (
                 candidate.identifier == statistic.identifier
                 and candidate.group_by == declaration.group_by
-                and candidate.bins == declaration.bins
+                and bins == declaration.bins
                 and candidate.levels == levels
                 and candidate.level == declaration.level
             ):
+                if in_days:
+                    return replace(
+                        candidate,
+                        bins=bins,
+                        groups=tuple(_group_in_days(group) for group in candidate.groups),
+                    )
                 return candidate
         raise FluxError(
             FLX_5037,

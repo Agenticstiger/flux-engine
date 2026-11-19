@@ -45,7 +45,7 @@ from flux_stats.profile import SCHEMA_URL, parse_profile
 pytestmark = pytest.mark.unit
 
 SPEC = Path(__file__).resolve().parents[2] / "docs" / "spec"
-SCHEMA = json.loads((SPEC / "scorecard-1.schema.json").read_text(encoding="utf-8"))
+SCHEMA = json.loads((SPEC / "scorecard-1-2.schema.json").read_text(encoding="utf-8"))
 SHAPE_SCHEMA = {"$defs": SCHEMA["$defs"], "$ref": "#/$defs/ShapeFlags"}
 
 TABLE = "orders"

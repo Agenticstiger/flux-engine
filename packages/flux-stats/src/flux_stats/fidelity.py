@@ -83,6 +83,7 @@ from flux_stats.reading import (
     encode_value,
     level_cells,
     nfc,
+    parse_date_days,
     parse_rfc3339_ms,
     read_column,
     read_pairs,
@@ -123,6 +124,7 @@ __all__ = [
     "declared_enum_values",
     "definition_for_property",
     "expose_from_contract",
+    "is_date_type",
     "measure_group",
     "parse_duration_ms",
     "parse_fidelity_block",
@@ -683,7 +685,17 @@ def _require_decimal(value: Any, subject: str) -> Decimal:
     return parsed
 
 
-def _read_bound(value: Any, subject: str) -> Tuple[Fraction, ValueDomain]:
+def is_date_type(declared: str) -> bool:
+    """Whether a column's declared type spelling is FLUID's DATE (case-insensitive).
+
+    The same reading ``flux_engine.seam.contract.parse_logical_type`` gives the
+    spelling: lower-cased, and with any parameter list set aside.
+    """
+    name, _ = split_type_params(" ".join(declared.lower().split()))
+    return name == "date"
+
+
+def _read_bound(value: Any, subject: str, *, date: bool = False) -> Tuple[Fraction, ValueDomain]:
     """Read a range bound as an exact decimal, else as an RFC 3339 instant.
 
     §2's example declares ``amount`` with a decimal range and
@@ -693,8 +705,30 @@ def _read_bound(value: Any, subject: str) -> Tuple[Fraction, ValueDomain]:
     unambiguous: try the decimal, and fall back to KERNEL-SPEC §7's
     timestamp parser, whose result is integer milliseconds. A string that
     is neither is ``FLX-5030``.
+
+    A bound of a column whose declared type is DATE (*date*) may be a day: a
+    ``YYYY-MM-DD`` string, or a number of days since 1970-01-01. Both read as
+    days in the ``DATE`` domain. An RFC 3339 instant stays what it was before
+    the ``DATE`` domain existed, a ``TIMESTAMP`` bound in milliseconds, so a
+    block a profiler declared with instants reads, and profiles, as it did.
+    Any other string is ``FLX-5030``.
     """
     parsed = _decimal_of(value, subject)
+    if date:
+        if parsed is not None:
+            return Fraction(parsed), ValueDomain.DATE
+        try:
+            return Fraction(parse_date_days(str(value))), ValueDomain.DATE
+        except FluxError:
+            pass
+        try:
+            return Fraction(parse_rfc3339_ms(str(value))), ValueDomain.TIMESTAMP
+        except FluxError:
+            raise FluxError(
+                FLX_5030,
+                f"{subject}: a DATE bound is a YYYY-MM-DD date, a number of days since "
+                "1970-01-01, or an RFC 3339 instant",
+            ) from None
     if parsed is not None:
         return Fraction(parsed), ValueDomain.NUMBER
     return Fraction(parse_rfc3339_ms(str(value))), ValueDomain.TIMESTAMP
@@ -1171,8 +1205,13 @@ def _parse_column(
         _known_keys(bounds, _RANGE_KEYS, f"fidelity.columns.{name}.range")
         if "min" not in bounds or "max" not in bounds:
             raise FluxError(FLX_5034, f"fidelity.columns.{name}.range needs both min and max")
-        lower, lower_domain = _read_bound(bounds["min"], f"fidelity.columns.{name}.range.min")
-        upper, upper_domain = _read_bound(bounds["max"], f"fidelity.columns.{name}.range.max")
+        dated = is_date_type(declared_type)
+        lower, lower_domain = _read_bound(
+            bounds["min"], f"fidelity.columns.{name}.range.min", date=dated
+        )
+        upper, upper_domain = _read_bound(
+            bounds["max"], f"fidelity.columns.{name}.range.max", date=dated
+        )
         if lower_domain is not upper_domain:
             raise FluxError(
                 FLX_5030,
@@ -1330,7 +1369,9 @@ def _parse_bins(
         raise FluxError(FLX_5032, f"{subject}.bins needs at least two edges")
     edges: List[Fraction] = []
     for index, value in enumerate(raw):
-        edge, domain = _read_bound(value, f"{subject}.bins[{index}]")
+        edge, domain = _read_bound(
+            value, f"{subject}.bins[{index}]", date=column.domain is ValueDomain.DATE
+        )
         if domain is not column.domain:
             raise FluxError(
                 FLX_5032,

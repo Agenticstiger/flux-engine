@@ -55,6 +55,7 @@ from flux_engine.api.lineage import DatasetRef
 from flux_engine.core.digest import DigestRef, digest_of_bytes
 from flux_engine.lineage.emitter import column_input_field, column_lineage_facet, job_namespace
 from flux_engine.seam.coverage import ColumnCoverage, ExposeCoverage, Origin, printable
+from flux_engine.seam.declared import NotGenerated
 
 __all__ = [
     "PROVENANCE_DIGEST_KEY",
@@ -64,6 +65,7 @@ __all__ = [
     "parse_provenance",
     "provenance_digest",
     "quoted_name",
+    "render_not_generated_sentence",
     "render_provenance_section",
     "render_uncovered_columns",
 ]
@@ -209,6 +211,39 @@ def render_uncovered_columns(coverages: Optional[Sequence[ExposeCoverage]]) -> s
         "These columns fell back to a type default, so no declaration or source "
         f"describes their values: {listed}."
     )
+
+
+def render_not_generated_sentence(not_generated: Sequence[NotGenerated]) -> Optional[str]:
+    """The sentence about declarations accepted and not generated; ``None`` when there are none.
+
+    Left out, not worded as "none", when the record lists none: a report of a bundle that
+    declares nothing of the kind keeps the text it had. A declaration is named by its locator,
+    which an author wrote, so it is withheld as a column name is when printing it would harm
+    the report (:func:`quoted_name`).
+    """
+    if not not_generated:
+        return None
+    listed: List[str] = []
+    for expose_id, group in _group(not_generated).items():
+        shown = "; ".join(
+            f"{quoted_name(row.locator, 'a declaration whose name this report does not print')}"
+            f" ({row.kind})"
+            for row in group
+        )
+        listed.append(
+            f"{quoted_name(expose_id, 'an expose whose name this report does not print')}: {shown}"
+        )
+    return (
+        "These declarations were accepted and not generated: the rows were drawn without "
+        "them, and some can break them. " + "; ".join(listed) + "."
+    )
+
+
+def _group(rows: Sequence[NotGenerated]) -> Dict[str, List[NotGenerated]]:
+    grouped: Dict[str, List[NotGenerated]] = {}
+    for row in rows:
+        grouped.setdefault(row.expose_id, []).append(row)
+    return grouped
 
 
 _UNPRINTED_SOURCE = "an attribute whose name this report does not print"

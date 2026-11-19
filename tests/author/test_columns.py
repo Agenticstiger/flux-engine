@@ -325,8 +325,9 @@ def test_a_sum_and_count_with_no_order_statistic_spread_around_the_mean() -> Non
 
 def test_nothing_published_is_a_placeholder_said_to_be_one() -> None:
     plan = _plan("int", None)
-    assert plan.declaration["levels"] == {"0": "1"}
-    assert "placeholder" in plan.how
+    assert plan.declaration["bins"] == ["0", "99"] and plan.declaration["binWeights"] == ["1"]
+    assert "levels" not in plan.declaration  # never one value on every row (ADR 0014)
+    assert "placeholder" in plan.how and plan.placeholder
 
 
 # ---------------------------------------------------------------------------
@@ -420,9 +421,27 @@ def test_a_boolean_without_counts_is_drawn_half_the_time() -> None:
 def test_the_null_fraction_rests_on_the_null_count(
     metrics: Dict[str, Any], expected: str, source: Source
 ) -> None:
-    plan = _plan("string", {"domain": "category", "metrics": metrics})
+    plan = _plan("int", {"domain": "number", "metrics": metrics})
     assert plan.declaration["nullFraction"] == expected
     assert _sources(plan)[("nullFraction",)] is source
+
+
+@pytest.mark.parametrize(
+    "metrics",
+    [
+        {"nullCount": _metric("nullCount/1", 0)},
+        {"nullCount": _metric("nullCount/1", status="A")},
+        {},
+    ],
+)
+def test_a_categorical_declares_no_null_fraction_it_is_not_given(metrics: Dict[str, Any]) -> None:
+    """An absent nullFraction draws no null, and a declared one keeps the column from being given."""
+    plan = _plan("string", {"domain": "category", "metrics": metrics})
+    assert "nullFraction" not in plan.declaration
+    counted = _plan(
+        "string", {"domain": "category", "metrics": {"nullCount": _metric("nullCount/1", 30)}}
+    )
+    assert counted.declaration["nullFraction"] == "0.05"
 
 
 def test_a_required_column_declares_no_null_fraction() -> None:
@@ -466,7 +485,9 @@ def test_assumed_levels_become_the_checked_support_only_when_asked() -> None:
     assert plan.declaration["support"] == {"values": ["c-1", "c-2"]}
     assert plan.declaration["maxCardinality"] == 2
     assert prop.document["property"] == "support"
-    one_value = _plan("int", {"domain": "number", "metrics": {"min": _metric("min/1", "4")}})
+    metrics = {"min": _metric("min/1", "4"), "max": _metric("max/1", "4")}
+    one_value = _plan("int", {"domain": "number", "metrics": metrics})
+    assert one_value.declaration["levels"] == {"4": "1"}  # the profile shows one value
     assert assumed_check(one_value, LogicalKind.INT) is None
 
 
@@ -529,7 +550,13 @@ def test_a_column_of_a_key_or_an_inner_join_declares_no_null_fraction() -> None:
     entry = {"domain": "category", "metrics": {"nullCount": _metric("nullCount/1", status="A")}}
     assert "nullFraction" not in _keyed_plan("string", entry, keyed=True).declaration
     assert "nullFraction" not in _keyed_plan("string", entry, inner=True).declaration
-    assert _keyed_plan("string", entry).declaration["nullFraction"] == "0"
+    assert (
+        _keyed_plan("int", {"domain": "number", "metrics": entry["metrics"]}).declaration[
+            "nullFraction"
+        ]
+        == "0"
+    )
+    assert "nullFraction" not in _keyed_plan("string", entry).declaration
 
 
 def test_a_column_of_a_key_is_never_declared_an_identifier_of_its_own() -> None:
@@ -710,7 +737,7 @@ def test_a_boolean_s_counts_shape_the_draw_and_nothing_the_check_reads() -> None
     assert _sources(plan)[("levels", "true")] is Source.PROFILE
 
 
-def test_a_date_column_carries_no_property() -> None:
+def test_a_date_column_is_spelled_in_days_of_the_calendar_and_scored() -> None:
     day = 86_400_000
     entry = {
         "domain": "timestamp",
@@ -723,9 +750,10 @@ def test_a_date_column_carries_no_property() -> None:
         ],
     }
     plan = _plan("date", entry)
-    # A profile reads a date as a timestamp, the block declares days: no property could score.
-    assert plan.declaration["range"] == {"min": 19_000, "max": 19_400}
-    assert plan.properties == []
+    # The profile holds the dates in milliseconds; the block spells them YYYY-MM-DD, which
+    # the check reads as days, so the histogram is a property it scores (ADR 0014).
+    assert plan.declaration["range"] == {"min": "2022-01-08", "max": "2023-02-12"}
+    assert [prop.document["property"] for prop in plan.properties] == ["marginalHistogram"]
 
 
 def test_a_key_lies_between_its_published_min_and_max() -> None:
@@ -771,24 +799,35 @@ def test_an_integer_beyond_what_a_row_carries_is_not_declared() -> None:
         "metrics": {"min": _metric("min/1", "1"), "max": _metric("max/1", "20000000000000000")},
     }
     plan = _plan("int", entry)
-    assert plan.declaration["levels"] == {"0": "1"} and plan.placeholder
-    assert "range" not in plan.declaration and "bins" not in plan.declaration
+    assert plan.declaration["bins"] == ["0", "99"] and plan.placeholder
+    assert "range" not in plan.declaration and "levels" not in plan.declaration
     assert any("2^53" in sentence for sentence in plan.assumptions)
     # Within the limit, the same column is declared from its bounds.
     entry["metrics"]["max"] = _metric("max/1", str(2**53 - 1))
     assert _plan("int", entry).declaration["range"]["max"] == str(2**53 - 1)
 
 
-def test_a_cell_withheld_under_another_status_is_the_mean_of_the_published_ones() -> None:
+def test_withheld_cells_share_what_the_published_counts_leave_of_k() -> None:
     entry = {
         "domain": "category",
         "statistics": [_levels(["a", "b", "c", "d"], [100, None, 300, None], ["F", "D", "F", "A"])],
     }
     plan = _plan("string", entry)
+    # k is 600: 200 records are left; the small one (A) takes at most 5, the other the rest.
+    assert plan.declaration["levels"] == share_texts_of([100, 195, 300, 5], ["a", "b", "c", "d"])
+    reasons = {label.tokens[-1]: label.basis.reason for label in plan.labels}
+    assert "the records the published counts leave" in str(reasons["b"])
+    assert "status A" in str(reasons["d"]) and "half the minimum cell" in str(reasons["d"])
+
+
+def test_with_no_total_a_withheld_cell_is_the_mean_of_the_published_ones() -> None:
+    statistic = _levels(["a", "b", "c", "d"], [100, None, 300, None], ["F", "D", "F", "A"])
+    del statistic["groups"][0]["k"]
+    plan = _plan("string", {"domain": "category", "statistics": [statistic]})
     # 200 for the cell withheld under D (any size), 5 for the small one (A).
     assert plan.declaration["levels"] == share_texts_of([100, 200, 300, 5], ["a", "b", "c", "d"])
     reasons = {label.tokens[-1]: label.basis.reason for label in plan.labels}
-    assert "status D" in str(reasons["b"]) and "does not say how large" in str(reasons["b"])
+    assert "mean of the counts the table publishes" in str(reasons["b"])
     assert "status A" in str(reasons["d"]) and "below the minimum cell" in str(reasons["d"])
 
 
@@ -797,11 +836,14 @@ def share_texts_of(counts: List[int], levels: List[str]) -> Dict[str, str]:
 
 
 def test_a_null_count_withheld_under_another_status_is_said_to_be_of_unknown_size() -> None:
-    entry = {"domain": "category", "metrics": {"nullCount": _metric("nullCount/1", status="C")}}
-    plan = _plan("string", entry)
+    entry = {"domain": "number", "metrics": {"nullCount": _metric("nullCount/1", status="C")}}
+    plan = _plan("int", entry)
     assert plan.declaration["nullFraction"] == "0"
     reason = next(label.basis.reason for label in plan.labels if label.tokens == ("nullFraction",))
     assert reason is not None and "status C" in reason and "does not say how many" in reason
+    categorical = _plan("string", {"domain": "category", "metrics": entry["metrics"]})
+    assert "nullFraction" not in categorical.declaration
+    assert any("status C" in sentence for sentence in categorical.assumptions)
 
 
 def test_a_placeholder_foreign_key_draws_over_its_parent_s_span() -> None:
@@ -928,7 +970,7 @@ def test_a_date_histogram_keeps_its_edges_when_moving_them_would_merge_two_days(
     }
     plan = _plan("date", entry)
     # Moved in to the published min, the first two edges would both be day 1.
-    assert plan.declaration["bins"] == [0, 1, 3]
+    assert plan.declaration["bins"] == ["1970-01-01", "1970-01-02", "1970-01-04"]
 
 
 def test_a_column_of_a_key_of_several_columns_spans_its_rows() -> None:

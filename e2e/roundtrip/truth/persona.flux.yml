@@ -1,0 +1,15 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# The least Persona a run needs, for the same reason.
+fluxVersion: "0.5.0"
+kind: Persona
+id: persona-b2b-billing
+name: Persona for B2B billing
+metadata:
+  owner:
+    team: data-platform
+spec:
+  traits:
+    digitalFluency: 0.5

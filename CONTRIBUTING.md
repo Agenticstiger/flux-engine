@@ -75,6 +75,12 @@ it, against a relational source on AWS, and is run by hand. Its privacy judge
 measures the method on a TPC-DS-shaped dataset that holds no real people, and
 is not a privacy guarantee.
 
+A second harness, [`e2e/roundtrip`](e2e/roundtrip/README.md), needs no cloud. It
+generates a truth, profiles it with `fluid profile`, writes a bundle back
+from the profile with `fluxsim init`, runs it, and judges the copy against the
+truth. It is a uv project of its own too, is run by hand, and keeps its score
+history in `history.jsonl`.
+
 ## What a good change looks like
 
 - **Tests with the code.** New behaviour comes with a test. A fix comes with

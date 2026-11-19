@@ -8,7 +8,9 @@ docs/spec/PARAMETER-REGISTER-SPEC.md. A Simulation can say, for the numbers its
 run reads, what each one rests on: a statistic of the profile it pins, a place
 in the FLUID contract it emits from (register format 1-1-0), an assumption with
 its reason, or a default. It says so in one list under the engine's namespace,
-beside the pin those citations depend on::
+beside the pin those citations depend on, and it may list the statistics of the
+pinned profile that no number rests on, each with its reason (``unused``,
+register format 1-2-0)::
 
     extensions:
       com.agentics.flux/1:
@@ -75,6 +77,7 @@ __all__ = [
     "NOT_PARAMETERS",
     "PARAMETERS_KEY",
     "SOURCES_1_0",
+    "UNUSED_KEY",
     "Citation",
     "ContractCitation",
     "DeclaredNumber",
@@ -82,12 +85,14 @@ __all__ = [
     "RegisterEntry",
     "RegisteredNumber",
     "Source",
+    "UnusedStatistic",
     "build_parameter_register",
     "check_contract_citations",
     "check_profile_citations",
     "declared_numbers",
     "parse_pointer",
     "read_parameters_block",
+    "read_unused_block",
     "render_pointer",
 ]
 
@@ -99,7 +104,8 @@ FLX_3113 = register(
     "statistic by a JSON Pointer into the profile the Simulation pins, and `plan` reads "
     "that pointer in the profile it is handed. The pointer has to reach a statistic or a "
     "metric (or a part of one) whose `definition` is the one the entry names, or a "
-    "table's `rowCount`, and nothing on the way may be withheld. The message says which "
+    "table's `rowCount`, and nothing on the way may be withheld. A statistic listed in "
+    "extensions['com.agentics.flux/1'].unused is read the same way. The message says which "
     "entry and what is wrong, and never quotes a value. Point the entry at a statistic "
     "the profile publishes, or give the number another source: an assumption, with its "
     "reason. Nothing was written.",
@@ -107,6 +113,10 @@ FLX_3113 = register(
 
 #: The key under the engine's namespace that holds the register.
 PARAMETERS_KEY = "parameters"
+
+#: The key under the engine's namespace that lists the statistics of the pinned
+#: profile no number of the run rests on, each with its reason (register format 1-2-0).
+UNUSED_KEY = "unused"
 
 
 class Source(str, Enum):
@@ -131,6 +141,8 @@ _ENTRY_KEYS: FrozenSet[str] = frozenset(
     {"document", "pointer", "source", "statistic", "contract", "reason"}
 )
 _CITATION_KEYS: FrozenSet[str] = frozenset({"pointer", "definition"})
+#: Every key one ``unused`` item may carry.
+_UNUSED_ITEM_KEYS: FrozenSet[str] = frozenset({"statistic", "reason"})
 _CONTRACT_CITATION_KEYS: FrozenSet[str] = frozenset({"productRef", "pointer"})
 
 #: The longest reason an entry may give. A reason is a sentence for a reader of
@@ -496,6 +508,20 @@ class RegisterEntry:
     contract: Optional[ContractCitation] = None
 
 
+@dataclass(frozen=True)
+class UnusedStatistic:
+    """A statistic of the pinned profile no number of the run rests on, and why."""
+
+    index: int
+    citation: Citation
+    reason: str
+    #: How a message names the item: the block's place in the Simulation and its index.
+    label: str = ""
+
+    def as_document(self) -> Dict[str, Any]:
+        return {"statistic": self.citation.as_document(), "reason": self.reason}
+
+
 def _registered_identifiers() -> FrozenSet[str]:
     """Every statistic and metric definition a profile can hold."""
     return frozenset(entry.identifier for entry in _stats_registry.definitions()) | frozenset(
@@ -610,6 +636,57 @@ def read_parameters_block(
     return tuple(entries)
 
 
+def read_unused_block(
+    block: Any, *, pinned: bool, where: str, code: ErrorCode
+) -> Tuple[UnusedStatistic, ...]:
+    """Read ``extensions["com.agentics.flux/1"].unused``, or refuse it with *code*.
+
+    A list of items, each a mapping with ``statistic`` (a citation of the pinned
+    profile, as a ``profile`` entry gives one) and ``reason`` (one line of text),
+    and nothing else. A Simulation that pins no profile has nothing to list, so
+    *pinned* must hold, and two items naming one statistic are refused. Whether a
+    pointer reaches a published statistic is :func:`check_profile_citations`'
+    question, which needs the profile.
+    """
+    if isinstance(block, (str, bytes, Mapping)) or not isinstance(block, Sequence):
+        raise FluxError(code, f"{where} is a list of statistics, each with its reason")
+    if not pinned:
+        raise FluxError(
+            code,
+            f"{where} lists statistics of a profile, and the Simulation pins none under "
+            "extensions['com.agentics.flux/1'].profile",
+        )
+    items: List[UnusedStatistic] = []
+    seen: Dict[Tuple[str, ...], int] = {}
+    for index, raw in enumerate(block):
+        at = f"{where}[{index}]"
+        if not isinstance(raw, Mapping):
+            raise FluxError(code, f"{at} is a mapping")
+        unknown = sorted(str(key) for key in raw if nfc(str(key)) not in _UNUSED_ITEM_KEYS)
+        if unknown:
+            raise FluxError(
+                code, f"{at} declares {unknown}; an item carries {sorted(_UNUSED_ITEM_KEYS)}"
+            )
+        for required in ("statistic", "reason"):
+            if required not in raw:
+                raise FluxError(code, f"{at} names its '{required}'")
+        citation = _citation(raw["statistic"], f"{at}.statistic", code)
+        if citation.tokens in seen:
+            raise FluxError(
+                code, f"{at} names the same statistic as {where}[{seen[citation.tokens]}]"
+            )
+        seen[citation.tokens] = index
+        items.append(
+            UnusedStatistic(
+                index=index,
+                citation=citation,
+                reason=_reason(raw["reason"], f"{at}.reason", code),
+                label=at,
+            )
+        )
+    return tuple(items)
+
+
 def _read_entry(raw: Any, index: int, *, at: str, pinned: bool, code: ErrorCode) -> RegisterEntry:
     """One entry of the block, named *at* in a refusal, with what its source takes."""
     if not isinstance(raw, Mapping):
@@ -712,19 +789,28 @@ class ParameterRegister:
     profile_digest: Optional[str]
     entries: Tuple[RegisterEntry, ...]
     numbers: Tuple[RegisteredNumber, ...]
+    #: The statistics of the pinned profile no number rests on, when the Simulation
+    #: lists them (register format 1-2-0); ``None`` when it does not.
+    unused: Optional[Tuple[UnusedStatistic, ...]] = None
 
     @property
     def uses_contract(self) -> bool:
         """Whether an entry names the contract as a source: register format 1-1-0."""
         return any(entry.source is Source.CONTRACT for entry in self.entries)
 
+    @property
+    def lists_unused(self) -> bool:
+        """Whether the Simulation lists the profile's unused statistics: register format 1-2-0."""
+        return self.unused is not None
+
     def sources(self) -> Tuple[Source, ...]:
         """The sources the register's format knows, in report order.
 
-        ``contract`` only when an entry names it, so a register that does not is
-        reported, recorded and counted exactly as a format 1-0-0 register was.
+        ``contract`` only when an entry names it or the register is of format
+        1-2-0, so a register that does neither is reported, recorded and counted
+        exactly as a format 1-0-0 register was.
         """
-        return tuple(Source) if self.uses_contract else SOURCES_1_0
+        return tuple(Source) if self.uses_contract or self.lists_unused else SOURCES_1_0
 
     def counts(self) -> Dict[str, int]:
         """How many numbers rest on each source, every source of the format listed, in order."""
@@ -798,6 +884,7 @@ def build_parameter_register(
     entries: Sequence[RegisterEntry],
     profile_digest: Optional[str],
     code: ErrorCode,
+    unused: Optional[Sequence[UnusedStatistic]] = None,
 ) -> ParameterRegister:
     """Give every number of the run its source, or refuse an entry that names none.
 
@@ -831,6 +918,7 @@ def build_parameter_register(
         profile_digest=profile_digest,
         entries=tuple(entries),
         numbers=tuple(registered),
+        unused=tuple(unused) if unused is not None else None,
     )
 
 
@@ -944,13 +1032,19 @@ def check_profile_citations(
     it; the nearest node on the way with a registered ``definition`` has to be
     the one the entry names, or the pointer is a table's ``rowCount`` and the
     entry names none; and nothing it reaches may be withheld. A message names
-    the entry and the part of its citation that fails, and no value.
+    the entry and the part of its citation that fails, and no value. The
+    statistics the register lists as unused are read the same way: each has to be
+    a statistic the profile publishes.
     """
     for entry in register_.entries:
         if entry.source is not Source.PROFILE or entry.citation is None:
             continue
         at = f"{entry.label or f'{where}: parameters[{entry.index}]'}.statistic"
         _check_citation(entry.citation, profile, at)
+    for item in register_.unused or ():
+        _check_citation(
+            item.citation, profile, f"{item.label or f'{where}: unused[{item.index}]'}.statistic"
+        )
 
 
 def check_contract_citations(

@@ -28,6 +28,12 @@ univariate and bivariate accuracies into one overall the same way. Here the
 weights are written out as exact fractions, every weight is 1 today, and a
 score that was never formed is ``None``, never a default number.
 
+The score does not say how much of the contract it speaks for, so the record
+also carries **coverage**: how many of the contract's columns carry a scored
+property, and how many of its declared relationships the profile constrains
+(:class:`Coverage`). Coverage is counted, never scored: no property scores
+children per parent yet.
+
 A dimension, a table or the run with nothing scored is ``not measured``. A
 threshold on it is not met, and nothing reports a number in its place.
 
@@ -41,7 +47,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -54,6 +60,7 @@ from flux_engine.concordance.verifier import (
     PropertyOutcome,
     Refusal,
 )
+from flux_engine.core.canonical import nfc
 from flux_engine.lineage.emitter import OPENLINEAGE_PRODUCER
 from flux_engine.seam.scorecard import (
     DIMENSIONS,
@@ -62,6 +69,7 @@ from flux_engine.seam.scorecard import (
     dimension_of,
 )
 from flux_stats import definition_for_property
+from flux_stats.profile import Profile
 
 if TYPE_CHECKING:
     from flux_engine.concordance.shape import ShapeReport
@@ -72,9 +80,14 @@ __all__ = [
     "SCHEMA_URL",
     "SCORECARD_FILE",
     "Aggregate",
+    "ContractShape",
+    "Coverage",
     "CredibilityResult",
+    "DeclaredLink",
     "PropertyScore",
+    "RunCoverage",
     "Scorecard",
+    "Share",
     "TableInput",
     "TableScore",
     "ThresholdResult",
@@ -83,7 +96,7 @@ __all__ = [
 ]
 
 #: The scorecard format this engine writes, named by its schema's ``$id``.
-SCHEMA_URL = "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-1-0/FluxScorecard.json"
+SCHEMA_URL = "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-2-0/FluxScorecard.json"
 
 #: OpenLineage's data-quality assertions facet, 1-1-0: one entry per scored property.
 ASSERTIONS_SCHEMA_URL = (
@@ -262,6 +275,148 @@ def _aggregate(properties: Sequence[PropertyScore]) -> Aggregate:
 
 
 @dataclass(frozen=True)
+class DeclaredLink:
+    """One relationship the contract declares: a child's key columns and its parent's.
+
+    The child expose declares it (``semantics.relationships``), so ``child`` is
+    that expose and ``parent`` the one it names with ``to``. The columns pair up
+    by position.
+    """
+
+    parent: str
+    parent_columns: Tuple[str, ...]
+    child: str
+    child_columns: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ContractShape:
+    """What coverage counts of one emit's contract: its columns and its declared relationships."""
+
+    columns: Tuple[str, ...]
+    relationships: Tuple[DeclaredLink, ...] = ()
+
+
+@dataclass(frozen=True)
+class Share:
+    """``covered`` of ``of``, with the exact share when there is something to cover."""
+
+    covered: int = 0
+    of: int = 0
+
+    @property
+    def share(self) -> Optional[Fraction]:
+        """``covered / of``, or ``None`` when nothing was declared: there is no share to state."""
+        return Fraction(self.covered, self.of) if self.of else None
+
+    def to_document(self) -> Dict[str, Any]:
+        """The share's row in the scorecard."""
+        return {"covered": self.covered, "of": self.of, "share": _exact(self.share)}
+
+    def __add__(self, other: "Share") -> "Share":
+        return Share(self.covered + other.covered, self.of + other.of)
+
+
+@dataclass(frozen=True)
+class Coverage:
+    """How much of a contract a score speaks for.
+
+    ``columns`` counts the contract's columns that carry at least one scored
+    property. ``relationships`` counts the declared relationships the profile
+    constrains: it holds an entry for that parent and child, over those key
+    columns, with at least one published statistic. That is counted, not
+    scored.
+    """
+
+    columns: Share = Share()
+    relationships: Share = Share()
+
+    def of_kind(self, kind: str) -> Share:
+        """``columns`` or ``relationships``."""
+        return self.columns if kind == "columns" else self.relationships
+
+    def to_document(self) -> Dict[str, Any]:
+        """The coverage's row in the scorecard."""
+        return {
+            "columns": self.columns.to_document(),
+            "relationships": self.relationships.to_document(),
+        }
+
+    def text(self) -> str:
+        """``covers 12 of 20 columns, 0 of 3 relationships``."""
+        return (
+            f"covers {self.columns.covered} of {self.columns.of} "
+            f"{'column' if self.columns.of == 1 else 'columns'}, "
+            f"{self.relationships.covered} of {self.relationships.of} "
+            f"{'relationship' if self.relationships.of == 1 else 'relationships'}"
+        )
+
+
+@dataclass(frozen=True)
+class RunCoverage:
+    """The run's coverage: the sum over the tables whose contract the run records.
+
+    ``tables_counted`` of ``tables_total`` tables are in the sum. A table whose
+    contract the run does not record (one with no fidelity block) is left out
+    rather than guessed at.
+    """
+
+    coverage: Coverage = Coverage()
+    tables_counted: int = 0
+    tables_total: int = 0
+
+    def text(self) -> str:
+        """The coverage as a sentence fragment, naming the tables it leaves out."""
+        if self.tables_counted == 0:
+            return "coverage not known: no table's contract is recorded"
+        text = self.coverage.text()
+        left_out = self.tables_total - self.tables_counted
+        if left_out:
+            text += (
+                f"; {left_out} of {self.tables_total} "
+                f"{'table' if self.tables_total == 1 else 'tables'} not counted, "
+                "no contract recorded"
+            )
+        return text
+
+    def to_document(self) -> Dict[str, Any]:
+        """The run's ``coverage`` entry."""
+        return {
+            **self.coverage.to_document(),
+            "tables": {"counted": self.tables_counted, "total": self.tables_total},
+        }
+
+
+def _published(profile: Profile, link: DeclaredLink) -> bool:
+    """Whether *profile* holds a published statistic for *link*'s parent and child."""
+    return any(
+        entry.parent_table == link.parent
+        and entry.child_table == link.child
+        and tuple(nfc(column) for column in entry.parent_columns) == link.parent_columns
+        and tuple(nfc(column) for column in entry.child_columns) == link.child_columns
+        and any(group.published for statistic in entry.statistics for group in statistic.groups)
+        for entry in profile.relationships
+    )
+
+
+def _coverage_of(
+    contract: ContractShape, properties: Sequence["PropertyScore"], profile: Optional[Profile]
+) -> Coverage:
+    scored = {
+        nfc(column) for entry in properties if entry.score is not None for column in entry.columns
+    }
+    names = {nfc(column) for column in contract.columns}
+    links = list(contract.relationships)
+    return Coverage(
+        columns=Share(len(names & scored), len(names)),
+        relationships=Share(
+            sum(1 for link in links if profile is not None and _published(profile, link)),
+            len(links),
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class TableScore:
     """One emit's table: its properties and their aggregate.
 
@@ -275,6 +430,8 @@ class TableScore:
     properties: Tuple[PropertyScore, ...]
     refusals: Tuple[Refusal, ...]
     aggregate: Aggregate
+    #: What the score speaks for; ``None`` when the run records no contract for the emit.
+    coverage: Optional[Coverage] = None
 
     @property
     def status(self) -> str:
@@ -394,6 +551,8 @@ class Scorecard:
     #: The shape flags; ``None`` when none were checked. They inform:
     #: :attr:`met` does not read them, and nothing withholds on them.
     shape: Optional["ShapeReport"] = None
+    #: How much of the contract the score speaks for, over every table that records one.
+    coverage: RunCoverage = field(default_factory=RunCoverage)
 
     @property
     def met(self) -> bool:
@@ -418,11 +577,21 @@ class Scorecard:
         """
         if threshold.scope == "table" and self.table(str(threshold.name)) is not None:
             return (str(threshold.name),)
+        if threshold.scope == "coverage":
+            counted = [table for table in self.tables if table.coverage is not None]
+            short = tuple(
+                table.expose_id
+                for table in counted
+                if table.coverage is not None
+                and not threshold.met_by(table.coverage.of_kind(str(threshold.name)).share)
+            )
+            if short or counted:
+                return short or tuple(table.expose_id for table in counted)
 
         def under(entry: PropertyScore) -> bool:
             return threshold.scope == "overall" or entry.dimension == threshold.name
 
-        if threshold.scope != "table":
+        if threshold.scope in ("overall", "dimension"):
             for wanted in (
                 lambda entry: under(entry) and entry.score is not None,
                 under,
@@ -443,6 +612,8 @@ class Scorecard:
         Where to look first when the threshold is missed. Ties go to the
         first in table and declaration order.
         """
+        if threshold.scope == "coverage":
+            return None
         candidates = [
             entry
             for table in self.tables
@@ -460,6 +631,8 @@ class Scorecard:
         line = result.line()
         if result.met:
             return line
+        if result.threshold.scope == "coverage":
+            return f"{line}; {self.coverage.text()}"
         weakest = self.lowest(result.threshold)
         if weakest is not None:
             return (
@@ -477,7 +650,8 @@ class Scorecard:
     def summary_lines(self) -> List[str]:
         """What a person reads: the run, then each dimension, table, threshold and floor."""
         return [
-            f"scorecard: overall {display(self.overall.score)} against profile {self.profile_digest}",
+            f"scorecard: overall {display(self.overall.score)} against profile "
+            f"{self.profile_digest} ({self.coverage.text()})",
             *(f"  {line}" for line in self.detail_lines()),
         ]
 
@@ -495,7 +669,10 @@ class Scorecard:
             text += "; not measured: " + ", ".join(unmeasured)
         lines.append(f"dimensions: {text}")
         for table in self.tables:
-            lines.append(f"table {table.expose_id}: {_table_state(table)}")
+            state = _table_state(table)
+            if table.coverage is not None:
+                state += f"; {table.coverage.text()}"
+            lines.append(f"table {table.expose_id}: {state}")
         lines.extend(result.line() for result in self.thresholds)
         lines.extend(result.line() for result in self.credibility)
         if self.shape is not None:
@@ -522,6 +699,7 @@ class Scorecard:
                     {"code": refusal.code, "reason": refusal.reason} for refusal in table.refusals
                 ],
                 "properties": [entry.to_document() for entry in table.properties],
+                "coverage": table.coverage.to_document() if table.coverage is not None else None,
                 "dataQualityAssertions": {
                     "_producer": OPENLINEAGE_PRODUCER,
                     "_schemaURL": ASSERTIONS_SCHEMA_URL,
@@ -556,6 +734,7 @@ class Scorecard:
                 }
                 for name, aggregate in self.dimensions
             ],
+            "coverage": self.coverage.to_document(),
             "tables": tables,
             "thresholds": [result.to_document() for result in self.thresholds],
             "shapeFlags": (
@@ -596,6 +775,9 @@ class TableInput:
     #: ``compiled``; a declared block whose record could not be compiled
     #: passes ``True`` with the evaluation that says why.
     declares_fidelity: Optional[bool] = None
+    #: The emit's contract columns and declared relationships, for coverage;
+    #: ``None`` when the run records no contract for it.
+    contract: Optional[ContractShape] = None
 
 
 def _property_score(
@@ -644,7 +826,7 @@ def _property_score(
     )
 
 
-def _table(table: TableInput) -> TableScore:
+def _table(table: TableInput, profile: Optional[Profile]) -> TableScore:
     compiled, evaluation = table.compiled, table.evaluation
     declares = (
         table.declares_fidelity if table.declares_fidelity is not None else compiled is not None
@@ -658,6 +840,9 @@ def _table(table: TableInput) -> TableScore:
             properties=(),
             refusals=tuple(evaluation.refusals) if declares and evaluation is not None else (),
             aggregate=_aggregate(()),
+            coverage=(
+                _coverage_of(table.contract, (), profile) if table.contract is not None else None
+            ),
         )
     refusals = evaluation.refusals if evaluation is not None else ()
     table_refusals = tuple(refusal for refusal in refusals if refusal.property_id is None)
@@ -681,6 +866,11 @@ def _table(table: TableInput) -> TableScore:
         properties=properties,
         refusals=table_refusals,
         aggregate=_aggregate(properties),
+        coverage=(
+            _coverage_of(table.contract, properties, profile)
+            if table.contract is not None
+            else None
+        ),
     )
 
 
@@ -692,15 +882,20 @@ def build_scorecard(
     profile_digest: str,
     tables: Sequence[TableInput],
     declaration: Optional[ScorecardDeclaration] = None,
+    profile: Optional[Profile] = None,
 ) -> Scorecard:
     """Score a run from its per-emit evaluations against the pinned profile.
 
     *tables* is one entry per emit the run wrote, in any order; the
     scorecard lists them by ``exposeId``. *declaration* holds the
     Simulation's thresholds, or ``None`` when it declares none. The run's
-    shape flags join the result afterwards (:attr:`Scorecard.shape`).
+    shape flags join the result afterwards (:attr:`Scorecard.shape`). *profile*
+    is the pinned profile, which says which declared relationships it
+    constrains; without it none is counted as constrained.
     """
-    scored = tuple(_table(table) for table in sorted(tables, key=lambda entry: entry.expose_id))
+    scored = tuple(
+        _table(table, profile) for table in sorted(tables, key=lambda entry: entry.expose_id)
+    )
     everything = [entry for table in scored for entry in table.properties]
     dimensions = tuple(
         (name, _aggregate([entry for entry in everything if entry.dimension == name]))
@@ -714,6 +909,15 @@ def build_scorecard(
         censored=sum(1 for entry in everything if entry.outcome == CENSORED),
         refused=sum(1 for entry in everything if entry.outcome == REFUSED),
     )
+    counted = [table.coverage for table in scored if table.coverage is not None]
+    run_coverage = RunCoverage(
+        coverage=Coverage(
+            columns=sum((entry.columns for entry in counted), Share()),
+            relationships=sum((entry.relationships for entry in counted), Share()),
+        ),
+        tables_counted=len(counted),
+        tables_total=len(scored),
+    )
     by_dimension = dict(dimensions)
     by_table = {table.expose_id: table.aggregate for table in scored}
     results: List[ThresholdResult] = []
@@ -722,6 +926,8 @@ def build_scorecard(
             score = overall.score
         elif threshold.scope == "dimension":
             score = by_dimension[str(threshold.name)].score
+        elif threshold.scope == "coverage":
+            score = run_coverage.coverage.of_kind(str(threshold.name)).share
         else:
             found = by_table.get(str(threshold.name))
             score = found.score if found is not None else None
@@ -748,4 +954,5 @@ def build_scorecard(
         overall=overall,
         thresholds=tuple(results),
         credibility=credibility,
+        coverage=run_coverage,
     )

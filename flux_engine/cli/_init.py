@@ -114,7 +114,12 @@ def _cd(directory: str) -> str:
 
 
 def run_init(
-    directory: str, *, contract: Optional[str] = None, profile: Optional[str] = None
+    directory: str,
+    *,
+    contract: Optional[str] = None,
+    profile: Optional[str] = None,
+    strict: bool = False,
+    allow: Tuple[str, ...] = (),
 ) -> StageResult:
     """Scaffold *directory* and report it as a :class:`StageResult`.
 
@@ -146,8 +151,27 @@ def run_init(
                 "--contract contract.orders.fluid.yaml --profile orders.profile.json`"
             ),
         )
+    if (strict or allow) and contract is None:
+        flag = "--strict" if strict else "--allow"
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                f"init: {flag} checks a bundle written from --contract and --profile; the "
+                "starter project has no profile to check"
+            ),
+        )
+    if allow and not strict:
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --allow accepts what --strict would refuse; pass --strict too, or drop "
+                "--allow"
+            ),
+        )
     if contract is not None and profile is not None:
-        return run_author(directory, contract, profile)
+        return run_author(directory, contract, profile, strict=strict, allow=allow)
     try:
         names = scaffold(Path(directory))
     except ScaffoldError as error:
@@ -203,14 +227,79 @@ def _parameters_line(counts: Dict[str, int]) -> str:
     return f"parameters: {declared} declared -- {', '.join(parts)}"
 
 
-def run_author(directory: str, contract: str, profile: str) -> StageResult:
+def _ledger_lines(bundle: Any) -> List[str]:
+    """The ledger's counts, and each unused statistic with its reason (ADR 0014)."""
+    from flux_engine.seam.coverage import printable
+
+    counts = bundle.ledger.counts()
+    total = sum(counts.values())
+    noun = "statistic" if total == 1 else "statistics"
+    lines = [
+        f"profile: {total} {noun} -- {counts['used']} used, {counts['unused']} unused, "
+        f"{counts['withheld']} withheld"
+    ]
+    unused = bundle.ledger.unused_entries()
+    if unused:
+        lines.append("unused (no number rests on these; the register lists them):")
+        for entry in unused:
+            definition = f" ({printable(entry.definition)})" if entry.definition else ""
+            lines.append(f"  - {printable(entry.pointer)}{definition}: {printable(entry.note)}")
+    return lines
+
+
+def _strict_refusal(findings: Any) -> str:
+    """What ``--strict`` refused, one line per finding, and how to accept one."""
+    from flux_engine.seam.coverage import printable
+
+    parts = []
+    if findings.unused:
+        parts.append(
+            f"{len(findings.unused)} statistic{'s' if len(findings.unused) != 1 else ''} of "
+            "the profile unused"
+        )
+    if findings.gaps:
+        many = len(findings.gaps) != 1
+        parts.append(
+            f"{len(findings.gaps)} assumption{'s' if many else ''} standing in for what the "
+            "profile did not publish"
+        )
+    if findings.stale:
+        parts.append(
+            f"{len(findings.stale)} --allow pointer{'s' if len(findings.stale) != 1 else ''} "
+            "accepting nothing"
+        )
+    lines = [f"init: --strict refuses this bundle ({', '.join(parts)}); nothing was written"]
+    for pointer, definition, reason in findings.unused:
+        named = f" ({printable(definition)})" if definition else ""
+        lines.append(f"  unused {printable(pointer)}{named}: {printable(reason)}")
+    for gap in findings.gaps:
+        lines.append(f"  gap {printable(gap.pointer)}: {printable(gap.reason)}")
+    for pointer in findings.stale:
+        lines.append(f"  --allow {printable(pointer)} accepts nothing")
+    lines.append(
+        "accept one with --allow POINTER (a profile pointer for a statistic, a Simulation "
+        "pointer for a gap), or publish what the profile left out"
+    )
+    return "\n".join(lines)
+
+
+def run_author(
+    directory: str,
+    contract: str,
+    profile: str,
+    *,
+    strict: bool = False,
+    allow: Tuple[str, ...] = (),
+) -> StageResult:
     """Write a bundle for the data *contract* and *profile* describe into *directory*.
 
     Exit ``1`` when an input cannot be used (the message names it and, for a
     refusal the engine shares, its ``FLX`` code), when no expose can be written,
-    or when the directory cannot take the files. Nothing is written then.
+    when *strict* refuses an unused statistic or a gap that no *allow* pointer
+    accepts (ADR 0014), or when the directory cannot take the files. Nothing is
+    written then.
     """
-    from flux_engine.author import AuthorError, author_bundle
+    from flux_engine.author import AuthorError, author_bundle, strict_findings
     from flux_engine.core.errors import FluxError
     from flux_engine.seam.coverage import printable
     from flux_engine.starter import ScaffoldError, write_project
@@ -242,6 +331,33 @@ def run_author(directory: str, contract: str, profile: str) -> StageResult:
                 f"{error.strerror or error}"
             ),
         )
+    if strict:
+        try:
+            findings = strict_findings(bundle, allow)
+        except ValueError as error:
+            return StageResult(
+                stage="init",
+                exit_code=2,
+                stderr=f"init: --allow takes a JSON Pointer (RFC 6901): {printable(str(error))}",
+            )
+        if findings.refused:
+            return StageResult(
+                stage="init",
+                exit_code=1,
+                _artifacts={
+                    "strict": {
+                        "unused": [
+                            {"pointer": pointer, "definition": definition, "reason": reason}
+                            for pointer, definition, reason in findings.unused
+                        ],
+                        "gaps": [
+                            {"pointer": gap.pointer, "reason": gap.reason} for gap in findings.gaps
+                        ],
+                        "staleAllow": list(findings.stale),
+                    }
+                },
+                stderr=_strict_refusal(findings),
+            )
     try:
         names = write_project(Path(directory), lambda: bundle.files)
     except ScaffoldError as error:
@@ -291,7 +407,8 @@ def run_author(directory: str, contract: str, profile: str) -> StageResult:
             }
         )
     assumptions += list(bundle.notes)
-    lines += ["", _parameters_line(dict(bundle.counts))]
+    lines += [""] + _ledger_lines(bundle)
+    lines += [_parameters_line(dict(bundle.counts))]
     if assumptions:
         lines.append(
             "assumed (the register gives each assumed number its reason; replace what you "
@@ -324,6 +441,11 @@ def run_author(directory: str, contract: str, profile: str) -> StageResult:
             "notes": [
                 {"subject": subject, "assumption": sentence} for subject, sentence in bundle.notes
             ],
+            "ledger": {
+                "counts": bundle.ledger.counts(),
+                "statistics": [entry.as_document() for entry in bundle.ledger],
+            },
+            "gaps": [{"pointer": gap.pointer, "reason": gap.reason} for gap in bundle.gaps],
         },
         stdout="\n".join(lines),
     )

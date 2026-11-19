@@ -12,7 +12,8 @@ the CLI's cold path stays small (ADR 0008).
 
 A text is read for one of two sides. A **core** text is a FLUID contract's
 FLUID SQL/1: a bare name is always a column and ``a.b`` always a
-relationship's column, and the extensions do not parse. A **FLUX-side**
+relationship's column, and the extensions do not parse, except the three date
+moves, which FLUID SQL/1 has too. A **FLUX-side**
 text is a bundle rule's, where ``row``, ``link``, ``previous`` and
 ``CHILDREN`` are roots and the four extensions parse (EXPR-SPEC-2 §3).
 
@@ -128,8 +129,9 @@ def parse(text: str, *, side: Union[Side, str], language: str = DEFAULT_LANGUAGE
 
     *language* is the one a FLUX-side rule declares (``flux-expr/2``, the
     default, or ``flux-expr/3``). flux-expr/3 adds ``EXTRACT``, ``ADD_DAYS``,
-    ``ADD_MONTHS``, ``ADD_YEARS`` and ``||`` (EXPR-SPEC-3 §2), which a core
-    text and a flux-expr/2 text refuse with ``FLX-6103``. A flux-expr/2 text
+    ``ADD_MONTHS``, ``ADD_YEARS`` and ``||`` (EXPR-SPEC-3 §2). A core text
+    (FLUID SQL/1) has the three date moves; ``EXTRACT`` and ``||`` stay
+    flux-expr/3's, and a flux-expr/2 text refuses all of them with ``FLX-6103``. A flux-expr/2 text
     parses to the same tree under either language.
 
     Raises :class:`~flux_engine.expr2.errors.Expr2Error` with ``FLX-6103``
@@ -653,7 +655,12 @@ class _Parser:
         word = name.text.upper()
         self.advance()  # "("
         self.enter(name.position)
-        if word in CORE_FUNCTIONS:
+        if word in DATE_ADD_FUNCTIONS:
+            # FLUID SQL/1 has the three date moves; a flux-expr/2 FLUX-side text refuses them.
+            if self.side is Side.FLUX:
+                self.refuse_unless_flux_expr_3(word, name.position)
+            node, depth = self.date_add(word, name.position)
+        elif word in CORE_FUNCTIONS:
             node, depth = self.core_call(word, name.position)
         elif word in AGGREGATES or word in WINDOWS:
             if self.side is Side.CORE:
@@ -667,12 +674,9 @@ class _Parser:
                 node, depth = self.aggregate(word, name.position)
             else:
                 node, depth = self.window(word, name.position)
-        elif word == "EXTRACT" or word in DATE_ADD_FUNCTIONS:
+        elif word == "EXTRACT":
             self.refuse_unless_flux_expr_3(word, name.position)
-            if word == "EXTRACT":
-                node, depth = self.extract(name.position)
-            else:
-                node, depth = self.date_add(word, name.position)
+            node, depth = self.extract(name.position)
         else:
             raise Expr2Error(
                 FLX_6103, f"FLUID SQL/1 has no function {name.text}", position=name.position

@@ -58,7 +58,12 @@ from flux_engine.generator.coverage import coverage_of_plan
 from flux_engine.generator.relations import FLX_3403, relate_plans, related_columns
 from flux_engine.generator.rows import clear_memos as clear_generator_memos
 from flux_engine.generator.rows import generator_version_for
-from flux_engine.generator.rules import RulePlan, flux_rule_entries, plan_rules
+from flux_engine.generator.rules import (
+    RulePlan,
+    declared_not_generated,
+    flux_rule_entries,
+    plan_rules,
+)
 from flux_engine.governance.audit import DecisionAuditLog
 from flux_engine.governance.skills import agentic_extension_available
 from flux_engine.governance.sovereignty import (
@@ -91,6 +96,7 @@ from flux_engine.runtime import (
 from flux_engine.runtime.cast import strip_range
 from flux_engine.seam.contract import CompiledExpose
 from flux_engine.seam.coverage import ExposeCoverage, require_full_coverage, strictness_asked_by
+from flux_engine.seam.declared import NotGenerated, require_all_generated
 from flux_engine.seam.emit import (
     EmitResult,
     EmitWriter,
@@ -120,6 +126,7 @@ from flux_engine.seam.resolve import (
     profile_reference,
     resolve_all_emits,
     strict_coverage_declared,
+    unused_statistics,
 )
 from flux_engine.seam.sinks import NullSink
 from flux_engine.stages._parallel import (
@@ -202,6 +209,10 @@ class EmitOutcome:
     #: It is reported and recorded in ``column-provenance.json``, and the plan
     #: holds a digest of that record (``columnProvenanceDigest``).
     coverage: Optional[ExposeCoverage] = None
+    #: What the expose declares and this version accepts without generating
+    #: (:mod:`flux_engine.seam.declared`). Reported by ``plan``; no
+    #: digest or record the plan binds carries it.
+    not_generated: Tuple[NotGenerated, ...] = ()
 
     @property
     def source(self) -> str:
@@ -294,6 +305,7 @@ def parameter_register_of(loaded: LoadedBundle, cast: Cast) -> Optional[Paramete
         entries=entries,
         profile_digest=profile_reference(simulation, where=cast.simulation_id),
         code=FLX_3105,
+        unused=unused_statistics(simulation, where=cast.simulation_id),
     )
     if register.uses_contract:
         check_contract_citations(
@@ -454,6 +466,17 @@ def plan_emit_rules(resolved: ResolvedEmit, *, strict: bool, where: str) -> Opti
         keys=resolved.keys,
         rows=resolved.declared_row_count,
         null_fractions=_declared_null_fractions(resolved),
+    )
+
+
+def emit_not_generated(resolved: ResolvedEmit, *, where: str) -> Tuple[NotGenerated, ...]:
+    """What *resolved*'s expose declares that this version accepts and does not generate."""
+    return declared_not_generated(
+        contract_document=resolved.contract_document,
+        expose_id=resolved.expose_id,
+        settings=resolved.invariant_settings,
+        flux_rules=resolved.flux_side_rules,
+        where=where,
     )
 
 
@@ -776,6 +799,10 @@ def execute(
             require_full_coverage(
                 (planned.coverage for planned in planned_emits), asked_by=asked_by
             )
+            require_all_generated(
+                tuple(row for planned in planned_emits for row in planned.not_generated),
+                asked_by=asked_by,
+            )
         emits = tuple(
             _generate_emit(resolved, digests, root, scenario, planned, jobs, compiled)
             for resolved, digests, planned, compiled in zip(
@@ -832,6 +859,7 @@ class _PlannedEmit:
     plan: Optional[GeneratorPlan]
     mapping: Optional[ColumnMapping]
     coverage: ExposeCoverage
+    not_generated: Tuple[NotGenerated, ...] = ()
 
 
 def _plan_emit(
@@ -854,6 +882,7 @@ def _plan_emit(
     """
     expose = resolved.compile()
     rules = plan_emit_rules(resolved, strict=strict, where=cast.simulation_id)
+    not_generated = emit_not_generated(resolved, where=cast.simulation_id)
     if resolved.fidelity is not None:
         count = (
             resolved.declared_row_count
@@ -871,7 +900,13 @@ def _plan_emit(
             rules=rules,
             generator_version=generator_version,
         )
-        return _PlannedEmit(expose=expose, plan=plan, mapping=None, coverage=coverage_of_plan(plan))
+        return _PlannedEmit(
+            expose=expose,
+            plan=plan,
+            mapping=None,
+            coverage=coverage_of_plan(plan),
+            not_generated=not_generated,
+        )
     mapping = resolve_column_mapping(
         expose,
         declared_sources=scenario.declared_sources,
@@ -880,7 +915,11 @@ def _plan_emit(
         overrides=resolved.column_mapping,
     )
     return _PlannedEmit(
-        expose=expose, plan=None, mapping=mapping, coverage=mapping.coverage(expose)
+        expose=expose,
+        plan=None,
+        mapping=mapping,
+        coverage=mapping.coverage(expose),
+        not_generated=not_generated,
     )
 
 
@@ -979,6 +1018,7 @@ def _generate_emit(
         processes=processes,
         compiled_fidelity=compiled_fidelity,
         coverage=planned.coverage,
+        not_generated=planned.not_generated,
     )
 
 

@@ -737,7 +737,7 @@ def test_parsing_is_a_pure_function_of_the_declaration(order) -> None:
 def test_the_closed_sets_have_exactly_the_members_the_spec_names() -> None:
     assert {member.value for member in NullPolicy} == {"exclude", "fail"}
     assert {member.value for member in ColumnKind} == {"range", "support"}
-    assert {member.value for member in ValueDomain} == {"number", "timestamp"}
+    assert {member.value for member in ValueDomain} == {"number", "timestamp", "date"}
     assert {member.value for member in FailureAction} == {"withholdBundle"}
     assert {member.value for member in ToleranceKind} == {
         "absolute",

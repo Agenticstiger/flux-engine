@@ -11,6 +11,11 @@ own row. This record amends
 [ADR 0008](./0008-flux-expr-2-derived-columns-and-rules.md)'s list of extensions: the four it names stay the only
 ones of flux-expr/2, and flux-expr/3 is flux-expr/2 with three more.
 
+**Amended 2026-11-19:** the date-arithmetic section named Db2 among the systems whose month move clamps. Db2's
+`ADD_MONTHS` keeps a month end on a month end, as Oracle's and Snowflake's do; only Db2's labeled duration,
+`+ n MONTHS`, clamps (IBM's Db2 SQL reference, "ADD_MONTHS" and "Date arithmetic"). The citation is corrected. The
+semantics did not change.
+
 ## Context
 
 [ADR 0011](./0011-rows-follow-their-key-entity-and-parent.md) plans three steps so that synthetic rows follow their
@@ -54,9 +59,10 @@ they stay out.
 
 - **`ADD_DAYS(d, n)`, `ADD_MONTHS(d, n)`, `ADD_YEARS(d, n)`.** Db2's names. Spark, Snowflake and Oracle have
   `ADD_MONTHS`. Three functions, each a date and an integer, each giving a date. A month or year move clamps the day
-  to the last day of the target month, as PostgreSQL, DuckDB and Db2 do. Oracle's `ADD_MONTHS` does not clamp: it
-  returns the last day of the target month when the start is the last day of its own, so `ADD_MONTHS(DATE '2001-02-28', 1)`
-  is the 31st of March there. These are exactly the inverse of FLUID SQL/1's whole-unit differences, because
+  to the last day of the target month, as PostgreSQL's `+ interval`, DuckDB's month arithmetic and Db2's labeled
+  duration `+ n MONTHS` do. The `ADD_MONTHS` functions of Db2, Oracle and Snowflake do more than clamp: they return the
+  last day of the target month when the start is the last day of its own, so `ADD_MONTHS(DATE '2001-02-28', 1)` is the
+  31st of March there. FLUX takes Db2's names and the labeled duration's rule. These are exactly the inverse of FLUID SQL/1's whole-unit differences, because
   `flux_engine/expr2/functions.py`'s `add_months` already defines `MONTHS_BETWEEN`: the largest `k` such that the
   start moved forward `k` months is not after the end.
 - SQL interval arithmetic, `d + INTERVAL 1 MONTH`. It needs an interval type, which FLUID SQL/1 does not have. The

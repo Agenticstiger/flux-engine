@@ -132,6 +132,7 @@ from flux_engine.safeio import (
     write_text_atomic,
 )
 from flux_engine.seam.coverage import ExposeCoverage
+from flux_engine.seam.declared import NotGenerated
 from flux_engine.stages.apply import (
     load_recorded_plan,
     plan_kernel,
@@ -365,7 +366,7 @@ def _decide_emit(
 
     from flux_engine.concordance.compiler import compile_fidelity
     from flux_engine.concordance.predicate import expose_from_contract
-    from flux_engine.stages._scorecard import min_credibility
+    from flux_engine.stages._scorecard import contract_shape, min_credibility
 
     if slice_uri is None and pinned is None:
         return EmitOutcome(
@@ -412,7 +413,15 @@ def _decide_emit(
             ),
         )
     compiled = compile_fidelity(contract=contract_document, emit=emit_entry, expose=expose)
-    scored = ProfileCheck(expose_id=expose_id, compiled=compiled) if pinned is not None else None
+    scored = (
+        ProfileCheck(
+            expose_id=expose_id,
+            compiled=compiled,
+            contract=contract_shape(contract_document, expose_id),
+        )
+        if pinned is not None
+        else None
+    )
 
     binding = _binding_checks(
         bundle_directory, compiled, contract_document, attestation, planned_emit
@@ -1014,7 +1023,7 @@ def _scorecard_summary_text(scorecard: "Scorecard") -> str:
         f"\n\nScorecard (`run/{SCORECARD_FILE}`), against the pinned profile "
         f"`{scorecard.profile_digest}`:",
         "",
-        f"- overall: {display(scorecard.overall.score)}",
+        f"- overall: {display(scorecard.overall.score)} ({scorecard.coverage.text()})",
     ]
     lines.extend(f"- {line}" for line in scorecard.detail_lines())
     for result in scorecard.credibility:
@@ -1038,7 +1047,10 @@ def _scorecard_not_proven(scorecard: "Scorecard") -> str:
         text += " These dimensions were not measured at all: " + ", ".join(unmeasured) + "."
     text += (
         " A score says how close the run is to the profile, not that the profile "
-        "describes its source accurately."
+        "describes its source accurately. Coverage counts how much of the contract the "
+        "score speaks for: a column counts when a scored property covers it, and a declared "
+        "relationship counts when the profile constrains it. No property scores children per "
+        "parent yet, so a relationship is counted, not scored."
     )
     if scorecard.shape is not None:
         text += (
@@ -1105,6 +1117,18 @@ def _signature_text(
     )
 
 
+def _declared_not_generated(directory: Path, simulation_id: str) -> Tuple[NotGenerated, ...]:
+    """What the bundle declares and the engine does not generate, worked out from the bundle.
+
+    A pure function of the bundle's documents, so nothing the plan binds records it.
+    """
+    from flux_engine.seam.resolve import load_bundle, resolve_all_emits
+    from flux_engine.stages.pipeline import emit_not_generated
+
+    resolved = resolve_all_emits(load_bundle(directory), simulation_id=simulation_id)
+    return tuple(row for emit in resolved for row in emit_not_generated(emit, where=simulation_id))
+
+
 def _write_evidence_report(
     layout: RunLayout,
     *,
@@ -1118,6 +1142,7 @@ def _write_evidence_report(
     coverage: Optional[Sequence[ExposeCoverage]] = None,
     scored: Optional["_ScoredRun"] = None,
     register: Optional[RegisterSummary] = None,
+    not_generated: Sequence[NotGenerated] = (),
 ) -> None:
     """Write ``EVIDENCE.md`` into the run directory, ahead of packing.
 
@@ -1161,6 +1186,7 @@ def _write_evidence_report(
             + (_scorecard_summary_text(scored.scorecard) if scored else "")
         ),
         coverage=coverage,
+        not_generated=not_generated,
         scorecard_note=_scorecard_not_proven(scored.scorecard) if scored else None,
         register_note=render_register_note(register) if register is not None else None,
     )
@@ -1445,6 +1471,7 @@ def ship(
             ephemeral_signing=signing_key is None,
             self_attested=trust_key is None,
             coverage=coverage,
+            not_generated=_declared_not_generated(directory, simulation_id),
             scored=_scored_run(layout, scorecard, outcomes, slices),
             register=summary,
         )

@@ -211,6 +211,89 @@ def test_bins_must_partition_the_declared_range() -> None:
         _refuses(raw, "FLX-5032")
 
 
+_DATED = DeclaredExpose(
+    expose_id="recovery_moment",
+    column_names=("due_on", "aborted_at"),
+    column_types={"due_on": "date", "aborted_at": "TIMESTAMP"},
+)
+
+
+def _dated_block(low: Any, high: Any, edges: List[Any]) -> Dict[str, Any]:
+    return {
+        "encoding": {"fractionalBits": 4, "rounding": "floor"},
+        "records": {"min": 2, "max": 8},
+        "columns": {"due_on": {"range": {"min": low, "max": high}, "null": "exclude"}},
+        "properties": [
+            {
+                "property": "marginalHistogram",
+                "column": "due_on",
+                "bins": edges,
+                "tolerance": {"type": "distance", "measure": "totalVariation", "max": "0.2"},
+            }
+        ],
+        "budget": {"maxChecksPerState": 3, "maxStateAge": "P30D"},
+        "failureAction": "withholdBundle",
+    }
+
+
+def test_a_date_column_reads_its_range_and_bins_as_dates_or_as_days() -> None:
+    spelled = parse_fidelity_block(
+        _dated_block("2026-01-01", "2026-12-31", ["2026-01-01", "2026-07-01", "2026-12-31"]),
+        expose=_DATED,
+    )
+    counted = parse_fidelity_block(
+        _dated_block(20454, "20818", [20454, 20635, 20818]), expose=_DATED
+    )
+    for block in (spelled, counted):
+        column = block.columns["due_on"]
+        assert column.domain is fidelity.ValueDomain.DATE
+        assert (column.lower, column.upper) == (Fraction(20454), Fraction(20818))
+    assert spelled.properties[0].bins == counted.properties[0].bins
+
+
+def test_a_date_bound_that_is_no_date_is_refused_and_a_timestamp_is_not_a_date() -> None:
+    for low in ("2026-02-30", "soon"):
+        with pytest.raises(FluxError) as caught:
+            parse_fidelity_block(
+                _dated_block(low, "2026-12-31", ["2026-01-01", "2026-12-31"]), expose=_DATED
+            )
+        assert caught.value.code.code == "FLX-5030"
+    # An instant and a day are two domains: a range cannot mix them.
+    with pytest.raises(FluxError) as caught:
+        parse_fidelity_block(
+            _dated_block("2026-01-01T00:00:00Z", "2026-12-31", ["2026-01-01", "2026-12-31"]),
+            expose=_DATED,
+        )
+    assert caught.value.code.code == "FLX-5030"
+    with pytest.raises(FluxError) as caught:
+        parse_fidelity_block(
+            _dated_block("2026-01-01", "2026-12-31", ["2026-01-01", "2026-06-30", "2026-12-30"]),
+            expose=_DATED,
+        )
+    assert caught.value.code.code == "FLX-5032"
+
+
+def test_a_date_column_bounded_by_instants_reads_as_it_did_before_days() -> None:
+    """A profiler's block, declared with RFC 3339 instants: the timestamp domain, in milliseconds."""
+    block = parse_fidelity_block(
+        _dated_block(
+            "0001-01-01T00:00:00Z",
+            "9999-12-31T23:59:59.999Z",
+            ["0001-01-01T00:00:00Z", "2026-01-01T00:00:00Z", "9999-12-31T23:59:59.999Z"],
+        ),
+        expose=_DATED,
+    )
+    column = block.columns["due_on"]
+    assert column.domain is fidelity.ValueDomain.TIMESTAMP
+    assert column.lower == Fraction(-62135596800000)
+
+
+def test_a_column_that_is_not_declared_a_date_still_refuses_a_date() -> None:
+    raw = _block()
+    raw["columns"]["amount"]["range"] = {"min": "2026-01-01", "max": "2026-12-31"}
+    _refuses(raw, "FLX-5022")
+
+
 def test_a_correlation_is_declared_with_two_columns_and_a_variance_floor() -> None:
     raw = _block()
     raw["properties"][4]["columns"] = ["amount"]

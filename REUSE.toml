@@ -31,6 +31,7 @@ path = [
   ".github/**/*.md",
   "docs/**",
   "e2e/aws/README.md",
+  "e2e/roundtrip/README.md",
   "e2e/aws/queries/athena-tpcds/README.md",
 ]
 precedence = "aggregate"
@@ -63,6 +64,8 @@ SPDX-License-Identifier = "CC-BY-SA-4.0"
 path = [
   "uv.lock",
   "e2e/aws/uv.lock",
+  "e2e/roundtrip/uv.lock",
+  "e2e/roundtrip/history.jsonl",
   "**/*.json",
   "flux_engine/starter/**",
   "tests/cli/help-snapshots/**",

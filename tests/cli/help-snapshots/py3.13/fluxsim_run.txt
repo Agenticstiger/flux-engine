@@ -78,12 +78,14 @@ options:
   --strict-coverage     refuse the run when a column falls back to a type
                         default (an optional column nothing maps onto, a DATE
                         or TIMESTAMP column with no declaration of its own),
-                        with a table of every such column, before any row is
-                        drawn; a Simulation can ask for the same with
-                        strictCoverage: true in its extensions; without either
-                        the plan names those columns and goes on, and with
-                        this flag the rows and every digest are the same
-                        either way
+                        with a table of every such column (FLX-3304), or when
+                        the contract declares what the run does not generate,
+                        such as sharedColumns or a check without generates
+                        (FLX-3305), before any row is drawn; a Simulation can
+                        ask for the same with strictCoverage: true in its
+                        extensions; without either the plan names those
+                        columns and goes on, and with this flag the rows and
+                        every digest are the same either way
   --profile PATH        the profile document the Simulation pins under
                         extensions['com.agentics.flux/1'].profile
                         (docs/spec/PROFILE-SPEC.md); refused when its digest

@@ -41,10 +41,10 @@ EXTENSION_VECTORS = REPO_ROOT / "tests" / "vectors" / "expr2-vectors.json"
 #: Where the vendored copy comes from, and its bytes' digest. Re-vendor by
 #: copying the file from forge-cli unchanged and updating both.
 SHARED_SOURCE = (
-    "Agenticstiger/forge-cli fluid_build/fluid_sql/fluid-sql-vectors.json "
-    "on main at 003e4b085e23d5faa12c4544966d1544d2939255 (Agenticstiger/forge-cli#964)"
+    "Agenticstiger/forge-cli fluid_build/fluid_sql/fluid-sql-vectors.json, "
+    "vectorsVersion 1.1.0, at commit 1d7f6dc269795a8d7bbabdfe6f3f6e6c2ac43867"
 )
-SHARED_SHA256 = "72c58fb7935cb34d087eca94c228188ec09bda65c969a31141fcc6838db4d041"
+SHARED_SHA256 = "ba7a6211f60d2c7a8a596b7f0e1bc8e8b6d9e020e3beb4b4e538cf9a7cb91d56"
 
 #: The one model of a file in fluid-sql-vectors.json's shape, whose exposes
 #: are the file's ``models``.

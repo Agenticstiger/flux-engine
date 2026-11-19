@@ -1,4 +1,4 @@
-# Scorecard: normative specification (format 1-1-0)
+# Scorecard: normative specification (format 1-2-0)
 
 A scorecard says how close a run is to the profile its Simulation pins
 (PROFILE-SPEC.md), as exact scores per property, per table, per fidelity
@@ -10,13 +10,16 @@ evidence pack as `run/scorecard.json`.
 
 Normative files beside this page:
 
-- [`scorecard-1.schema.json`](scorecard-1.schema.json): the JSON Schema,
+- [`scorecard-1-2.schema.json`](scorecard-1-2.schema.json): the JSON Schema,
   whose `$id` is
-  `https://agenticstiger.github.io/flux/engine/spec/scorecard/1-1-0/FluxScorecard.json`.
+  `https://agenticstiger.github.io/flux/engine/spec/scorecard/1-2-0/FluxScorecard.json`.
   The schema checks the shape; this page says how every number is formed.
+  [`scorecard-1.schema.json`](scorecard-1.schema.json) is kept beside it for
+  the documents of formats `1-0-0` and `1-1-0`, which name its earlier `$id`.
 - [`scorecard-example.json`](scorecard-example.json): a scorecard with a
   scored, a censored and a refused property, a table with no fidelity block,
-  a missed threshold and a `minCredibility` read against a measured score.
+  a missed threshold, a coverage floor and a `minCredibility` read against a
+  measured score.
   The tests validate it against the schema.
 
 The scorecard reads the outcomes of the profile path (PROFILE-SPEC.md §7)
@@ -37,10 +40,11 @@ so one run and one profile give the same bytes everywhere.
 | `profile` | `digest`, the pinned profile's `jcs-document` digest. |
 | `met` | Whether every declared threshold is met and every measured `minCredibility` is reached (§4). |
 | `overall` | The run's score (§3). |
+| `coverage` | How much of the contract the score speaks for, over every table that records a contract (§3). |
 | `dimensions` | The eight dimensions, always all eight, in the order of §3. |
-| `tables` | One entry per emit of the run, sorted by `exposeId`. |
-| `thresholds` | The declared thresholds and what each read (§4). |
-| `shapeFlags` | The shape flags (§6), with the status `checked`. A scorecard formed without them, and every document of format `1-0-0`, holds `{"status": "not checked"}`. |
+| `tables` | One entry per emit of the run, sorted by `exposeId`, each with its own `coverage` (§3), `null` when the run records no contract for it. |
+| `thresholds` | The declared thresholds and coverage floors, and what each read (§4). |
+| `shapeFlags` | The shape flags (§6), with the status `checked`. A scorecard formed without them holds `{"status": "not checked"}`. |
 | `intervals` | `{"status": "not computed"}`: the sample-based estimates are not built in this format. |
 
 Numbers:
@@ -145,6 +149,46 @@ property's column, and `params` holds the dimension, the outcome, the declared
 tolerance, the score when there is one, the `groupBy` and a pair's two
 columns. A censored property ran no comparison and has no assertion.
 
+**Coverage.** A score says how close the run is to the profile on the
+properties that were scored. It does not say how much of the contract those
+properties are about, so the scorecard states that beside the score, per table
+and for the run:
+
+- `columns` counts the columns of the emit's contract schema that carry at
+  least one scored property: a property that has a score and names the column
+  (a pair names two). The column a property is grouped by is not named by it.
+  A column whose every property is censored, refused or absent is not
+  covered. `covered` is that count and `of` is the number of columns the
+  contract declares.
+- `relationships` counts the relationships the contract declares, in the
+  child expose's `semantics.relationships` (FLUID 0.7.7), that the profile
+  constrains. The profile constrains a relationship when its top-level
+  `relationships` list holds an entry for that parent and child, with the
+  same key columns (paired by position), and at least one of the entry's
+  statistics has a published group. `covered` is that count and `of` is the
+  number of declared relationships. No property scores children per parent
+  yet, so a relationship is counted as constrained by the profile and is never
+  scored: it contributes to coverage and to no score.
+
+Each of the two is `{"covered", "of", "share"}`, where `share` is the exact
+`covered / of`, or `null` when `of` is `0`: nothing was declared, so there is
+no share to state. A table's `coverage` is `null` when the run records no
+contract for the emit, which is the case for an emit with no fidelity block.
+The run's `coverage` sums `columns` and `relationships` over the tables that
+have one, and `tables` says how many tables are `counted` of the `total`, so
+a reader sees how many it leaves out. Coverage is not a dimension and enters
+no mean.
+
+The text output prints it with the overall score, as in
+
+```text
+scorecard: overall 0.93 against profile sha256:... (covers 12 of 20 columns, 0 of 3 relationships)
+```
+
+and a table's line ends with the table's own counts. When tables are left
+out the parenthesis says so, and when none records a contract it says that
+coverage is not known.
+
 ## 4. Thresholds and `minCredibility`
 
 A Simulation that pins a profile can declare floors on its scores under the
@@ -162,14 +206,24 @@ extensions:
           marginals: { mustBeGreaterOrEqualTo: "0.95" }
         tables:
           payment_recovery_moment: { mustBeGreaterThan: "0.8" }
+      coverage:
+        columns: "0.8"
+        relationships: "0.5"
     emits:
       payment_recovery_moment:
         rows: 64
 ```
 
-- `scorecard` holds exactly `thresholds`, and `thresholds` holds `overall`,
-  `dimensions` (keyed by dimension) or `tables` (keyed by `exposeId`), at
-  least one threshold in all.
+- `scorecard` holds `thresholds` and `coverage` and nothing else, at least
+  one of them. `thresholds` holds `overall`, `dimensions` (keyed by
+  dimension) or `tables` (keyed by `exposeId`), at least one threshold in
+  all.
+- `coverage` holds `columns`, `relationships` or both, each an operand (below)
+  that floors the `share` of §3 with `mustBeGreaterOrEqualTo`: the run's
+  `coverage` of that kind, summed over the tables that record a contract. It
+  is the floor of a share of the contract, not of a score, and it is met or
+  missed as a score is. A share that is `null` meets no floor, so a floor on
+  `relationships` over a contract that declares none is not met: remove it.
 - A threshold holds exactly one operator, one of the Open Data Contract
   Standard's quality operators: `mustBeGreaterOrEqualTo` or
   `mustBeGreaterThan`. A threshold is a floor, and ODCS's other six operators
@@ -181,7 +235,8 @@ extensions:
   A float in a document built some other way, and a bool, are refused.
 - Refused too, because each could only withhold: a block in a Simulation that
   pins no profile; `mustBeGreaterThan` `1`; an `overall` threshold when no emit
-  declares a fidelity property this engine scores; a dimension no property
+  declares a fidelity property this engine scores, and the same for
+  `coverage`; a dimension no property
   kind of this engine is scored in (§3); a dimension no declared fidelity
   property is scored in; a table the Simulation does not emit; a table that
   declares no fidelity block; and two spellings of one name (keys equal under
@@ -195,13 +250,16 @@ behaves exactly as before.
 holds `profileDigest`, the pinned digest, and, when thresholds are declared,
 `scorecard`: `{"thresholds": [{"target", "operator", "value"}]}`, overall
 first, then the dimensions in the order of §3, then the tables by
-`exposeId`. `verify` and `ship` read the pin and the thresholds only through
+`exposeId`, then the coverage floors, `coverage.columns` before
+`coverage.relationships`, each with the operator `mustBeGreaterOrEqualTo`. `verify` and `ship` read the pin and the thresholds only through
 the plan, which its own digest binds, never from a bundle directory nothing
 binds to the run. A plan whose Simulation pins nothing holds neither key, so
 its bytes and its `planDigest` are the ones it had.
 
 **A threshold is met** when the score it names exists and clears the floor,
-compared exactly. A score that is `null` meets no threshold.
+compared exactly. A score that is `null` meets no threshold. A coverage floor is read in the
+same list as `thresholds`, with the target `coverage.columns` or
+`coverage.relationships` and the `share` as its `score`.
 
 **`minCredibility`.** Wherever a property measures something, the computed
 score replaces the declared credibility. An emit that declares
@@ -252,6 +310,9 @@ both references find it within. Then the scorecard is formed and gated:
 
 - a missed table threshold, or a measured score below the emit's
   `minCredibility`, withholds that emit;
+- a missed coverage floor withholds every emit whose own coverage of that
+  kind is below the floor, and when every counted table meets it alone, every
+  counted table; failing that, as a missed overall threshold does;
 - a missed dimension or overall threshold withholds every emit whose scored
   properties feed the score; when none was scored, every emit with a property
   under it; and failing that every emit that declares a fidelity block, so a
@@ -281,7 +342,9 @@ withholds anything.
 in it every column the profile describes, whether or not a fidelity property
 is declared on it (shape flags). A value is read as the profile reads its
 column's domain: an exact decimal, integer milliseconds since the epoch, or
-an NFC string. A value that cannot be read so refuses its column with
+an NFC string. A `YYYY-MM-DD` value of a timestamp column is the millisecond its day starts
+at, in UTC, which is how a profile holds a date column (PROFILE-SPEC §7). A value that cannot be read so
+refuses its column with
 `FLX-5005` (a timestamp with `FLX-5022`), naming the row and the value's
 class, and no other column. An emit whose rows cannot be read is refused as
 a whole, as §5 refuses it, and a column the rows do not carry is `absent`.
@@ -378,6 +441,12 @@ column.
   not measured was not checked at all.
 - A censored property was not scored: what the profile withheld is unknown,
   not zero.
+- A score speaks only for what was scored. Coverage says how much that is,
+  and does not say the uncovered columns match: a column with no scored
+  property was not compared. A relationship counted as constrained by the
+  profile was not scored, since nothing yet scores children per parent. A
+  table whose contract the run does not record is left out of the run's
+  coverage, and `tables` says so.
 - A score says how close the run is to the profile. It says nothing about
   whether the profile describes its source accurately, and nothing about
   privacy or fitness for any use.
@@ -407,8 +476,11 @@ The format grows by minor versions, as the profile format does
 (PROFILE-SPEC.md §8): a minor version adds an optional key, a status value or
 a dimension's first property kind, and never changes what a key of format
 `1-0-0` means. Format `1-1-0` added the shape flags (§6):
-`shapeFlags` gained the status `checked` and the flags per column. The
-planned additions:
+`shapeFlags` gained the status `checked` and the flags per column. Format
+`1-2-0` adds the coverage (§3): `coverage` on the run and on every table, and
+the targets `coverage.columns` and `coverage.relationships` among the
+thresholds. The schema of formats `1-0-0` and `1-1-0` is kept in
+`scorecard-1.schema.json` as published. The planned additions:
 
 - **Intervals (sample-based verification):** a sampled `verify` already reports
   each estimate with its sample size and interval in its own leg

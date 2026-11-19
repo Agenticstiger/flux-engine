@@ -26,7 +26,9 @@ used: no binary float, no :mod:`decimal` context, no clock.
 * :func:`add_days`, :func:`try_add_months` and :func:`add_years` are flux-expr/3's
   date arithmetic (EXPR-SPEC-3 §4), Db2's ``ADD_DAYS``, ``ADD_MONTHS`` and
   ``ADD_YEARS``. A month or year move clamps the day to the target month's last
-  day, as PostgreSQL, DuckDB and Db2 do (Oracle's ``ADD_MONTHS`` does not), so
+  day, as PostgreSQL's ``+ interval``, DuckDB's month arithmetic and Db2's labeled
+  duration ``+ n MONTHS`` do (the ``ADD_MONTHS`` of Db2, Oracle and Snowflake keeps
+  a month end on a month end, which these do not), so
   ``months_between(a, try_add_months(a, n))`` is ``n``: they are the inverse of
   the whole-unit differences. They are total: a result outside 0001-01-01 to
   9999-12-31 is ``None``, never an error.

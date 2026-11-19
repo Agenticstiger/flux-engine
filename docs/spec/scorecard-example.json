@@ -1,6 +1,22 @@
 {
   "_producer": "https://github.com/Agenticstiger/flux-engine",
-  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-1-0/FluxScorecard.json",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-2-0/FluxScorecard.json",
+  "coverage": {
+    "columns": {
+      "covered": 3,
+      "of": 4,
+      "share": "0.75"
+    },
+    "relationships": {
+      "covered": 0,
+      "of": 1,
+      "share": "0"
+    },
+    "tables": {
+      "counted": 1,
+      "total": 2
+    }
+  },
   "dimensions": [
     {
       "counts": {
@@ -188,6 +204,18 @@
         "properties": 6,
         "refused": 1,
         "scored": 4
+      },
+      "coverage": {
+        "columns": {
+          "covered": 3,
+          "of": 4,
+          "share": "0.75"
+        },
+        "relationships": {
+          "covered": 0,
+          "of": 1,
+          "share": "0"
+        }
       },
       "credibility": {
         "basis": "measured",
@@ -448,6 +476,7 @@
         "refused": 0,
         "scored": 0
       },
+      "coverage": null,
       "dataQualityAssertions": {
         "_producer": "https://github.com/Agenticstiger/flux-engine",
         "_schemaURL": "https://openlineage.io/spec/facets/1-1-0/DataQualityAssertionsDatasetFacet.json#/$defs/DataQualityAssertionsDatasetFacet",
@@ -481,6 +510,13 @@
       "operator": "mustBeGreaterThan",
       "score": "0.96875",
       "target": "tables.recovery_moment",
+      "value": "0.8"
+    },
+    {
+      "met": false,
+      "operator": "mustBeGreaterOrEqualTo",
+      "score": "0.75",
+      "target": "coverage.columns",
       "value": "0.8"
     }
   ]
