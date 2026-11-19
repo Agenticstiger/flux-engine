@@ -3075,12 +3075,36 @@ def _exact_text(value: Fraction) -> str:
     return f"-{text}" if units < 0 else text
 
 
+#: What the draw does when the contract's range lies beyond what the column's type holds.
+_RANGE_BEYOND_TYPE = (
+    "The contract's range for the column lies beyond what its type holds, so no value can "
+    "meet it: the draw keeps to {what}."
+)
+#: What the profile's values leave of a range that holds none of them.
+_RANGE_OUTSIDE = (
+    "The profile's values lie outside the range the contract declares for the column, so "
+    "none of them shapes the draw: the values are drawn evenly over the contract's range."
+)
+_OUTSIDE_REASON = (
+    "the profile's values lie outside the range the contract declares, so none of them "
+    "shapes the draw"
+)
+#: What the draw does when the profile puts no row inside the contract's range.
+_RANGE_NO_ROW = (
+    "The profile puts no row inside the range the contract declares for the column: the "
+    "values are drawn evenly within the part of the profile's span that range leaves."
+)
+#: The positions of a declaration that make up a number column's draw.
+_DRAW_POSITIONS = (("bins",), ("binWeights",), ("levels",), ("range",))
+
+
 def _within_range(ctx: ColumnContext, plan: ColumnPlan) -> None:
     """Keep a drawn number column inside the range its contract declares (ADR 0014 section 3).
 
     A column the profile published nothing for is drawn evenly over the declared range
     instead of the placeholder. Any other draw is clipped to the range: its bin edges and its
     levels. A bin left with no grid value is dropped, and the loss of weight is an assumption.
+    A draw none of whose values lies inside the range is replaced by an even draw over it.
     The range the check reads and a property's bins keep the profile's edges: the check
     compares the profile's statistic over exactly those (``FLX-5037``), and a value drawn
     inside the contract's range lies inside them.
@@ -3096,11 +3120,104 @@ def _within_range(ctx: ColumnContext, plan: ColumnPlan) -> None:
         _declared_range_draw(ctx, plan, low, high, basis)
         return
     step = Fraction(_grid(ctx))
-    lost = _clip_bins(plan, low, high, basis, step) + _clip_levels(plan, low, high)
+    before = _draw_of(plan)
+    lost_bins = _clip_bins(plan, low, high, basis, step)
+    lost_levels = _clip_levels(plan, low, high) if lost_bins is not None else None
+    if lost_bins is None or lost_levels is None:
+        _outside_range(ctx, plan, low, high, basis)
+        return
+    if _draw_of(plan) != before:
+        _drop_unscorable_histogram(ctx, plan, step)
+    lost = lost_bins + lost_levels
     if lost:
         reason = _RANGE_LOST.format(count=lost)
         plan.assumptions.append(reason)
         plan.choices.append(reason)
+
+
+def _draw_of(plan: ColumnPlan) -> Tuple[Any, ...]:
+    """The bins, weights and levels a column's declaration draws from."""
+    return tuple(repr(plan.declaration.get(key)) for key in ("bins", "binWeights", "levels"))
+
+
+#: Why a column's histogram is no longer a property.
+_NO_PUBLISHED_CELL = (
+    "the range the contract declares leaves no value in a cell the profile published, so the "
+    "check has no published cell to score the draw by"
+)
+
+
+def _drop_unscorable_histogram(ctx: ColumnContext, plan: ColumnPlan, step: Fraction) -> None:
+    """Drop the histogram property when the clipped draw lands in no cell the profile published.
+
+    The check scores a histogram over the cells the profile published and refuses a run that
+    puts no record in them (``FLX-5005``), so a draw clipped to cells the profile withheld
+    could not be scored. The statistic is then unused, with the reason.
+    """
+    found = _ungrouped(ctx.entry, _HISTOGRAM)
+    if found is None:
+        return
+    index, statistic, group = found
+    edges = [Fraction(Decimal(str(edge))) for edge in statistic.get("bins", ())]
+    cells = _cells(group, "binCounts")
+    if len(edges) != len(cells) + 1:
+        return
+    runs: List[Tuple[Fraction, Fraction]] = []
+    bins, weights = plan.declaration.get("bins"), plan.declaration.get("binWeights")
+    if isinstance(bins, list) and isinstance(weights, list) and len(weights) == len(bins) - 1:
+        points = [Fraction(Decimal(str(edge))) for edge in bins]
+        for position, weight in enumerate(weights):
+            if Fraction(Decimal(str(weight))) > 0:
+                first = math.ceil(points[position] / step) * step
+                last = points[position + 1]
+                final = (
+                    math.floor(last / step) * step
+                    if position == len(weights) - 1
+                    else math.ceil(last / step) * step - step
+                )
+                runs.append((first, final))
+    levels = plan.declaration.get("levels")
+    if isinstance(levels, dict):
+        runs += [(Fraction(Decimal(str(text))),) * 2 for text in levels]
+    for position, cell in enumerate(cells):
+        if cell.count is None:
+            continue
+        top, closed = edges[position + 1], position == len(cells) - 1
+        if any(
+            (first <= top if closed else first < top) and final >= edges[position]
+            for first, final in runs
+        ):
+            return
+    kept = [prop for prop in plan.properties if prop.document["property"] != "marginalHistogram"]
+    if len(kept) == len(plan.properties):
+        return
+    plan.properties = kept
+    plan.passed.append((ctx.profile_tokens + ("statistics", str(index)), _NO_PUBLISHED_CELL))
+
+
+def _declared_span(
+    ctx: ColumnContext, low: Optional[Fraction], high: Optional[Fraction], basis: Basis
+) -> Optional[Tuple[Fraction, Fraction, Basis]]:
+    """The values a draw over the contract's range spans: its first, its last, and what they rest on.
+
+    The range is held to what the column's type carries. ``None`` when the type holds no
+    value of it, or the range gives no bound.
+    """
+    limit = _limit(ctx)
+    if limit is not None:
+        if (low is not None and low > limit) or (high is not None and high < -limit):
+            return None
+        low = max(low, -limit) if low is not None else None
+        high = min(high, limit) if high is not None else None
+    if low is not None and high is not None:
+        return (low, high, basis) if low <= high else None
+    if low is not None:
+        first, last = _span_bins(ctx, low, _PLACEHOLDER_VALUES)
+    elif high is not None:
+        first, last = _span_bins(ctx, high, _PLACEHOLDER_VALUES, upward=False)
+    else:
+        return None
+    return first, last, assumed(_RANGE_ONE_SIDED)
 
 
 def _declared_range_draw(
@@ -3109,20 +3226,35 @@ def _declared_range_draw(
     low: Optional[Fraction],
     high: Optional[Fraction],
     basis: Basis,
-) -> None:
-    """Draw evenly over the declared range, in place of a placeholder."""
+) -> bool:
+    """Draw evenly over the declared range, in place of a placeholder; whether it did.
+
+    A range the column's type holds none of leaves the placeholder, and says so.
+    """
     if low is None and high is None:
-        return
-    used = basis
-    if low is not None and high is not None:
-        first, last = low, high
+        return False
+    span = _declared_span(ctx, low, high, basis)
+    if span is None:
+        reason = _RANGE_BEYOND_TYPE.format(what="the placeholder")
+        plan.assumptions.append(reason)
+        plan.choices.append(reason)
+        return False
+    first, last, used = span
+    _draw_evenly(ctx, plan, first, last, used)
+    if used is not basis:
+        plan.assumptions.append(_RANGE_ONE_SIDED)
+        plan.choices.append(_RANGE_ONE_SIDED)
+        plan.how = "a placeholder over a hundred values from the contract's one bound"
     else:
-        used = assumed(_RANGE_ONE_SIDED)
-        if low is not None:
-            first, last = _span_bins(ctx, low, _PLACEHOLDER_VALUES)
-        else:
-            assert high is not None
-            first, last = _span_bins(ctx, high, _PLACEHOLDER_VALUES, upward=False)
+        plan.how = "evenly over the range the contract declares"
+    plan.placeholder = False
+    return True
+
+
+def _draw_evenly(
+    ctx: ColumnContext, plan: ColumnPlan, first: Fraction, last: Fraction, used: Basis
+) -> None:
+    """Replace the column's draw by one bin from *first* to *last*, drawn evenly."""
     plan.declaration.pop("levels", None)
     plan.declaration.pop("bins", None)
     plan.declaration.pop("binWeights", None)
@@ -3135,13 +3267,58 @@ def _declared_range_draw(
     ]
     plan.reads = [read for read in plan.reads if "placeholder spans" not in read[1]]
     _even_bins(ctx, plan, first, last, used)
+
+
+def _outside_range(
+    ctx: ColumnContext,
+    plan: ColumnPlan,
+    low: Optional[Fraction],
+    high: Optional[Fraction],
+    basis: Basis,
+) -> None:
+    """A draw that holds no value the contract's range allows: draw evenly over the range.
+
+    None of the profile's values lies inside the range, so no statistic of the column
+    shapes the draw: each the draw read becomes unused, with the reason, and the properties
+    that scored the profile's values go. A range the column's type holds none of leaves the
+    draw as it is, and says so.
+    """
+    span = _declared_span(ctx, low, high, basis)
+    if span is None:
+        reason = _RANGE_BEYOND_TYPE.format(what="what the profile gives")
+        plan.assumptions.append(reason)
+        plan.choices.append(reason)
+        return
+    first, last, used = span
+    cited: List[Tuple[str, ...]] = [tokens for tokens, _ in plan.reads]
+    for prop in plan.properties:
+        cited.extend(tokens for tokens, _ in prop.reads)
+        cited.extend(
+            label.basis.statistic[0] for label in prop.labels if label.basis.statistic is not None
+        )
+    cited.extend(
+        label.basis.statistic[0]
+        for label in plan.labels
+        if label.tokens[:1] in _DRAW_POSITIONS and label.basis.statistic is not None
+    )
+    held = [tokens for tokens, _ in plan.passed]
+    for tokens in cited:
+        if tokens not in held:
+            held.append(tokens)
+            plan.passed.append((tokens, _OUTSIDE_REASON))
+    plan.reads = []
+    plan.properties = []
+    plan.declaration.pop("range", None)
+    plan.published_range = plan.time_span = None
+    plan.labels = [label for label in plan.labels if label.tokens[:1] not in _DRAW_POSITIONS]
+    plan.assumptions, plan.choices, plan.weight_notes = [], [], []
+    _draw_evenly(ctx, plan, first, last, used)
+    plan.assumptions.append(_RANGE_OUTSIDE)
+    plan.choices.append(_RANGE_OUTSIDE)
     if used is not basis:
         plan.assumptions.append(_RANGE_ONE_SIDED)
         plan.choices.append(_RANGE_ONE_SIDED)
-        plan.how = "a placeholder over a hundred values from the contract's one bound"
-    else:
-        plan.how = "evenly over the range the contract declares"
-    plan.placeholder = False
+    plan.how = "evenly over the range the contract declares"
 
 
 def _clip_bins(
@@ -3150,8 +3327,13 @@ def _clip_bins(
     high: Optional[Fraction],
     basis: Basis,
     step: Fraction,
-) -> int:
-    """Clip the declared bins to the range; returns how many bins it dropped."""
+) -> Optional[int]:
+    """Clip the declared bins to the range; returns how many bins it dropped.
+
+    ``None`` when no bin holds a grid value inside the range, and the draw is left as
+    it is. A range that leaves no weight, or one grid value, is drawn evenly over what it
+    leaves, or as that one value.
+    """
     bins, weights = plan.declaration.get("bins"), plan.declaration.get("binWeights")
     if not isinstance(bins, list) or len(bins) < 2 or not isinstance(weights, list):
         return 0
@@ -3173,9 +3355,21 @@ def _clip_bins(
         if first <= final and kept_low > kept_high:
             continue
         cells.append((index, first, final, kept_low, kept_high))
-    if not cells or (len(cells) == count and all(c[1] == c[3] and c[2] == c[4] for c in cells)):
+    live = [cell for cell in cells if cell[1] <= cell[2]]
+    if not live:
+        return None
+    if len(cells) == count and all(c[1] == c[3] and c[2] == c[4] for c in cells):
         return 0
     dropped = count - len(cells)
+    drawn = [cell for cell in live if share[cell[0]] > 0]
+    if not drawn:
+        _draw_clipped(plan, live[0][3], live[-1][4], basis, step)
+        plan.assumptions.append(_RANGE_NO_ROW)
+        plan.choices.append(_RANGE_NO_ROW)
+        return 0
+    if len(drawn) == 1 and drawn[0][3] == drawn[0][4]:
+        _draw_clipped(plan, drawn[0][3], drawn[0][4], basis, step)
+        return dropped
     first_cell, last_cell = cells[0], cells[-1]
     old: Dict[int, Basis] = {
         int(label.tokens[1]): label.basis
@@ -3227,8 +3421,30 @@ def _clip_bins(
     return dropped
 
 
-def _clip_levels(plan: ColumnPlan, low: Optional[Fraction], high: Optional[Fraction]) -> int:
-    """Clip the declared levels to the range; returns how many it dropped."""
+def _draw_clipped(
+    plan: ColumnPlan, first: Fraction, last: Fraction, basis: Basis, step: Fraction
+) -> None:
+    """Replace the bins by one drawn evenly from *first* to *last*, or by the value they share."""
+    for key in ("bins", "binWeights", "levels"):
+        plan.declaration.pop(key, None)
+    plan.labels = [label for label in plan.labels if label.tokens[:1] not in _DRAW_POSITIONS[:3]]
+    if first >= last:
+        plan.declaration["levels"] = {_exact_text(first): "1"}
+        plan.labels.append(Label(("levels",), basis))
+        return
+    plan.declaration["bins"] = [_exact_text(first), _exact_text(last)]
+    plan.declaration["binWeights"] = ["1"]
+    plan.labels.append(Label(("bins",), basis))
+    plan.labels.append(Label(("binWeights",), assumed(_RANGE_NO_ROW)))
+
+
+def _clip_levels(
+    plan: ColumnPlan, low: Optional[Fraction], high: Optional[Fraction]
+) -> Optional[int]:
+    """Clip the declared levels to the range; returns how many it dropped.
+
+    ``None`` when no level lies inside the range, and the draw is left as it is.
+    """
     levels = plan.declaration.get("levels")
     if not isinstance(levels, dict) or not levels:
         return 0
@@ -3243,10 +3459,11 @@ def _clip_levels(plan: ColumnPlan, low: Optional[Fraction], high: Optional[Fract
     if not dropped:
         return 0
     if not inside:
-        nearest = low if low is not None else high
-        assert nearest is not None
-        inside = {_exact_text(nearest): Fraction(1)}
+        return None
     total = sum(inside.values(), Fraction(0))
+    if total <= 0:
+        inside = {text: Fraction(1) for text in inside}
+        total = Fraction(len(inside))
     texts = share_texts([weight / total for weight in inside.values()])
     plan.declaration["levels"] = dict(zip(inside, texts, strict=True))
     return dropped
