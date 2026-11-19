@@ -45,8 +45,8 @@ _SECTION_REASONS: Mapping[str, str] = {
     ),
     "periods": "a generator emit draws no mean month by month",
     "relationships": (
-        "no rule of fluxsim init reads children per parent: a foreign key is drawn over "
-        "the keys of its parent from its own column's statistics"
+        "children per parent are read from an ungrouped histogram or mean of a one-column "
+        "relationship the contract declares, and this is neither"
     ),
     "queries": "the count a query matches has no declaration a generator emit draws from",
 }

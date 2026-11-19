@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 import yaml
 
 from flux_engine.author.basis import Basis, Label, assumed, default, from_profile
+from flux_engine.author.children import spread_children
 from flux_engine.author.columns import (
     MOST_PLACES,
     ColumnContext,
@@ -712,10 +713,20 @@ def _cite(ledger: Ledger, basis: Optional[Basis]) -> None:
 
 
 def _ledger(
-    profile: Mapping[str, Any], exposes: Sequence[AuthoredExpose], contract_ids: Set[str]
+    profile: Mapping[str, Any],
+    exposes: Sequence[AuthoredExpose],
+    contract_ids: Set[str],
+    extra: Tuple[List[_Note], List[_Note]] = ([], []),
 ) -> Ledger:
-    """Every statistic of *profile*, marked by what the written *exposes* rest on and read."""
+    """Every statistic of *profile*, marked by what the written *exposes* rest on and read.
+
+    *extra* holds what the bundle made of statistics no column plan carries (a
+    relationship's children per parent): the used ones, and the unused ones with
+    their reasons.
+    """
     ledger = Ledger(profile)
+    for tokens, how in extra[0]:
+        ledger.use(tokens, how)
     tables = profile.get("tables")
     for name in tables if isinstance(tables, Mapping) else ():
         if str(name) not in contract_ids:
@@ -744,7 +755,97 @@ def _ledger(
         for prop in expose.properties:
             for label in prop.labels:
                 _cite(ledger, label.basis)
+    for tokens, why in extra[1]:
+        ledger.unused(tokens, why)
     return ledger
+
+
+#: A pointer into the profile, with how it was used or why it was not.
+_Note = Tuple[Tuple[str, ...], str]
+
+
+def _spread_relationships(
+    exposes: Sequence[AuthoredExpose],
+    keys: Optional[ContractKeys],
+    profile: Mapping[str, Any],
+    *,
+    minimum_cell: int,
+    fractional_bits: int,
+) -> Tuple[List[_Note], List[_Note]]:
+    """Lay each relationship's children per parent out as its foreign key's spread (ADR 0014).
+
+    A profile ``relationships`` entry is read when the contract declares the same
+    one-column relationship between two exposes the bundle writes
+    (:func:`flux_engine.author.children.spread_children`). Returns what was used
+    and, with the reasons, what was not.
+    """
+    used: List[_Note] = []
+    unused: List[_Note] = []
+    found = profile.get("relationships")
+    found_tables = profile.get("tables")
+    tables: Mapping[str, Any] = found_tables if isinstance(found_tables, Mapping) else {}
+    planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
+    for index, entry in enumerate(found if isinstance(found, list) else ()):
+        if not isinstance(entry, Mapping):
+            continue
+        tokens = ("relationships", str(index))
+        statistics = entry.get("statistics")
+        every = [
+            tokens + ("statistics", str(position))
+            for position, _ in enumerate(statistics if isinstance(statistics, list) else ())
+        ]
+        found_parent, found_child = entry.get("parent"), entry.get("child")
+        parent: Mapping[str, Any] = found_parent if isinstance(found_parent, Mapping) else {}
+        child: Mapping[str, Any] = found_child if isinstance(found_child, Mapping) else {}
+        parent_table, child_table = str(parent.get("table")), str(child.get("table"))
+        parent_columns = [nfc(str(name)) for name in parent.get("columns") or ()]
+        child_columns = [nfc(str(name)) for name in child.get("columns") or ()]
+        why: Optional[str] = None
+        if len(parent_columns) != 1 or len(child_columns) != 1:
+            why = "a key of several columns: its children per parent are not laid out"
+        elif child_table not in planned or parent_table not in planned:
+            why = "the bundle writes no generator emit of one of its two tables"
+        elif keys is None or not any(
+            relationship.target == parent_table
+            and relationship.from_columns == tuple(child_columns)
+            and relationship.to_columns == tuple(parent_columns)
+            for relationship in _relationships_of(keys, child_table)
+        ):
+            why = "the contract declares no such relationship between the two exposes"
+        if why is not None:
+            unused += [(pointer, why) for pointer in every]
+            continue
+        child_expose, parent_expose = planned[child_table], planned[parent_table]
+        child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
+        parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
+        child_entries = (
+            tables.get(child_table, {}).get("columns")
+            if isinstance(tables.get(child_table), Mapping)
+            else None
+        )
+        spread = spread_children(
+            entry,
+            tokens,
+            child_plan,
+            child_expose.kinds[child_plan.name],
+            child_expose.rows,
+            child_entries.get(child_plan.name) if isinstance(child_entries, Mapping) else None,
+            ("tables", child_table, "columns", child_plan.name),
+            parent_plan,
+            parent_expose.kinds[parent_plan.name],
+            minimum_cell=minimum_cell,
+            fractional_bits=fractional_bits,
+        )
+        used += spread.used
+        unused += spread.unused
+    return used, unused
+
+
+def _relationships_of(keys: ContractKeys, expose_id: str) -> Sequence[Any]:
+    try:
+        return keys.expose(expose_id).relationships
+    except (KeyError, LookupError):
+        return ()
 
 
 def _unused_block(ledger: Ledger) -> List[Dict[str, Any]]:
@@ -845,6 +946,13 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
             exposes.append(AuthoredExpose(expose_id=expose_id, skipped=_beyond_note(error)))
     try:
         _span_keys([expose for expose in exposes if expose.skipped is None], keys)
+        children = _spread_relationships(
+            exposes,
+            keys,
+            profile,
+            minimum_cell=minimum_cell,
+            fractional_bits=fractional_bits,
+        )
     except (ArithmeticError, ValueError) as error:
         raise AuthorError(_beyond_note(error)) from error
     for expose in exposes:
@@ -923,7 +1031,7 @@ def author_bundle(contract_path: Path, profile_path: Path) -> AuthoredBundle:
     contract_ids = {
         str(expose.get("exposeId")) for expose in contract["exposes"] if isinstance(expose, Mapping)
     }
-    ledger = _ledger(profile, exposes, contract_ids)
+    ledger = _ledger(profile, exposes, contract_ids, children)
 
     template = (
         "fluxsim init writes the least World a run needs: the generator emits read none of "

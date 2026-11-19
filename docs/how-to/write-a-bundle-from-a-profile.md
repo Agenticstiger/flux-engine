@@ -227,6 +227,7 @@ The rules run from the most the profile says to the least:
 | `nullCount` | `nullFraction` | profile |
 | a histogram, level counts or a list of levels | `bins` and weights, `levels`, and a property the run is scored on | profile |
 | a histogram or level counts grouped by a categorical column | `given` that column, with `binWeightsGiven` or `levelWeightsGiven` from the group counts, and a grouped property | profile |
+| children per parent of a relationship the contract declares (`relationships`) | the foreign key's `bins` and `binWeights`: each class of parents a share of the parent's keys, weighted by its children | assumption, from the profile's counts |
 | as many distinct values as values | `unique: true`: an identifier the engine derives | no number |
 | an `enum(...)` type | `support: declared`, with `maxCardinality` its number of levels | contract |
 | a key, in its `semantics` | no key of its own: the engine reads keys from the contract | no number |
@@ -257,6 +258,9 @@ These rules shape the assumptions:
   decides which column is drawn given which: at most one `given` per column, a number
   column only at the end of a link, and never given a column that holds nulls. A grouping
   the tree leaves out is unused, and the output says why.
+- Children per parent are an approximation: a parent of a class whose mean is `m`
+  receives a Poisson-like number of children, so about `e^-m` of them receive none, and
+  the run's share of parents with no child comes out that much larger than published.
 - A column of a key over several columns spans its rows the same way, and a text one
   takes as many opaque levels as rows, so the key can hold one value per row. A key's
   columns declare no `nullFraction`, nor does an `inner` foreign key, and a composite

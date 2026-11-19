@@ -268,8 +268,8 @@ def test_every_statistic_is_listed_once_with_its_state(inputs: Dict[str, Path]) 
     assert "weights of tier given segment" in states[GROUPED]["note"]
     assert states[PAIR]["state"] == "unused"
     assert "correlation" in states[PAIR]["note"]
-    assert states[CHILDREN]["state"] == "unused"
-    assert "children per parent" in states[CHILDREN]["note"]
+    assert states[CHILDREN]["state"] == "used"
+    assert "a mean alone" in states[CHILDREN]["note"]
     assert states["/tables/customer/columns/customer_id/metrics/nullCount"]["state"] == "withheld"
     assert states["/tables/customer/columns/segment/statistics/0"]["state"] == "used"
     assert states["/tables/customer/rowCount"]["state"] == "used"
@@ -277,7 +277,7 @@ def test_every_statistic_is_listed_once_with_its_state(inputs: Dict[str, Path]) 
     assert sum(counts.values()) == len(states)
     assert f"profile: {len(states)} statistics -- {counts['used']} used" in result.stdout
     assert f"  - {PAIR} (correlation/1): " in result.stdout
-    assert f"  - {CHILDREN} (mean/1): " in result.stdout
+    assert f"  - {CHILDREN} (mean/1): " not in result.stdout
 
 
 def test_the_register_lists_them_and_the_evidence_names_them(inputs: Dict[str, Path]) -> None:
@@ -290,7 +290,7 @@ def test_the_register_lists_them_and_the_evidence_names_them(inputs: Dict[str, P
     unused = [
         e["pointer"] for e in result.artifacts["ledger"]["statistics"] if e["state"] == "unused"
     ]
-    assert pointers == unused and PAIR in pointers and CHILDREN in pointers
+    assert pointers == unused and PAIR in pointers and CHILDREN not in pointers
     state = inputs["root"] / "state"
     out = inputs["root"] / "out"
     outcome = run(
@@ -314,7 +314,7 @@ def test_strict_writes_nothing_and_names_each_finding(inputs: Dict[str, Path]) -
     assert not (inputs["root"] / "strict").exists()
     assert "--strict refuses this bundle" in result.stderr
     assert f"  unused {PAIR} (correlation/1): " in result.stderr
-    assert f"  unused {CHILDREN} (mean/1): " in result.stderr
+    assert f"  unused {CHILDREN} (mean/1): " not in result.stderr
     assert "  gap /extensions/com.agentics.flux~11/emits/orders/fidelity/columns/customer_id" in (
         result.stderr
     )
@@ -335,7 +335,7 @@ def test_allow_accepts_what_lies_at_or_below_a_pointer(inputs: Dict[str, Path]) 
         inputs,
         "prefix",
         strict=True,
-        allow=("/tables", "/relationships", "/extensions/com.agentics.flux~11/emits", "/spec"),
+        allow=("/tables", "/extensions/com.agentics.flux~11/emits", "/spec"),
     )
     assert prefix.exit_code == 0, prefix.stderr
 
@@ -347,7 +347,6 @@ def test_an_allow_that_accepts_nothing_is_refused(inputs: Dict[str, Path]) -> No
         strict=True,
         allow=(
             "/tables",
-            "/relationships",
             "/extensions/com.agentics.flux~11/emits",
             "/spec",
             "/queries",

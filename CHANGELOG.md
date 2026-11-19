@@ -70,6 +70,17 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   published null count of zero: an absent one draws no null, and a declared one
   kept the column from being drawn on (`FLX-3402`).
 
+- `fluxsim init` reads a profile's `relationships` (ADR 0014 section 5). For a
+  one-column number foreign key the contract declares, the classes of a
+  children-per-parent histogram are laid over the parent's key range, each a
+  share of the keys equal to its share of the parents (the Largest Remainder
+  Method) and weighted by its parents times their mean number of children, the
+  class of none at 0; the open class's mean is solved from the relationship's
+  mean. With a histogram of the foreign key's own values the classes are laid
+  inside each of its bins, so both hold. A mean alone leaves the spread even.
+  The approximation is documented: about `e^-m` more parents of a class of mean
+  `m` receive no child.
+
 ## 0.7.0 - 2026-11-19
 
 flux-stats exports the read of a FLUX bundle that the engine takes its digests
