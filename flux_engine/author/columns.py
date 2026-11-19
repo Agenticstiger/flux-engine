@@ -58,6 +58,7 @@ from flux_engine.seam.coverage import printable
 from flux_stats.column_metrics import MAX, MIN, NULL_COUNT, QUANTILES
 from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM, MEAN, QUANTILE_BINNED
 from flux_stats.definitions import SUPPORT as SUPPORT_STATISTIC
+from flux_stats.spelling import MOST_DIGITS
 
 __all__ = [
     "DEFAULT_TOLERANCES",
@@ -1248,7 +1249,12 @@ def _limit(ctx: ColumnContext) -> Optional[Fraction]:
     if logical.kind is LogicalKind.INT:
         return Fraction(JCS_MAX_SAFE_INTEGER)
     if logical.kind is LogicalKind.DECIMAL and isinstance(logical.precision, int):
-        return Fraction(10) ** (logical.precision - _scale(ctx)) - Fraction(_grid(ctx))
+        digits = logical.precision - _scale(ctx)
+        if digits > MOST_DIGITS:
+            # No number a fidelity block may spell reaches it, and 10^digits is no
+            # number to work out for a type declared with a precision of millions.
+            return None
+        return Fraction(10) ** digits - Fraction(_grid(ctx))
     return None
 
 
@@ -2996,10 +3002,25 @@ def _range_bounds(
 
 
 def _exact_text(value: Fraction) -> str:
-    """*value* as an exact decimal text: a bound or a half step has a finite expansion."""
-    with localcontext() as context:
-        context.prec = 200
-        return format(Decimal(value.numerator) / Decimal(value.denominator), "f")
+    """*value* as an exact decimal text: a bound or a half step has a finite expansion.
+
+    Exact at any length: the denominator is a product of twos and fives, so *value*
+    times ten to the larger of their counts is a whole number.
+    """
+    rest, twos, fives = value.denominator, 0, 0
+    while rest % 2 == 0:
+        rest, twos = rest // 2, twos + 1
+    while rest % 5 == 0:
+        rest, fives = rest // 5, fives + 1
+    if rest != 1:  # no finite expansion: the nearest 200 significant digits
+        with localcontext() as context:
+            context.prec = 200
+            return format(Decimal(value.numerator) / Decimal(value.denominator), "f")
+    places = max(twos, fives)
+    units = value.numerator * 10**places // value.denominator
+    digits = str(abs(units)).rjust(places + 1, "0")
+    text = digits if places == 0 else f"{digits[:-places]}.{digits[-places:]}"
+    return f"-{text}" if units < 0 else text
 
 
 def _within_range(ctx: ColumnContext, plan: ColumnPlan) -> None:

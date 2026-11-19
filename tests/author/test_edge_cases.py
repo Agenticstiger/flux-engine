@@ -417,3 +417,20 @@ def test_a_column_a_dependency_sets_has_no_mean_property() -> None:
     # One fee per plan: the run's mean rests on a few draws, so no margin holds it.
     assert not any(prop.document["property"] == "mean" for prop in plan.properties)
     assert any("A dependency of the contract sets this column" in text for text in plan.choices)
+
+
+def test_a_decimal_of_huge_precision_is_planned_at_once() -> None:
+    # 10^(p-s) for a precision of millions is no number to work out: no limit applies.
+    started = time.perf_counter()
+    entry = {"domain": "number", "metrics": {"count": _metric("count/1", 600)}}
+    _plan("decimal(100000000,2)", entry)
+    assert time.perf_counter() - started < 5
+
+
+def test_an_edge_is_spelled_exactly_at_any_length() -> None:
+    from flux_engine.author.columns import _exact_text
+
+    big = 10**300 + 1
+    assert _exact_text(F(big, 4)) == f"{big // 4}.25"
+    assert _exact_text(F(-1, 4)) == "-0.25"
+    assert _exact_text(F(25, 2)) == "12.5" and _exact_text(F(100)) == "100"
