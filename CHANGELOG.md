@@ -21,7 +21,7 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.8.0 - 2026-11-19
 
 - `fluxsim init` reads `quantile/2`, the binned quantile `fluid profile` publishes
   by default: each group is two points of a number, date or timestamp column's
