@@ -54,7 +54,7 @@ from types import ModuleType
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from flux_engine.core.errors import FluxError
-from flux_engine.generators.errors import FLX_3114, FLX_3115, FLX_3116, FLX_3117, FLX_3118
+from flux_engine.generators.errors import FLX_3114, FLX_3115, FLX_3116, FLX_3117, FLX_3118, FLX_3124
 from flux_engine.seam.coverage import printable
 
 __all__ = [
@@ -440,6 +440,15 @@ def resolve(
     )
 
 
+def plugin_label(resolved: ResolvedGenerator, expose_id: Optional[str]) -> str:
+    """The plugin as a refusal names it: the expose it generates, its reference and its pin."""
+    where = f"expose {printable(expose_id)}, " if expose_id is not None else ""
+    return (
+        f"{where}plugin {printable(resolved.name)} "
+        f"({printable(resolved.distribution)} {printable(resolved.version)})"
+    )
+
+
 def _module_file(loaded: Any) -> Optional[Path]:
     module: Optional[ModuleType]
     if isinstance(loaded, ModuleType):
@@ -455,21 +464,48 @@ def _module_file(loaded: Any) -> Optional[Path]:
         return None
 
 
-def load(resolved: ResolvedGenerator) -> Any:
+_FIRST_LINE = 200
+
+
+def failure_text(error: BaseException) -> str:
+    """The type and first line of *error*, as it is written into a diagnostic."""
+    lines = str(error).strip().splitlines()
+    first = lines[0] if lines else ""
+    if len(first) > _FIRST_LINE:
+        first = first[:_FIRST_LINE] + "..."
+    return printable(f"{type(error).__name__}: {first}" if first else type(error).__name__)
+
+
+def _missing_module(resolved: ResolvedGenerator, error: ModuleNotFoundError) -> str:
+    """Name the module a ``ModuleNotFoundError`` lacks, and whether it is the plugin's own."""
+    missing = error.name
+    if not missing:
+        return ""
+    module = resolved.value.split(":", 1)[0].strip()
+    own = module == missing or module.startswith(missing + ".")
+    return (
+        f"; the module {printable(missing)} is missing, and it is "
+        f"{'the plugin' + chr(39) + 's own module' if own else 'a module it imports'}"
+    )
+
+
+def load(resolved: ResolvedGenerator, *, expose_id: Optional[str] = None) -> Any:
     """Import the entry point of *resolved*, then check that the checked code is what loaded.
 
     The loaded object's module file must lie inside the top-level package that
     :func:`resolve` checked and, unless the distribution is editable, be listed
-    in its ``RECORD``. Anything else is ``FLX-3118``.
+    in its ``RECORD``. Anything else is ``FLX-3118``. An exception raised while
+    importing is ``FLX-3124``, naming *expose_id* when it is given.
     """
     found = f"{printable(resolved.distribution)} {printable(resolved.version)}"
     try:
         loaded = resolved.entry_point.load()
-    except (ImportError, AttributeError) as error:
+    except Exception as error:  # noqa: BLE001 (a plugin's own failure is its refusal, by name)
+        extra = _missing_module(resolved, error) if isinstance(error, ModuleNotFoundError) else ""
         raise FluxError(
-            FLX_3118,
-            f"{found}: the entry point {resolved.name!r} ({printable(resolved.value)}) could not "
-            f"be imported ({type(error).__name__})",
+            FLX_3124,
+            f"{plugin_label(resolved, expose_id)}: importing the module "
+            f"{printable(resolved.value)} failed ({failure_text(error)}){extra}",
         ) from error
     file = _module_file(loaded)
     expected = resolved.package_root
