@@ -209,8 +209,21 @@ def read_accounting(value: Any, where: str) -> Accounting:
     )
 
 
-def read_noise(value: Any, where: str, accounting: Accounting) -> Noise:
-    """Read a ``noise`` block: ``mechanism``, ``scale`` and the share ``privacyLoss``."""
+def read_noise(
+    value: Any,
+    where: str,
+    accounting: Accounting,
+    *,
+    l1: Fraction,
+    l2_squared: Fraction,
+) -> Noise:
+    """Read a ``noise`` block: ``mechanism``, ``scale`` and the share ``privacyLoss``.
+
+    ``l1`` and ``l2_squared`` are the L1 sensitivity and the squared L2 sensitivity of what the
+    block noises, under adding or removing one row of the unit's expose. They have no default: a
+    count table passes ``Fraction(1)`` for both, written out, so a caller that forgets them fails
+    instead of charging a sensitivity of one by accident.
+    """
     raw = _mapping(value, where, ("mechanism", "scale", "privacyLoss"))
     mechanism = raw["mechanism"]
     if mechanism not in MECHANISMS:
@@ -219,7 +232,7 @@ def read_noise(value: Any, where: str, accounting: Accounting) -> Noise:
     if scale <= 0 or str(raw["scale"]).startswith("-"):
         raise refuse(f"{where}.scale", "a noise scale is above zero")
     loss = _loss(raw["privacyLoss"], f"{where}.privacyLoss", accounting.measure)
-    _require_spent(mechanism, scale, loss, f"{where}.privacyLoss")
+    _require_spent(mechanism, scale, loss, f"{where}.privacyLoss", l1=l1, l2_squared=l2_squared)
     return Noise(mechanism=mechanism, scale=scale, loss=loss)
 
 
@@ -262,8 +275,8 @@ def _require_spent(
     loss: PrivacyLoss,
     where: str,
     *,
-    l1: Fraction = Fraction(1),
-    l2_squared: Fraction = Fraction(1),
+    l1: Fraction,
+    l2_squared: Fraction,
 ) -> None:
     """Refuse a share below what the mechanism spends on a release of the stated sensitivity (ADR 0019).
 

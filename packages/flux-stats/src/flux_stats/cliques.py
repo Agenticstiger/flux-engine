@@ -132,7 +132,13 @@ def read_clique(
             read_decimal(count, f"{where}.noisyCounts[{position}]")
             for position, count in enumerate(counts)
         ),
-        noise=read_noise(value["noise"], f"{where}.noise", accounting),
+        noise=read_noise(
+            value["noise"],
+            f"{where}.noise",
+            accounting,
+            l1=Fraction(1),
+            l2_squared=Fraction(1),
+        ),
     )
 
 

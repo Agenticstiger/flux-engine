@@ -278,6 +278,8 @@ _QUERY_KINDS = frozenset({"levelHistogram"})
 _DATE_GAP_KINDS = frozenset({"marginalHistogram", "quantile"})
 #: The statistics that count cells, the only ones a profiler may release noisily (format 1-2-0).
 _NOISY_KINDS = frozenset({"levelHistogram", "marginalHistogram"})
+#: A count table's sensitivity: one row lands in one cell, so L1 and the squared L2 are both one.
+_COUNT_SENSITIVITY = Fraction(1)
 #: The kinds that count a categorical column; the others read ordered values.
 _CATEGORICAL_KINDS = frozenset({"levelHistogram", "support"})
 _ORDERED_DOMAINS = frozenset({NUMBER, TIMESTAMP})
@@ -1279,7 +1281,13 @@ class _Reader:
         accounting = self._require_account(f"{where}.noise")
         assert noisy_in is not None  # the key is optional only where a statistic may carry it
         self._in_unit(noisy_in, f"{where}.noise", accounting)
-        noise = read_noise(raw["noise"], f"{where}.noise", accounting)
+        noise = read_noise(
+            raw["noise"],
+            f"{where}.noise",
+            accounting,
+            l1=_COUNT_SENSITIVITY,
+            l2_squared=_COUNT_SENSITIVITY,
+        )
         self.parts.append((where, noise))
         return noise
 
