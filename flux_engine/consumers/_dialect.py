@@ -23,10 +23,11 @@ environment or the clock. The rewrites copy an operand a few times, so an operan
 
 from __future__ import annotations
 
-import re
 from typing import Callable, Dict, List, Optional, Tuple
 
 from sqlglot import exp
+from sqlglot.dialects.dialect import Dialect
+from sqlglot.tokens import TokenType
 
 from flux_engine.consumers import _allow
 from flux_engine.consumers.errors import FLX_3622, FLX_3627
@@ -52,21 +53,62 @@ _DAYS: Dict[str, int] = {
 _TSQL_FIRST_DAY = -53_690
 _TSQL_LAST_DAY = 2_958_463
 
+#: A day count with more digits than this (leading zeros apart) is out of range and is not parsed.
+_MAX_DAY_DIGITS = 40
+
 #: Where the engine maps the parts of each dialect, for the refusal's message.
 _MAPPED = "tsql, bigquery, snowflake and mysql"
 
-#: ``DATEPART(w, x)`` is the weekday in T-SQL, and sqlglot reads it as the week.
-_TSQL_W = re.compile(r"\bdatepart\s*\(\s*w\s*,", re.IGNORECASE)
+_PART_TOKENS = frozenset({TokenType.VAR, TokenType.IDENTIFIER, TokenType.STRING})
+
+#: The T-SQL date functions whose first argument is a part name.
+_TSQL_PART_FUNCTIONS = frozenset(
+    {"DATEPART", "DATENAME", "DATEADD", "DATEDIFF", "DATEDIFF_BIG", "DATETRUNC"}
+)
+
+#: Part abbreviations that sqlglot's T-SQL reader maps to another part than T-SQL's documentation
+#: gives them, checked against sqlglot 30.33 and the DATEPART, DATEADD, DATEDIFF, DATENAME and
+#: DATETRUNC pages. ``w`` is the weekday in T-SQL and is read as the week, or, in DATEADD, as a
+#: week to add where T-SQL adds a day; ``y`` is the day of the year and is read as the year in
+#: DATEADD, DATENAME and DATETRUNC (and passed through unread in DATEDIFF). ``m`` in DATETRUNC is
+#: the month and is read as the minute; ``dy`` in DATENAME is the day of the year and is written
+#: as the day of the month. Every other abbreviation in those tables reads as T-SQL means it, or
+#: is refused later by the allow-list.
+_TSQL_MISREAD: Dict[str, str] = {"w": "weekday", "y": "day of the year"}
+_TSQL_MISREAD_IN: Dict[Tuple[str, str], str] = {
+    ("DATETRUNC", "m"): "month",
+    ("DATENAME", "dy"): "day of the year",
+}
 
 
 def refuse_misread_spellings(sql: str, dialect: str, label: str) -> None:
-    """Refuse the spellings the parser reads as another part than the dialect does."""
-    if dialect.lower() == "tsql" and _TSQL_W.search(sql):
-        raise FluxError(
-            FLX_3622,
-            f"{label} writes the T-SQL part w, which the parser reads as the week and T-SQL reads "
-            "as the weekday; write weekday or dw",
-        )
+    """Refuse the spellings the parser reads as another part than the dialect does.
+
+    Decided from the token stream, so a comment, a bracket or a quote between the parenthesis and
+    the part does not hide it.
+    """
+    if dialect.lower() != "tsql":
+        return
+    try:
+        tokens = Dialect.get_or_raise("tsql").tokenize(sql)
+    except Exception:  # the caller has already tokenized the text; a failure here refuses later
+        return
+    for index in range(len(tokens) - 2):
+        name = tokens[index].text.upper()
+        if name not in _TSQL_PART_FUNCTIONS or tokens[index + 1].token_type != TokenType.L_PAREN:
+            continue
+        first = tokens[index + 2]
+        if first.token_type not in _PART_TOKENS:
+            continue
+        part = first.text.lower()
+        meaning = _TSQL_MISREAD.get(part) or _TSQL_MISREAD_IN.get((name, part))
+        if meaning is not None:
+            raise FluxError(
+                FLX_3622,
+                f"{label} writes the T-SQL part {first.text} in {name}, which the parser reads as "
+                f"another part than T-SQL's {meaning} in the dialect tsql; write {meaning.replace(' ', '')}"
+                " in full or use another part",
+            )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -331,6 +373,8 @@ def _day_count(node: exp.Expr) -> Optional[int]:
     if isinstance(node, exp.Neg):
         sign, node = -1, node.this
     if isinstance(node, exp.Literal) and not node.is_string and node.name.isdigit():
+        if len(node.name.lstrip("0")) > _MAX_DAY_DIGITS:
+            return sign * (_TSQL_LAST_DAY + 1)
         return sign * int(node.name)
     return None
 

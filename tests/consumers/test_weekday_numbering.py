@@ -221,6 +221,48 @@ def test_the_t_sql_part_w_is_refused_because_the_parser_reads_it_as_the_week() -
     refused(PREFIX + "DATEPART(w, renewed_at) = 1", "FLX-3622", "part w", dialect="tsql")
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        "DATEPART(/*x*/w, renewed_at)",
+        "DATEPART([w], renewed_at)",
+        'DATEPART("w", renewed_at)',
+        "DATEPART(--c\nw, renewed_at)",
+        "DATEPART(W, renewed_at)",
+        "DATEPART ( w , renewed_at)",
+        "DATENAME([W], renewed_at)",
+        "DATEADD(w, 1, renewed_at)",
+        "DATEADD([y], 1, renewed_at)",
+        "DATEDIFF(w, started, renewed_at)",
+        "DATEDIFF_BIG(y, started, renewed_at)",
+        "DATETRUNC(Y, renewed_at)",
+        "DATETRUNC(m, renewed_at)",
+        "DATENAME(dy, renewed_at)",
+    ],
+)
+def test_a_t_sql_part_the_parser_reads_differently_is_refused_however_it_is_written(
+    call: str,
+) -> None:
+    refused(PREFIX + f"{call} IS NOT NULL", "FLX-3622", "tsql", dialect="tsql")
+
+
+@pytest.mark.parametrize(
+    "call",
+    ["DATEPART(weekday, renewed_at)", "DATEADD(d, 1, renewed_at)", "DATENAME(month, renewed_at)"],
+)
+def test_the_parts_t_sql_and_the_parser_agree_on_are_not_refused_by_the_part_check(
+    call: str,
+) -> None:
+    try:
+        check(PREFIX + f"{call} IS NOT NULL", dialect="tsql")
+    except FluxError as error:
+        assert "reads the T-SQL part" not in str(error)
+
+
+def test_a_huge_day_count_is_refused_not_raised_as_a_value_error() -> None:
+    refused("SELECT YEAR(" + "9" * 4400 + ") AS y FROM subscriptions", "FLX-3622", dialect="tsql")
+
+
 def test_an_operand_too_large_to_repeat_is_refused() -> None:
     operand = " + ".join(["LEN(plan)"] * 120)
     refused(

@@ -68,6 +68,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - Refusals read "1 child" and "1 bin" in the singular, `FLX-3403` names key and bridge columns as plain text, a links `when` error names its `links[...].when` key, `fluxsim verify --help` names the `counts:` rule lines and the `childrenPerParent` row, and SEAM-FIDELITY-SPEC lists every namespace key the engine reads.
 - Under a `parentWhen`, the `FLX-3403` note below `--scale 1` is decided from the eligible parents, and is given only when scale 1 would not fall short the same way.
 - A generator plugin whose import or factory raises ends in a coded refusal, `FLX-3124`, that names the expose, the plugin, the phase and the error, and a missing module is named, with whether it is the own module of the plugin; an entry point that cannot be imported moves from `FLX-3118` to `FLX-3124`.
+- A T-SQL date part that the query parser reads differently from T-SQL (`w` and `y` in every date function, `m` in `DATETRUNC`, `dy` in `DATENAME`) is refused with `FLX-3622` however it is quoted or commented, and a day count too long for any date is refused rather than raised.
 
 ### Changed
 
