@@ -187,8 +187,8 @@ SCHEMA_URL_1_3_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-3
 
 #: Format ``1-4-0``, the ``$id`` of ``docs/spec/profile-1-4.schema.json``. It adds the rank correlations
 #: ``kendallTau/1`` and ``spearmanRho/1`` of a ``columnPairs`` entry and the ``rowFloor`` key of
-#: PROFILE-SPEC.md section 5, the clique ``cliqueMarginal/2`` and a table's ``cliqueSelection``, and
-#: changes nothing format ``1-3-0`` says. A document that holds one of
+#: PROFILE-SPEC.md section 5, the clique ``cliqueMarginal/2``, a table's ``cliqueSelection`` and a
+#: statistic's ``groupByBins``, and changes nothing format ``1-3-0`` says. A document that holds one of
 #: :data:`_FORMS_OF_1_4_0` names it.
 SCHEMA_URL_1_4_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json"
 
@@ -202,6 +202,7 @@ _FORMS_OF_1_4_0: Mapping[str, str] = MappingProxyType(
         "rowFloor": "a rowFloor",
         "cliqueMarginal/2": "a cliqueMarginal/2",
         "cliqueSelection": "a cliqueSelection",
+        "groupByBins": "a groupByBins",
     }
 )
 
@@ -1012,6 +1013,7 @@ def _statistic_optional(
     of: Optional[Set[str]],
     plain_group: bool,
     query_group: bool = False,
+    binned_by: Optional[Set[str]] = None,
 ) -> Tuple[str, ...]:
     """The keys a statistic may carry beyond the required four, as its section allows them."""
     optional: Tuple[str, ...] = ("bins", "levels", "level")
@@ -1019,6 +1021,8 @@ def _statistic_optional(
         optional += ("noise",)
     if grouped_by is not None:
         optional += ("groupBy",) if plain_group else ("groupBy", "groupByLink", "per")
+        if binned_by is not None and not plain_group:
+            optional += ("groupByBins",)
     if query_group:
         optional += ("groupBy",)
     if of is not None:
@@ -1111,6 +1115,7 @@ class _Reader:
         column_of: Optional[Tuple[str, Set[str]]] = None,
         plain_group: bool = False,
         query_group: bool = False,
+        binned_by: Optional[Set[str]] = None,
     ) -> StatisticEntry:
         """Read one statistic of a section that allows *kinds*.
 
@@ -1119,13 +1124,16 @@ class _Reader:
         a ``groupBy`` may name in format ``1-3-0``, and *column_of* is the statistic's own column
         and every column of the table, for ``per``. A *plain_group* section takes a ``groupBy`` and
         no ``groupByLink`` and no ``per``. *query_group* lets a query's statistic carry a ``groupBy``
-        (format ``1-3-0``).
+        (format ``1-3-0``). *binned_by* are the number and timestamp columns of the table other
+        than the statistic's own, which a ``groupByBins`` may name (format ``1-4-0``).
         """
         raw = _mapping(
             value,
             where,
             required=("definition", "sampleSize", "disclosure", "groups"),
-            optional=_statistic_optional(noisy_in, grouped_by, of, plain_group, query_group),
+            optional=_statistic_optional(
+                noisy_in, grouped_by, of, plain_group, query_group, binned_by
+            ),
         )
         entry = self._read_definition(raw, where, kinds, domain)
         bins = self._bins(raw, where, entry)
@@ -1136,7 +1144,10 @@ class _Reader:
         else:
             group_by, key_form = self._group_by(raw, where, grouped_by, numeric_by)
         link = self._group_by_link(raw, where, group_by)
-        per = self._read_per(raw, where, group_by, link, column_of)
+        bin_grouping = self._group_by_bins(raw, where, group_by, link, binned_by)
+        if bin_grouping is not None:
+            key_form = bin_grouping.keys.__contains__
+        per = self._read_per(raw, where, group_by, link, bin_grouping, column_of)
         if per and "noise" in raw:
             raise refuse(f"{where}.noise", _MOVES_AN_ENTITY + " in a statistic with per")
         if link is not None and "noise" in raw:
@@ -1154,11 +1165,17 @@ class _Reader:
             f"{where}.groups",
             entry,
             cells=cells,
-            grouped=group_by is not None or link is not None,
+            grouped=group_by is not None or link is not None or bin_grouping is not None,
             period=period,
             noisy=noise is not None,
             key_form=key_form,
         )
+        if noise is not None and bin_grouping is not None:
+            if [group.key for group in groups] != list(bin_grouping.keys):
+                raise refuse(
+                    f"{where}.groups",
+                    "a noisy statistic grouped by bins publishes one group for every bin",
+                )
         found = StatisticEntry(
             definition=entry,
             sample_size=_sample_size(raw["sampleSize"], f"{where}.sampleSize"),
@@ -1173,6 +1190,7 @@ class _Reader:
             cell_variance=noise.variance if noise is not None else None,
             group_by_link=link,
             per=per,
+            group_by_bins=bin_grouping,
         )
         if link is not None:
             assert noisy_in is not None  # a link is read only in a column statistic
@@ -1255,20 +1273,54 @@ class _Reader:
             raise refuse(where, "a statistic holds at most one of groupBy and groupByLink")
         return self._link(raw["groupByLink"], f"{where}.groupByLink")
 
+    def _group_by_bins(
+        self,
+        raw: Mapping[str, Any],
+        where: str,
+        group_by: Optional[str],
+        link: Optional[LinkGrouping],
+        binned_by: Optional[Set[str]],
+    ) -> Optional[BinGrouping]:
+        """The bins a statistic is grouped by (format 1-4-0), or ``None``."""
+        if "groupByBins" not in raw:
+            return None
+        here = f"{where}.groupByBins"
+        self.require_1_4_0("groupByBins", here)
+        if group_by is not None or link is not None:
+            raise refuse(
+                where, "a statistic holds at most one of groupBy, groupByLink and groupByBins"
+            )
+        assert binned_by is not None  # the key is optional only where a statistic may carry it
+        raw_bins = _mapping(raw["groupByBins"], here, required=("column", "bins"))
+        column = _name(raw_bins["column"], f"{here}.column")
+        if column not in binned_by:
+            raise refuse(
+                f"{here}.column",
+                "names no number or timestamp column of this table other than the statistic's own",
+            )
+        edges = tuple(
+            read_decimal(edge, f"{here}.bins[{index}]")
+            for index, edge in enumerate(_list(raw_bins["bins"], f"{here}.bins"))
+        )
+        if len(edges) < 2 or any(b <= a for a, b in zip(edges, edges[1:], strict=False)):
+            raise refuse(f"{here}.bins", "bin edges are at least two, strictly increasing")
+        return BinGrouping(column=column, bins=edges)
+
     def _read_per(
         self,
         raw: Mapping[str, Any],
         where: str,
         group_by: Optional[str],
         link: Optional[LinkGrouping],
+        bin_grouping: Optional[BinGrouping],
         column_of: Optional[Tuple[str, Set[str]]],
     ) -> Tuple[str, ...]:
         """The columns a statistic is counted per (format 1-3-0), or none."""
         if "per" not in raw:
             return ()
         self._require_1_3(f"{where}.per", "a per")
-        if group_by is not None or link is not None:
-            raise refuse(where, "a statistic with per holds no groupBy and no groupByLink")
+        if group_by is not None or link is not None or bin_grouping is not None:
+            raise refuse(where, "a statistic with per holds no groupBy, groupByLink or groupByBins")
         assert column_of is not None
         return self._per(raw["per"], f"{where}.per", *column_of)
 
@@ -1655,6 +1707,7 @@ class _Reader:
         expose_id: Optional[str] = None,
         numeric: Optional[Set[str]] = None,
         names: Optional[Set[str]] = None,
+        ordered: Optional[Set[str]] = None,
     ) -> ColumnEntry:
         raw = _mapping(value, where, required=("domain",), optional=("metrics", "statistics"))
         domain = raw["domain"]
@@ -1677,6 +1730,7 @@ class _Reader:
             noisy_in=expose_id,
             numeric_by=(numeric or set()) - {name},
             column_of=(name, names if names is not None else {name}),
+            binned_by=(ordered or set()) - {name},
         )
         low, high = found_metrics.get("min"), found_metrics.get("max")
         if low is not None and high is not None and low.value is not None:
@@ -1726,6 +1780,7 @@ class _Reader:
                 expose_id,
                 numeric=numeric,
                 names=names,
+                ordered=ordered,
             )
             for name in sorted(names)
         }

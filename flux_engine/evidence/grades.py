@@ -20,9 +20,10 @@ and every plugin's.
   account: no row count, no column metric, no statistic without a ``noise`` block, no period,
   relationship, query or fact statistic, none of which can be released with noise in this format,
   and no column pair with a statistic that has none. A pair is noisy when every statistic in it
-  carries a ``noise`` block: a ``correlation/1`` never does, and a rank correlation can. The engine
-  checked the account's arithmetic and the cliques' agreement. It did not check that noise was
-  applied, nor the declaration about the structure: both are the profiler's statement.
+  carries a ``noise`` block: a ``correlation/1`` never does, and a rank correlation can. A column
+  statistic grouped by bins (``groupByBins``) is noisy only when it carries a ``noise`` block. The
+  engine checked the account's arithmetic and the cliques' agreement. It did not check that noise
+  was applied, nor the declaration about the structure: both are the profiler's statement.
 
   The parts of the account are the ones the profile reader enumerates
   (:attr:`flux_stats.profile.Profile.parts`), once each, so no statistic can be missing from the

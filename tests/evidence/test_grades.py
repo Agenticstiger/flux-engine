@@ -662,8 +662,47 @@ def test_a_hostile_top_level_or_privacy_name_cannot_forge_a_heading_a_row_or_a_c
 
 
 # ---------------------------------------------------------------------------
-# A table's clique selection (profile format 1-4-0)
+# A statistic grouped by bins, and a table's clique selection (profile format 1-4-0)
 # ---------------------------------------------------------------------------
+
+
+def _binned(*, noisy: bool) -> Dict[str, Any]:
+    statistic: Dict[str, Any] = {
+        "definition": "marginalHistogram/1",
+        "bins": ["0", "10", "20"],
+        "sampleSize": {"min": 1000, "max": 9999},
+        "disclosure": "noisy",
+        "groupByBins": {"column": "age", "bins": ["0", "30", "60"]},
+        "groups": [{"group": key, "status": "F", "noisyCounts": ["5", "6"]} for key in ("0", "30")],
+    }
+    if noisy:
+        statistic["noise"] = {
+            "mechanism": "gaussian",
+            "scale": "5",
+            "privacyLoss": {"rho": "0.02"},
+        }
+    else:
+        statistic["groups"] = [
+            {"group": key, "status": "F", "k": 11, "binCounts": [5, 6]} for key in ("0", "30")
+        ]
+    return statistic
+
+
+def _with_binned(noisy: bool) -> Dict[str, Any]:
+    document: Dict[str, Any] = json.loads(
+        (SPEC / "profile-1-4-example.json").read_text(encoding="utf-8")
+    )
+    document["privacy"]["privacyLoss"] = {"rho": "1"}
+    document["tables"]["subscriber"]["columns"]["tenure"]["statistics"] = [_binned(noisy=noisy)]
+    return document
+
+
+def test_a_statistic_grouped_by_bins_is_noisy_only_when_it_carries_noise() -> None:
+    noisy = grade_profile(_with_binned(True), pinned=True)
+    assert noisy.pattern is Pattern.P3 and noisy.reasons == ()
+    exact = grade_profile(_with_binned(False), pinned=True)
+    assert exact.pattern is Pattern.P1
+    assert any("a statistic released without noise" in reason for reason in exact.reasons)
 
 
 def test_a_clique_selection_is_accounting_and_never_makes_a_profile_not_p3() -> None:
