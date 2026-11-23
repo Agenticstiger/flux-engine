@@ -298,6 +298,7 @@ def story(
         return StageResult(
             stage="story",
             exit_code=1,
+            _artifacts={"code": refusal.code.code} if refusal.code else {},
             stderr=str(refusal),
             error_code=refusal.code.code if refusal.code else None,
         )
