@@ -162,7 +162,9 @@ changes them counts differently from the engine.
 Every other weekday or week part (T-SQL `DATETRUNC(week, x)`, the part `w`, which the parser reads as the week,
 BigQuery `TIMESTAMP_TRUNC` and `DATETIME_TRUNC` to a week, MySQL `WEEK` in any other mode, and any part in another
 dialect other than `duckdb`) is refused (`FLX-3622`), and the message names the dialect and the part. The
-`duckdb` dialect keeps its own numbering. A rewrite repeats its operand, so the operand holds at most 200 nodes
+`duckdb` dialect keeps its own numbering. The T-SQL date parts that the query parser reads differently from T-SQL
+(`w` and `y` in every date function, `m` in `DATETRUNC`, `dy` in `DATENAME`) are refused with `FLX-3622` however
+they are quoted or commented. A rewrite repeats its operand, so the operand holds at most 200 nodes
 (`FLX-3627` beyond that).
 
 An integer given to a date function means that many days after 1900-01-01 in T-SQL, so `YEAR(0)` and
