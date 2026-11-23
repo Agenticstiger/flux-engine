@@ -242,3 +242,31 @@ def test_a_missing_seed_path_file_is_refused(
     with pytest.raises(FluxError) as caught:
         read_seed_paths(layout, document)
     assert caught.value.code.code == "FLX-2108"
+
+
+def test_apply_run_id_of_a_committed_run_whose_bundle_changed_is_refused_not_kept(
+    bundle_dir: Path, state_dir: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import shutil
+
+    from flux_engine.cli import main
+
+    working_copy = tmp_path / "bundle"
+    shutil.copytree(bundle_dir, working_copy)
+    state = ["--state-dir", str(state_dir)]
+    assert main(["plan", str(working_copy), *state]) == 0
+    run_id = next(path.name for path in (state_dir / "runs").iterdir())
+    assert main(["apply", str(working_copy), *state, "--run-id", run_id]) == 0
+    capsys.readouterr()
+    target = tmp_path / "parquet"
+    delivery = ["--sink", f"parquet:{target}"]
+    assert main(["apply", str(working_copy), *state, "--run-id", run_id]) == 0  # control
+
+    world_path = working_copy / "world.flux.yml"
+    world_path.write_text(world_path.read_text(encoding="utf-8") + "\n# moved\n", encoding="utf-8")
+    capsys.readouterr()
+    for extra in ([], delivery):
+        assert main(["apply", str(working_copy), *state, "--run-id", run_id, *extra]) == 1
+        err = capsys.readouterr().err
+        assert "FLX-2101" in err and run_id in err and "changed after the run was made" in err
+    assert not target.exists()

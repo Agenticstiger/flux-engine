@@ -983,3 +983,43 @@ def test_the_report_writes_every_value_of_a_stored_expose_escaped() -> None:
     assert "## Forged" not in section and "\x1b" not in section
     assert "a\\|b" in section
     assert "an unknown reproducibility" in section and "an unreadable digest" in section
+
+
+# ---------------------------------------------------------------------------
+# `plan` and `apply --run-id` of a committed run, and of a bundle edited after it
+# ---------------------------------------------------------------------------
+
+
+def test_plan_of_a_committed_plugin_run_asks_the_plugin_for_nothing_and_writes_nothing(
+    drifting: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bundle, run_id, layout = _applied_none(tmp_path, capsys)
+    before = _snapshot(tmp_path)
+    plan_bytes = layout.plan_path.read_bytes()
+    assert _calls() == [(0, 64)]
+
+    code = main(["plan", str(bundle), *_state(tmp_path), "--allow-generator", "learned"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert f"run {run_id} keeps its stored plugin output" in out and "another seed" in out
+    assert _calls() == [(0, 64)]
+    assert layout.plan_path.read_bytes() == plan_bytes
+    assert _snapshot(tmp_path) == before
+
+
+def test_apply_run_id_of_a_bundle_edited_after_its_run_is_refused_not_kept(
+    drifting: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bundle, run_id, layout = _applied_none(tmp_path, capsys)
+    args = ["apply", str(bundle), *_state(tmp_path), "--run-id", run_id]
+    before = _snapshot(tmp_path)
+    assert main(args) == 0  # the unedited control keeps the run
+    assert "keeps its stored plugin output" in capsys.readouterr().out
+
+    path = bundle / "simulation.flux.yml"
+    path.write_text(path.read_text(encoding="utf-8") + "\n# a note added after the run\n")
+    assert main(args) == 1
+    err = capsys.readouterr().err
+    assert "FLX-2101" in err and run_id in err and "changed after the run was made" in err
+    assert _calls() == [(0, 64)]
+    assert _snapshot(tmp_path) == before

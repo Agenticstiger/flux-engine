@@ -466,6 +466,7 @@ def plan(
             scale=scale,
             allow_generators=allow_generators,
             stage_required=not stage,
+            reuse_committed=True,
         )[0],
     )
 
@@ -660,6 +661,11 @@ def plan_with_result(
                     "plan_digest": digested.ref.value,
                     "input_digest": result.input_digest.ref.value,
                 },
+                stdout=(
+                    f"run {run_id_for(digested.ref.value)} keeps its stored plugin output: it is "
+                    "never generated again, and a new sample needs a new run, for example "
+                    "another seed"
+                ),
             ),
             None,
         )

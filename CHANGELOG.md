@@ -57,6 +57,8 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - A T-SQL integer given to `YEAR`, `MONTH`, `DAY` or `DATEPART` in a consumer query is read as days after 1900-01-01, as T-SQL reads it, and a number that no dialect reads as a date is refused when the query is compiled (`FLX-3622`).
 - T-SQL `DATEDIFF` with `GETDATE()`, BigQuery `DATE_TRUNC(x, WEEK)` and Snowflake `LEN` are accepted in consumer queries with the value their dialect gives; `GETDATE()` reads the registry's `asOf`, like `NOW()`.
 - Weekday and week parts of consumer queries in T-SQL, BigQuery, Snowflake and MySQL are mapped to the value they have in that dialect under its default settings, and a part with no exact mapping is refused, naming the dialect and the part.
+- `fluxsim plan` on a bundle whose plugin run is already committed asks the plugin for no rows and writes nothing, and says the run keeps its stored plugin output.
+- `fluxsim apply --run-id` on a committed run whose bundle changed after the run was made names the run and says so in its `FLX-2101` refusal.
 
 ## Unreleased
 
