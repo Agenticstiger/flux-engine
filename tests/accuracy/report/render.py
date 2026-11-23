@@ -328,8 +328,9 @@ def render(artefact: Mapping[str, Any]) -> str:
     commit = str(run.get("commit") or "")[:12]
     workflow_link = _workflow_link(str(run.get("url") or ""))
     lines.append(
-        f"Latest nightly run: {run.get('date', '-')}, commit `{commit or '-'}`, base seed "
-        f"`{run.get('baseSeed', '-')}`, confirmation seed `{run.get('confirmSeed', '-')}`"
+        f"Latest nightly run: {run.get('date', '-')}"
+        + (f", commit `{commit}`" if commit else "")
+        + f", base seed `{run.get('baseSeed', '-')}`, confirmation seed `{run.get('confirmSeed', '-')}`"
         + (f", [nightly workflow]({workflow_link})" if workflow_link else "")
         + "."
     )

@@ -1,7 +1,6 @@
 ---
 title: "How-to guides"
-description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, ship with evidence, write a bundle from a profile, score a run against a profile, seal and score a prediction, forecast the next state and score it, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, check consumer queries and calibrate to them, fix values and seed rows."
-description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, ship with evidence, write a bundle from a profile, score a run against a profile, seal and score a prediction, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, give an entity a history, project a history."
+description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, ship with evidence, write a bundle from a profile, score a run against a profile, seal and score a prediction, forecast the next state and score it, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, check consumer queries and calibrate to them, fix values and seed rows, give an entity a history, project a history, keep dates inside their parent's lifetime."
 ---
 
 # How-to guides

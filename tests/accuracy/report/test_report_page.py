@@ -67,7 +67,9 @@ def test_a_snapshot_that_names_no_run_adds_no_link_and_no_commit() -> None:
     artefact["run"]["commit"] = None
     page = render(artefact)
     assert "[nightly workflow]" not in page
-    assert "commit `-`" in page
+    line = next(x for x in page.splitlines() if x.startswith("Latest nightly run"))
+    assert "commit" not in line
+    assert "`-`" not in line
 
 
 def test_an_owner_named_actions_does_not_confuse_the_workflow_link() -> None:
