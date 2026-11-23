@@ -737,3 +737,56 @@ def test_a_failure_before_anything_is_written_has_nothing_to_clean_up(
     flaky = Flaky(monkeypatch, put_fails_on=1)
     error = _failing_delivery(kind)
     assert flaky.deletes == [] and "deleted" not in str(error)
+
+
+def test_a_manifest_put_that_commits_and_then_raises_keeps_the_data_objects(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_put = obstore.put
+    calls = {"n": 0}
+
+    def put(store: Any, key: str, data: Any, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        result = real_put(store, key, data, **kwargs)
+        if calls["n"] == 5:  # four data files, then the manifest
+            raise RuntimeError("Error performing PUT: timed out after the server stored it")
+        return result
+
+    monkeypatch.setattr(obstore, "put", put)
+    deletes: List[str] = []
+    real_delete = obstore.delete
+    monkeypatch.setattr(
+        obstore, "delete", lambda store, key, **kw: (deletes.append(key), real_delete(store, key))
+    )
+    error = _failing_delivery(kind)
+    assert deletes == []
+    assert len(_stored(from_url.store)) == 5
+    assert "manifest of the stream is in place" in str(error) and "kept" in str(error)
+
+
+def _denied_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    def head(store: Any, key: str) -> Any:
+        raise PermissionError("Error performing HEAD: 403 Forbidden")
+
+    monkeypatch.setattr(obstore, "head", head)
+
+
+def test_a_head_refused_for_permission_does_not_fail_the_delivery(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _denied_head(monkeypatch)
+    stream = Stream(40)
+    sink = TARGETS[kind]("s3://bucket/p", {"rows-per-file": "10"}).sink_for(stream.context)
+    assert _deliver(sink, stream.header, stream.rows) is not None
+    assert len(_stored(from_url.store)) == 5
+
+
+def test_a_failure_with_an_unreadable_manifest_state_keeps_the_data_objects(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _denied_head(monkeypatch)
+    flaky = Flaky(monkeypatch, put_fails_on=5)
+    error = _failing_delivery(kind)
+    assert flaky.deletes == []
+    assert len(_stored(from_url.store)) == 4
+    assert "could not be checked" in str(error) and "kept" in str(error)

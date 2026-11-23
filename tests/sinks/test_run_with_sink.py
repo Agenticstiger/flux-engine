@@ -604,7 +604,7 @@ def test_two_deliveries_through_one_variable_name_keep_two_receipts(tmp_path: Pa
             capture_output=True,
             text=True,
             timeout=300,
-            env={**os.environ, "FLUX_TEST_SINK_URI": str(place / "sim.sqlite")},
+            env={**os.environ, "FLUX_TEST_SINK_URI": (place / "sim.sqlite").as_uri()},
         )
         assert result.returncode == 0, result.stderr
     run_id = json.loads(result.stdout)["artifacts"]["plan"]["run_id"]
@@ -714,3 +714,28 @@ def test_a_failure_on_the_second_of_three_streams_names_it_and_counts_the_delive
     assert "sink-receipts.json" in message
     document = json.loads(layout.sink_receipts_path.read_text())
     assert [entry["exposeId"] for entry in document["receipts"]] == ["stream_a"]
+
+
+@pytest.mark.parametrize(
+    ("uri", "secret"),
+    [
+        ("host=db.internal user=u password=hunter2 dbname=sim", "hunter2"),
+        ("Driver=x;PWD=abc;Server=h", "abc"),
+        ("postgresql://u:pa/ss@h/db", "pa/ss"),
+    ],
+)
+def test_a_uri_that_is_not_a_clean_url_gets_no_target_id(uri: str, secret: str) -> None:
+    from flux_engine.sinks.adbc import AdbcSink
+
+    sink = object.__new__(AdbcSink)
+    sink.uri, sink.uri_env = uri, "SIM_URI"
+    assert sink._target_id() is None
+
+
+def test_a_clean_url_still_gets_a_target_id() -> None:
+    from flux_engine.sinks.adbc import AdbcSink
+
+    sink = object.__new__(AdbcSink)
+    sink.uri, sink.uri_env = "postgresql://u:s3cret@h/db?sslmode=require", "SIM_URI"
+    target_id = sink._target_id()
+    assert target_id is not None and "s3cret" not in target_id

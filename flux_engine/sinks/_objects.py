@@ -590,17 +590,53 @@ def _present(obstore: ModuleType, store: Any, key: str) -> bool:
     return True
 
 
-def _cleanup(obstore: ModuleType, store: Any, written: List[str], earlier: bool) -> str:
+def _known_present(obstore: ModuleType, store: Any, key: str) -> Optional[bool]:
+    """Whether *key* exists, or ``None`` when that cannot be told.
+
+    S3 answers a HEAD of a missing key with a permission error when the credential has no
+    ``ListBucket``, so any failure other than "not found" is "unknown", never a refusal.
+    """
+    try:
+        return _present(obstore, store, key)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _cleanup(
+    obstore: ModuleType,
+    store: Any,
+    written: List[str],
+    earlier: Optional[bool],
+    manifest_key: str = "",
+) -> str:
     """Delete the objects this delivery wrote, best effort; say what became of them.
 
     Only the exact keys that were written are touched. The first failed delete ends the
     cleanup, because an endpoint that refuses one request is not asked for the rest, and the
-    keys not yet deleted are named. An earlier complete delivery of the stream is never undone.
+    keys not yet deleted are named. An earlier complete delivery of the stream is never undone,
+    and neither is one whose manifest is found in place after the failure (a manifest put that
+    committed and then raised): without a manifest check the data objects are kept.
+    *earlier* is ``None`` when the manifest could not be checked before the upload.
     """
     if not written:
         return ""
     count = len(written)
     plural = "" if count == 1 else "s"
+    unchecked = (
+        f"; the {count} data object{plural} this delivery had written "
+        f"{'was' if count == 1 else 'were'} kept because the state of the manifest could not be checked"
+    )
+    if earlier is None:
+        return unchecked
+    if not earlier and manifest_key:
+        found = _known_present(obstore, store, manifest_key)
+        if found is None:
+            return unchecked
+        if found:
+            return (
+                f"; the manifest of the stream is in place, so the {count} data "
+                f"object{plural} this delivery had written {'was' if count == 1 else 'were'} kept"
+            )
     if earlier:
         return (
             f"; the manifest of an earlier delivery of this stream is in place, so the {count} "
@@ -643,15 +679,16 @@ def upload_files(location: ObjectLocation, uploads: Iterable[Upload]) -> str:
         require_key_in_prefix(item.key, location.prefix)
     store = open_store(location)
     written: List[str] = []
-    earlier = False
+    manifest_key = batch[-1].key if batch else ""
+    earlier: Optional[bool] = _known_present(obstore, store, manifest_key) if batch else False
     try:
-        earlier = bool(batch) and _present(obstore, store, batch[-1].key)
         for item in batch:
             obstore.put(store, item.key, item.path)
             written.append(item.key)
     except Exception as exc:  # noqa: BLE001
         failure = _failure(f"uploading to {printable(location.url)} failed", exc, location)
         raise FluxError(
-            FLX_3505, failure.detail + _cleanup(obstore, store, written, earlier)
+            FLX_3505,
+            failure.detail + _cleanup(obstore, store, written, earlier, manifest_key),
         ) from None
     return f"obstore {obstore.__version__}"
