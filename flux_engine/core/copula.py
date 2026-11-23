@@ -4,11 +4,19 @@
 
 """The Gaussian copula's pinned arithmetic (ADR 0035 decisions 5 and 6).
 
+Two halves, both pure functions of their arguments.
+
 The plan (``decimal`` at 50 digits, rounding half to even, in a local context that never
 touches the caller's): :func:`latent` turns a published rank correlation into a latent
 Gaussian correlation, :func:`passes` and :func:`shrink` make the matrix valid, :func:`factor`
 takes its Cholesky factor in binary64, :func:`factor_digest` names it, and
 :func:`plan_copula` runs the five steps.
+
+The draw (binary64, one IEEE operation per step): :func:`uniform` and :func:`normal` turn a
+block word into a standard normal, :func:`latent_row` and :func:`latent_columns` correlate a
+row's normals, and :class:`ColumnLaw` turns a latent value into a bin and a grid value. Every
+``*_columns`` function makes the operations of its per-row twin one ufunc at a time, with no
+``dot``, ``sum`` or fused operation, so the two give the same bits.
 """
 
 from __future__ import annotations
@@ -18,12 +26,31 @@ import struct
 from dataclasses import dataclass
 from decimal import Decimal, localcontext
 from fractions import Fraction
-from typing import List, Literal, Mapping, Optional, Sequence, Tuple, Union
+from math import lcm
+from typing import Dict, List, Literal, Mapping, Optional, Sequence, Tuple, Union
 
+import numpy as np
+
+from flux_engine.core import kernel2
 from flux_engine.core.canonical import sha256_hex
 from flux_engine.core.rng import _pi, kernel_context
 
-__all__ = ["CopulaPlan", "factor", "factor_digest", "latent", "passes", "plan_copula", "shrink"]
+__all__ = [
+    "ColumnLaw",
+    "CopulaPlan",
+    "factor",
+    "factor_digest",
+    "latent",
+    "latent_columns",
+    "latent_row",
+    "normal",
+    "normal_array",
+    "passes",
+    "plan_copula",
+    "shrink",
+    "uniform",
+    "uniform_array",
+]
 
 Measure = Literal["kendall", "spearman"]
 Matrix = List[List[Decimal]]
@@ -38,6 +65,9 @@ _DELTA = Decimal(10) ** -6
 _BISECTIONS = 40
 #: A factor entry below this magnitude is zero, so no draw product is subnormal.
 _FACTOR_FLOOR = math.ldexp(1.0, -900)
+_SMALLEST_NORMAL = math.ldexp(1.0, -1022)
+_TWO_POW_MINUS_53 = 1.0 / (1 << 53)
+_HALF = Fraction(1, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -234,3 +264,188 @@ def plan_copula(
         factor=tuple(tuple(row) for row in rows),
         digest=factor_digest(rows),
     )
+
+
+# ---------------------------------------------------------------------------
+# The draw
+# ---------------------------------------------------------------------------
+
+
+def uniform(word: int) -> float:
+    """``(2 * (w0 >> 12) + 1) * 2**-53``: exact, strictly inside (0, 1), symmetric about 1/2."""
+    return float(2 * (word >> 12) + 1) * _TWO_POW_MINUS_53
+
+
+def uniform_array(words: "np.ndarray") -> "np.ndarray":
+    """:func:`uniform` of each uint64 word."""
+    odd = (words >> np.uint64(12)) * np.uint64(2) + np.uint64(1)
+    result: "np.ndarray" = odd.astype(np.float64) * _TWO_POW_MINUS_53
+    return result
+
+
+def normal(word: int) -> float:
+    """``z = Phi^-1(u)`` of a block word's uniform (KERNEL-SPEC-2 section 5.2)."""
+    return kernel2.ppnd16(uniform(word))
+
+
+def normal_array(words: "np.ndarray") -> "np.ndarray":
+    """:func:`normal` of each uint64 word, by kernel 0.2.0's array form of ``ppnd16``."""
+    return kernel2._ppnd16_array(uniform_array(words))
+
+
+def latent_row(rows: Sequence[Sequence[float]], z: Sequence[float]) -> List[float]:
+    """``x = L z``: entry ``i`` is ``((L[i][0] * z_0 + L[i][1] * z_1) + ...) + L[i][i] * z_i``.
+
+    Strictly left to right, one IEEE multiply and one IEEE add per term.
+    """
+    out: List[float] = []
+    for i, row in enumerate(rows):
+        total = row[0] * z[0]
+        for j in range(1, i + 1):
+            total = total + row[j] * z[j]
+        out.append(total)
+    return out
+
+
+def latent_columns(
+    rows: Sequence[Sequence[float]], z: Sequence["np.ndarray"]
+) -> List["np.ndarray"]:
+    """:func:`latent_row` over arrays of rows: ``z[j]`` holds the draw ``j`` of every row.
+
+    One ufunc per IEEE operation (``np.multiply`` then ``np.add``, looping over ``j``), so
+    each element equals the per-row result bit for bit.
+    """
+    kernel2.require_subnormals()
+    out: List["np.ndarray"] = []
+    for i, row in enumerate(rows):
+        total = np.multiply(z[0], row[0])
+        for j in range(1, i + 1):
+            total = np.add(total, np.multiply(z[j], row[j]))
+        out.append(total)
+    return out
+
+
+def threshold(numerator: int, denominator: int) -> float:
+    """``t(F)`` for the exact share ``F = numerator / denominator`` in ``[0, 1]``.
+
+    ``Phi^-1(binary64(F))`` for ``F <= 1/2`` and ``-Phi^-1(binary64(1 - F))`` above it; a
+    binary64 argument below ``2**-1022`` (zero included) gives ``-inf`` or ``+inf``. Python's
+    integer true division is correctly rounded, ties to even.
+    """
+    if 2 * numerator <= denominator:
+        argument = numerator / denominator
+        return -math.inf if argument < _SMALLEST_NORMAL else kernel2.ppnd16(argument)
+    argument = (denominator - numerator) / denominator
+    return math.inf if argument < _SMALLEST_NORMAL else -kernel2.ppnd16(argument)
+
+
+class ColumnLaw:
+    """One column's bins, and the two bisections that map a latent value to a bin and a grid value.
+
+    *shares* are the bins' exact shares ``p_b`` (they sum to 1) and *widths* the grid values
+    ``w_b`` in each bin (at least 1). A bin of share zero is never chosen: the bin bisection
+    starts with ``hi`` at the last bin that has weight, which gives the spec's result for
+    every finite ``x`` (the thresholds from there on are ``+inf``) and keeps ``x = +inf`` from
+    stopping past it. Bins are numbered ``1 .. B`` and grid values ``0 .. w_b - 1``.
+    """
+
+    def __init__(self, shares: Sequence[Fraction], widths: Sequence[int]) -> None:
+        if len(shares) != len(widths) or not shares:
+            raise ValueError("a column has as many widths as bins")
+        if any(share < 0 for share in shares) or sum(shares, Fraction(0)) != 1:
+            raise ValueError("a column's shares are not negative and sum to 1")
+        if any(width < 1 for width in widths):
+            raise ValueError("a bin holds at least one grid value")
+        self._bins = len(shares)
+        self._denominator = lcm(*(Fraction(share).denominator for share in shares))
+        self._numerators = [int(Fraction(share) * self._denominator) for share in shares]
+        self._widths = [int(width) for width in widths]
+        self._before: List[int] = [0]
+        for numerator in self._numerators:
+            self._before.append(self._before[-1] + numerator)
+        positive = [b for b, numerator in enumerate(self._numerators, 1) if numerator > 0]
+        self._last = positive[-1]
+        self._bin_thresholds = [threshold(c, self._denominator) for c in self._before]
+        self._bin_array = np.array(self._bin_thresholds, dtype=np.float64)
+        self._widths_array = np.array(self._widths, dtype=np.int64)
+        self._grid: Dict[Tuple[int, int], float] = {}
+
+    @property
+    def bins(self) -> int:
+        """The number of bins, ``B``."""
+        return self._bins
+
+    def bin_threshold(self, m: int) -> float:
+        """``t(c_m)``, the threshold of the cumulative share after bin ``m`` (``0 <= m <= B``)."""
+        return self._bin_thresholds[m]
+
+    def grid_threshold(self, b: int, j: int) -> float:
+        """``t(F(b, j))`` with ``F(b, j) = c_(b-1) + p_b * j / w_b``, exact."""
+        key = (b, j)
+        cached = self._grid.get(key)
+        if cached is None:
+            width = self._widths[b - 1]
+            numerator = self._before[b - 1] * width + self._numerators[b - 1] * j
+            cached = threshold(numerator, self._denominator * width)
+            self._grid[key] = cached
+        return cached
+
+    def locate(self, x: float) -> Tuple[int, int]:
+        """The bin ``b`` and grid index ``lo`` of latent value *x*, by the two bisections."""
+        lo, hi = 0, self._last
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if self._bin_thresholds[mid] <= x:
+                lo = mid
+            else:
+                hi = mid
+        b = lo + 1
+        lo, hi = 0, self._widths[b - 1]
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if self.grid_threshold(b, mid) <= x:
+                lo = mid
+            else:
+                hi = mid
+        return b, lo
+
+    def _grid_thresholds(self, b: "np.ndarray", mid: "np.ndarray") -> "np.ndarray":
+        """``t(F(b, mid))`` for each pair, computed once per distinct pair."""
+        pairs, inverse = np.unique(np.stack([b, mid], axis=1), axis=0, return_inverse=True)
+        values = np.array(
+            [self.grid_threshold(int(p), int(m)) for p, m in pairs.tolist()], dtype=np.float64
+        )
+        result: "np.ndarray" = values[inverse.reshape(-1)]
+        return result
+
+    def locate_columns(self, x: "np.ndarray") -> Tuple["np.ndarray", "np.ndarray"]:
+        """:meth:`locate` of each element of *x*: the same probes, run for every row at once.
+
+        Each row takes the midpoints its own bisection takes, so the result equals the
+        per-row one whatever the thresholds' order.
+        """
+        kernel2.require_subnormals()
+        size = x.shape[0]
+        lo = np.zeros(size, dtype=np.int64)
+        hi = np.full(size, self._last, dtype=np.int64)
+        while True:
+            active = hi - lo > 1
+            if not active.any():
+                break
+            mid = (lo + hi) // 2
+            below = self._bin_array[mid] <= x
+            lo = np.where(active & below, mid, lo)
+            hi = np.where(active & ~below, mid, hi)
+        b = lo + 1
+        lo = np.zeros(size, dtype=np.int64)
+        hi = self._widths_array[b - 1]
+        while True:
+            active = hi - lo > 1
+            if not active.any():
+                break
+            mid = (lo + hi) // 2
+            below = np.zeros(size, dtype=bool)
+            below[active] = self._grid_thresholds(b[active], mid[active]) <= x[active]
+            lo = np.where(active & below, mid, lo)
+            hi = np.where(active & ~below, mid, hi)
+        return b, lo
