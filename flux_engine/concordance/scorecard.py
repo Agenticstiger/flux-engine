@@ -118,7 +118,7 @@ SCHEMA_URL_1_4_0 = (
 
 #: Format ``1-5-0``, written only by a scorecard that holds a ``rankCorrelation`` row, a row
 #: grouped by the bins of a column, or a children-per-parent row grouped by a parent column
-#: (SCORECARD-SPEC.md §3, docs/spec/drafts/correlations-0.11.0.md section 5): every other scorecard
+#: (SCORECARD-SPEC.md §3): every other scorecard
 #: keeps the format it wrote before.
 SCHEMA_URL_1_5_0 = (
     "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-5-0/FluxScorecard.json"

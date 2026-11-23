@@ -1586,7 +1586,7 @@ def _parse_group_by_bins(
     subject: str,
     group_by: Optional[str],
 ) -> Optional[BinsGrouping]:
-    """Read ``groupByBins``: ``{column, bins}``, the profile's spelling (PROFILE-SPEC.md section 1.4).
+    """Read ``groupByBins``: ``{column, bins}``, the profile's spelling (PROFILE-SPEC.md section 5).
 
     ``column`` is a range column of the block other than the property's own, and ``bins`` are at least
     two strictly increasing edges on the grid, in the column's domain, that cover its declared range,

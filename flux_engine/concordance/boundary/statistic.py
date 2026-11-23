@@ -196,7 +196,7 @@ def compute_property_statistic(
     keys: Optional[Sequence[Tuple[str, Sequence[int]]]] = None
     if declaration.group_by_bins is not None:
         # The groups are the bins of another column, named by their lower edges and kept in the order
-        # of the bins (docs/spec/PROFILE-SPEC.md section 1.4).
+        # of the bins (docs/spec/PROFILE-SPEC.md section 5).
         keys = bin_group_keys(
             rows,
             declaration.group_by_bins,

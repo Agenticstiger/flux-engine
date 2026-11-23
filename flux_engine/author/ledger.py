@@ -30,6 +30,7 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from flux_engine.author.forms import unread_reason
 from flux_engine.seam.parameters import render_pointer
+from flux_stats.definitions import CORRELATION
 from flux_stats.rank_correlation import RANK_IDENTIFIERS
 
 __all__ = ["USED", "UNUSED", "WITHHELD", "Ledger", "LedgerEntry"]
@@ -40,7 +41,7 @@ WITHHELD = "withheld"
 
 _FREE = "F"
 _RANK_DEFINITIONS = RANK_IDENTIFIERS
-_CORRELATION = "correlation/1"
+_CORRELATION = CORRELATION.identifier
 
 #: Why a statistic of a section no rule reads is unused, by section.
 _SECTION_REASONS: Mapping[str, str] = {
