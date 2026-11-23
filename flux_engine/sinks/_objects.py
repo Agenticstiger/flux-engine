@@ -162,7 +162,8 @@ def _whole_number(
         return None
     text = raw.strip()
     if not text.isascii() or not text.isdigit() or not low <= int(text) <= high:
-        raise FluxError(FLX_3504, f"{key} must be {what} from {low} to {high}, got {raw!r}")
+        # The option's name and its range, never its value: a plain option is not scrubbed.
+        raise FluxError(FLX_3504, f"{key} must be {what} from {low} to {high}")
     return int(text)
 
 
