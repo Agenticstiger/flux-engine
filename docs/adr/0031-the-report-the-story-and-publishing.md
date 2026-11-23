@@ -9,6 +9,9 @@ moves: the streams, the plan, the receipt and every existing sink's receipt keep
 the section. It is prose that no reader parses, and the evidence pack carries no format version of
 its own, so none is bumped.
 
+**Amended 2026-11-23:** a label keeps the letters and numbers of any script, as the
+[amendment](#amendment-of-2026-11-23-labels-in-any-script) at the end sets out.
+
 ## Context
 
 `EVIDENCE.md` (`flux_engine/evidence/report.py`) already states what a run is, its conformance,
@@ -213,3 +216,46 @@ for the libraries before 1.0. `THIRD_PARTY_LICENSES.md` lists each with what it 
 - A writer that cannot take its credentials from the environment: it is not added.
 - Profiles that publish children-per-parent histograms per period: the section would draw them over
   time.
+
+## Amendment of 2026-11-23: labels in any script
+
+### Context
+
+The text rule above kept only ASCII letters and digits, so every character of another script became
+`_`. A level written 東京, 大阪 or 京都 printed as `__` in each of three rows, and two long labels
+that shared their first 40 characters printed the same. The rule was safe and it made a report of a
+non-English population unreadable.
+
+### Decision
+
+- **Kept.** A title or a label is put in NFC. It keeps the ASCII letters, digits, the space and
+  `_.,:;/()+=-` as before, and the letters and numbers of any script (Unicode general categories `L`
+  and `N`). A combining mark (`M`) is kept when it follows a kept letter, number or mark.
+- **Replaced by `_`.** Control and format characters (the bidirectional controls, the zero width
+  characters and the joiners among them), line and paragraph separators, every space but the plain
+  one, private-use, surrogate and unassigned code points, and every punctuation mark or symbol outside
+  the ASCII set above. So a newline, `#`, `|`, `[`, `<`, `"` or a backtick still never reaches the
+  report, and nothing in a label can close the code block or the `<details>` element, start a heading,
+  a link, a table cell, a Mermaid directive or comment, or carry markup. The reserved word check is
+  unchanged.
+- **Distinct labels.** A label that prints as it was given (after NFC) is unchanged, so an ASCII label
+  of allowed characters and at most 40 of them prints exactly as before. A label that prints as
+  something else, because a character was replaced or the text was cut, is shortened to 31 characters
+  and ends in `_` and the first eight hexadecimal digits of the SHA-256 of the given text in NFC and
+  UTF-8, 40 characters at most. A given text that already ends in `_` and eight such digits is treated
+  the same way, so no two different labels print alike except by a collision of those 32 bits. The
+  result depends on the text alone, so it is the same on every platform and in every run.
+- **Where.** The one function writes every title, label, column, emit name and score text of the
+  Population section. `fluxsim story` and the file names of a run do not carry these labels, and the
+  data keeps the real label.
+
+### Consequences
+
+- `EVIDENCE.md` of a run shipped with a profile whose levels have letters outside ASCII changes, as
+  it did when the section was added. No run digest, plan digest or file of a run moves, and the
+  scorecard keeps its bytes.
+- A label that holds an ASCII character the rule replaces, such as `a|b`, now ends in the eight digits
+  where it used to end at the `_`.
+- A label of letters that look alike in two scripts (a Cyrillic and a Latin `a`) prints as two
+  different texts that read alike. The section does not try to detect lookalikes; the real labels stay
+  in the data.
