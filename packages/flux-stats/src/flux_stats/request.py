@@ -27,12 +27,13 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from flux_stats.column_metrics import CATEGORY, DOMAINS, NUMBER, TIMESTAMP
 from flux_stats.errors import FluxError, register
 from flux_stats.exact_yaml import ReadBudget, ReadLimits, load_documents
 from flux_stats.fixedpoint import MAX_FRACTIONAL_BITS
+from flux_stats.rank_correlation import RANK_IDENTIFIERS
 from flux_stats.registry import definition, metrics
 from flux_stats.spelling import MAX_SAFE_COUNT
 
@@ -42,12 +43,14 @@ __all__ = [
     "MOST_NAME_CHARACTERS",
     "MOST_RELATIONSHIPS",
     "MOST_STATISTICS_PER_ENTRY",
+    "MOST_CLIQUE_CANDIDATES",
     "MOST_COLUMNS_PER_TABLE",
     "MOST_CALENDAR_COLUMNS",
     "MOST_DATE_PAIRS",
     "MOST_EXPOSURES",
     "MOST_QUERIES",
     "MOST_QUERY_BYTES",
+    "MOST_RANK_COLUMNS",
     "MOST_TABLES",
     "MOST_WORKLOAD_COLUMNS",
     "MOST_WORKLOAD_SETS",
@@ -56,6 +59,7 @@ __all__ = [
     "REQUEST_LIMITS",
     "REQUEST_SCHEMA_URL",
     "REQUEST_SCHEMA_URL_1_1_0",
+    "REQUEST_SCHEMA_URL_1_2_0",
     "ProfileRequest",
     "RequestColumn",
     "RequestDatePair",
@@ -64,6 +68,7 @@ __all__ = [
     "RequestExposure",
     "RequestFact",
     "RequestQuery",
+    "RequestRankCorrelation",
     "RequestRelationship",
     "RequestTable",
     "RequestUnit",
@@ -103,6 +108,14 @@ REQUEST_SCHEMA_URL_1_1_0 = (
     "https://agenticstiger.github.io/flux/engine/spec/profile-request/1-1-0/FluxProfileRequest.json"
 )
 
+#: Format ``1-2-0`` of the request. It adds ``rankCorrelations`` and ``cliqueColumns`` to a table
+#: (:data:`_ADDITIONS_OF_1_2_0`), and a document that uses one names this URL. A request that asks
+#: for none of them keeps the format it named before and its bytes. The reader reads ``1-0-0``,
+#: ``1-1-0`` and ``1-2-0``; ``1-2-0`` holds everything ``1-1-0`` does.
+REQUEST_SCHEMA_URL_1_2_0 = (
+    "https://agenticstiger.github.io/flux/engine/spec/profile-request/1-2-0/FluxProfileRequest.json"
+)
+
 #: The bounds a request is held to. A request lists names and identifiers, so
 #: every one is far below what a contract of a real data product holds, and far
 #: below a bundle's own read bounds: the file may come from anyone.
@@ -117,6 +130,10 @@ MOST_DATE_PAIRS = 1024
 #: for (format 1-1-0).
 MOST_CALENDAR_COLUMNS = 1024
 MOST_EXPOSURES = 1024
+#: The most columns one ``rankCorrelations`` entry names, and the most columns a table's
+#: ``cliqueColumns`` lists (format 1-2-0).
+MOST_RANK_COLUMNS = 64
+MOST_CLIQUE_CANDIDATES = 1024
 MOST_NAME_CHARACTERS = 512
 
 #: What the exact reader may write out of a request: 200 000 values, nested 12 deep,
@@ -172,12 +189,26 @@ class RequestExposure:
 
 
 @dataclass(frozen=True)
+class RequestRankCorrelation:
+    """A rank correlation asked over every pair of the listed columns of one table (format 1-2-0).
+
+    ``definition`` is ``kendallTau/1`` or ``spearmanRho/1``; ``columns`` are two to
+    :data:`MOST_RANK_COLUMNS` distinct number or timestamp columns of the table.
+    """
+
+    definition: str
+    columns: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RequestTable:
     """One table (a FLUID ``exposeId``): whether its row count is asked, and its columns.
 
     ``date_pairs`` are the pairs of its timestamp columns whose days apart the profile states, and
     ``calendar`` the timestamp columns it counts by month, day of week and hour of week, in the
-    order asked (format 1-1-0).
+    order asked (format 1-1-0). ``rank_correlations`` are the rank correlations asked over the
+    pairs of its number and timestamp columns, and ``clique_columns`` the columns a profiler may
+    join into cliques (format 1-2-0).
     """
 
     expose_id: str
@@ -187,6 +218,10 @@ class RequestTable:
     calendar: Tuple[str, ...] = ()
     #: Format 1-1-0 (consumer additions): the column sets consumers' queries read together.
     workload: Tuple["RequestWorkload", ...] = ()
+    #: Format 1-2-0: the rank correlations asked, one entry per definition.
+    rank_correlations: Tuple[RequestRankCorrelation, ...] = ()
+    #: Format 1-2-0: the columns a profiler may join into cliques, each once.
+    clique_columns: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -337,7 +372,14 @@ def _column(name: str, value: Any, where: str) -> RequestColumn:
     )
 
 
-def _table(expose_id: str, value: Any, where: str, *, additions: bool = True) -> RequestTable:
+def _table(
+    expose_id: str,
+    value: Any,
+    where: str,
+    *,
+    additions: bool = True,
+    from_1_2_0: bool = True,
+) -> RequestTable:
     raw = _mapping(
         value,
         where,
@@ -346,8 +388,10 @@ def _table(expose_id: str, value: Any, where: str, *, additions: bool = True) ->
             ("rowCount", "workload", "datePairs", "calendar")
             if additions
             else ("rowCount", "workload")
-        ),
+        )
+        + _keys_of_1_2_0("table"),
     )
+    _needs_1_2_0(from_1_2_0, raw, where, "table")
     row_count = raw.get("rowCount", False)
     if not isinstance(row_count, bool):
         raise _refuse(f"{where}.rowCount", "is true or false")
@@ -377,6 +421,12 @@ def _table(expose_id: str, value: Any, where: str, *, additions: bool = True) ->
         date_pairs=pairs,
         calendar=calendar,
         workload=workload,
+        rank_correlations=_rank_correlations(
+            raw.get("rankCorrelations", []), f"{where}.rankCorrelations", columns
+        ),
+        clique_columns=_clique_columns(
+            raw.get("cliqueColumns", []), f"{where}.cliqueColumns", columns
+        ),
     )
 
 
@@ -496,12 +546,13 @@ def parse_request(document: Any) -> ProfileRequest:
         required=("_schemaURL", "tables"),
         optional=("contract", "encoding", "relationships", "facts", "queries"),
     )
-    if raw["_schemaURL"] not in (REQUEST_SCHEMA_URL, REQUEST_SCHEMA_URL_1_1_0):
+    if raw["_schemaURL"] not in _READ_FORMATS:
         raise _refuse(
             "request._schemaURL",
-            f"this reader reads {REQUEST_SCHEMA_URL} and {REQUEST_SCHEMA_URL_1_1_0}",
+            "this reader reads " + ", ".join(_READ_FORMATS),
         )
-    dated = raw["_schemaURL"] == REQUEST_SCHEMA_URL_1_1_0
+    from_1_2_0 = raw["_schemaURL"] == REQUEST_SCHEMA_URL_1_2_0
+    dated = raw["_schemaURL"] in (REQUEST_SCHEMA_URL_1_1_0, REQUEST_SCHEMA_URL_1_2_0)
     additions = dated
     digest: Optional[str] = None
     if "contract" in raw:
@@ -525,7 +576,13 @@ def parse_request(document: Any) -> ProfileRequest:
             )
     declared = _mapping_of_names(raw["tables"], "request.tables", MOST_TABLES)
     tables = {
-        name: _table(name, declared[name], f"request.tables.{name}", additions=additions)
+        name: _table(
+            name,
+            declared[name],
+            f"request.tables.{name}",
+            additions=additions,
+            from_1_2_0=from_1_2_0,
+        )
         for name in sorted(declared)
     }
     relationships = tuple(
@@ -606,6 +663,10 @@ def check_request(request: ProfileRequest) -> None:
         _twice([column.name for column in table.columns], where, "column")
         _bounded(len(table.date_pairs), MOST_DATE_PAIRS, f"{where} date pairs")
         _bounded(len(table.calendar), MOST_CALENDAR_COLUMNS, f"{where} calendar")
+        _bounded(len(table.clique_columns), MOST_CLIQUE_CANDIDATES, f"{where} clique columns")
+        _bounded(len(table.rank_correlations), len(RANK_IDENTIFIERS), f"{where} rank correlations")
+        for entry in table.rank_correlations:
+            _bounded(len(entry.columns), MOST_RANK_COLUMNS, f"{where} rank correlation columns")
         for column in table.columns:
             _name(column.name, f"{where} column {column.name!r}")
     for index, relationship in enumerate(request.relationships):
@@ -716,6 +777,13 @@ def _table_document(table: RequestTable) -> Dict[str, Any]:
         item["calendar"] = list(table.calendar)
     if table.workload:
         item["workload"] = _workload_document(table.workload)
+    if table.rank_correlations:
+        item["rankCorrelations"] = [
+            {"definition": entry.definition, "columns": list(entry.columns)}
+            for entry in table.rank_correlations
+        ]
+    if table.clique_columns:
+        item["cliqueColumns"] = list(table.clique_columns)
     return item
 
 
@@ -817,7 +885,17 @@ class RequestWorkload:
 
 
 def _schema_url_of(request: ProfileRequest) -> str:
-    """Format 1-1-0 only when the request holds an addition, so one without keeps its text."""
+    """The earliest format that holds every addition the request uses, so one without keeps its text.
+
+    Format 1-2-0 when the request holds an addition of :data:`_ADDITIONS_OF_1_2_0`, 1-1-0 when it
+    holds one of that format, and 1-0-0 otherwise.
+    """
+    if any(
+        addition.held(entry)
+        for addition in _ADDITIONS_OF_1_2_0
+        for entry in _entries_of(request, addition.section)
+    ):
+        return REQUEST_SCHEMA_URL_1_2_0
     if (
         request.queries
         or any(table.workload or table.date_pairs or table.calendar for table in request.tables)
@@ -825,6 +903,95 @@ def _schema_url_of(request: ProfileRequest) -> str:
     ):
         return REQUEST_SCHEMA_URL_1_1_0
     return REQUEST_SCHEMA_URL
+
+
+@dataclass(frozen=True)
+class _Addition:
+    """One key that only format 1-2-0 holds: the section of the request it sits in, its name, and
+    how to tell that a parsed entry of that section uses it."""
+
+    section: str
+    key: str
+    held: Callable[[Any], bool]
+
+
+#: Every key that only format ``1-2-0`` holds. A document that names an earlier format and holds
+#: one is refused (:func:`_needs_1_2_0`), the keys a section may carry (:func:`_keys_of_1_2_0`) and
+#: the format a request is written in (:func:`_schema_url_of`) come from this list, and a later
+#: addition of the format is one more entry here and one place that reads it.
+_ADDITIONS_OF_1_2_0: Tuple[_Addition, ...] = (
+    _Addition("table", "rankCorrelations", lambda table: bool(table.rank_correlations)),
+    _Addition("table", "cliqueColumns", lambda table: bool(table.clique_columns)),
+)
+
+#: Every format this reader reads, oldest first.
+_READ_FORMATS: Tuple[str, ...] = (
+    REQUEST_SCHEMA_URL,
+    REQUEST_SCHEMA_URL_1_1_0,
+    REQUEST_SCHEMA_URL_1_2_0,
+)
+
+
+def _keys_of_1_2_0(section: str) -> Tuple[str, ...]:
+    """The keys a *section* may carry in format 1-2-0 and not before."""
+    return tuple(item.key for item in _ADDITIONS_OF_1_2_0 if item.section == section)
+
+
+def _entries_of(request: ProfileRequest, section: str) -> Sequence[Any]:
+    """The parsed entries of a *section* of the request, in document order."""
+    return request.tables if section == "table" else request.relationships
+
+
+def _needs_1_2_0(from_1_2_0: bool, raw: Mapping[str, Any], where: str, section: str) -> None:
+    """Refuse (``FLX-5038``) an addition of format 1-2-0 in a document that names an earlier format."""
+    if from_1_2_0:
+        return
+    for key in _keys_of_1_2_0(section):
+        if key in raw:
+            raise _refuse(
+                f"{where}.{key}",
+                "is an addition of format 1-2-0, and this document names an earlier format: name "
+                f"{REQUEST_SCHEMA_URL_1_2_0} in _schemaURL",
+            )
+
+
+def _rank_correlations(
+    value: Any, where: str, columns: Sequence[RequestColumn]
+) -> Tuple[RequestRankCorrelation, ...]:
+    """A table's ``rankCorrelations``: each definition once, over 2 to 64 distinct ordered columns."""
+    domains = {column.name: column.domain for column in columns}
+    found: List[RequestRankCorrelation] = []
+    for index, item in enumerate(_list(value, where, most=len(RANK_IDENTIFIERS))):
+        here = f"{where}[{index}]"
+        raw = _mapping(item, here, required=("definition", "columns"))
+        identifier = _name(raw["definition"], f"{here}.definition")
+        if identifier not in RANK_IDENTIFIERS:
+            raise _refuse(f"{here}.definition", f"is one of {sorted(RANK_IDENTIFIERS)}")
+        names = _names(raw["columns"], f"{here}.columns", most=MOST_RANK_COLUMNS)
+        if len(names) < 2:
+            raise _refuse(f"{here}.columns", f"names 2 to {MOST_RANK_COLUMNS} columns")
+        _distinct(names, f"{here}.columns")
+        for position, name in enumerate(names):
+            if domains.get(name) not in (NUMBER, TIMESTAMP):
+                raise _refuse(
+                    f"{here}.columns[{position}]",
+                    "names no column of this table that the request lists with the domain "
+                    "number or timestamp",
+                )
+        found.append(RequestRankCorrelation(definition=identifier, columns=names))
+    _distinct([entry.definition for entry in found], where)
+    return tuple(found)
+
+
+def _clique_columns(value: Any, where: str, columns: Sequence[RequestColumn]) -> Tuple[str, ...]:
+    """A table's ``cliqueColumns``: columns of the table, each once, at most 1,024."""
+    names = _names(value, where, most=MOST_CLIQUE_CANDIDATES)
+    _distinct(names, where)
+    known = {column.name for column in columns}
+    for position, name in enumerate(names):
+        if name not in known:
+            raise _refuse(f"{where}[{position}]", "names no column of this table")
+    return names
 
 
 def _needs_1_1_0(additions: bool, where: str) -> None:
