@@ -26,9 +26,9 @@ and every plugin's.
 
   The parts of the account are the ones the profile reader enumerates
   (:attr:`flux_stats.profile.Profile.parts`), once each, so no statistic can be missing from the
-  spent figure for want of a place in a list kept here. A member the grade does not know, at the top
-  level, in the ``privacy`` block, in a table, a column or a relationship, counts as released without
-  noise.
+  spent figure for want of a place in a list kept here. A clique of either definition carries its
+  own ``noise``. A member the grade does not know, at the top level, in the ``privacy`` block, in a
+  table, a column or a relationship, counts as released without noise.
 * **Otherwise P1.** The profile's statistics were released under output checks and carry no formal
   guarantee, and the reasons are listed.
 * **A generator plugin: P4 or P5.** ``P4`` is a differentially private model, with the account the

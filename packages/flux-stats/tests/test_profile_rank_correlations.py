@@ -461,7 +461,7 @@ def test_a_rank_correlation_names_format_1_4_0() -> None:
 def test_a_row_floor_names_format_1_4_0_wherever_it_is_read() -> None:
     from flux_stats.profile import _FORMS_OF_1_4_0, _Reader
 
-    assert set(_FORMS_OF_1_4_0) == {"rankCorrelation", "rowFloor"}
+    assert {"rankCorrelation", "rowFloor"} <= set(_FORMS_OF_1_4_0)
     reader = _Reader({}, first_format=False, from_1_4=False)
     for form in _FORMS_OF_1_4_0:
         with pytest.raises(FluxError) as refused:

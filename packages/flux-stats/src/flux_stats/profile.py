@@ -60,9 +60,14 @@ from typing import (
 
 from flux_stats.cliques import (
     CLIQUE_DEFINITION,
+    CLIQUE_DEFINITION_2,
+    MOST_CLIQUES,
     CliqueEntry,
     check_consistency,
+    check_table_limits,
+    edge_text,
     read_clique,
+    read_clique_2,
 )
 from flux_stats.column_metrics import (
     CATEGORY,
@@ -108,7 +113,9 @@ from flux_stats.spelling import (
 )
 
 __all__ = [
+    "BinGrouping",
     "CLIQUE_DEFINITION",
+    "CLIQUE_DEFINITION_2",
     "CONF_STATUS",
     "CliqueEntry",
     "CALENDAR_LEVELS",
@@ -143,6 +150,7 @@ __all__ = [
     "SCHEMA_URL_1_1_0",
     "SCHEMA_URL_1_2_0",
     "SCHEMA_URL_1_3_0",
+    "SCHEMA_URL_1_4_0",
     "SEVERAL",
     "STRUCTURAL_CLASSES",
     "SampleSize",
@@ -175,7 +183,8 @@ SCHEMA_URL_1_3_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-3
 
 #: Format ``1-4-0``, the ``$id`` of ``docs/spec/profile-1-4.schema.json``. It adds the rank correlations
 #: ``kendallTau/1`` and ``spearmanRho/1`` of a ``columnPairs`` entry and the ``rowFloor`` key of
-#: PROFILE-SPEC.md section 5, and changes nothing format ``1-3-0`` says. A document that holds one of
+#: PROFILE-SPEC.md section 5 and the clique ``cliqueMarginal/2``, and changes nothing format ``1-3-0``
+#: says. A document that holds one of
 #: :data:`_FORMS_OF_1_4_0` names it.
 SCHEMA_URL_1_4_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json"
 
@@ -187,6 +196,7 @@ _FORMS_OF_1_4_0: Mapping[str, str] = MappingProxyType(
     {
         "rankCorrelation": "a rank correlation (kendallTau/1 or spearmanRho/1)",
         "rowFloor": "a rowFloor",
+        "cliqueMarginal/2": "a cliqueMarginal/2",
     }
 )
 
@@ -402,6 +412,25 @@ class LinkGrouping:
 
 
 @dataclass(frozen=True)
+class BinGrouping:
+    """A column statistic grouped by the bin of another column of its table (format 1-4-0).
+
+    ``column`` is a number or timestamp column and ``bins`` its edges, strictly increasing. The
+    groups are keyed by the canonical decimal text of each bin's lower edge
+    (:func:`flux_stats.cliques.edge_text`); the records whose value of ``column`` is NULL are one
+    more group, never written.
+    """
+
+    column: str
+    bins: Tuple[Fraction, ...]
+
+    @property
+    def keys(self) -> Tuple[str, ...]:
+        """The group keys, one per bin, in order."""
+        return tuple(edge_text(edge) for edge in self.bins[:-1])
+
+
+@dataclass(frozen=True)
 class StatisticEntry:
     """One statistic of a profile and the declared shape it was formed on."""
 
@@ -427,6 +456,9 @@ class StatisticEntry:
     #: The columns the statistic is counted once per distinct value of (format 1-3-0): its counts
     #: are entities, not rows. Empty for a statistic counted per row.
     per: Tuple[str, ...] = ()
+    #: The grouping by the bins of another column (format 1-4-0); ``None`` for a statistic with
+    #: none. A statistic that holds one is grouped even though :attr:`group_by` is ``None``.
+    group_by_bins: Optional[BinGrouping] = None
     #: The ``rowFloor`` of a rank correlation (format 1-4-0), a count of at least 2; ``None`` when
     #: the statistic states none and ``N`` is the number of its records.
     row_floor: Optional[int] = None
@@ -586,8 +618,12 @@ class TableEntry:
     columns: Mapping[str, ColumnEntry]
     pairs: Tuple[PairEntry, ...]
     periods: Tuple[PeriodEntry, ...]
-    #: The noisy clique marginals of format 1-2-0, in document order.
+    #: The noisy clique marginals of format 1-2-0 (``cliqueMarginal/1``), in document order.
     cliques: Tuple[CliqueEntry, ...] = ()
+    #: The ``cliqueMarginal/2`` cliques (format 1-4-0), in document order. They are kept apart from
+    #: :attr:`cliques` so that a consumer that draws categorical cliques only does not read a
+    #: binned one as one; the agreement of the two lists is checked together.
+    cliques2: Tuple[CliqueEntry, ...] = ()
     #: The statistics of the days between two timestamp columns of the table (format 1-3-0).
     date_pairs: Tuple[DatePairEntry, ...] = ()
     #: The counts of a timestamp column by month, day of week and hour of week (format 1-3-0).
@@ -1382,6 +1418,7 @@ class _Reader:
                 statistic.identifier,
                 statistic.group_by,
                 statistic.group_by_link,
+                statistic.group_by_bins,
                 statistic.per,
                 statistic.of,
                 statistic.bins,
@@ -1684,9 +1721,17 @@ class _Reader:
             )
             for name in sorted(names)
         }
-        cliques = self._cliques(raw.get("cliques", []), where, expose_id, categorical)
-        if cliques:
-            formed = {name: _derived(name, cliques, entry) for name, entry in columns.items()}
+        cliques, cliques2 = self._cliques(
+            raw.get("cliques", []),
+            where,
+            expose_id,
+            categorical,
+            {name: domain for name, domain in domains.items() if isinstance(domain, str)},
+        )
+        if cliques or cliques2:
+            formed = {
+                name: _derived(name, cliques + cliques2, entry) for name, entry in columns.items()
+            }
             columns = {
                 name: replace(
                     entry,
@@ -1717,6 +1762,7 @@ class _Reader:
             pairs=pairs,
             periods=periods,
             cliques=cliques,
+            cliques2=cliques2,
             date_pairs=date_pairs,
             calendar=self._calendar(raw, where, expose_id, domains),
             history=self._history(raw, where, expose_id, domains),
@@ -1965,29 +2011,61 @@ class _Reader:
         return reasons
 
     def _cliques(
-        self, value: Any, where: str, expose_id: str, categorical: Set[str]
-    ) -> Tuple[CliqueEntry, ...]:
-        """A table's noisy cliques, each read, entered in the budget and checked for agreement."""
+        self,
+        value: Any,
+        where: str,
+        expose_id: str,
+        categorical: Set[str],
+        domains: Mapping[str, str],
+    ) -> Tuple[Tuple[CliqueEntry, ...], Tuple[CliqueEntry, ...]]:
+        """A table's noisy cliques, each read, entered in the budget and checked for agreement.
+
+        The ``cliqueMarginal/1`` cliques and the ``cliqueMarginal/2`` ones (format 1-4-0) come back
+        apart, each in document order, and every clique of both is checked against the others. A
+        document of format 1-4-0 holds at most :data:`flux_stats.cliques.MOST_CLIQUES` cliques in a
+        table and :data:`flux_stats.cliques.MOST_TABLE_CELLS` cells over them.
+        """
         items = _list(value, f"{where}.cliques")
         if not items:
-            return ()
+            return (), ()
         accounting = self._require_account(f"{where}.cliques")
         self._in_unit(expose_id, f"{where}.cliques", accounting)
-        cliques = tuple(
-            read_clique(
-                item,
-                f"{where}.cliques[{index}]",
-                expose_id=expose_id,
-                index=index,
-                categorical=categorical,
-                accounting=accounting,
-            )
-            for index, item in enumerate(items)
-        )
-        for clique in cliques:
+        if self.from_1_4 and len(items) > MOST_CLIQUES:
+            check_table_limits(where, len(items), 0)
+        first: List[CliqueEntry] = []
+        second: List[CliqueEntry] = []
+        cells = 0
+        for index, item in enumerate(items):
+            at = f"{where}.cliques[{index}]"
+            if isinstance(item, Mapping) and item.get("definition") == CLIQUE_DEFINITION_2:
+                self.require_1_4_0("cliqueMarginal/2", f"{at}.definition")
+                clique = read_clique_2(
+                    item,
+                    at,
+                    expose_id=expose_id,
+                    index=index,
+                    domains=domains,
+                    accounting=accounting,
+                )
+                second.append(clique)
+            else:
+                clique = read_clique(
+                    item,
+                    at,
+                    expose_id=expose_id,
+                    index=index,
+                    categorical=categorical,
+                    accounting=accounting,
+                )
+                first.append(clique)
+            cells += clique.cell_count
+            if self.from_1_4:
+                check_table_limits(where, len(items), cells)
+        read = sorted(first + second, key=lambda clique: clique.index)
+        for clique in read:
             self.parts.append((f"{where}.cliques[{clique.index}]", clique.noise))
-        check_consistency(cliques)
-        return cliques
+        check_consistency(read)
+        return tuple(first), tuple(second)
 
     def _pair(self, value: Any, where: str, ordered: Set[str], expose_id: str) -> PairEntry:
         raw = _mapping(value, where, required=("columns", "statistics"))
@@ -2297,21 +2375,25 @@ class _Reader:
 def _derived(
     name: str, cliques: Tuple[CliqueEntry, ...], entry: ColumnEntry
 ) -> Tuple[Tuple[StatisticEntry, ...], Tuple[StatisticEntry, ...]]:
-    """The level histograms of column *name* that its cliques answer, as the reader forms them.
+    """The histograms of column *name* that its cliques answer, as the reader forms them.
 
-    Summing a clique onto one column gives that column's ungrouped level histogram, and onto two
-    gives a level histogram grouped by the other (a two-way count table). Each is a post-processing
-    of the noisy counts: the point estimate of the summed values (one group of the whole, or one per
-    level of the other column), with the variance of a sum of independent cells. A statistic the
-    column already carries in the document is not added to its statistics: the one formed is kept
-    apart (:attr:`ColumnEntry.clique_statistics`), because the draw of a column in a clique rests on
-    it. One pair is formed once, from the first clique that holds it. The result is the statistics
-    to add and the ones kept apart.
+    Summing a clique onto one column gives that column's ungrouped histogram, and onto two gives a
+    histogram grouped by the other (a two-way count table). A category column gives a
+    ``levelHistogram/1``. A number or timestamp column of a ``cliqueMarginal/2`` gives a
+    ``marginalHistogram/1`` over the clique's bins, grouped by a category column of the clique, or,
+    for two binned columns, the first in the clique's order grouped by the bins of the later one
+    (``groupByBins``). Each is a post-processing of the noisy counts: the point estimate of the
+    summed values (one group of the whole, or one per level or bin of the other column), with the
+    variance of a sum of independent cells. A statistic the column already carries in the document
+    is not added to its statistics: the one formed is kept apart
+    (:attr:`ColumnEntry.clique_statistics`), because the draw of a column in a clique rests on it.
+    One pair is formed once, from the first clique that holds it. The result is the statistics to
+    add and the ones kept apart.
     """
-    from flux_stats.definitions import LEVEL_HISTOGRAM
+    from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM
 
     have = {
-        (item.identifier, item.group_by, item.levels)
+        (item.identifier, item.group_by, item.group_by_bins, item.levels, item.bins)
         for item in entry.statistics
         if item.group_by_link is None and not item.per
     }
@@ -2322,7 +2404,16 @@ def _derived(
         if name not in clique.columns:
             continue
         levels = clique.levels_of(name)
-        others: List[Optional[str]] = [None, *(c for c in clique.columns if c != name)]
+        edges = clique.edges_of(name)
+        position = clique.columns.index(name)
+        others: List[Optional[str]] = [None]
+        for neighbour in clique.columns:
+            if neighbour == name:
+                continue
+            if not clique.binned(neighbour):
+                others.append(neighbour)
+            elif edges and clique.columns.index(neighbour) > position:
+                others.append(neighbour)
         for other in others:
             if other in seen:
                 continue
@@ -2335,29 +2426,43 @@ def _derived(
             for key in keys:
                 cells = [table[(level,) if other is None else (key, level)] for level in levels]
                 estimate = point_estimate(cells)
+                held = {"bin_counts" if edges else "level_counts": estimate.counts}
                 groups.append(
                     ProfileGroup(
                         key=key,
                         status=FREE,
                         statistic=GroupStatistic(
-                            group=key, k=estimate.records, level_counts=estimate.counts
+                            group=key, k=estimate.records, **held  # type: ignore[arg-type]
                         ),
                         noisy=tuple(cells),
                     )
                 )
-            (shadowed if (LEVEL_HISTOGRAM.identifier, other, levels) in have else formed).append(
+            by_bins = (
+                BinGrouping(column=other, bins=clique.edges_of(other))
+                if other is not None and clique.binned(other)
+                else None
+            )
+            group_by = None if by_bins is not None else other
+            identifier = (MARGINAL_HISTOGRAM if edges else LEVEL_HISTOGRAM).identifier
+            (
+                shadowed
+                if (identifier, group_by, by_bins, levels if not edges else (), edges) in have
+                else formed
+            ).append(
                 StatisticEntry(
-                    definition=LEVEL_HISTOGRAM,
+                    definition=MARGINAL_HISTOGRAM if edges else LEVEL_HISTOGRAM,
                     sample_size=SampleSize(
                         minimum=min(g.statistic.k for g in groups if g.statistic)
                     ),
                     disclosure="",
                     groups=tuple(groups),
-                    group_by=other,
-                    levels=levels,
+                    group_by=group_by,
+                    levels=() if edges else levels,
+                    bins=edges,
                     noise=clique.noise,
                     cell_variance=clique.noise.variance * summed,
                     derived=True,
+                    group_by_bins=by_bins,
                 )
             )
     return tuple(formed), tuple(shadowed)

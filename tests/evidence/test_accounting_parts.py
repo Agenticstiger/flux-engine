@@ -8,7 +8,7 @@ The grade used to list the noisy parts of a profile by hand, so a statistic the 
 (a rank correlation, say) was missing from the spent figure, and a profile whose only noisy
 statistics were those graded P1 with "an account spent by nothing". It now counts the reader's own
 ``parts``. These tests walk the document generically and check that every ``noise`` block is one part,
-whichever place it sits in.
+whichever place it sits in, and that a ``cliqueMarginal/2`` is one part like any clique.
 """
 
 from __future__ import annotations
@@ -115,6 +115,15 @@ def _everywhere() -> Dict[str, Any]:
             "noise": copy.deepcopy(NOISE),
         }
     ]
+    table["cliques"].append(
+        {
+            "definition": "cliqueMarginal/2",
+            "columns": ["plan", "usage"],
+            "domains": [{"levels": ["basic", "pro"]}, {"bins": ["0", "50", "100"]}],
+            "noisyCounts": ["10", "20", "30", "40"],
+            "noise": copy.deepcopy(NOISE),
+        }
+    )
     table["calendar"] = [{"column": "joined_at", "month": _histogram(MONTHS)}]
     table["datePairs"] = [
         {
@@ -136,6 +145,7 @@ FIXTURES = {
     "the 1-4-0 example, with two rank correlations": lambda: _load(
         SPEC / "profile-1-4-example.json"
     ),
+    "the 1-4-0 example of cliques": lambda: _load(SPEC / "profile-1-4-cliques-example.json"),
     "every place a noise block sits": _everywhere,
 }
 
@@ -154,11 +164,18 @@ def test_every_noise_block_is_one_part_of_the_reader_and_of_the_account(name: st
 
 def test_the_everywhere_profile_holds_a_part_in_every_kind_of_place() -> None:
     places = [where for where, _ in parse_profile(_everywhere()).parts]
-    for section in ("columns.region", "columns.plan", "columns.usage", "cliques[0]", "calendar"):
+    for section in (
+        "columns.region",
+        "columns.plan",
+        "columns.usage",
+        "cliques[0]",
+        "cliques[1]",
+        "calendar",
+    ):
         assert any(f".{section}" in where for where in places), section
     assert sum(".columnPairs[" in where for where in places) == 3
     assert any(".datePairs[0]" in where for where in places)
-    assert len(places) == 9
+    assert len(places) == 10
 
 
 def test_the_spent_figure_adds_the_share_of_every_part_including_a_rank_correlation() -> None:
@@ -181,10 +198,10 @@ def test_a_profile_whose_only_noisy_statistics_are_rank_correlations_is_p3() -> 
 
 def test_the_spent_figure_of_every_place_adds_up() -> None:
     accounting = accounting_of(_everywhere())
-    assert accounting is not None and accounting.parts == 9
-    # the example's 0.1362, five blocks of 0.05 (two histograms, a clique, a calendar, an order)
+    assert accounting is not None and accounting.parts == 10
+    # the example's 0.1362, six blocks of 0.05 (two histograms, two cliques, a calendar, an order)
     # and the second pair's Kendall's 0.0162
-    assert accounting.spent == {"rho": "0.4024"}
+    assert accounting.spent == {"rho": "0.4524"}
 
 
 def test_a_profile_the_reader_refuses_has_no_parts_and_is_not_p3() -> None:
