@@ -642,6 +642,52 @@ def _declared_null_fractions(resolved: ResolvedEmit) -> Dict[str, Any]:
     }
 
 
+def _is_zero_share(declared: Any) -> bool:
+    """Whether a declared ``nullFraction`` is zero, which no cut can lower."""
+    try:
+        return Fraction(str(declared)) == 0
+    except (ValueError, ZeroDivisionError):
+        return False
+
+
+def period_end_null_notes(resolved: Sequence[ResolvedEmit]) -> Tuple[str, ...]:
+    """One sentence for each period end that declares a ``nullFraction`` under a parent that can close.
+
+    A period's end is cut at a closed parent's end (ADR 0024 section 5), so it is NULL only under a
+    parent that is open, and the share generated can be lower than the share declared. The sentence
+    names the emit, the column and the declared share. It is advice only: nothing here changes how a
+    value is drawn, and the plan's document and digests do not carry it. A period whose parent has no
+    end, or whose end column declares no ``nullFraction`` or a zero one, gets none.
+    """
+    held = {(str(emit.contract_path), emit.expose_id): emit for emit in resolved}
+    notes: List[str] = []
+    for emit in resolved:
+        own = lifetime_entries_of(emit.extension, emit.expose_id)[:1]
+        end = own[0].end if own else None
+        declared = _declared_null_fractions(emit).get(nfc(end)) if end is not None else None
+        if end is None or declared is None or _is_zero_share(declared):
+            continue
+        for entry in within_entries_of(emit.extension, emit.expose_id):
+            if not entry.lifetime:
+                continue
+            try:
+                parent_id = _targets_along(emit, entry.relationship)[-1]
+            except FluxError:  # pragma: no cover - the plan refused the relationship already
+                continue
+            parent = held.get((str(emit.contract_path), parent_id))
+            lifetime = lifetime_entries_of(parent.extension, parent.expose_id)[:1] if parent else ()
+            if not lifetime or lifetime[0].end is None:
+                continue
+            notes.append(
+                f"note: {emit.expose_id}.{end} declares nullFraction {declared}, and it is a period "
+                f"end within {parent_id}, which can close; an end is NULL only under a parent that "
+                "is open, because it is cut at a closed parent's end (ADR 0024 section 5), so the "
+                f"share generated can be lower than {declared}"
+            )
+            break
+    return tuple(notes)
+
+
 def counted_relationships(
     simulation: Mapping[str, Any], *, where: str
 ) -> FrozenSet[Tuple[str, str]]:

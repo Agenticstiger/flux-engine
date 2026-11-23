@@ -53,6 +53,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - `validate` refuses an `allocation: exact` on a key, a `nullFraction` on a required column and a table that declares no rows, with the codes `plan` gives.
 - `verify` accepts a correct run whose string link sentinel is written in a form other than NFC: the sentinel is compared in NFC, like the cells the writer emits.
 - The Population section of EVIDENCE.md keeps the letters and numbers of any script in a label, and a label that needed a replacement or a cut ends in a short stable hash of its text, so two different labels never print the same.
+- `plan` and `run` say on stderr, and `plan --json` lists under `period_end_notes`, when a period end declares a `nullFraction` under a parent that can close: the end is cut at a closed parent's end, so the generated NULL share can be lower than declared. No digest moves.
 
 ## Unreleased
 

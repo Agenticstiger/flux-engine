@@ -263,7 +263,7 @@ other entry is malformed (`FLX-3105`).
 - A period. For `lifetime: true` the start is drawn as above, and the end is drawn as the lifetime says, then cut at
   `p.end`: when `p` has ended, an end after `p.end`, or an open one, becomes `p.end`, so a child ends with its parent. An
   end that this cut puts below the end column's declared minimum is `infeasible`: the row keeps the end its own cell drew,
-  inside the range, and is counted for the period entry whose parent ended first. Past the window an end follows the lifetime's `endPastWindow` only while `p` is still active there. The order is
+  inside the range, and is counted for the period entry whose parent ended first. Past the window an end follows the lifetime's `endPastWindow` only while `p` is still active there. Since an end is cut at a closed parent's end, a `nullFraction` declared on the end column is met only among rows whose parent is open, and the share generated overall can be lower than the declared one; `plan` and `run` note it on stderr (ADR 0024, amendment of 2026-11-23). The order is
   fixed: the end is drawn without the window rule (the duration's end, NULL for its `open` slot, or the end column's own
   value); on a row whose parent has ended it is cut at the parent's end, in the child's units; and only where no parent
   has ended does an end after the window become NULL under `open`. The cut draws nothing and moves no position, the

@@ -288,7 +288,7 @@ within:
   exposure: true
 ```
 
-The first entry is a period: `lifetime: true` says the account's own lifetime, its start and its end, lies inside the customer's. `init` writes it when the child column starts the child's own lifetime. A child that ends after its parent ends is cut at the parent's end. The second entry puts a single date, `issued_on`, inside the account's lifetime.
+The first entry is a period: `lifetime: true` says the account's own lifetime, its start and its end, lies inside the customer's. `init` writes it when the child column starts the child's own lifetime. A child that ends after its parent ends is cut at the parent's end, so a child's end is NULL only under a parent that is still open: a `nullFraction` declared on the child's end column is met among the rows under open parents, and the run generates a lower share overall. `plan` and `run` print a note on stderr when a period's end declares one under a parent that can close. The second entry puts a single date, `issued_on`, inside the account's lifetime.
 
 The `target` is the percent of rows that may break the fact, and `init` takes it from the pair's `order`: 50 of the 2400 invoices are dated before their account opened, so 2.083% of the rows break the fact. An invoice on the same day as its account's start does not break it. The share of dates after the parent's end is added when the lifetime has an end. An entry with no `target`, as the account's, is enforced: one row that breaks it fails the run. An entry with a target is checked against it.
 

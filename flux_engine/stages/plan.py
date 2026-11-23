@@ -704,6 +704,10 @@ def plan_with_result(
         # apply to commit.
         discard_stage(layout)
 
+    period_notes = _pipeline.period_end_null_notes(
+        [outcome.resolved for outcome in result.emits]
+        + [outcome.resolved for outcome in result.hidden_emits]
+    )
     return (
         StageResult(
             stage="plan",
@@ -739,7 +743,9 @@ def plan_with_result(
                 **({"profile_digest": pinned.digest.value} if pinned is not None else {}),
                 **({"parameter_register": register.as_document()} if register is not None else {}),
                 **({"consumer_queries_checked": False} if unchecked else {}),
+                **({"period_end_notes": list(period_notes)} if period_notes else {}),
             },
+            stderr="\n".join(period_notes),
             stdout="\n".join(
                 [
                     _plan_stdout(
