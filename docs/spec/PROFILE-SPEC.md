@@ -839,7 +839,12 @@ two-way marginals. A column of a `cliqueMarginal/1` is categorical. A number col
   its groups (§3).
 - A record counts when every column of the clique is known.
 - A clique holds at most 1,000,000 cells. A document of this format holds at most 1,024 cliques in a table and
-  10,000,000 cells over a table's cliques, checked before the counts are read.
+  10,000,000 cells over a table's cliques, checked before the counts are read. The work a table asks of the reader
+  is limited too: the sum over its cliques of the clique's cells times the number of marginals the reader sums it
+  onto (each column, each two-way table it forms, and each set of shared columns the agreement check compares),
+  plus, for each set of shared columns, its cells for every clique compared on it, is at most 40,000,000. A
+  table over it is refused, from its structure alone and before any count is summed. A clique of 32 columns sums
+  onto 528 marginals, so one of 75,000 cells is near the limit.
 - The reader forms the one-way and two-way marginals as above, now with bins: a number column's one-way marginal
   is a `marginalHistogram/1` over the clique's bins; a number and a category give a `marginalHistogram/1` of the
   number grouped by the category; two numbers give a `marginalHistogram/1` of the first in the clique's order

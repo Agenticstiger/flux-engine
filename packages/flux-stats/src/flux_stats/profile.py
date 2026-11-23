@@ -1919,6 +1919,8 @@ class _Reader:
             formed = {
                 name: _derived(name, cliques + cliques2, entry) for name, entry in columns.items()
             }
+            for clique in cliques + cliques2:
+                clique.clear_sums()
             columns = {
                 name: replace(
                     entry,
@@ -2252,7 +2254,7 @@ class _Reader:
         read = sorted(first + second, key=lambda clique: clique.index)
         for clique in read:
             self.parts.append((f"{where}.cliques[{clique.index}]", clique.noise))
-        check_consistency(read)
+        check_consistency(read, work_where=where if self.from_1_4 else None)
         return tuple(first), tuple(second)
 
     def _clique_selection(

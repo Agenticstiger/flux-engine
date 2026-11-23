@@ -23,7 +23,8 @@ what was done.
   does.
 - **Limits.** At most 1,024 cliques in a table; at most 32 columns and 1,000,000 cells in a clique; at most
   10,000,000 cells over the cliques of a table. AIM's default model size of 80 MB, at eight bytes a cell, keeps a
-  model within the last.
+  model within the last. The reader also limits the work a table asks of it, from the structure alone: the cells of
+  each clique times the marginals it sums them onto, at most 40,000,000 over the table (PROFILE-SPEC.md section 5a).
 
 ## 2. What the profile states: `cliqueSelection`
 

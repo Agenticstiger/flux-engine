@@ -21,10 +21,11 @@ released noisily, then made consistent. Nothing of that code is used.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from fractions import Fraction
 from itertools import product
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple
 
 from flux_stats.column_metrics import CATEGORY
 from flux_stats.definitions import level_order
@@ -40,6 +41,7 @@ __all__ = [
     "MOST_CLIQUES",
     "MOST_CLIQUE_COLUMNS",
     "MOST_TABLE_CELLS",
+    "MOST_TABLE_WORK",
     "check_consistency",
     "check_table_limits",
     "edge_text",
@@ -65,6 +67,16 @@ MOST_CELLS = 1_000_000
 MOST_CLIQUES = 1_024
 MOST_CLIQUE_COLUMNS = 32
 MOST_TABLE_CELLS = 10_000_000
+
+#: The widest common denominator, in bits, that a clique's counts are summed over as integers.
+_MOST_SCALE_BITS = 256
+
+#: The most work one table of format 1-4-0 may ask of the reader: the sum over its cliques of the
+#: cells of the clique times the number of marginals the reader sums it onto (the one-way and
+#: two-way ones it forms, and the ones the agreement check compares), plus, for each marginal two
+#: or more cliques are compared on, the cells of that marginal for each of them. It follows the
+#: document's structure alone, never its counts.
+MOST_TABLE_WORK = 40_000_000
 
 #: How a table's cliques were chosen (PROFILE-SPEC.md section 5a): by AIM or MST as private-pgm
 #: implements them, named before the data was read, or by another method.
@@ -95,6 +107,10 @@ class CliqueEntry:
     #: column :attr:`levels` holds the canonical text of each bin's lower edge, so a cell is named
     #: by the same keys a ``groupByBins`` statistic writes.
     edges: Tuple[Tuple[Fraction, ...], ...] = ()
+    #: The marginals :meth:`prime` kept, by the sorted positions of the columns they sum onto.
+    _sums: Dict[Tuple[int, ...], Dict[Tuple[str, ...], Fraction]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
     @property
     def label(self) -> str:
@@ -107,13 +123,70 @@ class CliqueEntry:
         return list(zip(product(*self.levels), self.noisy, strict=True))
 
     def marginal(self, keep: Sequence[str]) -> Dict[Tuple[str, ...], Fraction]:
-        """The noisy counts summed onto the columns *keep*, keyed by their levels in that order."""
+        """The noisy counts summed onto the columns *keep*, keyed by their levels in that order.
+
+        A marginal the clique was primed for (:meth:`prime`) is read from what the one pass kept;
+        any other is summed on the spot and not kept.
+        """
         positions = [self.columns.index(name) for name in keep]
-        out: Dict[Tuple[str, ...], Fraction] = {}
-        for combination, value in self.cells():
-            key = tuple(combination[position] for position in positions)
-            out[key] = out.get(key, Fraction(0)) + value
-        return out
+        wanted = tuple(sorted(positions))
+        sums = self._sums.get(wanted) if len(set(positions)) == len(positions) else None
+        if sums is None:
+            return self._summed([tuple(positions)])[0]
+        if positions == list(wanted):
+            return sums
+        order = [wanted.index(position) for position in positions]
+        return {tuple(key[at] for at in order): value for key, value in sums.items()}
+
+    def prime(self, sets: Sequence[Tuple[int, ...]]) -> None:
+        """Sum the clique onto every set of column positions (each sorted) in one pass over its cells."""
+        todo = [item for item in dict.fromkeys(sets) if item not in self._sums]
+        if todo:
+            self._sums.update(zip(todo, self._summed(todo), strict=True))
+
+    def clear_sums(self) -> None:
+        """Forget the marginals :meth:`prime` kept."""
+        self._sums.clear()
+
+    def _summed(self, sets: Sequence[Tuple[int, ...]]) -> List[Dict[Tuple[str, ...], Fraction]]:
+        """One pass over the cells, summing onto each tuple of positions, keyed in that order.
+
+        The counts are summed as integers over their common denominator, and each sum is made a
+        fraction once; a common denominator that would be large is not used, and the fractions are
+        added instead. Either way every sum is exact.
+        """
+        scale = 1
+        for denominator in {value.denominator for value in self.noisy}:
+            scale = scale * denominator // math.gcd(scale, denominator)
+            if scale.bit_length() > _MOST_SCALE_BITS:
+                scale = 0
+                break
+        if scale:
+            values: Sequence[Any] = [
+                value.numerator * (scale // value.denominator) for value in self.noisy
+            ]
+            zero: Any = 0
+        else:
+            values, zero = self.noisy, Fraction(0)
+        getters = [_picker(item) if len(item) > 1 else None for item in sets]
+        tables: List[Dict[Any, Any]] = [{} for _ in sets]
+        for combination, value in zip(product(*self.levels), values, strict=True):
+            for item, getter, table in zip(sets, getters, tables, strict=True):
+                key: Any
+                if getter is not None:
+                    key = getter(combination)
+                elif item:
+                    key = combination[item[0]]
+                else:
+                    key = ()
+                table[key] = table.get(key, zero) + value
+        return [
+            {
+                (key,) if len(item) == 1 else key: Fraction(total, scale) if scale else total
+                for key, total in table.items()
+            }
+            for item, table in zip(sets, tables, strict=True)
+        ]
 
     def levels_of(self, column: str) -> Tuple[str, ...]:
         return self.levels[self.columns.index(column)]
@@ -393,7 +466,106 @@ def read_clique_selection(value: Any, where: str, *, accounting: Accounting) -> 
     )
 
 
-def check_consistency(cliques: Sequence[CliqueEntry]) -> None:
+def _picker(item: Tuple[int, ...]) -> Callable[[Tuple[str, ...]], Tuple[str, ...]]:
+    """A function taking the levels of a cell at the positions *item*, as a tuple."""
+    if len(item) == 2:
+        first, second = item
+        return lambda cell: (cell[first], cell[second])
+    return lambda cell: tuple([cell[position] for position in item])
+
+
+def derived_sets(clique: CliqueEntry) -> List[Tuple[int, ...]]:
+    """The sets of column positions (each sorted) the reader sums *clique* onto to form its statistics.
+
+    Every column on its own, and every pair of columns that gives a two-way table: two categories,
+    a category and a binned column, and two binned columns whose first (in the clique's order) is
+    the one grouped.
+    """
+    found: Dict[Tuple[int, ...], None] = {}
+    for position, name in enumerate(clique.columns):
+        found[(position,)] = None
+        edges = clique.edges_of(name)
+        for other, neighbour in enumerate(clique.columns):
+            if other == position:
+                continue
+            if not clique.binned(neighbour) or (edges and other > position):
+                found[(min(position, other), max(position, other))] = None
+    return list(found)
+
+
+def _agreement(cliques: Sequence[CliqueEntry]) -> Dict[FrozenSet[str], List[CliqueEntry]]:
+    """Refuse two cliques over one set of columns or listing different levels or edges of one column.
+
+    Returns, for each set of columns that two cliques share, the cliques that are one end of such a
+    pair. Equal marginals are equal to each other, so each set needs every one of its cliques
+    compared with the first, not each pair.
+    """
+    whole: Dict[FrozenSet[str], CliqueEntry] = {}
+    held: List[FrozenSet[str]] = []
+    for clique in cliques:
+        names = frozenset(clique.columns)
+        first = whole.setdefault(names, clique)
+        if first is not clique:
+            raise refuse(
+                "profile.tables", f"{first.label} and {clique.label} are over the same columns"
+            )
+        held.append(names)
+    firsts: Dict[str, CliqueEntry] = {}
+    for clique in cliques:
+        for column in clique.columns:
+            first = firsts.setdefault(column, clique)
+            if first is clique:
+                continue
+            if first.levels_of(column) != clique.levels_of(column):
+                raise refuse(
+                    "profile.tables",
+                    f"{first.label} and {clique.label} list different levels of column {column!r}",
+                )
+            if first.edges_of(column) != clique.edges_of(column):
+                raise refuse(
+                    "profile.tables",
+                    f"{first.label} and {clique.label} list different bin edges of column "
+                    f"{column!r}",
+                )
+    ends: Dict[FrozenSet[str], Dict[int, CliqueEntry]] = {}
+    for i, names in enumerate(held):
+        for j in range(i + 1, len(held)):
+            shared = names & held[j]
+            if shared:
+                members = ends.setdefault(shared, {})
+                members[i] = cliques[i]
+                members[j] = cliques[j]
+    return {shared: list(members.values()) for shared, members in ends.items()}
+
+
+def _sums_wanted(
+    cliques: Sequence[CliqueEntry], agreement: Mapping[FrozenSet[str], List[CliqueEntry]]
+) -> Dict[int, Dict[Tuple[int, ...], None]]:
+    """For each clique (by identity) the sets of positions it is summed onto, in order, once each."""
+    wanted: Dict[int, Dict[Tuple[int, ...], None]] = {
+        id(clique): dict.fromkeys(derived_sets(clique)) for clique in cliques
+    }
+    for shared, members in agreement.items():
+        for clique in members:
+            wanted[id(clique)][tuple(sorted(clique.columns.index(name) for name in shared))] = None
+    return wanted
+
+
+def table_work(
+    cliques: Sequence[CliqueEntry], agreement: Mapping[FrozenSet[str], List[CliqueEntry]]
+) -> int:
+    """The work :data:`MOST_TABLE_WORK` limits, from the structure of the cliques alone."""
+    wanted = _sums_wanted(cliques, agreement)
+    work = sum(clique.cell_count * len(wanted[id(clique)]) for clique in cliques)
+    for shared, members in agreement.items():
+        size = 1
+        for name in shared:
+            size *= len(members[0].levels_of(name))
+        work += size * len(members)
+    return work
+
+
+def check_consistency(cliques: Sequence[CliqueEntry], *, work_where: Optional[str] = None) -> None:
     """Refuse (``FLX-5036``) two cliques that disagree on the columns they share, naming both.
 
     Two cliques of one table that share columns must list the same levels (or the same bin edges)
@@ -401,37 +573,37 @@ def check_consistency(cliques: Sequence[CliqueEntry]) -> None:
     comparison is exact (decimal strings read as rationals), and a pair that shares no column is
     not compared. Two cliques over the same set of columns are refused too: one table of a joint
     is released once.
+
+    Each clique is summed onto everything the table asks of it (the marginals compared and the
+    ones the reader forms its statistics from) in one pass, and the marginals are kept for the
+    caller to read through :meth:`CliqueEntry.marginal` and let go with
+    :meth:`CliqueEntry.clear_sums`. With *work_where* (a document of format 1-4-0) a table whose
+    structure asks for more than :data:`MOST_TABLE_WORK` is refused first, before any count is
+    summed.
     """
-    for first, second in _pairs(cliques):
-        if set(first.columns) == set(second.columns):
-            raise refuse(
-                "profile.tables",
-                f"{first.label} and {second.label} are over the same columns",
-            )
-        shared = sorted(set(first.columns) & set(second.columns))
-        if not shared:
-            continue
-        for column in shared:
-            if first.levels_of(column) != second.levels_of(column):
+    agreement = _agreement(cliques)
+    wanted = _sums_wanted(cliques, agreement)
+    if work_where is not None:
+        check_table_work(work_where, table_work(cliques, agreement))
+    for clique in cliques:
+        clique.prime(list(wanted[id(clique)]))
+    for shared, members in agreement.items():
+        names = sorted(shared)
+        first = members[0]
+        base = first.marginal(names)
+        for clique in members[1:]:
+            if clique.marginal(names) != base:
                 raise refuse(
                     "profile.tables",
-                    f"{first.label} and {second.label} list different levels of column {column!r}",
+                    f"{first.label} and {clique.label} disagree on the marginal of "
+                    f"{', '.join(names)}",
                 )
-            if first.edges_of(column) != second.edges_of(column):
-                raise refuse(
-                    "profile.tables",
-                    f"{first.label} and {second.label} list different bin edges of column "
-                    f"{column!r}",
-                )
-        if first.marginal(shared) != second.marginal(shared):
-            raise refuse(
-                "profile.tables",
-                f"{first.label} and {second.label} disagree on the marginal of "
-                f"{', '.join(shared)}",
-            )
 
 
-def _pairs(cliques: Sequence[CliqueEntry]) -> List[Tuple[CliqueEntry, CliqueEntry]]:
-    return [
-        (cliques[i], cliques[j]) for i in range(len(cliques)) for j in range(i + 1, len(cliques))
-    ]
+def check_table_work(where: str, work: int) -> None:
+    """Refuse (``FLX-5036``) a table of format 1-4-0 whose cliques ask for too much work."""
+    if work > MOST_TABLE_WORK:
+        raise refuse(
+            f"{where}.cliques",
+            f"a table's cliques ask for more than {MOST_TABLE_WORK} cell visits to sum and compare",
+        )
