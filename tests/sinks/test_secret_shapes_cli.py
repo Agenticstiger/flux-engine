@@ -176,8 +176,16 @@ def test_the_cli_shows_nothing_after_the_scheme_when_a_slash_precedes_an_at_sign
         ("parquet", "batch-size"),
         ("parquet", "rows-per-file"),
         ("parquet", "verify"),
+        ("parquet", "request-timeout"),
+        ("parquet", "connect-timeout"),
+        ("parquet", "max-retries"),
+        ("parquet", "retry-timeout"),
         ("arrow-ipc", "compression"),
         ("arrow-ipc", "batch-size"),
+        ("arrow-ipc", "request-timeout"),
+        ("arrow-ipc", "connect-timeout"),
+        ("arrow-ipc", "max-retries"),
+        ("arrow-ipc", "retry-timeout"),
         ("delta", "mode"),
         ("adbc:sqlite", "mode"),
         ("adbc:sqlite", "verify"),
@@ -197,6 +205,28 @@ def test_the_cli_refuses_a_bad_option_value_naming_the_option_only(
     )
     assert result.returncode != 0
     assert option in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("sink", ["parquet", "arrow-ipc"])
+@pytest.mark.parametrize(
+    "option", ["request-timeout", "connect-timeout", "max-retries", "retry-timeout"]
+)
+@pytest.mark.parametrize("value", [SECRET, "99999"])
+def test_the_cli_refuses_a_bad_tuning_value_for_an_object_store_target_naming_the_option_only(
+    tmp_path: Path, sink: str, option: str, value: str
+) -> None:
+    """The object URL is refused before any store is built, so no test opens a connection.
+
+    ``value`` is a secret for the first case and a number out of range for the other, so a message
+    that echoes the value would print them, and the test holds the message to the option's name.
+    """
+    result = _run_and_find_no_secret(
+        tmp_path, "--sink", f"{sink}:s3://bkt/pfx", "--sink-opt", f"{option}={value}"
+    )
+    printed = result.stdout + result.stderr
+    assert result.returncode != 0 and "FLX-3504" in printed
+    assert option in printed
+    assert "got " not in printed, printed
 
 
 # -- 6. a library echoes a secret percent-encoded or quoted --------------------------

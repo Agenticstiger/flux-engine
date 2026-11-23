@@ -113,6 +113,9 @@ class SinkReceipt:
     files: Tuple[FileEntry, ...] = ()
     table: Optional[Union[str, Tuple[str, ...]]] = None
     writer: Mapping[str, Any] = field(default_factory=dict)
+    #: Tells apart two targets that print alike, such as two databases named by the same
+    #: environment variable: a short digest of the target after its credentials are removed.
+    target_id: Optional[str] = None
 
     def as_document(self) -> Dict[str, Any]:
         """The receipt as a JSON-ready document, keys in a stable order."""
@@ -128,6 +131,8 @@ class SinkReceipt:
         }
         if self.files:
             document["files"] = [entry.as_document() for entry in self.files]
+        if self.target_id is not None:
+            document["targetId"] = self.target_id
         if self.table is not None:
             document["table"] = list(self.table) if isinstance(self.table, tuple) else self.table
         return document

@@ -499,3 +499,46 @@ def test_the_remedy_names_steps_that_lead_out_of_the_refusal_not_back_into_it(
     # the step the old text named does lead back: the bundle pins the profile
     without = plan(bundle, state_dir=tmp_path / "state-without")
     assert without.error_code == "FLX-3109" and "pins profile" in without.stderr
+
+
+def test_a_pinned_run_whose_plan_records_p0_is_read_as_p1() -> None:
+    from flux_engine.stages._grades import recorded_grade
+
+    assert recorded_grade({"privacyGrade": "P0"}, pinned=True) is Pattern.P1
+    assert recorded_grade({"privacyGrade": "P0"}, pinned=False) is Pattern.P0
+
+
+def test_a_pinned_run_records_only_what_a_pinned_run_can_be_graded() -> None:
+    from flux_engine.stages._grades import recorded_grade
+
+    for held in ("P1", "P3", "P5"):  # the profile's P1 or P3, or a generator's weaker P5
+        assert recorded_grade({"privacyGrade": held}, pinned=True) is Pattern(held)
+    for stronger in ("P0", "P4"):
+        assert recorded_grade({"privacyGrade": stronger}, pinned=True) is Pattern.P1
+
+
+@pytest.mark.parametrize("stronger", ["P0", "P4"])
+def test_a_hand_edited_plan_that_records_p0_does_not_pass_the_floor_of_a_pinned_run(
+    tmp_path: Path, stronger: str
+) -> None:
+    from flux_engine.core.digest import build_plan_digest
+
+    bundle = _bundle(tmp_path, "pii")
+    state = tmp_path / "state"
+    planned = _planned(bundle, tmp_path)
+    run_id = planned.artifacts["run_id"]
+    path = state / "runs" / run_id / "plan.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document.pop("planDigest")
+    document["privacyGrade"] = stronger
+    # the forger also rewrites the digest so that the plan agrees with itself
+    document["planDigest"] = build_plan_digest(document).ref.value
+    path.write_text(json.dumps(document), encoding="utf-8")
+    # ... and renames the run directory, which is named after the digest
+    forged_id = document["planDigest"].split(":")[1][:16]
+    path.parent.rename(state / "runs" / forged_id)
+    run_id = forged_id
+    refused = apply(bundle, run_id=run_id, state_dir=state)
+    assert refused.exit_code == 1 and refused.error_code == "FLX-4005", refused.stderr
+    assert "needs P3 or stronger, and the run's grade is P1" in refused.stderr
+    assert _committed_files(state, run_id) == []

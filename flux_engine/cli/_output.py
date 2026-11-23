@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import shlex
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -23,21 +24,31 @@ from flux_engine.core.credentials import names_environment_variable
 from flux_engine.core.target_label import WITHHELD, target_label
 from flux_engine.sinks._options import PLAIN_OPTIONS
 
+#: The status of a command whose work a closed pipe cut short: 128 plus SIGPIPE's 13.
+BROKEN_PIPE_EXIT = 141
 
-def _print_result(result: Any, *, as_json: bool, next_steps: Sequence[str] = ()) -> int:
-    """Print one :class:`~flux_engine.api.stages.StageResult` and return its exit code.
 
-    The ``--json`` envelope is the same shape for every command: ``stage``,
-    ``exitCode`` and ``ok`` so a caller never has to infer which command
-    produced a document or guess its success from a bare exit code;
-    ``artifacts``, the stage's own structured output; and ``error``,
-    always present (``null`` on success) and always carrying a ``message``
-    alongside the ``code`` -- a caller that wants the reason a stage
-    failed never has to fall back to regexing stderr, and stderr is
-    always still printed too so a human reading the terminal is not left
-    staring at a JSON blob for the one line that matters.
+def _detach_stdout() -> None:
+    """Point stdout at the null device after the reader of it has gone.
+
+    The pattern is the "Note on SIGPIPE" in the ``signal`` module's documentation: without
+    it the interpreter's own flush at shutdown raises ``BrokenPipeError`` a second time and
+    turns a quiet exit into a traceback. SIGPIPE keeps the interpreter's default of being
+    ignored, so a write to the closed pipe raises instead of killing the process.
     """
-    artifacts = _json_safe(dict(result.artifacts))
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, sys.stdout.fileno())
+        finally:
+            os.close(devnull)
+    except (OSError, ValueError, AttributeError):
+        # A stdout with no descriptor (a test double, a closed stream) has nothing to redirect.
+        pass
+
+
+def _result_text(result: Any, *, as_json: bool) -> Optional[str]:
+    """What a result prints on stdout: its ``--json`` envelope, or its own stdout."""
     if as_json:
         error: Optional[Dict[str, Any]] = None
         if not result.success:
@@ -54,12 +65,46 @@ def _print_result(result: Any, *, as_json: bool, next_steps: Sequence[str] = ())
             "stage": result.stage,
             "exitCode": result.exit_code,
             "ok": result.success,
-            "artifacts": artifacts,
+            "artifacts": _json_safe(dict(result.artifacts)),
             "error": error,
         }
-        print(json.dumps(envelope, indent=2, sort_keys=True, default=str))
-    elif result.stdout:
-        print(result.stdout)
+        return json.dumps(envelope, indent=2, sort_keys=True, default=str)
+    return result.stdout or None
+
+
+def _write_stdout(text: Optional[str]) -> bool:
+    """Print *text* and flush stdout; ``False`` when its reader has gone.
+
+    Flushed here so a closed pipe shows up now, while the status is still the command's own,
+    and not at interpreter shutdown. When the reader has gone, stdout then points at the null
+    device (:func:`_detach_stdout`).
+    """
+    try:
+        if text is not None:
+            print(text)
+        sys.stdout.flush()
+    except BrokenPipeError:
+        _detach_stdout()
+        return False
+    return True
+
+
+def _print_result(result: Any, *, as_json: bool, next_steps: Sequence[str] = ()) -> int:
+    """Print one :class:`~flux_engine.api.stages.StageResult` and return its exit code.
+
+    The ``--json`` envelope is the same shape for every command: ``stage``,
+    ``exitCode`` and ``ok`` so a caller never has to infer which command
+    produced a document or guess its success from a bare exit code;
+    ``artifacts``, the stage's own structured output; and ``error``,
+    always present (``null`` on success) and always carrying a ``message``
+    alongside the ``code`` -- a caller that wants the reason a stage
+    failed never has to fall back to regexing stderr, and stderr is
+    always still printed too so a human reading the terminal is not left
+    staring at a JSON blob for the one line that matters.
+    """
+    if not _write_stdout(_result_text(result, as_json=as_json)):
+        # The work is done and only the reader left: stop writing, keep the command's status.
+        return int(result.exit_code)
     if result.stderr:
         # Flush stdout FIRST. stdout is block-buffered the moment it is
         # redirected while stderr never is, so `fluxsim run ... 2>&1 | tee log`

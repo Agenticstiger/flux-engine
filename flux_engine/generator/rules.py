@@ -2223,7 +2223,16 @@ def _plan_links(
             )
         if entry.when is None:
             continue
-        checked = check(parse(entry.when, side=Side.CORE), model, expose_id, position=PREDICATE)
+        try:
+            checked = check(parse(entry.when, side=Side.CORE), model, expose_id, position=PREDICATE)
+        except Expr2Error as error:
+            # The text's own refusal, with the key it came from in front of it.
+            raise Expr2Error(
+                error.code,
+                f"links[{expose_id}.{entry.relationship}].when {entry.when!r}: "
+                + error.detail.rsplit(" (at offset", 1)[0],
+                position=error.position,
+            ) from None
         own, paths, beyond = _split_reads(checked)
         if paths or beyond or _windows_of(checked.parsed.tree):
             raise Expr2Error(

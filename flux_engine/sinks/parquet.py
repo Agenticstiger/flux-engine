@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Sequen
 from flux_engine.core.errors import FluxError
 from flux_engine.sinks._columnar import ColumnarFileSink, FileTarget, positive_int
 from flux_engine.sinks._files import load_manifest
-from flux_engine.sinks._objects import ObjectLocation, instance_identity_option
+from flux_engine.sinks._objects import ObjectLocation, instance_identity_option, tuning_option
 from flux_engine.sinks._optional import require
 from flux_engine.sinks._options import bool_option, int_option, require_known, text_option
 from flux_engine.sinks.arrow import DEFAULT_BATCH_SIZE, pa
@@ -61,7 +61,11 @@ OPTIONS = (
     "batch-size",
     "compression",
     "compression-level",
+    "connect-timeout",
     "instance-identity",
+    "max-retries",
+    "request-timeout",
+    "retry-timeout",
     "row-group-size",
     "rows-per-file",
     "verify",
@@ -236,6 +240,7 @@ def target(directory: str, options: Mapping[str, str]) -> FileTarget:
         directory=directory,
         sink_class=ParquetSink,
         instance_identity=instance_identity_option(options),
+        tuning=tuning_option(options),
         settings={
             "compression": text_option(options, "compression", DEFAULT_COMPRESSION),
             "compression_level": int_option(options, "compression-level", None),

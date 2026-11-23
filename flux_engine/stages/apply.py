@@ -571,7 +571,7 @@ def _apply(
                 require_record(declared, plan_document)
                 stored = bool(declared)
         except FluxError as error:
-            return _failed(error)
+            return _failed(_named_for_run(error, layout, run_id))
 
     refused_share = _refuse_share_of_stored_run(layout, stored, run_id, shares)
     if refused_share is not None:
@@ -677,7 +677,11 @@ def _apply(
     current_input_digest = result.input_digest.ref.value
     planned_input_digest = plan_document["inputDigest"]
     if current_input_digest != planned_input_digest:
-        moved_error = InputDigestMoved(planned=planned_input_digest, current=current_input_digest)
+        moved_error = _named_for_run(
+            InputDigestMoved(planned=planned_input_digest, current=current_input_digest),
+            layout,
+            run_id,
+        )
         return StageResult(
             stage="apply",
             exit_code=1,
@@ -969,6 +973,27 @@ def _failed(error: FluxError) -> StageResult:
         _artifacts={"code": error.code.code},
         stderr=str(error),
         error_code=error.code.code,
+    )
+
+
+def _named_for_run(error: FluxError, layout: RunLayout, run_id: Optional[str]) -> FluxError:
+    """*error*, said for ``apply --run-id`` when it is the moved bundle (``FLX-2101``).
+
+    The run is named and the edit is said to have come after it was made, when the run is committed
+    (its receipt exists); any other error, a staged plan's included, and a call without
+    ``--run-id``, is returned as it is.
+    """
+    if (
+        run_id is None
+        or not isinstance(error, InputDigestMoved)
+        or not is_regular_file(layout.receipt_path)
+    ):
+        return error
+    return FluxError(
+        error.code,
+        f"plan recorded {error.planned}, bundle is now {error.current}\n"
+        f"run {layout.run_id} was made from the bundle as the plan recorded it: the bundle "
+        "changed after the run was made",
     )
 
 

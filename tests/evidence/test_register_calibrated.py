@@ -129,6 +129,19 @@ def _register(entries: List[Dict[str, Any]]) -> ParameterRegister:
     )
 
 
+def _register_pinned(entries: List[Dict[str, Any]], digest: str) -> ParameterRegister:
+    loaded = load_bundle(STARTER)
+    cast = resolve_cast(loaded.flux_documents)
+    return build_parameter_register(
+        simulation_id=cast.simulation_id,
+        documents=dict(cast.documents),
+        namespace=EXTENSION_NAMESPACE,
+        entries=read_parameters_block(entries, pinned=True, where="sim", code=FLX_3105),
+        profile_digest=digest,
+        code=FLX_3105,
+    )
+
+
 def _calibrated(change: Any = None) -> Dict[str, Any]:
     entry = copy.deepcopy(CALIBRATED)
     if change is not None:
@@ -465,3 +478,16 @@ def test_a_record_of_an_earlier_format_does_not_read_an_estimate() -> None:
     document["counts"].pop("calibrated")
     with pytest.raises(ValueError, match="only a record of format 1-3-0"):
         parse_register(json.dumps(document))
+
+
+def test_the_note_says_when_a_calibrated_entry_names_another_profile_than_the_pinned_one() -> None:
+    other = "sha256:" + "9" * 64
+    note = render_register_note(
+        parse_register(render_register(_register_pinned([CALIBRATED, ASSUMED], other)))
+    )
+    assert "1 of them records the digest of a profile other than the pinned one" in note
+    own = CALIBRATED["calibration"]["targets"]
+    note = render_register_note(
+        parse_register(render_register(_register_pinned([CALIBRATED, ASSUMED], own)))
+    )
+    assert "other than the pinned one" not in note

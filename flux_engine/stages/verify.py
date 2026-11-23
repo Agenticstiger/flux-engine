@@ -163,6 +163,7 @@ from flux_engine.stages.layout import (
     read_json_object,
 )
 from flux_engine.stages.plan import read_column_provenance, read_parameter_register
+from flux_engine.stages.run_binding import require_receipt_binds_plan, require_run_files_named
 
 if TYPE_CHECKING:
     from flux_engine.concordance.calendar_lines import CalendarChecks
@@ -2207,6 +2208,8 @@ def _load_run(layout: RunLayout) -> Union[_Loaded, StageResult]:
             layout.run_digest_path, code=FLX_2110, remedy=RUN_FILE_REMEDY
         )
         require_run_digest_binds_plan(layout, recorded_plan, run_digest_document)
+        require_receipt_binds_plan(layout, recorded_plan, receipt)
+        require_run_files_named(layout, receipt, recorded_plan)
         read_column_provenance(layout, recorded_plan)
         # Parameter register: the sources of the run's numbers, read only through the plan.
         register = read_parameter_register(layout, recorded_plan)

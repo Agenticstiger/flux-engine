@@ -65,7 +65,7 @@ _manifest-db1a89eefb51c42e-parquet.json
 db1a89eefb51c42e-00000.parquet
 ```
 
-The file name starts with the first 16 hex characters of the stream's `outputDigest`. The same bundle and seed always write the same name, so running again replaces the file instead of adding a second copy, and a run with another seed lands beside it. The manifest lists every file of the stream with its SHA-256, size and row count, the stream header, and the writer settings, and its name says which sink wrote it. A stream is published whole or not at all: files are written under hidden names and renamed into place once every row is in, the manifest is written last, and a stream that fails part-way to a local directory leaves no manifest and no files behind. On an object store, objects uploaded before a failure can stay behind without a manifest, and a stream is whole only once its manifest is there. Names that start with `_` or `.` are skipped by Parquet dataset readers, so the manifest is never read as data.
+The file name starts with the first 16 hex characters of the stream's `outputDigest`. The same bundle and seed always write the same name, so running again replaces the file instead of adding a second copy, and a run with another seed lands beside it. The manifest lists every file of the stream with its SHA-256, size and row count, the stream header, and the writer settings, and its name says which sink wrote it. A stream is published whole or not at all: files are written under hidden names and renamed into place once every row is in, the manifest is written last, and a stream that fails part-way to a local directory leaves no manifest and no files behind. On an object store the manifest is uploaded last and a stream is whole only once it is there; when an upload fails, the data objects this delivery had written are deleted, best effort and by their exact keys, and the error says whether that worked and which keys remain if not (see [Write to an object store](#write-to-an-object-store)). Names that start with `_` or `.` are skipped by Parquet dataset readers, so the manifest is never read as data.
 
 The columns are typed from the FLUID contract, and no value goes through a float:
 
@@ -83,7 +83,7 @@ Files are compressed with zstd. Each file's metadata also carries the stream hea
 
 ## Write to an object store
 
-The Parquet and Arrow IPC sinks also take an object store URL as their target, with `s3://`, `gs://`, `az://` or `abfs://` as the scheme. The URL's host is the bucket (or container) and its path is the prefix the files go under. This needs the `[publish]` extra, which installs obstore, and without it the sink refuses with the install line.
+The Parquet and Arrow IPC sinks also take an object store URL as their target, with `s3://`, `gs://`, `az://` or `abfs://` as the scheme. The URL's host is the bucket (or container) and its path is the prefix the files go under. For Azure Data Lake Storage Gen2, the standard `abfs://CONTAINER@ACCOUNT.dfs.core.windows.net/PREFIX` form is also accepted (`az://` takes it too): the part before the `@` is the container, the account is the first label of the host, which must end in `.dfs.core.windows.net`, and the path is the prefix. A receipt shows the target as any URL is shown, with the container, which comes before an `@`, written as `…`. A host with no container before it, such as `abfs://ACCOUNT.dfs.core.windows.net/PREFIX`, is refused with `FLX-3510`. This needs the `[publish]` extra, which installs obstore, and without it the sink refuses with the install line.
 
 ```text
 fluxsim run . --sink parquet:s3://my-bucket/simulations/run-a
@@ -94,7 +94,29 @@ Each object has the key `<prefix>/<exposeId>/<name>`, where `<name>` is the file
 
 A target with no explicit credentials is refused before the run with `FLX-3505`, and nothing is contacted, unless you pass `--sink-opt instance-identity=true`. That option opts in to the credentials of the machine or workload itself (an EC2, ECS or pod role, an Azure managed identity, a GCE service account), which the store asks the cloud's instance metadata service for. Explicit credentials are the variables the store reads from your environment, for example `AWS_ACCESS_KEY_ID` with `AWS_SECRET_ACCESS_KEY`. [Runs offline](../explanation/offline.md) lists them for each cloud.
 
-Credentials and endpoints come only from your own environment or from the platform's credential chain, as obstore reads them: the `AWS_*`, `GOOGLE_*` or `AZURE_*` variables, a profile, an instance or workload identity. No `--sink-opt` reaches the store, a target that carries user information, a query or a fragment (`s3://user:pass@bucket/`) is refused, and an error from the store is reported with URLs' user information and any credential variable's value removed.
+Credentials and endpoints come only from your own environment or from the platform's credential chain, as obstore reads them: the `AWS_*`, `GOOGLE_*` or `AZURE_*` variables, a profile, an instance or workload identity. No `--sink-opt` carries a credential or an endpoint to the store (the only settings that reach the client are the timeouts and retries below), a target that carries user information, a query or a fragment (`s3://user:pass@bucket/`) is refused, and an error from the store is reported with URLs' user information and any credential variable's value removed.
+
+### Shorten the wait for an endpoint that does not answer
+
+obstore's defaults apply unless you change them: a request times out after 30 seconds, and a failed request is retried up to 10 times within 3 minutes. An endpoint that never answers therefore costs about 3 minutes before the run stops with `FLX-3505`. The defaults are kept because they suit a healthy network and obstore's own documentation advises keeping the retry time below 5 minutes. To give up sooner, or to wait longer on a slow link, set them for the `parquet` and `arrow-ipc` sinks:
+
+```text
+fluxsim run . --sink parquet:s3://my-bucket/simulations/run-a \
+  --sink-opt retry-timeout=20 --sink-opt max-retries=2 --sink-opt connect-timeout=5
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `request-timeout` | 30 seconds | the time one request may take, in whole seconds from 1 to 3600 |
+| `connect-timeout` | none of its own | the time to open the connection, in whole seconds from 1 to 3600 |
+| `max-retries` | 10 | how many times a failed request is retried, from 0 (no retries) to 100 |
+| `retry-timeout` | 180 seconds | the most time spent retrying one request, in whole seconds from 1 to 3600; the setting that shortens the wait |
+
+These options apply to an object store target only; a local directory refuses them (`FLX-3504`). The `delta` sink writes through deltalake and takes none of them.
+
+### When an upload fails
+
+The files are uploaded in order and the manifest last. If an upload fails, the data objects this delivery had written before the failure are deleted, only those and by the exact keys it wrote, and the `FLX-3505` message says whether the cleanup worked. When a delete fails the cleanup stops there, because an endpoint that refuses one request is not asked for the rest, and the message names the keys that remain without a manifest so you can delete them. When the manifest of an earlier, complete delivery of the same stream is already in place, nothing is deleted, because the new objects have the same names and bytes. Nothing is deleted either when the manifest is found in place after the failure (an upload that committed and then timed out), or when the manifest cannot be checked, as with a credential that may write but not list: a missing manifest is then reported as unknown, the delivery goes on, and the data objects are kept. The run is kept either way, so `fluxsim apply BUNDLE --run-id RUN_ID --sink TARGET` publishes it again.
 
 The path is split on `/` and each segment must be a plain name. An empty segment, `.`, `..`, a backslash and a percent-encoded `/`, `\` or `.` (`%2F`, `%5C`, `%2E`) are refused with `FLX-3510`, so no spelling of a target can write outside the prefix it shows. A trailing `/` is dropped, and a target must name a prefix.
 
@@ -289,6 +311,10 @@ Credentials come from the environment or the platform's own credential chain, ne
 | `parquet` | `row-group-size` | `1048576` | rows per row group |
 | `parquet`, `arrow-ipc` | `rows-per-file` | one file | start a new file after this many rows |
 | `arrow-ipc` | `compression` | `zstd` | `zstd`, `lz4` or `none` |
+| `parquet`, `arrow-ipc` | `request-timeout` | 30 seconds | object store target only: seconds one request may take (1 to 3600) |
+| `parquet`, `arrow-ipc` | `connect-timeout` | none of its own | object store target only: seconds to open a connection (1 to 3600) |
+| `parquet`, `arrow-ipc` | `max-retries` | 10 | object store target only: retries of a failed request (0 to 100) |
+| `parquet`, `arrow-ipc` | `retry-timeout` | 180 seconds | object store target only: most seconds spent retrying one request (1 to 3600) |
 | every sink | `batch-size` | `65536` | rows per Arrow batch (for `arrow-ipc`, per record batch in the file) |
 | every sink | `verify` | `false` | read what was written back and check its digest before publishing |
 | `adbc` | `uri` | none | the database file, or a URI without a password |
@@ -301,7 +327,7 @@ Credentials come from the environment or the platform's own credential chain, ne
 
 ## Receipts and the evidence pack
 
-Each sink returns a receipt: the rows, and either the files with their SHA-256 or the table. `fluxsim run` records each one in `sink-receipts.json` in the run directory as soon as its stream is published, so a delivery that fails on a later stream still leaves the earlier ones on record. A receipt is kept per sink, target, table and expose: delivering the run to another place adds one, and delivering it to the same place again replaces that one.
+Each sink returns a receipt: the rows, and either the files with their SHA-256 or the table. `fluxsim run` records each one in `sink-receipts.json` in the run directory as soon as its stream is published, so a delivery that fails on a later stream still leaves the earlier ones on record. A receipt is kept per sink, target, table and expose: delivering the run to another place adds one, and delivering it to the same place again replaces that one. A database named by `uri-env` prints as `driver:$NAME` whatever the variable holds, so its receipt also carries a `targetId`, a short digest of the label of the URI (its scheme, host, port and path, without user information, query or fragment), and two deliveries through one variable name that point at two databases keep two receipts. Only a URL form (`scheme://host/db`) gets a `targetId`: a keyword string such as `host=db user=u password=...` or an ODBC string could carry a password a digest would expose to guessing, so it gets none, and two deliveries through one variable keep separate receipts only for URL forms.
 
 ```console
 $ grep -E '"(sink|table|target)"' .flux/runs/205ba6e504c40820/sink-receipts.json
@@ -336,7 +362,7 @@ What only the run's own streams or the destination can tell stops the delivery a
 |---|---|
 | [`FLX-3501`](../reference/errors/FLX-3501.md) | the sink's extra or driver is not installed; the message has the `pip install` line |
 | [`FLX-3504`](../reference/errors/FLX-3504.md) | a target or a setting is missing or wrong |
-| [`FLX-3505`](../reference/errors/FLX-3505.md) | writing failed part-way; nothing partial was left |
+| [`FLX-3505`](../reference/errors/FLX-3505.md) | writing failed part-way; a local target keeps no partial stream, an object store target has the data objects this delivery wrote deleted, best effort, and the message says which remain |
 | [`FLX-3506`](../reference/errors/FLX-3506.md) | the database sink will not touch a table it did not create |
 | [`FLX-3507`](../reference/errors/FLX-3507.md) | there is no sink by that name |
 

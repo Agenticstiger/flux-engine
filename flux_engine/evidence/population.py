@@ -18,11 +18,13 @@ is not touched by any of it.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_HALF_EVEN, Decimal, localcontext
 from typing import List, Optional, Sequence, Tuple
 
 from flux_engine._vocabulary import find_banned_words
+from flux_engine.core.canonical import nfc, sha256_hex
 
 __all__ = [
     "MAX_CELLS",
@@ -44,7 +46,44 @@ MAX_CELLS = 40
 #: The longest a title or a label can be.
 _MAX_TEXT = 40
 
-_UNSAFE = re.compile(r"[^A-Za-z0-9 _.,:;/()+=\-]")
+_ASCII_KEPT = re.compile(r"[A-Za-z0-9 _.,:;/()+=\-]")
+
+#: Unicode general categories whose characters are kept: letters and numbers of any script.
+_KEPT_CATEGORIES = ("L", "N")
+
+#: Combining marks (``Mn``, ``Mc``, ``Me``) are kept only after a kept letter, number or mark, since
+#: many scripts write a syllable with them and nothing else puts one at the start of a label.
+_MARK_CATEGORY = "M"
+
+#: The Default_Ignorable_Code_Point property as a list of inclusive ranges, from Unicode 16.0.0
+#: ``DerivedCoreProperties.txt`` (the section "Derived Property: Default_Ignorable_Code_Point").
+#: The standard library has no such property. A character in it can render as nothing, so a label
+#: of such characters would print blank and look like another label. A later Unicode version adds
+#: only unassigned code points, which are replaced already.
+_DEFAULT_IGNORABLE: Tuple[Tuple[int, int], ...] = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+
+#: The tail a label gets when the text it prints is not the text it was given: ``_`` and eight
+#: lowercase hexadecimal digits of the SHA-256 of the given text in NFC and UTF-8.
+_TAIL = re.compile(r"_[0-9a-f]{8}$")
+_TAIL_LENGTH = 9
 
 _NO_PROFILE = "There is no target to draw: this run was shipped without a profile."
 
@@ -102,9 +141,46 @@ class PopulationProperty:
         return sum(len(group.cells) for group in self.groups)
 
 
+def _kept(character: str, after_kept: bool) -> bool:
+    """Whether *character* is written as it is: an allowed ASCII one, or a letter or number of any script."""
+    if character.isascii():
+        return _ASCII_KEPT.fullmatch(character) is not None
+    code = ord(character)
+    if any(first <= code <= last for first, last in _DEFAULT_IGNORABLE):
+        return False
+    category = unicodedata.category(character)
+    if category[0] in _KEPT_CATEGORIES:
+        return True
+    return category[0] == _MARK_CATEGORY and after_kept
+
+
 def safe_text(text: str) -> str:
-    """*text* with every character outside the allowed set replaced by ``_``, cut at 40."""
-    return _UNSAFE.sub("_", text)[:_MAX_TEXT]
+    """*text* in NFC with each character that is not safe to print replaced by ``_``, at most 40 characters.
+
+    Kept: the ASCII letters, digits, space and ``_.,:;/()+=-``, and the letters and numbers of any
+    script (with the combining marks that follow them). Everything else becomes ``_``: control and
+    format characters (the bidirectional controls and the joiners among them), line and paragraph
+    separators, spaces other than the plain one, private-use and unassigned code points, and every
+    punctuation and symbol that is not in the ASCII set above, so no label can start a heading, a
+    link, a table cell, a Mermaid directive or markup.
+
+    A label that comes out as something other than what it was given (a character replaced, or cut
+    at 40) ends in ``_`` and eight hexadecimal digits of the SHA-256 of the given text, so two
+    different labels never print the same. A label that prints as it was given is unchanged. The
+    result depends on the text alone, on every platform.
+    """
+    given = nfc(text)
+    printed: List[str] = []
+    after_kept = False
+    for character in given:
+        keep = _kept(character, after_kept)
+        printed.append(character if keep else "_")
+        after_kept = keep and unicodedata.category(character)[0] in "LNM"
+    body = "".join(printed)
+    if body == given and len(body) <= _MAX_TEXT and _TAIL.search(body) is None:
+        return body
+    digest = sha256_hex(given.encode("utf-8"))[:8]
+    return f"{body[: _MAX_TEXT - _TAIL_LENGTH]}_{digest}"
 
 
 def _shown(text: str, fallback: str) -> str:

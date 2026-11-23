@@ -322,7 +322,7 @@ calibration:
   what the data does not state. At most 64 parameters.
 - **The fit.** `fluxsim calibrate --fit` runs CMA-ES (cma, in the `[calibrate]` extra) over the
   parameters scaled to the range 0 to 1, bounded, seeded with `seed` (the Simulation's seed when
-  absent), for at most `evaluations` runs. A bundle may only lower the engine's ceiling of 64;
+  absent), for at most `evaluations` runs, and the start point is evaluated as well. A bundle may only lower the engine's ceiling of 64;
   `--max-evaluations` raises it, up to 4,096. Each evaluation runs the
   bundle with the candidate values, each rounded to its `step`, at `scale`, staged under the state
   directory and removed once its counts are taken, and counts the calibration queries (section 3). The

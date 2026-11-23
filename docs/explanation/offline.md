@@ -54,7 +54,7 @@ fluxsim run . --sink parquet:s3://my-bucket/simulations/run-a --sink-opt instanc
 
 `instance-identity` is a true or false option, like `verify`. The `parquet`, `arrow-ipc` and `delta` sinks accept it. With it, the run behaves as it did before this rule. Without it and without explicit credentials, `fluxsim explain FLX-3505` prints the cause and the remedy: set explicit credentials in your environment, or pass the opt-in.
 
-The `adbc` sink and Iceberg catalogues are configured by your own settings and are unchanged by this rule.
+The `adbc` sink and Iceberg catalogues are configured by your own settings and are unchanged by this rule: FLUX hands the database driver and the catalogue loader only what you configured, and neither offers one setting that stops a client from asking a metadata service, so the rule does not cover them. To control what they contact, set it where they read their own configuration: the driver options of the `adbc` sink (`--sink-opt db.KEY=VALUE`), and the catalogue's configuration for `iceberg` (the `.pyiceberg.yaml` in your home directory or the `PYICEBERG_*` variables).
 
 ## Plugins
 

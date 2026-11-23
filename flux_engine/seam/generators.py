@@ -57,7 +57,7 @@ from decimal import Decimal
 from fractions import Fraction
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
-from flux_engine.core.canonical import nfc
+from flux_engine.core.canonical import FLX_1003, JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.credentials import credential_option, credential_value
 from flux_engine.core.errors import ErrorCode, FluxError
 from flux_engine.core.grades import Pattern
@@ -288,6 +288,16 @@ def _read_options(block: Any, where: str, code: ErrorCode) -> Dict[str, Any]:
     return copied
 
 
+def _refuse_unsafe_integer(value: Any, here: str) -> None:
+    """Refuse an option integer above 2^53-1, which has no canonical spelling in a plan."""
+    if isinstance(value, int) and not isinstance(value, bool) and abs(value) > JCS_MAX_SAFE_INTEGER:
+        # The plan binds the options, and an integer this large has no canonical spelling.
+        raise FluxError(
+            FLX_1003,
+            f"{here} is an integer above 2^53-1: write it as a string or an exact decimal",
+        )
+
+
 def _plain(value: Any, where: str, code: ErrorCode, *, depth: int, path: Tuple[str, ...]) -> Any:
     """A copy of *value* when it is plain data, else a refusal that never repeats a value."""
     here = f"{where}{''.join(path)}"
@@ -327,6 +337,7 @@ def _plain(value: Any, where: str, code: ErrorCode, *, depth: int, path: Tuple[s
                 "one, so a plugin reads it from its own environment",
             )
         return value
+    _refuse_unsafe_integer(value, here)
     if isinstance(value, (bool, int)):
         return value
     if isinstance(value, Decimal):

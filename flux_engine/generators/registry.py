@@ -53,9 +53,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
+from flux_engine.core.credentials import MASK, dsn_secret_values
 from flux_engine.core.errors import FluxError
-from flux_engine.generators.errors import FLX_3114, FLX_3115, FLX_3116, FLX_3117, FLX_3118
+from flux_engine.generators.errors import FLX_3114, FLX_3115, FLX_3116, FLX_3117, FLX_3118, FLX_3124
 from flux_engine.seam.coverage import printable
+from flux_engine.sinks._secrets import scrub
 
 __all__ = [
     "ENTRY_POINT_GROUP",
@@ -440,6 +442,15 @@ def resolve(
     )
 
 
+def plugin_label(resolved: ResolvedGenerator, expose_id: Optional[str]) -> str:
+    """The plugin as a refusal names it: the expose it generates, its reference and its pin."""
+    where = f"expose {printable(expose_id)}, " if expose_id is not None else ""
+    return (
+        f"{where}plugin {printable(resolved.name)} "
+        f"({printable(resolved.distribution)} {printable(resolved.version)})"
+    )
+
+
 def _module_file(loaded: Any) -> Optional[Path]:
     module: Optional[ModuleType]
     if isinstance(loaded, ModuleType):
@@ -455,21 +466,66 @@ def _module_file(loaded: Any) -> Optional[Path]:
         return None
 
 
-def load(resolved: ResolvedGenerator) -> Any:
+_FIRST_LINE = 200
+
+
+def plugin_text(text: str) -> str:
+    """*text*, which a plugin wrote, with every credential this process can name removed.
+
+    A plugin's message is free text: it may hold the URL of the service it called, a connection
+    string, or the value of a credential it read from the environment. The URL is written as its
+    label, each secret a connection string in it holds (the password of ``user:PW@host``, the value
+    of ``password=``, ``token=`` or ``sig=``) and each value of a credential-named environment
+    variable is replaced by ``***``. Call it on the whole text, before any line is picked or any
+    length is cut: a cut can leave four characters of a secret that no longer match it.
+    """
+    known = [(secret, MASK) for secret in dict.fromkeys(dsn_secret_values(text))]
+    return scrub(text, known)
+
+
+def failure_text(error: BaseException) -> str:
+    """The type and first line of *error*, as it is written into a diagnostic.
+
+    The message is scrubbed (:func:`plugin_text`) whole, then its first line is taken and cut.
+    """
+    lines = plugin_text(str(error)).strip().splitlines()
+    first = lines[0] if lines else ""
+    if len(first) > _FIRST_LINE:
+        first = first[:_FIRST_LINE] + "..."
+    name = plugin_text(type(error).__name__)
+    return printable(f"{name}: {first}" if first else name)
+
+
+def _missing_module(resolved: ResolvedGenerator, error: ModuleNotFoundError) -> str:
+    """Name the module a ``ModuleNotFoundError`` lacks, and whether it is the plugin's own."""
+    missing = error.name
+    if not missing:
+        return ""
+    module = resolved.value.split(":", 1)[0].strip()
+    own = module == missing or module.startswith(missing + ".")
+    return (
+        f"; the module {printable(plugin_text(missing))} is missing, and it is "
+        f"{'the plugin' + chr(39) + 's own module' if own else 'a module it imports'}"
+    )
+
+
+def load(resolved: ResolvedGenerator, *, expose_id: Optional[str] = None) -> Any:
     """Import the entry point of *resolved*, then check that the checked code is what loaded.
 
     The loaded object's module file must lie inside the top-level package that
     :func:`resolve` checked and, unless the distribution is editable, be listed
-    in its ``RECORD``. Anything else is ``FLX-3118``.
+    in its ``RECORD``. Anything else is ``FLX-3118``. An exception raised while
+    importing is ``FLX-3124``, naming *expose_id* when it is given.
     """
     found = f"{printable(resolved.distribution)} {printable(resolved.version)}"
     try:
         loaded = resolved.entry_point.load()
-    except (ImportError, AttributeError) as error:
+    except Exception as error:  # noqa: BLE001 (a plugin's own failure is its refusal, by name)
+        extra = _missing_module(resolved, error) if isinstance(error, ModuleNotFoundError) else ""
         raise FluxError(
-            FLX_3118,
-            f"{found}: the entry point {resolved.name!r} ({printable(resolved.value)}) could not "
-            f"be imported ({type(error).__name__})",
+            FLX_3124,
+            f"{plugin_label(resolved, expose_id)}: importing the module "
+            f"{printable(resolved.value)} failed ({failure_text(error)}){extra}",
         ) from error
     file = _module_file(loaded)
     expected = resolved.package_root

@@ -232,7 +232,9 @@ def _not_calibrated(outcome: Any) -> Any:
     from flux_engine.core.errors import FluxError
 
     gate = outcome.gate
-    if gate is None:
+    if not outcome.operations:
+        reason = "no candidate beat the start point, so no value moved"
+    elif gate is None:
         reason = "no held-out profile was given"
     elif not gate.queries:
         reason = "no held-out query has a target"

@@ -166,3 +166,26 @@ def test_plan_apply_and_verify_cover_a_copy_with_the_rows_that_reach_a_parent(
             )
         )
     assert digests[0] == digests[1]
+
+
+def test_a_string_sentinel_written_decomposed_plans_applies_and_verifies(tmp_path: Path) -> None:
+    decomposed = "café"
+    links = (
+        "    links:\n      - emit: invoice\n        relationship: account\n"
+        f'        when: "i_amount > 250"\n        sentinels: {{ region: "{decomposed}" }}\n'
+    )
+    bundle = _bundle_with(tmp_path, links, "nfd")
+    state = tmp_path / "state"
+    planned = plan(bundle, state_dir=state)
+    assert planned.success, planned.stderr
+    applied = apply(bundle, state_dir=state, run_id=str(planned.artifacts["run_id"]))
+    assert applied.success, applied.stderr
+    verified = run_verify(
+        bundle,
+        run_id=str(applied.artifacts["run_id"]),
+        state_dir=state,
+        allow_declared_baseline_drift=True,
+    )
+    assert verified.success, verified.stderr
+    line = {e["rule"]: e for e in verified.artifacts["rules"]["emits"]["invoice"]}["account.region"]
+    assert line["satisfied"] == line["total"] > 0

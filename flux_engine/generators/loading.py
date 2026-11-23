@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from flux_engine.core.errors import FluxError
 from flux_engine.generators import registry
-from flux_engine.generators.errors import FLX_3119, FLX_3120
+from flux_engine.generators.errors import FLX_3119, FLX_3120, FLX_3124
 from flux_engine.generators.registry import ResolvedGenerator
 from flux_engine.generators.request import Request
 from flux_engine.seam.coverage import printable
@@ -116,10 +116,18 @@ def load_declared(
     ]
     loaded: Dict[str, LoadedGenerator] = {}
     for item, found in zip(declarations, resolved, strict=True):
-        factory = registry.load(found)
-        loaded[item.expose_id] = LoadedGenerator(
-            declaration=item, resolved=found, plugin=factory(copy.deepcopy(dict(item.options)))
-        )
+        factory = registry.load(found, expose_id=item.expose_id)
+        try:
+            plugin = factory(copy.deepcopy(dict(item.options)))
+        except FluxError:
+            raise
+        except Exception as error:  # noqa: BLE001 (a plugin's own failure is its refusal, by name)
+            raise FluxError(
+                FLX_3124,
+                f"{registry.plugin_label(found, item.expose_id)}: calling the factory failed "
+                f"({registry.failure_text(error)})",
+            ) from error
+        loaded[item.expose_id] = LoadedGenerator(declaration=item, resolved=found, plugin=plugin)
     return loaded
 
 
@@ -149,7 +157,8 @@ def _flatten(document: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _shown(value: Any) -> str:
-    text = repr(value)
+    """What a plugin stated, as a refusal quotes it: scrubbed whole, then cut."""
+    text = registry.plugin_text(repr(value))
     return text if len(text) <= _SHOWN else text[:_SHOWN] + "..."
 
 

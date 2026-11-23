@@ -47,6 +47,8 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-2119](./FLX-2119.md) | the plan names a kernel this engine does not implement |
 | [FLX-2120](./FLX-2120.md) | the staged execution of a plan does not match its record |
 | [FLX-2121](./FLX-2121.md) | a story --key names no row of the expose, or is not a key it can read |
+| [FLX-2122](./FLX-2122.md) | the receipt and the plan of a run directory disagree |
+| [FLX-2123](./FLX-2123.md) | a committed run directory holds a file the run does not account for |
 | [FLX-2201](./FLX-2201.md) | run touched a seed-tree path the plan did not anticipate |
 | [FLX-2202](./FLX-2202.md) | seed-tree input outside its declared domain |
 | [FLX-2301](./FLX-2301.md) | the run's cast does not resolve |
@@ -85,6 +87,7 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-3121](./FLX-3121.md) | a generator plugin returned values its expose does not accept |
 | [FLX-3122](./FLX-3122.md) | a plan that declares a generator plugin must stage its rows |
 | [FLX-3123](./FLX-3123.md) | a generator plugin's run is committed from its stage, never generated again |
+| [FLX-3124](./FLX-3124.md) | a generator plugin could not be loaded |
 | [FLX-3201](./FLX-3201.md) | row carries a column the expose does not declare |
 | [FLX-3202](./FLX-3202.md) | row is missing a required column |
 | [FLX-3203](./FLX-3203.md) | positional row does not match the declared column count |
@@ -280,6 +283,8 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-7009](./FLX-7009.md) | accuracy store entry is a link or the wrong type of file |
 | [FLX-7010](./FLX-7010.md) | seam credibility gate not met |
 | [FLX-7011](./FLX-7011.md) | promotion policy document is malformed |
+| [FLX-7012](./FLX-7012.md) | prediction interval has its low above its high |
+| [FLX-7013](./FLX-7013.md) | the observation is dated before the horizon of the forecast |
 | [FLX-7101](./FLX-7101.md) | a candidate of the fit could not be run |
 | [FLX-7131](./FLX-7131.md) | consumer queries need an optional library that is not installed |
 | [FLX-7132](./FLX-7132.md) | a message to the query process passes its bound |

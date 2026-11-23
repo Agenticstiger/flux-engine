@@ -67,6 +67,7 @@ __all__ = [
     "overlay_from_plan",
     "read_overlay_block",
     "read_overlay_file",
+    "require_in_contract",
 ]
 
 #: The top-level key of the namespace that declares an overlay, and the member an emit's ``H`` gains.
@@ -312,6 +313,33 @@ def _require_present(profile: Mapping[str, Any], patch: Mapping[str, Any], code:
             )
         _require_columns(held[table_name], table, table_name, code)
         _require_history_rows(held[table_name], table, table_name, code)
+
+
+def require_in_contract(
+    contract: Mapping[str, Sequence[str]], overlay: Overlay, *, code: ErrorCode
+) -> None:
+    """Refuse (*code*) an overlay that names a table or a column the pinned contract does not have.
+
+    *contract* maps each table (expose) of the pinned FLUID contract to its column names. A
+    profile describes the contract's tables, so a name the contract lacks is one no profile
+    can hold, and it is refused without a profile; a name the contract has and the profile
+    lacks is :func:`overlaid_document`'s, which needs the profile.
+    """
+    at = f"overlay {_named(overlay.name)!r}: patch.tables"
+    for table_name, table in (overlay.patch.get("tables") or {}).items():
+        if table_name not in contract:
+            raise FluxError(
+                code,
+                f"{at}[{_named(table_name)!r}]: the pinned contract declares no such table",
+            )
+        patched = table.get("columns") if isinstance(table, Mapping) else None
+        for column_name in patched or ():
+            if column_name not in contract[table_name]:
+                raise FluxError(
+                    code,
+                    f"{at}[{_named(table_name)!r}].columns[{_named(column_name)!r}]: "
+                    f"the pinned contract declares no such column in table {_named(table_name)!r}",
+                )
 
 
 def _require_history_rows(held: Any, table: Any, table_name: str, code: ErrorCode) -> None:

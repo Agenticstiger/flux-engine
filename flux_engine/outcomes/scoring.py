@@ -49,6 +49,7 @@ from flux_engine.api.calibration import Scorecard
 from flux_engine.api.claims import ClaimBasis
 from flux_engine.api.stages import StageResult
 from flux_engine.core import kernels as _kernels
+from flux_engine.core.clock import parse_rfc3339_ms
 from flux_engine.core.errors import FluxError, register
 from flux_engine.evidence.grades import grade_profile
 from flux_engine.expr.types import nfc
@@ -62,6 +63,7 @@ from flux_engine.seam.responses import DEFAULT_BASIS, Forecasts
 from flux_engine.stages import pipeline as _pipeline
 
 __all__ = [
+    "FLX_7013",
     "FLX_7143",
     "FLX_7144",
     "ForecastScore",
@@ -79,6 +81,16 @@ FLX_7143 = register(
     "pins. A forecast scored against the state it was made on would be scored against what it "
     "already read, so a next state whose digest is the pinned profile's digest is refused, "
     "and nothing is scored or written. Pass the later release of the profile.",
+)
+
+FLX_7013 = register(
+    "FLX-7013",
+    "the observation is dated before the horizon of the forecast",
+    "A forecast is sealed with the horizon_end it was made for, the instant after which the next "
+    "state can be read. `fluxsim forecast score --observed-at` dates the observation, and one "
+    "dated before that instant was read before the outcome could be known, so it is refused "
+    "and nothing is scored or written. An observation dated exactly at the horizon end is "
+    "accepted. Pass the instant the next state was read, or score once the horizon has passed.",
 )
 
 FLX_7144 = register(
@@ -178,17 +190,24 @@ def _verdict(
 ) -> Tuple[AccuracyVerdict, Dict[str, Any], Optional[ObservedReadout]]:
     """The verdict of one forecast, and the optional members its document carries."""
     members: Dict[str, Any] = {"observedAt": observed_at}
-    if cell is None:
-        # Nothing was observed, but a date before the registration is refused all the same.
-        probe = ObservedReadout(
-            prediction_id=prediction.prediction_id,
-            metric_id=prediction.metric_id,
-            observed=Decimal(0),
-            sample_size=0,
-            basis=basis,
-            observed_at=observed_at,
+    # Nothing may be dated before the registration (FLX-7001), and then nothing before the
+    # horizon (FLX-7013), whether or not the cell holds an observation.
+    probe = ObservedReadout(
+        prediction_id=prediction.prediction_id,
+        metric_id=prediction.metric_id,
+        observed=Decimal(0),
+        sample_size=0,
+        basis=basis,
+        observed_at=observed_at,
+    )
+    bind_readout(prediction, probe)
+    if parse_rfc3339_ms(observed_at) < parse_rfc3339_ms(prediction.horizon_end):
+        raise FluxError(
+            FLX_7013,
+            f"prediction {prediction.prediction_id!r} has its horizon at "
+            f"{prediction.horizon_end!r}, observation dated {observed_at!r}",
         )
-        bind_readout(prediction, probe)
+    if cell is None:
         verdict = AccuracyVerdict(
             prediction_id=prediction.prediction_id,
             metric_id=prediction.metric_id,

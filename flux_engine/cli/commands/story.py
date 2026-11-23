@@ -12,7 +12,7 @@ import sys
 from typing import Dict, Tuple
 
 from flux_engine.cli._args import _RUN_ID_HELP, _add_json_flag, _add_state_dir, _whole_number_type
-from flux_engine.cli._output import _print_result
+from flux_engine.cli._output import _detach_stdout, _print_result
 from flux_engine.cli._parser import Example
 
 EXAMPLES: Dict[str, Tuple[Example, ...]] = {
@@ -101,8 +101,13 @@ def _cmd_story(args: argparse.Namespace) -> int:
         return _print_result(result, as_json=args.json and not result.success)
     # A story told is one JSON object per row, not the envelope: the rows are the output. A refusal
     # is the envelope every other command prints.
-    for row in result.artifacts["rows"]:
-        print(json.dumps(row, sort_keys=True))
+    try:
+        for row in result.artifacts["rows"]:
+            print(json.dumps(row, sort_keys=True))
+        sys.stdout.flush()
+    except BrokenPipeError:
+        _detach_stdout()
+        return int(result.exit_code)
     if result.stderr:
         sys.stdout.flush()
         print(result.stderr, file=sys.stderr)

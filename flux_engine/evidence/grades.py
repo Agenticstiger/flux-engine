@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 from flux_engine.core.grades import ORDER, Pattern, at_least, weakest
 from flux_engine.evidence.provenance import quoted_name
@@ -242,6 +242,63 @@ def accounting_of(profile: Optional[Mapping[str, Any]]) -> Optional[Accounting]:
     )
 
 
+#: Fixed phrases for the cases where a noisy statistic still states a data value or an exact size.
+_DATA_GROUP_REASON = (
+    "the profile holds a statistic grouped by a column whose keys are data values (a number or "
+    "timestamp column, or one the profile does not describe), which are released without noise"
+)
+_LINK_GROUP_REASON = (
+    "the profile holds a statistic grouped through a link to a column of another table, whose "
+    "keys are values of that table's data and are released without noise"
+)
+_EXACT_BAND_REASON = (
+    "the profile holds a statistic with a sampleSize band whose min equals its max, an exact "
+    "size released without noise"
+)
+
+
+def _structure_reasons(statistics: Any, columns: Mapping[str, Any], found: Set[str]) -> None:
+    """Add to *found* the reasons a noisy statistic of a table still states data (ADR 0020).
+
+    A group key of a ``groupBy`` on a column that is not categorical is a data value, and so is the
+    key of a ``groupByLink``. A ``sampleSize`` band with ``min`` equal to ``max`` is an exact size.
+    Under ``publicStructure`` a categorical level and a band are declared chosen without the data;
+    these are not, whatever the declaration says. Anything the check cannot read counts as data.
+    """
+    for statistic in statistics if isinstance(statistics, (list, tuple)) else ():
+        if isinstance(statistic, Mapping):
+            found.update(_statistic_reasons(statistic, columns))
+
+
+def _statistic_reasons(statistic: Mapping[str, Any], columns: Mapping[str, Any]) -> Set[str]:
+    """The reasons one noisy statistic still states data (see :func:`_structure_reasons`)."""
+    found: Set[str] = set()
+    if "groupByLink" in statistic:
+        found.add(_LINK_GROUP_REASON)
+    if "groupBy" in statistic:
+        target = (
+            columns.get(statistic["groupBy"]) if isinstance(statistic["groupBy"], str) else None
+        )
+        if not (isinstance(target, Mapping) and target.get("domain") == "category"):
+            found.add(_DATA_GROUP_REASON)
+    band = statistic.get("sampleSize")
+    if isinstance(band, Mapping) and "min" in band and band.get("min") == band.get("max"):
+        found.add(_EXACT_BAND_REASON)
+    return found
+
+
+def _table_structure_reasons(table: Mapping[str, Any], found: Set[str]) -> None:
+    """Add to *found* the reasons the statistics of a table's columns and date pairs state data."""
+    columns = table.get("columns")
+    table_columns = columns if isinstance(columns, Mapping) else {}
+    for pair in table.get("datePairs") or ():
+        if isinstance(pair, Mapping):
+            _structure_reasons(pair.get("statistics"), table_columns, found)
+    for column in (table.get("columns") or {}).values():
+        if isinstance(column, Mapping):
+            _structure_reasons(column.get("statistics"), table_columns, found)
+
+
 def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> ProfileGrade:
     """Grade a run from the document of the profile it pins (``None`` when it pins none).
 
@@ -275,6 +332,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
     }
     sections: List[str] = []
     unknown: List[str] = []
+    data_stated: Set[str] = set()
     tables = profile.get("tables")
     for table_id, table in tables.items() if isinstance(tables, Mapping) else ():
         if not isinstance(table, Mapping):
@@ -305,6 +363,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             for entry in table.get("calendar") or ()
         ):
             sections.append(f"{at}.calendar")
+        _table_structure_reasons(table, data_stated)
         for name, column in (table.get("columns") or {}).items():
             if not isinstance(column, Mapping):
                 continue
@@ -347,6 +406,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             "the profile holds pair, period, relationship, query or fact statistics, or reference "
             "rows, which cannot be released with noise in this format"
         )
+    reasons.extend(sorted(data_stated))
     for path in sections:
         reasons.append(f"the profile holds a statistic released without noise in {path}")
     for path in unknown:

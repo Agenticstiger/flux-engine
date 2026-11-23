@@ -168,18 +168,9 @@ def test_any_other_argument_of_the_two_classes_is_refused(node: exp.Expr) -> Non
     assert caught.value.code.code in {"FLX-3621", "FLX-3622"}
 
 
-@pytest.mark.parametrize(
-    ("dialect", "query"),
-    [
-        ("tsql", "DATEDIFF(day, renewed_at, GETDATE()) > 3"),
-        ("bigquery", "DATE_TRUNC(renewed_at, WEEK) = DATE '2025-01-05'"),
-        ("snowflake", "LEN(plan) = 3"),
-        ("snowflake", "TO_DATE(plan, 'YYYY') = DATE '2025-01-01'"),
-    ],
-)
-def test_the_other_classes_the_scan_named_stay_refused(dialect: str, query: str) -> None:
+def test_snowflake_to_date_with_a_format_stays_refused() -> None:
     with pytest.raises(FluxError) as caught:
-        check(PREFIX + query, dialect=dialect)
+        check(PREFIX + "TO_DATE(plan, 'YYYY') = DATE '2025-01-01'", dialect="snowflake")
     assert caught.value.code.code in {"FLX-3621", "FLX-3622"}
 
 

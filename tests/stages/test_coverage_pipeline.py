@@ -529,8 +529,10 @@ def test_ship_refuses_a_record_that_does_not_hash_to_the_digest_in_the_plan(
 
     verified, shipped = _verify_and_ship(bundle, applied.run_id, state, tmp_path / "out")
 
-    assert (verified.exit_code, verified.error_code) == (1, "FLX-2115"), verified.stderr
-    assert (shipped.exit_code, shipped.error_code) == (1, "FLX-2115"), shipped.stderr
+    # The run directory check refuses a directory before the record is read.
+    code = "FLX-2123" if how == "a-directory" else "FLX-2115"
+    assert (verified.exit_code, verified.error_code) == (1, code), verified.stderr
+    assert (shipped.exit_code, shipped.error_code) == (1, code), shipped.stderr
     assert "column-provenance.json" in shipped.stderr
     assert not (tmp_path / "out").exists(), "a refused ship packs nothing"
     assert not list(state.glob("runs/*/EVIDENCE.md")), "and writes no report"

@@ -55,7 +55,11 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "scored against it, per property, table, dimension and overall, when the "
             "profile is passed with --profile. A bundle that declares consumer queries "
             "has every query counted on the run, the calibration queries apart from the "
-            "held-out ones (--held-out), in the scorecard's queries dimension."
+            "held-out ones (--held-out), in the scorecard's queries dimension. Each counts "
+            "entry of the bundle adds the rule lines counts:<relationship>.minChildren and "
+            "counts:<relationship>.parentWhen to the child's rules, both enforced, and a "
+            "profile that publishes the children per parent of a relationship adds a "
+            "childrenPerParent row to the scorecard."
         ),
     )
     verify_p.add_argument("bundle", help=_BUNDLE_HELP)

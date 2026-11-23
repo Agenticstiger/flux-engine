@@ -309,8 +309,8 @@ $ sed -n '/^      calibration:/,$p' declared/simulation.flux.yml
 
 Each parameter names a document of the bundle and a JSON Pointer to a number the parameter register lists
 with the source `assumption` or `default`. A value the profile or the contract states is refused: a fit moves
-only what the data does not state. CMA-ES runs for at most `evaluations` runs of the bundle at `scale`, from
-a seeded generator, and the objective is the sum of the squared gaps between each calibration query's rate
+only what the data does not state. CMA-ES runs for at most `evaluations` runs of the bundle at `scale`, from a seeded generator, with the start point
+evaluated as well, and the objective is the sum of the squared gaps between each calibration query's rate
 and its target. It reads the pinned profile only.
 
 ```console

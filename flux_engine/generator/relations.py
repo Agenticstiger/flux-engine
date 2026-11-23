@@ -3806,7 +3806,7 @@ def _check_weights(
         if weight is None:
             raise _refuse(
                 f"{where}, and {relationship.target!r} has no column {column!r} "
-                f"(it has {[c.column.name for c in target.columns]})"
+                f"(it has {', '.join(c.column.name for c in target.columns)})"
             )
         kind = weight.column.logical_type.kind
         if kind not in (LogicalKind.INT, LogicalKind.DECIMAL):
@@ -4030,7 +4030,7 @@ def _check_parent_when(
     summed = parent.rules.summarised if parent.rules is not None else frozenset()
     if summed & set(condition.reads):
         raise _refuse(
-            f"{where} that reads {sorted(summed & set(condition.reads))} of "
+            f"{where} that reads {', '.join(sorted(summed & set(condition.reads)))} of "
             f"{relationship.target!r}, which a summary over its children sets, and the children "
             "wait on the condition"
         )
@@ -4167,7 +4167,7 @@ def _check_bridges(
     used: Dict[str, Tuple[str, str]] = {}
     found: Dict[Tuple[str, ...], Tuple[str, str]] = {}
     for pair in bridges:
-        where = f"expose {expose_id!r} bridge {list(pair)}"
+        where = f"expose {expose_id!r} bridge ({', '.join(pair)})"
         sides = []
         for name in pair:
             relationship = by_name.get(name)
@@ -4175,7 +4175,7 @@ def _check_bridges(
                 raise _refuse(f"{where} names {name!r}, which the expose does not declare")
             if name in used:
                 raise _refuse(
-                    f"{where} names {name!r}, which bridge {list(used[name])} already holds"
+                    f"{where} names {name!r}, which bridge ({', '.join(used[name])}) already holds"
                 )
             used[name] = pair
             sides.append(relationship)
@@ -4286,8 +4286,8 @@ def _owners(
         ):
             continue
         raise _refuse(
-            f"expose {expose_id!r} relationships {sorted(holders | {relationship.name})} both "
-            f"set {sorted(taken)}; two relationships may share a column only when one's "
+            f"expose {expose_id!r} relationships {', '.join(sorted(holders | {relationship.name}))} both "
+            f"set ({', '.join(sorted(taken))}); two relationships may share a column only when one's "
             "columns lie inside the other's and the other's parent declares the same "
             "relationship on the paired columns"
         )
@@ -4339,15 +4339,15 @@ def _composites(
         for relationship in inside.values():
             if not set(relationship.from_columns) <= columns:
                 raise _refuse(
-                    f"expose {expose_id!r} key {list(key)} shares columns with relationship "
-                    f"{relationship.name!r} {list(relationship.from_columns)}, which reaches "
+                    f"expose {expose_id!r} key ({', '.join(key)}) shares columns with relationship "
+                    f"{relationship.name!r} ({', '.join(relationship.from_columns)}), which reaches "
                     "outside it; a key holds a relationship's columns all or none"
                 )
         for column in key:
             if column in members:
                 raise _refuse(
-                    f"expose {expose_id!r} column {column!r} belongs to keys {list(members[column])} "
-                    f"and {list(key)}, and neither holds a smaller unique key; declare one of "
+                    f"expose {expose_id!r} column {column!r} belongs to keys ({', '.join(members[column])}) "
+                    f"and ({', '.join(key)}), and neither holds a smaller unique key; declare one of "
                     "them, or a one-column key inside both"
                 )
             members[column] = key
@@ -5051,7 +5051,7 @@ class _Resolver:
         space = 1
         for part in parts:
             space *= part.size
-        where = f"expose {expose_id!r} key {list(key)}"
+        where = f"expose {expose_id!r} key ({', '.join(key)})"
         if space < plan.rows:
             raise KeySpaceTooSmall(
                 FLX_3403,

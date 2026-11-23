@@ -173,6 +173,7 @@ from flux_engine.stages.plan import (
     read_column_provenance,
     read_parameter_register,
 )
+from flux_engine.stages.run_binding import require_receipt_binds_plan, require_run_files_named
 from flux_engine.stages.stored import declared_for_run, stored_generators
 from flux_engine.stages.verify import (
     ProfileCheck,
@@ -1965,6 +1966,8 @@ def ship(
         # Each link of the chain the statement stands on, checked before anything is
         # written: plan.json, its planDigest, run-digest.json, and the column record.
         require_run_digest_binds_plan(layout, plan_document, run_digest_document)
+        require_receipt_binds_plan(layout, plan_document, receipt)
+        require_run_files_named(layout, receipt, plan_document)
         bound = read_column_provenance(layout, plan_document)
         register = read_parameter_register(layout, plan_document)
         # What was stored is the bundle's declaration, which plan.json may only agree with

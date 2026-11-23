@@ -377,6 +377,11 @@ has this account and the declaration, and every statistic and metric it holds th
 read is noisy: no `rowCount`, no column metric, no statistic without a `noise` block, and no pair,
 period, relationship, query or fact section, none of which can be released with noise in this
 format.
+A noisy statistic that still states data is graded P1 too, because the declaration covers levels,
+bin edges and bands and not these: a `groupBy` on a column that is not categorical (a number or
+timestamp column, or a column the profile does not hold), whose group keys are data values; a
+`groupByLink`, whose keys are values of another table; and a `sampleSize` band whose `min` equals
+its `max`, which is an exact size.
 
 ## 4. Column metrics
 

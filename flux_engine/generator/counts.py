@@ -94,6 +94,11 @@ _SAFE = 1 << 62
 _LONGEST_TEXT = 64
 
 
+def _plural(count: int, one: str, many: str) -> str:
+    """*count* with its noun in the right number: ``1 child``, ``2 children``."""
+    return f"{count} {one if count == 1 else many}"
+
+
 def _refuse(message: str) -> FluxError:
     """``FLX-3403`` (imported here: relations imports this module)."""
     from flux_engine.generator import relations
@@ -134,8 +139,9 @@ def check_minimum(children: int, eligible: int, minimum: int) -> None:
 
         short = TooFewChildRows(
             relations.FLX_3403,
-            f"the {children} child rows cannot give each of the {eligible} eligible parents "
-            f"{minimum} children (N = {children}, m = {minimum}, e = {eligible}, "
+            f"the {_plural(children, 'child row', 'child rows')} cannot give each of the "
+            f"{_plural(eligible, 'eligible parent', 'eligible parents')} "
+            f"{_plural(minimum, 'child', 'children')} (N = {children}, m = {minimum}, e = {eligible}, "
             f"N - m * e < 0)",
         )
         short.children, short.eligible, short.minimum = children, eligible, minimum
@@ -547,8 +553,8 @@ def _capped(per_rank: "np.ndarray", weights: "np.ndarray") -> "np.ndarray":
         raise TooManyChildRows(
             _code(),
             f"a one_to_one relationship gives no parent more than one child, and the "
-            f"{int(per_rank.sum())} child rows are more than its {per_rank.shape[0]} eligible "
-            f"parents",
+            f"{_plural(int(per_rank.sum()), 'child row', 'child rows')} are more than its "
+            f"{_plural(per_rank.shape[0], 'eligible parent', 'eligible parents')}",
         )
     empty.sort(key=lambda rank: (-int(weights[rank]), rank))
     capped[np.array(empty[:spare], dtype=np.int64)] = 1
@@ -612,8 +618,9 @@ def _check_layout(
     check_minimum(children, ranks, minimum)
     if ranks == 0 and children > 0:
         raise _refuse(
-            f"{where + ': ' if where else ''}no parent is eligible (e = 0) for the {children} child "
-            "rows; relax the parentWhen condition or the parent's rows so some parent meets it"
+            f"{where + ': ' if where else ''}no parent is eligible (e = 0) for the "
+            f"{_plural(children, 'child row', 'child rows')}; relax the parentWhen condition or "
+            "the parent's rows so some parent meets it"
         )
     if one_to_one and minimum > 1:
         raise _refuse(

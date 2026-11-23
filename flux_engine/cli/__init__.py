@@ -10,6 +10,10 @@ other cold invocation) stays fast -- every ``_cmd_*`` function imports the
 stage it calls, so a command that only touches the error catalog (``fluxsim
 explain``) never pulls in numpy, cryptography or jsonschema.
 
+When the reader of stdout closes early (``fluxsim ... | head -1``), fluxsim stops writing and
+exits quietly, with nothing on stderr: with the command's own status if its work was done, and
+with 141 (128 plus SIGPIPE) if the pipe broke while the command was still working.
+
 Stable exit-code convention: 2 for a usage error (argparse's own
 convention via ``parser.error``), 1 for a command that ran and failed,
 0 for success -- with one deliberate exception: ``fluxsim gate decide``
@@ -52,7 +56,7 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 
 from flux_engine._links import ISSUES_URL, command_url
 from flux_engine.cli._args import _jobs_from_environment
-from flux_engine.cli._output import _print_result
+from flux_engine.cli._output import BROKEN_PIPE_EXIT, _detach_stdout, _print_result
 from flux_engine.cli._parser import Example, _children, _FluxArgumentParser
 from flux_engine.cli.commands import COMMANDS
 from flux_engine.cli.commands.accuracy import (
@@ -204,6 +208,12 @@ def _run_command(fn: Any, args: argparse.Namespace) -> int:
     stage = _stage_of(args)
     try:
         return fn(args)
+    except BrokenPipeError:
+        # The reader of stdout closed it while the command was still working, so the work was
+        # cut short: leave quietly with the status a shell reports for a writer stopped by a
+        # closed pipe. Nothing on stderr, and never the traceback hint.
+        _detach_stdout()
+        return BROKEN_PIPE_EXIT
     except Exception as error:  # noqa: BLE001 - the CLI's outermost boundary
         # A FluxError is not the only way a command can fail: a malformed
         # --request file, an unreadable path, a bug. Every one of those used

@@ -77,6 +77,9 @@ One command tells its output differently. `fluxsim story --json` prints a story 
 | `1` | The command ran and failed. The message says why; a catalogued failure carries an `FLX-nnnn` code. |
 | `2` | A usage error: the command line itself was wrong, so nothing ran. |
 | `3` | `fluxsim gate decide` only: the request was decided, and the policy said no. |
+| `141` | The reader of the output closed the pipe (`fluxsim ... \| head -1`) while the command was still working, so its work was cut short. |
+
+When the reader closes the pipe after the command has finished its work, fluxsim stops writing and exits quietly with the command's own status. In both cases nothing is printed on stderr.
 
 ## Environment
 

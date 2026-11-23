@@ -56,7 +56,9 @@ from flux_engine.core.target_label import target_label
 from flux_engine.seam.emit import FLX_3301
 from flux_engine.sinks._files import FileSlice, manifest_name
 from flux_engine.sinks._objects import (
+    TUNING_OPTIONS,
     ObjectLocation,
+    ObjectTuning,
     Upload,
     is_object_target,
     open_store,
@@ -378,6 +380,8 @@ class FileTarget:
     settings: Mapping[str, Any] = field(default_factory=dict)
     #: ``--sink-opt instance-identity=true``: an object store may use the instance's own credentials.
     instance_identity: bool = False
+    #: The client timeouts and retry budget asked for; they apply to an object store target only.
+    tuning: ObjectTuning = ObjectTuning()
 
     def __post_init__(self) -> None:
         # The text, not a Path: Path("") is ".", and a sink must never fall
@@ -388,18 +392,28 @@ class FileTarget:
                 f"the {self.name} sink needs a directory: --sink {self.name}:DIRECTORY",
             )
         refuse_unsupported_scheme(self.name, self.directory)
+        if self.tuning != ObjectTuning() and not is_object_target(self.directory):
+            raise FluxError(
+                FLX_3504,
+                f"{', '.join(TUNING_OPTIONS)} tune the upload to an object store, so the "
+                f"{self.name} sink takes them only for an s3://, gs://, az:// or abfs:// target",
+            )
         # Every setting is checked now, before the simulation runs.
         self.sink_class(self._destination(), _PROBE, **self.settings)
         if is_object_target(self.directory):
             require_obstore()
             # Built now, so a setting obstore refuses without a request fails before the run.
             open_store(
-                parse_object_target(self.directory, instance_identity=self.instance_identity)
+                parse_object_target(
+                    self.directory, instance_identity=self.instance_identity, tuning=self.tuning
+                )
             )
 
     def _destination(self) -> Union[Path, ObjectLocation]:
         if is_object_target(self.directory):
-            return parse_object_target(self.directory, instance_identity=self.instance_identity)
+            return parse_object_target(
+                self.directory, instance_identity=self.instance_identity, tuning=self.tuning
+            )
         return Path(self.directory)
 
     def sink_for(self, context: StreamContext) -> ColumnarFileSink:
