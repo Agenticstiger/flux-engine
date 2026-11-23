@@ -282,6 +282,8 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-7009](./FLX-7009.md) | accuracy store entry is a link or the wrong type of file |
 | [FLX-7010](./FLX-7010.md) | seam credibility gate not met |
 | [FLX-7011](./FLX-7011.md) | promotion policy document is malformed |
+| [FLX-7012](./FLX-7012.md) | prediction interval has its low above its high |
+| [FLX-7013](./FLX-7013.md) | the observation is dated before the horizon of the forecast |
 | [FLX-7101](./FLX-7101.md) | a candidate of the fit could not be run |
 | [FLX-7131](./FLX-7131.md) | consumer queries need an optional library that is not installed |
 | [FLX-7132](./FLX-7132.md) | a message to the query process passes its bound |

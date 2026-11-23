@@ -42,6 +42,11 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - `fluxsim verify` and `fluxsim ship` compare the receipt's simulation id and emit ids with the run's plan and refuse a run directory where they differ (`FLX-2122`), so a hand-edited receipt can no longer name a simulation or an emit the plan does not.
 - `fluxsim verify` and `fluxsim ship` refuse a committed run directory that holds a file the run did not write, such as an extra `emits/<id>.ndjson` (`FLX-2123`), because `ship` packs the directory whole; a `.DS_Store` that a file manager leaves is neither refused nor packed.
 
+### Fixed
+
+- `fluxsim forecast make` checks every forecast against the store before it registers any, so a conflict (`FLX-7007`) or a malformed record on one item leaves nothing registered, as its message says; a write that fails part way names what was registered.
+- `fluxsim accuracy register` and `forecast make` refuse an interval whose low is above its high (`FLX-7012`), `forecast score` refuses a stored record that holds one, and it refuses an `--observed-at` earlier than the sealed horizon end (`FLX-7013`).
+
 ## Unreleased
 
 ### Added
