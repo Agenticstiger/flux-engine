@@ -107,13 +107,21 @@ is refused, whatever its count, and a relationship that `follows` names only to 
 
 ### 1.6 The unit follows its child rows
 
-`privacyUnit` is `{ "expose": id }` or, in this format, `{ "expose": id, "follows": [...] }`. Each entry of `follows`
-is `{ "parent": { "table", "columns" }, "child": { "table", "columns" }, "maxChildren": c }`:
+`privacyUnit` is `{ "expose": id }` or, in this format, `{ "expose": id, "follows": [...] }`. Without `follows` the
+unit is one row of `expose`, as in every earlier format, and a profile's charges and bytes are what they were. Each
+entry of `follows` is `{ "parent": { "table", "columns" }, "child": { "table", "columns" }, "maxChildren": c }`:
 
 - it names exactly one entry of the profile's `relationships`, by its parent and child tables and columns, and no
   entry is named twice;
-- `c` is a count of at least 1;
-- the listed relationships form no cycle.
+- `c` is a count of at least 1, a fixed public cap chosen without the data.
+
+The listed relationships form a tree rooted at the expose. Each table they reach, other than the expose, is the child
+of exactly one listed relationship; the parent of every listed relationship is the expose or a table they reach; no
+table is listed as a child twice; they form no cycle; and the expose is never a child. Anything else is refused
+(`FLX-5036`), naming the entry. A table reached by two paths, or a child whose parent the unit does not reach, would
+make the stated reach understate the sensitivity: two followed keys of cap 1 into one table state a reach of 2, yet
+one parent row can bring rows in through both, and the rows under a parent that is no part of the unit move with that
+parent.
 
 One unit of privacy is one row of `expose` together with, recursively, the rows of child tables that reference a row
 of the unit through a listed relationship. Neighbouring data sets differ by one unit (OpenDP's symmetric distance at
@@ -125,13 +133,16 @@ order of their values or a seeded draw, and a dropped row takes with it the rows
 of a followed table that follow no row of the unit's expose. Every statistic of the document is measured on what
 remains.
 
-**Reach.** `m_T` is the number of rows of table `T` that one unit contributes: `m_expose = 1`, and for every other
-table `m_T` is the sum, over the listed relationships whose child is `T`, of `c * m_P`, with `P` the relationship's
-parent. A table that no listed relationship reaches has `m_T = 0`.
+**Reach.** `m_T` is the number of rows of table `T` that one unit contributes: `m_expose = 1`, and for a reached table
+`T`, `m_T = c * m_P` for its one listed relationship (`P` to `T`, cap `c`), that is the product of the caps along the
+one path from the expose to `T`. A table that no listed relationship reaches has `m_T = 0`. The numbers are exact
+integers.
 
 **What the guarantee covers.** Units. The rows of a table with `m_T = 0` are the same in every neighbouring data set,
 so a statistic grouped by such a table's column, or a count of its rows' children, protects the unit's rows and not
-that table's. The account names the tables the unit reaches and the tables it treats as fixed.
+that table's. The account names the tables the unit reaches and the tables it treats as fixed. For the minimum grade
+of a column (ADR 0020), any labelled column (one that carries a sensitivity label such as `pii` or `restricted`) of a
+table with `m_T = 0` counts as `P1`, whether or not the statistic that touches it is noisy.
 
 ### 1.7 What a noisy statistic is charged
 
@@ -152,7 +163,7 @@ Two forms read a row of another table and have their own rules:
 - **A relationship's `marginalHistogram/1`**, from parent table `P` to child table `C`. Let `m_C'` be `m_C` less the
   contribution of this relationship to it (`c * m_P` when it is listed, 0 when it is not).
   - `m_P >= 1` and `m_C' = 0`: L1 and L2 are `m_P`.
-  - `m_P = 0` and `m_C >= 1`: L1 is `2 * m_C` and L2 is `sqrt(2) * m_C`.
+  - `m_P = 0` and `m_C >= 1`: L1 is `2 * m_C` and L2 is `sqrt(2) * m_C`, so the squared L2 is `2 * m_C^2`.
   - Otherwise its noise is refused.
 
   A `groupBy` or `groupByBins` naming a column of `P` leaves the sensitivity as it is.

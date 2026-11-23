@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed 2026-11-23, for design review. Nothing in it is built. Builds on
+Accepted 2026-11-23, with the amendments of decisions 1 and 2 (the followed relationships form a tree, and a labelled
+column of a table the unit treats as fixed counts as `P1` for the minimum grade) and of decision 3 (estimated cliques
+are not read in this release). Builds on
 [ADR 0016](./0016-children-per-parent-are-counted.md) (the counted layout),
 [ADR 0022](./0022-rows-read-their-linked-rows.md) (a row reads its linked row),
 [ADR 0023](./0023-a-catalogue-and-the-rows-that-follow-it.md) (a column drawn `given` a linked row's column, from a
@@ -61,24 +63,41 @@ model fitted to records, and FLUX reads aggregates.
 
 `privacyUnit` gains `follows`, a list of `{ "parent": { "table", "columns" }, "child": { "table", "columns" },
 "maxChildren": c }`. Each entry names a `relationships` entry of the profile, at most once, and `c` is a count of at
-least 1. A relationship named only to be followed may hold an empty list of statistics.
+least 1. A relationship named only to be followed may hold an empty list of statistics. The entries form the tree
+described below.
 
+- **Opt in.** `follows` is optional. Without it the unit is one row of the expose, as it always was, and every
+  charge, byte and digest of such a profile is what it was. A profile of an earlier format cannot hold it.
 - **The unit.** One unit is one row of the unit's expose together with, recursively, the rows of child tables that
-  reference a row of the unit through a listed relationship. Neighbouring data sets differ by one unit. A profile of
-  an earlier format, or one with no `follows`, keeps today's unit: one row of the expose.
+  reference a row of the unit through a listed relationship. Neighbouring data sets differ by one unit.
+- **A tree.** The listed relationships form a tree rooted at the expose: each table they reach, other than the expose,
+  is the child of exactly one listed relationship; the parent of every listed relationship is the expose or a table
+  they reach; no table is the child of two listed relationships; they form no cycle; and the expose is never a child.
+  A list that is not such a tree is refused with `FLX-5036`, naming the entry. A table reached by two paths, or a
+  child whose parent the unit does not reach, would make the stated reach understate what one unit changes: two
+  followed foreign keys of cap 1 into one table state a reach of 2 while a single parent row can bring its rows in
+  through both, and the rows of a parent that is no part of the unit move with that parent, not with the unit. The
+  tree keeps every reached row on one path from the unit's row, so the reach below is the number of rows one unit
+  can change.
 - **Truncation.** Before it measures anything, the profiler keeps at most `c` children of each parent row on each
   listed relationship, dropping the rest by a rule that reads only that parent's own child rows (a fixed order of
   their values, or a seeded draw), and a dropped row takes the rows that follow it. Rows of a followed table that
   follow no unit row are dropped too. Every statistic of the profile is measured on what remains. Truncation is what
   makes `c` a bound.
-- **Public.** `c` is chosen without the data, and the profile's `publicStructure` declaration covers it.
-- **Reach.** `m_T`, the number of rows of table `T` that one unit contributes, is 1 for the unit's expose, and for
-  any other table the sum, over every path of listed relationships from the unit's expose to `T`, of the product of
-  their `c`. A table no path reaches has `m_T = 0`. The listed relationships form no cycle.
+- **Public.** `maxChildren` is a fixed public cap per followed relationship, chosen without the data, and the
+  profile's `publicStructure` declaration covers it. It is not a threshold chosen privately from a ladder.
+- **Reach.** `m_T`, the number of rows of table `T` that one unit contributes, is 1 for the unit's expose. For a
+  reached table `T` it is `c * m_P`, with `c` the cap of the one listed relationship from `P` to `T`: the product of
+  the caps along the one path from the expose to `T`. A table no listed relationship reaches has `m_T = 0`.
 - **What the guarantee covers.** The guarantee is about units. The rows of a table the unit does not reach are the
   same in every neighbouring data set, so a statistic grouped by such a table's column, or a count of its rows'
   children, protects the unit's rows and not that table's. `EVIDENCE.md` names the tables the unit reaches and the
   tables it treats as fixed, and the grade's account says the same (decision 8).
+- **The fixed-table floor.** For the minimum-grade check of each column (ADR 0020), any labelled column of a table
+  the unit treats as fixed (`m_T = 0`) counts as `P1`, whether or not the statistic that touches it is noisy: a
+  label such as `pii` or `restricted` on a column of a fixed table says that one of its rows must not move a
+  published number, and the guarantee does not cover those rows. A run graded `P3` therefore cannot draw on such a
+  column of a table the unit does not follow.
 
 ### 2. What a noisy statistic is charged
 
@@ -97,11 +116,13 @@ not reach, and the children per parent of a relationship whose child is the unit
   Otherwise it is refused.
 - **Children per parent** of a relationship from `P` to `C`, whose records are the rows of `P` and whose value is
   their number of children:
-  1. `P` reached, and no path from the unit reaches `C` except through this relationship: one unit adds or removes at
-     most `m_P` records with their children and changes no other, so the sensitivity is `m_P` in L1 and in L2.
+  1. `P` reached, and `C` reached by no other listed relationship (`m_C'`, which is `m_C` less this relationship's
+     contribution `c * m_P` when it is listed and 0 when it is not, is 0): one unit adds or removes at most `m_P`
+     records with their children and changes no other, so the sensitivity is `m_P` in L1 and in L2.
   2. `P` not reached and `C` reached: each of the unit's `m_C` child rows moves one parent between two count classes,
-     so the sensitivity is `2 m_C` in L1 and `sqrt(2) m_C` in L2.
-  3. Otherwise noise is refused.
+     so the sensitivity is `2 m_C` in L1 and `sqrt(2) m_C` in L2, and the squared L2 is `2 m_C^2`. With the fixed-table
+     floor of decision 1 this case is only safe where the parent's labelled columns are not read at `P3`.
+  3. Otherwise noise is refused, with `FLX-5036`.
 
   A grouping by a column of `P` keeps the same sensitivity: a parent's group is the record's own value. On a followed
   relationship no parent has more than `c` children, so a level or a bin whose least count is above `c` is refused,
@@ -120,6 +141,9 @@ a Laplace of scale `b` spends `epsilon = Delta_1 / b`, and a share below that is
 - **Noise** is allowed under decision 2 on a relationship's `marginalHistogram/1`, grouped or not, and on a count
   table with `groupByLink` (a parent attribute and a child attribute). A relationship's `mean/1` and quantiles stay
   exact, as a column's do, and a relationship that holds one keeps a run at P1 (decision 8).
+
+Estimated cliques are not read in this release: a table's cliques are measured (ADR 0035 decision 10, ADR 0036), so
+no estimate's variance enters the account.
 
 ### 4. The declaration: children given a parent column
 
@@ -189,7 +213,9 @@ The `relationships` section is no longer exact as a whole. A relationship is noi
 `noise` block and it holds no `dates` and no `exposure`; otherwise it keeps a run at P1, with a reason that names it. A
 statistic grouped by a link counts as noisy when it carries a `noise` block. `EVIDENCE.md` states the unit with what it
 follows, for example one row of `account` with at most 20 rows of `invoice`, which is the guarantee's unit in NIST SP
-800-226's terms, and names the tables the unit does not reach, whose rows the guarantee treats as fixed. A member the
+800-226's terms, and names the tables the unit reaches and the tables it does not reach, whose rows the guarantee
+treats as fixed. A labelled column of a table treated as fixed counts as `P1` for that column's minimum grade
+(decision 1). A member the
 grade does not know counts as released without noise.
 
 ### 9. Not in this record
@@ -220,21 +246,24 @@ on a relationship's `dates` and `exposure`, on `per` statistics and on histories
   profile with any parent statistic could not be P3. Decision 2's second case keeps it available where the parent is
   not reached.
 - **R2T's ladder of thresholds** in place of a fixed cap: better accuracy for the same budget, but the cap then
-  depends on the data through a private choice, and the profile would state the chosen threshold and its share. Left
-  as a question.
+  depends on the data through a private choice, and the profile would state the chosen threshold and
+  its share. Not adopted; a later format could accept one.
 - **PrivLava's latent variables.** Rejected: a model fitted to records, which FLUX does not run.
 - **A new seed path for the grouped layout.** Rejected: today's permutation, restricted to a class, is a uniform order
   of that class, so no new randomness is needed.
 
-## Questions for review
+## Settled in review
 
-1. **The neighbouring relation.** A unit that takes its children with it, as PrivLava and R2T define one, rather than a
-   row alone.
-2. **The cap.** A fixed public cap per followed relationship, or R2T's ladder with a stated share.
-3. **The second case of children per parent** (`2 m_C` and `sqrt(2) m_C`): keep it, or refuse noise there.
+1. **The neighbouring relation.** A unit that takes its children with it, as PrivLava and R2T define one, for a
+   profile that opts in with `follows` and only where the followed relationships form a tree. One row of the expose
+   stays the default.
+2. **The cap.** A fixed public cap per followed relationship, covered by `publicStructure`.
+3. **The second case of children per parent** (`2 m_C` and `sqrt(2) m_C`): kept, with the fixed-table floor of
+   decision 1.
 4. **Relational cliques.** A child column given its parent's column and other child columns together is the next
-   step, and needs a clique whose columns span a link.
-5. **Numbers of children given a binned parent column**, which decision 4 allows: in this release or the next.
+   step, and needs a clique whose columns span a link. Not in this release.
+5. **Numbers of children given a binned parent column**, which decision 4 allows: in this release, with ADR 0036's
+   binned `given`.
 
 ## Tasks
 

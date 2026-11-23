@@ -60,7 +60,7 @@ A new registered definition of a clique, in `tables.<exposeId>.cliques` beside `
 | `columns` | One or more distinct names of columns of the table. |
 | `domains` | One per column, in the order of `columns`: `{ "levels": [...] }` for a categorical column, distinct and sorted by code point, or `{ "bins": [...] }` for a number or timestamp column, at least two strictly increasing decimal edges. |
 | `noisyCounts` | One noisy value per combination of levels and bins, row-major, as `cliqueMarginal/1`. |
-| `noise` or `estimate` | The mechanism, scale and share (PROFILE-SPEC.md section 3a), or, in a table whose cliques are estimated from measurements, the variance per cell the profiler vouches for (ADR 0035 decision 10). |
+| `noise` | The mechanism, scale and share (PROFILE-SPEC.md section 3a). A clique estimated from measurements, with a variance in place of `noise`, is not read in this release (ADR 0035 decision 10). |
 
 - **Bins** are read as `marginalHistogram/1` reads them: a value is floored onto the profile's grid, bin `i` is
   `[e_i, e_(i+1))`, and the last bin is closed above. The profiler chooses edges that cover the column's declared
@@ -69,8 +69,8 @@ A new registered definition of a clique, in `tables.<exposeId>.cliques` beside `
   column are milliseconds, converted to days as PROFILE-SPEC.md section 7 converts a histogram's.
 - **A record counts** when every column of the clique is known. A column with a null fraction is still not drawn
   from a clique (decision 6).
-- **One column** is allowed in `cliqueMarginal/2`: it is that column's marginal, which an estimated release (AIM's
-  model, for one) gives for a column its junction tree leaves alone. `cliqueMarginal/1` keeps its two-column minimum.
+- **One column** is allowed in `cliqueMarginal/2`: it is that column's marginal, which a release from a model such as
+  AIM's gives for a column its junction tree leaves alone. `cliqueMarginal/1` keeps its two-column minimum.
 - **Agreement** is ADR 0021's and PROFILE-SPEC.md section 5a's: cliques of either definition that share a column list
   the same levels or the same edges for it, and agree exactly on their noisy sums over the shared columns. Two cliques
   over one set of columns are refused.
@@ -167,8 +167,8 @@ section 9 widens one. A property row that holds `groupByBins` names scorecard fo
 
 ### 9. Grades
 
-A `cliqueMarginal/2` is noisy as a `cliqueMarginal/1` is, and an estimated clique is post-processing of noisy
-measurements, so neither keeps a run from P3. A `groupByBins` count table with a `noise` block is noisy; without one
+A `cliqueMarginal/2` is noisy as a `cliqueMarginal/1` is, so neither keeps a run from P3. Estimated cliques are not
+read in this release. A `groupByBins` count table with a `noise` block is noisy; without one
 it is exact.
 
 ## Consequences
@@ -205,7 +205,7 @@ Sizes are changed lines with their tests: small is about 150, medium about 500, 
 
 | # | task | where | size |
 |---|---|---|---|
-| 1 | `cliqueMarginal/2`: the reader (domains, bins, one column, `estimate`), agreement across both definitions, the schema, the example | flux-stats | medium |
+| 1 | `cliqueMarginal/2`: the reader (domains, bins, one column), agreement across both definitions, the schema, the example | flux-stats | medium |
 | 2 | `groupByBins`: the form on column statistics, its disclosure and noise, the schema | flux-stats | small |
 | 3 | a binned parent in `given`: validation, keys by lower edge, the per-row and column paths, the kernel `0.1.0` refusal, tests for equivalence, jobs, shards and scale, an end-to-end `ship` test | engine | medium |
 | 4 | the junction tree and `init` with bins: `junction.py`, `author/cliques.py`, the edges against the contract's range, the ledger | engine | medium |
@@ -215,8 +215,7 @@ Sizes are changed lines with their tests: small is about 150, medium about 500, 
 | 8 | grades: the second definition, `groupByBins` | engine | small |
 | 9 | docs: PROFILE-SPEC section 5a, SEAM-FIDELITY-SPEC (a histogram column may be a parent), PARAMETER-REGISTER-SPEC (a citation of the new definition), the how-to on drawing a column given another | docs | small |
 
-Task 1 extends the schema that ADR 0035's first task creates, and its `estimate` waits for that record's
-`cliqueSelection` (its task 2). Tasks 1 and 2 come first; 3 to 6 can then run beside 7 and 8.
+Task 1 extends the schema that ADR 0035's first task creates. Tasks 1 and 2 come first; 3 to 6 can then run beside 7 and 8.
 
 ## What would change this decision
 

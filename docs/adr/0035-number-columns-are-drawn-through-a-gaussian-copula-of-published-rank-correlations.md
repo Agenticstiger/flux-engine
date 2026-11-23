@@ -304,13 +304,12 @@ drafted in the note for profilers:
   names the tool and its version), the share spent choosing the cliques (`selection`) and the share spent releasing
   levels or bin edges that were not public (`domain`). Both are parts of the budget. ADR 0019 left the loss of
   choosing cliques as unstated slack; a profile of format 1-4-0 states it.
-- **Measured or estimated, per table.** The cliques of a table are either all measurements, each with its own `noise`
-  block and share as today, or all estimates formed from listed `measurements` (each with its `noise` block and
-  share), such as AIM's model projected onto the maximal cliques of its junction tree. An estimate is a
-  `cliqueMarginal/2` with no share. It states a variance `v` per cell, and the profiler vouches that the errors of its
-  cells have a covariance of at most `v` times the identity, the condition PROFILE-SPEC.md section 5a states for a
-  noisy clique; `verify` uses `v` only to widen its margins. An estimate in a table with no `cliqueSelection`, or
-  with a measured one, is refused.
+- **Measured, per table, in this release.** The cliques of a table are all measurements, each with its own `noise`
+  block and share as today. A later format may add cliques estimated from listed `measurements`, such as AIM's model
+  projected onto the maximal cliques of its junction tree, each an estimate with a variance `v` per cell that the
+  profiler vouches for, the condition PROFILE-SPEC.md section 5a states for a noisy clique. This release does not read
+  them: `estimate` and `measurements`, and `published: estimated`, are refused. An estimate's variance must then be a
+  function of the measurement design and the noise scales only, and is part of the structure a profile declares public.
 - **Limits** the reader enforces: at most 1,024 cliques and 4,096 measurements in a table; at most 1,000,000 cells in
   a clique, as today; and, new, at most 32 columns in a clique and 10,000,000 cells over a table's cliques, the order
   of AIM's default model size of 80 MB; every measurement's columns inside one published clique; and, as today,
@@ -363,9 +362,8 @@ evidence says so.
    known approximation, or leave tie-heavy columns to cliques as this record does.
 5. **A copula with categories.** A copula per level of a category, or a copula that holds categorical columns
    through thresholds, is left for later.
-6. **Estimated cliques.** Whether a variance the profiler vouches for is enough to score against an estimate, or
-   the first release should accept measured cliques only (MST and the `fixed` method), with AIM's estimates to
-   follow.
+6. **Estimated cliques.** Settled: measured cliques only in this release (MST and the `fixed` method), with AIM's
+   estimates to follow in a later format.
 7. **The parameter register.** This design keeps the register at format 1-3-0: `fidelity.copula` joins the
    declarations whose numbers it does not count, beside `counts` and `conditions`, and a citation may not name the
    new definitions. Counting the copula's values, with the rank correlation each rests on, would be register format
@@ -378,7 +376,7 @@ Sizes are changed lines with their tests: small is about 150, medium about 500, 
 | # | task | where | size |
 |---|---|---|---|
 | 1 | `kendallTau/1` and `spearmanRho/1`: definitions, the reader (exact and noisy, `rowFloor`, the charge), the sensitivity bounds as exhaustive tests over small data, `profile-1-4.schema.json` created, the example | flux-stats | medium |
-| 2 | `cliqueSelection`: the reader, the parts, measured and estimated cliques, the limits | flux-stats | medium |
+| 2 | `cliqueSelection`: the reader, the parts, measured cliques, the limits | flux-stats | medium |
 | 3 | request format 1-2-0: `rankCorrelations` and `cliqueColumns` in `flux_stats.request`, the refusals (`FLX-5038`), `init` writing the asks | flux-stats and engine | small |
 | 4 | `fidelity.copula`: validation, the kernel `0.1.0` refusal, `H` and `G`, an end-to-end `ship` test | engine | medium |
 | 5 | the plan's matrix: the series, LDLᵀ, shrinking, Cholesky, the plan's `copula` member, `EVIDENCE.md` | engine | medium |
