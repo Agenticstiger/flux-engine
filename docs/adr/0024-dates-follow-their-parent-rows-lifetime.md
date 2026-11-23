@@ -8,6 +8,7 @@ module facts live. It draws as EXPR-SPEC-2 section 6 specifies a bounds draw rel
 (`distribution`) and as section 7 specifies the shares below 100 %, on the rule stream section 7 names,
 so the bounds form over a relationship of [ADR 0011](./0011-rows-follow-their-key-entity-and-parent.md)
 step 3b draws the same way when it comes. That form itself stays `FLX-6210`.
+**Amended 2026-11-23:** profile format `1-3-0` and request format `1-1-0` shipped in 0.10.0.
 
 ## Context
 
@@ -254,7 +255,7 @@ regenerating hidden rows inside it would check the generator against itself.
 
 ### 9. Profile format 1-3-0 and request format 1-1-0
 
-Profile format `1-3-0` is not released yet, so it gains two optional members rather than a new format:
+Profile format `1-3-0` was not released when this record was written and shipped in 0.10.0, so it gains two optional members rather than a new format:
 
 - **`tables.<id>.datePairs`**: `{start, end, statistics, order}` for two DATE or TIMESTAMP columns of one
   table, over the rows where both are known. `statistics` are of `DAYS_BETWEEN(start, end)`

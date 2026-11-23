@@ -6,6 +6,7 @@ Accepted 2026-11-22. Builds on [ADR 0024](./0024-dates-follow-their-parent-rows-
 stream, positions and draws it extends, and on the expected-count hook of ADR 0016 (children per parent are
 counted), through which a parent's exposure sets its number of children. Its module facts live
 under [ADR 0018](./0018-module-facts-live-in-the-flux-bundle.md)'s namespace.
+**Amended 2026-11-23:** profile format `1-3-0` and request format `1-1-0` shipped in 0.10.0.
 
 ## Context
 
@@ -160,7 +161,7 @@ vector moves.
 
 ### 6. Profile format 1-3-0 and request format 1-1-0
 
-Both formats are unreleased, so they gain members rather than versions:
+Both formats were unreleased when this record was written and shipped in 0.10.0, so they gain members rather than versions:
 
 - **`tables.<id>.calendar`**: `{column, month, dayOfWeek, hourOfWeek}` for a DATE or TIMESTAMP column, each
   a `levelHistogram/1` of the column's known values over its levels, `01` to `12`, `1` to `7` (Monday is

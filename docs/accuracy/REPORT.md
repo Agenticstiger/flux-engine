@@ -4,7 +4,7 @@
 
 What each family measures, and the pass criterion every number below is held to, is in [DESIGN.md](DESIGN.md). Results are measured at the stated sizes and seeds, not established in general.
 
-Latest nightly run: 2026-11-14, commit `-`, base seed `5373377673183447537`, confirmation seed `5373377673183447538`.
+Latest nightly run: 2026-11-14, base seed `5373377673183447537`, confirmation seed `5373377673183447538`.
 
 Verdict: **passed**.
 

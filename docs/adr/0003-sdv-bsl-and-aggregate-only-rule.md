@@ -17,11 +17,13 @@ release's guarantee, for the stated unit and for nothing else, as set out in
 [the second amendment](#amendment-of-2026-11-21). The rule that the engine reads no
 record is unchanged, and so is point 3 above for every statistic that carries no noise.
 **Amended again 2026-11-21:** learned record-level generators stay out of the engine and
-are planned as a package of their own, as set out in
+are meant to be a package of their own, as set out in
 [the third amendment](#amendment-of-2026-11-21-learned-record-level-generators).
 **Amended 2026-11-23:** a profiler protects the facts it publishes over one table as a
 set, not one at a time, as set out in
 [the fourth amendment](#amendment-of-2026-11-23-facts-protected-as-a-set).
+**Amended 2026-11-23:** `flux-learned` is deferred. The design exists and the build is not yet
+scheduled, so the third amendment no longer names a release for it.
 
 ## Context
 
@@ -230,9 +232,10 @@ boundary means for a learned generator.
    or in any extra, that does. The engine holds an aggregates-only boundary, and a learned
    generator is on the other side of it by construction, because its input is the records
    themselves.
-2. **They live in a package of their own.** `flux-learned`, planned for 0.11.0, is a separate
+2. **They live in a package of their own.** `flux-learned` is a separate
    distribution that whoever wants one installs beside the engine. Installing the engine
-   installs none of it, and the engine does not name it as an extra.
+   installs none of it, and the engine does not name it as an extra. *Amended
+   2026-11-23:* the design exists and the build is deferred, not yet scheduled.
 3. **The engine's guarantees do not reach what it makes.** The statement of the second
    amendment holds because every input of a run that describes the data is an element of
    one release. The rows a learned generator draws are a function of the records, not of a
@@ -250,7 +253,7 @@ boundary means for a learned generator.
 
 - Nothing changes in this release. No engine code reads or fits a record, and the
   dependency list does not move.
-- Someone who wants a learned generator installs `flux-learned` when it ships and takes
+- Someone who wants a learned generator installs `flux-learned` if it is built and takes
   what it says about privacy from that package.
 - A model fitted to rows can reproduce rows it was fitted to. The engine's aggregate path has
   no such output, which is part of why the two are kept apart.
