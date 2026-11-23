@@ -280,6 +280,7 @@ from flux_engine.stages.scaling import (
     child_rows_note,
     key_space_note,
     scale_emit,
+    scaled_rows,
     share_of,
     too_many_child_rows_note,
 )
@@ -2229,23 +2230,28 @@ def _refuses_unscaled(directory: Any, options: Mapping[str, Any]) -> bool:
     return False
 
 
-def _scale_causes(short: TooFewChildRows, declared_rows: Mapping[str, Optional[int]]) -> bool:
+def _scale_causes(
+    short: TooFewChildRows, declared_rows: Mapping[str, Optional[int]], scale: Decimal
+) -> bool:
     """Whether child rows too few for a minimum at a scale below 1 are short because of the scale.
 
     The refusal names the child and the parent expose, and *declared_rows* holds what each declares
-    before any scaling. At scale 1 the child rows are ``N1`` and no more than ``P1`` parents are
-    eligible (every one, or those that meet a ``parentWhen``). The scale is the cause when
-    ``N1 >= m * P1``: the same counts at scale 1 clear the minimum even if every parent is eligible.
-    When ``N1 < m * P1`` scale 1 falls short (exactly so when every parent is eligible).
-    Where they do not, scale 1 fails, or may fail, the same way, and the note would send the person
-    to a retry that fails too, so it is left out. Rows an expose does not declare (they come from
-    the run's own moments) give no such count, and the note is given as before.
+    before any scaling. At scale 1 the child rows are ``N1`` and the parents ``P1``. The scaled run
+    had ``e`` eligible parents among the ``Ps`` it drew; with no ``parentWhen`` that is all of them,
+    and otherwise the parents beyond the first ``Ps`` add at most ``P1 - Ps`` more, so no more than
+    ``e + P1 - Ps`` parents are eligible at scale 1 (``P1`` when every parent is). The scale is the
+    cause when ``N1 >= m * (e + P1 - Ps)``: scale 1 clears the minimum even if every one of those
+    is eligible. Where it does not, scale 1 fails, or may fail, the same way, and the note would
+    send the person to a retry that fails too, so it is left out. Rows an expose does not declare
+    (they come from the run's own moments) give no such count, and the note is given as before.
     """
     children = declared_rows.get(short.child)
     parents = declared_rows.get(short.parent)
     if children is None or parents is None:
         return True
-    return children >= short.minimum * parents
+    drawn = scaled_rows(parents, scale)
+    most_eligible = min(parents, short.eligible + max(0, parents - drawn))
+    return children >= short.minimum * most_eligible
 
 
 def _check_declared_blocks(
@@ -2432,7 +2438,7 @@ def _scale_noted(
         elif (
             scale < 1
             and isinstance(small, TooFewChildRows)
-            and not _scale_causes(small, declared_rows)
+            and not _scale_causes(small, declared_rows, scale)
         ):
             raise
         else:

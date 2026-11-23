@@ -59,6 +59,7 @@ __all__ = [
     "parse_shard",
     "scale_emit",
     "scale_text",
+    "scaled_rows",
     "share_of",
     "too_many_child_rows_note",
 ]
@@ -70,6 +71,10 @@ def _scaled_rows(rows: int, scale: Decimal) -> int:
     if scaled > MOST_ROWS:
         raise FluxError(FLX_3405, f"{rows} rows at scale {scale_text(scale)} is {scaled} rows")
     return scaled
+
+
+#: *rows* at *scale*, as the plan rounds them (half up, and at least one row of a table that has any).
+scaled_rows = _scaled_rows
 
 
 def _scaled_span(low: Decimal, high: Decimal, scale: Decimal, *, whole: bool) -> Decimal:

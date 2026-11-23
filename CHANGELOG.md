@@ -65,6 +65,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - When a sink delivery fails partway, the error names the stream that failed and says how many streams were delivered.
 - Under `--json`, every `story` refusal carries its code in `artifacts.code`, as the refusals of the other commands do.
 - Refusals read "1 child" and "1 bin" in the singular, `FLX-3403` names key and bridge columns as plain text, a links `when` error names its `links[...].when` key, `fluxsim verify --help` names the `counts:` rule lines and the `childrenPerParent` row, and SEAM-FIDELITY-SPEC lists every namespace key the engine reads.
+- Under a `parentWhen`, the `FLX-3403` note below `--scale 1` is decided from the eligible parents, and is given only when scale 1 would not fall short the same way.
 
 ## Unreleased
 
