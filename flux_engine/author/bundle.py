@@ -73,6 +73,7 @@ from flux_engine.author.columns import (
     recheck_key,
     widen_key_span,
 )
+from flux_engine.author.copula import CopulaPlan, declare_copula
 from flux_engine.author.dates import (
     DATE_KINDS,
     DatedExpose,
@@ -118,6 +119,7 @@ from flux_engine.governance.privacy import effective_floors, sensitivities_of
 from flux_engine.seam.asof import ASOF_KEY
 from flux_engine.seam.contract import LogicalKind, compile_expose
 from flux_engine.seam.copies import COPIES_KEY, declares_copies
+from flux_engine.seam.copula import COPULA_KEY
 from flux_engine.seam.counts import COUNTS_KEY, count_entries_of
 from flux_engine.seam.coverage import printable
 from flux_engine.seam.dates import LIFETIMES_KEY, RATES_KEY, WITHIN_KEY
@@ -139,9 +141,10 @@ from flux_engine.seam.profile import load_profile
 from flux_engine.seam.profile_request import column_domains
 from flux_engine.seam.resolve import EXTENSION_NAMESPACE, FLX_3105, ExactLoader, read_bundle_file
 from flux_engine.starter import StarterFile
-from flux_stats.cliques import CliqueEntry
+from flux_stats.cliques import CLIQUE_DEFINITION_2, CliqueEntry
 from flux_stats.column_metrics import COUNT
 from flux_stats.exact_yaml import load_documents
+from flux_stats.rank_correlation import RANK_IDENTIFIERS
 from flux_stats.request import ProfileRequest
 
 __all__ = [
@@ -241,6 +244,10 @@ class AuthoredExpose:
     #: The columns of linked rows a property of this expose is grouped by, under their
     #: ``<relationship>.<column>`` names: the levels the check counts the groups over.
     linked: Dict[str, ColumnPlan] = field(default_factory=dict)
+    #: The columns a clique of the profile draws, which a copula leaves to the cliques.
+    drawn_by_cliques: Set[str] = field(default_factory=set)
+    #: What the table's published rank correlations came to: its copula, and what was said of it.
+    copula: Optional[CopulaPlan] = None
 
 
 @dataclass(frozen=True)
@@ -740,6 +747,7 @@ def _settle_expose(
         order=[plan.name for plan in authored.columns],
         determined=set(authored.derives) | set(authored.copies),
     )
+    authored.drawn_by_cliques = set(drawn)
     choose_givens(
         authored.columns,
         authored.kinds,
@@ -1141,17 +1149,20 @@ def _fidelity_block(authored: AuthoredExpose, encoding: Mapping[str, Any]) -> Di
             columns[column.name] = column.declaration
     for name, linked in authored.linked.items():
         columns[name] = linked.declaration
-    return {
+    block: Dict[str, Any] = {
         "encoding": {
             "fractionalBits": encoding.get("fractionalBits", 16),
             "rounding": encoding.get("rounding", "floor"),
         },
         "records": dict(RECORDS),
         "columns": columns,
-        "properties": [prop.document for prop in authored.properties],
-        "budget": dict(BUDGET),
-        "failureAction": "withholdBundle",
     }
+    if authored.copula is not None and authored.copula.declaration is not None:
+        block[COPULA_KEY] = authored.copula.declaration
+    block["properties"] = [prop.document for prop in authored.properties]
+    block["budget"] = dict(BUDGET)
+    block["failureAction"] = "withholdBundle"
+    return block
 
 
 def _labels(authored: AuthoredExpose) -> List[Label]:
@@ -1393,6 +1404,9 @@ def _ledger_expose(ledger: Ledger, expose: AuthoredExpose) -> None:
     for column in expose.columns:
         for tokens, how in column.reads:
             ledger.use(tokens, how)
+    if expose.copula is not None:
+        for tokens, how in expose.copula.reads:
+            ledger.use(tokens, how)
     for prop in expose.properties:
         for tokens, how in prop.reads:
             ledger.use(tokens, how)
@@ -1410,6 +1424,9 @@ def _cite_expose(ledger: Ledger, expose: AuthoredExpose) -> None:
     for prop in expose.properties:
         for label in prop.labels:
             _cite(ledger, label.basis)
+    if expose.copula is not None:
+        for tokens, why in expose.copula.passed:
+            ledger.unused(tokens, why)
 
 
 def _reset_unwritten_relationships(
@@ -2090,10 +2107,20 @@ def _relationships_of(keys: ContractKeys, expose_id: str) -> Sequence[Any]:
         return ()
 
 
+#: The definitions of a profile that the register's own list of them does not hold.
+_NOT_IN_THE_REGISTER = RANK_IDENTIFIERS | {CLIQUE_DEFINITION_2}
+
+
 def _unused_block(ledger: Ledger) -> List[Dict[str, Any]]:
-    """The register's ``unused`` list: each unused statistic with its definition and reason."""
+    """The register's ``unused`` list: each unused statistic with its definition and reason.
+
+    A statistic of a definition the register does not hold (a rank correlation, a binned clique)
+    cannot be cited there, so the ledger names it and the register leaves it out.
+    """
     block: List[Dict[str, Any]] = []
     for entry in ledger.unused_entries():
+        if entry.definition in _NOT_IN_THE_REGISTER:
+            continue
         statistic: Dict[str, Any] = {"pointer": entry.pointer}
         if entry.definition is not None:
             statistic["definition"] = entry.definition
@@ -2123,6 +2150,8 @@ def _gaps(
                 continue
             if subject == "rows" and sentence == expose.rows_note:
                 found.append(Gap(render_pointer(base + ("rows",)), sentence))
+            elif subject == "copula":
+                found.append(Gap(render_pointer(base + ("fidelity", COPULA_KEY)), sentence))
             elif sentence not in choices.get(subject, set()):
                 found.append(Gap(render_pointer(base + ("fidelity", "columns", subject)), sentence))
     if window_note is not None:
@@ -2766,6 +2795,7 @@ def _author_bundle(
         declined_rates=unrated,
     )
     _release_dated_columns(authored, dated)
+    _declare_copulas(authored, reading, dated, histories)
     children = (
         spread.used + histories.used + dated.used,
         spread.unused + histories.unused + dated.unused,
@@ -3445,6 +3475,56 @@ def _release_dated_columns(exposes: Sequence[AuthoredExpose], dated: Any) -> Non
                     plan.how = plan.how[: -len(EXACT_HOW)].rstrip("; ")
 
 
+def _declare_copulas(
+    exposes: Sequence[AuthoredExpose], reading: _Reading, dated: Any, histories: _Histories
+) -> None:
+    """Write one copula for each written expose whose table publishes rank correlations.
+
+    Run last of the declarations, once the cliques, the Chow-Liu forest, the dates, the small
+    tables' allocation and the histories have each taken the columns they draw, so that the copula
+    gets only the columns nothing else decides (ADR 0035 decision 9). Under kernel 0.1.0, which
+    has no copula path, no key is written.
+    """
+    from flux_engine.core.kernels import new_plan_is_counter_based
+
+    named = _columns_named_by_dates(dated)
+    with_history = {str(entry["emit"]) for entry in histories.entries}
+    for expose in exposes:
+        if expose.reference or expose.skipped is not None:
+            continue
+        whole = None
+        if expose.expose_id in with_history or expose.projected is not None or expose.carries:
+            whole = "its columns follow a history, which sets them"
+        planned = declare_copula(
+            expose,
+            reading.scored.tables.get(expose.expose_id),
+            by_dates=named.get(expose.expose_id, set()),
+            whole=whole,
+            counter_based=new_plan_is_counter_based(),
+        )
+        if planned is None:
+            continue
+        expose.copula = planned
+        expose.properties.extend(planned.properties)
+        expose.assumptions.extend(("copula", sentence) for sentence in planned.assumptions)
+
+
+def _columns_named_by_dates(dated: Any) -> Dict[str, Set[str]]:
+    """The columns of each emit that a ``lifetimes``, ``within`` or ``rates`` entry names at all."""
+    named = _columns_set_by_dates(dated)
+    for entry in dated.lifetimes:
+        named.setdefault(entry["emit"], set()).update(
+            name for name in (entry.get("start"), entry.get("end")) if name is not None
+        )
+    for entry in dated.within:
+        if entry.get("date") is not None:
+            named.setdefault(entry["emit"], set()).add(entry["date"])
+    for entry in dated.rates:
+        if entry.get("column") is not None:
+            named.setdefault(entry["emit"], set()).add(entry["column"])
+    return named
+
+
 def _columns_set_by_dates(dated: Any) -> Dict[str, Set[str]]:
     """The columns of each emit that a lifetime's end or a ``within`` date sets."""
     set_by_dates: Dict[str, Set[str]] = {}
@@ -3546,9 +3626,10 @@ def _generator_version(emits: Sequence[Any], counted: FrozenSet[Tuple[str, str]]
     """The kernel the emits are planned under.
 
     A reference expose, a column drawn given a linked row, a column under exact allocation, a
-    relationship on the counted layout and a history generate under kernel 0.2.0 only, so one of
-    any puts every plan of the simulation there.
+    copula, a relationship on the counted layout and a history generate under kernel 0.2.0 only,
+    so one of any puts every plan of the simulation there.
     """
+    from flux_engine.generator.copula import declares_copula
     from flux_engine.generator.rows import GENERATOR_VERSION, GENERATOR_VERSION_2
 
     return (
@@ -3558,6 +3639,7 @@ def _generator_version(emits: Sequence[Any], counted: FrozenSet[Tuple[str, str]]
             resolved.is_reference
             or _given_across_link(resolved)
             or _allocated(resolved)
+            or declares_copula(resolved.fidelity)
             or HISTORY_KEY in (resolved.extension or {})
             or ASOF_KEY in (resolved.extension or {})
             for resolved in emits
