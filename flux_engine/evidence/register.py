@@ -244,6 +244,8 @@ class RegisterSummary:
     unused: Optional[Tuple[UnusedNote, ...]] = None
     #: The overlays the record's entries cite (format 1-3-0), by name; empty for any other record.
     overlays: Tuple[str, ...] = ()
+    #: How many calibrated entries record a ``targets`` digest other than the pinned profile's.
+    off_profile: int = 0
 
     def as_document(self) -> Dict[str, Any]:
         """The shares as a stage's ``--json`` envelope carries them."""
@@ -309,6 +311,19 @@ def parse_register(text: str) -> RegisterSummary:
         stated_defaults=stated,
         unused=_unused_notes(document),
         overlays=_overlay_names(entries, sources),
+        off_profile=_off_profile(entries, sources, digest),
+    )
+
+
+def _off_profile(entries: List[Any], sources: Mapping[int, str], pinned: Optional[str]) -> int:
+    """The calibrated entries whose ``targets`` digest is not the pinned profile's digest."""
+    return sum(
+        1
+        for position, entry in enumerate(entries)
+        if sources[position] == Source.CALIBRATED.value
+        and isinstance(entry, Mapping)
+        and isinstance(entry.get("calibration"), Mapping)
+        and entry["calibration"].get("targets") != pinned
     )
 
 
@@ -580,7 +595,7 @@ def _defaults_detail(defaults: int, stated: int) -> str:
     )
 
 
-def _calibrated_clause(counts: Mapping[str, int], total: int) -> str:
+def _calibrated_clause(counts: Mapping[str, int], total: int, off_profile: int = 0) -> str:
     """The note's words on calibrated values; none for a register of a format that has none.
 
     A register of format 1-3-0 counts them even when there are none, and the words it has always
@@ -593,9 +608,18 @@ def _calibrated_clause(counts: Mapping[str, int], total: int) -> str:
     share = f"{_share(found, total)} are calibrated values, "
     if not found:
         return share + "fitted to targets of the pinned profile, "
+    differ = (
+        ""
+        if not off_profile
+        else (
+            f"{off_profile} of them record{'s' if off_profile == 1 else ''} the digest of a "
+            "profile other than the pinned one as the profile fitted to, "
+        )
+    )
     return (
         share + "which the bundle declares were fitted to targets of the pinned profile and "
         "passed a held-out check, with the digests it names (the engine did not re-run the fit), "
+        + differ
     )
 
 
@@ -635,7 +659,7 @@ def render_register_note(summary: RegisterSummary) -> str:
         if counts.get(Source.OVERLAY.value)
         else ""
     )
-    calibrated = _calibrated_clause(counts, total)
+    calibrated = _calibrated_clause(counts, total, summary.off_profile)
     paragraph = (
         f"Parameter register: the register counts {total} "
         f"number{'s' if total != 1 else ''} of this run: the numbers under `spec` in the "

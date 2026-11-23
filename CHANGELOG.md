@@ -41,6 +41,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - A profile that declares `publicStructure` grades P1, not P3, when a noisy statistic is grouped by a number or timestamp column or through a link, or carries a `sampleSize` band whose `min` equals its `max`; EVIDENCE.md gives a fixed reason.
 - `fluxsim verify` and `fluxsim ship` compare the receipt's simulation id and emit ids with the run's plan and refuse a run directory where they differ (`FLX-2122`), so a hand-edited receipt can no longer name a simulation or an emit the plan does not.
 - `fluxsim verify` and `fluxsim ship` refuse a committed run directory that holds a file the run did not write, such as an extra `emits/<id>.ndjson` (`FLX-2123`), because `ship` packs the directory whole; a `.DS_Store` that a file manager leaves is neither refused nor packed.
+- A calibrated register entry records the digest of the profile it was fitted to (`calibration.targets`), and the register note in EVIDENCE.md now says when that digest is not the pinned profile's.
 
 ### Fixed
 
