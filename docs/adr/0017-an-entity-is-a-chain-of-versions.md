@@ -9,6 +9,7 @@ keeps [ADR 0018](./0018-module-facts-live-in-the-flux-bundle.md)'s rule that mod
 live in the FLUX bundle. Its projections (a snapshot, change events, periodic rows) are
 [ADR 0027](./0027-a-history-projects-snapshots-events-and-periods.md). Everything below generates under kernel
 `0.2.0` only.
+**Amended 2026-11-23:** profile format `1-3-0` and request format `1-1-0` shipped in 0.10.0.
 
 ## Context
 
@@ -382,7 +383,7 @@ other emit keeps the warning, so no bundle written before this record is refused
 
 ### 12. Profile format 1-3-0 and request format 1-1-0
 
-Both are unreleased and gain optional members rather than new versions:
+Both were unreleased when this record was written and shipped in 0.10.0. They gain optional members rather than new versions:
 
 - **Profile, `tables.<id>.history`**, for a table with a validity window: `versionsPerEntity`, a
   `marginalHistogram/1` of the entities by their number of versions; `firstStart`, a `marginalHistogram/1` of the
