@@ -69,7 +69,7 @@ from json.encoder import encode_basestring
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, canonical_bytes, nfc
-from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
+from flux_engine.core.clock import format_rfc3339_ms, format_seconds, parse_rfc3339_ms
 from flux_engine.core.errors import FluxError, register
 from flux_engine.seam.contract import CompiledColumn, CompiledExpose, LogicalKind, LogicalType
 
@@ -333,7 +333,7 @@ def _from_the_clock(render: Callable[[], str]) -> str:
 
 def _isoformat_z(moment: datetime) -> str:
     """Spell an aware UTC datetime in the grammar ``parse_rfc3339_ms`` accepts."""
-    return moment.strftime("%Y-%m-%dT%H:%M:%S") + f".{moment.microsecond // 1000:03d}Z"
+    return format_seconds(moment) + f".{moment.microsecond // 1000:03d}Z"
 
 
 def _render_json(value: Any) -> str:
@@ -537,6 +537,30 @@ def render_columns(rows: Sequence[Row], expose: CompiledExpose) -> List[str]:
     return lines
 
 
+def _table_tokens(
+    values: Sequence[Any],
+    classes: set,
+    allowed: frozenset,
+    has_null: bool,
+    logical_type: LogicalType,
+) -> List[str]:
+    """The columns whose value classes are a small closed set: a fast path or one token per value."""
+    kind = logical_type.kind
+    if not classes <= allowed:
+        raise ValueError("a value class the row renderer decides")
+    if kind is LogicalKind.BOOL:
+        return ["null" if v is None else "true" if v else "false" for v in values]
+    if kind is LogicalKind.TIMESTAMP and classes <= {int, _NONE}:
+        if _instants_in_range(values, has_null):
+            return _instant_tokens(values)
+    elif kind is LogicalKind.STRING:
+        return _string_tokens(values)
+    table: Dict[Any, str] = {}
+    for value in set(values):
+        table[value] = _NULL if value is None else _scalar_token(render_cell(value, logical_type))
+    return [table[value] for value in values]
+
+
 def _column_tokens(values: Sequence[Any], column: CompiledColumn) -> List[str]:
     """Each value of one column as its JSON text, as :func:`render_cell` then JCS writes it."""
     classes = set(map(type, values))
@@ -547,16 +571,7 @@ def _column_tokens(values: Sequence[Any], column: CompiledColumn) -> List[str]:
     kind = logical_type.kind
     allowed = _TABLE_CLASSES.get(kind)
     if allowed is not None:
-        if not classes <= allowed:
-            raise ValueError("a value class the row renderer decides")
-        if kind is LogicalKind.BOOL:
-            return ["null" if v is None else "true" if v else "false" for v in values]
-        table: Dict[Any, str] = {}
-        for value in set(values):
-            table[value] = (
-                _NULL if value is None else _scalar_token(render_cell(value, logical_type))
-            )
-        return [table[value] for value in values]
+        return _table_tokens(values, classes, allowed, has_null, logical_type)
     if kind is LogicalKind.INT:
         if not classes <= {int, _NONE}:
             raise ValueError("a value class the row renderer decides")
@@ -574,6 +589,73 @@ def _column_tokens(values: Sequence[Any], column: CompiledColumn) -> List[str]:
         return _decimal_tokens(values, logical_type, has_null)
     # JSON and BYTES: one value at a time, through the cell renderer.
     return [_NULL if v is None else _scalar_token(render_cell(v, logical_type)) for v in values]
+
+
+_DAY_MS = 86_400_000
+
+#: The instants ``format_rfc3339_ms`` can spell: 0001-01-01T00:00:00.000Z to
+#: 9999-12-31T23:59:59.999Z, as milliseconds from the epoch. Outside it the clock's own
+#: arithmetic overflows, and the row renderer decides what is raised.
+_INSTANT_MIN_MS = -62_135_596_800_000
+_INSTANT_MAX_MS = 253_402_300_799_999
+
+#: ``.mmm`` and the closing ``Z`` and quote of a timestamp token, by millisecond.
+_MS_TAIL = tuple(f'.{ms:03d}Z"' for ms in range(1000))
+
+
+def _instants_in_range(values: Sequence[Any], has_null: bool) -> bool:
+    present = [v for v in values if v is not None] if has_null else values
+    if not present:
+        return True
+    return _INSTANT_MIN_MS <= min(present) and max(present) <= _INSTANT_MAX_MS
+
+
+def _instant_tokens(values: Sequence[Any]) -> List[str]:
+    """TIMESTAMP cells held as integer milliseconds: :func:`format_rfc3339_ms` for a column.
+
+    An instant is a day and a time of day. The text of a day (``"YYYY-MM-DDT``) is asked of
+    the clock once per distinct day, by formatting that day's first instant, so the clock
+    stays the one source of the date's spelling on every platform; the time of day is
+    ``HH:MM:SS`` from integer arithmetic (pinned against the clock for every second of a
+    day) and ``.mmm`` from a table. The day count floors, as ``timedelta`` does, so an
+    instant before 1970 gets the same day and the same time the clock gives it.
+    """
+    days = {}
+    for day in {v // _DAY_MS for v in values if v is not None}:
+        # The clock's text ends in "HH:MM:SS.mmmZ", thirteen characters, at midnight.
+        days[day] = '"' + format_rfc3339_ms(day * _DAY_MS)[:-13]
+    seconds: Dict[int, str] = {}
+    tails = _MS_TAIL
+    out: List[str] = []
+    append = out.append
+    for value in values:
+        if value is None:
+            append(_NULL)
+            continue
+        day, rest = divmod(value, _DAY_MS)
+        second, ms = divmod(rest, 1000)
+        clock = seconds.get(second)
+        if clock is None:
+            clock = seconds[second] = (
+                f"{second // 3600:02d}:{second // 60 % 60:02d}:{second % 60:02d}"
+            )
+        append(days[day] + clock + tails[ms])
+    return out
+
+
+def _string_tokens(values: Sequence[Any]) -> List[str]:
+    """STRING cells as JSON strings: NFC and escape each distinct value once.
+
+    An ASCII string is its own NFC form, so it skips the normaliser. The text is what
+    ``_scalar_token(render_cell(value))`` makes of it.
+    """
+    table: Dict[Any, str] = {
+        value: (
+            _NULL if value is None else encode_basestring(value if value.isascii() else nfc(value))
+        )
+        for value in set(values)
+    }
+    return [table[value] for value in values]
 
 
 def _scalar_token(rendered: Any) -> str:

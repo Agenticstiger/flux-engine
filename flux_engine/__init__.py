@@ -12,11 +12,23 @@ production.
 
 from __future__ import annotations
 
-from importlib import metadata as _metadata
-
-try:
-    __version__ = _metadata.version("flux-sim-engine")
-except _metadata.PackageNotFoundError:  # pragma: no cover - editable/dev tree, no metadata yet
-    __version__ = "0.10.0"
+from typing import Any
 
 __all__ = ["__version__"]
+
+
+def __getattr__(name: str) -> Any:
+    # Read on first use: `importlib.metadata` costs about 30 ms to import and a worker
+    # process, or any command that never prints the version, has no use for it.
+    if name == "__version__":
+        from importlib import metadata
+
+        # The local keeps the name __version__: scripts/release_guard.py reads the fallback
+        # literal from an assignment to that name in an except branch.
+        try:
+            __version__ = metadata.version("flux-sim-engine")
+        except metadata.PackageNotFoundError:  # pragma: no cover - editable/dev tree
+            __version__ = "0.10.0"
+        globals()["__version__"] = __version__
+        return __version__
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

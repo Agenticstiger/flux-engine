@@ -318,7 +318,7 @@ def _jobs_type(text: str) -> int:
     """
     value = text.strip().lower()
     if value == "auto":
-        from flux_engine.stages._parallel import cpu_jobs
+        from flux_engine.stages._prewarm import cpu_jobs
 
         return cpu_jobs()
     jobs = int(value) if value.isdecimal() else 0

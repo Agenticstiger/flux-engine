@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from fractions import Fraction
+from math import lcm
 from typing import Any, Callable, Dict, Hashable, Iterable, List, Optional, Sequence, Set, Tuple
 
 from flux_engine.expr2.ast import (
@@ -1124,6 +1125,28 @@ def _suggest(name: str, known: Iterable[str]) -> str:
     return f"; did you mean {close[0]!r}?" if close else ""
 
 
+def _exact_sum(found: List[Any]) -> Any:
+    """The sum of *found*, a non-empty list of numbers, as ``sum(found, Fraction(0))`` gives it.
+
+    Adding Fractions one at a time reduces every partial sum by a gcd. The same exact value is
+    one reduction when the terms are put over their common denominator first (a Fraction is
+    held in lowest terms, so equal values are equal objects). Anything that is not a Fraction is
+    summed the plain way.
+    """
+    if any(type(term) is not Fraction for term in found):
+        return sum(found, Fraction(0))
+    denominator = 1
+    for term in found:
+        d = term.denominator
+        if d != denominator and denominator % d:
+            denominator = lcm(denominator, d)
+    numerator = 0
+    for term in found:
+        d = term.denominator
+        numerator += term.numerator * (denominator // d) if d != denominator else term.numerator
+    return Fraction(numerator, denominator)
+
+
 def _aggregate_function(
     name: str, arg: Optional[Fn]
 ) -> Callable[[Sequence[RowView], Session], Any]:
@@ -1139,7 +1162,7 @@ def _aggregate_function(
 
     def total(rows: Sequence[RowView], session: Session) -> Any:
         found = values(rows, session)
-        return sum(found, Fraction(0)) if found else None
+        return _exact_sum(found) if found else None
 
     def smallest(rows: Sequence[RowView], session: Session) -> Any:
         found = values(rows, session)
@@ -1151,7 +1174,7 @@ def _aggregate_function(
 
     def average(rows: Sequence[RowView], session: Session) -> Any:
         found = values(rows, session)
-        return sum(found, Fraction(0)) / len(found) if found else None
+        return _exact_sum(found) / len(found) if found else None
 
     return {"COUNT": count, "SUM": total, "MIN": smallest, "MAX": largest, "AVG": average}[name]
 

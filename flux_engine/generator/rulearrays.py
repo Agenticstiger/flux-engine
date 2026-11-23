@@ -108,7 +108,8 @@ def units_to_decimals(units: Sequence[int], scale: int) -> List[Decimal]:
     """Each whole number of units as the ``Decimal`` at *scale* that ``fit`` writes."""
     # The constructor reads the text exactly, so no context rounds it.
     suffix = f"E-{scale}"
-    return [Decimal(f"{u}{suffix}") for u in units]
+    built = {u: Decimal(f"{u}{suffix}") for u in set(units)}
+    return [built[u] for u in units]
 
 
 def _and(a: Optional["np.ndarray"], b: Optional["np.ndarray"]) -> Optional["np.ndarray"]:

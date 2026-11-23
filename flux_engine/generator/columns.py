@@ -483,7 +483,13 @@ def _grid_values(column_plan: "_rows.ColumnPlan", units: List[int], exponent: in
         # A grid counted in whole units: ``to_integral_value`` leaves each point as it is.
         # (A grid's exponent is never above zero: _rows._common_exponent caps it there.)
         return units
-    return [_rows._from_grid(_rows._decimal_from_units(value, exponent), column) for value in units]
+    # A column repeats grid points, so each distinct point is built once and shared (a
+    # Decimal is immutable).
+    built = {
+        value: _rows._from_grid(_rows._decimal_from_units(value, exponent), column)
+        for value in set(units)
+    }
+    return [built[value] for value in units]
 
 
 def _bin_picks(
@@ -527,29 +533,41 @@ def _histogram(
     column, statistics = column_plan.column, column_plan.statistics
     bins = statistics.bins or ()
     picks = _bin_picks(column_plan, key, rows, draw, given_level) if forced is None else forced
-    members: Dict[int, List[int]] = {}
-    for position, index in enumerate(picks):
-        if index is not None:
-            members.setdefault(index, []).append(position)
+    if forced is None:
+        index_of = np.asarray(picks, dtype=np.int64)
+    else:
+        index_of = np.array([-1 if pick is None else pick for pick in picks], dtype=np.int64)
     step = _rows._grid_step(column)
     integral = column.logical_type.kind is LogicalKind.INT
-    values: List[Any] = [None] * len(picks)
-    for index, chosen_rows in members.items():
+    out = np.full(len(picks), None, dtype=object)
+    # Rows grouped by bin (a NULL row, index -1, is in no group).
+    order = np.argsort(index_of, kind="stable")
+    present, firsts = np.unique(index_of[order], return_index=True)
+    ends = [*firsts.tolist()[1:], len(order)]
+    for index, first, end in zip(present.tolist(), firsts.tolist(), ends, strict=True):
+        if index < 0:
+            continue
+        chosen_rows = order[first:end]
         low_units, step_units, points, exponent = _rows._grid_of(
             _rows._exact(bins[index]),
             _rows._exact(_rows._bin_top(bins, index, step)),
             _rows._exact(step),
         )
-        picked = kernel2.column_bounded(key, rows[chosen_rows], draw + 1, points).tolist()
+        picked = kernel2.column_bounded(key, rows[chosen_rows], draw + 1, points)
+        # Each distinct grid point is converted once; the rows index into the results.
+        distinct, inverse = np.unique(picked, return_inverse=True)
+        converted = np.empty(distinct.shape[0], dtype=object)
         if integral and exponent == 0:
             # A grid counted in whole units: int() of each point is its units.
-            for position, k in zip(chosen_rows, picked, strict=True):
-                values[position] = low_units + k * step_units
-            continue
-        for position, k in zip(chosen_rows, picked, strict=True):
-            drawn = _rows._decimal_from_units(low_units + k * step_units, exponent)
-            values[position] = int(drawn) if integral else _rows._from_grid(drawn, column)
-    return values
+            converted[:] = [low_units + k * step_units for k in distinct.tolist()]
+        else:
+            drawn = (
+                _rows._decimal_from_units(low_units + k * step_units, exponent)
+                for k in distinct.tolist()
+            )
+            converted[:] = [int(d) if integral else _rows._from_grid(d, column) for d in drawn]
+        out[chosen_rows] = converted[inverse]
+    return out.tolist()
 
 
 def _bounded_normal(
