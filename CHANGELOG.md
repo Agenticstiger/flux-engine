@@ -51,6 +51,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - The calibration search evaluates its start point as well as its budget and keeps it unless a candidate is strictly better; a fit that moves no value writes no bundle and ends in `FLX-3712`.
 - `validate` refuses, as `plan` does and naming the expose, column or option at fault, a generator plugin's expose that an aggregate or a counts `parentWhen` reads, a plugin column declaring `allocation: exact`, and a plugin `options` integer above 2^53.
 - `validate` refuses an `allocation: exact` on a key, a `nullFraction` on a required column and a table that declares no rows, with the codes `plan` gives.
+- `verify` accepts a correct run whose string link sentinel is written in a form other than NFC: the sentinel is compared in NFC, like the cells the writer emits.
 
 ## Unreleased
 

@@ -233,3 +233,22 @@ def test_a_path_needs_the_rows_of_every_expose_it_crosses_and_the_bundles_rules_
         "account",
         "customer",
     }
+
+
+def test_a_string_sentinel_is_compared_in_nfc_with_the_cells_the_writer_wrote() -> None:
+    from flux_engine.concordance.rule_shares import _sentinel_share
+
+    class _View:
+        def follow(self, relationship: str) -> None:
+            return None
+
+        def get(self, column: str) -> str:
+            return "café"
+
+    class _Rows:
+        def rows(self, expose_id: str) -> List[_View]:
+            return [_View(), _View()]
+
+    model = model_from_contract(_contract([]))
+    holds = _sentinel_share("v", "café", ("rel",), _Rows(), "t", model)  # type: ignore[arg-type]
+    assert (holds.satisfied, holds.total) == (2, 2)

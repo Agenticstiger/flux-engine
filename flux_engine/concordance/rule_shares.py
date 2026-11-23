@@ -413,7 +413,9 @@ def _sentinel_share(
     """A sentinel: of the rows whose path reaches no row, the share whose *column* holds it."""
     column_type = model.exposes[expose_id].columns[column]
     read = decoder(column_type)
-    expected = read(sentinel_value(text, column_type, column))
+    value = sentinel_value(text, column_type, column)
+    # The emit writer writes a string cell in NFC, so the sentinel is compared in NFC too.
+    expected = read(nfc(value) if column_type.kind is Kind.STRING else value)
     covered = satisfied = 0
     for view in rows.rows(expose_id):
         if _reaches(view, path):
