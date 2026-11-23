@@ -437,15 +437,12 @@ def describe(node: exp.Expr) -> str:
     return f"{type(node).__name__}"
 
 
-def vet_tree(
-    tree: exp.Expr, *, label: str, caps: Caps, canonical: bool, dialect: str = "duckdb"
-) -> int:
+def vet_tree(tree: exp.Expr, *, label: str, caps: Caps, canonical: bool) -> int:
     """Check every node of *tree* against the lists; return the number of nodes.
 
     *canonical* is the stricter second pass: no placeholder, no clock and no unknown function
     may remain. A node or depth cap that is passed, and any refusal, raise a :class:`FluxError`
-    naming *label*. *dialect* is the dialect the text was written in: a weekday or week part is
-    refused outside DuckDB, whose numbering differs. The walk is iterative, so the caps are checked before any depth can hurt.
+    naming *label*. The walk is iterative, so the caps are checked before any depth can hurt.
     """
     allowed = _CANONICAL_CLASSES if canonical else _SOURCE_CLASSES
     stack: List[Tuple[exp.Expr, int]] = [(tree, 1)]
@@ -462,8 +459,6 @@ def vet_tree(
                 "AND or OR nests one level per term)",
             )
         _vet_node(node, label, allowed)
-        if dialect.lower() != "duckdb":
-            _vet_numbering(node, label, dialect)
         if not canonical and isinstance(node, (exp.Placeholder, exp.Parameter)):
             # A placeholder is replaced by a literal before anything else reads the tree, or
             # refused, so what it holds (the name, as a Var) is not an expression of the query.
@@ -471,40 +466,6 @@ def vet_tree(
         for child in reversed(list(node.iter_expressions())):
             stack.append((child, depth + 1))
     return count
-
-
-#: Date parts whose numbering or start day differs between dialects while DuckDB's text keeps its own
-#: (Sunday is 0 in DuckDB, 1 in T-SQL, MySQL and BigQuery; the week is ISO in DuckDB).
-_NUMBERED_PARTS: FrozenSet[str] = frozenset({"WEEK", "WEEKS", "DAYOFWEEK", "DOW"})
-
-#: Classes whose unit is an argument of its own, as ``Extract`` holds it in ``this``.
-_UNIT_ARGS: Tuple[Tuple[type, str], ...] = (
-    (exp.Extract, "this"),
-    (exp.DateTrunc, "unit"),
-    (exp.TimestampTrunc, "unit"),
-    (exp.DatetimeTrunc, "unit"),
-)
-
-
-def _vet_numbering(node: exp.Expr, label: str, dialect: str) -> None:
-    """Refuse a weekday or week part in a dialect other than DuckDB, whose numbering differs."""
-    part: Optional[str] = None
-    if isinstance(node, (exp.DayOfWeek, exp.Week)):
-        part = type(node).__name__
-    else:
-        for cls, key in _UNIT_ARGS:
-            if isinstance(node, cls):
-                unit = node.args.get(key)
-                name = str(getattr(unit, "name", "") or unit or "").upper()
-                if name in _NUMBERED_PARTS:
-                    part = name
-    if part is not None:
-        raise FluxError(
-            FLX_3622,
-            f"{label} uses the weekday or week part {part} in the dialect {dialect}, whose "
-            "numbering differs from the DuckDB text the engine runs (Sunday is 0 there); write the "
-            "query in the duckdb dialect, or use another part",
-        )
 
 
 def _vet_node(node: exp.Expr, label: str, allowed: FrozenSet[type]) -> None:

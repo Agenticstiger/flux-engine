@@ -54,6 +54,9 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - `verify` accepts a correct run whose string link sentinel is written in a form other than NFC: the sentinel is compared in NFC, like the cells the writer emits.
 - The Population section of EVIDENCE.md keeps the letters and numbers of any script in a label, and a label that needed a replacement or a cut ends in a short stable hash of its text, so two different labels never print the same.
 - `plan` and `run` say on stderr, and `plan --json` lists under `period_end_notes`, when a period end declares a `nullFraction` under a parent that can close: the end is cut at a closed parent's end, so the generated NULL share can be lower than declared. No digest moves.
+- A T-SQL integer given to `YEAR`, `MONTH`, `DAY` or `DATEPART` in a consumer query is read as days after 1900-01-01, as T-SQL reads it, and a number that no dialect reads as a date is refused when the query is compiled (`FLX-3622`).
+- T-SQL `DATEDIFF` with `GETDATE()`, BigQuery `DATE_TRUNC(x, WEEK)` and Snowflake `LEN` are accepted in consumer queries with the value their dialect gives; `GETDATE()` reads the registry's `asOf`, like `NOW()`.
+- Weekday and week parts of consumer queries in T-SQL, BigQuery, Snowflake and MySQL are mapped to the value they have in that dialect under its default settings, and a part with no exact mapping is refused, naming the dialect and the part.
 
 ## Unreleased
 

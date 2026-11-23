@@ -139,11 +139,41 @@ literal digit count. The operand is a column, a literal or a scalar expression o
 table, a table function or a function that is not listed; any other argument is refused. The depth and node
 caps are unchanged.
 
-A weekday or week part is refused (`FLX-3622`) in every dialect other than `duckdb`, because the numbering
-differs: Sunday is 1 in T-SQL, MySQL and BigQuery and 0 in the canonical DuckDB text, and T-SQL's `week` is
-not the ISO week. The refused spellings are `DayOfWeek`, `Week`, and `EXTRACT`, `DATE_TRUNC` and
-`DATEPART` over `DAYOFWEEK`, `DOW` or `WEEK`. The `duckdb` dialect keeps them, and `WeekOfYear` and
-`DayOfYear` are unchanged.
+A weekday or week part is mapped, before the allow-list reads the tree, to the DuckDB expression that has the
+value the dialect gives it under the dialect's documented default settings. The mapping is built only from
+`DayOfWeek`, `DayOfYear`, `WeekOfYear`, `DateTrunc`, `Cast`, `Interval` and the arithmetic operators, all on the
+lists above, so it widens nothing. The settings read are `DATEFIRST` 7 for T-SQL, `default_week_format` 0 for
+MySQL, and `WEEK_START` 0 with `WEEK_OF_YEAR_POLICY` 0 for Snowflake; a query run against a session that
+changes them counts differently from the engine.
+
+| Dialect | Part | Value |
+| --- | --- | --- |
+| T-SQL | `DATEPART(weekday, x)`, `dw` | Sunday 1 to Saturday 7 |
+| T-SQL | `DATEPART(week, x)`, `wk`, `ww` | week 1 holds 1 January, weeks start on Sunday |
+| T-SQL | `DATEPART(iso_week, x)` | ISO 8601 week |
+| BigQuery | `EXTRACT(DAYOFWEEK FROM x)` | Sunday 1 to Saturday 7 |
+| BigQuery | `EXTRACT(WEEK FROM x)`, `WEEK(<day>)` | weeks start on the day (Sunday by default); days before the year's first such day are week 0 |
+| BigQuery | `EXTRACT(ISOWEEK FROM x)` | ISO 8601 week |
+| BigQuery | `DATE_TRUNC(x, WEEK)`, `WEEK(<day>)`, `ISOWEEK` | the date on or before `x` that starts the week, as a date |
+| Snowflake | `DAYOFWEEK`, `DAYOFWEEKISO`, `WEEK`, `WEEKOFYEAR`, `WEEKISO`, `DATE_TRUNC('week', x)` | Sunday 0 to Saturday 6; Monday 1 to Sunday 7; ISO 8601 week; the Monday on or before `x` |
+| MySQL | `DAYOFWEEK(x)` | Sunday 1 to Saturday 7 |
+| MySQL | `WEEK(x)`, `WEEK(x, 0)`, `WEEK(x, 3)`, `WEEKOFYEAR(x)` | mode 0 (Sunday weeks, week 0 before the first Sunday); ISO 8601 week |
+
+Every other weekday or week part (T-SQL `DATETRUNC(week, x)`, the part `w`, which the parser reads as the week,
+BigQuery `TIMESTAMP_TRUNC` and `DATETIME_TRUNC` to a week, MySQL `WEEK` in any other mode, and any part in another
+dialect other than `duckdb`) is refused (`FLX-3622`), and the message names the dialect and the part. The
+`duckdb` dialect keeps its own numbering. A rewrite repeats its operand, so the operand holds at most 200 nodes
+(`FLX-3627` beyond that).
+
+An integer given to a date function means that many days after 1900-01-01 in T-SQL, so `YEAR(0)` and
+`DATEPART(year, 0)` are 1900. The engine writes that date for a whole-number literal from -53690 to 2958463, the
+range of the T-SQL `datetime`. A number given to a date function in any other dialect, a T-SQL number outside
+that range, and a decimal one are refused when the query is compiled (`FLX-3622`), not when it runs. An integer
+column given to a date function is not rewritten and fails when it runs, and that run is refused.
+
+T-SQL `DATEDIFF(unit, x, GETDATE())` reads the clock as `CURRENT_TIMESTAMP` does: it becomes the `asOf` literal at
+midnight, and is refused without `asOf` (`FLX-3629`). Snowflake `LEN` and `LENGTH` are the length in characters of
+the text.
 
 A function that reads a file, the environment, a setting, the catalog, a sequence, a random source or the
 clock is refused, and so is a table function (`read_csv`, `read_parquet`, `glob`, `range`,

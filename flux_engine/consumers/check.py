@@ -102,7 +102,7 @@ from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, build_scope
 from sqlglot.tokens import Token, TokenType
 
-from flux_engine.consumers import _allow
+from flux_engine.consumers import _allow, _dialect
 from flux_engine.consumers._bounds import (
     refuse_alias_references,
     refuse_long_patterns,
@@ -633,14 +633,10 @@ class _Checker:
         if "\x00" in sql:
             raise FluxError(FLX_3618, f"{label} holds a NUL character")
         strings = _scan_tokens(self._dialect, sql, label, _allow.SOURCE_CAPS)
+        _dialect.refuse_misread_spellings(sql, self._registry.dialect, label)
         tree = _parse(sql, self._registry.dialect, label)
-        nodes = _allow.vet_tree(
-            tree,
-            label=label,
-            caps=_allow.SOURCE_CAPS,
-            canonical=False,
-            dialect=self._registry.dialect,
-        )
+        _dialect.translate(tree, dialect=self._registry.dialect, label=label)
+        nodes = _allow.vet_tree(tree, label=label, caps=_allow.SOURCE_CAPS, canonical=False)
         _refuse_string_tables(tree, strings, label)
         used = _bind_placeholders(tree, label, values)
         refuse_long_patterns(tree, label=label)
