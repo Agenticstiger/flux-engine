@@ -18,6 +18,12 @@ bundle and never in the FLUID contract:
             parentWhen: "status <> 'void'"
             children: { bins: ["1", "2", "4", "10"], binWeights: ["0.40", "0.35", "0.25"] }
             tolerance: "0.10"
+          - emit: invoice
+            relationship: account
+            children: { bins: ["0", "1", "3", "10"], binWeights: ["0.2", "0.5", "0.3"] }
+            given: segment
+            childrenGiven:
+              business: ["0.05", "0.35", "0.60"]
 
 An entry names an emitted expose and a relationship it declares, and puts that relationship on the
 counted layout (KERNEL-SPEC-2 section 8.1): the child's rows take their parents from a layout that
@@ -27,7 +33,11 @@ a whole number (default 0), is the least number of children of every parent that
 final row makes it TRUE has children. ``children`` is the
 shape of the number of children per parent, in the fidelity block's own spelling: ``levels`` with
 ``levelWeights``, or ``bins`` with ``binWeights``, over whole counts. ``tolerance`` is the largest
-total variation distance the children-per-parent check allows.
+total variation distance the children-per-parent check allows. ``given`` names a column of the
+parent expose, a ``category`` column with declared levels or a column drawn from bins, and
+``childrenGiven`` maps each class of it (a level, or the text of a bin's lower edge) to the weights
+of the classes ``children`` declares, in the same order; a class with no list takes ``children``'s
+weights (KERNEL-SPEC-2 section 8.1). ``children`` is required with ``given``.
 
 **An entry changes the rows the emit generates**, so it is bound into ``H`` before any row is
 drawn: :func:`bound_into_h` is the member the emit's entry for ``H`` gains, present only when the
@@ -58,7 +68,16 @@ __all__ = [
 #: ``H`` gains.
 COUNTS_KEY = "counts"
 
-_ENTRY_KEYS = ("emit", "relationship", "minChildren", "parentWhen", "children", "tolerance")
+_ENTRY_KEYS = (
+    "emit",
+    "relationship",
+    "minChildren",
+    "parentWhen",
+    "children",
+    "tolerance",
+    "given",
+    "childrenGiven",
+)
 _MOST_MINIMUM = 1 << 62
 _MOST_COUNTS = 4096
 _MOST_CLASSES = 4096
@@ -99,6 +118,11 @@ class CountsEntry:
     parent_when: Optional[str] = None
     #: The largest total variation distance the children-per-parent check allows, as written.
     tolerance: Optional[str] = None
+    #: ``given``: the column of the parent expose whose class sets the weights of the shape (NFC).
+    given: Optional[str] = None
+    #: ``childrenGiven``: a weight list over the shape's classes for each class of the given
+    #: column, as written, sorted by class; ``None`` when not declared.
+    children_given: Optional[Tuple[Tuple[str, Tuple[str, ...]], ...]] = None
 
     def as_member(self) -> Dict[str, Any]:
         """The entry as the emit's ``counts`` member holds it: no ``emit``, no absent key."""
@@ -111,6 +135,10 @@ class CountsEntry:
             member["children"] = self.children.as_member()
         if self.tolerance is not None:
             member["tolerance"] = self.tolerance
+        if self.given is not None:
+            member["given"] = self.given
+        if self.children_given is not None:
+            member["childrenGiven"] = {key: list(weights) for key, weights in self.children_given}
         return member
 
 
@@ -177,7 +205,8 @@ def read_counts_block(
 
     *emits* is every ``exposeId`` the Simulation emits. Refused: a block that is not a list,
     more than 4 096 entries, an entry that is not a mapping or carries a key other than ``emit``,
-    ``relationship``, ``minChildren``, ``parentWhen``, ``children`` and ``tolerance``, an emit the Simulation does not emit, a
+    ``relationship``, ``minChildren``, ``parentWhen``, ``children``, ``tolerance``, ``given`` and
+    ``childrenGiven``, an emit the Simulation does not emit, a
     name that is not a non-empty string, a relationship declared twice, a ``children`` that is
     not exactly one of ``{levels, levelWeights}`` and ``{bins, binWeights}`` over lists of
     strings, a ``minChildren`` that is not a whole number of 0 or more, a ``parentWhen`` that is not a non-empty text, and a ``tolerance`` that is not a decimal text between 0 and 1. Whether the emit's
@@ -241,13 +270,49 @@ def _read_entry_body(
         min_children=minimum,
         parent_when=nfc(condition) if isinstance(condition, str) else None,
         tolerance=tolerance,
+        given=_given(entry["given"], at, code) if "given" in entry else None,
+        children_given=(
+            _children_given(entry["childrenGiven"], f"{at}.childrenGiven", code)
+            if "childrenGiven" in entry
+            else None
+        ),
     )
+
+
+def _given(raw: Any, at: str, code: ErrorCode) -> str:
+    """``given``: the name of one column of the parent expose."""
+    if not isinstance(raw, str) or not raw:
+        raise FluxError(code, f"{at}.given is the name of one column of the parent expose")
+    return nfc(raw)
+
+
+def _children_given(raw: Any, at: str, code: ErrorCode) -> Tuple[Tuple[str, Tuple[str, ...]], ...]:
+    """``childrenGiven``: a mapping from a class of the given column to a list of weight texts."""
+    if not isinstance(raw, Mapping):
+        raise FluxError(
+            code, f"{at} is a mapping from each class of the given column to its weights"
+        )
+    if len(raw) > _MOST_CLASSES:
+        raise FluxError(code, f"{at} holds more than {_MOST_CLASSES} classes")
+    found: Dict[str, Tuple[str, ...]] = {}
+    for key, weights in raw.items():
+        if not isinstance(key, str) or not key:
+            raise FluxError(code, f"{at} names a class that is not a non-empty string")
+        name = nfc(key)
+        if name in found:
+            raise FluxError(code, f"{at} names the class {name!r} twice")
+        # An empty list is read here and refused where the classes are known (no weight).
+        empty = (
+            isinstance(weights, Sequence) and not isinstance(weights, (str, bytes)) and not weights
+        )
+        found[name] = () if empty else _texts(weights, f"{at}.{name}", code)
+    return tuple(sorted(found.items()))
 
 
 def bound_into_h(entries: Sequence[CountsEntry], emit: str) -> Optional[List[Dict[str, Any]]]:
     """The member of *emit*'s entry for ``H`` that its counts entries make, or ``None``.
 
-    One ``{"relationship": <name>, "minChildren": <int>, "parentWhen": <text>, "children": {...}, "tolerance": <text>}`` mapping per entry
+    One ``{"relationship": <name>, "minChildren": <int>, "parentWhen": <text>, "children": {...}, "tolerance": <text>, "given": <column>, "childrenGiven": {...}}`` mapping per entry
     of *emit*, in relationship order, each key only when declared; ``None`` when it has none, so
     the entry gains no key.
     """
@@ -272,6 +337,7 @@ def count_entries_of(extension: Optional[Mapping[str, Any]], emit: str) -> Tuple
         minimum = item.get("minChildren")
         condition = item.get("parentWhen")
         tolerance = item.get("tolerance")
+        given = item.get("given")
         found.append(
             CountsEntry(
                 emit=nfc(emit),
@@ -280,9 +346,20 @@ def count_entries_of(extension: Optional[Mapping[str, Any]], emit: str) -> Tuple
                 min_children=minimum if isinstance(minimum, int) else None,
                 parent_when=condition if isinstance(condition, str) else None,
                 tolerance=tolerance if isinstance(tolerance, str) else None,
+                given=given if isinstance(given, str) else None,
+                children_given=_bound_children_given(item.get("childrenGiven")),
             )
         )
     return tuple(found)
+
+
+def _bound_children_given(raw: Any) -> Optional[Tuple[Tuple[str, Tuple[str, ...]], ...]]:
+    """The ``childrenGiven`` a bound entry holds, or ``None`` when it has none."""
+    if not isinstance(raw, Mapping):
+        return None
+    return tuple(
+        sorted((str(key), tuple(str(text) for text in weights)) for key, weights in raw.items())
+    )
 
 
 def _bound_shape(children: Any) -> Optional[ChildShape]:
