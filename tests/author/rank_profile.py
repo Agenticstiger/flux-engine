@@ -296,3 +296,67 @@ def group_by_region(document: Dict[str, Any], data: Sequence[Row], column: str) 
             "groups": groups,
         }
     )
+
+
+def _cell(value: Any, edges: Sequence[str]) -> int:
+    cuts = [Decimal(edge) for edge in edges]
+    return min(bisect.bisect_right(cuts, Decimal(str(value))) - 1, len(cuts) - 2)
+
+
+def add_clique(
+    document: Dict[str, Any],
+    data: Sequence[Row],
+    columns: Sequence[str],
+    *,
+    edges: Optional[Dict[str, List[str]]] = None,
+    noise_scale: str = "1",
+) -> Dict[str, Any]:
+    """Add to the table of *document* one ``cliqueMarginal/2`` over *columns* from the rows *data*.
+
+    A number column is binned over its histogram's own edges unless *edges* gives others, a
+    ``region`` lists its levels. The noisy counts are the exact joint counts, which a profile with
+    a tiny noise scale would release as they are; the noise block is a Gaussian under the
+    document's zero-concentrated budget. Returns the clique as written.
+    """
+    from itertools import product
+
+    table = document["tables"]["account"]
+    at = {name: position for position, name in enumerate(NUMBERS)}
+    domains: List[Dict[str, Any]] = []
+    sizes: List[int] = []
+    for name in columns:
+        if name == "region":
+            levels = sorted({row[3] for row in data})
+            domains.append({"levels": levels})
+            sizes.append(len(levels))
+        else:
+            cut = (edges or {}).get(name) or table["columns"][name]["statistics"][0]["bins"]
+            domains.append({"bins": list(cut)})
+            sizes.append(len(cut) - 1)
+    counts = {combo: 0 for combo in product(*(range(size) for size in sizes))}
+    for row in data:
+        key = []
+        for name, domain in zip(columns, domains, strict=True):
+            if name == "region":
+                key.append(domain["levels"].index(row[3]))
+            else:
+                key.append(_cell(row[at[name]], domain["bins"]))
+        counts[tuple(key)] += 1
+    clique = {
+        "definition": "cliqueMarginal/2",
+        "columns": list(columns),
+        "domains": domains,
+        "noisyCounts": [str(count) for count in counts.values()],
+        "noise": {"mechanism": "gaussian", "scale": noise_scale, "privacyLoss": {"rho": "0.5"}},
+    }
+    table.setdefault("cliques", []).append(clique)
+    document.setdefault(
+        "privacy",
+        {
+            "measure": "zeroConcentratedDP",
+            "privacyLoss": {"rho": "1000"},
+            "privacyUnit": {"expose": "account"},
+            "publicStructure": True,
+        },
+    )
+    return clique

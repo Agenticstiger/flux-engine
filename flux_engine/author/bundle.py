@@ -722,6 +722,8 @@ def _settle_expose(
     expose_index: int,
 ) -> None:
     """Record the rules and copies on the planned columns, then draw the cliques and choose givens."""
+    from flux_engine.core.kernels import new_plan_is_counter_based
+
     expose_id = authored.expose_id
     authored.derives = {
         name: rule
@@ -746,6 +748,8 @@ def _settle_expose(
         expose_id,
         order=[plan.name for plan in authored.columns],
         determined=set(authored.derives) | set(authored.copies),
+        contexts=contexts,
+        binned_parents=new_plan_is_counter_based(),
     )
     authored.drawn_by_cliques = set(drawn)
     choose_givens(
@@ -1219,6 +1223,9 @@ def _register(
     entries: List[Dict[str, Any]] = []
     for document_id, tokens, basis in labels:
         if (document_id, tokens) not in under:
+            continue
+        if basis.statistic is not None and basis.statistic[1] in _NOT_IN_THE_REGISTER:
+            # The register cannot cite a definition it does not hold (see _NOT_IN_THE_REGISTER).
             continue
         entries.append(
             {"document": document_id, "pointer": render_pointer(tokens), **basis.entry_fields()}
@@ -2440,13 +2447,20 @@ def _plan_guarded(
             fractional_bits=reading.fractional_bits,
             rounding_base=_rounding_base(reading.profile),
             noisy=reading.noisy,
-            cliques=scored_tables[expose_id].cliques if expose_id in scored_tables else (),
+            cliques=_cliques_of(scored_tables.get(expose_id)),
             asked=_asked(needs, expose_id, reading.scored),
         )
     except FluxError as error:
         return AuthoredExpose(expose_id=expose_id, skipped=printable(str(error)))
     except (ArithmeticError, ValueError) as error:
         return AuthoredExpose(expose_id=expose_id, skipped=_beyond_note(error))
+
+
+def _cliques_of(table: Any) -> Tuple[CliqueEntry, ...]:
+    """The cliques of a profile's *table* of either definition, in the order the document lists them."""
+    if table is None:
+        return ()
+    return tuple(sorted((*table.cliques, *table.cliques2), key=lambda clique: clique.index))
 
 
 def _draw_and_link(
@@ -2906,9 +2920,7 @@ def _asked(
     from flux_engine.author.consumers import asked_levels_of
 
     table = scored.tables.get(expose_id)
-    drawn = {
-        name for clique in (table.cliques if table is not None else ()) for name in clique.columns
-    }
+    drawn = {name for clique in _cliques_of(table) for name in clique.columns}
     return asked_levels_of(needs, expose_id, skip=drawn)
 
 
@@ -3626,8 +3638,8 @@ def _generator_version(emits: Sequence[Any], counted: FrozenSet[Tuple[str, str]]
     """The kernel the emits are planned under.
 
     A reference expose, a column drawn given a linked row, a column under exact allocation, a
-    copula, a relationship on the counted layout and a history generate under kernel 0.2.0 only,
-    so one of any puts every plan of the simulation there.
+    copula, a column given a bin, a relationship on the counted layout and a history generate under
+    kernel 0.2.0 only, so one of any puts every plan of the simulation there.
     """
     from flux_engine.generator.copula import declares_copula
     from flux_engine.generator.rows import GENERATOR_VERSION, GENERATOR_VERSION_2
@@ -3639,6 +3651,7 @@ def _generator_version(emits: Sequence[Any], counted: FrozenSet[Tuple[str, str]]
             resolved.is_reference
             or _given_across_link(resolved)
             or _allocated(resolved)
+            or _given_a_bin(resolved)
             or declares_copula(resolved.fidelity)
             or HISTORY_KEY in (resolved.extension or {})
             or ASOF_KEY in (resolved.extension or {})
@@ -3697,6 +3710,24 @@ def _allocated(resolved: Any) -> bool:
     return isinstance(columns, Mapping) and any(
         isinstance(declared, Mapping) and "allocation" in declared for declared in columns.values()
     )
+
+
+def _given_a_bin(resolved: Any) -> bool:
+    """Whether an emit's fidelity block draws a column ``given`` a column that is drawn from ``bins``."""
+    columns = (resolved.fidelity or {}).get("columns")
+    if not isinstance(columns, Mapping):
+        return False
+    binned = {
+        nfc(str(name))
+        for name, declared in columns.items()
+        if isinstance(declared, Mapping) and "bins" in declared
+    }
+    for declared in columns.values():
+        given = declared.get("given") if isinstance(declared, Mapping) else None
+        names = [given] if isinstance(given, str) else given if isinstance(given, list) else []
+        if any(isinstance(name, str) and nfc(name) in binned for name in names):
+            return True
+    return False
 
 
 def _given_across_link(resolved: Any) -> bool:

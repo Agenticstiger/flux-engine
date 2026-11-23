@@ -92,7 +92,7 @@ def point_estimates(
                 mechanism=str(noise["mechanism"]),
                 scale=str(noise["scale"]),
                 variance=render_exact(variance),
-                definition=CLIQUE_DEFINITION,
+                definition=str(clique.get("definition", CLIQUE_DEFINITION)),
                 records=point_estimate([Fraction(text) for text in clique["noisyCounts"]]).records,
             )
         columns = table.get("columns") if isinstance(table, dict) else None
