@@ -45,6 +45,7 @@ from flux_engine.concordance.date_facts import date_shares
 from flux_engine.concordance.integrity import (
     KeyColumns,
     LinkIntegrity,
+    grouped_spread,
     key_columns,
     link_integrity,
     link_integrity_columns,
@@ -79,7 +80,7 @@ from flux_engine.seam.dates import lifetime_entries_of, within_entries_of
 from flux_engine.seam.emit import frame_rows
 from flux_engine.seam.facts import Fact, contract_rule_ids, rule_ids_of
 from flux_engine.seam.history import HistoryEntry, history_entries_of
-from flux_engine.seam.keys import compile_keys, declared_exposes
+from flux_engine.seam.keys import Relationship, compile_keys, declared_exposes
 from flux_engine.seam.links import link_entries_of
 from flux_engine.stages.layout import RunLayout
 
@@ -818,6 +819,30 @@ def finish_module_checks(
                     f"{link.source}.{link.name}: its rows cannot be read ({type(error).__name__})"
                 )
                 continue
+        given = _given_of(plan.counts, link)
+        if given is not None and not planned.parent_versioned:
+            # A relationship laid out given a column of its parent is scored per class of it
+            # (ADR 0037 decision 7), so its parents are counted apart by that column's value.
+            try:
+                child_names, child_rows = row_path(link.source)
+                parent_names, parent_rows = row_path(link.target)
+                found = replace(
+                    found,
+                    parents_by_group=grouped_spread(
+                        link,
+                        child_names,
+                        child_rows,
+                        parent_names,
+                        parent_rows,
+                        given,
+                        _types_of(layout, link.target).get(given, ""),
+                    ),
+                )
+            except _UNREADABLE as error:
+                notes.append(
+                    f"{link.source}.{link.name}: its rows cannot be grouped by {given} "
+                    f"({type(error).__name__})"
+                )
         links.append(found)
     return ModuleChecks(
         rules=tuple(rules),
@@ -827,6 +852,14 @@ def finish_module_checks(
         counts=plan.counts,
         not_scored=plan.not_scored,
     )
+
+
+def _given_of(counts: Sequence[CountsEntry], link: Relationship) -> Optional[str]:
+    """The column of the parent a ``counts`` entry lays the relationship out given, or ``None``."""
+    for entry in counts:
+        if (entry.emit, entry.relationship) == (link.source, link.name):
+            return entry.given
+    return None
 
 
 def module_checks(

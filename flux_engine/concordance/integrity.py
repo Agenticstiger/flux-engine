@@ -45,6 +45,8 @@ __all__ = [
     "CHECKS",
     "KeyColumns",
     "LinkIntegrity",
+    "ParentGroups",
+    "grouped_spread",
     "key_columns",
     "link_integrity",
     "link_integrity_columns",
@@ -52,6 +54,22 @@ __all__ = [
 
 #: The four checks, in the order a relationship reports them.
 CHECKS: Tuple[str, ...] = ("found", "unique", "nulls", "oneToOne")
+
+
+@dataclass(frozen=True)
+class ParentGroups:
+    """The parents of a relationship by number of children, within each value of one column of the parent.
+
+    ``column`` is the parent's column the parents are grouped by and ``declared`` its type as the
+    emit's attestation spells it (``STRING``, ``INT``, ``DECIMAL(10,2)``, ``DATE``...). ``spreads``
+    maps each value the column holds, as the emit spells it, to how many parents of that value have
+    each number of children, so the same counts the relationship's own ``parents_by_children`` holds
+    are kept apart by value. A parent whose value is NULL is in no group.
+    """
+
+    column: str
+    declared: str
+    spreads: Mapping[Any, Mapping[int, int]]
 
 
 @dataclass(frozen=True)
@@ -74,6 +92,9 @@ class LinkIntegrity:
     #: parent. ``None`` when the parent is versioned, which repeats a key by design. Not part of
     #: the relationship's document: the scorecard's children-per-parent row reads it.
     parents_by_children: Optional[Mapping[int, int]] = None
+    #: The same parents kept apart by a column of the parent, for a relationship laid out given
+    #: that column (:func:`grouped_spread`); ``None`` when it was not asked for.
+    parents_by_group: Optional[ParentGroups] = None
 
     @property
     def checks(self) -> Tuple[Tuple[str, Holds], ...]:
@@ -186,6 +207,47 @@ def link_integrity(
             else None
         ),
     )
+
+
+def grouped_spread(
+    link: Relationship,
+    child_names: Sequence[str],
+    child_rows: Sequence[Sequence[Any]],
+    parent_names: Sequence[str],
+    parent_rows: Sequence[Sequence[Any]],
+    column: str,
+    declared: str,
+) -> ParentGroups:
+    """How many parents have each number of children, within each value of the parent's *column*.
+
+    The children are the child rows that found a parent, counted as :func:`link_integrity` counts
+    them. Raises ``ValueError`` (naming a column, never a value) when a column of the relationship
+    or *column* is not one of the emit's.
+    """
+    try:
+        at_child = _positions(child_names, link.from_columns)
+        at_parent = _positions(parent_names, link.to_columns)
+        at_group = parent_names.index(column)
+    except ValueError:
+        raise ValueError(
+            f"relationship {link.name!r} names a column its emit does not carry"
+        ) from None
+    parent_keys = {tuple(row[position] for position in at_parent) for row in parent_rows}
+    children_of: Dict[Tuple[Hashable, ...], int] = {}
+    for row in child_rows:
+        key = tuple(row[position] for position in at_child)
+        if None not in key and key in parent_keys:
+            children_of[key] = children_of.get(key, 0) + 1
+    spreads: Dict[Any, Dict[int, int]] = {}
+    for row in parent_rows:
+        key = tuple(row[position] for position in at_parent)
+        value = row[at_group]
+        if None in key or value is None:
+            continue
+        spread = spreads.setdefault(value, {})
+        number = children_of.get(key, 0)
+        spread[number] = spread.get(number, 0) + 1
+    return ParentGroups(column=column, declared=declared, spreads=spreads)
 
 
 # ---------------------------------------------------------------------------

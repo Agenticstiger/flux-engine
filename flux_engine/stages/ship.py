@@ -889,6 +889,26 @@ def _children_groups(entry: "PropertyScore") -> Tuple[PopulationGroup, ...]:
     """The cells a children-per-parent row was scored over: its bins, the profile's parents and the run's."""
     document = entry.document or {}
     bins = document.get("bins") or []
+    if "groups" in document:
+        # Grouped by a parent column: one group of cells for each class, named by its ordinal.
+        found = []
+        for held in document["groups"]:
+            profile = (held.get("profile") or {}).get("binCounts")
+            run = (held.get("run") or {}).get("binCounts")
+            if profile is None or run is None or not (len(bins) - 1 == len(profile) == len(run)):
+                continue
+            found.append(
+                PopulationGroup(
+                    label=f"g{held['ordinal']}",
+                    cells=tuple(
+                        PopulationCell(
+                            f"{bins[index]} to {bins[index + 1]}", profile[index], run[index]
+                        )
+                        for index in range(len(run))
+                    ),
+                )
+            )
+        return tuple(found)
     profile = (document.get("profile") or {}).get("binCounts")
     run = (document.get("run") or {}).get("binCounts")
     if profile is None or run is None or not (len(bins) - 1 == len(profile) == len(run)):
