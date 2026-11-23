@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import shlex
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -22,6 +23,28 @@ from flux_engine.cli._progress import progress_enabled
 from flux_engine.core.credentials import names_environment_variable
 from flux_engine.core.target_label import WITHHELD, target_label
 from flux_engine.sinks._options import PLAIN_OPTIONS
+
+#: The status of a command whose work a closed pipe cut short: 128 plus SIGPIPE's 13.
+BROKEN_PIPE_EXIT = 141
+
+
+def _detach_stdout() -> None:
+    """Point stdout at the null device after the reader of it has gone.
+
+    The pattern is the "Note on SIGPIPE" in the ``signal`` module's documentation: without
+    it the interpreter's own flush at shutdown raises ``BrokenPipeError`` a second time and
+    turns a quiet exit into a traceback. SIGPIPE keeps the interpreter's default of being
+    ignored, so a write to the closed pipe raises instead of killing the process.
+    """
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, sys.stdout.fileno())
+        finally:
+            os.close(devnull)
+    except (OSError, ValueError, AttributeError):
+        # A stdout with no descriptor (a test double, a closed stream) has nothing to redirect.
+        pass
 
 
 def _print_result(result: Any, *, as_json: bool, next_steps: Sequence[str] = ()) -> int:
@@ -57,9 +80,19 @@ def _print_result(result: Any, *, as_json: bool, next_steps: Sequence[str] = ())
             "artifacts": artifacts,
             "error": error,
         }
-        print(json.dumps(envelope, indent=2, sort_keys=True, default=str))
-    elif result.stdout:
-        print(result.stdout)
+        text: Optional[str] = json.dumps(envelope, indent=2, sort_keys=True, default=str)
+    else:
+        text = result.stdout or None
+    try:
+        if text is not None:
+            print(text)
+        # Flushed here so a closed pipe shows up now, while the status is still the command's
+        # own, and not at interpreter shutdown.
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # The work is done and only the reader left: stop writing, keep the command's status.
+        _detach_stdout()
+        return int(result.exit_code)
     if result.stderr:
         # Flush stdout FIRST. stdout is block-buffered the moment it is
         # redirected while stderr never is, so `fluxsim run ... 2>&1 | tee log`

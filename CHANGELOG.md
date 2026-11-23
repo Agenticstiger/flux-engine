@@ -70,6 +70,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - A generator plugin whose import or factory raises ends in a coded refusal, `FLX-3124`, that names the expose, the plugin, the phase and the error, and a missing module is named, with whether it is the own module of the plugin; an entry point that cannot be imported moves from `FLX-3118` to `FLX-3124`.
 - A T-SQL date part that the query parser reads differently from T-SQL (`w` and `y` in every date function, `m` in `DATETRUNC`, `dy` in `DATENAME`) is refused with `FLX-3622` however it is quoted or commented, and a day count too long for any date is refused rather than raised.
 - `validate` refuses a profile overlay that names a table or column the pinned contract does not have, with the `FLX-3105` that `plan` gives; a name the contract has but the profile lacks is still refused by `plan`.
+- `fluxsim` no longer ends in a `BrokenPipeError` traceback and exit 1 when the reader of its output closes the pipe early (`fluxsim plan ... | head -1`): it stops writing and exits quietly, with the status of the command when its work was done and with 141 when the pipe broke while it was still working.
 
 ### Changed
 
