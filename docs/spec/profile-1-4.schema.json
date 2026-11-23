@@ -1761,7 +1761,35 @@
           "properties": {
             "expose": {
               "$ref": "#/$defs/Name",
-              "description": "One row of this expose is the unit: neighbouring data sets differ by adding or removing one row of it."
+              "description": "One row of this expose is the unit: neighbouring data sets differ by adding or removing one row of it, together with the rows that follow it when the unit lists relationships in follows."
+            },
+            "follows": {
+              "description": "Format 1-4-0. The relationships whose child rows go with a row of the expose. Each names one entry of the profile's relationships and a fixed public cap on children per parent row. The entries form a tree rooted at the expose: a table is the child of one entry only, the parent of every entry is the expose or the child of another, and there is no cycle (PROFILE-SPEC.md section 3a).",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": {
+                "type": "object",
+                "required": [
+                  "parent",
+                  "child",
+                  "maxChildren"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "parent": {
+                    "$ref": "#/$defs/Key"
+                  },
+                  "child": {
+                    "$ref": "#/$defs/Key"
+                  },
+                  "maxChildren": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                }
+              }
             }
           }
         },

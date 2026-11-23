@@ -203,6 +203,7 @@ _FORMS_OF_1_4_0: Mapping[str, str] = MappingProxyType(
         "cliqueMarginal/2": "a cliqueMarginal/2",
         "cliqueSelection": "a cliqueSelection",
         "groupByBins": "a groupByBins",
+        "follows": "a privacyUnit.follows",
     }
 )
 
@@ -326,8 +327,6 @@ _QUERY_KINDS = frozenset({"levelHistogram"})
 _DATE_GAP_KINDS = frozenset({"marginalHistogram", "quantile"})
 #: The statistics that count cells, the only ones a profiler may release noisily (format 1-2-0).
 _NOISY_KINDS = frozenset({"levelHistogram", "marginalHistogram"})
-#: A count table's sensitivity: one row lands in one cell, so L1 and the squared L2 are both one.
-_COUNT_SENSITIVITY = Fraction(1)
 #: The kinds that count a categorical column; the others read ordered values.
 _CATEGORICAL_KINDS = frozenset({"levelHistogram", "support"})
 _ORDERED_DOMAINS = frozenset({NUMBER, TIMESTAMP})
@@ -1433,13 +1432,14 @@ class _Reader:
             )
         accounting = self._require_account(f"{where}.noise")
         assert noisy_in is not None  # the key is optional only where a statistic may carry it
-        self._in_unit(noisy_in, f"{where}.noise", accounting)
+        reach = self._reach(noisy_in, f"{where}.noise", accounting)
+        # a count table: one row lands in one cell, so a unit of reach m moves m cells by one each
         noise = read_noise(
             raw["noise"],
             f"{where}.noise",
             accounting,
-            l1=_COUNT_SENSITIVITY,
-            l2_squared=_COUNT_SENSITIVITY,
+            l1=Fraction(reach),
+            l2_squared=Fraction(reach * reach),
         )
         self.parts.append((where, noise))
         return noise
@@ -1450,14 +1450,21 @@ class _Reader:
         return self.accounting
 
     @staticmethod
-    def _in_unit(expose_id: str, where: str, accounting: Accounting) -> None:
-        """A noisy count lies in the table of the unit of privacy, and only there (ADR 0019)."""
-        if expose_id != accounting.unit:
+    def _reach(expose_id: str, where: str, accounting: Accounting) -> int:
+        """``m_T`` of a table a noisy statistic lies in: how many of its rows one unit contributes.
+
+        It is 1 for the unit's expose, and for a table the unit follows into the product of the caps
+        on the way (ADR 0037). A table the unit does not reach has none, and no noise is read there.
+        """
+        reach = accounting.reach(expose_id)
+        if reach < 1:
             raise refuse(
                 where,
-                "the profile's unit of privacy is one row of another expose, and the profile "
-                "does not state how many rows of this table one unit contributes",
+                "the profile's unit of privacy is one row of another expose, or follows no "
+                "relationship into this table, and the profile does not state how many rows of "
+                "this table one unit contributes",
             )
+        return reach
 
     def statistics(self, value: Any, where: str, **section: Any) -> Tuple[StatisticEntry, ...]:
         """Read a section's list of statistics; no two may answer one question."""
@@ -2094,7 +2101,7 @@ class _Reader:
         if not items:
             return (), ()
         accounting = self._require_account(f"{where}.cliques")
-        self._in_unit(expose_id, f"{where}.cliques", accounting)
+        self._reach(expose_id, f"{where}.cliques", accounting)
         if self.from_1_4 and len(items) > MOST_CLIQUES:
             check_table_limits(where, len(items), 0)
         first: List[CliqueEntry] = []
@@ -2145,7 +2152,7 @@ class _Reader:
         at = f"{where}.cliqueSelection"
         self.require_1_4_0("cliqueSelection", at)
         accounting = self._require_account(at)
-        self._in_unit(expose_id, at, accounting)
+        self._reach(expose_id, at, accounting)
         selection = read_clique_selection(raw["cliqueSelection"], at, accounting=accounting)
         for key, share in (("selection", selection.selection), ("domain", selection.domain)):
             if share is not None:
@@ -2204,8 +2211,8 @@ class _Reader:
                     "depend on the number of records",
                 )
             accounting = self._require_account(f"{where}.noise")
-            self._in_unit(expose_id, f"{where}.noise", accounting)
-            sensitivity = rank_sensitivity(entry.identifier, floor)
+            reach = self._reach(expose_id, f"{where}.noise", accounting)
+            sensitivity = reach * rank_sensitivity(entry.identifier, floor)
             noise = read_noise(
                 raw["noise"],
                 f"{where}.noise",
@@ -2615,6 +2622,21 @@ def _read_references(raw: Mapping[str, Any], rules: Mapping[str, Any]) -> Dict[s
     }
 
 
+def _check_follows(accounting: Accounting, relationships: Sequence[RelationshipEntry]) -> None:
+    """Each followed relationship is an entry of the profile's ``relationships`` (ADR 0037)."""
+    held = {
+        (item.parent_table, item.parent_columns, item.child_table, item.child_columns)
+        for item in relationships
+    }
+    for index, entry in enumerate(accounting.follows):
+        key = (entry.parent_table, entry.parent_columns, entry.child_table, entry.child_columns)
+        if key not in held:
+            raise refuse(
+                f"profile.privacy.privacyUnit.follows[{index}]",
+                "names no entry of the profile's relationships by its parent and child",
+            )
+
+
 def parse_profile(document: Any) -> Profile:
     """Read a parsed profile document whole, or refuse it (``FLX-5036``)."""
     _require_nfc(document, "profile")
@@ -2652,6 +2674,8 @@ def parse_profile(document: Any) -> Profile:
         from_1_3=raw["_schemaURL"] in _FROM_1_3_0,
         from_1_4=raw["_schemaURL"] == SCHEMA_URL_1_4_0,
     )
+    if accounting is not None and accounting.follows:
+        reader.require_1_4_0("follows", "profile.privacy.privacyUnit.follows")
     declared = _object(raw["tables"], "profile.tables")
     tables = {
         _name(name, "profile.tables"): reader.table(name, declared[name], f"profile.tables.{name}")
@@ -2676,6 +2700,7 @@ def parse_profile(document: Any) -> Profile:
     references = _read_references(raw, rules)
     reader.check_links(tables, references)
     if accounting is not None:
+        _check_follows(accounting, relationships)
         check_budget(accounting, reader.parts)
     return Profile(
         producer=producer,

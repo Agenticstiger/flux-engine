@@ -208,8 +208,8 @@ def read_clique(
             value["noise"],
             f"{where}.noise",
             accounting,
-            l1=Fraction(1),
-            l2_squared=Fraction(1),
+            l1=Fraction(accounting.reach(expose_id)),
+            l2_squared=Fraction(accounting.reach(expose_id) ** 2),
         ),
     )
 
@@ -311,8 +311,8 @@ def read_clique_2(
             value["noise"],
             f"{where}.noise",
             accounting,
-            l1=Fraction(1),
-            l2_squared=Fraction(1),
+            l1=Fraction(accounting.reach(expose_id)),
+            l2_squared=Fraction(accounting.reach(expose_id) ** 2),
         ),
         definition=CLIQUE_DEFINITION_2,
         edges=tuple(edges),
