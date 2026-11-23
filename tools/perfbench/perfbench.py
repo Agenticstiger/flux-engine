@@ -168,11 +168,11 @@ class Tree:
     def check(self) -> Tuple[str, str]:
         code = "import flux_engine, flux_stats; print(flux_engine.__file__); print(flux_stats.__file__)"
         out = subprocess.run(
-            [self.python, "-c", code],
+            [self.python, "-P", "-c", code],
             env=self.env,
             capture_output=True,
             text=True,
-            cwd=tempfile.gettempdir(),
+            cwd=ROOT,
         )
         files = out.stdout.split()
         if out.returncode != 0 or len(files) != 2:
@@ -404,46 +404,63 @@ def check_same(res: Results, what: str, fps: Dict[str, Dict[str, Any]]) -> None:
                 res.problems.append(f"{what}: {name} differs between {ref_key} and {key}")
 
 
+def _run_trees(
+    trees: List[Tree], case: Case, jobs: List[int], repeats: int, bundle: Path, scratch: Path
+) -> Dict[Tuple[str, int], List[Dict[str, Any]]]:
+    runs: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
+    for j in jobs:
+        for _ in range(repeats):
+            for tree in trees:  # ABAB: the trees alternate run by run
+                runs.setdefault((tree.label, j), []).append(
+                    run_case_once(tree, case, bundle, j, scratch)
+                )
+    return runs
+
+
+def _tree_entry(
+    res: Results, case: Case, tree: Tree, jobs: List[int], runs: Dict[Tuple[str, int], Any]
+) -> Dict[str, Any]:
+    per_jobs: Dict[str, Any] = {}
+    fps: Dict[str, Dict[str, Any]] = {}
+    for j in jobs:
+        rs = runs[(tree.label, j)]
+        per_jobs[str(j)] = {**summarise(rs), "runs": rs}
+        for k, r in enumerate(rs):
+            fps[f"jobs={j}#{k}"] = r["fingerprint"]
+    check_same(res, f"{case.name} [{tree.label}]", fps)
+    return {"jobs": per_jobs, "fingerprint": next(iter(fps.values()))}
+
+
+def _compare_trees(
+    res: Results, case: Case, trees: List[Tree], entry: Dict[str, Any], jobs: List[int]
+) -> None:
+    a, b = (entry["trees"][t.label] for t in trees)
+    check_same(res, f"{case.name} (tree {trees[0].label} vs {trees[1].label})",
+               {trees[0].label: a["fingerprint"], trees[1].label: b["fingerprint"]})  # fmt: skip
+    entry["ratio_b_over_a"] = {
+        str(j): {
+            "best": round(b["jobs"][str(j)]["best_wall"] / a["jobs"][str(j)]["best_wall"], 3),
+            "median": round(b["jobs"][str(j)]["median_wall"] / a["jobs"][str(j)]["median_wall"], 3),
+        }
+        for j in jobs
+    }  # fmt: skip
+
+
 def timed_cases(
     res: Results, trees: List[Tree], cases: List[Case], jobs: List[int], repeats: int, scratch: Path
 ) -> None:
     for case in cases:
         bundle = stage_bundle(case, scratch)
         before = load()
-        runs: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
-        for j in jobs:
-            for _ in range(repeats):
-                for tree in trees:  # ABAB: the trees alternate run by run
-                    runs.setdefault((tree.label, j), []).append(
-                        run_case_once(tree, case, bundle, j, scratch)
-                    )
+        runs = _run_trees(trees, case, jobs, repeats, bundle, scratch)
         entry: Dict[str, Any] = {
             "case": asdict_case(case),
             "load_before": before,
             "load_after": load(),
-            "trees": {},
+            "trees": {t.label: _tree_entry(res, case, t, jobs, runs) for t in trees},
         }
-        for tree in trees:
-            per_jobs: Dict[str, Any] = {}
-            fps: Dict[str, Dict[str, Any]] = {}
-            for j in jobs:
-                rs = runs[(tree.label, j)]
-                per_jobs[str(j)] = {**summarise(rs), "runs": rs}
-                for k, r in enumerate(rs):
-                    fps[f"jobs={j}#{k}"] = r["fingerprint"]
-            check_same(res, f"{case.name} [{tree.label}]", fps)
-            entry["trees"][tree.label] = {"jobs": per_jobs, "fingerprint": next(iter(fps.values()))}
         if len(trees) == 2:
-            a, b = (entry["trees"][t.label] for t in trees)
-            check_same(res, f"{case.name} (tree {trees[0].label} vs {trees[1].label})",
-                       {trees[0].label: a["fingerprint"], trees[1].label: b["fingerprint"]})  # fmt: skip
-            entry["ratio_b_over_a"] = {
-                str(j): {
-                    "best": round(b["jobs"][str(j)]["best_wall"] / a["jobs"][str(j)]["best_wall"], 3),
-                    "median": round(b["jobs"][str(j)]["median_wall"] / a["jobs"][str(j)]["median_wall"], 3),
-                }
-                for j in jobs
-            }  # fmt: skip
+            _compare_trees(res, case, trees, entry, jobs)
         res.timed[case.name] = entry
         res.digests["timed:" + case.name] = entry["trees"][trees[0].label]["fingerprint"]
         print(f"done {case.name}  load {before} -> {entry['load_after']}", file=sys.stderr)
@@ -458,46 +475,57 @@ def asdict_case(case: Case) -> Dict[str, Any]:
     }
 
 
-def digest_cases(res: Results, tree: Tree, scratch: Path) -> None:
-    """Kernel 0.1.0, scale 0.5 and shard fingerprints at jobs 1 and 4."""
+def _digest_plans() -> List[Tuple[str, List[str], bool]]:
     plans: List[Tuple[str, List[str], bool]] = []
     for name in KERNEL_BUNDLES:
         plans.append((f"kernel-0.1.0:{name}", ["--kernel", "0.1.0"], False))
     for name in HALF_BUNDLES:
         plans.append((f"scale-0.5:{name}", ["--scale", "0.5"], False))
     plans.append((f"shards:{SHARD_BUNDLE}", ["--scale", "1"], True))
-    for label, flags, sharded in plans:
-        case = CASES[label.split(":")[1]]
-        bundle = stage_bundle(case, scratch)
-        fps: Dict[str, Dict[str, Any]] = {}
-        for j in (1, 4):
-            state = Path(tempfile.mkdtemp(prefix="state-", dir=scratch))
-            try:
-                base = ["--state-dir", str(state), "--jobs", str(j)]
-                plan = execute(tree, ["plan", str(bundle), *flags, *base], scratch)
-                if plan.rc != 0:
-                    raise RuntimeError(f"{label} plan failed: {plan.err.strip()[-300:]}")
-                run_id = run_dir_of(state).name
-                fp: Dict[str, Any] = {}
-                for shard in ("1/2", "2/2") if sharded else (None,):
-                    extra = ["--shard", shard] if shard else []
-                    done = execute(
-                        tree, ["apply", str(bundle), "--run-id", run_id, *extra, *base], scratch
-                    )
-                    if done.rc != 0:
-                        raise RuntimeError(f"{label} apply failed: {done.err.strip()[-300:]}")
-                fp.update(fingerprint(run_dir_of(state)))
-                if sharded:
-                    fp.update(fingerprint(run_dir_of(state), shards=True))
-                fps[f"jobs={j}"] = fp
-            finally:
-                shutil.rmtree(state, ignore_errors=True)
+    return plans
+
+
+def _digest_once(
+    tree: Tree, label: str, flags: List[str], sharded: bool, bundle: Path, j: int, scratch: Path
+) -> Dict[str, Any]:
+    """Plan and apply *bundle* at *j* jobs in a fresh state directory; its fingerprint."""
+    state = Path(tempfile.mkdtemp(prefix="state-", dir=scratch))
+    try:
+        base = ["--state-dir", str(state), "--jobs", str(j)]
+        plan = execute(tree, ["plan", str(bundle), *flags, *base], scratch)
+        if plan.rc != 0:
+            raise RuntimeError(f"{label} plan failed: {plan.err.strip()[-300:]}")
+        run_id = run_dir_of(state).name
+        for shard in ("1/2", "2/2") if sharded else (None,):
+            extra = ["--shard", shard] if shard else []
+            done = execute(tree, ["apply", str(bundle), "--run-id", run_id, *extra, *base], scratch)
+            if done.rc != 0:
+                raise RuntimeError(f"{label} apply failed: {done.err.strip()[-300:]}")
+        fp: Dict[str, Any] = dict(fingerprint(run_dir_of(state)))
+        if sharded:
+            fp.update(fingerprint(run_dir_of(state), shards=True))
+        return fp
+    finally:
+        shutil.rmtree(state, ignore_errors=True)
+
+
+def digest_cases(res: Results, tree: Tree, scratch: Path) -> None:
+    """Kernel 0.1.0, scale 0.5 and shard fingerprints at jobs 1 and 4."""
+    for label, flags, sharded in _digest_plans():
+        bundle = stage_bundle(CASES[label.split(":")[1]], scratch)
+        fps = {
+            f"jobs={j}": _digest_once(tree, label, flags, sharded, bundle, j, scratch)
+            for j in (1, 4)
+        }
         check_same(res, label, fps)
         res.digests[label] = fps["jobs=1"]
         print(f"done {label}", file=sys.stderr)
 
 
-def verify_timing(res: Results, tree: Tree, jobs: List[int], repeats: int, scratch: Path) -> None:
+def verify_timing(
+    res: Results, tree: Tree, jobs: List[int], repeats: int, scratch: Path, labelled: bool = False
+) -> None:
+    """Time ``verify`` of each bundle on *tree*; with *labelled* each row is keyed by the tree."""
     for name, scale in VERIFY_BUNDLES:
         case = CASES[name]
         bundle = stage_bundle(case, scratch)
@@ -521,7 +549,10 @@ def verify_timing(res: Results, tree: Tree, jobs: List[int], repeats: int, scrat
                     rc = r.rc
                     best = r.wall if best is None else min(best, r.wall)
                 row[str(j)] = {"best_wall": round(best or 0.0, 4), "exit": rc}
-            res.verify[name] = {"scale": scale, "jobs": row}
+            res.verify[f"{name} [{tree.label}]" if labelled else name] = {
+                "scale": scale,
+                "jobs": row,
+            }
         finally:
             shutil.rmtree(state, ignore_errors=True)
         print(f"done verify {name}", file=sys.stderr)
@@ -547,16 +578,19 @@ def markdown(res: Results, trees: List[Tree], jobs: List[int]) -> str:
                                for j, v in entry["ratio_b_over_a"].items())  # fmt: skip
             lines.append(f"| {name} | B/A wall | | | | | | | | | {ratios} |")
     if res.verify:
-        vjobs = list(next(iter(res.verify.values()))["jobs"])
-        lines += ["", "verify, best wall seconds", "", "| bundle | " + " | ".join(f"jobs {j}" for j in vjobs) + " |",
-                  "|" + "---|" * (len(vjobs) + 1)]  # fmt: skip
-        for name, v in res.verify.items():
-            lines.append(
-                f"| {name} | "
-                + " | ".join(f"{v['jobs'][j]['best_wall']:.2f}" for j in vjobs)
-                + " |"
-            )
+        lines += _verify_table(res)
     return "\n".join(lines) + "\n"
+
+
+def _verify_table(res: Results) -> List[str]:
+    vjobs = list(next(iter(res.verify.values()))["jobs"])
+    lines = ["", "verify, best wall seconds", "", "| bundle | " + " | ".join(f"jobs {j}" for j in vjobs) + " |",
+             "|" + "---|" * (len(vjobs) + 1)]  # fmt: skip
+    for name, v in res.verify.items():
+        lines.append(
+            f"| {name} | " + " | ".join(f"{v['jobs'][j]['best_wall']:.2f}" for j in vjobs) + " |"
+        )
+    return lines
 
 
 def compare_against(res: Results, path: Path) -> None:
@@ -615,29 +649,116 @@ def short_path(fname: str) -> str:
     return fname
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+#: Every option as ``(flag, argparse keywords)``.
+_OPTIONS: Tuple[Tuple[str, Dict[str, Any]], ...] = (
+    ("--cases", {"default": "all", "help": "comma list of case names, or all"}),
+    ("--jobs", {"default": "1,2,4,8,16"}),
+    ("--repeats", {"type": int, "default": 3}),
+    ("--scale", {"type": float, "help": "override every timed case's scale"}),
+    ("--tree", {"help": "source tree to run (default: the interpreter's own install)"}),
+    ("--tree-b", {"help": "second tree, alternated with --tree run by run (ABAB)"}),
+    ("--python", {"default": sys.executable, "help": "interpreter that runs fluxsim"}),
+    ("--save", {"help": "write every result as JSON"}),
+    ("--md", {"help": "also write the Markdown table to this file"}),
+    ("--against", {"help": "compare every digest with this saved JSON; exit 2 on a mismatch"}),
+    ("--profile", {"help": "comma list of cases (or all) to run under cProfile at jobs 1"}),
+    ("--profile-dir", {"help": "write profile-<case>.txt files here as well"}),
+    (
+        "--no-digest-cases",
+        {"action": "store_true", "help": "skip kernel, half-scale and shard cases"},
+    ),
+    ("--no-verify", {"action": "store_true", "help": "skip the verify timing"}),
+    ("--list", {"action": "store_true", "help": "list the built-in cases and exit"}),
+)
+
+
+def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Benchmark the fluxsim CLI.")
-    ap.add_argument("--cases", default="all", help="comma list of case names, or all")
-    ap.add_argument("--jobs", default="1,2,4,8,16")
-    ap.add_argument("--repeats", type=int, default=3)
-    ap.add_argument("--scale", type=float, help="override every timed case's scale")
-    ap.add_argument("--tree", help="source tree to run (default: the interpreter's own install)")
-    ap.add_argument("--tree-b", help="second tree, alternated with --tree run by run (ABAB)")
-    ap.add_argument("--python", default=sys.executable, help="interpreter that runs fluxsim")
-    ap.add_argument("--save", help="write every result as JSON")
-    ap.add_argument("--md", help="also write the Markdown table to this file")
-    ap.add_argument(
-        "--against", help="compare every digest with this saved JSON; exit 2 on a mismatch"
-    )
-    ap.add_argument(
-        "--profile", help="comma list of cases (or all) to run under cProfile at jobs 1"
-    )
-    ap.add_argument("--profile-dir", help="write profile-<case>.txt files here as well")
-    ap.add_argument(
-        "--no-digest-cases", action="store_true", help="skip kernel, half-scale and shard cases"
-    )
-    ap.add_argument("--no-verify", action="store_true", help="skip the verify timing")
-    ap.add_argument("--list", action="store_true", help="list the built-in cases and exit")
+    for flag, keywords in _OPTIONS:
+        ap.add_argument(flag, **keywords)
+    return ap
+
+
+def _profile_all(
+    ap: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    names: List[str],
+    tree: Tree,
+    scratch: Path,
+) -> None:
+    wanted = names if args.profile == "all" else args.profile.split(",")
+    for n in wanted:
+        if n not in CASES:
+            ap.error(f"unknown profile case {n}")
+        warm_up(tree, scratch)
+        out_dir = Path(args.profile_dir) if args.profile_dir else None
+        print(profile_case(tree, CASES[n], scratch, out_dir))
+
+
+def _measure(
+    res: Results,
+    args: argparse.Namespace,
+    trees: List[Tree],
+    cases: List[Case],
+    jobs: List[int],
+    scratch: Path,
+) -> None:
+    for t in trees:
+        warm_up(t, scratch)
+    timed_cases(res, trees, cases, jobs, args.repeats, scratch)
+    if not args.no_digest_cases:
+        digest_cases(res, trees[0], scratch)
+    if not args.no_verify:
+        for t in trees:
+            verify_timing(res, t, [1, 2, 4, 8, 16], args.repeats, scratch, labelled=len(trees) > 1)
+
+
+def _report(
+    res: Results,
+    args: argparse.Namespace,
+    trees: List[Tree],
+    jobs: List[int],
+    modules: Dict[str, Tuple[str, str]],
+    seen: Optional[str],
+    started: float,
+) -> Dict[str, Any]:
+    return {
+        "machine": {
+            "cpu_count": os.cpu_count(),
+            "platform": platform.platform(),
+            "python": sys.version.split()[0],
+            "PYTHONDONTWRITEBYTECODE_seen": seen,
+            "PYTHONDONTWRITEBYTECODE_used": None,
+            "trees": {t.label: t.path for t in trees},
+            "modules": modules,
+            "wall_seconds": round(time.time() - started, 1),
+        },
+        "jobs": jobs,
+        "repeats": args.repeats,
+        "timed": res.timed,
+        "verify": res.verify,
+        "digests": res.digests,
+        "problems": res.problems,
+        "mismatches": res.mismatches,
+    }
+
+
+def _verdict(res: Results, two_trees: bool) -> int:
+    for p in res.problems:
+        print("NOT BIT-EXACT:", p, file=sys.stderr)
+    for m in res.mismatches:
+        print("MISMATCH:", m, file=sys.stderr)
+    if not res.problems and not res.mismatches:
+        print(
+            "bit-exact: every fingerprint is identical across jobs"
+            + (" and trees" if two_trees else ""),
+            file=sys.stderr,
+        )
+    return 2 if res.mismatches else (1 if res.problems else 0)
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    ap = _parser()
     args = ap.parse_args(argv)
 
     if args.list:
@@ -661,27 +782,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     started = time.time()
     try:
         if args.profile:
-            wanted = names if args.profile == "all" else args.profile.split(",")
-            for n in wanted:
-                if n not in CASES:
-                    ap.error(f"unknown profile case {n}")
-                warm_up(trees[0], scratch)
-                print(
-                    profile_case(
-                        trees[0],
-                        CASES[n],
-                        scratch,
-                        Path(args.profile_dir) if args.profile_dir else None,
-                    )
-                )
+            _profile_all(ap, args, names, trees[0], scratch)
             return 0
-        for t in trees:
-            warm_up(t, scratch)
-        timed_cases(res, trees, cases, jobs, args.repeats, scratch)
-        if not args.no_digest_cases:
-            digest_cases(res, trees[0], scratch)
-        if not args.no_verify:
-            verify_timing(res, trees[0], [1, 2, 4, 8, 16], args.repeats, scratch)
+        _measure(res, args, trees, cases, jobs, scratch)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
@@ -691,40 +794,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         Path(args.md).write_text(table, encoding="utf-8")
     if args.against:
         compare_against(res, Path(args.against))
-    report = {
-        "machine": {
-            "cpu_count": os.cpu_count(),
-            "platform": platform.platform(),
-            "python": sys.version.split()[0],
-            "PYTHONDONTWRITEBYTECODE_seen": seen,
-            "PYTHONDONTWRITEBYTECODE_used": None,
-            "trees": {t.label: t.path for t in trees},
-            "modules": modules,
-            "wall_seconds": round(time.time() - started, 1),
-        },
-        "jobs": jobs,
-        "repeats": args.repeats,
-        "timed": res.timed,
-        "verify": res.verify,
-        "digests": res.digests,
-        "problems": res.problems,
-        "mismatches": res.mismatches,
-    }
     if args.save:
+        report = _report(res, args, trees, jobs, modules, seen, started)
         Path(args.save).write_text(
             json.dumps(report, indent=1, sort_keys=True) + "\n", encoding="utf-8"
         )
-    for p in res.problems:
-        print("NOT BIT-EXACT:", p, file=sys.stderr)
-    for m in res.mismatches:
-        print("MISMATCH:", m, file=sys.stderr)
-    if not res.problems and not res.mismatches:
-        print(
-            "bit-exact: every fingerprint is identical across jobs"
-            + (" and trees" if args.tree_b else ""),
-            file=sys.stderr,
-        )
-    return 2 if res.mismatches else (1 if res.problems else 0)
+    return _verdict(res, bool(args.tree_b))
 
 
 if __name__ == "__main__":
