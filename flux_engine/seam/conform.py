@@ -69,7 +69,7 @@ from json.encoder import encode_basestring
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, canonical_bytes, nfc
-from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
+from flux_engine.core.clock import format_rfc3339_ms, format_seconds, parse_rfc3339_ms
 from flux_engine.core.errors import FluxError, register
 from flux_engine.seam.contract import CompiledColumn, CompiledExpose, LogicalKind, LogicalType
 
@@ -333,7 +333,7 @@ def _from_the_clock(render: Callable[[], str]) -> str:
 
 def _isoformat_z(moment: datetime) -> str:
     """Spell an aware UTC datetime in the grammar ``parse_rfc3339_ms`` accepts."""
-    return moment.strftime("%Y-%m-%dT%H:%M:%S") + f".{moment.microsecond // 1000:03d}Z"
+    return format_seconds(moment) + f".{moment.microsecond // 1000:03d}Z"
 
 
 def _render_json(value: Any) -> str:

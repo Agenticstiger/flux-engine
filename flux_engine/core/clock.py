@@ -61,6 +61,7 @@ __all__ = [
     "declared_time_bounds",
     "document_ordinals",
     "format_rfc3339_ms",
+    "format_seconds",
     "parse_rfc3339_ms",
 ]
 
@@ -115,7 +116,28 @@ def format_rfc3339_ms(t_ms: int) -> str:
     if isinstance(t_ms, bool) or not isinstance(t_ms, int):
         raise FluxError(FLX_5022, f"milliseconds must be an integer, got {type(t_ms).__name__}")
     moment = _EPOCH + timedelta(milliseconds=t_ms)
-    return f"{moment.strftime('%Y-%m-%dT%H:%M:%S')}.{moment.microsecond // 1000:03d}Z"
+    return f"{format_seconds(moment)}.{moment.microsecond // 1000:03d}Z"
+
+
+def format_seconds(moment: datetime) -> str:
+    """Spell *moment* as ``YYYY-MM-DDTHH:MM:SS``, the fields only, with no offset.
+
+    A four-digit year is formatted straight from the datetime's fields. ``strftime`` costs
+    a libc call, and on some platforms that call is two orders of magnitude slower inside
+    a forked worker than in its parent. Below year 1000 the platform pads a short ``%Y``
+    its own way, so those years keep the ``strftime`` spelling.
+    """
+    if moment.year < 1000:
+        return _strftime_seconds(moment)
+    return (
+        f"{moment.year}-{moment.month:02d}-{moment.day:02d}"
+        f"T{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}"
+    )
+
+
+def _strftime_seconds(moment: datetime) -> str:
+    """The ``strftime`` spelling :func:`format_seconds` keeps for years below 1000."""
+    return moment.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def document_ordinals(document_ids: Iterable[str]) -> Mapping[str, int]:
