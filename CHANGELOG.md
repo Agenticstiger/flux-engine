@@ -47,6 +47,8 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 
 - `fluxsim forecast make` checks every forecast against the store before it registers any, so a conflict (`FLX-7007`) or a malformed record on one item leaves nothing registered, as its message says; a write that fails part way names what was registered.
 - `fluxsim accuracy register` and `forecast make` refuse an interval whose low is above its high (`FLX-7012`), `forecast score` refuses a stored record that holds one, and it refuses an `--observed-at` earlier than the sealed horizon end (`FLX-7013`).
+- `calibrate --fit` leaves no `.patch.json` behind when a held-out profile is refused after the fit.
+- The calibration search evaluates its start point as well as its budget and keeps it unless a candidate is strictly better; a fit that moves no value writes no bundle and ends in `FLX-3712`.
 
 ## Unreleased
 

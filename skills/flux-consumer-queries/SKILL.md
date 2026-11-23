@@ -76,7 +76,7 @@ A fit moves only the numbers the bundle declares under `calibration`, and only t
 fluxsim calibrate --fit bundle --profile orders.profile.json --held-out held-out.profile.json --out calibrated
 ```
 
-`--out` and its patch must not exist yet. The patch, `calibrated.patch.json`, is always written. The calibrated bundle is written only when the held-out check holds; otherwise the command exits 1 with `FLX-3712`. Report the patch and each held-out gap as they are. Read [calibration](references/calibration.md) before you advise what to change.
+`--out` and its patch must not exist yet. The patch, `calibrated.patch.json`, is always written. The calibrated bundle is written only when the held-out check holds and a value moved; otherwise the command exits 1 with `FLX-3712`. Report the patch and each held-out gap as they are. Read [calibration](references/calibration.md) before you advise what to change.
 
 ## 5. Fixed values and seed rows
 

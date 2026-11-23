@@ -330,10 +330,24 @@ def test_a_held_out_profile_that_names_a_calibration_query_is_refused_after_the_
     with pytest.raises(FluxError) as error:
         run_fit(request(make(tmp_path), tmp_path, held))
     assert error.value.code.code == "FLX-3702" and "premium-renewed" in str(error.value)
-    assert (
-        tmp_path / "calibrated.patch.json"
-    ).is_file()  # the fit stands: it never saw the profile
+    assert not (tmp_path / "calibrated.patch.json").exists()  # a refusal leaves no patch behind
     assert not (tmp_path / "calibrated").exists()
+    assert sorted(p.name for p in tmp_path.iterdir() if p.name.startswith(".")) == []
+
+
+def test_an_unreadable_held_out_profile_leaves_no_patch_and_the_rerun_is_not_refused(
+    tmp_path: Path,
+) -> None:
+    held = tmp_path / "corrupt.json"
+    held.write_text("{ not a profile", encoding="utf-8")
+    bundle = make(tmp_path)
+    with pytest.raises(FluxError) as error:
+        run_fit(request(bundle, tmp_path, held))
+    assert error.value.code.code == "FLX-5036"
+    assert not (tmp_path / "calibrated.patch.json").exists()
+    assert not (tmp_path / "calibrated").exists()
+    outcome = run_fit(request(bundle, tmp_path))  # not FLX-3710 "already exists"
+    assert outcome.calibrated
 
 
 def test_a_bundle_with_no_held_out_query_refuses_a_held_out_profile_before_any_run(
@@ -430,3 +444,16 @@ def test_fit_then_plan_apply_and_verify_the_calibrated_bundle(
     if fitted["artifacts"]["patch"]["operations"]:
         assert register["counts"]["calibrated"] == 1
     assert verified["artifacts"]["queries"]["status"] == "counted"
+
+
+def test_a_fit_that_moves_nothing_writes_no_bundle_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    bundle = make(tmp_path)
+    monkeypatch.setattr(fit_module, "_operations", lambda parameters, values: ())
+    outcome = run_fit(request(bundle, tmp_path))
+    assert not outcome.calibrated and outcome.bundle is None
+    assert not (tmp_path / "calibrated").exists()
+    from flux_engine.cli.commands.calibrate import _not_calibrated
+
+    assert "no candidate beat the start point" in str(_not_calibrated(outcome))

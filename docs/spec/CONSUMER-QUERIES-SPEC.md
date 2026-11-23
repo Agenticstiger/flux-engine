@@ -460,7 +460,7 @@ no number the register counts, a value outside `min` and `max`, a step with no v
 parameters that name one number is `FLX-3706`.
 
 **The fit.** CMA-ES runs over the parameters scaled to the range 0 to 1, bounded, seeded with `seed` (moved
-into 1 to 2,147,483,647, since cma reads 0 as "from the clock"), for at most `evaluations` runs. Each
+into 1 to 2,147,483,647, since cma reads 0 as "from the clock"), for at most `evaluations` runs, and the start point is evaluated as well. Each
 evaluation writes the candidate values, each rounded to its `step`, into a copy of the bundle's files, plans
 and applies it at `scale` under the state directory, loads the run's tables into the one query process,
 counts the calibration queries, and removes the copy and its run. The objective is the sum of the squared
@@ -527,7 +527,7 @@ calibration, `fluxsim calibrate BUNDLE`, is unchanged and needs none of the extr
    held to, is a miss. A fit with no held-out target is never called calibrated.
 5. Only a calibrated fit writes the bundle at `DIR`. Otherwise `calibrate` writes the patch and its report,
    names each held-out query that missed with its gap and why, writes no bundle, and exits with status 1
-   (`FLX-3712`).
+   (`FLX-3712`). A fit where no candidate beat the start point moves no value and is refused the same way.
 
 The register records the largest gap rounded up to 12 decimals when it does not terminate, so it never
 understates it.

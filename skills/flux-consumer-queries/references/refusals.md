@@ -25,7 +25,7 @@ links each page. Never weaken a check, raise a tolerance, move a query between t
 | `FLX-3705` to `FLX-3707` | what a fit may move: a source it may not move, a document or number the bundle does not have, or nothing to fit | the user's decision on what may move; see the calibration reference |
 | `FLX-3708`, `FLX-3709` | the `calibrate` extra is missing; or the queries were checked with another sqlglot than the one installed | ask the user to install the extra or the recorded version, or write the queries again with `fluxsim init` |
 | `FLX-3710`, `FLX-3711` | the place a fit writes is taken, or a patch operation cannot be applied | name a new output folder; report the second |
-| `FLX-3712` | the held-out error does not hold, so the bundle was not called calibrated; the patch is written, no bundle | report each missed query and gap; see the calibration reference |
+| `FLX-3712` | the held-out error does not hold, so the bundle was not called calibrated, or no candidate beat the start point; the patch is written, no bundle | report each missed query and gap; see the calibration reference |
 | `FLX-3716` | a calibrated entry whose held-out gap is larger than its tolerance | the record contradicts itself; report it, never edit the register to fit |
 | `FLX-7101` | a candidate of the fit could not be run | report the code and the candidate's message |
 | `FLX-3640` to `FLX-3647` | `conditions`: see the fixed values reference | see it |

@@ -110,7 +110,9 @@ FLX_3711 = register(
 FLX_3712 = register(
     "FLX-3712",
     "the held-out error does not hold, so the bundle was not called calibrated",
-    "A calibration is calibrated only when at least one held-out query has a target and every "
+    "A fit where no candidate beat the start point moves no value, so it writes the patch and no "
+    'bundle and is refused the same way, with the message "no candidate beat the start point, so '
+    'no value moved". Otherwise, a calibration is calibrated only when at least one held-out query has a target and every '
     "held-out query that has one falls within its tolerance (its own tolerance, or else the "
     "calibration block's heldOutTolerance). Otherwise fluxsim calibrate --fit writes the "
     "calibration patch and reports each held-out query that missed, with its gap and why, exits "

@@ -477,7 +477,7 @@ def command(*arguments: str) -> int:
 def test_the_command_fits_and_reports_the_patch(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    bundle = copy_bundle(tmp_path, calibration(evaluations=4, heldOutTolerance="0.5"))
+    bundle = copy_bundle(tmp_path, calibration(evaluations=6, heldOutTolerance="0.5"))
     status = command(
         "--fit",
         str(bundle),
@@ -498,6 +498,31 @@ def test_the_command_fits_and_reports_the_patch(
     assert document["artifacts"]["patch"]["digest"].startswith("sha256:")
     assert document["artifacts"]["method"] == "flux.calibration.cma/1"
     assert patch.is_file()
+
+
+def test_a_fit_where_no_candidate_beats_the_start_ends_in_the_not_moved_refusal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bundle = copy_bundle(tmp_path, calibration(evaluations=4, heldOutTolerance="0.5"))
+    status = command(
+        "--fit",
+        str(bundle),
+        "--profile",
+        str(PROFILE),
+        "--held-out",
+        str(HELD_OUT),
+        "--out",
+        str(tmp_path / "calibrated"),
+        "--state-dir",
+        str(tmp_path / "state"),
+        "--json",
+    )
+    document = json.loads(capsys.readouterr().out)
+    assert status == 1 and "FLX-3712" in json.dumps(document)
+    assert "no candidate beat the start point" in json.dumps(document)
+    assert document["artifacts"]["patch"]["operations"] == 0
+    assert document["artifacts"]["bundle"] is None and not (tmp_path / "calibrated").exists()
+    assert (tmp_path / "calibrated.patch.json").is_file()
 
 
 def test_the_command_reports_a_refusal_with_its_code(
@@ -634,7 +659,34 @@ def test_at_most_the_budget_is_evaluated_even_inside_a_generation(evaluations: i
     calibrator.calibrate({}, {})
     assert calibrator.result is not None
     assert calibrator.result.evaluations == evaluations
-    assert len(calls) == calibrator.result.runs <= evaluations
+    assert len(calls) == calibrator.result.runs <= evaluations + 1  # the start point is extra
+
+
+def test_the_start_point_is_evaluated_first_and_kept_when_nothing_beats_it() -> None:
+    calls: List[Any] = []
+
+    def evaluate(values: Any) -> Evaluation:
+        calls.append(values)
+        return bowl("0.3")(values)
+
+    start = toy("a", "0", "1", "0.01", "0.3")
+    calibrator = CmaCalibrator(
+        [start, toy("b", "0", "1", "0.01", "0.3")], evaluate, evaluations=1, seed=4
+    )
+    dials, _ = calibrator.calibrate({}, {})
+    assert calls[0] == (Fraction(3, 10), Fraction(3, 10)) and len(calls) <= 2
+    assert calibrator.result is not None and calibrator.result.evaluations == 1
+    assert all(value == __import__("decimal").Decimal("0.3") for value in dials.values())
+
+
+def test_a_short_fit_never_returns_a_worse_value_than_the_start() -> None:
+    parameters = [toy("a", "0", "1", "0.001", "0.3"), toy("b", "0", "1", "0.001", "0.3")]
+    for evaluations in (1, 2, 3, 5):
+        calibrator = CmaCalibrator(parameters, bowl("0.3"), evaluations=evaluations, seed=11)
+        calibrator.calibrate({}, {})
+        assert calibrator.result is not None
+        assert calibrator.result.evaluation.objective == 0
+        assert calibrator.result.evaluations == evaluations
 
 
 def test_one_parameter_is_fitted_although_cma_has_no_one_dimensional_search() -> None:

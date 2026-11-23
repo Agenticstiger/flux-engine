@@ -17,6 +17,8 @@ gaps between each calibration query's rate and its target, and the gap of each q
   from the clock", so the seed it is given is the declared one, moved into 1 to 2,147,483,647.
 * **One parameter** is searched in two dimensions, the second of which no value reads, because cma 4.6.0
   cannot run a bounded fit in one (pycma issues 86 and 302).
+* **The start point** is evaluated as well, before the first candidate, and kept when no candidate beats
+  it, so a short fit is never worse than the start. It is not counted against the budget.
 * **Budget.** At most ``evaluations`` candidates are evaluated: whole generations, and the first
   candidates of the next one when the budget ends inside it. A candidate that rounds to the values of an
   earlier one is not run again, and still counts against the budget.
@@ -180,6 +182,14 @@ class CmaCalibrator:
                 "verb_disp": 0,
             },
         )
+        # The start point is evaluated as well as the budget's candidates, and it is kept unless a
+        # candidate beats it (ties keep the earlier), so a short fit is never worse than the start.
+        first = tuple(
+            parameter.snap(float(unit))
+            for parameter, unit in zip(self._parameters, starts, strict=True)
+        )
+        seen[first] = self._evaluate(first)
+        best = (first, seen[first])
         while done < self._evaluations and not strategy.stop():
             candidates = strategy.ask()
             taken = candidates[: self._evaluations - done]
