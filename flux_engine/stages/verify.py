@@ -2163,7 +2163,7 @@ def _load_run(layout: RunLayout) -> Union[_Loaded, StageResult]:
         )
         require_run_digest_binds_plan(layout, recorded_plan, run_digest_document)
         require_receipt_binds_plan(layout, recorded_plan, receipt)
-        require_run_files_named(layout, receipt)
+        require_run_files_named(layout, receipt, recorded_plan)
         read_column_provenance(layout, recorded_plan)
         # Parameter register: the sources of the run's numbers, read only through the plan.
         register = read_parameter_register(layout, recorded_plan)

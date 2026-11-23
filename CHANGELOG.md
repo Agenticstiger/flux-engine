@@ -42,6 +42,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - `fluxsim verify` and `fluxsim ship` compare the receipt's simulation id and emit ids with the run's plan and refuse a run directory where they differ (`FLX-2122`), so a hand-edited receipt can no longer name a simulation or an emit the plan does not.
 - `fluxsim verify` and `fluxsim ship` refuse a committed run directory that holds a file the run did not write, such as an extra `emits/<id>.ndjson` (`FLX-2123`), because `ship` packs the directory whole; a `.DS_Store` that a file manager leaves is neither refused nor packed.
 - A calibrated register entry records the digest of the profile it was fitted to (`calibration.targets`), and the register note in EVIDENCE.md now says when that digest is not the pinned profile's.
+- `verify` and `ship` accept a share stream or share record only when it is the share of the whole stream the receipt binds and matches the plan, and refuse a `seed-paths.ndjson` that does not digest to the plan's `seedTreeDigest` (`FLX-2108`); `sink-receipts.json` and `calibration-provenance.json` are carried as the run directory holds them.
 
 ### Fixed
 

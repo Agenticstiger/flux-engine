@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict
 import pytest
 
 from flux_engine.cli import main
-from flux_engine.core.digest import digest_of_document
+from flux_engine.core.digest import digest_of_bytes, digest_of_document
 from flux_engine.stages.layout import COMPONENT_LEDGER, RunLayout
 from flux_engine.stages.verify import recompute_components
 
@@ -230,6 +230,102 @@ def test_a_file_the_receipt_does_not_name_is_refused_by_verify_and_ship(
     assert code != 0
     assert "FLX-2123" in text and named in text
     assert not (tmp_path / "out" / "EVIDENCE.md").exists()
+
+
+def _shared_run(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> RunLayout:
+    """A run applied in two shares and then whole, the way `size-and-split-a-run` does it."""
+    state = tmp_path / ".flux"
+    bundle = str(FIXTURE_BUNDLE)
+    assert _cli(capsys, "plan", bundle, "--state-dir", str(state), "--no-stage")[0] == 0
+    (run_dir,) = (state / "runs").iterdir()
+    layout = RunLayout.for_state_dir(state, run_dir.name)
+    for share in ("1/2", "2/2", None):
+        extra = ["--shard", share] if share is not None else []
+        argv = ["apply", bundle, "--state-dir", str(state), "--run-id", layout.run_id, *extra]
+        code, text = _cli(capsys, *argv)
+        assert code == 0, text
+    return layout
+
+
+def _refused_everywhere(
+    layout: RunLayout, tmp_path: Path, capsys: pytest.CaptureFixture[str], named: str
+) -> None:
+    for code, text in (_verify(capsys, layout), _ship(capsys, layout, tmp_path)):
+        assert code != 0
+        assert "FLX-2123" in text, text
+        assert named in text, text
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        f"emits/{EXPOSE_ID}.shard-7-of-3.ndjson",
+        f"emits/{EXPOSE_ID}.shard-0-of-3.ndjson",
+        f"emits/{EXPOSE_ID}.shard-1-of-2.ndjson",
+        "shard-7-of-3.json",
+        "shard-0-of-2.json",
+    ],
+)
+def test_a_share_a_run_never_wrote_is_refused(
+    name: str, run: RunLayout, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (run.run_dir / name).write_text("[]\n", encoding="utf-8")
+    _refused_everywhere(run, tmp_path, capsys, name)
+
+
+def test_a_share_stream_without_its_manifest_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    layout = _shared_run(tmp_path, capsys)
+    layout.shard_manifest_path(2, 2).unlink()
+    _refused_everywhere(layout, tmp_path, capsys, f"{EXPOSE_ID}.shard-2-of-2.ndjson")
+
+
+def test_a_share_stream_with_other_bytes_than_its_share_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    layout = _shared_run(tmp_path, capsys)
+    share = layout.shard_emit_path(EXPOSE_ID, 1, 2)
+    share.write_bytes(share.read_bytes() + b"[]\n")
+    _refused_everywhere(layout, tmp_path, capsys, "shard-1-of-2")
+
+
+def test_a_share_stream_swapped_for_the_other_share_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    layout = _shared_run(tmp_path, capsys)
+    first = layout.shard_emit_path(EXPOSE_ID, 1, 2)
+    second = layout.shard_emit_path(EXPOSE_ID, 2, 2)
+    first.write_bytes(second.read_bytes())
+    manifest = layout.shard_manifest_path(1, 2)
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    entry = document["emits"][0]
+    entry["bytes"] = first.stat().st_size
+    entry["sha256"] = digest_of_bytes(first.read_bytes(), subject="shardFile").value
+    entry["rows"] = first.read_bytes().count(b"\n")
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+    _refused_everywhere(layout, tmp_path, capsys, "shard-1-of-2")
+
+
+def test_a_manifest_that_does_not_describe_its_share_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    layout = _shared_run(tmp_path, capsys)
+    manifest = layout.shard_manifest_path(1, 2)
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["emits"][0]["sha256"] = "0" * 64
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+    _refused_everywhere(layout, tmp_path, capsys, manifest.name)
+
+
+def test_a_changed_seed_path_list_is_refused_because_the_plan_binds_it(
+    run: RunLayout, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with run.seed_paths_path.open("ab") as handle:
+        handle.write(b'["extra"]\n')
+    for code, text in (_verify(capsys, run), _ship(capsys, run, tmp_path)):
+        assert code != 0
+        assert "FLX-2108" in text or "FLX-2123" in text, text
 
 
 def test_a_directory_where_the_run_writes_a_file_is_named_as_such(

@@ -25,6 +25,8 @@ run 205ba6e504c40820 complete
 
 These examples write the pack beside the bundle directory, so that directory keeps only its documents. Writing it inside, as the tutorial does with `-o out`, also works: `ship` leaves that output folder out of the archive.
 
+`ship` packs the run directory as it holds it, and refuses a file the run did not write (`FLX-2123`). `sink-receipts.json` and `calibration-provenance.json` are carried as the directory holds them: nothing the run digest binds says whether the run wrote them, so they are not covered by the run digest.
+
 ```console
 $ fluxsim ship . --run-id 205ba6e504c40820 -o ../out
 [ok] packed ../out/demo.flux.tgz

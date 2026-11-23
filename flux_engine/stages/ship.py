@@ -1967,7 +1967,7 @@ def ship(
         # written: plan.json, its planDigest, run-digest.json, and the column record.
         require_run_digest_binds_plan(layout, plan_document, run_digest_document)
         require_receipt_binds_plan(layout, plan_document, receipt)
-        require_run_files_named(layout, receipt)
+        require_run_files_named(layout, receipt, plan_document)
         bound = read_column_provenance(layout, plan_document)
         register = read_parameter_register(layout, plan_document)
         # What was stored is the bundle's declaration, which plan.json may only agree with

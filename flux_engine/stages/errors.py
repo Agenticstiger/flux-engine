@@ -219,9 +219,15 @@ FLX_2123: ErrorCode = register(
     "input and fidelity record. A stream file for an emit the receipt does not name (an "
     "extra `emits/<id>.ndjson`, for example), or any other file or directory the engine "
     "never writes there, was added after `apply` and is not covered by the run digest, so "
-    "a pack would carry it as if the run had produced it. The refusal names the first "
-    "such file, as a path relative to the run directory. Remove the file, or move it out "
-    "of the run directory.",
+    "a pack would carry it as if the run had produced it. A share is read, not only named: "
+    "`shard-I-of-N.json` needs I from 1 to N and has to agree with the plan and with the "
+    "share beside it, and a share stream `emits/<id>.shard-I-of-N.ndjson` needs that record "
+    "and has to be exactly the rows of the run's whole stream that share I of N holds. "
+    "The refusal names the first such file, as a path relative to the run directory. "
+    "Remove the file, or move it out of the run directory. `sink-receipts.json` and "
+    "`calibration-provenance.json` are carried as the run directory holds them: nothing "
+    "the run digest, the receipt or the plan binds says whether the run wrote them, so they "
+    "are not covered by the run digest.",
 )
 
 
