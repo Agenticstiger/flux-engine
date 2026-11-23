@@ -37,6 +37,8 @@ __all__ = [
     "FLX_2116",
     "FLX_2119",
     "FLX_2121",
+    "FLX_2122",
+    "FLX_2123",
     "FLX_4103",
     "FLX_4104",
     "ColumnProvenanceMoved",
@@ -190,6 +192,36 @@ FLX_2121: ErrorCode = register(
     "value against the run's own stream, and name the column as `COLUMN=VALUE` when the key "
     "has more than one column or the column is not the expose's primary key. The refusal "
     "names the key it looked for and, for an unknown column, the columns the expose has.",
+)
+
+
+FLX_2122: ErrorCode = register(
+    "FLX-2122",
+    "the receipt and the plan of a run directory disagree",
+    "A run directory holds two records of what the run was: `plan.json`, whose planDigest "
+    "pins the simulation it names and the emits it declares, and `receipt.json`, which "
+    "`apply` wrote from the same plan. `fluxsim verify` and `fluxsim ship` read the "
+    "simulation id and the emit ids back from the receipt, and an id becomes part of a file "
+    "name (the golden record, each emit stream), so a receipt that names another simulation, "
+    "or another set of emits, than the plan beside it was edited or assembled from another "
+    "run. The refusal names the field that differs: the simulation id, or the emit ids the "
+    "receipt lacks or adds. Run `fluxsim plan` and `fluxsim apply` again rather than "
+    "editing a receipt.",
+)
+
+FLX_2123: ErrorCode = register(
+    "FLX-2123",
+    "a committed run directory holds a file the run does not account for",
+    "`fluxsim ship` packs the whole run directory, and `fluxsim verify` reads the emit "
+    "streams in it, so every file there has to be one the run itself wrote: the files "
+    "`apply`, `ship` and `calibrate --write` write, the shares `apply --shard` "
+    "writes, and, for each emit the receipt names, its stream, seam attestation, fidelity "
+    "input and fidelity record. A stream file for an emit the receipt does not name (an "
+    "extra `emits/<id>.ndjson`, for example), or any other file or directory the engine "
+    "never writes there, was added after `apply` and is not covered by the run digest, so "
+    "a pack would carry it as if the run had produced it. The refusal names the first "
+    "such file, as a path relative to the run directory. Remove the file, or move it out "
+    "of the run directory.",
 )
 
 

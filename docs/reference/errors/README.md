@@ -47,6 +47,8 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-2119](./FLX-2119.md) | the plan names a kernel this engine does not implement |
 | [FLX-2120](./FLX-2120.md) | the staged execution of a plan does not match its record |
 | [FLX-2121](./FLX-2121.md) | a story --key names no row of the expose, or is not a key it can read |
+| [FLX-2122](./FLX-2122.md) | the receipt and the plan of a run directory disagree |
+| [FLX-2123](./FLX-2123.md) | a committed run directory holds a file the run does not account for |
 | [FLX-2201](./FLX-2201.md) | run touched a seed-tree path the plan did not anticipate |
 | [FLX-2202](./FLX-2202.md) | seed-tree input outside its declared domain |
 | [FLX-2301](./FLX-2301.md) | the run's cast does not resolve |

@@ -20,6 +20,7 @@ right shape, in the one document this engine signs.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -105,8 +106,14 @@ def _ship(applied: RunLayout, out_dir: Path, slices: dict) -> object:
 
 
 def test_a_withheld_second_emit_leaves_no_record_for_the_first(
-    applied: RunLayout, slice_uri: str, tmp_path: Path
+    applied: RunLayout, slice_uri: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The second emit is added to the receipt only, and a plan cannot be edited without
+    # moving the run id, so the comparison of the receipt's emits with the plan's (FLX-2122,
+    # held by its own tests) is set aside to reach the gate this test is about.
+    monkeypatch.setattr(
+        sys.modules["flux_engine.stages.ship"], "require_receipt_binds_plan", lambda *a, **k: None
+    )
     _add_a_second_emit(applied)
     out_dir = tmp_path / "dist"
 
