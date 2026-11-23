@@ -1,9 +1,9 @@
 # Reading results
 
 What `fluxsim verify` and `fluxsim run --verify` print, and how to report it. Pages this one draws on:
-[the six-step loop](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/explanation/the-six-step-loop.md),
-[the evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/explanation/the-evidence-pack.md) and
-[the command reference](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/reference/cli/README.md).
+[the six-step loop](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/the-six-step-loop.md),
+[the evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/the-evidence-pack.md) and
+[the command reference](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/reference/cli/README.md).
 
 ## The run summary
 
@@ -72,8 +72,8 @@ file stays outside the bundle folder (`FLX-3108`) and its digest must be the pin
   pass it. The fidelity leg prints `declared, not checked` when a check is declared and no slice or profile is
   passed.
 
-Format and rules: [the scorecard specification](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/spec/SCORECARD-SPEC.md).
-Worked steps: [score a run against a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/how-to/score-a-run-against-a-profile.md).
+Format and rules: [the scorecard specification](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/spec/SCORECARD-SPEC.md).
+Worked steps: [score a run against a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/score-a-run-against-a-profile.md).
 
 ## Sampling
 

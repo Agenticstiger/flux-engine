@@ -23,7 +23,7 @@ A column's FLUID sensitivity is a label in the contract, under `exposes[].contra
 fluxsim explain FLX-4005
 ```
 
-The same text is on [the FLX-4005 page](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/reference/errors/FLX-4005.md), and the design is in [ADR 0020](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/adr/0020-privacy-grades.md).
+The same text is on [the FLX-4005 page](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/reference/errors/FLX-4005.md), and the design is in [ADR 0020](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/adr/0020-privacy-grades.md).
 
 ## 2. Decide the grade the run needs
 
@@ -88,4 +88,4 @@ A profile whose privacy parts exceed its budget is refused with FLX-5036, naming
 - forge-cli lacks `--request`;
 - the source needs a credential.
 
-Public pages: [the evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/explanation/the-evidence-pack.md), [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/how-to/write-a-bundle-from-a-profile.md), [fluxsim init](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/reference/cli/init.md), [ADR 0019](https://github.com/Agenticstiger/flux-engine/blob/v0.10.0/docs/adr/0019-one-privacy-budget-per-profile-release.md).
+Public pages: [the evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/the-evidence-pack.md), [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/write-a-bundle-from-a-profile.md), [fluxsim init](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/reference/cli/init.md), [ADR 0019](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/adr/0019-one-privacy-budget-per-profile-release.md).
