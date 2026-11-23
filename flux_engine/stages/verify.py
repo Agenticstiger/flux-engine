@@ -92,6 +92,7 @@ measures a predicted outcome against the world, so ``validity`` is always
 
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -653,6 +654,35 @@ class _EmitReads:
         return found
 
 
+#: Rows, outside the largest emit, that a pool must be able to read at once before its start pays.
+#: Starting the workers costs about 0.5 s (the forkserver and its preload), and reading costs about
+#: 2 microseconds a row (measured: 536,500 rows read in 1.16 s). The work a pool can take off the
+#: critical path is every emit but the largest, since the largest bounds the wall time from below
+#: however many workers there are. 400,000 such rows is about 0.8 s of serial work against the 0.5 s
+#: start, so the pool is chosen only when it clearly wins; a run like the 100x star schema (a
+#: 400,000 row fact table and 136,500 rows beside it) reads in this process. Prior art: joblib
+#: runs ``n_jobs=1`` work in-process and sizes batches by their duration, and dask advises against
+#: tasks under about 100 ms; both treat dispatch cost as something the work must clearly exceed.
+_POOL_MIN_PARALLEL_ROWS = 400_000
+
+
+def _pool_pays(tasks: Sequence[_EmitTask]) -> bool:
+    """Whether reading *tasks* in a pool beats reading them here, decided from the receipt alone.
+
+    The decision looks only at the row counts the run recorded, so it is the same on every
+    machine and at every ``--jobs`` above one, and it moves no verdict and no byte: the reads
+    are the same, only where they run changes. An entry without a usable row count counts as
+    empty, which keeps the work here.
+    """
+    counts = []
+    for task in tasks:
+        rows = task.entry.get("rows") if isinstance(task.entry, Mapping) else None
+        counts.append(rows if isinstance(rows, int) and not isinstance(rows, bool) else 0)
+    if len(counts) < 2:
+        return False
+    return sum(counts) - max(counts) >= _POOL_MIN_PARALLEL_ROWS
+
+
 def _read_emits(
     layout: RunLayout,
     receipt: Mapping[str, Any],
@@ -674,6 +704,8 @@ def _read_emits(
         )
         for expose_id, entry in sorted(receipt.get("emits", {}).items())
     ]
+    if not _pool_pays(tasks):
+        jobs = 1
     return _EmitReads(tuple(_map_in_pool(_emit_pass, tasks, jobs)), pinned is not None)
 
 
@@ -1997,6 +2029,20 @@ def _paired_profile(
     return pair_run_profile(plan_document, profile, where=simulation_id)
 
 
+def _in_bundle_scope(function: Callable[..., StageResult]) -> Callable[..., StageResult]:
+    """Run *function* with each bundle directory parsed once (:func:`bundle_load_scope`)."""
+
+    @functools.wraps(function)
+    def scoped(*args: Any, **kwargs: Any) -> StageResult:
+        from flux_engine.seam.resolve import bundle_load_scope
+
+        with bundle_load_scope():
+            return function(*args, **kwargs)
+
+    return scoped
+
+
+@_in_bundle_scope
 def verify(
     bundle_directory: Union[str, Path],
     *,
