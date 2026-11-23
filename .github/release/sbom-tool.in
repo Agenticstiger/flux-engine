@@ -3,7 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The tool that writes the release SBOM, installed into its own environment
-# with --require-hashes. Regenerate with:
-#   uv pip compile .github/release/sbom-tool.in --universal --generate-hashes \
+# with --require-hashes. --python-version is the lowest Python the project supports
+# (requires-python in pyproject.toml): without it uv resolves for the interpreter it runs
+# on and leaves out what an older one needs (typing-extensions, which cyclonedx-python-lib
+# asks for below Python 3.13), and pip --require-hashes then refuses the install on the
+# release job's Python 3.12. Regenerate with:
+#   uv pip compile .github/release/sbom-tool.in --universal --python-version 3.11 \
+#     --generate-hashes \
 #     --no-header --no-annotate -o .github/release/sbom-tool.txt
 cyclonedx-bom==8.0.1

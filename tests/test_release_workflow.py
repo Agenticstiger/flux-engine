@@ -124,6 +124,46 @@ def test_the_hash_files_the_build_reads_exist_and_every_requirement_has_a_hash()
             assert "--hash=sha256:" in entry, f"{name}: {entry.splitlines()[0]}"
 
 
+_RELEASE = ROOT / ".github" / "release"
+
+
+def _requires_python_floor() -> str:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    found = re.search(r'^requires-python\s*=\s*"[^"]*?>=\s*(\d+\.\d+)', text, re.M)
+    assert found, "requires-python does not start with >="
+    return found.group(1)
+
+
+def test_the_sbom_tool_lock_pins_typing_extensions_with_a_hash() -> None:
+    """``cyclonedx-python-lib`` needs it below Python 3.13, and the release job runs 3.12.
+
+    ``pip --require-hashes`` refuses an install whose dependency is not pinned with ``==`` and a
+    hash, so a lock compiled on a newer Python than the job's (which drops it) fails the SBOM step
+    of a release, after the tag.
+    """
+    text = (_RELEASE / "sbom-tool.txt").read_text(encoding="utf-8")
+    entries = re.findall(r"^typing[-_]extensions==[^\n]*(?:\n[ \t]+[^\n]*)*", text, re.M | re.I)
+    assert len(entries) == 1, entries
+    assert "--hash=sha256:" in entries[0], entries[0]
+    marker = re.search(r";\s*python_full_version\s*<\s*'(\d+\.\d+)'", entries[0])
+    release_python = "3.12"
+    assert marker is None or tuple(map(int, release_python.split("."))) < tuple(
+        map(int, marker.group(1).split("."))
+    ), f"typing-extensions is locked out of Python {release_python}: {entries[0].splitlines()[0]}"
+
+
+@pytest.mark.parametrize("name", ["sbom-tool", "build-tools"])
+def test_a_release_lock_is_compiled_for_the_lowest_python_the_project_supports(name: str) -> None:
+    """Without ``--python-version`` uv resolves for the interpreter it runs on and drops the rest."""
+    source = (_RELEASE / f"{name}.in").read_text(encoding="utf-8")
+    command = " ".join(
+        line.lstrip("# ").rstrip("\\ ")
+        for line in source.splitlines()
+        if line.startswith("#") and ("uv pip compile" in line or "--" in line)
+    )
+    assert f"--python-version {_requires_python_floor()}" in command, command
+
+
 def test_the_jobs_are_chained_and_the_artifact_names_connect() -> None:
     jobs = _jobs()
     assert {"guard", "ci"} <= set(jobs["build"]["needs"])
