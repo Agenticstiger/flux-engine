@@ -23,6 +23,7 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple
 from flux_engine.core.errors import FluxError
 from flux_engine.core.grades import Pattern, weakest
 from flux_engine.evidence.grades import (
+    Accounting,
     ColumnFloor,
     GeneratorGrade,
     ProfileGrade,
@@ -132,10 +133,13 @@ def require_minimum_grade(
     *,
     where: str,
     grade_of: str = "the run's grade",
+    accounting: Optional[Accounting] = None,
 ) -> None:
     """Refuse (``FLX-4005``) a run of *grade* with a labelled column whose floor it does not meet.
 
-    *grade_of* names the profile whose grade this is, when it is not the pinned one.
+    *grade_of* names the profile whose grade this is, when it is not the pinned one. *accounting* is
+    the account of the pinned profile: a labelled column of an expose its unit of privacy does not
+    reach counts as ``P1`` (:meth:`flux_engine.evidence.grades.Accounting.unreached`).
 
     A bundle that labels no column with a sensitivity that has a floor is not checked at all.
     """
@@ -144,7 +148,8 @@ def require_minimum_grade(
     labels = {key: label for key, label in labels.items() if label in floors}
     _refuse_labelled_reference_columns(emits, labels)
     if labels:
-        enforce_minimum_grades(grade, labels, floors, columns, grade_of=grade_of)
+        fixed = accounting.unreached({name for name, _ in columns}) if accounting else frozenset()
+        enforce_minimum_grades(grade, labels, floors, columns, grade_of=grade_of, fixed=fixed)
 
 
 def _refuse_labelled_reference_columns(
@@ -191,19 +196,30 @@ def require_declared_grade(
 
 
 def column_floors(
-    grade: Pattern, emits: Sequence[ResolvedEmit], simulation: Mapping[str, Any], *, where: str
+    grade: Pattern,
+    emits: Sequence[ResolvedEmit],
+    simulation: Mapping[str, Any],
+    *,
+    where: str,
+    accounting: Optional[Accounting] = None,
 ) -> Tuple[ColumnFloor, ...]:
-    """Each column of the run with its sensitivity, its minimum and whether *grade* meets it."""
+    """Each column of the run with its sensitivity, its minimum and whether *grade* meets it.
+
+    A column of an expose the profile's unit of privacy does not reach is held to the weaker of
+    *grade* and ``P1`` (:meth:`flux_engine.evidence.grades.Accounting.unreached`).
+    """
     from flux_engine.core.grades import at_least
 
     floors = effective_floors(privacy_floors(simulation, where=where))
     labels, columns = _labels(emits)
+    fixed = accounting.unreached({name for name, _ in columns}) if accounting else frozenset()
     rows: List[ColumnFloor] = []
     for expose_id, name in columns:
         label = labels.get((expose_id, name))
         floor: Optional[Pattern] = floors.get(label) if label is not None else None
+        held = weakest([grade, Pattern.P1]) if expose_id in fixed else grade
         rows.append(
-            ColumnFloor(expose_id, name, label, floor, floor is None or at_least(grade, floor))
+            ColumnFloor(expose_id, name, label, floor, floor is None or at_least(held, floor))
         )
     return tuple(rows)
 
@@ -246,5 +262,7 @@ def run_grade(
     )
     result = RunGrade(graded, (), generators)
     return RunGrade(
-        graded, column_floors(result.pattern, emits, simulation, where=where), generators
+        graded,
+        column_floors(result.pattern, emits, simulation, where=where, accounting=graded.accounting),
+        generators,
     )

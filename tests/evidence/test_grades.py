@@ -128,8 +128,12 @@ def test_the_example_profile_of_the_spec_is_p3_too() -> None:
             "released without noise in tables.`subscriber`.columnPairs[0]",
         ),
         (
-            lambda d: d.update(relationships=[{"parent": {}, "child": {}, "statistics": []}]),
-            "relationship",
+            lambda d: d.update(
+                relationships=[
+                    {"parent": {}, "child": {}, "statistics": [{"definition": "mean/1"}]}
+                ]
+            ),
+            "released without noise in relationships[0]",
         ),
         (lambda d: d.update(queries=[{"name": "q", "statistics": []}]), "query"),
         (lambda d: d.update(invariants=[{"name": "f", "statistics": []}]), "fact"),

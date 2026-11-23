@@ -519,11 +519,12 @@ def _profile_grade(result: "_pipeline.PipelineResult", pinned: Optional[Any]) ->
     from flux_engine.evidence.grades import grade_profile
     from flux_engine.stages._grades import generator_grades, require_minimum_grade
 
+    graded = grade_profile(
+        pinned.document if pinned is not None else None, pinned=pinned is not None
+    )
     grade = weakest(
         [
-            grade_profile(
-                pinned.document if pinned is not None else None, pinned=pinned is not None
-            ).pattern,
+            graded.pattern,
             *generator_grades(result.cast.simulation, where=result.cast.simulation_id),
         ]
     )
@@ -532,6 +533,7 @@ def _profile_grade(result: "_pipeline.PipelineResult", pinned: Optional[Any]) ->
         [outcome.resolved for outcome in result.emits],
         result.cast.simulation,
         where=result.cast.simulation_id,
+        accounting=graded.accounting,
     )
     return grade
 

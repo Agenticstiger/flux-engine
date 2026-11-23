@@ -1812,7 +1812,7 @@
         },
         "publicStructure": {
           "type": "boolean",
-          "description": "True when the levels of the profile's histograms, their bin edges, the sampleSize bands and every rowFloor were chosen without the data, or are part of the release. The engine cannot check it, and a profile without it is not graded P3."
+          "description": "True when the levels and bin edges of the profile's histograms and cliques, the bins of every groupByBins, the group keys of its grouped noisy statistics, the sampleSize bands, every rowFloor and every maxChildren were chosen without the data, or are part of the release. The engine cannot check it, and a profile without it is not graded P3."
         }
       }
     },

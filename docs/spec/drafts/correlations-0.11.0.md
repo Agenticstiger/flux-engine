@@ -212,9 +212,18 @@ A table may hold `cliqueSelection`, which says how its cliques were chosen and r
 ### 1.9 The declaration about structure
 
 `publicStructure: true` declares, in this format, that these were chosen without the data or are part of the
-release: the levels and bin edges of the profile's histograms and cliques, the bins of every `groupByBins`, the
-`sampleSize` bands, every `rowFloor`, and every `maxChildren`. A profile with `domain` in a `cliqueSelection` has
-released some of them under its account, which the declaration allows.
+release: the levels and bin edges of the profile's histograms and cliques, the bins of every `groupByBins`, the group
+keys of every grouped noisy statistic, the `sampleSize` bands, every `rowFloor`, and every `maxChildren`. A profile
+with `domain` in a `cliqueSelection` has released some of them under its account, which the declaration allows.
+
+The group keys are the levels of a `groupBy` column, the lower edges of `groupByBins`, and the values of the parent
+column of a `groupByLink`: a noisy statistic publishes every group it names, and the names themselves come from the
+declaration, not from a count. The `sampleSize` bands of the new statistics are covered in the same way: a band is a
+number of records stated beside the noisy values, so it is chosen without the data or is part of the release.
+
+When estimated cliques are read, in a later format, an estimate's `variance` must be a function of the measurement
+design and the noise scales only, and it belongs to this list: a variance computed from the data would be a number
+released outside the account.
 
 ### 1.10 P3
 

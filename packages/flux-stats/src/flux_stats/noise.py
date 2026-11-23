@@ -128,9 +128,11 @@ class Accounting:
     #: ``m_T`` for every table the unit reaches (:func:`reach_of`); empty when the
     #: unit follows nothing, and then :meth:`reach` is 1 for the expose and 0 for every other table.
     reached: Mapping[str, int] = field(default_factory=dict)
-    #: The profiler declares that the levels of its histograms, their bin edges, the
-    #: ``sampleSize`` bands and every ``rowFloor`` of a rank correlation were chosen without the
-    #: data, or are part of the release (PROFILE-SPEC.md section 3a). The engine cannot check it.
+    #: The profiler declares that the structure of the release was chosen without the data, or is
+    #: part of it (PROFILE-SPEC.md section 3a): the levels and bin edges of its histograms and
+    #: cliques, the bins of every ``groupByBins``, the group keys of its grouped noisy statistics,
+    #: the ``sampleSize`` bands, every ``rowFloor`` and every ``maxChildren``. The engine cannot
+    #: check it.
     public_structure: bool = False
 
     def reach(self, table: str) -> int:

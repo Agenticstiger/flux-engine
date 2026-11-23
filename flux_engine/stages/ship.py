@@ -902,7 +902,7 @@ def _children_groups(entry: "PropertyScore") -> Tuple[PopulationGroup, ...]:
 
 def _histogram_groups(entry: "PropertyScore", outcome: Any) -> Tuple[PopulationGroup, ...]:
     """The cells of a histogram row, one group per level of its ``group_by`` (none for a censored level)."""
-    grouped = entry.group_by is not None
+    grouped = entry.group_by is not None or entry.group_by_bins is not None
     return tuple(
         PopulationGroup(
             label=f"g{ordinal}" if grouped else "",
@@ -1583,7 +1583,14 @@ def _hold_to_minimum(
     loaded = load_bundle(directory)
     emits = resolve_all_emits(loaded, simulation_id=simulation_id)
     simulation = resolve_cast(loaded.flux_documents, simulation_id=simulation_id).simulation
-    require_minimum_grade(floor, emits, simulation, where=simulation_id, grade_of=grade_of)
+    require_minimum_grade(
+        floor,
+        emits,
+        simulation,
+        where=simulation_id,
+        grade_of=grade_of,
+        accounting=privacy.profile.accounting,
+    )
 
 
 def _forecast_accuracy(

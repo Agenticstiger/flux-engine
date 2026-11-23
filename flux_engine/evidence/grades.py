@@ -17,13 +17,18 @@ and every plugin's.
 * **A profile pinned: P3** only when the profile states an account of a release under differential
   privacy, declares that its levels, bin edges and ``sampleSize`` bands were chosen without the data
   (``publicStructure``), and **every** statistic the engine can read from it is noisy under that
-  account: no row count, no column metric, no statistic without a ``noise`` block, no period,
-  relationship, query or fact statistic, none of which can be released with noise in this format,
-  and no column pair with a statistic that has none. A pair is noisy when every statistic in it
-  carries a ``noise`` block: a ``correlation/1`` never does, and a rank correlation can. A column
-  statistic grouped by bins (``groupByBins``) is noisy only when it carries a ``noise`` block. The
-  engine checked the account's arithmetic and the cliques' agreement. It did not check that noise
-  was applied, nor the declaration about the structure: both are the profiler's statement.
+  account: no row count, no column metric, no statistic without a ``noise`` block, no period, query
+  or fact statistic, none of which can be released with noise in this format, and no column pair
+  with a statistic that has none. A pair is noisy when every statistic in it carries a ``noise``
+  block: a ``correlation/1`` never does, and a rank correlation can. A column statistic grouped by
+  bins (``groupByBins``) or by a link (``groupByLink``) is noisy only when it carries a ``noise``
+  block. A relationship is noisy when every statistic in it carries one (so it holds no ``mean/1``
+  and no quantile) and it holds no ``dates`` and no ``exposure``; a relationship that holds no
+  statistic, named only so that the unit can follow it, releases nothing. The unit's ``follows`` is
+  part of the account: the evidence states the unit with what it follows and names the tables it
+  treats as fixed. The engine checked the account's arithmetic and the cliques' agreement. It did
+  not check that noise was applied, nor the declaration about the structure: both are the
+  profiler's statement.
 
   The parts of the account are the ones the profile reader enumerates
   (:attr:`flux_stats.profile.Profile.parts`), once each, so no statistic can be missing from the
@@ -48,13 +53,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
 
 from flux_engine.core.grades import ORDER, Pattern, at_least, weakest
 from flux_engine.evidence.provenance import quoted_name
 from flux_stats.errors import FluxError
-from flux_stats.noise import Spent
-from flux_stats.profile import parse_profile
+from flux_stats.profile import SCHEMA_URL_1_4_0, Profile, parse_profile
 
 __all__ = [
     "Accounting",
@@ -71,7 +75,15 @@ __all__ = [
 ]
 
 #: The sections of a profile whose statistics cannot carry a ``noise`` block.
-_NOT_NOISY_SECTIONS = ("relationships", "queries", "invariants", "references")
+_NOT_NOISY_SECTIONS = ("queries", "invariants", "references")
+
+#: What the declaration about structure covers (``publicStructure``), for the reason a profile that
+#: does not make it is not ``P3``. A profile that names format 1-4-0 declares more.
+_STRUCTURE = "its levels, bin edges and sampleSize bands"
+_STRUCTURE_1_4 = (
+    "its levels and bin edges, the bins of every groupByBins, the group keys of grouped noisy "
+    "statistics, its sampleSize bands, every rowFloor and every maxChildren"
+)
 
 #: The top-level members of a profile the grade reads, each by its own rule in :func:`grade_profile`.
 GRADED_TOP_LEVEL_MEMBERS = frozenset(
@@ -121,6 +133,29 @@ class Accounting:
     #: The profiler's declaration that levels, bin edges and ``sampleSize`` bands were chosen
     #: without the data. The engine cannot check it.
     public_structure: bool = False
+    #: The profile names format 1-4-0. Its declaration covers more (the group keys of grouped
+    #: noisy statistics, every ``rowFloor`` and every ``maxChildren``), and a labelled column of a
+    #: table its unit does not reach counts as ``P1`` for the minimum grade.
+    from_1_4: bool = False
+    #: The relationships the unit follows, as ``(parent table, child table, maxChildren)``.
+    follows: Tuple[Tuple[str, str, int], ...] = ()
+    #: ``m_T`` of every table the unit reaches, the expose included, by table name. Empty when the
+    #: reader refuses the profile.
+    reached: Tuple[Tuple[str, int], ...] = ()
+    #: The profile's tables the unit does not reach, whose rows the guarantee treats as fixed.
+    fixed: Tuple[str, ...] = ()
+
+    def unreached(self, exposes: Iterable[str]) -> FrozenSet[str]:
+        """The *exposes* the unit does not reach, for a profile of format 1-4-0; none otherwise.
+
+        A table that is not in the profile at all is not reached either. The minimum-grade check
+        counts a labelled column of such a table as ``P1`` (ADR 0037 decision 1). A profile of an
+        earlier format keeps the check it always had.
+        """
+        if not self.from_1_4:
+            return frozenset()
+        held = {table for table, _ in self.reached}
+        return frozenset(name for name in exposes if name not in held)
 
     @property
     def definition(self) -> str:
@@ -214,10 +249,10 @@ def _decimal(value: Fraction) -> str:
     return text.rstrip("0").rstrip(".") if "." in text else text
 
 
-def _read_parts(profile: Mapping[str, Any]) -> Optional[Tuple[Tuple[str, Spent], ...]]:
-    """The noisy parts of a profile, as its reader enumerates them, or ``None`` when it cannot read it."""
+def _read(profile: Mapping[str, Any]) -> Optional[Profile]:
+    """The profile as its reader reads it, or ``None`` when the reader refuses it."""
     try:
-        return parse_profile(profile).parts
+        return parse_profile(profile)
     except FluxError:
         return None
 
@@ -230,13 +265,18 @@ def _account(profile: Optional[Mapping[str, Any]]) -> Tuple[Optional[Accounting]
     assert profile is not None
     total = dict(block.get("privacyLoss") or {})
     spent: Dict[str, Fraction] = {key: Fraction(0) for key in total}
-    parts = _read_parts(profile)
+    read = _read(profile)
+    parts = read.parts if read is not None else None
     for _, noise in parts or ():
         for key in spent:
             share = getattr(noise.loss, key, None)
             if share is not None:
                 spent[key] += share
     unit = block.get("privacyUnit")
+    stated = read.accounting if read is not None else None
+    reach: Tuple[Tuple[str, int], ...] = ()
+    if stated is not None:
+        reach = tuple(sorted({stated.unit: 1, **stated.reached}.items()))
     accounting = Accounting(
         measure=str(block.get("measure")),
         unit=str(unit.get("expose")) if isinstance(unit, Mapping) else "",
@@ -244,6 +284,18 @@ def _account(profile: Optional[Mapping[str, Any]]) -> Tuple[Optional[Accounting]
         parts=len(parts or ()),
         spent={key: _decimal(value) for key, value in spent.items()},
         public_structure=block.get("publicStructure") is True,
+        from_1_4=profile.get("_schemaURL") == SCHEMA_URL_1_4_0,
+        follows=(
+            tuple((f.parent_table, f.child_table, f.max_children) for f in stated.follows)
+            if stated is not None
+            else ()
+        ),
+        reached=reach,
+        fixed=(
+            tuple(sorted(name for name in read.tables if name not in dict(reach)))
+            if read is not None
+            else ()
+        ),
     )
     return accounting, parts is not None
 
@@ -301,8 +353,9 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
         reasons.append("the profile states no account of a release under differential privacy")
     elif not accounting.public_structure:
         reasons.append(
-            "the profile does not declare that its levels, bin edges and sampleSize bands were "
-            "chosen without the data"
+            "the profile does not declare that "
+            + (_STRUCTURE_1_4 if accounting.from_1_4 else _STRUCTURE)
+            + " were chosen without the data"
         )
     exact = {
         "row count": False,
@@ -377,6 +430,11 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             continue
         at = f"relationships[{index}]"
         sections += [f"{at}.{key}" for key in ("dates", "exposure") if relationship.get(key)]
+        if any(
+            not (isinstance(s, Mapping) and "noise" in s)
+            for s in relationship.get("statistics") or ()
+        ):
+            sections.append(at)
         unknown += [
             f"{at}.{_named(key)}"
             for key in relationship
@@ -397,7 +455,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
         )
     if exact["other"]:
         reasons.append(
-            "the profile holds period, relationship, query or fact statistics, or reference "
+            "the profile holds period, query or fact statistics, or reference "
             "rows, which cannot be released with noise in this format"
         )
     for path in sections:
