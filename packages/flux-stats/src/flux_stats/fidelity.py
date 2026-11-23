@@ -71,6 +71,7 @@ from functools import partial
 from types import MappingProxyType
 from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
+from flux_stats.definitions import bin_index
 from flux_stats.errors import ErrorCode, FluxError, register
 from flux_stats.fixedpoint import DEFAULT_FRACTIONAL_BITS, FLX_5005, Grid, Interval
 from flux_stats.rank_correlation import KENDALL_TAU, SPEARMAN_RHO
@@ -80,6 +81,7 @@ from flux_stats.reading import (
     Row,
     ValueDomain,
     category,
+    cell,
     digits_written_out,
     encode_value,
     level_cells,
@@ -95,7 +97,7 @@ from flux_stats.registry import (
     StatisticDefinition,
     definition_for_kind,
 )
-from flux_stats.spelling import MOST_DIGITS
+from flux_stats.spelling import MOST_DIGITS, render_exact
 
 __all__ = [
     "COLUMN_KEYS",
@@ -107,6 +109,7 @@ __all__ = [
     "FLX_5034",
     "SUPPORT_DECLARED",
     "SUPPORT_VALUES_KEY",
+    "BinsGrouping",
     "Budget",
     "ColumnDeclaration",
     "ColumnKind",
@@ -127,6 +130,7 @@ __all__ = [
     "definition_for_property",
     "expose_from_contract",
     "is_date_type",
+    "bin_group_keys",
     "is_link_key",
     "measure_group",
     "parse_duration_ms",
@@ -939,6 +943,24 @@ class Tolerance:
 
 
 @dataclass(frozen=True)
+class BinsGrouping:
+    """``groupByBins``: a property grouped by the bins of another range column (format 1-4-0).
+
+    The groups are the bins, keyed by the canonical decimal text of each lower edge as the declaration
+    writes it (a DATE column's edges are days), and a record whose value of ``column`` is null is in
+    none (``null: exclude``) or refused (``null: fail``), as a ``groupBy`` column's null is.
+    """
+
+    column: str
+    bins: Tuple[Fraction, ...]
+
+    @property
+    def keys(self) -> Tuple[str, ...]:
+        """The group key of each bin, in the order of the bins."""
+        return tuple(render_exact(edge) for edge in self.bins[:-1])
+
+
+@dataclass(frozen=True)
 class PropertyDeclaration:
     """One entry of the block's ``properties`` list (§2)."""
 
@@ -954,6 +976,13 @@ class PropertyDeclaration:
     min_variance: Optional[Fraction] = None
     #: A ``rankCorrelation``'s measure, ``kendall`` or ``spearman``; ``None`` for any other kind.
     measure: Optional[str] = None
+    #: The bins the property is grouped by, in place of ``group_by``; at most one of the two is set.
+    group_by_bins: Optional[BinsGrouping] = None
+
+    @property
+    def grouped(self) -> bool:
+        """Whether the property is grouped, by a column or by bins."""
+        return self.group_by is not None or self.group_by_bins is not None
 
     @property
     def property_id(self) -> str:
@@ -965,6 +994,8 @@ class PropertyDeclaration:
         rows line up with the declaration order a reader is looking at.
         """
         tail = f"@{self.group_by}" if self.group_by is not None else ""
+        if self.group_by_bins is not None:
+            tail = f"@{self.group_by_bins.column}#bins"
         return f"{self.index:03d}:{self.kind.value}:{'+'.join(self.columns)}{tail}"
 
 
@@ -1016,6 +1047,8 @@ class FidelityBlock:
             covered.update(prop.columns)
             if prop.group_by is not None:
                 covered.add(prop.group_by)
+            if prop.group_by_bins is not None:
+                covered.add(prop.group_by_bins.column)
         return tuple(sorted(covered))
 
 
@@ -1087,6 +1120,7 @@ _PROPERTY_KEYS = (
     "level",
     "minVariance",
     "measure",
+    "groupByBins",
 )
 _TOLERANCE_KEYS = ("type", "value", "max", "measure", "sampling")
 
@@ -1544,6 +1578,97 @@ def _parse_bins(
     return tuple(edges)
 
 
+def _parse_group_by_bins(
+    mapping: Mapping[str, Any],
+    names: Tuple[str, ...],
+    columns: Mapping[str, ColumnDeclaration],
+    grid: Grid,
+    subject: str,
+    group_by: Optional[str],
+) -> Optional[BinsGrouping]:
+    """Read ``groupByBins``: ``{column, bins}``, the profile's spelling (PROFILE-SPEC.md section 1.4).
+
+    ``column`` is a range column of the block other than the property's own, and ``bins`` are at least
+    two strictly increasing edges on the grid, in the column's domain, that cover its declared range,
+    so that every value a record may hold lies in a bin (a bin is half open and the last is closed).
+    """
+    if "groupByBins" not in mapping:
+        return None
+    here = f"{subject}.groupByBins"
+    if group_by is not None:
+        raise FluxError(
+            FLX_5030, f"{subject}: a property holds at most one of groupBy and groupByBins"
+        )
+    raw = _require_mapping(mapping["groupByBins"], here)
+    _known_keys(raw, ("column", "bins"), here)
+    if "column" not in raw or "bins" not in raw:
+        raise FluxError(FLX_5034, f"{here} needs a column and bins")
+    name = nfc(str(raw["column"]))
+    if name not in columns:
+        raise FluxError(FLX_5034, f"{here}: column {name!r} has no declaration in fidelity.columns")
+    column = columns[name]
+    if column.kind is not ColumnKind.RANGE:
+        raise FluxError(
+            FLX_5030, f"{here}: groupByBins needs a range column, and {name!r} is a support"
+        )
+    if name in names:
+        raise FluxError(FLX_5030, f"{here}: groupByBins repeats the property's own column")
+    listed = raw["bins"]
+    if not isinstance(listed, Sequence) or isinstance(listed, (str, bytes)):
+        raise FluxError(FLX_5030, f"{here}.bins must be a list")
+    if len(listed) < 2:
+        raise FluxError(FLX_5032, f"{here}.bins needs at least two edges")
+    edges: List[Fraction] = []
+    for position, value in enumerate(listed):
+        edge, domain = _read_bound(
+            value, f"{here}.bins[{position}]", date=column.domain is ValueDomain.DATE
+        )
+        if domain is not column.domain:
+            raise FluxError(
+                FLX_5032, f"{here}.bins[{position}] is not in the same domain as the column's range"
+            )
+        if edges and edge <= edges[-1]:
+            raise FluxError(FLX_5032, f"{here}.bins[{position}] does not increase")
+        if not grid.is_on_grid(edge):
+            raise FluxError(FLX_5032, f"{here}.bins[{position}] does not land on the declared grid")
+        edges.append(edge)
+    interval = column.interval
+    if edges[0] > interval.lo or edges[-1] < interval.hi:
+        raise FluxError(
+            FLX_5032, f"{here}.bins do not cover the column's declared minimum and maximum"
+        )
+    return BinsGrouping(column=name, bins=tuple(edges))
+
+
+def bin_group_keys(
+    rows: Sequence[Row],
+    grouping: BinsGrouping,
+    column: ColumnDeclaration,
+    grid: Grid,
+    *,
+    first_row: int = 0,
+) -> List[Tuple[str, List[int]]]:
+    """Partition row indices by the bin each row's value of the grouping column falls in.
+
+    A group's key is the text of its bin's lower edge; groups with no record are left out, and come
+    back in the order of the bins, never in the order the rows arrived. A null is left out under
+    ``exclude`` and refused under ``fail``, as :func:`flux_stats.reading.group_keys` does.
+    """
+    edges = [grid.quantise(edge, subject="bin edge") for edge in grouping.bins]
+    keys = grouping.keys
+    buckets: Dict[int, List[int]] = {}
+    for index, row in enumerate(rows):
+        named = first_row + index
+        value = cell(row, column, row_index=named)
+        if value is None:
+            if column.null_policy is NullPolicy.FAIL:
+                raise FluxError(FLX_5005, f"column {column.name!r} row {named}: null is refused")
+            continue
+        units = encode_value(value, column, grid, row_index=named)
+        buckets.setdefault(bin_index(units, edges), []).append(index)
+    return [(keys[position], buckets[position]) for position in sorted(buckets)]
+
+
 def _parse_property(
     index: int,
     raw: Any,
@@ -1561,7 +1686,7 @@ def _parse_property(
     except ValueError:
         raise FluxError(FLX_5030, f"{subject}.property {text!r} has no comparison") from None
 
-    if kind is PropertyKind.RANK_CORRELATION and "groupBy" in mapping:
+    if kind is PropertyKind.RANK_CORRELATION and ("groupBy" in mapping or "groupByBins" in mapping):
         raise FluxError(FLX_5030, f"{subject}: a rank correlation is ungrouped")
     names = _property_columns(mapping, kind, subject)
     wanted_kind = _COLUMN_KINDS[kind]
@@ -1602,6 +1727,7 @@ def _parse_property(
         if group_by in names:
             raise FluxError(FLX_5030, f"{subject}: groupBy repeats the property's own column")
 
+    group_by_bins = _parse_group_by_bins(mapping, names, columns, grid, subject, group_by)
     if "tolerance" not in mapping and kind is PropertyKind.RANK_CORRELATION:
         mapping = {**mapping, "tolerance": dict(DEFAULT_RANK_TOLERANCE)}
     if "tolerance" not in mapping:
@@ -1670,6 +1796,7 @@ def _parse_property(
         level=level,
         min_variance=min_variance,
         measure=measure,
+        group_by_bins=group_by_bins,
     )
 
 

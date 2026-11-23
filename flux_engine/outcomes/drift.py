@@ -247,6 +247,7 @@ def _shape(entry: StatisticEntry) -> Tuple[Any, ...]:
         entry.bins,
         entry.per,
         repr(entry.group_by_link),
+        repr(entry.group_by_bins),
     )
 
 
@@ -272,6 +273,8 @@ def _entry_statistics(
         name = f"{table_name}.{column_name}/{entry.definition.identifier}"
         if entry.group_by is not None:
             name += f"/by {entry.group_by}={group.key}"
+        elif entry.group_by_bins is not None:
+            name += f"/by the bins of {entry.group_by_bins.column}={group.key}"
         counts, reason = _group_counts(group, entry.definition.kind, cells)
         _held(found, Statistic(name, _shape(entry), counts, reason))
 

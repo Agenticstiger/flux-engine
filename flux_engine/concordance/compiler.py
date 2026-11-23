@@ -420,6 +420,19 @@ class CompiledFidelity:
                         if compiled.declaration.group_by is not None
                         else {}
                     ),
+                    **(
+                        {
+                            "groupByBins": {
+                                "column": compiled.declaration.group_by_bins.column,
+                                "bins": [
+                                    render_exact(edge)
+                                    for edge in compiled.declaration.group_by_bins.bins
+                                ],
+                            }
+                        }
+                        if compiled.declaration.group_by_bins is not None
+                        else {}
+                    ),
                     "epsilon": render_exact(compiled.epsilon),
                     "margin": (
                         render_exact(compiled.margin) if compiled.margin is not None else None

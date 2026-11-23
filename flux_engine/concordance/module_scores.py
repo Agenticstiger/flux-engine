@@ -195,6 +195,7 @@ def _reference_histogram(
             statistic.definition.identifier != MARGINAL_HISTOGRAM.identifier
             or statistic.group_by is not None
             or statistic.group_by_link is not None
+            or statistic.group_by_bins is not None
             or len(statistic.bins) < 2
         ):
             continue

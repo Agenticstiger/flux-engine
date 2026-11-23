@@ -214,6 +214,9 @@ class PropertyScore:
     #: values, the distance, the sampling widening and what the two may differ by, and the copula's
     #: ``alpha`` when the run's plan has one. ``None`` for every other kind.
     rank: Optional[Mapping[str, Any]] = None
+    #: The bins the property is grouped by, as ``{"column": name, "bins": [edges]}`` (format 1-5-0),
+    #: in place of ``group_by``; its groups are the bins, named by ordinal in the order of the bins.
+    group_by_bins: Optional[Mapping[str, Any]] = None
 
     @property
     def subject(self) -> str:
@@ -223,6 +226,8 @@ class PropertyScore:
         text = f"{self.kind} of {', '.join(self.columns)}"
         if self.group_by is not None:
             text += f", grouped by {self.group_by}"
+        if self.group_by_bins is not None:
+            text += f", grouped by the bins of {self.group_by_bins['column']}"
         return text
 
     def to_document(self) -> Dict[str, Any]:
@@ -251,6 +256,8 @@ class PropertyScore:
         }
         if self.group_by is not None:
             document["groupBy"] = self.group_by
+        if self.group_by_bins is not None:
+            document["groupByBins"] = dict(self.group_by_bins)
         if self.noise is not None:
             document["noise"] = dict(self.noise)
         if self.sampling is not None:
@@ -289,6 +296,8 @@ class PropertyScore:
             params["score"] = render_exact(self.score)
         if self.group_by is not None:
             params["groupBy"] = self.group_by
+        if self.group_by_bins is not None:
+            params["groupByBins"] = dict(self.group_by_bins)
         entry: Dict[str, Any] = {
             "assertion": self.statistic,
             "success": self.outcome == WITHIN,
@@ -308,7 +317,7 @@ class PropertyScore:
 def _holds_1_5_0(prop: PropertyScore) -> bool:
     """Whether a property row holds what format 1-5-0 adds: a rank correlation, or a grouped
     children-per-parent row (the ``groupBy`` or ``groupByBins`` member its document then has)."""
-    if prop.rank is not None:
+    if prop.rank is not None or prop.group_by_bins is not None:
         return True
     document = prop.document
     return (
@@ -1009,7 +1018,15 @@ def _property_score(
         statistic=definition_for_property(declaration).identifier,
         columns=tuple(declaration.columns),
         group_by=declaration.group_by,
-        dimension=dimension_of(kind, declaration.group_by is not None),
+        group_by_bins=(
+            {
+                "column": declaration.group_by_bins.column,
+                "bins": [render_exact(edge) for edge in declaration.group_by_bins.bins],
+            }
+            if declaration.group_by_bins is not None
+            else None
+        ),
+        dimension=dimension_of(kind, declaration.grouped),
         outcome=status,
         score=score,
         groups_scored=len(scores),
