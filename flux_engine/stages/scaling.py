@@ -140,7 +140,7 @@ def _scale_column(
                 raise FluxError(
                     FLX_3405,
                     f"{scale_text(scale)} leaves the key column {name} fewer values than its "
-                    f"{len(bins) - 1} bins; use a larger --scale",
+                    f"{len(bins) - 1} {'bin' if len(bins) == 2 else 'bins'}; use a larger --scale",
                 ) from None
     return result
 

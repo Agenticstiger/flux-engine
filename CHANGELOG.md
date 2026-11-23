@@ -64,6 +64,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - Object store uploads by the `parquet` and `arrow-ipc` sinks take `request-timeout`, `connect-timeout`, `max-retries` and `retry-timeout` as `--sink-opt` keys, `FLX-3505` says how to shorten the wait for an endpoint that never answers, and a failed upload deletes, best effort, the data objects it had written and names any that remain.
 - When a sink delivery fails partway, the error names the stream that failed and says how many streams were delivered.
 - Under `--json`, every `story` refusal carries its code in `artifacts.code`, as the refusals of the other commands do.
+- Refusals read "1 child" and "1 bin" in the singular, `FLX-3403` names key and bridge columns as plain text, a links `when` error names its `links[...].when` key, `fluxsim verify --help` names the `counts:` rule lines and the `childrenPerParent` row, and SEAM-FIDELITY-SPEC lists every namespace key the engine reads.
 
 ## Unreleased
 

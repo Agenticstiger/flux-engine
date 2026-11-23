@@ -16,7 +16,11 @@ into a result. A run whose plan pins a profile is also scored against it, per
 property, table, dimension and overall, when the profile is passed with
 --profile. A bundle that declares consumer queries has every query counted on
 the run, the calibration queries apart from the held-out ones (--held-out), in
-the scorecard's queries dimension.
+the scorecard's queries dimension. Each counts entry of the bundle adds the
+rule lines counts:<relationship>.minChildren and
+counts:<relationship>.parentWhen to the child's rules, both enforced, and a
+profile that publishes the children per parent of a relationship adds a
+childrenPerParent row to the scorecard.
 
 examples:
   # re-check an applied run on five independent legs

@@ -116,8 +116,8 @@ The namespace carries five keys and no others: `emits`, keyed by `exposeId` as b
 profile document by its digest (PROFILE-SPEC.md §6); `scorecard`, which declares thresholds on the scores that
 profile gives the run (SCORECARD-SPEC.md §4); `parameters`, the parameter register, which says what each number the
 run reads rests on (PARAMETER-REGISTER-SPEC.md); and `strictCoverage`, a boolean (§1). Any other key is refused
-(`FLX-3105`). The keys the later records add, `facts`, `links`, `bridges`, `counts`, `copies`, `generators`, `overlay`, `history`, `asOf`, `snapshots`, `events`, `periods`, `lifetimes`, `within`, `rates`, `privacy` and `unused`, are described where
-they apply (§3 for the fifteen that change a run's rows, its tolerances, or the profile it is scored against). A new block starts at
+(`FLX-3105`). The keys the later records add, `facts`, `links`, `bridges`, `counts`, `copies`, `generators`, `overlay`, `history`, `asOf`, `snapshots`, `events`, `periods`, `lifetimes`, `within`, `rates`, `privacy`, `unused`, `consumers`, `responses`, `forecasts` and `conditions`, are described where
+they apply (`consumers` in CONSUMER-QUERIES-SPEC.md, `responses` and `forecasts` in ADR 0029 and `conditions` in ADR 0028 section 10; §3 for the fifteen that change a run's rows, its tolerances, or the profile it is scored against). A new block starts at
 the top level of the namespace when what it declares belongs to the Simulation rather than to one expose.
 An emit's block carries eight keys and no others: `rows`, `mapping`, `fidelity`, `invariants`, `rules`, `reference`, `hidden` and `hiddenColumns`. `invariants`
 holds FLUX settings for the rules of the emit's contract (`exposes[].contract.invariants[]`), each keyed by the
