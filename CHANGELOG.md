@@ -20,7 +20,22 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.11.0 - 2026-11-24
+
+This release makes generation, rendering and `verify` faster and fixes the known issues the 0.10.0 changelog listed.
+Every run replays bit for bit: the same plan, the same run digest and the same bytes in every emitted file, at every
+`--jobs`, at `--scale` below 1, under `apply --shard` and for kernel 0.1.0 replays. The performance pass and the fixes
+move no format and no pinned digest. flux-stats 0.11.0 is released with it, and the engine requires the line
+`>=0.11,<0.12`.
+
+<!-- RELEASE SLOT, correlations: one intro paragraph here. It moves three formats: profile `1-4-0`, profile request
+`1-2-0` and scorecard `1-5-0`. Remove this comment when the feature's entries are in. -->
+
+### Added
+
+<!-- RELEASE SLOT, correlations: the feature's entries go here. -->
+
+- `tools/perfbench/perfbench.py` runs the `fluxsim` command line on representative bundles at any `--jobs` and records wall and CPU seconds, peak memory, rows per second and the serial phases. It fingerprints every run (the plan and run digests and the sha256 of every emitted file); `--against` replays a saved baseline and exits 2 on any difference, and `--tree` and `--tree-b` alternate two source trees run by run.
 
 ### Security
 
@@ -60,10 +75,37 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `validate` refuses a profile overlay that names a table or column the pinned contract does not have, with the `FLX-3105` that `plan` gives; a name the contract has but the profile lacks is still refused by `plan`.
 - `fluxsim` no longer ends in a `BrokenPipeError` traceback and exit 1 when the reader of its output closes the pipe early (`fluxsim plan ... | head -1`): it stops writing and exits quietly, with the status of the command when its work was done and with 141 when the pipe broke while it was still working.
 - The text a generator plugin supplies to a refusal is scrubbed before it is quoted: what an import or a factory raised (`FLX-3124`), the name of a module it lacks and what it stated (`FLX-3120`). A URL is written as its label, and the value of a credential-named environment variable and the secret of a `password=` or `token=` pair or of `user:PW@host` become `***`, in the whole message before its first line is picked and cut, so a secret across the cut leaves no piece of itself.
+- A bad value of an object store tuning option (`request-timeout`, `connect-timeout`, `max-retries`, `retry-timeout`) is no longer printed back: the message names the option and the range it allows.
 
 ### Changed
 
+- Generation, rendering, `verify` and the worker pool are faster, and every run is byte for byte what it was. Measured on an Apple M4 Max with 16 CPUs, best of 2, in wall seconds on 0.10.0 and on this release: counts (145,800 rows) 2.36 and 1.73 on one job, 1.28 and 0.88 on 16; links (536,500 rows) 5.17 and 3.64, 1.53 and 1.09; temporal (181,000 rows) 1.97 and 1.27, 7.03 and 0.66; history (54,954 rows) 2.63 and 1.40, 2.40 and 1.04; a large world (416,000 rows) 4.65 and 3.12, 1.28 and 0.85.
+- `verify` parses its bundle once instead of three times and uses a pool only when the rows outside the largest emit reach 400,000, decided from the receipt so no verdict moves. At scale 1, on one and four jobs, `verify` takes 0.70 and 1.03 seconds before and 0.54 and 0.52 after on the counts world, 0.75 and 1.16 against 0.54 and 0.54 on links, and 0.86 and 1.21 against 0.59 and 0.58 on history, so more jobs no longer make a small `verify` slower.
+- Timestamp and string columns render per distinct value, foreign and key-part values are looked up a column at a time, contiguous random draws come from numpy's own Philox generator (every process checks it against the engine's implementation and falls back on any difference), and the clock spells four-digit years without `strftime`. That last call cost 130 to 280 microseconds in a forked worker on macOS, which made a temporal run slower with more jobs.
+- `fluxsim` starts the worker pool's server as soon as `--jobs` asks for more than one process, so its preload overlaps the parent's own work, and the preload imports 422 modules where it imported 609.
+- `flux_engine.stages` and `flux_engine.concordance` export their names lazily, so the error catalog holds only the codes of the modules a process has imported until `flux_engine.core.errors.ensure_core_codes_loaded()` runs, as the command line already does for `fluxsim explain`. A library caller that wants the whole catalog calls it first.
 - KERNEL-SPEC-2 sections 8.1 and 8.3 say that a plan using a counted layout or an exact allocation replays only on engine 0.10.0 and later, and why the kernel version did not move.
+
+### Known issues
+
+These are logged for the next release.
+
+- On a world of 536,500 rows, 16 jobs are about 3.5 times faster than one, and on a world of 2.68 million rows 16 jobs are no faster than 12: the serial start-up, load, simulate and digest phases (about 0.6 seconds) and the generation phase itself stop scaling past 8 to 12 workers.
+- `fluxsim run` at 16 jobs spends about 0.4 seconds more than `fluxsim plan` on the same world.
+- `story --depth` keeps looping after the frontier is empty, so a very large depth costs time in proportion to it.
+- A shaped counted layout costs about 390 MB per million parents, as measured on 0.10.0, and, like a windowed table, is rebuilt in every `--jobs` worker.
+- `lifetimes` and `within` cost about 2 ms per child row at plan time, as measured on 0.10.0.
+- Two `uri-env` deliveries through one variable name still share one key in `sink-receipts.json` when the variable holds something that is not a URL showing more than its scheme, such as a connection string with its password inline, because no digest of a password is written.
+- `validate` still says valid for a bundle whose profile lacks a table or column the contract has, which `plan` refuses.
+- A period end's `nullFraction` is met only under open parents, so the share generated can be lower than declared. `plan` and `run` now say so, and generation is unchanged because changing it would move the digests of bundles written for 0.10.0.
+- A counted plan or an exact allocation replays only on engine 0.10 and later, though kernel 0.2.0 is unchanged. An engine already released cannot be changed, and KERNEL-SPEC-2 now says so.
+- The parameter register does not count the numbers of namespace keys outside `emits`, such as `counts`, `history`, `lifetimes` and `conditions`, as its specification says.
+- Generator plugins are unsandboxed user code, and `--allow-generator` is the only gate.
+- The `adbc` sink and Iceberg catalogues take their settings from the user's own configuration, and the rule against metadata endpoints does not cover them. The page on running offline says where to set it.
+- `init` leaves out an exposure when customers still open at the end of the profile's window are not drawn as open, so the bundle holds fewer exposures than the profile publishes.
+- The trial run `init` makes does not allow for its own sample size, so a large bundle can lose a `rates` entry that the full run would pass.
+- Planning a bundle whose time bounds pass the year 9999 raises a plain `ValueError` rather than an `FLX` code.
+- A fidelity property that `init` leaves out is reported in its output and in `--json`, not in the register's `unused` list.
 
 ## 0.10.0 - 2026-11-23
 
