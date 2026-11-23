@@ -163,3 +163,31 @@ def test_a_bundle_changed_between_loads_is_loaded_again(tmp_path: Path) -> None:
         victim.write_bytes(victim.read_bytes() + b"\n# touched\n")
         assert load_bundle(copy) is not first
     assert load_bundle(copy) is not load_bundle(copy), "the memo outlived its scope"
+
+
+def _add_unreadable_links(bundle: Path) -> None:
+    """A dangling link and a link loop beside the documents: neither is a file the loader reads."""
+    (bundle / "dangling.yml").symlink_to(bundle / "no-such-target")
+    (bundle / "loop-a.yml").symlink_to(bundle / "loop-b.yml")
+    (bundle / "loop-b.yml").symlink_to(bundle / "loop-a.yml")
+
+
+def test_links_the_loader_ignores_load_the_same_inside_and_outside_the_scope(
+    tmp_path: Path,
+) -> None:
+    copy = tmp_path / "bundle"
+    shutil.copytree(FIXTURE, copy)
+    _add_unreadable_links(copy)
+    outside = load_bundle(copy)
+    with bundle_load_scope():
+        first = load_bundle(copy)
+        assert load_bundle(copy) is first
+    assert first.file_bytes == outside.file_bytes
+    assert first.flux_documents == outside.flux_documents
+
+
+def test_verify_succeeds_on_a_bundle_with_unreadable_links(tmp_path: Path) -> None:
+    run = Applied(tmp_path)
+    _add_unreadable_links(run.bundle)
+    result = run.verify()
+    assert result.exit_code == 0, result.stderr

@@ -1034,10 +1034,18 @@ _BUNDLE_LOADS: ContextVar[
 
 
 def _bundle_fingerprint(root: Path) -> Tuple[Any, ...]:
-    """What a reload would read, by stat: each regular file's name, size, mtime and inode."""
+    """What a reload would read, by stat: each regular file's name, size, mtime and inode.
+
+    The entries are those :func:`_load_bundle_once` reads (``is_file`` semantics, links followed),
+    so an entry whose stat fails, such as a dangling link, a link loop or a file that vanished
+    since the listing, is skipped rather than raised.
+    """
     found = []
     for path in sorted(root.iterdir()):
-        info = path.stat()
+        try:
+            info = path.stat()
+        except (OSError, ValueError):
+            continue
         if stat.S_ISREG(info.st_mode):
             found.append((path.name, info.st_size, info.st_mtime_ns, info.st_ino))
     return tuple(found)
