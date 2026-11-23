@@ -334,6 +334,55 @@ def test_labels_of_any_script_keep_their_letters_and_stay_distinct() -> None:
     assert safe_text("क्षि") == "क्षि", "combining marks stay with their letter"
 
 
+_IGNORABLE_SAMPLES = [
+    "\u00ad",
+    "\u034f",
+    "\u061c",
+    "\u115f",
+    "\u1160",
+    "\u17b4",
+    "\u17b5",
+    "\u180b",
+    "\u180f",
+    "\u200b",
+    "\u200f",
+    "\u202a",
+    "\u202e",
+    "\u2060",
+    "\u206f",
+    "\u3164",
+    "\ufe00",
+    "\ufe0f",
+    "\ufeff",
+    "\uffa0",
+    "\ufff0",
+    "\ufff8",
+    "\U0001bca0",
+    "\U0001bca3",
+    "\U0001d173",
+    "\U0001d17a",
+    "\U000e0000",
+    "\U000e0fff",
+]
+
+
+@pytest.mark.parametrize("character", _IGNORABLE_SAMPLES)
+def test_a_default_ignorable_character_is_replaced_so_no_label_prints_blank(
+    character: str,
+) -> None:
+    for given in (character, character * 2, "a" + character, "a" + character + "b"):
+        printed = safe_text(given)
+        assert character not in printed
+        assert re.fullmatch(r"[a-b]?_*[a-b]?_[0-9a-f]{8}", printed), repr(printed)
+    assert safe_text("\u3164\u3164") != safe_text("\uffa0\uffa0")
+    assert safe_text("e" + character) != "e"
+
+
+def test_a_label_of_hangul_fillers_never_prints_blank() -> None:
+    printed = safe_text("\u3164\u3164")
+    assert re.fullmatch(r"_{3}[0-9a-f]{8}", printed), printed
+
+
 def test_a_label_with_a_hostile_character_is_neutralised_and_marked() -> None:
     printed = safe_text("a\u202eb\nc#[<`|d\u200be")
     assert re.fullmatch(r"a_b_c_{5}d_e_[0-9a-f]{8}", printed)

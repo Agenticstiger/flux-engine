@@ -55,6 +55,31 @@ _KEPT_CATEGORIES = ("L", "N")
 #: many scripts write a syllable with them and nothing else puts one at the start of a label.
 _MARK_CATEGORY = "M"
 
+#: The Default_Ignorable_Code_Point property as a list of inclusive ranges, from Unicode 16.0.0
+#: ``DerivedCoreProperties.txt`` (the section "Derived Property: Default_Ignorable_Code_Point").
+#: The standard library has no such property. A character in it can render as nothing, so a label
+#: of such characters would print blank and look like another label. A later Unicode version adds
+#: only unassigned code points, which are replaced already.
+_DEFAULT_IGNORABLE: Tuple[Tuple[int, int], ...] = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+
 #: The tail a label gets when the text it prints is not the text it was given: ``_`` and eight
 #: lowercase hexadecimal digits of the SHA-256 of the given text in NFC and UTF-8.
 _TAIL = re.compile(r"_[0-9a-f]{8}$")
@@ -120,6 +145,9 @@ def _kept(character: str, after_kept: bool) -> bool:
     """Whether *character* is written as it is: an allowed ASCII one, or a letter or number of any script."""
     if character.isascii():
         return _ASCII_KEPT.fullmatch(character) is not None
+    code = ord(character)
+    if any(first <= code <= last for first, last in _DEFAULT_IGNORABLE):
+        return False
     category = unicodedata.category(character)
     if category[0] in _KEPT_CATEGORIES:
         return True
