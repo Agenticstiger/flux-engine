@@ -488,6 +488,8 @@ def test_a_failed_publish_of_an_apply_without_a_run_id_says_which_run_was_kept(
 # ---------------------------------------------------------------------------
 
 ADLS = "abfs://data@acct1.dfs.core.windows.net/sims/a"
+#: What a receipt shows of it: the label, which writes the container (user information to it) as ``…``.
+ADLS_LABEL = "abfs://…@acct1.dfs.core.windows.net/sims/a"
 
 
 def test_the_adls_gen2_form_maps_container_account_and_prefix() -> None:
@@ -499,7 +501,7 @@ def test_the_adls_gen2_form_maps_container_account_and_prefix() -> None:
         "sims/a",
     )
     assert location.store_url == "abfs://data@acct1.dfs.core.windows.net"
-    assert location.url == ADLS
+    assert location.url == ADLS_LABEL
     assert location.key("e/f.parquet") == "sims/a/e/f.parquet"
     # obstore reads the same container and account from what the engine hands it.
     store = obstore_store.from_url(location.store_url)
@@ -533,7 +535,7 @@ def test_the_adls_form_passes_the_credential_check_and_is_delivered(
     stream = Stream(5)
     sink = TARGETS[kind](ADLS, {}).sink_for(stream.context)
     receipt = _deliver(sink, stream.header, stream.rows)
-    assert receipt is not None and receipt.target == ADLS
+    assert receipt is not None and receipt.target == ADLS_LABEL
     assert all(call == (("abfs://data@acct1.dfs.core.windows.net",), {}) for call in from_url.calls)
     assert all(key.startswith("sims/a/") for key in _stored(from_url.store))
 

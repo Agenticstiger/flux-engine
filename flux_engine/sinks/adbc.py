@@ -409,7 +409,7 @@ class AdbcSink:
             return None
         if not _SCHEME_URL.match(self.uri):
             return None
-        shown = target_label(self.dialect.name, self.uri)
+        shown = target_label("adbc", self.uri)
         if shown.endswith("://" + WITHHELD) or " target sha256:" in shown:
             return None
         return digest_of_bytes(shown.encode("utf-8"), subject="target").hex[:12]
