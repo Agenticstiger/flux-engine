@@ -73,6 +73,7 @@ from datetime import date
 from decimal import Decimal, localcontext
 from fractions import Fraction
 from math import lcm
+from operator import itemgetter
 from threading import local
 from types import MappingProxyType
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple, Union
@@ -320,6 +321,9 @@ def _exponent(column: CompiledColumn) -> int:
     return 0
 
 
+#: Array arithmetic on grid points stays exact while every number and product is under this.
+_HALF_INT64 = 1 << 62
+
 _DATE_KIND = LogicalKind.DATE.value
 _DECIMAL_KIND = LogicalKind.DECIMAL.value
 
@@ -333,11 +337,27 @@ def _value_of_units(kind: str, exponent: int, units: int) -> Any:
     return units  # INT, and TIMESTAMP in milliseconds since the epoch
 
 
+def _values_of_units(kind: str, exponent: int, units: List[int]) -> List[Any]:
+    """:func:`_value_of_units` of each of *units*: the one rule, applied to a column at once."""
+    if kind == _DATE_KIND:
+        return [date.fromordinal(unit + DATE_EPOCH_ORDINAL) for unit in units]
+    if kind == _DECIMAL_KIND:
+        build = _rows._decimal_from_units
+        return [build(unit, exponent) for unit in units]
+    return units  # INT, and TIMESTAMP in milliseconds since the epoch
+
+
 def _units_of_value(kind: str, exponent: int, value: Any) -> int:
     """The grid point a drawn value lies on: the inverse of :func:`_value_of_units`."""
     if kind == LogicalKind.DATE.value:
         return int(value.toordinal() - DATE_EPOCH_ORDINAL)
     if kind == LogicalKind.DECIMAL.value:
+        if isinstance(value, (Decimal, int)):
+            # Exact integers all the way, with no Fraction built for each value.
+            numerator, denominator = value.as_integer_ratio()
+            if exponent <= 0:
+                return (numerator * 10**-exponent) // denominator
+            return numerator // (denominator * 10**exponent)
         scaled = Fraction(value) * Fraction(10) ** (-exponent)
         return scaled.numerator // scaled.denominator
     return int(value)
@@ -376,6 +396,9 @@ class KeyGrid:
     counts: Tuple[int, ...]
     starts: Tuple[int, ...]
     rows: int
+    # The bins as int64 arrays, built the first time a column is read at once (``False`` when
+    # a bin does not fit one): a cache, in no comparison, hash or document.
+    _arrays: Any = field(default=None, init=False, repr=False, compare=False, hash=False)
 
     def units_at(self, row: int) -> int:
         index = bisect_right(self.starts, row) - 1
@@ -384,6 +407,100 @@ class KeyGrid:
 
     def value_at(self, row: int) -> Any:
         return _value_of_units(self.kind, self.exponent, self.units_at(row))
+
+    def _bins(self) -> "Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]":
+        """The bins' ``firsts``, ``widths``, ``counts`` and ``starts`` as int64 arrays, or ``None``.
+
+        ``None`` when a number does not fit int64 or the product of a width and a count could
+        overflow it, so the array arithmetic below is exactly the Python integer arithmetic of
+        :meth:`units_at` and :meth:`row_near` whenever it runs.
+        """
+        found = self._arrays
+        if found is None:
+            found = False
+            if (
+                self.firsts
+                and max(self.widths) * max(self.counts) < _HALF_INT64
+                and max(self.firsts) + max(self.widths) < _HALF_INT64
+                and min(self.firsts) > -_HALF_INT64
+            ):
+                try:
+                    found = tuple(
+                        np.array(column, dtype=np.int64)
+                        for column in (self.firsts, self.widths, self.counts, self.starts)
+                    )
+                except OverflowError:
+                    found = False
+            object.__setattr__(self, "_arrays", found)
+        return found or None
+
+    def units_of_rows(self, rows: "np.ndarray") -> "Optional[np.ndarray]":
+        """:meth:`units_at` of every row of an int64 array, or ``None`` for the per-row code.
+
+        A column read at once: one ``searchsorted`` over the bins' first rows in place of one
+        ``bisect_right`` per row, the same integer arithmetic on arrays.
+        """
+        bins = self._bins()
+        if bins is None or rows.shape[0] == 0 or int(rows.min()) < 0:
+            return None
+        firsts, widths, counts, starts = bins
+        index = np.searchsorted(starts, rows, side="right") - 1
+        offset = rows - starts[index]
+        if int(offset.max()) * int(widths.max()) >= _HALF_INT64:
+            return None
+        return firsts[index] + (offset * widths[index]) // counts[index]
+
+    def values_at(self, rows: List[int]) -> Optional[List[Any]]:
+        """:meth:`value_at` of each of *rows*, or ``None`` when the per-row code must."""
+        if not rows or max(rows) >= kernel2.ARRAY_ROWS:
+            return None
+        units = self.units_of_rows(np.array(rows, dtype=np.int64))
+        if units is None:
+            return None
+        return _values_of_units(self.kind, self.exponent, units.tolist())
+
+    def rows_near(self, values: Sequence[Any]) -> "Optional[np.ndarray]":
+        """:meth:`row_near` of each of *values* as an int64 array, or ``None`` for the per-row code.
+
+        The grid point of each distinct value is worked out once, and the bin each point
+        lies in, the row it rounds to and which neighbour is nearer are found for all of them
+        by array arithmetic, in the integers :meth:`row_near` uses.
+        """
+        bins = self._bins()
+        if bins is None or not values:
+            return None
+        points: Dict[Any, int] = {}
+        for value in values:
+            if value not in points:
+                points[value] = _units_of_value(self.kind, self.exponent, value)
+        try:
+            units = np.array([points[value] for value in values], dtype=np.int64)
+        except OverflowError:
+            return None
+        if int(units.max()) >= _HALF_INT64 or int(units.min()) <= -_HALF_INT64:
+            return None
+        firsts, widths, counts, starts = bins
+        index = np.searchsorted(firsts, units, side="right") - 1
+        before = index < 0
+        index = np.maximum(index, 0)
+        first, width, count, start = firsts[index], widths[index], counts[index], starts[index]
+        offset = np.maximum(units - first, 0)
+        inside = np.minimum(offset, width - 1)
+        low = np.where(offset >= width, start + count - 1, start + (inside * count) // width)
+        high = low + 1
+        # The nearer of the two rows, the lower when they are as near; the last row has no upper.
+        top = high >= self.rows
+        above_row = np.where(top, low, high)
+        below_gap = units - self._units_at_rows(low)
+        above_gap = self._units_at_rows(above_row) - units
+        near = np.where(top | (below_gap <= above_gap), low, high)
+        return np.where(before, 0, near)
+
+    def _units_at_rows(self, rows: "np.ndarray") -> "np.ndarray":
+        """:meth:`units_at` of rows already known to be in range and the bins to fit."""
+        firsts, widths, counts, starts = self._arrays
+        index = np.searchsorted(starts, rows, side="right") - 1
+        return firsts[index] + ((rows - starts[index]) * widths[index]) // counts[index]
 
     def row_near(self, value: Any) -> int:
         """The row whose key is nearest *value*; the lower key when two are as near."""
@@ -861,7 +978,8 @@ class RelationReader:
         self.root = root
         self._streams: Dict[Tuple[str, str], CellStreams] = {}
         self._picks: Dict[Tuple[str, str, str, int], int] = {}
-        self._points: Dict[Tuple[str, str, Tuple[str, ...], int], Tuple[int, ...]] = {}
+        # A composite key's decoded point of each row, by expose and key columns.
+        self._points: Dict[Tuple[str, str, Tuple[str, ...]], Dict[int, Tuple[int, ...]]] = {}
         # Filled by prefetch for one slice of a kernel 0.2.0 pass, row by row: a foreign
         # key's null and parent row, per relationship, and an identifier key's text.
         self._ready: Dict[Tuple[str, str, str], Dict[int, Tuple[bool, int]]] = {}
@@ -1521,13 +1639,13 @@ class RelationReader:
 
     def _point(self, owner: _Owner, composite: CompositeKey, row: int) -> Tuple[int, ...]:
         """Each part's index in the point *composite* decoded to at *row*, cached."""
-        cache_key = (owner.sim_id, owner.expose_id, composite.columns, row)
-        indexes = self._points.get(cache_key)
+        points = self._points.setdefault((owner.sim_id, owner.expose_id, composite.columns), {})
+        indexes = points.get(row)
         if indexes is None:
             indexes = composite.indexes_at(row)
-            if len(self._points) >= _CACHE_LIMIT:
-                self._points.clear()
-            self._points[cache_key] = indexes
+            if len(points) >= _CACHE_LIMIT:
+                points.clear()
+            points[row] = indexes
         return indexes
 
     def _member(self, owner: _Owner, composite: CompositeKey, column: str, row: int) -> Any:
@@ -1620,6 +1738,56 @@ class RelationReader:
         memo[row] = value
         return value
 
+    def view_values(self, view: ParentView, column: str, rows: List[int]) -> List[Any]:
+        """:meth:`view_value` of each of *rows*: each distinct row's value worked out once.
+
+        The rows of a slice name the same parent rows many times over, and the kinds of column
+        a view reads are mostly arithmetic on the row, so the distinct rows not yet held are
+        worked out together (:meth:`_view_batch`) and then gathered to every row that names
+        them. Called with the kernel's ``decimal`` context held, as :meth:`column_values` is.
+        """
+        if not rows:
+            return []
+        memo = self._views.setdefault((view.sim_id, view.expose_id, column), {})
+        got: Dict[int, Any] = {}
+        todo: List[int] = []
+        distinct = dict.fromkeys(rows)
+        if memo:
+            for row in distinct:
+                if row in memo:
+                    got[row] = memo[row]
+                else:
+                    todo.append(row)
+        else:
+            todo = list(distinct)
+        if todo:
+            values = self._view_batch(view, column, todo)
+            got.update(zip(todo, values, strict=True))
+            if len(memo) + len(todo) >= _CACHE_LIMIT:
+                memo.clear()
+            if len(todo) < _CACHE_LIMIT:
+                memo.update(zip(todo, values, strict=True))
+        return list(map(got.__getitem__, rows))
+
+    def _view_batch(self, view: ParentView, column: str, rows: List[int]) -> List[Any]:
+        """:meth:`_view_value` of each of *rows*, a column at a time where the driver has a way."""
+        driver = view.driver(column)
+        if isinstance(driver, KeyGrid):
+            found = driver.values_at(rows)
+            if found is not None:
+                return found
+        elif isinstance(driver, ReferenceColumn):
+            return list(map(driver.values.__getitem__, rows))
+        elif isinstance(driver, IdentifierKey):
+            return self._identifier_values(driver, rows)
+        elif isinstance(driver, CompositeMember):
+            owner = _Owner(view.sim_id, view.expose_id, view.seam_digest)
+            return self._member_values(owner, driver.composite, column, rows)
+        elif isinstance(driver, ForeignKey):
+            owner = _Owner(view.sim_id, view.expose_id, view.seam_digest)
+            return self._foreign_values(owner, view.column_plan(column), driver, rows)
+        return [self._view_value(view, column, row) for row in rows]
+
     def _view_value(self, view: ParentView, column: str, row: int) -> Any:
         owner = _Owner(view.sim_id, view.expose_id, view.seam_digest)
         column_plan = view.column_plan(column)
@@ -1666,11 +1834,13 @@ class RelationReader:
 
     def _identifier_values(self, driver: IdentifierKey, rows: List[int]) -> List[Any]:
         texts = self._texts.get(driver, _NOTHING)
-        values: List[Any] = []
-        for row in rows:
-            text = texts.get(row)
-            values.append(text if text is not None else driver.value_at(row))
-        return values
+        found = list(map(texts.get, rows))
+        if None in found:
+            return [
+                driver.value_at(row) if text is None else text
+                for row, text in zip(rows, found, strict=True)
+            ]
+        return found
 
     def _foreign_values(
         self,
@@ -1681,15 +1851,27 @@ class RelationReader:
     ) -> List[Any]:
         target = driver.target_of(column_plan.column.name)
         ready = self._ready.get((owner.sim_id, owner.expose_id, driver.relationship), _NOTHING)
-        values: List[Any] = []
-        for row in rows:
+        entries = list(map(ready.get, rows))
+        if rows and None not in entries:
+            # Every row's draws are held: no row takes the per-row code.
+            nulls, taken = zip(*entries, strict=True)
+            if not any(nulls):
+                return self.view_values(driver.parent, target, list(taken))
+        values: List[Any] = [None] * len(rows)
+        slots: List[int] = []
+        parent_rows: List[int] = []
+        for slot, row in enumerate(rows):
             found = ready.get(row)
             if found is None:
-                values.append(self._cell(owner, column_plan, driver, row, None))
-            elif found[0]:
-                values.append(None)
-            else:
-                values.append(self.view_value(driver.parent, target, found[1]))
+                values[slot] = self._cell(owner, column_plan, driver, row, None)
+            elif not found[0]:
+                slots.append(slot)
+                parent_rows.append(found[1])
+        # Each distinct parent row's value is worked out once, then gathered to the rows.
+        for slot, value in zip(
+            slots, self.view_values(driver.parent, target, parent_rows), strict=True
+        ):
+            values[slot] = value
         return values
 
     def _member_values(
@@ -1701,20 +1883,27 @@ class RelationReader:
             for position, part in enumerate(composite.parts)
             if column in part.columns
         )
-        prefix = (owner.sim_id, owner.expose_id, composite.columns)
-        points = self._points
-        indexes = []
-        for row in rows:
-            point = points.get(prefix + (row,))
-            if point is None:
-                point = composite.indexes_at(row)
-            indexes.append(point[position])
+        points = self._points.get((owner.sim_id, owner.expose_id, composite.columns), _NOTHING)
+        decoded: List[Any] = list(map(points.get, rows))
+        if None in decoded:
+            decoded = [
+                composite.indexes_at(row) if point is None else point
+                for row, point in zip(rows, decoded, strict=True)
+            ]
+        indexes = list(map(itemgetter(position), decoded))
+        if isinstance(part, ParentPart):
+            target = part.to_columns[part.from_columns.index(column)]
+            return self.view_values(part.parent, target, indexes)
+        # A part has few indexes, so each distinct one is converted once.
+        distinct = list(set(indexes))
         if isinstance(part, GridPart):
-            return [_value_of_units(part.kind, part.exponent, part.first + i) for i in indexes]
-        if isinstance(part, LevelPart):
-            return [_rows._level_to_value(part.levels[i], part.column) for i in indexes]
-        target = part.to_columns[part.from_columns.index(column)]
-        return [self.view_value(part.parent, target, index) for index in indexes]
+            converted = _values_of_units(
+                part.kind, part.exponent, [part.first + index for index in distinct]
+            )
+        else:
+            converted = [_rows._level_to_value(part.levels[i], part.column) for i in distinct]
+        made = dict(zip(distinct, converted, strict=True))
+        return list(map(made.__getitem__, indexes))
 
     def prefetch(
         self,
@@ -1770,8 +1959,7 @@ class RelationReader:
         if rows.shape[0] == 0:
             return
         images = kernel2.permute2_array(driver.key, driver.space, rows)
-        for row, image in zip(rows.tolist(), images, strict=True):
-            texts[row] = driver.text_of(image)
+        texts.update(zip(rows.tolist(), map(driver.text_of, images), strict=True))
 
     def _prefetch_composite(
         self, owner: _Owner, composite: CompositeKey, rows: "np.ndarray"
@@ -1779,20 +1967,16 @@ class RelationReader:
         if not composite.counter_based or composite.space > kernel2.PERMUTE_ARRAY_MAX_DOMAIN:
             return
         # Every member column of the key asks for it; the rows already decoded are skipped.
-        prefix = (owner.sim_id, owner.expose_id, composite.columns)
-        points = self._points
-        fresh = [row for row in rows.tolist() if prefix + (row,) not in points]
-        if not fresh:
+        points = self._points.setdefault((owner.sim_id, owner.expose_id, composite.columns), {})
+        fresh = np.asarray(_missing(rows, points), dtype=np.int64)
+        if fresh.shape[0] == 0:
             return
-        images = kernel2.permute2_array(
-            composite.key, composite.space, np.array(fresh, dtype=np.int64)
-        )
+        images = kernel2.permute2_array(composite.key, composite.space, fresh)
         decoded = composite.indexes_of_points(images)
-        for row, indexes in zip(fresh, decoded, strict=True):
-            points[prefix + (row,)] = indexes
+        points.update(zip(fresh.tolist(), decoded, strict=True))
         for position, part in enumerate(composite.parts):
             if isinstance(part, ParentPart):
-                parent_rows = _row_array({indexes[position] for indexes in decoded})
+                parent_rows = _row_array(set(map(itemgetter(position), decoded)))
                 if parent_rows is not None:
                     for target in part.to_columns:
                         self._prefetch_view(part.parent, target, parent_rows)
@@ -1813,24 +1997,30 @@ class RelationReader:
             return
         key = self.streams(owner.sim_id, owner.expose_id).column_key(driver.from_columns[0])
         draw = 0
-        nulls = [False] * rows.shape[0]
+        nulls = np.zeros(rows.shape[0], dtype=np.bool_)
         if driver.first_null is not None:
-            nulls = kernel2.column_bernoulli(
-                kernel2.column_uniform53(key, rows, 0), driver.first_null
-            ).tolist()
+            nulls = np.asarray(
+                kernel2.column_bernoulli(kernel2.column_uniform53(key, rows, 0), driver.first_null),
+                dtype=np.bool_,
+            )
             draw = 1
         parents = self._parents_of_rows(owner, column_plan, driver, (key, draw), rows)
         if parents is None:
             return
-        named: Set[int] = set()
-        for row, null, parent in zip(rows.tolist(), nulls, parents, strict=True):
-            ready[row] = (bool(null), int(parent))
-            if not null:
-                named.add(int(parent))
-        parent_rows = _row_array(named)
-        if parent_rows is not None:
-            for target in driver.to_columns:
-                self._prefetch_view(driver.parent, target, parent_rows)
+        try:
+            taken = np.asarray(parents, dtype=np.int64)
+        except OverflowError:
+            # Parent rows past what an array holds: kept as they are, and no view is prefetched.
+            kept = zip(nulls.tolist(), map(int, parents), strict=True)
+            ready.update(zip(rows.tolist(), kept, strict=True))
+            return
+        # One C-level pass in place of a tuple and a store for each row.
+        ready.update(
+            zip(rows.tolist(), zip(nulls.tolist(), taken.tolist(), strict=True), strict=True)
+        )
+        parent_rows = np.unique(taken[~nulls])
+        for target in driver.to_columns:
+            self._prefetch_view(driver.parent, target, parent_rows)
 
     def _parents_of_rows(
         self,
@@ -1839,7 +2029,7 @@ class RelationReader:
         driver: ForeignKey,
         stream: Tuple[kernel2.Key, int],
         rows: "np.ndarray",
-    ) -> Optional[List[int]]:
+    ) -> "Union[List[int], np.ndarray, None]":
         """The parent row each of *rows* takes, or ``None`` when the per-row code must.
 
         *stream* is the first column's key and the draw index its pick is drawn at. A ``counted``
@@ -1848,9 +2038,9 @@ class RelationReader:
         """
         key, draw = stream
         if driver.pick == "counted":
-            return [int(parent) for parent in self._layout(owner, driver).parents_of(rows)]
+            return self._layout(owner, driver).parents_of(rows)
         if driver.pick == "history":
-            return [int(parent) for parent in self._history_of(owner, driver).parent_rows_of(rows)]
+            return self._history_of(owner, driver).parent_rows_of(rows)
         if driver.pick == "declared":
             from flux_engine.generator import columns as _columns
 
@@ -1858,6 +2048,10 @@ class RelationReader:
             drawn = _columns._draws(column_plan, key, rows, draw)
             if drawn is None:
                 return None
+            if isinstance(driver.grid, KeyGrid):
+                near = driver.grid.rows_near(drawn)
+                if near is not None:
+                    return near
             return [driver.grid.row_near(value) for value in drawn]
         if driver.pick == "distinct":
             assert driver.key is not None  # relate_plans sets it for this pick
