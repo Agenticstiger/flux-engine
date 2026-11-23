@@ -376,6 +376,21 @@ so slot values never decrease with the slot.
   that order takes the value of slot `i`. When every `e_r` is equal this is exactly `v_sigma(r)`;
 - neither: `x_r = 1`.
 
+**Given a class** (a `counts` entry with `given`, ADR 0037 decision 4; kernel `0.2.0` only). The entry names a column
+of the parent and a weight list for each of its classes over the shape's classes (SEAM-FIDELITY-SPEC section 3), a class
+with no list taking the shape's own weights. The classes of the column are its declared levels in NFC order, or its
+bins in order, and a parent's class is that of its value on its final row (the bin the value falls in, for a column
+drawn from bins). `E` is split into `E_l`, one for each class `l`, keeping `E`'s order. Class `l` has its own count
+classes `n_(l,k) = LRM(|E_l|, weights_l)`, keyed as above by `k`, and the slots `v_(l,i)` of the formula above over
+`|E_l|`, from `i = 0`. `sigma` is `permute/2(K, e, r)` as before, taken over the whole of `E`. The ranks of `E_l`
+in ascending order of `sigma` take `v_(l,0), v_(l,1), ...` as their expected counts. With a hook, the ranks of
+`E_l` are ordered by `(e_r, sigma(r))` ascending instead, and the `i`-th takes `v_(l,i)`: the rank coupling applies
+within each class. A class with no eligible parent has no slot, and a value of the column that is no class of it is
+`FLX-3403`. The minimum, the allotment and the rows below are unchanged. No seed path is added: `K` is the key of the
+`count` path, so the declaration meets the four conditions of section 12 as a declaration that adds no path does,
+and a `counts` entry with no `given` lays out exactly as before. The vector file `tests/vectors/kernel2-counted-given-vectors.json`
+pins layouts with given classes (section 11), and the `countedLayouts` of the streams vectors keep their bytes.
+
 **The minimum.** `S = N - m * e`, and `S < 0` is `FLX-3403`, as is `e = 0` with `N > 0`. Then `y_r = max(x_r - m, 0)`
 and `Y` is the sum of the `y_r`. If `Y = 0` and `S > 0`, every `y_r` is `1`.
 
@@ -807,6 +822,7 @@ of a column a key of its own.
 | `tests/vectors/kernel2-history-vectors.json` | Section 8.4's and 8.5's paths: each path's key label, key, counters and blocks; the layouts, chains, fits, ended entities and reasons of chosen entries, and the derived counts and allotments of chosen projections. |
 | `tests/vectors/kernel2-transforms-vectors.json` | The logarithm's and AS241's constants by bit pattern; `log` and Φ⁻¹ at their region edges; per declaration, the binary64 constants of section 5.3 and the `z` bits and units of each probed `uniform53`, a declaration whose tails are taken as zero among them; the exponential's units. |
 | `tests/vectors/kernel2-copula-vectors.json` | Section 8.6's copula path: the key label, key, counters and blocks of chosen rows, and for each `u`, `z`, `x`, the bin thresholds, the bin and grid index and the value, and the plan's `alpha`, factor and its digest, for three small copulas: one whose matrix passes, one that is shrunk, and one with a bin of weight zero. |
+| `tests/vectors/kernel2-counted-given-vectors.json` | Section 8.1's counted layouts given a class of a parent column: the path's key label and key, `e`, the classes of the column with each one's weights, the class of each eligible parent, `sigma`, the slot values, the expected counts as exact fractions, the counts per parent row and their offsets, with and without a hook. |
 | `tests/vectors/kernel2-binned-given-vectors.json` | A column drawn given a column drawn from bins (SEAM-FIDELITY-SPEC.md section 2): for chosen rows, the key, counters and blocks of each column's own cell path, the bin and class the parent drew, the place inside the bin and the value, the class named by the text of its lower edge. |
 | `tests/vectors/kernel2-dates-vectors.json` | The dates stream of EXPR-SPEC-2 section 7: its key label, key, counters and blocks at positions 0, 1 and 257 for a DATE column and for a TIMESTAMP column, and the cell path of a hidden column; the thinning positions 2, 3 and 256 and a thinning run over a fixed intensity. |
 

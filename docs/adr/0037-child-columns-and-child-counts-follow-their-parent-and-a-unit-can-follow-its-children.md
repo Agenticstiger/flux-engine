@@ -13,8 +13,8 @@ noise only in its expose) and [ADR 0020](./0020-privacy-grades.md). A companion 
 [ADR 0035](./0035-number-columns-are-drawn-through-a-gaussian-copula-of-published-rank-correlations.md) and
 [ADR 0036](./0036-binned-number-columns-join-clique-marginals.md). The format text of the unit that follows
 its child rows and of what a noisy statistic is charged is in [PROFILE-SPEC.md](../spec/PROFILE-SPEC.md) section 3a;
-the text for a number of children given a parent column is still drafted in
-[correlations-0.11.0.md](../spec/drafts/correlations-0.11.0.md).
+the text for a number of children given a parent column is in
+[SEAM-FIDELITY-SPEC.md](../spec/SEAM-FIDELITY-SPEC.md) section 3 and [KERNEL-SPEC-2.md](../spec/KERNEL-SPEC-2.md) section 8.1.
 
 **What this release builds.** `privacyUnit.follows` and the charges of decision 2, the relational statistics of
 decision 3 (a relationship's statistics grouped by a parent column, noise on a relationship's histogram and on a

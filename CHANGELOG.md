@@ -68,6 +68,21 @@ at `1-3-0`. The kernel does not change: the new seed path is read only by a bund
 - Profile request format `1-2-0` asks for rank correlations (`rankCorrelations`) and the columns a profiler may join
   into cliques (`cliqueColumns`) in a table, and for a relationship's statistics grouped by parent columns
   (`groupBy`) and child columns grouped by a parent column (`linked`).
+- A relationship's number of children per parent may depend on a column of the parent. A `counts` entry gains `given`,
+  a category column with declared levels or a column drawn from bins, and `childrenGiven`, a list of weights for each
+  of its classes over the classes of `children`; a class with no list takes `children`'s weights, and the emit's plan
+  entry states which did under `countsGiven`. The layout splits the eligible parents by class and lays each out by the
+  largest remainder (KERNEL-SPEC-2 section 8.1). No seed path is added, kernel `0.1.0` refuses the keys with `FLX-3105`,
+  and an entry with neither key lays out as before.
+- A children-per-parent row of the scorecard is scored class by class when the relationship's entry has `given` and the
+  profile holds a histogram of children per parent grouped by that column, each group widened by the noise of its own
+  reference (SCORECARD-SPEC.md section 3). A scorecard that holds one names format `1-5-0`.
+- `fluxsim init` reads a profile's rank correlations into one `fidelity.copula` for each table, over the number and
+  timestamp columns it draws from bins (Kendall's tau when any pair publishes it, otherwise Spearman's rho), and leaves
+  to the cliques a column that ties often. It draws the number and timestamp columns of a `cliqueMarginal/2` clique over
+  the clique's bins. It writes a relationship's grouped histogram of children per parent as the `given` of its `counts`
+  entry, and reads a relationship's noisy histogram as its point estimate. Its profile request asks for what these
+  need (PROFILE-REQUEST-SPEC.md section 7), and a request that asks for none keeps its bytes.
 - Two how-to pages, [Draw number columns together](docs/how-to/draw-number-columns-together.md) and
   [Draw a column given the bin of another](docs/how-to/draw-a-column-given-the-bin-of-another.md), and a note for the
   authors of a profiler, `docs/spec/clique-selection-for-profilers.md`, which requires float-safe noise samplers.

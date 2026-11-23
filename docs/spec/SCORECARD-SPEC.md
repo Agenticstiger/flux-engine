@@ -192,6 +192,26 @@ children per parent (a profile `relationships` entry, PROFILE-SPEC.md section 3)
   count, is `censored`: it is shown and has no score. A relationship whose parent is
   versioned repeats keys by design, so its parents are not counted and it has no row.
   Like the rows above, it holds counts and exact shares and no key or row of the data.
+- **A children-per-parent row, grouped** (format `1-5-0`). A relationship whose `counts` entry has `given`
+  (SEAM-FIDELITY-SPEC.md section 3) is scored per group when the profile holds a `marginalHistogram/1` of
+  children per parent grouped by that column, by `groupBy` or by `groupByBins`; a profile that holds only the
+  ungrouped histogram leaves the row as the paragraph above states it. The row has the same `propertyId` and
+  the same `bins`, and holds the profile's grouping as `groupBy` (the column) or `groupByBins` (`column` and
+  `bins`), and `groups`, one entry per group of the profile's statistic in its order, which is the order of its
+  levels or of its bins. The run's parents of each group are counted into the profile's bins by their number
+  of children as the ungrouped row counts them, a parent being in the group its value of the column on its row
+  names: for `groupBy` the value as the emit spells it, and for `groupByBins` the bin of the profile that holds
+  it, a value outside every bin being in no group. A group is named by its `ordinal`, and holds its `outcome`,
+  `run` and `profile` as `{parents, binCounts}` (`profile` is `null` for a group withheld), and `distance`,
+  the total variation distance of the two. A group is `within` when its distance is at most the row's
+  `tolerance`, the `counts` entry's and `0.10` without one, plus its widening when the reference is noisy. A
+  group whose profile counts were withheld, or that holds no run parent, is `censored`: it is shown and has no
+  distance. The row is `outside` when any scored group is, `within` when every scored group is, and `censored`
+  when none was scored. Its `score` is the mean of the scored groups' scores, each one minus the distance, and
+  its `distance` the largest. A noisy reference is widened by §9's `w` for each group, from that group's own
+  noisy total, and a group's `widening` holds it; the row then carries `noise` as §9 states it, `widening`
+  being the largest over its groups. A scorecard that holds such a row names `1-5-0`. A row with no `given`
+  behind it is the ungrouped row, unchanged.
 
 **Calendars (format `1-4-0`).** A fourth kind of row sits in the table of a date column the
 profile publishes a `calendar` for (PROFILE-SPEC.md section 3), one for each histogram `verify`
@@ -798,6 +818,9 @@ clique's own answer to the same question (the same cells and group). Each bound 
 at least `1 - e^-5`, so by a union bound the two together hold with probability at least `1 - 2 e^-5`,
 about 0.987, and the statements of the paragraph above carry that probability when two statistics are
 summed. A reference formed from the clique is the one the column is drawn from, and adds nothing.
+
+A statistic grouped by a link (`groupByLink`, PROFILE-SPEC.md section 3) or a children-per-parent histogram
+grouped by a column of the parent (§3) is widened in the same way, group by group, each group by its own `w`.
 
 A property row compared with a noisy statistic carries `noise`: `mechanism`, the mechanism it was
 released under, `cellVariance`, the variance of each cell, and `widening`, the largest `w` any of its

@@ -174,3 +174,22 @@ owner's choice, stated in the profile.
   the parent column through this relationship (`groupByLink`, PROFILE-SPEC.md section 3).
 
 A name that no column of its table holds is refused with `FLX-5038`, naming where.
+
+**What `fluxsim init` asks for.** Given a contract and no profile, `fluxsim init` writes a request of format 1-2-0
+only when it asks for one of the keys above, and a request with none of them keeps its bytes and the format it
+named before. For each table it asks for `kendallTau/1` over the number and timestamp columns it would draw from
+histograms (at most 64, and none when the table has fewer than two), and names as `cliqueColumns` the columns a
+clique could hold (at most 1 024, and none when the table has fewer than two). For each relationship it could lay
+out on the counted layout, one column on each side and to another table, whose foreign key no key, other
+relationship or rule of the contract sets, it asks to be grouped by every column its parent draws (at most 64) and
+lists as `linked` the pairs of a child column and a `category` column of the parent (at most 1 024). A column that a
+key, a relationship, a rule or a hidden or identifier column of the contract sets is asked for none of these. The
+request holds candidates: which of them a profile answers, and so which `init` draws that way, is the profile's.
+
+When the profile answers, `init` reads its rank correlations into one copula for each table and its grouped
+histograms of children per parent into the `given` of a `counts` entry. A column is left out of the copula when
+two independent draws of it are equal with probability at least 1/20, the sum over its bins of the squared share of
+a bin divided by the number of grid values in it, since the statistics carry no tie correction. The copula's
+measure is Kendall's when the profile publishes it for any pair of the copula's columns, and Spearman's
+otherwise. The ledger of `init` says why each statistic was used or left unused (the how-to
+[Write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md)).
