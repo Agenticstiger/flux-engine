@@ -114,9 +114,9 @@ class Accounting:
     measure: str
     total: PrivacyLoss
     unit: str
-    #: The profiler declares that the levels of its histograms, their bin edges and the
-    #: ``sampleSize`` bands were chosen without the data, or are part of the release
-    #: (PROFILE-SPEC.md section 3a). The engine cannot check it.
+    #: The profiler declares that the levels of its histograms, their bin edges, the
+    #: ``sampleSize`` bands and every ``rowFloor`` of a rank correlation were chosen without the
+    #: data, or are part of the release (PROFILE-SPEC.md section 3a). The engine cannot check it.
     public_structure: bool = False
 
 

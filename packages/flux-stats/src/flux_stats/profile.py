@@ -83,6 +83,12 @@ from flux_stats.noise import (
     read_accounting,
     read_noise,
 )
+from flux_stats.rank_correlation import (
+    RANK_DEFINITIONS,
+    RANK_IDENTIFIERS,
+    rank_sensitivity,
+    rank_value,
+)
 from flux_stats.registry import (
     GroupStatistic,
     MetricDefinition,
@@ -167,6 +173,23 @@ SCHEMA_URL_1_2_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-2
 #: ``per``, and changes nothing format ``1-2-0`` says. A document that holds one of them names it.
 SCHEMA_URL_1_3_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-3-0/FluxProfile.json"
 
+#: Format ``1-4-0``, the ``$id`` of ``docs/spec/profile-1-4.schema.json``. It adds the rank correlations
+#: ``kendallTau/1`` and ``spearmanRho/1`` of a ``columnPairs`` entry and the ``rowFloor`` key of
+#: PROFILE-SPEC.md section 5, and changes nothing format ``1-3-0`` says. A document that holds one of
+#: :data:`_FORMS_OF_1_4_0` names it.
+SCHEMA_URL_1_4_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json"
+
+#: Every form that only format ``1-4-0`` holds, by the key the reader names it with, and what the
+#: refusal calls it. A document that names an earlier format and holds one is refused
+#: (:meth:`_Reader.require_1_4_0`). A later form of the format is one more entry here and one call at
+#: the place the reader reads it.
+_FORMS_OF_1_4_0: Mapping[str, str] = MappingProxyType(
+    {
+        "rankCorrelation": "a rank correlation (kendallTau/1 or spearmanRho/1)",
+        "rowFloor": "a rowFloor",
+    }
+)
+
 #: The classes a relationship may declare structurally empty (format 1-3-0): parents with no child,
 #: and child keys, not NULL, whose parent is missing.
 STRUCTURAL_CLASSES: Tuple[str, ...] = ("childless", "orphan")
@@ -191,10 +214,19 @@ SEVERAL = "several"
 
 #: Every format this reader reads. A later format is a new URL, so a reader that predates it
 #: refuses the document rather than skip what it cannot read.
-_READ_FORMATS = (SCHEMA_URL, SCHEMA_URL_1_1_0, SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0)
+_READ_FORMATS = (
+    SCHEMA_URL,
+    SCHEMA_URL_1_1_0,
+    SCHEMA_URL_1_2_0,
+    SCHEMA_URL_1_3_0,
+    SCHEMA_URL_1_4_0,
+)
 
 #: The formats that hold the sections of format ``1-2-0`` (``invariants``, ``privacy``).
-_FROM_1_2_0 = (SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0)
+_FROM_1_2_0 = (SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0)
+
+#: The formats that hold the forms of format ``1-3-0``.
+_FROM_1_3_0 = (SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0)
 
 #: The most columns a ``per`` names (PROFILE-SPEC.md section 3).
 MAX_PER_COLUMNS = 8
@@ -338,6 +370,10 @@ class ProfileGroup:
     #: an exact one. :attr:`statistic` then holds the point estimate they make
     #: (:func:`flux_stats.noise.point_estimate`).
     noisy: Tuple[Fraction, ...] = ()
+    #: The value of a rank correlation's group (format 1-4-0), exact: ``S / C(N, 2)`` or
+    #: ``3 A4 / (N (N^2 - 1))`` for an exact group, and for a noisy one the released number clamped
+    #: to ``[-1, 1]``. ``None`` for every other statistic and for a suppressed group.
+    value: Optional[Fraction] = None
 
     @property
     def published(self) -> bool:
@@ -391,6 +427,9 @@ class StatisticEntry:
     #: The columns the statistic is counted once per distinct value of (format 1-3-0): its counts
     #: are entities, not rows. Empty for a statistic counted per row.
     per: Tuple[str, ...] = ()
+    #: The ``rowFloor`` of a rank correlation (format 1-4-0), a count of at least 2; ``None`` when
+    #: the statistic states none and ``N`` is the number of its records.
+    row_floor: Optional[int] = None
 
     @property
     def identifier(self) -> str:
@@ -648,6 +687,10 @@ class Profile:
     accounting: Optional[Accounting] = None
     #: The tables released whole, by ``exposeId`` (format 1-3-0); empty for an earlier format.
     references: Mapping[str, ReferenceTable] = field(default_factory=lambda: MappingProxyType({}))
+    #: Every noisy part of the release, once each: the place in the document and its mechanism,
+    #: scale and share. This is the one enumeration of the budget's parts. The reader checks the
+    #: total against it, and a grade or a report counts from it and never from the document.
+    parts: Tuple[Tuple[str, Noise], ...] = ()
 
     def invariant(self, name: str) -> Optional[InvariantEntry]:
         """One fact's entry, or ``None``."""
@@ -977,11 +1020,15 @@ class _Reader:
         first_format: bool,
         accounting: Optional[Accounting] = None,
         from_1_3: bool = False,
+        from_1_4: bool = False,
     ) -> None:
         self.rules = rules
         #: Whether the document names format ``1-3-0``, the only one that holds a ``groupBy`` on
         #: a number column, a ``groupByLink`` or a ``per``.
         self.from_1_3 = from_1_3
+        #: Whether the document names format ``1-4-0``, the only one that holds the forms of
+        #: :data:`_FORMS_OF_1_4_0`.
+        self.from_1_4 = from_1_4
         #: Every statistic grouped by a link, with the place it was read at and its own table,
         #: checked against the tables once all of them are read (:meth:`check_links`).
         self.links: List[Tuple[str, str, StatisticEntry]] = []
@@ -992,6 +1039,17 @@ class _Reader:
         #: Whether the document names format ``1-0-0``, which holds none of
         #: the statistics :data:`_ADDED_IN_1_1_0` names.
         self.first_format = first_format
+
+    def require_1_4_0(self, form: str, where: str) -> None:
+        """Refuse (``FLX-5036``) a form of format 1-4-0 in a document that names an earlier one."""
+        if form not in _FORMS_OF_1_4_0:
+            raise KeyError(f"{form!r} is no form of format 1-4-0")
+        if not self.from_1_4:
+            raise refuse(
+                where,
+                f"{_FORMS_OF_1_4_0[form]} is a form of format 1-4-0, and this document names an "
+                "earlier format",
+            )
 
     # -- statistics ----------------------------------------------------------
 
@@ -1312,6 +1370,12 @@ class _Reader:
             self.statistic(item, f"{where}[{index}]", **section)
             for index, item in enumerate(_list(value, where))
         )
+        self._no_repeats(read, where)
+        return read
+
+    @staticmethod
+    def _no_repeats(read: Tuple[StatisticEntry, ...], where: str) -> None:
+        """Refuse a list in which two statistics answer one question."""
         seen: Set[Tuple[Any, ...]] = set()
         for index, statistic in enumerate(read):
             key = (
@@ -1327,7 +1391,6 @@ class _Reader:
             if key in seen:
                 raise refuse(f"{where}[{index}]", "repeats a statistic already in this list")
             seen.add(key)
-        return read
 
     @staticmethod
     def _bins(
@@ -1633,7 +1696,7 @@ class _Reader:
                 for name, entry in columns.items()
             }
         pairs = tuple(
-            self._pair(item, f"{where}.columnPairs[{index}]", ordered)
+            self._pair(item, f"{where}.columnPairs[{index}]", ordered, expose_id)
             for index, item in enumerate(_list(raw.get("columnPairs", []), f"{where}.columnPairs"))
         )
         if len({pair.columns for pair in pairs}) != len(pairs):
@@ -1926,15 +1989,123 @@ class _Reader:
         check_consistency(cliques)
         return cliques
 
-    def _pair(self, value: Any, where: str, ordered: Set[str]) -> PairEntry:
+    def _pair(self, value: Any, where: str, ordered: Set[str], expose_id: str) -> PairEntry:
         raw = _mapping(value, where, required=("columns", "statistics"))
         columns = tuple(read_texts(raw["columns"], f"{where}.columns"))
         if len(columns) != 2 or columns[0] == columns[1] or not set(columns) <= ordered:
             raise refuse(f"{where}.columns", "a pair is two different number or timestamp columns")
-        return PairEntry(
-            columns=(columns[0], columns[1]),
-            statistics=self.statistics(raw["statistics"], f"{where}.statistics", kinds=_PAIR_KINDS),
+        statistics = tuple(
+            self._pair_statistic(item, f"{where}.statistics[{index}]", expose_id)
+            for index, item in enumerate(_list(raw["statistics"], f"{where}.statistics"))
         )
+        self._no_repeats(statistics, f"{where}.statistics")
+        return PairEntry(columns=(columns[0], columns[1]), statistics=statistics)
+
+    def _pair_statistic(self, value: Any, where: str, expose_id: str) -> StatisticEntry:
+        """One statistic of a column pair: a ``correlation/1``, or a rank correlation (format 1-4-0)."""
+        named = value.get("definition") if isinstance(value, Mapping) else None
+        if isinstance(named, str) and named in RANK_IDENTIFIERS:
+            return self._rank_statistic(value, where, expose_id)
+        return self.statistic(value, where, kinds=_PAIR_KINDS)
+
+    def _rank_statistic(self, value: Any, where: str, expose_id: str) -> StatisticEntry:
+        """A ``kendallTau/1`` or ``spearmanRho/1`` of a column pair (PROFILE-SPEC.md section 5).
+
+        Exact, its one group holds ``k`` and ``S`` or ``A4``. Noisy, which needs a ``rowFloor``, it
+        holds the released value, and the share is charged the sensitivity of the definition at that
+        floor (:func:`flux_stats.rank_correlation.rank_sensitivity`) and enters the budget once.
+        """
+        self.require_1_4_0("rankCorrelation", f"{where}.definition")
+        raw = _mapping(
+            value,
+            where,
+            required=("definition", "sampleSize", "disclosure", "groups"),
+            optional=("rowFloor", "noise"),
+        )
+        entry = RANK_DEFINITIONS[raw["definition"]]
+        floor: Optional[int] = None
+        if "rowFloor" in raw:
+            self.require_1_4_0("rowFloor", f"{where}.rowFloor")
+            floor = read_count(raw["rowFloor"], f"{where}.rowFloor")
+            if floor < 2:
+                raise refuse(f"{where}.rowFloor", "a row floor is a count of at least 2")
+        disclosure = raw["disclosure"]
+        if not isinstance(disclosure, str) or disclosure not in self.rules:
+            raise refuse(f"{where}.disclosure", "names no rule in disclosureRules")
+        noise: Optional[Noise] = None
+        if "noise" in raw:
+            if floor is None:
+                raise refuse(
+                    f"{where}.noise",
+                    "a noisy rank correlation states a rowFloor, so that its sensitivity does not "
+                    "depend on the number of records",
+                )
+            accounting = self._require_account(f"{where}.noise")
+            self._in_unit(expose_id, f"{where}.noise", accounting)
+            sensitivity = rank_sensitivity(entry.identifier, floor)
+            noise = read_noise(
+                raw["noise"],
+                f"{where}.noise",
+                accounting,
+                l1=sensitivity,
+                l2_squared=sensitivity * sensitivity,
+            )
+            if noise.mechanism == "discreteGaussian":
+                raise refuse(
+                    f"{where}.noise.mechanism",
+                    "a rank correlation is not an integer count, so a discrete Gaussian does not apply",
+                )
+            self.parts.append((where, noise))
+        group = self._rank_group(
+            raw["groups"], f"{where}.groups", entry, floor, noisy=noise is not None
+        )
+        return StatisticEntry(
+            definition=entry,
+            sample_size=_sample_size(raw["sampleSize"], f"{where}.sampleSize"),
+            disclosure=disclosure,
+            groups=(group,),
+            noise=noise,
+            cell_variance=noise.variance if noise is not None else None,
+            row_floor=floor,
+        )
+
+    def _rank_group(
+        self,
+        value: Any,
+        where: str,
+        entry: StatisticDefinition,
+        floor: Optional[int],
+        *,
+        noisy: bool,
+    ) -> ProfileGroup:
+        """The one group of a rank correlation, keyed by the empty string, with its value."""
+        items = _list(value, where)
+        if len(items) != 1:
+            raise refuse(where, "a rank correlation has one group, keyed by the empty string")
+        at = f"{where}[0]"
+        if noisy:
+            raw = _mapping(items[0], at, required=("group", "status", "noisyValue"))
+            if raw["status"] != FREE:
+                raise refuse(f"{at}.status", "a noisy statistic publishes every group, status F")
+            if raw["group"] != "":
+                raise refuse(f"{at}.group", "a rank correlation is keyed by the empty string")
+            released = read_decimal(raw["noisyValue"], f"{at}.noisyValue")
+            clamped = max(Fraction(-1), min(Fraction(1), released))
+            return ProfileGroup(key="", status=FREE, noisy=(released,), value=clamped)
+        group = self._group(items[0], at, entry, cells=0)
+        if group.key != "":
+            raise refuse(f"{at}.group", "a rank correlation is keyed by the empty string")
+        state = group.statistic
+        if state is None:
+            return group
+        size = state.k
+        if size < 2:
+            raise refuse(f"{at}.k", "a published rank correlation holds at least 2 records")
+        if abs(state.rank_s) > size * (size - 1) // 2:
+            raise refuse(f"{at}.S", "lies within plus or minus C(k, 2)")
+        if 3 * abs(state.rank_a4) > size * (size * size - 1):
+            raise refuse(f"{at}.A4", "lies within plus or minus k (k^2 - 1) / 3")
+        return replace(group, value=rank_value(entry.identifier, state, floor))
 
     def _period(self, value: Any, where: str, domains: Mapping[str, Any]) -> PeriodEntry:
         raw = _mapping(value, where, required=("column", "period", "statistics"))
@@ -2234,7 +2405,7 @@ def _require_format_of_sections(raw: Mapping[str, Any]) -> None:
                 f"profile.{section}",
                 "is a section of format 1-2-0, and this document names an earlier format",
             )
-    if "references" in raw and raw["_schemaURL"] != SCHEMA_URL_1_3_0:
+    if "references" in raw and raw["_schemaURL"] not in _FROM_1_3_0:
         raise refuse(
             "profile.references",
             "is a section of format 1-3-0, and this document names an earlier format",
@@ -2288,7 +2459,8 @@ def parse_profile(document: Any) -> Profile:
         MappingProxyType(rules),
         first_format=raw["_schemaURL"] == SCHEMA_URL,
         accounting=accounting,
-        from_1_3=raw["_schemaURL"] == SCHEMA_URL_1_3_0,
+        from_1_3=raw["_schemaURL"] in _FROM_1_3_0,
+        from_1_4=raw["_schemaURL"] == SCHEMA_URL_1_4_0,
     )
     declared = _object(raw["tables"], "profile.tables")
     tables = {
@@ -2326,4 +2498,5 @@ def parse_profile(document: Any) -> Profile:
         invariants=invariants,
         accounting=accounting,
         references=MappingProxyType(references),
+        parts=tuple(reader.parts),
     )
