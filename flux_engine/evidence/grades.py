@@ -266,19 +266,37 @@ def _structure_reasons(statistics: Any, columns: Mapping[str, Any], found: Set[s
     these are not, whatever the declaration says. Anything the check cannot read counts as data.
     """
     for statistic in statistics if isinstance(statistics, (list, tuple)) else ():
-        if not isinstance(statistic, Mapping):
-            continue
-        if "groupByLink" in statistic:
-            found.add(_LINK_GROUP_REASON)
-        if "groupBy" in statistic:
-            target = (
-                columns.get(statistic["groupBy"]) if isinstance(statistic["groupBy"], str) else None
-            )
-            if not (isinstance(target, Mapping) and target.get("domain") == "category"):
-                found.add(_DATA_GROUP_REASON)
-        band = statistic.get("sampleSize")
-        if isinstance(band, Mapping) and "min" in band and band.get("min") == band.get("max"):
-            found.add(_EXACT_BAND_REASON)
+        if isinstance(statistic, Mapping):
+            found.update(_statistic_reasons(statistic, columns))
+
+
+def _statistic_reasons(statistic: Mapping[str, Any], columns: Mapping[str, Any]) -> Set[str]:
+    """The reasons one noisy statistic still states data (see :func:`_structure_reasons`)."""
+    found: Set[str] = set()
+    if "groupByLink" in statistic:
+        found.add(_LINK_GROUP_REASON)
+    if "groupBy" in statistic:
+        target = (
+            columns.get(statistic["groupBy"]) if isinstance(statistic["groupBy"], str) else None
+        )
+        if not (isinstance(target, Mapping) and target.get("domain") == "category"):
+            found.add(_DATA_GROUP_REASON)
+    band = statistic.get("sampleSize")
+    if isinstance(band, Mapping) and "min" in band and band.get("min") == band.get("max"):
+        found.add(_EXACT_BAND_REASON)
+    return found
+
+
+def _table_structure_reasons(table: Mapping[str, Any], found: Set[str]) -> None:
+    """Add to *found* the reasons the statistics of a table's columns and date pairs state data."""
+    columns = table.get("columns")
+    table_columns = columns if isinstance(columns, Mapping) else {}
+    for pair in table.get("datePairs") or ():
+        if isinstance(pair, Mapping):
+            _structure_reasons(pair.get("statistics"), table_columns, found)
+    for column in (table.get("columns") or {}).values():
+        if isinstance(column, Mapping):
+            _structure_reasons(column.get("statistics"), table_columns, found)
 
 
 def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> ProfileGrade:
@@ -345,15 +363,10 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             for entry in table.get("calendar") or ()
         ):
             sections.append(f"{at}.calendar")
-        table_columns = table.get("columns")
-        table_columns = table_columns if isinstance(table_columns, Mapping) else {}
-        for pair in table.get("datePairs") or ():
-            if isinstance(pair, Mapping):
-                _structure_reasons(pair.get("statistics"), table_columns, data_stated)
+        _table_structure_reasons(table, data_stated)
         for name, column in (table.get("columns") or {}).items():
             if not isinstance(column, Mapping):
                 continue
-            _structure_reasons(column.get("statistics"), table_columns, data_stated)
             unknown += [
                 f"{at}.columns.{_named(name)}.{_named(key)}"
                 for key in column

@@ -271,6 +271,32 @@ def adls_gen2_target(target: str) -> bool:
     )
 
 
+def _prefix_segments(path: str, shown: str, scheme: str) -> List[str]:
+    """The segments of an object prefix, or ``FLX-3510`` when one is unusable."""
+    if path.endswith("/"):
+        path = path[:-1]
+    if "\\" in path:
+        raise FluxError(FLX_3510, f"{shown!r} holds a backslash in its prefix")
+    if "@" in path:
+        # Read as user information, what comes before it is a credential a person put in the wrong
+        # place: refuse it rather than write it into a key and a receipt.
+        raise FluxError(
+            FLX_3510,
+            f"{shown!r} holds an at sign in its prefix, which reads as user information; "
+            "credentials come from the environment, and a prefix is a name without one",
+        )
+    if _ENCODED_SEPARATOR.search(path):
+        raise FluxError(FLX_3510, f"{shown!r} holds a percent-encoded separator in its prefix")
+    segments = path.split("/")
+    if segments == [""]:
+        raise FluxError(FLX_3510, f"{shown!r} names no prefix: {scheme}://BUCKET/PREFIX")
+    for segment in segments:
+        if segment in ("", ".", ".."):
+            what = "an empty segment" if not segment else f"the segment {segment!r}"
+            raise FluxError(FLX_3510, f"{shown!r} holds {what} in its prefix")
+    return segments
+
+
 def parse_object_target(
     target: str, *, instance_identity: bool = False, tuning: ObjectTuning = NO_TUNING
 ) -> ObjectLocation:
@@ -297,27 +323,7 @@ def parse_object_target(
         raise FluxError(
             FLX_3510, f"{shown!r} names no usable bucket or container: {scheme}://BUCKET/PREFIX"
         )
-    if path.endswith("/"):
-        path = path[:-1]
-    if "\\" in path:
-        raise FluxError(FLX_3510, f"{shown!r} holds a backslash in its prefix")
-    if "@" in path:
-        # Read as user information, what comes before it is a credential a person put in the wrong
-        # place: refuse it rather than write it into a key and a receipt.
-        raise FluxError(
-            FLX_3510,
-            f"{shown!r} holds an at sign in its prefix, which reads as user information; "
-            "credentials come from the environment, and a prefix is a name without one",
-        )
-    if _ENCODED_SEPARATOR.search(path):
-        raise FluxError(FLX_3510, f"{shown!r} holds a percent-encoded separator in its prefix")
-    segments = path.split("/")
-    if segments == [""]:
-        raise FluxError(FLX_3510, f"{shown!r} names no prefix: {scheme}://BUCKET/PREFIX")
-    for segment in segments:
-        if segment in ("", ".", ".."):
-            what = "an empty segment" if not segment else f"the segment {segment!r}"
-            raise FluxError(FLX_3510, f"{shown!r} holds {what} in its prefix")
+    segments = _prefix_segments(path, shown, scheme)
     return ObjectLocation(
         scheme=scheme,
         bucket=bucket,
@@ -620,7 +626,16 @@ def _cleanup(
     """
     if not written:
         return ""
-    count = len(written)
+    kept = _kept_written(obstore, store, len(written), earlier, manifest_key)
+    if kept is not None:
+        return kept
+    return _delete_written(obstore, store, written)
+
+
+def _kept_written(
+    obstore: ModuleType, store: Any, count: int, earlier: Optional[bool], manifest_key: str
+) -> Optional[str]:
+    """Why the written objects are kept, or ``None`` when they are to be deleted."""
     plural = "" if count == 1 else "s"
     unchecked = (
         f"; the {count} data object{plural} this delivery had written "
@@ -642,6 +657,13 @@ def _cleanup(
             f"; the manifest of an earlier delivery of this stream is in place, so the {count} "
             f"object{plural} this delivery rewrote with the same bytes were kept"
         )
+    return None
+
+
+def _delete_written(obstore: ModuleType, store: Any, written: List[str]) -> str:
+    """Delete the written keys in order; say what became of them."""
+    count = len(written)
+    plural = "" if count == 1 else "s"
     left = list(written)
     try:
         while left:

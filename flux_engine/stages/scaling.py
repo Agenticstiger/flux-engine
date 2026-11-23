@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any, Dict, FrozenSet, List, Mapping
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 from flux_engine.core.errors import FluxError
 from flux_engine.core.sizing import (
@@ -112,6 +112,35 @@ def _scaled_edges(
     return [format(edge, "f") for edge in moved]
 
 
+def _scaled_bins(
+    name: str,
+    bins: List[Any],
+    bounds: Tuple[Decimal, Decimal, Decimal],
+    scale: Decimal,
+    whole: bool,
+) -> Optional[List[str]]:
+    """The key column's bin edges grown from the low end, or ``None`` when an edge is no number."""
+    low, high, end = bounds
+    try:
+        return _scaled_edges(bins, low, high, end, scale, whole)
+    except InvalidOperation:
+        return None
+    except ValueError:
+        raise FluxError(
+            FLX_3405,
+            f"{scale_text(scale)} leaves the key column {name} fewer values than its "
+            f"{len(bins) - 1} {'bin' if len(bins) == 2 else 'bins'}; use a larger --scale",
+        ) from None
+
+
+def _range_bounds(declared_range: Mapping[str, Any]) -> Optional[Tuple[Decimal, Decimal]]:
+    """The low and high ends of a declared range, or ``None`` when either is no number."""
+    try:
+        return Decimal(str(declared_range["min"])), Decimal(str(declared_range["max"]))
+    except InvalidOperation:
+        return None
+
+
 def _scale_column(
     name: str, declared: Mapping[str, Any], kind: LogicalKind, scale: Decimal
 ) -> Mapping[str, Any]:
@@ -122,11 +151,10 @@ def _scale_column(
     result: Dict[str, Any] = dict(declared)
     declared_range = declared.get("range")
     if isinstance(declared_range, Mapping) and {"min", "max"} <= set(declared_range):
-        try:
-            low = Decimal(str(declared_range["min"]))
-            high = Decimal(str(declared_range["max"]))
-        except InvalidOperation:
+        ends = _range_bounds(declared_range)
+        if ends is None:
             return declared
+        low, high = ends
         end = _scaled_span(low, high, scale, whole=whole)
         if end <= low:
             raise FluxError(
@@ -137,16 +165,10 @@ def _scale_column(
         result["range"] = {**declared_range, "max": format(end, "f")}
         bins = declared.get("bins")
         if isinstance(bins, list):
-            try:
-                result["bins"] = _scaled_edges(bins, low, high, end, scale, whole)
-            except InvalidOperation:
+            edges = _scaled_bins(name, bins, (low, high, end), scale, whole)
+            if edges is None:
                 return declared
-            except ValueError:
-                raise FluxError(
-                    FLX_3405,
-                    f"{scale_text(scale)} leaves the key column {name} fewer values than its "
-                    f"{len(bins) - 1} {'bin' if len(bins) == 2 else 'bins'}; use a larger --scale",
-                ) from None
+            result["bins"] = edges
     return result
 
 

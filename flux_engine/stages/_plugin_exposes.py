@@ -25,7 +25,7 @@ expose in this release, and is refused (``FLX-3105``) rather than supported half
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from flux_engine.core.errors import FluxError
 from flux_engine.expr2.errors import Expr2Error
@@ -125,17 +125,21 @@ def _refuse_own(
     expose = resolved.compile()
     statistics = statistics_from_fidelity(expose, resolved.fidelity)
     for column in expose.columns:
-        given = statistics[column.name]
-        linked = [] if given.given_link is None else [given.given_link[1]]
-        if given.allocation is not None and column.name in names:
-            raise _refusal(
-                here,
-                f"column {column.name!r} declares allocation: exact, and the plugin generates "
-                "its values, so the engine has no levels to allot",
-            )
-        parents = [*given.parents, *linked]
-        if parents and (column.name in names or any(parent in names for parent in parents)):
-            raise _refusal(here, f"column {column.name!r} is drawn given another column")
+        _refuse_column_given(column.name, statistics[column.name], names, here)
+
+
+def _refuse_column_given(name: str, given: Any, names: Set[str], here: str) -> None:
+    """Refuse a column the plugin generates, or one drawn given a column it generates."""
+    linked = [] if given.given_link is None else [given.given_link[1]]
+    if given.allocation is not None and name in names:
+        raise _refusal(
+            here,
+            f"column {name!r} declares allocation: exact, and the plugin generates "
+            "its values, so the engine has no levels to allot",
+        )
+    parents = [*given.parents, *linked]
+    if parents and (name in names or any(parent in names for parent in parents)):
+        raise _refusal(here, f"column {name!r} is drawn given another column")
 
 
 def _paths_of(
@@ -190,6 +194,19 @@ def _refuse_parent_whens(
             )
 
 
+def _refuse_summaries(
+    rules: Optional[RulePlan], plugins: Mapping[str, PluginExpose], here: str
+) -> None:
+    """Refuse a rule that summarises an expose a plugin generates."""
+    for rule in () if rules is None else rules.rules:
+        if rule.summary is not None and rule.summary[0] in plugins:
+            raise _refusal(
+                here,
+                f"rule {rule.id!r} is an aggregate over {rule.summary[0]!r}, an expose a plugin "
+                "generates, whose values are not there when the summary is made",
+            )
+
+
 def _refuse_reads(
     resolved: ResolvedEmit,
     rules: Optional[RulePlan],
@@ -202,13 +219,7 @@ def _refuse_reads(
         return
     paths, weights = _paths_of(resolved, rules)
     here = f"{printable(where)}: emit {resolved.expose_id!r}"
-    for rule in () if rules is None else rules.rules:
-        if rule.summary is not None and rule.summary[0] in plugins:
-            raise _refusal(
-                here,
-                f"rule {rule.id!r} is an aggregate over {rule.summary[0]!r}, an expose a plugin "
-                "generates, whose values are not there when the summary is made",
-            )
+    _refuse_summaries(rules, plugins, here)
     _refuse_parent_whens(resolved, keys, plugins, here)
     for path in paths:
         current = resolved.expose_id
