@@ -230,6 +230,24 @@ _CACHE_LIMIT = 1 << 16
 #: time and a slice run in order reads rows near the last, so the oldest rows are the ones to drop.
 _FINALS_KEPT = 1 << 12
 
+#: An emit that fits in :data:`_FINALS_KEPT` rows is made whole, in one slice, once a process has
+#: worked out one row in this many of it a row at a time (and at least :data:`_FILL_FLOOR` rows):
+#: a slice of one row pays the column pass's fixed cost for a single row, so a process that reads
+#: most of a small parent row by row pays it again and again. This is ski rental: the rows already
+#: bought one by one cost about what the whole emit costs, so renting longer would only lose.
+_FILL_SHARE = 16
+_FILL_FLOOR = 32
+
+
+class _Finals(OrderedDict[int, Tuple[Any, ...]]):
+    """One emit's kept final rows, with what is needed to decide when to make it whole."""
+
+    #: Rows worked out one at a time because they were not kept.
+    singles: int = 0
+    #: Set while the emit is being made whole, so a read inside that pass takes the one-row path.
+    filling: bool = False
+
+
 # The final rows of each emit a run has read, held by the run's root and gone with it. A reader is
 # made for every slice and a row's final value is worked out by a slice of its own, so what a
 # reader kept died with it and a ``previous`` read worked a chain out again for every row.
@@ -245,9 +263,7 @@ def _finals_store() -> "WeakKeyDictionary[SeedTreeRoot, Dict[Tuple[str, str], Tu
     return found
 
 
-def _finals_of(
-    root: SeedTreeRoot, plan: "_rows.GeneratorPlan"
-) -> "OrderedDict[int, Tuple[Any, ...]]":
+def _finals_of(root: SeedTreeRoot, plan: "_rows.GeneratorPlan") -> _Finals:
     """The final rows kept for *plan*'s emit under *root*: nothing another run or plan has seen."""
     store = _finals_store()
     by_emit = store.get(root)
@@ -257,7 +273,7 @@ def _finals_of(
     address = (plan.sim_id, plan.expose.expose_id)
     held = by_emit.get(address)
     if held is None or held[0] is not plan:
-        held = (plan, OrderedDict())
+        held = (plan, _Finals())
         by_emit[address] = held
     return held[1]
 
@@ -1537,6 +1553,14 @@ class RelationReader:
         memo = _finals_of(self.root, plan)
         found = memo.get(row)
         if found is None:
+            memo.singles += 1
+            if (
+                not memo.filling
+                and plan.rows <= _FINALS_KEPT
+                and memo.singles >= max(_FILL_FLOOR, plan.rows // _FILL_SHARE)
+                and self._keep_whole(plan, memo)
+            ):
+                return memo[row]
             found = _rows.generate_row_slice(plan, row, row + 1, root=self.root)[0]
             memo[row] = found
             if len(memo) > _FINALS_KEPT:
@@ -1544,6 +1568,25 @@ class RelationReader:
         else:
             memo.move_to_end(row)
         return found
+
+    def _keep_whole(self, plan: "_rows.GeneratorPlan", memo: _Finals) -> bool:
+        """Make every row of *plan* in one slice and keep them; ``False`` leaves *memo* as it was.
+
+        Row ``i`` of a slice is row ``i`` of any other (SEAM-FIDELITY-SPEC section 1), so these
+        are the rows a slice of one row each would have made. A refusal on a row nothing has read
+        is left to the one-row path, which raises it only for a row that is read.
+        """
+        memo.filling = True
+        try:
+            whole = _rows.generate_row_slice(plan, 0, plan.rows, root=self.root)
+        except FluxError:
+            memo.singles = -(1 << 62)  # do not try again
+            return False
+        finally:
+            memo.filling = False
+        for index, made in enumerate(whole):
+            memo[index] = made
+        return True
 
     def linked_level(self, plan: "_rows.GeneratorPlan", given: LinkedGiven, row: int) -> str:
         """The level the row's link reaches: that of the parent's final value (ADR 0023 section 3).
