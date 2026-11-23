@@ -243,6 +243,11 @@ def test_the_list_of_keys_that_need_1_2_0_is_the_one_the_reader_and_the_writer_u
     from flux_stats import request as module
 
     keys = [(item.section, item.key) for item in module._ADDITIONS_OF_1_2_0]
-    assert keys == [("table", "rankCorrelations"), ("table", "cliqueColumns")]
+    assert keys == [
+        ("table", "rankCorrelations"),
+        ("table", "cliqueColumns"),
+        ("relationship", "groupBy"),
+        ("relationship", "linked"),
+    ]
     assert module._keys_of_1_2_0("table") == ("rankCorrelations", "cliqueColumns")
-    assert module._keys_of_1_2_0("relationship") == ()
+    assert module._keys_of_1_2_0("relationship") == ("groupBy", "linked")

@@ -59,7 +59,10 @@ __all__ = [
     "REQUEST_LIMITS",
     "REQUEST_SCHEMA_URL",
     "REQUEST_SCHEMA_URL_1_1_0",
+    "MOST_RELATIONSHIP_GROUPS",
+    "MOST_RELATIONSHIP_LINKS",
     "REQUEST_SCHEMA_URL_1_2_0",
+    "RequestLinked",
     "ProfileRequest",
     "RequestColumn",
     "RequestDatePair",
@@ -134,6 +137,10 @@ MOST_EXPOSURES = 1024
 #: ``cliqueColumns`` lists (format 1-2-0).
 MOST_RANK_COLUMNS = 64
 MOST_CLIQUE_CANDIDATES = 1024
+#: The most parent columns a relationship's ``groupBy`` lists, and the most column pairs its ``linked``
+#: lists (format 1-2-0).
+MOST_RELATIONSHIP_GROUPS = 64
+MOST_RELATIONSHIP_LINKS = 1024
 MOST_NAME_CHARACTERS = 512
 
 #: What the exact reader may write out of a request: 200 000 values, nested 12 deep,
@@ -201,6 +208,14 @@ class RequestRankCorrelation:
 
 
 @dataclass(frozen=True)
+class RequestLinked:
+    """A column of a relationship's child table grouped by a column of its parent table (format 1-2-0)."""
+
+    column: str
+    parent_column: str
+
+
+@dataclass(frozen=True)
 class RequestTable:
     """One table (a FLUID ``exposeId``): whether its row count is asked, and its columns.
 
@@ -244,6 +259,12 @@ class RequestRelationship:
     dates: Tuple[RequestDateLink, ...] = ()
     #: The parent's lifetime columns whose exposure is asked (format 1-1-0).
     exposure: Tuple[RequestExposure, ...] = ()
+    #: The columns of the parent table the relationship's statistics are grouped by, each once
+    #: (format 1-2-0).
+    group_by: Tuple[str, ...] = ()
+    #: The child columns whose statistics are grouped by a parent column through this relationship,
+    #: each pair once (format 1-2-0).
+    linked: Tuple[RequestLinked, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -494,14 +515,20 @@ def _end(value: Any, where: str, tables: Mapping[str, RequestTable]) -> RequestE
 
 
 def _relationship(
-    value: Any, where: str, tables: Mapping[str, RequestTable], *, dated: bool
+    value: Any,
+    where: str,
+    tables: Mapping[str, RequestTable],
+    *,
+    dated: bool,
+    from_1_2_0: bool = True,
 ) -> RequestRelationship:
     raw = _mapping(
         value,
         where,
         required=("parent", "child", "statistics"),
-        optional=("dates", "exposure") if dated else (),
+        optional=(("dates", "exposure") if dated else ()) + _keys_of_1_2_0("relationship"),
     )
+    _needs_1_2_0(from_1_2_0, raw, where, "relationship")
     parent = _end(raw["parent"], f"{where}.parent", tables)
     child = _end(raw["child"], f"{where}.child", tables)
     if len(parent.columns) != len(child.columns):
@@ -522,7 +549,15 @@ def _relationship(
     )
     _distinct([f"{item.start}\n{item.end}" for item in exposures], f"{where}.exposure")
     return RequestRelationship(
-        parent=parent, child=child, statistics=statistics, dates=links, exposure=exposures
+        parent=parent,
+        child=child,
+        statistics=statistics,
+        dates=links,
+        exposure=exposures,
+        group_by=_group_by(raw.get("groupBy", []), f"{where}.groupBy", tables[parent.table]),
+        linked=_linked(
+            raw.get("linked", []), f"{where}.linked", tables[parent.table], tables[child.table]
+        ),
     )
 
 
@@ -586,7 +621,9 @@ def parse_request(document: Any) -> ProfileRequest:
         for name in sorted(declared)
     }
     relationships = tuple(
-        _relationship(item, f"request.relationships[{index}]", tables, dated=dated)
+        _relationship(
+            item, f"request.relationships[{index}]", tables, dated=dated, from_1_2_0=from_1_2_0
+        )
         for index, item in enumerate(
             _list(raw.get("relationships", []), "request.relationships", most=MOST_RELATIONSHIPS)
         )
@@ -674,6 +711,16 @@ def check_request(request: ProfileRequest) -> None:
         _bounded(
             len(relationship.exposure), MOST_EXPOSURES, f"request.relationships[{index}].exposure"
         )
+        _bounded(
+            len(relationship.group_by),
+            MOST_RELATIONSHIP_GROUPS,
+            f"request.relationships[{index}].groupBy",
+        )
+        _bounded(
+            len(relationship.linked),
+            MOST_RELATIONSHIP_LINKS,
+            f"request.relationships[{index}].linked",
+        )
     for fact in request.facts:
         where = f"request fact {fact.name!r}"
         _name(fact.name, where)
@@ -754,6 +801,12 @@ def _relationship_document(entry: RequestRelationship) -> Dict[str, Any]:
         item["exposure"] = [
             {"start": each.start} if each.end is None else {"start": each.start, "end": each.end}
             for each in entry.exposure
+        ]
+    if entry.group_by:
+        item["groupBy"] = list(entry.group_by)
+    if entry.linked:
+        item["linked"] = [
+            {"column": each.column, "parentColumn": each.parent_column} for each in entry.linked
         ]
     return item
 
@@ -922,6 +975,8 @@ class _Addition:
 _ADDITIONS_OF_1_2_0: Tuple[_Addition, ...] = (
     _Addition("table", "rankCorrelations", lambda table: bool(table.rank_correlations)),
     _Addition("table", "cliqueColumns", lambda table: bool(table.clique_columns)),
+    _Addition("relationship", "groupBy", lambda relationship: bool(relationship.group_by)),
+    _Addition("relationship", "linked", lambda relationship: bool(relationship.linked)),
 )
 
 #: Every format this reader reads, oldest first.
@@ -992,6 +1047,42 @@ def _clique_columns(value: Any, where: str, columns: Sequence[RequestColumn]) ->
         if name not in known:
             raise _refuse(f"{where}[{position}]", "names no column of this table")
     return names
+
+
+def _group_by(value: Any, where: str, parent: RequestTable) -> Tuple[str, ...]:
+    """A relationship's ``groupBy``: columns of the parent table, each once, at most 64."""
+    names = _names(value, where, most=MOST_RELATIONSHIP_GROUPS)
+    _distinct(names, where)
+    known = {column.name for column in parent.columns}
+    for position, name in enumerate(names):
+        if name not in known:
+            raise _refuse(
+                f"{where}[{position}]", "names no column of the relationship's parent table"
+            )
+    return names
+
+
+def _linked(
+    value: Any, where: str, parent: RequestTable, child: RequestTable
+) -> Tuple[RequestLinked, ...]:
+    """A relationship's ``linked``: a child column and a parent column, each pair once, at most 1,024."""
+    found: List[RequestLinked] = []
+    parent_columns = {column.name for column in parent.columns}
+    child_columns = {column.name for column in child.columns}
+    for index, item in enumerate(_list(value, where, most=MOST_RELATIONSHIP_LINKS)):
+        here = f"{where}[{index}]"
+        raw = _mapping(item, here, required=("column", "parentColumn"))
+        column = _name(raw["column"], f"{here}.column")
+        parent_column = _name(raw["parentColumn"], f"{here}.parentColumn")
+        if column not in child_columns:
+            raise _refuse(f"{here}.column", "names no column of the relationship's child table")
+        if parent_column not in parent_columns:
+            raise _refuse(
+                f"{here}.parentColumn", "names no column of the relationship's parent table"
+            )
+        found.append(RequestLinked(column=column, parent_column=parent_column))
+    _distinct([f"{entry.column}\n{entry.parent_column}" for entry in found], where)
+    return tuple(found)
 
 
 def _needs_1_1_0(additions: bool, where: str) -> None:
