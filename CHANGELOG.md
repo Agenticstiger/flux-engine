@@ -20,19 +20,7 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## 0.10.0 - 2026-11-23
-
-This release lets a Simulation link tables, copy a column from a linked row and publish a catalogue whole; lay a
-relationship's child rows out by exact counts per parent and allot a column's classes exactly; give dates a lifetime,
-seasonal rates and a calendar; give an entity a history that projects into other tables; declare the SQL its consumers
-run, check it and calibrate to it; make and score forecasts of the next state; overlay a profile with a named scenario;
-and generate through a plugin, publish to object stores, Iceberg and Delta Lake, and tell one entity's story from a run.
-It also ships eight agent skills with a plugin that installs them. flux-stats 0.10.0 is released with it, and the engine
-requires the line `>=0.10,<0.11`.
-
-It moves four formats, each additively, so a document of the earlier format reads as before and a run that uses nothing
-new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, scorecard `1-4-0` and parameter register
-`1-3-0`.
+## Unreleased
 
 ### Security
 
@@ -76,7 +64,19 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 
 - KERNEL-SPEC-2 sections 8.1 and 8.3 say that a plan using a counted layout or an exact allocation replays only on engine 0.10.0 and later, and why the kernel version did not move.
 
-## Unreleased
+## 0.10.0 - 2026-11-23
+
+This release lets a Simulation link tables, copy a column from a linked row and publish a catalogue whole; lay a
+relationship's child rows out by exact counts per parent and allot a column's classes exactly; give dates a lifetime,
+seasonal rates and a calendar; give an entity a history that projects into other tables; declare the SQL its consumers
+run, check it and calibrate to it; make and score forecasts of the next state; overlay a profile with a named scenario;
+and generate through a plugin, publish to object stores, Iceberg and Delta Lake, and tell one entity's story from a run.
+It also ships eight agent skills with a plugin that installs them. flux-stats 0.10.0 is released with it, and the engine
+requires the line `>=0.10,<0.11`.
+
+It moves four formats, each additively, so a document of the earlier format reads as before and a run that uses nothing
+new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, scorecard `1-4-0` and parameter register
+`1-3-0`.
 
 ### Added
 
