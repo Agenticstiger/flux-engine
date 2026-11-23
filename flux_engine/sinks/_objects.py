@@ -16,10 +16,24 @@ shows. A trailing ``/`` is dropped. An object's key is the prefix, a ``/`` and t
 relative name a local target would use, and is checked to start with the prefix and
 a ``/`` before it is used.
 
+**An ADLS Gen2 target** is also written ``abfs://CONTAINER@ACCOUNT.dfs.core.windows.net/PREFIX``
+(``az://`` takes the same form): the part before the ``@`` is the container, the account is
+the first label of the host, which must end in ``.dfs.core.windows.net``, and the path is the
+prefix. The form is checked as strictly as a bucket name, so the ``@`` carries no credential.
+
 **Credentials and endpoints are never passed on.** The store is built by
-``obstore.store.from_url("<scheme>://<bucket>")`` with no credential, configuration
-or client option, so obstore reads them from the person's environment. No credential
-sink option reaches obstore.
+``obstore.store.from_url("<scheme>://<bucket>")`` with no credential or endpoint, so obstore
+reads them from the person's environment. No credential sink option reaches obstore. The
+only things the engine sets on the client are the timeouts and the retry budget a person
+asks for with ``request-timeout``, ``connect-timeout``, ``max-retries`` and
+``retry-timeout`` (:class:`ObjectTuning`); with none of them obstore's own defaults apply
+(a 30 second request timeout, 10 retries over at most 3 minutes).
+
+**A failed upload cleans up after itself.** The manifest is uploaded last and commits the
+stream. When an upload fails, the data objects this delivery had written are deleted, best
+effort and by their exact keys, unless the manifest of an earlier delivery of the same
+stream is already in place (it names the same objects with the same bytes, so they are kept).
+The error says what was deleted and which keys remain.
 
 **No metadata probe by default.** With no explicit credential in the environment
 (:func:`explicit_credentials`), the store would fall back to the cloud's instance
@@ -38,9 +52,10 @@ import importlib
 import os
 import re
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path, PurePosixPath
 from types import ModuleType
-from typing import Any, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from flux_engine.core.errors import FluxError
 from flux_engine.core.target_label import target_label
@@ -53,8 +68,11 @@ from flux_engine.sinks.errors import FLX_3504, FLX_3505, FLX_3510
 __all__ = [
     "INSTANCE_IDENTITY_OPTION",
     "OBJECT_SCHEMES",
+    "TUNING_OPTIONS",
     "ObjectLocation",
+    "ObjectTuning",
     "Upload",
+    "adls_gen2_target",
     "explicit_credentials",
     "instance_identity_option",
     "is_object_target",
@@ -64,6 +82,7 @@ __all__ = [
     "require_explicit_credentials",
     "require_obstore",
     "require_plain_segment",
+    "tuning_option",
     "upload_files",
 ]
 
@@ -75,11 +94,86 @@ OBJECT_SCHEMES: Tuple[str, ...] = ("s3", "gs", "az", "abfs")
 #: Not named like a credential, which the registry would refuse.
 INSTANCE_IDENTITY_OPTION = "instance-identity"
 
+#: The ``--sink-opt`` keys that tune the object store client, as the command line spells them.
+TUNING_OPTIONS: Tuple[str, ...] = (
+    "connect-timeout",
+    "max-retries",
+    "request-timeout",
+    "retry-timeout",
+)
+
 _SCHEME = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*)://")
+#: The host of an ADLS Gen2 account: the account name, then ``.dfs.core.windows.net``.
+_ADLS_HOST = re.compile(r"^([a-z0-9]{3,24})\.dfs\.core\.windows\.net$")
+#: The schemes that take the ``CONTAINER@ACCOUNT.dfs.core.windows.net`` form.
+_ADLS_SCHEMES = ("abfs", "az")
 #: A bucket or container name: letters, digits, ``.``, ``_`` and ``-``.
 _BUCKET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 #: A percent-encoded ``/``, ``\`` or ``.``, in either case.
 _ENCODED_SEPARATOR = re.compile(r"%(?:2f|5c|2e)", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ObjectTuning:
+    """The client settings a person may change: whole seconds, and a retry count.
+
+    ``None`` leaves obstore's own default (a 30 second request timeout, no connect timeout
+    of its own, 10 retries within 3 minutes). ``retry_timeout`` bounds the whole time spent
+    retrying one request, so it is what shortens the wait for an endpoint that never answers.
+    """
+
+    request_timeout: Optional[int] = None
+    connect_timeout: Optional[int] = None
+    max_retries: Optional[int] = None
+    retry_timeout: Optional[int] = None
+
+    def client_options(self) -> Dict[str, Any]:
+        """obstore's ``client_options`` for these settings: only the ones that were set."""
+        options: Dict[str, Any] = {}
+        if self.request_timeout is not None:
+            options["timeout"] = timedelta(seconds=self.request_timeout)
+        if self.connect_timeout is not None:
+            options["connect_timeout"] = timedelta(seconds=self.connect_timeout)
+        return options
+
+    def retry_config(self) -> Dict[str, Any]:
+        """obstore's ``retry_config`` for these settings: only the ones that were set."""
+        config: Dict[str, Any] = {}
+        if self.max_retries is not None:
+            config["max_retries"] = self.max_retries
+        if self.retry_timeout is not None:
+            config["retry_timeout"] = timedelta(seconds=self.retry_timeout)
+        return config
+
+
+#: No tuning: obstore's own defaults.
+NO_TUNING = ObjectTuning()
+
+#: The longest timeout, in seconds, and the most retries an option may ask for.
+_MAX_SECONDS = 3600
+_MAX_RETRIES = 100
+
+
+def _whole_number(
+    options: Mapping[str, str], key: str, low: int, high: int, what: str
+) -> Optional[int]:
+    raw = options.get(key)
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text.isascii() or not text.isdigit() or not low <= int(text) <= high:
+        raise FluxError(FLX_3504, f"{key} must be {what} from {low} to {high}, got {raw!r}")
+    return int(text)
+
+
+def tuning_option(options: Mapping[str, str]) -> ObjectTuning:
+    """The :data:`TUNING_OPTIONS` of *options*; ``FLX-3504`` naming the option that is out of range."""
+    return ObjectTuning(
+        request_timeout=_whole_number(options, "request-timeout", 1, _MAX_SECONDS, "seconds"),
+        connect_timeout=_whole_number(options, "connect-timeout", 1, _MAX_SECONDS, "seconds"),
+        max_retries=_whole_number(options, "max-retries", 0, _MAX_RETRIES, "a number of retries"),
+        retry_timeout=_whole_number(options, "retry-timeout", 1, _MAX_SECONDS, "seconds"),
+    )
 
 
 @dataclass(frozen=True)
@@ -91,15 +185,25 @@ class ObjectLocation:
     prefix: str
     #: Whether the person opted in to the instance's or the workload's own credentials.
     instance_identity: bool = False
+    #: The storage account, for the ADLS Gen2 form ``CONTAINER@ACCOUNT.dfs.core.windows.net``.
+    account: Optional[str] = None
+    #: The timeouts and retry budget the person asked for; empty leaves obstore's defaults.
+    tuning: ObjectTuning = ObjectTuning()
 
     @property
     def store_url(self) -> str:
         """What the store is built from: the scheme and the bucket, never the prefix."""
+        if self.account is not None:
+            return f"{self.scheme}://{self.bucket}@{self.account}.dfs.core.windows.net"
         return f"{self.scheme}://{self.bucket}"
 
     @property
     def url(self) -> str:
-        """The target as the receipt records it: its label, so the key prefix stays whole."""
+        """The target as the receipt records it: its label, so the key prefix stays whole.
+
+        The ADLS form is labelled like any other URL: the container before the ``@`` is user
+        information to the label and is written ``…``.
+        """
         return target_label(self.scheme, f"{self.store_url}/{self.prefix}")
 
     def key(self, relative: str) -> str:
@@ -149,7 +253,27 @@ def refuse_unsupported_scheme(sink: str, target: str) -> None:
         )
 
 
-def parse_object_target(target: str, *, instance_identity: bool = False) -> ObjectLocation:
+def adls_gen2_target(target: str) -> bool:
+    """Whether *target* is the ADLS Gen2 form ``abfs://CONTAINER@ACCOUNT.dfs.core.windows.net[/...]``.
+
+    Only that exact shape: a container name, an account host and a path with no query or
+    fragment. Its ``@`` is not user information, so the credential check lets it through.
+    """
+    match = _SCHEME.match(target)
+    if match is None or match.group(1).lower() not in _ADLS_SCHEMES:
+        return False
+    rest = target[match.end() :]
+    if "?" in rest or "#" in rest:
+        return False
+    container, at, host = rest.partition("/")[0].partition("@")
+    return (
+        bool(at) and _BUCKET.fullmatch(container) is not None and _ADLS_HOST.match(host) is not None
+    )
+
+
+def parse_object_target(
+    target: str, *, instance_identity: bool = False, tuning: ObjectTuning = NO_TUNING
+) -> ObjectLocation:
     """Check *target* and split it into scheme, bucket and prefix; ``FLX-3510`` if unusable."""
     match = _SCHEME.match(target)
     if match is None or match.group(1).lower() not in OBJECT_SCHEMES:
@@ -159,6 +283,16 @@ def parse_object_target(target: str, *, instance_identity: bool = False) -> Obje
     scheme = match.group(1).lower()
     bucket, _, path = target[match.end() :].partition("/")
     shown = target_label(scheme, target)
+    account: Optional[str] = None
+    if adls_gen2_target(target):
+        bucket, _, host = bucket.partition("@")
+        account = _ADLS_HOST.match(host).group(1)  # type: ignore[union-attr]
+    elif "@" in bucket or bucket.endswith(".dfs.core.windows.net"):
+        raise FluxError(
+            FLX_3510,
+            f"{shown!r} names no usable container: for ADLS Gen2 write "
+            f"{scheme}://CONTAINER@ACCOUNT.dfs.core.windows.net/PREFIX",
+        )
     if _BUCKET.fullmatch(bucket) is None:
         raise FluxError(
             FLX_3510, f"{shown!r} names no usable bucket or container: {scheme}://BUCKET/PREFIX"
@@ -189,6 +323,8 @@ def parse_object_target(target: str, *, instance_identity: bool = False) -> Obje
         bucket=bucket,
         prefix="/".join(segments),
         instance_identity=instance_identity,
+        account=account,
+        tuning=tuning,
     )
 
 
@@ -385,6 +521,16 @@ def require_explicit_credentials(location: ObjectLocation, *, library: str = "ob
     )
 
 
+#: A failure that comes of waiting on an endpoint that is slow or does not answer.
+_SLOW_FAILURE = re.compile(r"timed? ?out|timeout|retries|deadline", re.IGNORECASE)
+
+_WAIT_HINT = (
+    "An endpoint that does not answer is retried for up to 3 minutes before this error; to give "
+    "up sooner pass --sink-opt retry-timeout=SECONDS, and tune --sink-opt max-retries=N, "
+    "request-timeout=SECONDS and connect-timeout=SECONDS"
+)
+
+
 def _failure(what: str, exc: BaseException, location: ObjectLocation) -> FluxError:
     """``FLX-3505`` for a store failure: the first line scrubbed, and a remedy when settings are to blame.
 
@@ -394,10 +540,13 @@ def _failure(what: str, exc: BaseException, location: ObjectLocation) -> FluxErr
     detail = (scrub(str(exc), known, sink=location.scheme).strip().splitlines() or [""])[0][:300]
     kind = type(exc).__name__
     text = f"{what}: {kind}{': ' + printable(detail) if detail else ''}"
-    if kind in ("UnauthenticatedError", "PermissionDeniedError") or _SETTINGS_FAILURE.search(
-        f"{kind} {detail}"
-    ):
+    settings = kind in ("UnauthenticatedError", "PermissionDeniedError") or bool(
+        _SETTINGS_FAILURE.search(f"{kind} {detail}")
+    )
+    if settings:
         text += f". To fix the store's settings, {_REMEDY[location.scheme]}"
+    if settings or _SLOW_FAILURE.search(f"{kind} {detail}"):
+        text += f". {_WAIT_HINT}"
     return FluxError(FLX_3505, text)
 
 
@@ -407,32 +556,102 @@ def open_store(location: ObjectLocation) -> Any:
     Building reads the environment and makes no request, so a setting that is missing or
     malformed (an Azure target with no account) fails here, before any row is generated.
     A credential that is wrong only shows on the first request. ``FLX-3505`` on failure.
+    The client's timeouts and retry budget are set only when the person asked for them.
     """
     require_obstore()
     require_explicit_credentials(location)
+    options: Dict[str, Any] = {}
+    client = location.tuning.client_options()
+    retry = location.tuning.retry_config()
+    if client:
+        options["client_options"] = client
+    if retry:
+        options["retry_config"] = retry
     try:
-        return importlib.import_module("obstore.store").from_url(location.store_url)
+        return importlib.import_module("obstore.store").from_url(location.store_url, **options)
     except Exception as exc:  # noqa: BLE001
         raise _failure(
             f"the object store for {printable(location.url)} could not be set up", exc, location
         ) from None
 
 
+#: How many keys a message lists before it counts the rest.
+_LISTED_KEYS = 5
+
+
+def _present(obstore: ModuleType, store: Any, key: str) -> bool:
+    """Whether the object *key* exists; a failure other than "not found" is the caller's."""
+    # obstore raises the builtin FileNotFoundError for a missing object.
+    not_found = (FileNotFoundError, importlib.import_module("obstore.exceptions").NotFoundError)
+    try:
+        obstore.head(store, key)
+    except not_found:
+        return False
+    return True
+
+
+def _cleanup(obstore: ModuleType, store: Any, written: List[str], earlier: bool) -> str:
+    """Delete the objects this delivery wrote, best effort; say what became of them.
+
+    Only the exact keys that were written are touched. The first failed delete ends the
+    cleanup, because an endpoint that refuses one request is not asked for the rest, and the
+    keys not yet deleted are named. An earlier complete delivery of the stream is never undone.
+    """
+    if not written:
+        return ""
+    count = len(written)
+    plural = "" if count == 1 else "s"
+    if earlier:
+        return (
+            f"; the manifest of an earlier delivery of this stream is in place, so the {count} "
+            f"object{plural} this delivery rewrote with the same bytes were kept"
+        )
+    left = list(written)
+    try:
+        while left:
+            obstore.delete(store, left[0])
+            left.pop(0)
+    except Exception:  # noqa: BLE001
+        shown = ", ".join(left[:_LISTED_KEYS]) + (
+            f" and {len(left) - _LISTED_KEYS} more" if len(left) > _LISTED_KEYS else ""
+        )
+        done = count - len(left)
+        return (
+            f"; the cleanup of the data objects this delivery had written stopped after "
+            f"{done} of {count}: {len(left)} could not be deleted and remain without a manifest "
+            f"({shown}), so delete them or publish the stream again"
+        )
+    verb = "was" if count == 1 else "were"
+    return (
+        f"; the {count} data object{plural} this delivery had written {verb} deleted, "
+        "so none is left without a manifest"
+    )
+
+
 def upload_files(location: ObjectLocation, uploads: Iterable[Upload]) -> str:
     """Upload each file in order; return the writer, ``obstore <version>``.
 
-    The store is built from the scheme and the bucket alone, so obstore takes its
-    credentials and endpoint from the environment. A failure is the engine's own
-    ``FLX-3505``, its message scrubbed and the writer's exception not chained.
+    The last upload is the manifest, which commits the stream. The store is built from the
+    scheme and the bucket alone, so obstore takes its credentials and endpoint from the
+    environment. A failure is the engine's own ``FLX-3505``, its message scrubbed and the
+    writer's exception not chained; the data objects this delivery had written before it are
+    deleted, best effort (:func:`_cleanup`), and the message says what became of them.
     """
     obstore = require_obstore()
     batch = tuple(uploads)
     for item in batch:
         require_key_in_prefix(item.key, location.prefix)
     store = open_store(location)
+    written: List[str] = []
+    earlier = False
     try:
+        earlier = bool(batch) and _present(obstore, store, batch[-1].key)
         for item in batch:
             obstore.put(store, item.key, item.path)
+            written.append(item.key)
     except Exception as exc:  # noqa: BLE001
-        raise _failure(f"uploading to {printable(location.url)} failed", exc, location) from None
+        failure = _failure(f"uploading to {printable(location.url)} failed", exc, location)
+        raise FluxError(
+            FLX_3505, failure.detail + _cleanup(obstore, store, written, earlier)
+        ) from None
     return f"obstore {obstore.__version__}"

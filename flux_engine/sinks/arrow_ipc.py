@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Dict, Mapping, Optional, Sequen
 from flux_engine.core.errors import FluxError
 from flux_engine.sinks._columnar import ColumnarFileSink, FileTarget
 from flux_engine.sinks._files import load_manifest
-from flux_engine.sinks._objects import ObjectLocation, instance_identity_option
+from flux_engine.sinks._objects import ObjectLocation, instance_identity_option, tuning_option
 from flux_engine.sinks._options import bool_option, int_option, require_known, text_option
 from flux_engine.sinks.arrow import DEFAULT_BATCH_SIZE, pa
 from flux_engine.sinks.errors import FLX_3504
@@ -33,7 +33,17 @@ if TYPE_CHECKING:  # pragma: no cover - annotations only
 __all__ = ["OPTIONS", "ArrowIpcSink", "read_files", "read_stream", "target"]
 
 #: The options ``--sink-opt`` may set, as the command line spells them.
-OPTIONS = ("batch-size", "compression", "instance-identity", "rows-per-file", "verify")
+OPTIONS = (
+    "batch-size",
+    "compression",
+    "connect-timeout",
+    "instance-identity",
+    "max-retries",
+    "request-timeout",
+    "retry-timeout",
+    "rows-per-file",
+    "verify",
+)
 
 _CODECS = ("zstd", "lz4", "none")
 
@@ -118,6 +128,7 @@ def target(directory: str, options: Mapping[str, str]) -> FileTarget:
         directory=directory,
         sink_class=ArrowIpcSink,
         instance_identity=instance_identity_option(options),
+        tuning=tuning_option(options),
         settings={
             "compression": text_option(options, "compression", "zstd"),
             "rows_per_file": int_option(options, "rows-per-file", None),

@@ -276,18 +276,29 @@ def test_the_options_stay_closed(kind: str) -> None:
     assert "endpoint" not in module.OPTIONS
     with pytest.raises(FluxError):
         TARGETS[kind]("s3://b/p", {"endpoint": "http://elsewhere"})
-    assert module.OPTIONS == (
-        (
-            "batch-size",
-            "compression",
-            "compression-level",
-            "instance-identity",
-            "row-group-size",
-            "rows-per-file",
-            "verify",
+    tuning = ("connect-timeout", "max-retries", "request-timeout", "retry-timeout")
+    assert module.OPTIONS == tuple(
+        sorted(
+            (
+                "batch-size",
+                "compression",
+                "compression-level",
+                "instance-identity",
+                "row-group-size",
+                "rows-per-file",
+                "verify",
+                *tuning,
+            )
+            if kind == "parquet"
+            else (
+                "batch-size",
+                "compression",
+                "instance-identity",
+                "rows-per-file",
+                "verify",
+                *tuning,
+            )
         )
-        if kind == "parquet"
-        else ("batch-size", "compression", "instance-identity", "rows-per-file", "verify")
     )
 
 
@@ -470,3 +481,259 @@ def test_a_failed_publish_of_an_apply_without_a_run_id_says_which_run_was_kept(
         f"fluxsim apply {FIXTURE} --run-id {run_id} --sink parquet:s3://b/p --state-dir {state}"
     )
     assert command in err
+
+
+# ---------------------------------------------------------------------------
+# The ADLS Gen2 form: abfs://CONTAINER@ACCOUNT.dfs.core.windows.net/PREFIX
+# ---------------------------------------------------------------------------
+
+ADLS = "abfs://data@acct1.dfs.core.windows.net/sims/a"
+
+
+def test_the_adls_gen2_form_maps_container_account_and_prefix() -> None:
+    location = parse_object_target(ADLS)
+    assert (location.scheme, location.bucket, location.account, location.prefix) == (
+        "abfs",
+        "data",
+        "acct1",
+        "sims/a",
+    )
+    assert location.store_url == "abfs://data@acct1.dfs.core.windows.net"
+    assert location.url == ADLS
+    assert location.key("e/f.parquet") == "sims/a/e/f.parquet"
+    # obstore reads the same container and account from what the engine hands it.
+    store = obstore_store.from_url(location.store_url)
+    assert store.config["container_name"] == "data"
+    assert store.config["account_name"] == "acct1"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "abfs://@acct1.dfs.core.windows.net/p",
+        "abfs://acct1.dfs.core.windows.net/p",
+        "abfs://data@example.com/p",
+        "abfs://data@acct1.dfs.core.windows.net:8080/p",
+        "abfs://data@ac.dfs.core.windows.net/p",
+        "abfs://da ta@acct1.dfs.core.windows.net/p",
+        "abfs://data@acct1.dfs.core.windows.net",
+        "abfs://data@acct1.dfs.core.windows.net/a/../b",
+        "s3://data@acct1.dfs.core.windows.net/p",
+    ],
+)
+def test_a_form_that_names_no_container_or_account_is_still_refused(target: str) -> None:
+    with pytest.raises(FluxError) as caught:
+        parse_object_target(target)
+    assert caught.value.code.code == "FLX-3510"
+
+
+def test_the_adls_form_passes_the_credential_check_and_is_delivered(
+    kind: str, from_url: FromUrl
+) -> None:
+    stream = Stream(5)
+    sink = TARGETS[kind](ADLS, {}).sink_for(stream.context)
+    receipt = _deliver(sink, stream.header, stream.rows)
+    assert receipt is not None and receipt.target == ADLS
+    assert all(call == (("abfs://data@acct1.dfs.core.windows.net",), {}) for call in from_url.calls)
+    assert all(key.startswith("sims/a/") for key in _stored(from_url.store))
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "abfs://data:pw@acct1.dfs.core.windows.net/p",
+        "abfs://data@acct1.dfs.core.windows.net/p?sig=abc",
+        "abfs://data@acct1.dfs.core.windows.net/p#frag",
+        "abfs://data@example.com/p",
+    ],
+)
+def test_user_information_is_still_refused_beside_the_adls_form(
+    target: str, from_url: FromUrl
+) -> None:
+    with pytest.raises(FluxError) as caught:
+        registry.open_target(f"parquet:{target}")
+    assert caught.value.code.code in ("FLX-3509", "FLX-3510")
+    assert from_url.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Tuning the client: timeouts and retries
+# ---------------------------------------------------------------------------
+
+
+def test_the_client_options_reach_the_store(kind: str, from_url: FromUrl) -> None:
+    from datetime import timedelta
+
+    TARGETS[kind](
+        "s3://bucket/p",
+        {
+            "request-timeout": "20",
+            "connect-timeout": "5",
+            "max-retries": "2",
+            "retry-timeout": "30",
+        },
+    )
+    assert from_url.calls[-1] == (
+        ("s3://bucket",),
+        {
+            "client_options": {
+                "timeout": timedelta(seconds=20),
+                "connect_timeout": timedelta(seconds=5),
+            },
+            "retry_config": {"max_retries": 2, "retry_timeout": timedelta(seconds=30)},
+        },
+    )
+
+
+def test_a_zero_retry_budget_turns_retries_off(from_url: FromUrl) -> None:
+    parquet.target("s3://bucket/p", {"max-retries": "0"})
+    assert from_url.calls[-1][1] == {"retry_config": {"max_retries": 0}}
+
+
+def test_obstore_itself_accepts_the_options_the_engine_passes() -> None:
+    from datetime import timedelta
+
+    store = obstore_store.from_url(
+        "s3://bucket",
+        client_options={"timeout": timedelta(seconds=20), "connect_timeout": timedelta(seconds=5)},
+        retry_config={"max_retries": 2, "retry_timeout": timedelta(seconds=30)},
+        config={"region": "us-east-1"},
+    )
+    assert type(store).__name__ == "S3Store"
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("request-timeout", "0"),
+        ("connect-timeout", "-3"),
+        ("retry-timeout", "soon"),
+        ("request-timeout", "99999"),
+        ("max-retries", "-1"),
+        ("max-retries", "many"),
+        ("max-retries", "1000"),
+    ],
+)
+def test_a_bad_tuning_option_is_refused_by_name(kind: str, option: str, value: str) -> None:
+    with pytest.raises(FluxError) as caught:
+        TARGETS[kind]("s3://bucket/p", {option: value})
+    assert caught.value.code.code == "FLX-3504" and option in str(caught.value)
+
+
+def test_a_tuning_option_on_a_local_directory_is_refused(kind: str, tmp_path: Path) -> None:
+    with pytest.raises(FluxError) as caught:
+        TARGETS[kind](str(tmp_path), {"retry-timeout": "10"})
+    assert caught.value.code.code == "FLX-3504" and "object store" in str(caught.value)
+    assert not list(tmp_path.iterdir())
+
+
+def test_the_failure_message_says_how_to_shorten_the_wait(
+    from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("error sending request for url (https://x.example/): timed out")
+
+    monkeypatch.setattr(obstore, "put", refuse)
+    with pytest.raises(FluxError) as caught:
+        upload_files(ObjectLocation("s3", "b", "p"), [Upload(Path(__file__), "p/x")])
+    text = str(caught.value)
+    assert "retry-timeout" in text and "max-retries" in text and "3 minutes" in text
+
+
+# ---------------------------------------------------------------------------
+# A failed upload and the objects it already wrote
+# ---------------------------------------------------------------------------
+
+
+class Flaky:
+    """``obstore.put`` and ``delete`` that fail on chosen calls, over a real in-memory store."""
+
+    def __init__(
+        self, monkeypatch: pytest.MonkeyPatch, *, put_fails_on: int, delete_fails: bool = False
+    ) -> None:
+        self.puts = 0
+        self.put_fails_on = put_fails_on
+        self.delete_fails = delete_fails
+        self.deletes: List[str] = []
+        real_put, real_delete = obstore.put, obstore.delete
+        flaky = self
+
+        def put(store: Any, key: str, data: Any, **kwargs: Any) -> Any:
+            flaky.puts += 1
+            if flaky.puts == flaky.put_fails_on:
+                raise RuntimeError("Error performing PUT: connection closed")
+            return real_put(store, key, data, **kwargs)
+
+        def delete(store: Any, key: Any, **kwargs: Any) -> Any:
+            flaky.deletes.append(key)
+            if flaky.delete_fails:
+                raise RuntimeError("Error performing DELETE: connection closed")
+            return real_delete(store, key, **kwargs)
+
+        monkeypatch.setattr(obstore, "put", put)
+        monkeypatch.setattr(obstore, "delete", delete)
+
+
+def _failing_delivery(kind: str, rows: int = 40) -> FluxError:
+    stream = Stream(rows)
+    sink = TARGETS[kind]("s3://bucket/p", {"rows-per-file": "10"}).sink_for(stream.context)
+    with pytest.raises(FluxError) as caught:
+        _deliver(sink, stream.header, stream.rows)
+    assert sink.receipt is None
+    return caught.value
+
+
+def test_a_failed_upload_deletes_the_data_objects_it_wrote(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flaky = Flaky(monkeypatch, put_fails_on=3)
+    error = _failing_delivery(kind)
+    assert error.code.code == "FLX-3505"
+    assert "2 data objects this delivery had written were deleted" in str(error)
+    assert _stored(from_url.store) == {}
+    assert len(flaky.deletes) == 2
+
+
+def test_a_failed_manifest_upload_deletes_every_data_object(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    Flaky(monkeypatch, put_fails_on=5)  # four data files, then the manifest
+    error = _failing_delivery(kind)
+    assert "4 data objects this delivery had written were deleted" in str(error)
+    assert _stored(from_url.store) == {}
+
+
+def test_a_cleanup_that_fails_names_the_keys_that_remain(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flaky = Flaky(monkeypatch, put_fails_on=3, delete_fails=True)
+    error = _failing_delivery(kind)
+    text = str(error)
+    left = sorted(_stored(from_url.store))
+    assert len(left) == 2
+    assert "could not be deleted" in text
+    for key in left:
+        assert key in text
+    assert len(flaky.deletes) == 1, "one failed delete stops the cleanup: the endpoint is down"
+
+
+def test_a_complete_earlier_delivery_is_never_cleaned_up(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stream = Stream(40)
+    sink = TARGETS[kind]("s3://bucket/p", {"rows-per-file": "10"}).sink_for(stream.context)
+    assert _deliver(sink, stream.header, stream.rows) is not None
+    before = _stored(from_url.store)
+    flaky = Flaky(monkeypatch, put_fails_on=3)
+    error = _failing_delivery(kind)
+    assert _stored(from_url.store) == before
+    assert flaky.deletes == []
+    assert "earlier delivery" in str(error) and "kept" in str(error)
+
+
+def test_a_failure_before_anything_is_written_has_nothing_to_clean_up(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flaky = Flaky(monkeypatch, put_fails_on=1)
+    error = _failing_delivery(kind)
+    assert flaky.deletes == [] and "deleted" not in str(error)

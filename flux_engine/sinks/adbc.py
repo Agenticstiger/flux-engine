@@ -391,6 +391,20 @@ class AdbcSink:
             return shown
         return f"{self.dialect.name}:{shown}"
 
+    def _target_id(self) -> Optional[str]:
+        """A short digest of the uri's label, when a variable holds it.
+
+        The target prints as ``sqlite:$NAME`` whatever the variable holds, so this is what
+        tells two deliveries through one name apart. It is made of the label the receipt would
+        show for a uri given outright (:func:`~flux_engine.core.target_label.target_label`),
+        never of the credentials, and never of the variable.
+        """
+        if not (self.uri and self.uri_env):
+            return None
+        return digest_of_bytes(
+            target_label(self.dialect.name, self.uri).encode("utf-8"), subject="target"
+        ).hex[:12]
+
     def _label(self) -> str:
         from flux_engine import __version__
 
@@ -619,6 +633,7 @@ class AdbcSink:
             output_digest=self.context.output_digest.value,
             rows=builder.rows,
             target=self.target,
+            target_id=self._target_id(),
             table=self.table if self.schema is None else f"{self.schema}.{self.table}",
             writer={
                 "library": "adbc-driver-manager",

@@ -59,6 +59,10 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - Weekday and week parts of consumer queries in T-SQL, BigQuery, Snowflake and MySQL are mapped to the value they have in that dialect under its default settings, and a part with no exact mapping is refused, naming the dialect and the part.
 - `fluxsim plan` on a bundle whose plugin run is already committed asks the plugin for no rows and writes nothing, and says the run keeps its stored plugin output.
 - `fluxsim apply --run-id` on a committed run whose bundle changed after the run was made names the run and says so in its `FLX-2101` refusal.
+- Two deliveries through one `uri-env` variable name no longer share a key in `sink-receipts.json`: each receipt carries a `targetId`, a short digest of the URI with its credentials removed.
+- The Azure Data Lake Storage Gen2 form `abfs://CONTAINER@ACCOUNT.dfs.core.windows.net/PREFIX` is accepted as an object store target.
+- Object store uploads by the `parquet` and `arrow-ipc` sinks take `request-timeout`, `connect-timeout`, `max-retries` and `retry-timeout` as `--sink-opt` keys, `FLX-3505` says how to shorten the wait for an endpoint that never answers, and a failed upload deletes, best effort, the data objects it had written and names any that remain.
+- When a sink delivery fails partway, the error names the stream that failed and says how many streams were delivered.
 
 ## Unreleased
 
