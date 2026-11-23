@@ -1,4 +1,4 @@
-# Scorecard: normative specification (format 1-4-0)
+# Scorecard: normative specification (format 1-5-0)
 
 A scorecard says how close a run is to the profile its Simulation pins
 (PROFILE-SPEC.md), as exact scores per property, per table, per fidelity
@@ -10,14 +10,15 @@ evidence pack as `run/scorecard.json`.
 
 Normative files beside this page:
 
-- [`scorecard-1-4.schema.json`](scorecard-1-4.schema.json): the JSON Schema,
+- [`scorecard-1-5.schema.json`](scorecard-1-5.schema.json): the JSON Schema,
   whose `$id` is
-  `https://agenticstiger.github.io/flux/engine/spec/scorecard/1-4-0/FluxScorecard.json`.
+  `https://agenticstiger.github.io/flux/engine/spec/scorecard/1-5-0/FluxScorecard.json`.
   The schema checks the shape; this page says how every number is formed.
+  [`scorecard-1-4.schema.json`](scorecard-1-4.schema.json),
   [`scorecard-1-3.schema.json`](scorecard-1-3.schema.json),
   [`scorecard-1-2.schema.json`](scorecard-1-2.schema.json) and
   [`scorecard-1.schema.json`](scorecard-1.schema.json) are kept beside it for
-  the documents of formats `1-3-0`, `1-2-0`, and `1-0-0` and `1-1-0`, which name their own `$id`.
+  the documents of formats `1-4-0`, `1-3-0`, `1-2-0`, and `1-0-0` and `1-1-0`, which name their own `$id`.
 - [`scorecard-example.json`](scorecard-example.json): a scorecard of format
   `1-2-0` with a scored, a censored and a refused property, a table with no
   fidelity block, a missed threshold, a coverage floor and a `minCredibility`
@@ -25,7 +26,9 @@ Normative files beside this page:
   [`scorecard-1-3-example.json`](scorecard-1-3-example.json) is a scorecard of
   format `1-3-0`: a fact scored against its profile share, a fact the profile
   gave no share for, and a relationship scored for referential integrity.
-  The tests validate each against its schema.
+  [`scorecard-1-5-example.json`](scorecard-1-5-example.json) is a scorecard of
+  format `1-5-0`: a rank correlation compared with a noisy reference, a property grouped by bins and a
+  children-per-parent row grouped by a parent column. The tests validate each against its schema.
 
 The scorecard reads the outcomes of the profile path (PROFILE-SPEC.md §7)
 and nothing else. The engine still reads no record of the data a profile
@@ -40,7 +43,7 @@ so one run and one profile give the same bytes everywhere.
 | Key | Holds |
 |---|---|
 | `_producer` | A URI naming the tool that wrote the scorecard. |
-| `_schemaURL` | The schema's `$id`. The format version is part of it. A scorecard names `1-4-0` only when it holds a children-per-parent row or a calendar row (§3), a property row that carries the `sampling` member of its `widening` (§9a), or the `queries` member of the `queries` dimension (§3a), or the top-level `overlay` member; otherwise it names `1-3-0` when it holds a fact or a relationship row (§3) or a property compared with a noisy statistic (§9), and every other scorecard names `1-2-0`, each keeping the bytes that format wrote. |
+| `_schemaURL` | The schema's `$id`. The format version is part of it. A scorecard names `1-5-0` only when it holds a `rankCorrelation` row or a property row with `groupByBins` (§3), or a children-per-parent row grouped by a parent column; otherwise it names `1-4-0` only when it holds a children-per-parent row or a calendar row (§3), a property row that carries the `sampling` member of its `widening` (§9a), or the `queries` member of the `queries` dimension (§3a), or the top-level `overlay` member; otherwise it names `1-3-0` when it holds a fact or a relationship row (§3) or a property compared with a noisy statistic (§9), and every other scorecard names `1-2-0`, each keeping the bytes that format wrote. |
 | `run` | `runId`, `planDigest` and `runDigest` of the run scored. |
 | `profile` | `digest`, the pinned profile's `jcs-document` digest. |
 | `overlay` | Format `1-4-0`, only when the Simulation declares a profile overlay (ADR 0030 section 7): `name` and `digest`, the overlay's name and the `jcs-document` digest of its `{name, patch}`. The properties are then scored against the overlaid profile, `MergePatch(profile, patch)`, read by the profile reader at the pinned profile's format, while `profile` still names the pinned profile. The overlay's numbers are a scenario the maintainers wrote, not a measurement, and the privacy grade reads the pinned profile. `ship` and `verify` read the overlay from the plan, which records it. |
@@ -86,6 +89,7 @@ The similarity says how close the two sides are, on one scale for every kind.
 | `quantile/2` | `max(0, 1 - d / W)`, where `d` is the synthetic witness's distance in grid units from the reference bin, `0` inside it | the same, for a bin |
 | `support/1` | the share of the synthetic group's records whose value is a member of the reference support; `1` for a group with no record | SDMetrics CategoryAdherence |
 | `correlation/1` | a lower bound of `1 - abs(r - r') / 2` (below) | SDMetrics CorrelationSimilarity |
+| `kendallTau/1`, `spearmanRho/1` | `1 - abs(t - t') / 2`, exact, rounded down to 12 decimal places | SDMetrics CorrelationSimilarity |
 
 `W` places both ends of the declared range on the grid the way a value is
 placed (floored). A range of one grid point (`W = 0`) scores `1` when the two
@@ -126,7 +130,7 @@ refusals, each a code and a reason that names columns, rows and counts.
 |---|---|
 | `structure` | `support`, grouped or not: whether every value is one the data holds |
 | `marginals` | `mean`, `quantile`, `marginalHistogram` and `levelHistogram` with no `groupBy` |
-| `joint` | `correlation`, and those four kinds with a `groupBy`: two columns of one table together |
+| `joint` | `correlation`, `rankCorrelation` (format `1-5-0`), and those four kinds with a `groupBy` or a `groupByBins`: two columns of one table together |
 | `crossTable` | referential integrity of every declared relationship (format `1-3-0`, below) and children per parent (format `1-4-0`, below); later, multi-table fidelity properties |
 | `temporal` | each histogram of a date column's published calendar (format `1-4-0`, below); later, periods and series and checks across periods |
 | `invariants` | each fact scored against the share the profile measured (format `1-3-0`, below) |
@@ -209,6 +213,32 @@ its line gates the run: a line gates, and an outside row then makes the scorecar
   column the run does not hold or that is no date, the `hourOfWeek` of a DATE) is not a row. The
   rows are read from the comparison of the `calendar:<column>` lines and are never formed a second
   time. They hold counts and exact decimals and no value of the data.
+
+**Rank correlations and grouping by bins (format `1-5-0`).** Two more kinds of row sit among a table's properties.
+
+- **A rank correlation** (`"property": "rankCorrelation"`, `joint`) compares the rank correlation of a pair of
+  columns of the run with the profile's (PROFILE-SPEC.md section 5). The run's statistic is the plain one over the
+  run's rows, with no row floor, so `N` is the number of rows that hold both values, and the reference is the
+  profile's value: exact, or its clamped noisy estimate. Both are formed on the profile's grid, a tie being a tie on
+  the grid, so the block's `fractionalBits` must equal the profile's (PROFILE-SPEC.md section 7). A pair is read
+  in either order, since both statistics are symmetric, and a DATE column needs no conversion. Forming the run's
+  side sorts the pair's values over the whole run, `O(n log n)`, and fewer than two rows that hold both values
+  refuse the property (`FLX-5005`). A profile that holds no such statistic over the pair refuses it (`FLX-5037`),
+  and one that withheld the group makes the row `censored`. The score is `1 - |t - t'| / 2`, an exact rational,
+  rounded down to 12 places as a correlation's is (§2). The outcome is `within` when
+  `|t - t'| <= margin + w_noise + w_sampling` (§9b), where `margin` is the compiled absolute margin of the
+  property's tolerance (`{ type: absolute, max }`, `0.05` by default), `w_noise` is zero for an exact reference
+  and `w_sampling` follows the run's size. When that sum is 2 or more, every run is within, and the row says so
+  (`tooNoisyToTell`). The row's `rank` member holds `measure`, `records`, `run`, `reference`, `distance`,
+  `samplingWidening`, `reach` (the sum above) and `tooNoisyToTell`, and `alpha`, the shrinkage of the copula the
+  run's plan states for the emit (KERNEL-SPEC-2.md section 8.6), when it has one. A noisy reference adds the
+  `noise` member of §9. A committed slice and a sampled `verify` name the property and compare nothing, since `S`
+  and `A4` do not add up across blocks (SAMPLE-SPEC.md section 4). A shrunk copula is not widened for: the run is
+  scored against what the profile published, so a large `alpha` shows as an outside score, and the row carries
+  `alpha` for the reader.
+- **A property grouped by bins** (`groupByBins`, `joint`) reads as a `groupBy` row, with the groups keyed by the
+  lower edge of each bin and named by ordinal in the order of the bins. The row holds `groupByBins`, `{column,
+  bins}`, in place of `groupBy`. A noisy reference is widened group by group (§9).
 
 A relationship is scored whenever its parent and child are both emitted by the
 run, whatever the profile holds. A fact is a row for every rule of an emit's contract
@@ -671,7 +701,8 @@ column.
 The format grows by minor versions, as the profile format does
 (PROFILE-SPEC.md §8): a minor version adds an optional key, a status value or
 a dimension's first property kind, and never changes what a key of format
-`1-0-0` means. Format `1-4-0` adds the children-per-parent row and the calendar row (§3), the dimension `temporal` its first scored rows, the `queries` member of the `queries` dimension (§3a), the `sampling` member of a property row's
+`1-0-0` means. Format `1-5-0` adds the `rankCorrelation` row and a property row's `groupByBins` member (§3), the `joint`
+dimension's second scored kind, and the widening of §9b. Format `1-4-0` adds the children-per-parent row and the calendar row (§3), the dimension `temporal` its first scored rows, the `queries` member of the `queries` dimension (§3a), the `sampling` member of a property row's
 `widening` (§9a) and the top-level `overlay` member (§1). Format `1-3-0` adds the fact and relationship rows (§3), the
 dimensions `invariants` and `crossTable` their first scored rows, and the `noise` key of a property
 row compared with a noisy statistic (§9). Format `1-1-0` added the shape flags (§6):
@@ -683,7 +714,7 @@ key to the document: a missed `maxFlags` is a `met` of false, and the limit is
 in the plan. The schema of formats `1-0-0` and `1-1-0` is kept in
 `scorecard-1.schema.json`, the schema of `1-2-0` in `scorecard-1-2.schema.json`, and the
 schema of `1-3-0` in `scorecard-1-3.schema.json`, as published. A scorecard that holds no
-children-per-parent row, no calendar row, no `queries` member and no `sampling` member names `1-3-0` or `1-2-0` as it did before, and is byte for byte what
+rank correlation row, no `groupByBins` member, no children-per-parent row, no calendar row, no `queries` member and no `sampling` member names `1-3-0` or `1-2-0` as it did before, and is byte for byte what
 that format wrote. The planned additions:
 
 - **Intervals (sample-based verification):** a sampled `verify` already reports
@@ -805,6 +836,28 @@ scorecard with such a member names format `1-4-0`, and the schema is
 [`scorecard-1-4.schema.json`](scorecard-1-4.schema.json). The margin the row shows is still the compiled
 `tau'`. A property that is also compared with a noisy statistic keeps its `noise` member, and both
 widenings are added to the margin.
+
+## 9b. A rank correlation widens the margin (format `1-5-0`)
+
+A rank correlation is one scalar, so its widening is that of a scalar. The row is within when the distance of
+the two values is at most `margin + w_noise + w_sampling`, each width rounded up to 12 decimal places in exact
+integers, so that it is a terminating decimal and never below the root.
+
+- **`w_noise`**, for a reference released with noise (PROFILE-SPEC.md section 3a): `sqrt(10 * v)`, with `v` the
+  variance of the released value, `scale^2` for a Gaussian and `2 * scale^2` for a Laplace. The released value
+  exceeds its true value by more than that with probability below 0.002 for Gaussian noise, since
+  `P(|Z| > sqrt(10))` is about 0.0016, and about 0.011 for Laplace noise, whose tails are heavier. The clamping of
+  the released value to `[-1, 1]` does not move it away from the true value, which lies in `[-1, 1]`. For an exact
+  reference `w_noise` is zero.
+- **`w_sampling`**: `sqrt(10 * v_n)`, with `v_n` the variance of the plain statistic over `n` rows of two
+  independent columns, ties aside: `2 * (2n + 5) / (9 * n * (n - 1))` for Kendall's tau and `1 / (n - 1)` for
+  Spearman's rho. It is about `0.67 / sqrt(n)` for tau. It is the spread a run of `n` rows gives a rank
+  correlation, taken at the confidence of §9, so that a small run is not held to a margin its own size cannot
+  meet. It is not zero for an exact reference, and it falls as the run grows, so a large run is held to the
+  margin.
+
+The `noise` member of §9 is written when the reference is noisy, with `widening` equal to `w_noise`. A row whose `margin + w_noise + w_sampling` is 2 or more is marked
+`tooNoisyToTell`: the statistic lies in `[-1, 1]`, so any run is within.
 
 ## 10. Prior art
 

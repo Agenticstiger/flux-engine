@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed 2026-11-23, for design review. Nothing in it is built. Builds on
+Accepted 2026-11-23. Builds on
 [ADR 0019](./0019-one-privacy-budget-per-profile-release.md) (one budget per release, and what the reader
 charges a noisy statistic), [ADR 0020](./0020-privacy-grades.md) (grades),
 [ADR 0021](./0021-clique-marginals-are-drawn-through-a-junction-tree.md) (cliques through a junction tree) and
@@ -10,9 +10,18 @@ charges a noisy statistic), [ADR 0020](./0020-privacy-grades.md) (grades),
 over today), and on KERNEL-SPEC-2 sections 5 (binary64 transforms) and 12 (additive paths). Two records come with
 it: [ADR 0036](./0036-binned-number-columns-join-clique-marginals.md) lets number columns join cliques, and
 [ADR 0037](./0037-child-columns-and-child-counts-follow-their-parent-and-a-unit-can-follow-its-children.md) draws
-across a relationship. The format text of all three is drafted in
-[correlations-0.11.0.md](../spec/drafts/correlations-0.11.0.md), and the profiler's side of clique selection in
-[clique-selection-for-profilers.md](../spec/drafts/clique-selection-for-profilers.md).
+across a relationship. The format text is in [PROFILE-SPEC.md](../spec/PROFILE-SPEC.md) (profile format 1-4-0),
+[PROFILE-REQUEST-SPEC.md](../spec/PROFILE-REQUEST-SPEC.md) (request format 1-2-0),
+[SEAM-FIDELITY-SPEC.md](../spec/SEAM-FIDELITY-SPEC.md), [KERNEL-SPEC-2.md](../spec/KERNEL-SPEC-2.md) section 8.6
+and [SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md) (scorecard format 1-5-0), and the profiler's side of clique
+selection in [clique-selection-for-profilers.md](../spec/clique-selection-for-profilers.md).
+
+**What this release builds.** The rank correlations and their charge (decisions 1 and 2), `fidelity.copula`, its
+plan and its draw (decisions 4 to 6), the `rankCorrelation` property and the scorecard format that holds it
+(decision 7), the grades (decision 8), and `cliqueSelection` for measured cliques (decision 10). **What it leaves
+for later:** cliques estimated from measurements (the format does not read `estimate`, `measurements` or
+`published: estimated`), a copula over categorical columns, NULL as a level of a clique, and binned parents in the
+Chow-Liu forest. The parameter register stays at format 1-3-0.
 
 ## Context
 
@@ -73,8 +82,8 @@ and low in the other, takes it to `-1 / n`. For the draw of decision 6, the per-
 the same bits over 200,000 rows of eight columns; the repair of decision 5 took 1.7 seconds for 64 columns and 12
 seconds for 128, and gave the same bits on every run. Drawing the place inside a bin independently of the copula, as
 a histogram does today, lowered the reproduced tau by 17 to 25 percent with five bins and by 1 to 3 percent with
-twenty; drawing it from the copula's own residual removed the loss. The checks of the bounds become tests of the
-repository (task 1), so a reviewer can run them.
+twenty; drawing it from the copula's own residual removed the loss. The checks of the bounds are tests of the
+repository (`packages/flux-stats/tests/test_rank_correlation_sensitivity.py`), so anyone can run them.
 
 **Clique selection.** The receipts for decision 10 are in the note for profilers: AIM (R. McKenna, B. Mullins,
 D. Sheldon and G. Miklau, PVLDB 15(11):2599-2612, 2022, arXiv 2201.12677), MST (R. McKenna, G. Miklau and
@@ -103,7 +112,9 @@ counts when both of its values are known, and `n` is the number of such records.
   statistic has none. It is part of the statistic's definition, not a claim that `n` is at least `f`: a smaller `n`
   only shrinks the value towards zero.
 
-Both are ungrouped in format 1-4-0, and the disclosure rules apply to them as they apply to `correlation/1`.
+Both are ungrouped in format 1-4-0, and the disclosure rules apply to them as they apply to `correlation/1`. The
+group size rule never withholds the noisy form: a noisy rank correlation is released whatever the number of its
+records, since its noise is its protection.
 
 ### 2. Their noise, and what the reader charges for it
 
@@ -125,8 +136,10 @@ removing one row of the unit's expose:
   derived constant until a tighter argument replaces it.
 - **The charge** is ADR 0019's for a count table, with `Delta` in place of 1: a Gaussian of scale `s` spends
   `rho = Delta^2 / (2 s^2)` under zero-concentrated DP, and a Laplace of scale `b` spends `epsilon = Delta / b`. A
-  share below that is refused (`FLX-5036`), and one above it is the profiler's slack. A Laplace under
-  zero-concentrated DP and a Gaussian under approximate DP are not recomputed, as for a count table.
+  share below that is refused (`FLX-5036`), and one above it is the profiler's slack. All four pairings of a
+  mechanism and a measure are checked with the sensitivities of the statistic, as they are for a count table: a
+  Laplace under zero-concentrated DP spends `rho = (Delta / b)^2 / 2`, and a Gaussian under approximate DP states
+  a `delta` above zero and an `epsilon` at least `rho + 2 sqrt(rho ln(1 / delta))` with `rho = Delta^2 / (2 s^2)`.
 - **A matrix is its pairs.** Each pair is a statistic with its own share, and the shares add (ADR 0019 decision 3).
   A copula over `q` columns therefore costs `m = q (q - 1) / 2` shares: under a Gaussian the same as charging the
   vector of its pairs its L2 sensitivity `sqrt(m) * Delta`, and under a Laplace its L1 sensitivity `m * Delta`.
@@ -176,8 +189,8 @@ fidelity:
 - `pairs`: each names two of the `columns`, at most once in either order, with a decimal `value` in `[-1, 1]`. A pair
   not listed has the value 0.
 - A copula column may declare a `nullFraction`: its NULL draw stays on its own cell path, independent of the copula,
-  and the copula draws its value whether or not the cell is NULL. It may be the parent of another column's `given`
-  through its bins (ADR 0036).
+  and the copula draws its value whether or not the cell is NULL. A copula column is no `given` parent, since a
+  column has one joint (decision 9).
 
 Anything else is `FLX-3402`. Under kernel `0.1.0` the key is `FLX-3105`, naming the kernel. The copula lives in the
 fidelity block, so, like `given` and the weights beside it, it enters both `H` and `G` (SEAM-FIDELITY-SPEC.md
@@ -190,8 +203,9 @@ In `decimal` at 50 digits, rounding half to even, as KERNEL-SPEC-2 section 5.3 c
 
 1. **The latent correlations.** `r = sin(pi * tau / 2)` for Kendall's measure and `r = 2 sin(pi * rho / 6)` for
    Spearman's. They are exact for continuous margins. π is `rng._pi` at 60 digits, and the sine is its Taylor
-   series summed at 60 digits until a term's magnitude is below `10^-55`, then rounded to 50 digits; the argument
-   lies in `[-pi/2, pi/2]`, so the series needs no reduction.
+   series summed at 60 digits, then rounded to 50 digits: the first term is always added, a later term is added only when
+   its magnitude is at least `10^-55`, and the series stops at the first term below that, which is not added.
+   The argument lies in `[-pi/2, pi/2]`, so the series needs no reduction.
 2. **The matrix** `R` has a unit diagonal and `r` off it, in the order of `columns`.
 3. **The test.** `R` passes when every pivot of its LDLᵀ factorisation, without pivoting and in the order of
    `columns`, is at least `delta = 10^-6`.
@@ -200,11 +214,11 @@ In `decimal` at 50 digits, rounding half to even, as KERNEL-SPEC-2 section 5.3 c
    `[0, 1]`: `lo = 0`, `hi = 1`, and at each step the midpoint becomes `hi` when `R(mid)` passes and `lo` when it
    does not; `alpha = hi`. The identity always passes, so the repair never refuses.
 5. **The factor.** `L` is the Cholesky factor of `R(alpha)`, each entry the unit factor times the square root of
-   its pivot, at 50 digits, then rounded once to binary64. An entry whose magnitude is below `2^-900` is taken as
-   zero, so that no product of decision 6 is subnormal (KERNEL-SPEC-2 section 5.1).
+   its pivot, at 50 digits, then rounded once to binary64. An entry whose rounded binary64 magnitude is below
+   `2^-900` is taken as zero, so that no product of decision 6 is subnormal (KERNEL-SPEC-2 section 5.1).
 
 The emit's plan document gains a `copula` member, `{ "alpha", "factor" }`, `factor` the sha256 of `L`'s binary64
-words in row-major order, only when the emit declares a copula, so it enters `planDigest` there and nowhere else.
+words, the lower triangle including the diagonal in row-major order, each entry as big-endian IEEE 754 bytes, only when the emit declares a copula, so it enters `planDigest` there and nowhere else.
 `EVIDENCE.md` states `alpha` and that every correlation was multiplied by `1 - alpha` on the latent scale.
 
 ### 6. The draw (kernel `0.2.0`)
@@ -227,7 +241,7 @@ fraction. `binary64(F)` is the fraction rounded once to the nearest binary64, ti
 digits; a binary64 argument below `2^-1022` gives an infinite threshold of its sign. With `x = x_i`:
 
 ```text
-lo = 0, hi = B                                     the bin
+lo = 0, hi = Bp                                    the bin; Bp is the last bin of positive weight
 while hi - lo > 1:  mid = (lo + hi) // 2;  if t(c_mid) <= x: lo = mid  else: hi = mid
 b = lo + 1
 lo = 0, hi = w_b                                   the grid value inside bin b
@@ -235,7 +249,8 @@ while hi - lo > 1:  mid = (lo + hi) // 2;  if t(F(b, mid)) <= x: lo = mid  else:
 the value is grid value lo of bin b
 ```
 
-A bin of weight zero is never chosen, since its thresholds equal the next bin's.
+A bin of weight zero is never chosen: its thresholds equal the next bin's, and starting `hi` at the last bin of
+positive weight keeps `x = +inf` from selecting a trailing bin of weight zero.
 
 So the value is uniform over its bin's grid values given its bin, its margin is its histogram's, and the copula holds
 across bins and inside them. The path draws nothing else, and a copula column draws nothing on its own cell path but
@@ -271,10 +286,14 @@ reference from a profile.
   not estimate.
 - **The score.** The similarity is `1 - |t - t'| / 2`, exact since both sides are rationals, rounded down to 12
   places as SCORECARD-SPEC.md section 2 rounds a correlation's. The outcome is within when
-  `|t - t'| <= margin + w`. The tolerance is `{ type: absolute, max }`, `0.05` by default. `w` is zero for an exact
-  reference; for a noisy one it is `sqrt(10 v)`, rounded up at 12 places, with `v = s^2` for a Gaussian and `2 b^2`
-  for a Laplace: the noise exceeds it with probability below 0.002 for a Gaussian and about 0.011 for a Laplace.
-  When `margin + w` is 2 or more, every run is within, and the row says the reference is too noisy to tell.
+  `|t - t'| <= margin + w_noise + w_sampling`. The tolerance is `{ type: absolute, max }`, `0.05` by default.
+  `w_noise` is zero for an exact reference; for a noisy one it is `sqrt(10 v)`, rounded up at 12 places, with
+  `v = s^2` for a Gaussian and `2 b^2` for a Laplace: the noise exceeds it with probability below 0.002 for a
+  Gaussian and about 0.011 for a Laplace. `w_sampling` is the same reach of the variance of the plain statistic
+  over `n` rows of two independent columns, ties aside, `2 (2n + 5) / (9 n (n - 1))` for tau and `1 / (n - 1)` for
+  rho, so that a small run is not held to a margin its own size cannot meet. When
+  `margin + w_noise + w_sampling` is 2 or more, every run is within, and the row says the reference is too noisy
+  to tell. SCORECARD-SPEC.md section 9b states it.
 - **Shrinking** (decision 5) is not widened for: the run is scored against what the profile published, a large
   `alpha` shows as an outside score, and the row carries `alpha` for the reader.
 
@@ -298,7 +317,7 @@ copula the number columns that the forest draws given nothing.
 FLUX consumes the cliques a profile publishes as they are: it chooses none, reweighs none and fits no model. A
 profiler chooses them, by AIM or MST as private-pgm implements them, and the recommended route is OpenDP's
 `make_contingency_table`, MIT, with its `opendp[mbi]` extra. What profile format 1-4-0 asks the profile to state is
-drafted in the note for profilers:
+stated in the note for profilers:
 
 - **`cliqueSelection`**, per table: the `method` (`aim`, `mst`, `fixed` or `other`), the `producer` (a URI that
   names the tool and its version), the share spent choosing the cliques (`selection`) and the share spent releasing
@@ -308,12 +327,16 @@ drafted in the note for profilers:
   block and share as today. A later format may add cliques estimated from listed `measurements`, such as AIM's model
   projected onto the maximal cliques of its junction tree, each an estimate with a variance `v` per cell that the
   profiler vouches for, the condition PROFILE-SPEC.md section 5a states for a noisy clique. This release does not read
-  them: `estimate` and `measurements`, and `published: estimated`, are refused. An estimate's variance must then be a
-  function of the measurement design and the noise scales only, and is part of the structure a profile declares public.
-- **Limits** the reader enforces: at most 1,024 cliques and 4,096 measurements in a table; at most 1,000,000 cells in
-  a clique, as today; and, new, at most 32 columns in a clique and 10,000,000 cells over a table's cliques, the order
-  of AIM's default model size of 80 MB; every measurement's columns inside one published clique; and, as today,
-  cliques that agree and have a junction tree.
+  them: `estimate` and `measurements`, and `published: estimated`, are refused with `FLX-5036`, which says that
+  estimated cliques are not read in this format. An estimate's variance must then be a function of the measurement
+  design and the noise scales only, and is part of the structure a profile declares public.
+- **Limits** the reader enforces: at most 1,024 cliques in a table; at most 1,000,000 cells in a clique, as today;
+  and, new, at most 32 columns in a clique and 10,000,000 cells over a table's cliques, the order of AIM's default
+  model size of 80 MB; and, as today, cliques that agree. A set of cliques with no junction tree is refused at
+  `init`.
+- **The noise sampler** is the profiler's: the reader checks a share against a scale and cannot check how the noise
+  was drawn. The note for profilers requires a float-safe sampler (I. Mironov, "On significance of the least
+  significant bits for differential privacy", ACM CCS 2012).
 
 The engine checks the arithmetic and the structure. It cannot check that the method ran as stated, and the
 evidence says so.
@@ -351,43 +374,22 @@ evidence says so.
   the data.
 - **Noise on `S` and `n` apart.** Rejected: the sensitivity of `S` grows with `n`, so its noise would have to.
 
-## Questions for review
+## Questions settled
 
 1. **Which measure the profiler computes.** Spearman's form is a window ranking and a sum in SQL, where the data
    lives; Kendall's needs an `O(n log n)` pass outside SQL, and its sensitivity is less than half as large. Both are
-   specified; the profiler may publish either or both.
-2. **The default tolerance** of a `rankCorrelation` property, `0.05`.
-3. **Shrinking or a pinned nearest correlation matrix.** Shrinking is chosen for cost and reproducibility.
-4. **Ties.** Whether `init` should correct a published tau for the ties its margins imply before the conversion, a
-   known approximation, or leave tie-heavy columns to cliques as this record does.
+   specified; the profiler may publish either or both, and a copula takes Kendall's when a profile holds both.
+2. **The default tolerance** of a `rankCorrelation` property is `0.05`, with the small-run allowance of decision 7.
+3. **Shrinking or a pinned nearest correlation matrix.** Shrinking, for cost and reproducibility.
+4. **Ties.** No correction of a published tau for the ties its margins imply: tie-heavy columns are better served by
+   a clique, and `init` says so in the ledger.
 5. **A copula with categories.** A copula per level of a category, or a copula that holds categorical columns
    through thresholds, is left for later.
-6. **Estimated cliques.** Settled: measured cliques only in this release (MST and the `fixed` method), with AIM's
-   estimates to follow in a later format.
-7. **The parameter register.** This design keeps the register at format 1-3-0: `fidelity.copula` joins the
-   declarations whose numbers it does not count, beside `counts` and `conditions`, and a citation may not name the
-   new definitions. Counting the copula's values, with the rank correlation each rests on, would be register format
-   1-4-0.
-
-## Tasks
-
-Sizes are changed lines with their tests: small is about 150, medium about 500, large about 900.
-
-| # | task | where | size |
-|---|---|---|---|
-| 1 | `kendallTau/1` and `spearmanRho/1`: definitions, the reader (exact and noisy, `rowFloor`, the charge), the sensitivity bounds as exhaustive tests over small data, `profile-1-4.schema.json` created, the example | flux-stats | medium |
-| 2 | `cliqueSelection`: the reader, the parts, measured cliques, the limits | flux-stats | medium |
-| 3 | request format 1-2-0: `rankCorrelations` and `cliqueColumns` in `flux_stats.request`, the refusals (`FLX-5038`), `init` writing the asks | flux-stats and engine | small |
-| 4 | `fidelity.copula`: validation, the kernel `0.1.0` refusal, `H` and `G`, an end-to-end `ship` test | engine | medium |
-| 5 | the plan's matrix: the series, LDLᵀ, shrinking, Cholesky, the plan's `copula` member, `EVIDENCE.md` | engine | medium |
-| 6 | the draw: the path, the per-row and column computations, thresholds and bisection, the vector file, tests for equivalence, jobs, shards and scale | engine | large |
-| 7 | `init`: one copula per table, the ledger's reasons | engine | medium |
-| 8 | `verify`: the `rankCorrelation` kind, the run's statistic, scorecard 1-5-0 rows and schema, the widening, the slice and `--sample` naming it | engine and flux-stats | medium |
-| 9 | grades: the pair rule, `cliqueSelection`, `EVIDENCE.md` | engine | small |
-| 10 | docs: PROFILE-SPEC, PROFILE-REQUEST-SPEC, KERNEL-SPEC-2, SEAM-FIDELITY-SPEC, SCORECARD-SPEC, SAMPLE-SPEC, PARAMETER-REGISTER-SPEC (the copula among the declarations it does not count), a how-to for drawing number columns together, the skills check | docs | medium |
-
-Task 1 comes first and creates the schema that ADR 0036 and ADR 0037 extend; task 2 follows it. Tasks 3 to 7 and 8
-to 9 can then run beside each other.
+6. **Estimated cliques.** Measured cliques only in this release (MST and the `fixed` method), with AIM's estimates
+   to follow in a later format.
+7. **The parameter register.** It stays at format 1-3-0: `fidelity.copula` joins the declarations whose numbers it
+   does not count, beside `counts` and `conditions`, and a citation may not name the new definitions. Counting the
+   copula's values, with the rank correlation each rests on, would be register format 1-4-0.
 
 ## What would change this decision
 

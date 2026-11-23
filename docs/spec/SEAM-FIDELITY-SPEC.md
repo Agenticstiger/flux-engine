@@ -497,9 +497,11 @@ column declaring it carries one weight table per level of that column, in place 
   mapping of level to weight, P(level | level), from a two-way count table. Every mapping names the same levels.
 
 The weights are counts or shares, normalised per level of the given column as `binWeights` is, and every list or
-mapping carries some weight. The given column is a categorical with no `nullFraction`, so each row has exactly
-one level to look up, and the table names exactly the levels it can draw. The links form a forest: a column has
-at most one `given`, a cycle is refused, and a histogram column is always a leaf, because a bin is not a level.
+mapping carries some weight. The given column is a categorical with no `nullFraction`, or a column drawn from
+`bins` (below), so each row has exactly one class to look up, and the table names exactly the classes it can
+draw. The links form a forest: a column has at most one `given` and a cycle is refused. A histogram column is a
+parent only in the form below, which names its bins as classes; the Chow-Liu forest of
+`flux_engine.calibrate.structure` still takes a histogram column as a leaf.
 A column is drawn after the column it is given, whatever the declared column order; every cell keeps its own
 §1 path, so column-first generation and slices are unchanged, and a root of the forest (a column drawn given
 nothing) draws exactly the values it drew without the links. A declaration the
@@ -533,6 +535,85 @@ refused, and so is a list of given columns that holds a path. Kernel 0.2.0 only:
 (`FLX-3402`, naming the kernel). The cell is drawn on its own §1 path at the index it always takes, so no seed-tree
 path is added (KERNEL-SPEC-2.md §12); a plan that declares none documents none of it, and the plan lists the plan it
 reads. The column path of kernel 0.2.0 leaves such a plan to the per-row path, its oracle.
+
+**`given` may name a column drawn from bins.** `given`, alone or in a list, may name a number or timestamp column
+of the emit that is drawn from `bins` and `binWeights` (or `binWeightsGiven`), with no `nullFraction`, that is not
+a key and is not set by a rule, a `lifetimes`, `within` or `rates` entry, a copy or a hidden declaration. Its
+classes are its bins. In `levelWeightsGiven` and `binWeightsGiven` they are keyed by the text of each bin's lower
+edge as the parent's `bins` write it, and every bin has an entry:
+
+```yaml
+columns:
+  balance:
+    bins: ["0", "1000", "5000", "50000"]
+    binWeights: ["0.55", "0.35", "0.10"]
+  plan:
+    given: balance
+    levelWeightsGiven:
+      "0":    { basic: "0.9", premium: "0.1" }
+      "1000": { basic: "0.6", premium: "0.4" }
+      "5000": { basic: "0.2", premium: "0.8" }
+    support: { values: [basic, premium] }
+```
+
+The class of a row is the bin the parent's own draw chose, known before the child draws, on the per-row path and
+on the column path alike. The place inside a bin of a binned column drawn given others is the bounded draw a
+histogram makes, independent of every other column. The child draws on its own §1 path at the index it always
+takes, and the parent's bin only chooses the table the uniform is searched in, so no seed-tree path is added
+(KERNEL-SPEC-2.md section 12). A column drawn with `allocation: exact` given a binned parent is refused, and so is
+a column of a copula (below), which is one joint. Everything this paragraph refuses is `FLX-3402`, except that
+kernel `0.1.0` refuses a binned parent with `FLX-3105`, naming the kernel. A grouped `marginalHistogram` or
+`levelHistogram` property over the child with `groupByBins` the parent states the same table. Like every `given`,
+it is in the fidelity block, so it enters both `H` and `G`.
+
+**`copula` draws number columns together.** The fidelity block may hold one `copula` (ADR 0035), read under
+kernel `0.2.0` only:
+
+```yaml
+fidelity:
+  copula:
+    columns: [amount, balance, opened_at]
+    rankCorrelations:
+      measure: kendall
+      pairs:
+        - { columns: [amount, balance], value: "0.42" }
+        - { columns: [amount, opened_at], value: "-0.08" }
+```
+
+- `columns`: 2 to 64 distinct columns of the emit, each a `number` or `timestamp` column (a DATE column is one)
+  drawn from `bins` and `binWeights`, with no `given` and no `allocation`, that is nobody's `given` parent either,
+  and that nothing else sets: not a key, and not set by a rule, a `lifetimes`, `within` or `rates` entry, a
+  history, a hidden declaration or a copy. A column has one joint. The order of `columns` is the order of the
+  draws. A copula column may declare a `nullFraction`: its NULL draw stays on its own cell path, independent of
+  the copula, and the copula draws its value whether or not the cell is NULL.
+- `rankCorrelations.measure`: `kendall` or `spearman`, the population measure the values estimate.
+- `rankCorrelations.pairs`: a list of `{ "columns": [a, b], "value" }`, each naming two different listed columns,
+  each pair at most once in either order, `value` a decimal text in `[-1, 1]`. A pair not listed is 0.
+- A bin of positive weight that holds no grid value is refused. Anything else the declaration gets wrong is
+  `FLX-3402`, naming where and never a value, and kernel `0.1.0` refuses the key with `FLX-3105`, naming the
+  kernel.
+
+The plan makes the latent matrix valid in pinned arithmetic and states `copula: { alpha, factor }` in the emit's
+entry of `plan.json`, only for an emit that declares a copula, so it enters `planDigest` there and nowhere else
+(KERNEL-SPEC-2.md section 8.6). The key lives in the fidelity block, so, like `given` and the weights beside it,
+it enters both `H` and `G` (§3), and a committed state made under one copula is not reused under another. The
+fidelity check reads the block without the key: the declaration is the generator's. `EVIDENCE.md` names the
+columns and the measure, and says when the matrix was shrunk, so a reader knows that the columns are less
+correlated than declared.
+
+**A property may state a rank correlation, or be grouped by bins.**
+
+- `{ property: rankCorrelation, columns: [a, b], measure: kendall | spearman, tolerance: { type: absolute, max } }`
+  states the rank correlation of two different range columns of the emit. `measure` is required, `max` is
+  positive and defaults to `"0.05"`, and the property is ungrouped. It is scored against a profile only
+  (SCORECARD-SPEC.md section 3): a committed slice names the property and compares nothing, since `S` and `A4`
+  of the profile (PROFILE-SPEC.md section 5) do not add up across blocks. It lives in the `joint` dimension.
+- `groupByBins: { column, bins }` groups a property by the bins of another range column of the emit, in place of
+  `groupBy`. `bins` are at least two strictly increasing edges on the grid, in the column's domain (days for a
+  DATE column), and cover the column's declared range, so every value lies in a bin; a bin is half open and the
+  last is closed above. The groups are keyed by the canonical text of each lower edge and named by ordinal in
+  the order of the bins. A property holds at most one of `groupBy` and `groupByBins`. The profile's statistic
+  must hold the same `groupByBins` (PROFILE-SPEC.md section 7).
 
 **`allocation` makes a column's classes exact.** `allocation: exact` gives each class of the column exactly its share of
 the expose's rows, in place of a share each row draws for itself: the column's levels (with `levelWeights`, or equal

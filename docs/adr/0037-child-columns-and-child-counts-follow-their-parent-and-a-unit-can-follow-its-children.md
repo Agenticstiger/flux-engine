@@ -11,8 +11,16 @@ are not read in this release). Builds on
 statistic grouped by a link), [ADR 0019](./0019-one-privacy-budget-per-profile-release.md) (one unit of privacy, and
 noise only in its expose) and [ADR 0020](./0020-privacy-grades.md). A companion of
 [ADR 0035](./0035-number-columns-are-drawn-through-a-gaussian-copula-of-published-rank-correlations.md) and
-[ADR 0036](./0036-binned-number-columns-join-clique-marginals.md). The format text is drafted in
+[ADR 0036](./0036-binned-number-columns-join-clique-marginals.md). The format text of the unit that follows
+its child rows and of what a noisy statistic is charged is in [PROFILE-SPEC.md](../spec/PROFILE-SPEC.md) section 3a;
+the text for a number of children given a parent column is still drafted in
 [correlations-0.11.0.md](../spec/drafts/correlations-0.11.0.md).
+
+**What this release builds.** `privacyUnit.follows` and the charges of decision 2, the relational statistics of
+decision 3 (a relationship's statistics grouped by a parent column, noise on a relationship's histogram and on a
+statistic grouped by a link), the grades of decision 8, and request format 1-2-0's `groupBy` and `linked` asks.
+**What it leaves for later:** estimated cliques, relational cliques (a clique whose columns span a link), and a
+cap chosen privately from a ladder.
 
 ## Context
 
@@ -252,7 +260,7 @@ on a relationship's `dates` and `exposure`, on `per` statistics and on histories
 - **A new seed path for the grouped layout.** Rejected: today's permutation, restricted to a class, is a uniform order
   of that class, so no new randomness is needed.
 
-## Settled in review
+## Questions settled
 
 1. **The neighbouring relation.** A unit that takes its children with it, as PrivLava and R2T define one, for a
    profile that opts in with `follows` and only where the followed relationships form a tree. One row of the expose
@@ -264,24 +272,6 @@ on a relationship's `dates` and `exposure`, on `per` statistics and on histories
    step, and needs a clique whose columns span a link. Not in this release.
 5. **Numbers of children given a binned parent column**, which decision 4 allows: in this release, with ADR 0036's
    binned `given`.
-
-## Tasks
-
-Sizes are changed lines with their tests: small is about 150, medium about 500, large about 900.
-
-| # | task | where | size |
-|---|---|---|---|
-| 1 | `privacyUnit.follows`: the reader, reach, the charges of decision 2, the refusals, the schema, an example | flux-stats | medium |
-| 2 | relationship statistics with `groupBy`, `groupByBins` and `noise`; `groupByLink` with `noise` | flux-stats | medium |
-| 3 | request format 1-2-0: `relationships[].groupBy` and `.linked` in `flux_stats.request`, the refusals (`FLX-5038`), `init` writing the asks | flux-stats and engine | small |
-| 4 | `counts` with `given` and `childrenGiven`: validation, the layout by class, vectors, the kernel `0.1.0` refusal, `H` and `G`, an end-to-end `ship` test, tests for jobs, shards and scale | engine | large |
-| 5 | `init`: grouped children per parent, noisy link groupings, the ledger | engine | medium |
-| 6 | `verify`: grouped children-per-parent rows, the widening, scorecard 1-5-0 | engine and flux-stats | medium |
-| 7 | grades and `EVIDENCE.md`: relationships, the unit's statement, the tables it treats as fixed | engine | small |
-| 8 | docs: PROFILE-SPEC sections 3a and 5, PROFILE-REQUEST-SPEC, KERNEL-SPEC-2 section 8.1, SCORECARD-SPEC, the how-to on children per parent | docs | small |
-
-Tasks 1 and 2 extend the schema that ADR 0035's first task creates, and come first; 4 can then run beside 3 and 5
-to 7.
 
 ## What would change this decision
 

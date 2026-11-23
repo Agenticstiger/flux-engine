@@ -2,17 +2,27 @@
 
 ## Status
 
-Proposed 2026-11-23, for design review. Nothing in it is built. Amends decision 5 of
+Accepted 2026-11-23. Amends decision 5 of
 [ADR 0021](./0021-clique-marginals-are-drawn-through-a-junction-tree.md), whose cliques hold categorical columns
-only, section 4 of [ADR 0014](./0014-init-reads-every-statistic-a-profile-publishes.md), whose Chow-Liu forest
-takes a histogram column only as a leaf, and the rule of SEAM-FIDELITY-SPEC.md section 2 that a histogram column is
-always a leaf because a bin is not a level. Builds on [ADR 0019](./0019-one-privacy-budget-per-profile-release.md),
+only, and the rule of SEAM-FIDELITY-SPEC.md section 2 that a histogram column is always a leaf because a bin is not
+a level: a declaration may now name a bin as a parent. The Chow-Liu forest of
+[ADR 0014](./0014-init-reads-every-statistic-a-profile-publishes.md) section 4 keeps taking a histogram column as a
+leaf. Builds on [ADR 0019](./0019-one-privacy-budget-per-profile-release.md),
 [ADR 0020](./0020-privacy-grades.md) and the `conditions` of
 [ADR 0028](./0028-consumer-queries-run-locked-compile-requirements-and-calibrate.md) (section 10). A companion of
 [ADR 0035](./0035-number-columns-are-drawn-through-a-gaussian-copula-of-published-rank-correlations.md), which also
 states how a profile says its cliques were chosen, and of
 [ADR 0037](./0037-child-columns-and-child-counts-follow-their-parent-and-a-unit-can-follow-its-children.md). The
-format text is drafted in [correlations-0.11.0.md](../spec/drafts/correlations-0.11.0.md).
+format text is in [PROFILE-SPEC.md](../spec/PROFILE-SPEC.md) (`cliqueMarginal/2`, `groupByBins`),
+[SEAM-FIDELITY-SPEC.md](../spec/SEAM-FIDELITY-SPEC.md) (a binned parent in `given`),
+[CONSUMER-QUERIES-SPEC.md](../spec/CONSUMER-QUERIES-SPEC.md) section 10 (`conditions` over bins) and
+[SCORECARD-SPEC.md](../spec/SCORECARD-SPEC.md) (`groupByBins` rows).
+
+**What this release builds.** `cliqueMarginal/2` and the derived marginals with bins (decision 1), a column drawn
+given the bin of another (decision 3), `conditions` over bins (decision 5), `groupByBins` (decision 7), and the
+`verify` rows and grades for them (decisions 8 and 9). **What it leaves for later:** a NULL class in a clique
+(decision 6), binned parents in the Chow-Liu forest (decision 4), and cliques estimated from measurements, which
+this release does not read.
 
 ## Context
 
@@ -60,7 +70,7 @@ A new registered definition of a clique, in `tables.<exposeId>.cliques` beside `
 | `columns` | One or more distinct names of columns of the table. |
 | `domains` | One per column, in the order of `columns`: `{ "levels": [...] }` for a categorical column, distinct and sorted by code point, or `{ "bins": [...] }` for a number or timestamp column, at least two strictly increasing decimal edges. |
 | `noisyCounts` | One noisy value per combination of levels and bins, row-major, as `cliqueMarginal/1`. |
-| `noise` | The mechanism, scale and share (PROFILE-SPEC.md section 3a). A clique estimated from measurements, with a variance in place of `noise`, is not read in this release (ADR 0035 decision 10). |
+| `noise` | The mechanism, scale and share (PROFILE-SPEC.md section 3a). A clique estimated from measurements, with a variance in place of `noise`, is not read in this release: it is refused with `FLX-5036` (ADR 0035 decision 10). |
 
 - **Bins** are read as `marginalHistogram/1` reads them: a value is floored onto the profile's grid, bin `i` is
   `[e_i, e_(i+1))`, and the last bin is closed above. The profiler chooses edges that cover the column's declared
@@ -69,8 +79,8 @@ A new registered definition of a clique, in `tables.<exposeId>.cliques` beside `
   column are milliseconds, converted to days as PROFILE-SPEC.md section 7 converts a histogram's.
 - **A record counts** when every column of the clique is known. A column with a null fraction is still not drawn
   from a clique (decision 6).
-- **One column** is allowed in `cliqueMarginal/2`: it is that column's marginal, which a release from a model such as
-  AIM's gives for a column its junction tree leaves alone. `cliqueMarginal/1` keeps its two-column minimum.
+- **One column** is allowed in `cliqueMarginal/2`: it is that column's marginal, which a profiler may release for a
+  column its other cliques leave alone. `cliqueMarginal/1` keeps its two-column minimum.
 - **Agreement** is ADR 0021's and PROFILE-SPEC.md section 5a's: cliques of either definition that share a column list
   the same levels or the same edges for it, and agree exactly on their noisy sums over the shared columns. Two cliques
   over one set of columns are refused.
@@ -109,7 +119,7 @@ columns:
   path and on the column path alike.
 - **The place inside a bin** of a binned column drawn given others is today's bounded draw, independent of every
   other column: the clique carries no more than the bin. (ADR 0035's copula is different, and draws its place from its
-  own residual.)
+  own residual, and a copula column is no `given` parent.)
 - **No seed path is added.** Each column draws on its own cell path at the indices a histogram or categorical column
   draws at, and the parent's bin only chooses the table the uniform is searched in, so KERNEL-SPEC-2 section 12's
   example of a declaration that adds no path applies. A test holds the per-row and the column path to the same bytes.
@@ -126,9 +136,8 @@ columns:
   `binWeightsGiven` from its noisy counts. The clique's bins win over the column's own histogram when their edges
   differ, and the ledger passes that histogram over with the reason.
 - **Grouped tables.** A statistic grouped by the bins of a number column (`groupByBins`, decision 7) is a two-way
-  table, and the Chow-Liu forest scores it like a categorical grouping. A binned column may then be a parent, not only
-  a leaf. Every other rule of the forest holds: at most one `given` per column, no cycle, and no parent with a null
-  fraction.
+  table. The Chow-Liu forest keeps taking a binned column as a leaf in this release, and a binned parent in the
+  forest is left for the next.
 
 ### 5. `conditions`
 
@@ -139,7 +148,7 @@ the place inside a bin is drawn as decision 3 says once the bin is known.
 ### 6. Still not drawn from a clique
 
 A key, a column a rule sets, a column with a declared null fraction, and a copula column (ADR 0035). A NULL class in a
-clique is a question for review.
+clique is left for a later format.
 
 ### 7. `groupByBins` (profile format 1-4-0)
 
@@ -189,33 +198,15 @@ it is exact.
   category, and a profile that measures cliques has already paid for the bins.
 - **Bins keyed by index in a weight table.** Rejected: a lower edge says what it is; an index does not.
 
-## Questions for review
+## Questions settled
 
-1. **A NULL class.** Whether a clique may list NULL as a level of a column with a null fraction, so that its NULLs are
-   drawn with the rest of the clique. The generator would then need a parent class that is NULL.
-2. **Bins for timestamps.** Whether a timestamp column's bins should be calendar months, which a profiler can fix
-   without the data, rather than any edges.
-3. **The forest.** Whether binned parents in the Chow-Liu forest (decision 4) belong in this release or the next.
-4. **The clique's bins and the column's histogram.** Decision 4 lets the clique's edges win; the other choice is to
-   refuse a profile whose edges for one column differ.
-
-## Tasks
-
-Sizes are changed lines with their tests: small is about 150, medium about 500, large about 900.
-
-| # | task | where | size |
-|---|---|---|---|
-| 1 | `cliqueMarginal/2`: the reader (domains, bins, one column), agreement across both definitions, the schema, the example | flux-stats | medium |
-| 2 | `groupByBins`: the form on column statistics, its disclosure and noise, the schema | flux-stats | small |
-| 3 | a binned parent in `given`: validation, keys by lower edge, the per-row and column paths, the kernel `0.1.0` refusal, tests for equivalence, jobs, shards and scale, an end-to-end `ship` test | engine | medium |
-| 4 | the junction tree and `init` with bins: `junction.py`, `author/cliques.py`, the edges against the contract's range, the ledger | engine | medium |
-| 5 | `conditions` over bins | engine | small |
-| 6 | the forest with `groupByBins` and binned parents | engine | medium |
-| 7 | `verify`: derived marginals with bins, `groupByBins` rows, scorecard 1-5-0 | engine and flux-stats | medium |
-| 8 | grades: the second definition, `groupByBins` | engine | small |
-| 9 | docs: PROFILE-SPEC section 5a, SEAM-FIDELITY-SPEC (a histogram column may be a parent), PARAMETER-REGISTER-SPEC (a citation of the new definition), the how-to on drawing a column given another | docs | small |
-
-Task 1 extends the schema that ADR 0035's first task creates. Tasks 1 and 2 come first; 3 to 6 can then run beside 7 and 8.
+1. **A NULL class.** Whether a clique may list NULL as a level of a column with a null fraction is left for a later
+   format, since the generator would need a parent class that is NULL.
+2. **Bins for timestamps.** Any public edges are accepted. The note for profilers recommends calendar months for a
+   date column, which a profiler can fix without the data.
+3. **The forest.** Binned parents in the Chow-Liu forest belong to the next release.
+4. **The clique's bins and the column's histogram.** The clique's edges win, and the ledger names the histogram it
+   passes over.
 
 ## What would change this decision
 

@@ -264,6 +264,11 @@ and `budget` (when the check runs), the namespace's `profile`,
 `strictCoverage` and `parameters`, other namespaces, and anything outside
 `spec` and this namespace, such as `metadata`, `agentPolicy` and `skills`.
 
+Also not counted are the numbers of the fidelity block's `copula` (`rankCorrelations.pairs[].value`,
+SEAM-FIDELITY-SPEC.md section 2), which sits beside the positions above and joins none of them, and a citation may
+not name the definitions `kendallTau/1` and `spearmanRho/1` or `cliqueMarginal/2`. Counting the copula's values,
+with the rank correlation each rests on, would be a new register format. The register stays at format `1-3-0`.
+
 Also not counted are the numbers of the namespace's own declarations of how rows relate and
 fall in time, and of what a patch or a consumer asks for: `facts`, `links`, `bridges`,
 `counts`, `history`, `asOf`, `snapshots`, `events`, `periods`, `copies`, `generators`,

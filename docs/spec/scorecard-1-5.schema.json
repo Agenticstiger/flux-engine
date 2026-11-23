@@ -1857,7 +1857,7 @@
     },
     "GroupByBins": {
       "type": "object",
-      "description": "A property grouped by the bins of another number or timestamp column of its table (format 1-5-0, PROFILE-SPEC.md section 1.4): the groups are the bins, named by ordinal in the order of the bins. A row holds at most one of groupBy and groupByBins.",
+      "description": "A property grouped by the bins of another number or timestamp column of its table (format 1-5-0, PROFILE-SPEC.md section 3): the groups are the bins, named by ordinal in the order of the bins. A row holds at most one of groupBy and groupByBins.",
       "required": [
         "column",
         "bins"
