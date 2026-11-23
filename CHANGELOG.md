@@ -36,7 +36,7 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 
 ### Security
 
-- The release workflow builds and smoke-tests the distributions in a read-only job that installs only from hash-checked files (the build toolchain and an export of `uv.lock`); the job that attests and publishes holds the write and OIDC permissions and installs nothing.
+- The release workflow builds and smoke-tests the distributions in a read-only job that installs only from hash-checked files (the build toolchain and an export of `uv.lock`); the job that attests and publishes holds the write and OIDC permissions, installs nothing, and checks the distributions, the SBOM and the release body against the digests the build job recorded.
 - A plan that records, for a run whose Simulation pins a profile, a grade such a run cannot have (`P0`, `P4`, anything but `P1`, `P3` and `P5`) is read as `P1`, so a hand-edited `plan.json` can no longer claim a stronger grade for a pinned run.
 - A profile that declares `publicStructure` grades P1, not P3, when a noisy statistic is grouped by a number or timestamp column or through a link, or carries a `sampleSize` band whose `min` equals its `max`; EVIDENCE.md gives a fixed reason.
 - `fluxsim verify` and `fluxsim ship` compare the receipt's simulation id and emit ids with the run's plan and refuse a run directory where they differ (`FLX-2122`), so a hand-edited receipt can no longer name a simulation or an emit the plan does not.

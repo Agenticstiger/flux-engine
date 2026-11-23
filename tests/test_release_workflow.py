@@ -142,9 +142,12 @@ def test_the_jobs_are_chained_and_the_artifact_names_connect() -> None:
     assert artifact_names(jobs["release"], "download-artifact") == uploaded
     assert artifact_names(jobs["publish-pypi"], "download-artifact") == {"dist"}
     # The digests the later jobs check against come from the build job.
-    assert {"dist_sha256", "sbom_sha256"} <= set(jobs["build"]["outputs"])
+    assert {"dist_sha256", "sbom_sha256", "notes_sha256"} <= set(jobs["build"]["outputs"])
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "needs.build.outputs.dist_sha256" in text
+    # The release body is checked against its recorded digest, not only for size.
+    assert "needs.build.outputs.notes_sha256" in text
+    assert 'NOTES_SHA256" notes.md | sha256sum -c -' in text
     assert "needs.release.outputs" not in text
     for ref in re.findall(r"needs\.(\w+)\.outputs\.(\w+)", text):
         job, output = ref

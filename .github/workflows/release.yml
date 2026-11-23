@@ -210,6 +210,7 @@ jobs:
       # check what they download against.
       dist_sha256: ${{ steps.digests.outputs.dist_sha256 }}
       sbom_sha256: ${{ steps.sbom.outputs.sbom_sha256 }}
+      notes_sha256: ${{ steps.extras.outputs.notes_sha256 }}
     permissions:
       contents: read
     env:
@@ -492,9 +493,11 @@ jobs:
       # release body. Kept apart from `dist`, which must hold exactly the four
       # files that are attested and sent to PyPI.
       - name: Stage the SBOM and the release body
+        id: extras
         run: |
           mkdir -p "$RUNNER_TEMP/extras"
           cp "$RUNNER_TEMP/sbom/$SBOM_NAME" "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/extras/"
+          echo "notes_sha256=$(cd "$RUNNER_TEMP/extras" && sha256sum notes.md | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       # The four files, kept for the `release` job (which attests and attaches
       # them) and the `publish-pypi` job. `overwrite` lets a re-run of this job
@@ -546,6 +549,7 @@ jobs:
       SBOM_NAME: flux-sim-engine-${{ needs.guard.outputs.version }}.cdx.json
       DIGESTS: ${{ needs.build.outputs.dist_sha256 }}
       SBOM_SHA256: ${{ needs.build.outputs.sbom_sha256 }}
+      NOTES_SHA256: ${{ needs.build.outputs.notes_sha256 }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -564,11 +568,13 @@ jobs:
         run: |
           test -n "$DIGESTS" || { echo "REFUSED: no recorded digests"; exit 1; }
           test -n "$SBOM_SHA256" || { echo "REFUSED: no recorded SBOM digest"; exit 1; }
+          test -n "$NOTES_SHA256" || { echo "REFUSED: no recorded release body digest"; exit 1; }
           ls -l "$DIST" "$EXTRAS"
           (cd "$DIST" && printf '%s\n' "$DIGESTS" | sha256sum -c -)
           count=$(find "$DIST" -maxdepth 1 -type f | wc -l)
           test "$count" -eq 4 || { echo "REFUSED: expected exactly 4 files in $DIST, found $count"; exit 1; }
           (cd "$EXTRAS" && printf '%s  %s\n' "$SBOM_SHA256" "$SBOM_NAME" | sha256sum -c -)
+          (cd "$EXTRAS" && printf '%s  %s\n' "$NOTES_SHA256" notes.md | sha256sum -c -)
           test -s "$EXTRAS/notes.md"
 
       # Build provenance over the four files that are about to be published: a
@@ -687,6 +693,7 @@ jobs:
           # Nothing since the attestation may have touched the files.
           (cd "$DIST" && printf '%s\n' "$DIGESTS" | sha256sum -c -)
           (cd "$EXTRAS" && printf '%s  %s\n' "$SBOM_SHA256" "$SBOM_NAME" | sha256sum -c -)
+          (cd "$EXTRAS" && printf '%s  %s\n' "$NOTES_SHA256" notes.md | sha256sum -c -)
           flags=(--verify-tag
                  --repo "$GITHUB_REPOSITORY"
                  --title "flux-sim-engine and flux-stats $VERSION"
