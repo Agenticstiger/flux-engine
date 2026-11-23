@@ -343,6 +343,13 @@ def _levels_of(
         return cache[name]
     column_plan = plan.column_plan(name)
     statistics, column = column_plan.statistics, column_plan.column
+    if _rows.is_binned(column_plan):
+        # A column drawn from bins is given by the bin of the value it draws.
+        drawn = _vectorized(column_plan, plan, streams, rows, cache)
+        if drawn is None:
+            raise FluxError(_rows.FLX_3402, f"{name}: not drawn by arrays")
+        cache[name] = [_rows.bin_class(column_plan, value) for value in drawn]
+        return cache[name]
     if column_plan.allocated_rows is not None:
         # The first draw is left unread: the level is the one of the row's slot.
         cache[name] = [str(label) for label in _allocated(column_plan, plan, streams, rows)]

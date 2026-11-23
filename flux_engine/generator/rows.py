@@ -42,6 +42,7 @@ digesting stay where KERNEL-SPEC §8 and §9 put them.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, localcontext
@@ -662,6 +663,7 @@ def build_plan(
         )
     if rules is not None:
         rules.refuse_given_on_determined(plans)
+    _require_binned_parents(plans, generator_version, related, rules)
     _require_conditionals(plans)
     _require_allocatable(plans, generator_version, related, rules)
     plans = _with_allocation_parents(plans)
@@ -829,6 +831,12 @@ def _require_allocatable_column(
         )
     for given in statistics.parents:
         parent = by_name[given]
+        if is_binned(parent):
+            raise FluxError(
+                FLX_3402,
+                f"{name}: allocation exact is read given a categorical column, and {given!r} is "
+                "drawn from bins",
+            )
         if parent.statistics.allocation is None:
             raise FluxError(
                 FLX_3402,
@@ -1085,13 +1093,13 @@ def _require_conditionals(plans: Sequence[ColumnPlan]) -> None:
     ``binWeightsGiven`` (P(bin | level), from a grouped histogram's
     (group, bin) counts), or a categorical column with ``levelWeightsGiven``
     (P(level | level), from a two-way count table). The column it is given
-    is a categorical with no declared nulls, so each row has exactly one
-    level to look up, and the weight table names exactly the levels that
-    column can draw.
+    is a categorical with no declared nulls, or a column drawn from ``bins`` with none
+    (ADR 0036 decision 3: its classes are its bins, keyed by the text of each lower edge), so
+    each row has exactly one class to look up, and the weight table names exactly the classes
+    that column can draw.
 
     A given column may itself be drawn given another, so the columns form a
-    forest: each column has at most one parent, a cycle is refused, and a
-    histogram column is always a leaf, because a bin is not a level. That is
+    forest: each column has at most one parent, and a cycle is refused. That is
     the shape of a Chow-Liu tree (Chow and Liu, 1968), the structure MST
     (McKenna, Miklau and Sheldon, 2021) selects, without its privacy noise.
     """
@@ -1137,11 +1145,11 @@ def _require_conditionals(plans: Sequence[ColumnPlan]) -> None:
         drawn_by_parent: List[Tuple[str, ...]] = []
         for given in parents:
             parent = by_name[given]
-            if parent.family is not Family.CATEGORICAL:
+            if parent.family is not Family.CATEGORICAL and not is_binned(parent):
                 raise FluxError(
                     FLX_3402,
                     f"{name}: given column {given!r} is not categorical, so it has no level "
-                    "to condition on",
+                    "to condition on (nor is it drawn from bins, which would give it a bin)",
                 )
             if parent.statistics.null_fraction is not None:
                 raise FluxError(
@@ -1149,7 +1157,7 @@ def _require_conditionals(plans: Sequence[ColumnPlan]) -> None:
                     f"{name}: given column {given!r} declares a nullFraction, and a null "
                     "has no level to condition on",
                 )
-            drawn_by_parent.append(tuple(sorted(_level_names(parent.statistics))))
+            drawn_by_parent.append(tuple(sorted(class_names(parent))))
         if len(parents) == 1:
             drawn = list(drawn_by_parent[0])
         else:
@@ -1202,6 +1210,87 @@ def _level_names(statistics: ColumnStatistics) -> Tuple[str, ...]:
     if statistics.levels is not None:
         return tuple(statistics.levels)
     return tuple(statistics.support or ())
+
+
+def is_binned(plan: ColumnPlan) -> bool:
+    """Whether *plan*'s column is drawn from ``bins``: a histogram, whose classes are its bins."""
+    return plan.family is Family.UNIFORM_EMPIRICAL and plan.statistics.bins is not None
+
+
+def class_names(plan: ColumnPlan) -> Tuple[str, ...]:
+    """The classes a column drawn given can be keyed by: its levels, or the lower edge of each bin.
+
+    A bin is named by the text of its lower edge exactly as the column's ``bins`` write it
+    (ADR 0036 decision 3).
+    """
+    if not is_binned(plan):
+        return _level_names(plan.statistics)
+    statistics = plan.statistics
+    assert statistics.bins is not None
+    texts = statistics.bin_texts or tuple(str(edge) for edge in statistics.bins)
+    return tuple(nfc(text) for text in texts[:-1])
+
+
+def bin_class(plan: ColumnPlan, value: Any) -> str:
+    """The class of a drawn *value* of a column drawn from bins: its bin's name.
+
+    The value is floored onto the grid the histogram draws on and placed in the bin that holds
+    it, the last bin closed above, which is the bin the draw chose.
+    """
+    statistics = plan.statistics
+    edges = statistics.bins
+    assert edges is not None
+    if isinstance(value, date):
+        grid = Decimal(value.toordinal() - DATE_EPOCH_ORDINAL)
+    elif isinstance(value, (int, Decimal)) and not isinstance(value, bool):
+        grid = Decimal(value)
+    else:
+        raise FluxError(FLX_3402, f"{plan.column.name}: a value of this column has no bin")
+    index = min(max(bisect_right(edges, grid) - 1, 0), len(edges) - 2)
+    return class_names(plan)[index]
+
+
+def _require_binned_parents(
+    plans: Sequence[ColumnPlan],
+    generator_version: str,
+    related: FrozenSet[str],
+    rules: Optional["RulePlan"],
+) -> None:
+    """Refuse a ``given`` that names a column drawn from bins where this plan cannot draw it.
+
+    Kernel 0.1.0 has no such parent, so it is ``FLX-3105``, naming the kernel. A key, a foreign
+    key, or a column a rule, a ``lifetimes``, ``within``, ``rates`` or copy entry sets has no
+    draw of its own to read a bin from, and is ``FLX-3402``. What else a parent must be is
+    checked with every other ``given`` (:func:`_require_conditionals`).
+    """
+    by_name = {plan.column.name: plan for plan in plans}
+    binned = {
+        (parent, plan.column.name)
+        for plan in plans
+        for parent in plan.statistics.parents
+        if parent in by_name and is_binned(by_name[parent])
+    }
+    if not binned:
+        return
+    parent, child = min(binned)
+    if generator_version != GENERATOR_VERSION_2:
+        from flux_engine.seam.resolve import FLX_3105
+
+        raise FluxError(
+            FLX_3105,
+            f"{child}: given {parent!r}, a column drawn from bins, is generated on kernel 0.2.0 "
+            "only, and this run is on kernel 0.1.0",
+        )
+    elsewhere = _set_elsewhere(plans, related, rules)
+    for parent, child in sorted(binned):
+        if by_name[parent].column.hidden:
+            continue
+        reason = elsewhere.get(nfc(parent))
+        if reason is not None:
+            raise FluxError(
+                FLX_3402,
+                f"{child}: given {parent!r}, which is {reason}, so it has no bin of its own draw",
+            )
 
 
 def _bin_top(edges: Sequence[Decimal], index: int, step: Decimal) -> Decimal:
@@ -1931,6 +2020,12 @@ def _given_cell(
     as ``"1.50"`` and the value it renders to are different keys.
     """
     column = plan.column
+    if is_binned(plan):
+        # A column drawn from bins is given by the bin its own cell draws, on its own stream at
+        # the indices a histogram cell draws at: the cell is what _cell makes, its class its bin.
+        # (The seam digest only keys an identifier cell, which a column drawn from bins is not.)
+        value = _cell(plan, source, sim_id, expose_id, row_index, "", given_level)
+        return value, bin_class(plan, value)
     with localcontext(_KERNEL_CONTEXT):
         if isinstance(source, CellStreams):
             stream = source.stream_at(row_index, column.name)
