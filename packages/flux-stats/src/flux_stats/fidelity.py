@@ -73,6 +73,7 @@ from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
 
 from flux_stats.errors import ErrorCode, FluxError, register
 from flux_stats.fixedpoint import DEFAULT_FRACTIONAL_BITS, FLX_5005, Grid, Interval
+from flux_stats.rank_correlation import KENDALL_TAU, SPEARMAN_RHO
 from flux_stats.reading import (
     FLX_5031,
     NullPolicy,
@@ -117,6 +118,7 @@ __all__ = [
     "NullPolicy",
     "PropertyDeclaration",
     "PropertyKind",
+    "RANK_MEASURES",
     "RecordsRange",
     "Tolerance",
     "ToleranceKind",
@@ -536,6 +538,7 @@ class PropertyKind(str, Enum):
     CORRELATION = "correlation"
     QUANTILE = "quantile"
     LEVEL_HISTOGRAM = "levelHistogram"
+    RANK_CORRELATION = "rankCorrelation"
 
 
 class ToleranceKind(str, Enum):
@@ -582,6 +585,7 @@ _TOLERANCE_KINDS: Mapping[PropertyKind, Tuple[ToleranceKind, ...]] = MappingProx
         PropertyKind.CORRELATION: (ToleranceKind.ABSOLUTE,),
         PropertyKind.QUANTILE: (ToleranceKind.ABSOLUTE,),
         PropertyKind.LEVEL_HISTOGRAM: (ToleranceKind.DISTANCE,),
+        PropertyKind.RANK_CORRELATION: (ToleranceKind.ABSOLUTE,),
     }
 )
 
@@ -597,7 +601,16 @@ _COLUMN_KINDS: Mapping[PropertyKind, ColumnKind] = MappingProxyType(
         PropertyKind.CORRELATION: ColumnKind.RANGE,
         PropertyKind.QUANTILE: ColumnKind.RANGE,
         PropertyKind.LEVEL_HISTOGRAM: ColumnKind.SUPPORT,
+        PropertyKind.RANK_CORRELATION: ColumnKind.RANGE,
     }
+)
+
+#: The two measures of a ``rankCorrelation`` property (ADR 0035 decision 7), and the default
+#: tolerance a property that states none is held to.
+RANK_MEASURES = ("kendall", "spearman")
+DEFAULT_RANK_TOLERANCE = {"type": "absolute", "max": "0.05"}
+RANK_DEFINITIONS_BY_MEASURE: Mapping[str, StatisticDefinition] = MappingProxyType(
+    {"kendall": KENDALL_TAU, "spearman": SPEARMAN_RHO}
 )
 
 
@@ -939,6 +952,8 @@ class PropertyDeclaration:
     bins: Tuple[Fraction, ...] = ()
     level: Optional[Fraction] = None
     min_variance: Optional[Fraction] = None
+    #: A ``rankCorrelation``'s measure, ``kendall`` or ``spearman``; ``None`` for any other kind.
+    measure: Optional[str] = None
 
     @property
     def property_id(self) -> str:
@@ -1071,6 +1086,7 @@ _PROPERTY_KEYS = (
     "bins",
     "level",
     "minVariance",
+    "measure",
 )
 _TOLERANCE_KEYS = ("type", "value", "max", "measure", "sampling")
 
@@ -1340,9 +1356,26 @@ def _given_of(mapping: Mapping[str, Any]) -> Tuple[str, ...]:
 
 
 def _tolerance_magnitude(
-    mapping: Mapping[str, Any], tolerance_kind: ToleranceKind, subject: str
+    mapping: Mapping[str, Any],
+    tolerance_kind: ToleranceKind,
+    subject: str,
+    *,
+    ranked: bool = False,
 ) -> Fraction:
-    """The ``value`` or ``max`` a tolerance of *tolerance_kind* carries, as an exact fraction."""
+    """The ``value`` or ``max`` a tolerance of *tolerance_kind* carries, as an exact fraction.
+
+    A ``rankCorrelation``'s absolute tolerance (*ranked*) is written with ``max``, as a bound on
+    a distance is; every other absolute tolerance is written with ``value``.
+    """
+    if ranked:
+        if "max" not in mapping:
+            raise FluxError(FLX_5034, f"{subject} needs a max")
+        if "value" in mapping:
+            raise FluxError(FLX_5030, f"{subject}: a rank correlation's tolerance has no value")
+        magnitude = Fraction(_require_decimal(mapping["max"], f"{subject}.max"))
+        if magnitude <= 0:
+            raise FluxError(FLX_5030, f"{subject}.max must be positive")
+        return magnitude
     if tolerance_kind in (ToleranceKind.ABSOLUTE, ToleranceKind.RELATIVE):
         if "value" not in mapping:
             raise FluxError(FLX_5034, f"{subject} needs a value")
@@ -1420,7 +1453,9 @@ def _parse_tolerance(raw: Any, kind: PropertyKind, subject: str) -> Tolerance:
     elif "measure" in mapping:
         raise FluxError(FLX_5030, f"{subject}: only a distance tolerance carries a measure")
 
-    magnitude = _tolerance_magnitude(mapping, tolerance_kind, subject)
+    magnitude = _tolerance_magnitude(
+        mapping, tolerance_kind, subject, ranked=kind is PropertyKind.RANK_CORRELATION
+    )
     sampling = _tolerance_sampling(mapping, tolerance_kind, subject)
     declared = _tolerance_declared(mapping)
     return Tolerance(
@@ -1452,14 +1487,15 @@ def _property_columns(raw: Mapping[str, Any], kind: PropertyKind, subject: str) 
     else:
         raise FluxError(FLX_5034, f"{subject} names no column")
 
-    if kind is PropertyKind.CORRELATION:
+    if kind is PropertyKind.CORRELATION or kind is PropertyKind.RANK_CORRELATION:
+        noun = "a correlation" if kind is PropertyKind.CORRELATION else "a rank correlation"
         if len(names) != 2:
             raise FluxError(
                 FLX_5033,
-                f"{subject}: a correlation declares two columns, got {len(names)}",
+                f"{subject}: {noun} declares two columns, got {len(names)}",
             )
         if names[0] == names[1]:
-            raise FluxError(FLX_5033, f"{subject}: a correlation needs two distinct columns")
+            raise FluxError(FLX_5033, f"{subject}: {noun} needs two distinct columns")
     elif len(names) != 1:
         raise FluxError(FLX_5030, f"{subject}: a {kind.value} property names one column")
     return names
@@ -1525,6 +1561,8 @@ def _parse_property(
     except ValueError:
         raise FluxError(FLX_5030, f"{subject}.property {text!r} has no comparison") from None
 
+    if kind is PropertyKind.RANK_CORRELATION and "groupBy" in mapping:
+        raise FluxError(FLX_5030, f"{subject}: a rank correlation is ungrouped")
     names = _property_columns(mapping, kind, subject)
     wanted_kind = _COLUMN_KINDS[kind]
     for name in names:
@@ -1564,6 +1602,8 @@ def _parse_property(
         if group_by in names:
             raise FluxError(FLX_5030, f"{subject}: groupBy repeats the property's own column")
 
+    if "tolerance" not in mapping and kind is PropertyKind.RANK_CORRELATION:
+        mapping = {**mapping, "tolerance": dict(DEFAULT_RANK_TOLERANCE)}
     if "tolerance" not in mapping:
         raise FluxError(FLX_5034, f"{subject} needs a tolerance")
     tolerance = _parse_tolerance(mapping["tolerance"], kind, f"{subject}.tolerance")
@@ -1608,6 +1648,18 @@ def _parse_property(
     elif "minVariance" in mapping:
         raise FluxError(FLX_5030, f"{subject}: only a correlation carries a minVariance")
 
+    measure: Optional[str] = None
+    if kind is PropertyKind.RANK_CORRELATION:
+        if "measure" not in mapping:
+            raise FluxError(FLX_5034, f"{subject} needs a measure")
+        measure = nfc(str(mapping["measure"]))
+        if measure not in RANK_MEASURES:
+            raise FluxError(
+                FLX_5030, f"{subject}.measure is {' or '.join(RANK_MEASURES)}, not {measure!r}"
+            )
+    elif "measure" in mapping:
+        raise FluxError(FLX_5030, f"{subject}: only a rankCorrelation carries a measure")
+
     return PropertyDeclaration(
         index=index,
         kind=kind,
@@ -1617,6 +1669,7 @@ def _parse_property(
         bins=bins,
         level=level,
         min_variance=min_variance,
+        measure=measure,
     )
 
 
@@ -1753,6 +1806,8 @@ def definition_for_property(declaration: PropertyDeclaration) -> StatisticDefini
     compare it, match a profile's or score it, picks it here, so no two of
     them can disagree about which one a property is.
     """
+    if declaration.kind is PropertyKind.RANK_CORRELATION:
+        return RANK_DEFINITIONS_BY_MEASURE[declaration.measure or ""]
     binned = declaration.kind is PropertyKind.QUANTILE and bool(declaration.bins)
     return definition_for_kind(declaration.kind, binned=binned)
 
@@ -1793,7 +1848,7 @@ def measure_group(
     if kind is PropertyKind.LEVEL_HISTOGRAM:
         return _level_histogram_group(rows, indices, key, columns[declaration.columns[0]])
 
-    if kind is PropertyKind.CORRELATION:
+    if kind is PropertyKind.CORRELATION or kind is PropertyKind.RANK_CORRELATION:
         pairs = read_pairs(
             rows,
             indices,

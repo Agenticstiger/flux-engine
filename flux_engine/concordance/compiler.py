@@ -199,6 +199,9 @@ _FORMED_INTERMEDIATES: Mapping[PropertyKind, Tuple[str, ...]] = MappingProxyType
         PropertyKind.LEVEL_HISTOGRAM: ("totalVariationComparison",),
         PropertyKind.SUPPORT: (),
         PropertyKind.QUANTILE: ("value",),
+        # A rank correlation forms exact integers (``S`` or ``A4``) in unbounded precision and
+        # compares two rationals, so it needs no fixed-width intermediate (ADR 0035 decision 7).
+        PropertyKind.RANK_CORRELATION: (),
         PropertyKind.CORRELATION: (
             "value",
             "sum",
@@ -299,6 +302,11 @@ def property_magnitudes(
 def _epsilon_of(block: FidelityBlock, declaration: PropertyDeclaration) -> Fraction:
     grid: Grid = block.grid
     kind = declaration.kind
+    if kind is PropertyKind.RANK_CORRELATION:
+        # Both sides are the statistic of the grid values, formed by one function, and a tie is a
+        # tie on the grid (ADR 0035 decision 7): the grid is part of the definition, so it adds
+        # no error to bound.
+        return epsilon_support()
     if kind is PropertyKind.SUPPORT or kind is PropertyKind.LEVEL_HISTOGRAM:
         # Neither encodes a value: a support check compares member lists,
         # a level histogram counts records per declared level. A level is

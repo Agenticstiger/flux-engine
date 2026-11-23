@@ -121,6 +121,32 @@ def test_the_1_4_0_schema_adds_the_children_per_parent_and_calendar_rows_to_1_3_
     )
 
 
+def test_the_1_5_0_schema_adds_the_rank_correlation_and_grouped_rows_to_1_4_0() -> None:
+    from jsonschema import Draft202012Validator
+
+    current = json.loads((SPEC / "scorecard-1-5.schema.json").read_text(encoding="utf-8"))
+    previous = json.loads((SPEC / "scorecard-1-4.schema.json").read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(current)
+    assert current["$id"].endswith("/scorecard/1-5-0/FluxScorecard.json")
+    assert current["properties"]["_schemaURL"]["const"] == current["$id"]
+    assert set(current["$defs"]) - set(previous["$defs"]) == {
+        "ChildrenPerParentGrouped",
+        "ChildrenPerParentGroup",
+        "GroupByBins",
+        "NoiseWidening",
+        "RankComparison",
+    }
+    assert "rankCorrelation" in current["$defs"]["Property"]["properties"]["property"]["enum"]
+    example = json.loads((SPEC / "scorecard-1-5-example.json").read_text(encoding="utf-8"))
+    Draft202012Validator(current).validate(example)
+    assert example["_schemaURL"] == current["$id"]
+    kinds = {row["property"] for table in example["tables"] for row in table["properties"]}
+    assert {"rankCorrelation", "childrenPerParent"} <= kinds
+    assert list(
+        Draft202012Validator(previous).iter_errors(example)
+    ), "a 1-5-0 scorecard names its own $id and holds rows 1-4-0 does not define"
+
+
 #: The sha256 of the profile schema of format 1-2-0 as release 0.9.0 published it. Format 1-3-0 has a
 #: schema file of its own, so a profile that names 1-2-0 keeps the schema it names.
 PROFILE_1_2_0_SHA256 = "9fed77263e2708f6f969fa08e7844d0c9c1406a7d1a66478482141a0ce7cebd7"

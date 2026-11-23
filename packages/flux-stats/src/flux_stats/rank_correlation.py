@@ -35,7 +35,7 @@ numbers.
 from __future__ import annotations
 
 from fractions import Fraction
-from math import comb
+from math import comb, isqrt
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from flux_stats.errors import FluxError
@@ -52,6 +52,8 @@ __all__ = [
     "kendall_s",
     "kendall_tau",
     "rank_denominator_size",
+    "rank_null_variance",
+    "rank_reach",
     "rank_sensitivity",
     "rank_value",
     "spearman_a4",
@@ -164,6 +166,42 @@ def rank_sensitivity(identifier: str, floor: int) -> Fraction:
     if constant is None:
         raise KeyError(f"{identifier!r} is no rank correlation")
     return Fraction(constant, floor + 1)
+
+
+def rank_null_variance(identifier: str, n: int) -> Fraction:
+    """The variance of the plain statistic over *n* records of two independent columns, ties aside.
+
+    ``2 (2 n + 5) / (9 n (n - 1))`` for Kendall's ``tau`` and ``1 / (n - 1)`` for Spearman's
+    ``rho``: the spread a run of *n* rows gives a rank correlation whose columns are unrelated,
+    which bounds the spread of a related pair's. *n* is at least 2.
+    """
+    if n < 2:
+        raise ValueError("a rank correlation needs at least two records")
+    if identifier == KENDALL_TAU_ID:
+        return Fraction(2 * (2 * n + 5), 9 * n * (n - 1))
+    if identifier == SPEARMAN_RHO_ID:
+        return Fraction(1, n - 1)
+    raise KeyError(f"{identifier!r} is no rank correlation")
+
+
+def rank_reach(variance: Fraction) -> Fraction:
+    """How far a scalar of variance *variance* reaches at the confidence the widenings are taken at.
+
+    ``sqrt(2 t v)`` with ``t`` the confidence exponent of :mod:`flux_stats.noise` (``sqrt(10 v)``),
+    rounded up to 12 decimal places in exact integers: a terminating decimal, never below the root.
+    """
+    # Read where it is used: the noise module is the profile reader's, and importing it here would
+    # put it in the closure of everything that reads a fidelity block.
+    from flux_stats.noise import CONFIDENCE_EXPONENT
+
+    if variance < 0:
+        raise ValueError("a variance is not negative")
+    scale = 10**24
+    scaled = -((-2 * CONFIDENCE_EXPONENT * variance.numerator * scale) // variance.denominator)
+    root = isqrt(scaled)
+    if root * root < scaled:
+        root += 1
+    return Fraction(root, 10**12)
 
 
 def rank_value(identifier: str, state: GroupStatistic, floor: int | None) -> Fraction:

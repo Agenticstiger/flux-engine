@@ -53,6 +53,7 @@ from flux_engine.concordance.predicate import (
     PropertyKind,
     ValueDomain,
 )
+from flux_engine.concordance.rank import RankComparison, compare_rank, run_rank_value
 from flux_engine.concordance.similarity import similarity
 from flux_engine.core.canonical import canonical_bytes
 from flux_engine.core.digest import DigestRef, digest_of_stream
@@ -229,6 +230,9 @@ class PropertyOutcome:
     #: The mechanism that statistic was released under (``gaussian``, ``discreteGaussian`` or
     #: ``laplace``); for a statistic formed from a clique, the clique's.
     noise_mechanism: Optional[str] = None
+    #: A rank correlation's comparison (ADR 0035 decision 7): both values, the distance, the
+    #: widenings and the verdict. ``None`` for every other kind.
+    rank: Optional[RankComparison] = None
 
     @property
     def widening(self) -> Optional[Fraction]:
@@ -305,6 +309,9 @@ class FidelityEvaluation:
     outcomes: Tuple[PropertyOutcome, ...]
     refusals: Tuple[Refusal, ...] = ()
     synthetic_rows: int = 0
+    #: The properties this comparison named and did not compare: a rank correlation against a
+    #: committed slice, whose ``S`` and ``A4`` do not add up across blocks (ADR 0035 decision 7).
+    not_compared: Tuple[str, ...] = ()
 
     @property
     def refused(self) -> bool:
@@ -541,7 +548,11 @@ class ClearStatistic:
             )
 
         outcomes: List[PropertyOutcome] = []
+        not_compared: List[str] = []
         for entry in self.compiled.properties:
+            if entry.declaration.kind is PropertyKind.RANK_CORRELATION:
+                not_compared.append(entry.property_id)
+                continue
             outcome, property_refusals = self._evaluate_property(entry)
             refusals.extend(property_refusals)
             outcomes.append(outcome)
@@ -550,6 +561,7 @@ class ClearStatistic:
             outcomes=tuple(outcomes),
             refusals=tuple(refusals),
             synthetic_rows=len(self.synthetic_rows),
+            not_compared=tuple(not_compared),
         )
 
     def _evaluate_property(self, entry: CompiledProperty) -> Tuple[PropertyOutcome, List[Refusal]]:
@@ -971,6 +983,8 @@ class ClearProfile:
                 f"{self.profile.fractional_bits}, the block declares "
                 f"{block.encoding.fractional_bits}",
             )
+        if declaration.kind is PropertyKind.RANK_CORRELATION:
+            return self._rank_reference(entry)
         levels: Tuple[str, ...] = ()
         if declaration.kind is PropertyKind.LEVEL_HISTOGRAM:
             levels = level_cells(block.columns[declaration.columns[0]])
@@ -1035,6 +1049,85 @@ class ClearProfile:
         raise FluxError(
             FLX_5037,
             f"the profile holds no {statistic.identifier} statistic over this property's columns",
+        )
+
+    def _rank_reference(self, entry: CompiledProperty) -> StatisticEntry:
+        """The profile's rank correlation of the property's pair, read in either order, or refuse.
+
+        Both statistics are symmetric, so the pair is found whichever way the profile names it.
+        """
+        declaration = entry.declaration
+        statistic = definition_for_property(declaration)
+        expose_id = self.compiled.block.expose_id
+        pair = tuple(declaration.columns)
+        for order in (pair, pair[::-1]):
+            for candidate in self.profile.pair_statistics(expose_id, order):
+                if candidate.identifier == statistic.identifier:
+                    return candidate
+        raise FluxError(
+            FLX_5037,
+            f"the profile holds no {statistic.identifier} statistic over this property's columns",
+        )
+
+    def _evaluate_rank(
+        self, entry: CompiledProperty, table: TableEntry
+    ) -> Tuple[PropertyOutcome, List[Refusal]]:
+        """Compare one rank correlation with the profile's (ADR 0035 decision 7, :mod:`flux_engine.concordance.rank`)."""
+        property_id = entry.property_id
+        block = self.compiled.block
+        base = _unscored(entry)
+        try:
+            reference = self._reference(entry, table)
+            run, records = run_rank_value(
+                self.synthetic_rows,
+                entry.declaration,
+                block.columns,
+                block,
+                subject="synthetic dataset",
+            )
+        except FluxError as error:
+            return base, [
+                Refusal(code=error.code.code, reason=error.detail, property_id=property_id)
+            ]
+        group = reference.groups[0]
+        if not group.published or group.value is None:
+            return (
+                replace(
+                    base,
+                    outcome=CENSORED,
+                    groups=(GroupOutcome("", 0, records, CENSORED),),
+                ),
+                [],
+            )
+        assert entry.margin is not None
+        found = compare_rank(
+            entry.declaration,
+            entry.margin,
+            run=run,
+            records=records,
+            reference=group.value,
+            variance=reference.cell_variance,
+        )
+        outcome = WITHIN if found.within else OUTSIDE
+        return (
+            replace(
+                base,
+                outcome=outcome,
+                groups=(
+                    GroupOutcome(
+                        group="",
+                        committed_count=group.statistic.k if group.statistic is not None else 0,
+                        synthetic_count=records,
+                        outcome=outcome,
+                        score=found.score,
+                        widening=found.noise,
+                    ),
+                ),
+                cell_variance=reference.cell_variance,
+                noise_mechanism=reference.noise.mechanism if reference.noise is not None else None,
+                rank=found,
+            ),
+            [],
         )
 
     def _draw_statistic(
@@ -1163,6 +1256,8 @@ class ClearProfile:
         self, entry: CompiledProperty, table: TableEntry
     ) -> Tuple[PropertyOutcome, List[Refusal]]:
         """Compare one property with the profile, refusing only that property."""
+        if entry.declaration.kind is PropertyKind.RANK_CORRELATION:
+            return self._evaluate_rank(entry, table)
         property_id = entry.property_id
         block = self.compiled.block
         base = _unscored(entry)

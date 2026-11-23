@@ -260,6 +260,9 @@ def compute_statistic(
     statistics: Dict[str, PropertyStatistic] = {
         entry.property_id: compute_property_statistic(rows, entry, block, subject=subject)
         for entry in compiled.properties
+        # A rank correlation's ``S`` and ``A4`` do not add up across blocks, so a committed state
+        # does not hold the kind (ADR 0035 decision 7).
+        if entry.declaration.kind is not PropertyKind.RANK_CORRELATION
     }
     return DerivedStatistic(
         expose_id=block.expose_id,
