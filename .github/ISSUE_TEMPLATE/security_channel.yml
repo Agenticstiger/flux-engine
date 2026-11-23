@@ -1,0 +1,25 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Ask for a private security channel
+description: Only if you cannot use private vulnerability reporting. Do not put any details here.
+title: "Private channel requested"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not describe the problem in this issue.** Say only that you have a
+        security report. A maintainer will answer here and set up a private channel.
+
+        If you can, use
+        [private vulnerability reporting](https://github.com/Agenticstiger/flux-engine/security/advisories/new)
+        instead; it keeps the whole report private from the start.
+
+  - type: checkboxes
+    id: no-details
+    attributes:
+      label: Before you submit
+      options:
+        - label: I have not put any details of the problem in this issue.
+          required: true

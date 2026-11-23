@@ -1,0 +1,29 @@
+{
+  "G": "sha256:94132bd523f41f1c6f9be84213efb6c0c97ef9a7cb6f0388ec31c68e22f716e5",
+  "H": "sha256:98e6570599e7859d013c4d6129756eeda8e560e88c338ca182edba7e34e397ab",
+  "columns": [
+    "i_item_sk",
+    "i_brand",
+    "i_price"
+  ],
+  "emitIndex": 1,
+  "reference": {
+    "contractDigest": "sha256:89b4675ab044d2fbb9a712079d6ba91241c41b1cd2e741a5d1938bc23a77f3a0",
+    "contractFileDigest": "sha256:9a28b56a04c7a06695639d9a4ff42d58027a6efbb6b22df44d070623df2f5999",
+    "exposeId": "item",
+    "fluidVersion": "0.7.7",
+    "productRef": "retail.store_star"
+  },
+  "shippedContract": null,
+  "simulationId": "sim-store-star",
+  "synthetic": {
+    "generatorDigest": "sha256:52df3a31eea643ea0d0f9b6d11b1b76a6ce513bd3a8e1089e34fd8f5bb94a785",
+    "outputDigest": "sha256:f30e2d3f584c34319f08917e1c93daf07bc1ef35341c460f5081cccda2d801bc",
+    "rows": 40
+  },
+  "types": [
+    "INT",
+    "STRING",
+    "DECIMAL(7,2)"
+  ]
+}

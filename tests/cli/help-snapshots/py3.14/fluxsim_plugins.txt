@@ -1,0 +1,22 @@
+usage: fluxsim plugins [-h] [-j]
+
+List the vertical packs, the output sinks and the generator plugins available
+in this environment, with the extra each sink needs and whether it is
+installed, and for each generator plugin its distribution and whether it is an
+editable install or lies outside an installation directory. Nothing is
+imported to find them. A generator plugin is your own code: it runs with your
+rights, and FLUX does not sandbox its network or file access, so allow only
+plugins you trust (docs/explanation/offline.md).
+
+examples:
+  # list the vertical packs, the sinks and the generator plugins
+  fluxsim plugins
+
+  # the same, as JSON
+  fluxsim plugins --json
+
+options:
+  -h, --help  show this help message and exit
+  -j, --json  emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/plugins.html

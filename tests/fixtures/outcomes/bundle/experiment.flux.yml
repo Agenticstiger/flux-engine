@@ -1,0 +1,19 @@
+fluxVersion: 0.5.0
+kind: Experiment
+id: exp-offer-test
+name: Offer Test
+metadata:
+  owner:
+    team: billing
+spec:
+  variants:
+  - name: control
+    weight: 0.5
+    treatmentRef: tr-no-offer
+    isControl: true
+  - name: offer
+    weight: 0.5
+    treatmentRef: tr-retention-offer
+  assignment:
+    method: largest_remainder
+    seed: 7

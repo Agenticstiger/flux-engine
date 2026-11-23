@@ -1,0 +1,229 @@
+{
+  "_producer": "https://example.invalid/profiler",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile/1-0-0/FluxProfile.json",
+  "disclosureRules": {
+    "none": {}
+  },
+  "encoding": {
+    "fractionalBits": 16,
+    "rounding": "floor"
+  },
+  "tables": {
+    "catalogue": {
+      "columns": {
+        "category": {
+          "domain": "category",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "disclosure": "none",
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              },
+              "status": "F",
+              "value": 26
+            }
+          },
+          "statistics": [
+            {
+              "definition": "levelHistogram/1",
+              "disclosure": "none",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 26,
+                  "levelCounts": [
+                    5,
+                    3,
+                    8,
+                    10
+                  ],
+                  "status": "F"
+                }
+              ],
+              "levels": [
+                "garden",
+                "lighting",
+                "paint",
+                "tools"
+              ],
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              }
+            }
+          ]
+        },
+        "price": {
+          "domain": "number",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "disclosure": "none",
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              },
+              "status": "F",
+              "value": 26
+            }
+          },
+          "statistics": [
+            {
+              "bins": [
+                "0",
+                "50",
+                "100"
+              ],
+              "definition": "marginalHistogram/1",
+              "disclosure": "none",
+              "groups": [
+                {
+                  "binCounts": [
+                    11,
+                    15
+                  ],
+                  "group": "",
+                  "k": 26,
+                  "status": "F"
+                }
+              ],
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              }
+            }
+          ]
+        },
+        "sku": {
+          "domain": "number",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "disclosure": "none",
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              },
+              "status": "F",
+              "value": 26
+            },
+            "max": {
+              "definition": "max/1",
+              "disclosure": "none",
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              },
+              "status": "F",
+              "value": "26"
+            },
+            "min": {
+              "definition": "min/1",
+              "disclosure": "none",
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              },
+              "status": "F",
+              "value": "1"
+            }
+          }
+        },
+        "tier": {
+          "domain": "category",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "disclosure": "none",
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              },
+              "status": "F",
+              "value": 26
+            }
+          },
+          "statistics": [
+            {
+              "definition": "levelHistogram/1",
+              "disclosure": "none",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 26,
+                  "levelCounts": [
+                    14,
+                    12
+                  ],
+                  "status": "F"
+                }
+              ],
+              "levels": [
+                "basic",
+                "premium"
+              ],
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              }
+            },
+            {
+              "definition": "levelHistogram/1",
+              "disclosure": "none",
+              "groupBy": "category",
+              "groups": [
+                {
+                  "group": "garden",
+                  "k": 5,
+                  "levelCounts": [
+                    3,
+                    2
+                  ],
+                  "status": "F"
+                },
+                {
+                  "group": "lighting",
+                  "k": 3,
+                  "levelCounts": [
+                    1,
+                    2
+                  ],
+                  "status": "F"
+                },
+                {
+                  "group": "paint",
+                  "k": 8,
+                  "levelCounts": [
+                    4,
+                    4
+                  ],
+                  "status": "F"
+                },
+                {
+                  "group": "tools",
+                  "k": 10,
+                  "levelCounts": [
+                    6,
+                    4
+                  ],
+                  "status": "F"
+                }
+              ],
+              "levels": [
+                "basic",
+                "premium"
+              ],
+              "sampleSize": {
+                "max": 26,
+                "min": 26
+              }
+            }
+          ]
+        }
+      },
+      "rowCount": 26
+    }
+  }
+}

@@ -1,0 +1,23 @@
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: shop.small_catalogue
+name: Small catalogue
+metadata:
+  owner:
+    team: shop-team
+exposes:
+  - exposeId: catalogue
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/catalogue.parquet }
+    contract:
+      schema:
+        - { name: sku, type: INT, required: true }
+        - { name: category, type: "enum('tools','paint','garden','lighting')", required: true }
+        - { name: tier, type: "enum('basic','premium')", required: true }
+        - { name: price, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: catalogue, type: primary, expr: sku }

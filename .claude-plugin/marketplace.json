@@ -1,0 +1,15 @@
+{
+  "name": "flux-engine",
+  "owner": {
+    "name": "The FLUX maintainers",
+    "url": "https://github.com/Agenticstiger"
+  },
+  "description": "Agent skills for the FLUX engine: they drive the fluxsim command line to author, run, verify, scale and ship simulated data.",
+  "plugins": [
+    {
+      "name": "flux-engine",
+      "source": "./skills",
+      "description": "Agent skills that drive the fluxsim command line. They pre-approve nothing, so every command asks the user first."
+    }
+  ]
+}

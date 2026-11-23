@@ -1,0 +1,472 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""Object store targets for the Parquet and Arrow IPC sinks, with no network.
+
+The store constructor is replaced by one that returns obstore's in-memory store,
+so what these tests read back is what an upload would have stored.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+import pytest
+
+from flux_engine.core.errors import FluxError
+from flux_engine.sinks import registry
+from flux_engine.sinks._objects import (
+    ObjectLocation,
+    Upload,
+    is_object_target,
+    parse_object_target,
+    require_key_in_prefix,
+    upload_files,
+)
+
+from .conftest import TEST_CREDENTIALS, pyarrow_or_skip
+from .test_files import Stream, _deliver
+
+pyarrow_or_skip()
+obstore = pytest.importorskip("obstore")
+obstore_store = pytest.importorskip("obstore.store")
+from flux_engine.sinks import arrow_ipc, parquet  # noqa: E402  (after the importorskip)
+
+pytestmark = pytest.mark.unit
+
+TARGETS = {"parquet": parquet.target, "arrow-ipc": arrow_ipc.target}
+
+
+class FromUrl:
+    """A stand-in for ``obstore.store.from_url`` that records its calls."""
+
+    def __init__(self, store: Any) -> None:
+        self.store = store
+        self.calls: List[Tuple[Tuple[Any, ...], Dict[str, Any]]] = []
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append((args, kwargs))
+        return self.store
+
+
+@pytest.fixture
+def from_url(monkeypatch: pytest.MonkeyPatch) -> FromUrl:
+    stand_in = FromUrl(obstore_store.MemoryStore())
+    monkeypatch.setattr(obstore_store, "from_url", stand_in)
+    return stand_in
+
+
+@pytest.fixture(params=sorted(TARGETS))
+def kind(request: Any) -> str:
+    return str(request.param)
+
+
+def _stored(store: Any) -> Dict[str, bytes]:
+    found: Dict[str, bytes] = {}
+    for batch in obstore.list(store):
+        for item in batch:
+            found[item["path"]] = bytes(obstore.get(store, item["path"]).bytes())
+    return found
+
+
+def _deliver_to(kind: str, target: str, stream: Stream) -> Any:
+    sink = TARGETS[kind](target, {}).sink_for(stream.context)
+    receipt = _deliver(sink, stream.header, stream.rows)
+    assert receipt is not None
+    return sink, receipt
+
+
+def test_the_objects_are_the_files_a_local_target_writes(
+    kind: str, from_url: FromUrl, tmp_path: Path
+) -> None:
+    stream = Stream(40)
+    _, local = _deliver_to(kind, str(tmp_path / "local"), stream)
+    sink, receipt = _deliver_to(kind, "s3://bucket/runs/a/", stream)
+
+    stored = _stored(from_url.store)
+    expose = stream.context.expose_id
+    prefix = f"runs/a/{expose}/"
+    manifest = f"{prefix}_manifest-{stream.context.slice_key}-{kind}.json"
+    expected = [f"runs/a/{entry.path}" for entry in local.files] + [manifest]
+    assert sorted(stored) == sorted(expected)
+    for entry in local.files:
+        assert stored[f"runs/a/{entry.path}"] == (tmp_path / "local" / entry.path).read_bytes()
+    assert stored[manifest] == (tmp_path / "local" / manifest[len("runs/a/") :]).read_bytes()
+
+    assert receipt.target == "s3://bucket/runs/a"
+    assert [entry.path for entry in receipt.files] == [f"runs/a/{e.path}" for e in local.files]
+    for entry, mine in zip(local.files, receipt.files, strict=True):
+        body = stored[mine.path]
+        assert (mine.bytes, mine.sha256, mine.rows) == (
+            len(body),
+            hashlib.sha256(body).hexdigest(),
+            entry.rows,
+        )
+        assert (mine.bytes, mine.sha256) == (entry.bytes, entry.sha256)
+    assert receipt.writer["upload"] == f"obstore {obstore.__version__}"
+    assert receipt.writer["library"] == "pyarrow"
+    assert not sink.directory.exists(), "the staging directory is removed"
+
+
+def test_the_store_is_built_from_the_bucket_alone(kind: str, from_url: FromUrl) -> None:
+    _deliver_to(kind, "gs://the-bucket/a/b", Stream(3))
+    assert from_url.calls, "the store is built"
+    assert all(call == (("gs://the-bucket",), {}) for call in from_url.calls)
+
+
+@pytest.mark.parametrize("scheme", ["s3", "gs", "az", "abfs"])
+def test_every_scheme_is_an_object_target(scheme: str) -> None:
+    location = parse_object_target(f"{scheme}://bucket/p")
+    assert (location.scheme, location.bucket, location.prefix) == (scheme, "bucket", "p")
+    assert location.store_url == f"{scheme}://bucket"
+    assert is_object_target(f"{scheme}://bucket/p")
+
+
+@pytest.mark.parametrize("target", ["out/", "../x", "C:\\out", "http://host/p", "file:///tmp/x"])
+def test_anything_else_is_a_local_target(target: str) -> None:
+    assert not is_object_target(target)
+
+
+@pytest.mark.parametrize("target", ["out", "relative/dir"])
+def test_a_local_target_needs_no_obstore(
+    kind: str, target: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(sys.modules, "obstore", None)
+    monkeypatch.chdir(tmp_path)
+    _, receipt = _deliver_to(kind, target, Stream(3))
+    assert receipt.target == target
+    assert "upload" not in receipt.writer
+
+
+@pytest.mark.parametrize(
+    "target, prefix",
+    [
+        ("s3://b/a", "a"),
+        ("s3://b/a/", "a"),
+        ("s3://b/a/b/c", "a/b/c"),
+        ("s3://b/a.b/c-d_e", "a.b/c-d_e"),
+        ("S3://b/a", "a"),
+    ],
+)
+def test_the_prefix_is_the_segments_joined(target: str, prefix: str) -> None:
+    assert parse_object_target(target).prefix == prefix
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "s3://b",
+        "s3://b/",
+        "s3://b//",
+        "s3://b//a",
+        "s3://b/a//b",
+        "s3://b/a//",
+        "s3://b/./a",
+        "s3://b/a/./b",
+        "s3://b/a/.",
+        "s3://b/..",
+        "s3://b/a/../b",
+        "s3://b/a/..",
+        "s3://b/a\\b",
+        "s3://b/\\",
+        "s3://b/a%2Fb",
+        "s3://b/a%2fb",
+        "s3://b/a%5Cb",
+        "s3://b/a%5cb",
+        "s3://b/%2E%2E/b",
+        "s3://b/%2e/b",
+        "s3://b/a/%2e%2e",
+        "s3://b/a%2Eb",
+        "s3:///a",
+        "s3://bu cket/a",
+        "s3://b:9000/a",
+        "az://%2e/a",
+    ],
+)
+def test_a_prefix_that_could_leave_its_place_is_refused(kind: str, target: str) -> None:
+    with pytest.raises(FluxError) as caught:
+        parse_object_target(target)
+    assert caught.value.code.code == "FLX-3510"
+    with pytest.raises(FluxError) as through_factory:
+        TARGETS[kind](target, {})
+    assert through_factory.value.code.code == "FLX-3510"
+
+
+def test_a_refused_target_writes_nothing(kind: str, from_url: FromUrl) -> None:
+    with pytest.raises(FluxError):
+        TARGETS[kind]("s3://b/a/../b", {})
+    assert from_url.calls == [] and _stored(from_url.store) == {}
+
+
+def test_a_key_must_start_with_the_prefix_and_a_slash() -> None:
+    require_key_in_prefix("runs/a/x.parquet", "runs/a")
+    for key in ("other/x", "runs/ab/x", "runs/a", "/runs/a/x", "x/runs/a/x"):
+        with pytest.raises(FluxError) as caught:
+            require_key_in_prefix(key, "runs/a")
+        assert caught.value.code.code == "FLX-3510"
+
+
+@pytest.mark.parametrize("relative", ["", "/abs/x", "../x", "a/../../x", "a//b", "./x", "a\\b"])
+def test_a_relative_name_is_checked_before_it_becomes_a_key(relative: str) -> None:
+    location = ObjectLocation("s3", "b", "p")
+    with pytest.raises(FluxError) as caught:
+        location.key(relative)
+    assert caught.value.code.code == "FLX-3510"
+    assert location.key("expose/x.parquet") == "p/expose/x.parquet"
+
+
+def test_nothing_is_uploaded_when_a_key_is_outside_the_prefix(
+    from_url: FromUrl, tmp_path: Path
+) -> None:
+    (tmp_path / "f").write_bytes(b"x")
+    location = ObjectLocation("s3", "b", "p")
+    with pytest.raises(FluxError) as caught:
+        upload_files(location, [Upload(tmp_path / "f", "p/ok"), Upload(tmp_path / "f", "q/bad")])
+    assert caught.value.code.code == "FLX-3510"
+    assert from_url.calls == [] and _stored(from_url.store) == {}
+
+
+def test_a_failed_upload_is_the_engines_error_scrubbed_and_unchained(
+    kind: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMIsecretvalue")
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError(
+            "PUT https://user:hunter2@host.example/b/x?X-Amz-Signature=abcd1234 failed "
+            "with wJalrXUtnFEMIsecretvalue"
+        )
+
+    monkeypatch.setattr(obstore, "put", refuse)
+    stream = Stream(3)
+    sink = TARGETS[kind]("s3://b/p", {}).sink_for(stream.context)
+    sink.open(stream.header)
+    for row in stream.rows:
+        sink.write(row)
+    with pytest.raises(FluxError) as caught:
+        sink.close()
+    error = caught.value
+    assert error.code.code == "FLX-3505"
+    assert error.__cause__ is None and error.__suppress_context__
+    text = str(error)
+    for leak in ("hunter2", "abcd1234", "wJalrXUtnFEMIsecretvalue"):
+        assert leak not in text
+    assert "RuntimeError" in text and "s3://b/p" in text
+    assert sink.receipt is None
+    assert not sink.directory.exists()
+
+
+@pytest.mark.parametrize("name", ["parquet", "arrow-ipc"])
+def test_without_obstore_an_object_target_names_the_extra(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(sys.modules, "obstore", None)
+    with pytest.raises(FluxError) as caught:
+        registry.open_target(f"{name}:s3://b/p")
+    assert caught.value.code.code == "FLX-3501"
+    assert "flux-sim-engine[publish]" in str(caught.value)
+
+
+def test_the_options_stay_closed(kind: str) -> None:
+    module = parquet if kind == "parquet" else arrow_ipc
+    assert "endpoint" not in module.OPTIONS
+    with pytest.raises(FluxError):
+        TARGETS[kind]("s3://b/p", {"endpoint": "http://elsewhere"})
+    assert module.OPTIONS == (
+        (
+            "batch-size",
+            "compression",
+            "compression-level",
+            "instance-identity",
+            "row-group-size",
+            "rows-per-file",
+            "verify",
+        )
+        if kind == "parquet"
+        else ("batch-size", "compression", "instance-identity", "rows-per-file", "verify")
+    )
+
+
+@pytest.mark.parametrize(
+    "target", ["s3://user:pass@bucket/p", "az://acct/c?sig=abc", "gs://bucket/p#frag"]
+)
+@pytest.mark.parametrize("name", ["parquet", "arrow-ipc"])
+def test_a_credential_bearing_object_target_is_refused_before_any_sink_runs(
+    name: str, target: str, from_url: FromUrl, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ran: List[str] = []
+    monkeypatch.setattr(registry, "load_factory", lambda sink: ran.append(sink))
+    with pytest.raises(FluxError) as caught:
+        registry.open_target(f"{name}:{target}")
+    assert caught.value.code.code == "FLX-3509"
+    assert ran == [] and from_url.calls == []
+
+
+_HOSTILE = "x\x1b[2J\nFLX-0000: forged‮"
+
+
+def _inert(text: str) -> None:
+    assert "\x1b" not in text and "‮" not in text
+    assert len(text.strip().splitlines()) == 1
+
+
+def test_a_refusal_never_prints_a_prefix_or_a_remote_message_raw(
+    from_url: FromUrl, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    location = ObjectLocation("s3", "b", _HOSTILE)
+    with pytest.raises(FluxError) as caught:
+        location.key("../x")
+    assert caught.value.code.code == "FLX-3510"
+    _inert(str(caught.value))
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("\x1b[2J\nFLX-0000: forged‮")
+
+    monkeypatch.setattr(obstore, "put", refuse)
+    (tmp_path / "f").write_bytes(b"x")
+    with pytest.raises(FluxError) as failed:
+        upload_files(location, [Upload(tmp_path / "f", f"{_HOSTILE}/ok")])
+    assert failed.value.code.code == "FLX-3505"
+    _inert(str(failed.value))
+
+
+def test_the_delivered_line_names_the_key_once_for_an_object_target(
+    kind: str, from_url: FromUrl, tmp_path: Path
+) -> None:
+    from flux_engine.stages.deliver import receipt_line
+
+    stream = Stream(10)
+    _, receipt = _deliver_to(kind, "s3://bucket/runs/a", stream)
+    expose = stream.context.expose_id
+    assert receipt_line(receipt).endswith(f" under s3://bucket/runs/a/{expose}/")
+    _, local = _deliver_to(kind, str(tmp_path / "local"), stream)
+    assert receipt_line(local).endswith(f" under {tmp_path / 'local'}/{expose}/")
+
+
+def _clear_store_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    for name in list(os.environ):
+        if name.startswith(("AWS_", "AZURE_", "GOOGLE_")):
+            monkeypatch.delenv(name)
+
+
+def test_an_object_store_that_cannot_be_set_up_fails_before_any_row_is_generated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flux_engine.stages.run import run
+
+    from .test_run_with_sink import FIXTURE
+
+    _clear_store_settings(monkeypatch)
+    state = tmp_path / "state"
+    for scheme in ("az", "abfs"):
+        result = run(FIXTURE, state_dir=state, sink=f"parquet:{scheme}://box/p")
+        assert not result.success and result.error_code == "FLX-3505"
+        assert "AZURE_" in result.stderr and f"{scheme}://box/p" in result.stderr
+        assert not (state / "runs").exists(), "no run was generated"
+
+
+@pytest.mark.parametrize(
+    ("scheme", "message", "names"),
+    [
+        (
+            "s3",
+            "Error performing PUT http://169.254.169.254/latest/api/token in 1s after 10 retries",
+            ("AWS_ACCESS_KEY_ID", "AWS_ALLOW_HTTP"),
+        ),
+        ("s3", "HTTP error: builder error", ("AWS_ENDPOINT_URL", "AWS_ALLOW_HTTP")),
+        ("gs", "Generic GCS error: no credentials", ("GOOGLE_APPLICATION_CREDENTIALS",)),
+        ("abfs", "Generic MicrosoftAzure error: Account must be specified", ("AZURE_STORAGE_",)),
+    ],
+)
+def test_a_credential_or_endpoint_failure_names_the_settings_for_its_scheme(
+    scheme: str,
+    message: str,
+    names: Tuple[str, ...],
+    from_url: FromUrl,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMIsecretvalue")
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError(message + " wJalrXUtnFEMIsecretvalue")
+
+    monkeypatch.setattr(obstore, "put", refuse)
+    stream = Stream(3)
+    sink = TARGETS["parquet"](f"{scheme}://b/p", {}).sink_for(stream.context)
+    sink.open(stream.header)
+    for row in stream.rows:
+        sink.write(row)
+    with pytest.raises(FluxError) as caught:
+        sink.close()
+    text = str(caught.value)
+    assert caught.value.code.code == "FLX-3505"
+    for name in names:
+        assert name in text
+    assert "wJalrXUtnFEMIsecretvalue" not in text
+    other = {"s3": "GOOGLE_", "gs": "AWS_", "abfs": "GOOGLE_"}[scheme]
+    assert other not in text
+
+
+def test_a_failed_publish_says_the_run_was_kept_and_how_to_publish_it_again(
+    tmp_path: Path,
+    from_url: FromUrl,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from flux_engine.cli import main
+
+    from .test_run_with_sink import FIXTURE
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("Error performing PUT http://169.254.169.254/latest/api/token")
+
+    monkeypatch.setattr(obstore, "put", refuse)
+    state = tmp_path / "st"
+    code = main(["run", str(FIXTURE), "--state-dir", str(state), "--sink", "parquet:s3://b/p"])
+    err = capsys.readouterr().err
+    assert code == 1
+    [run_id] = [entry.name for entry in (state / "runs").iterdir()]
+    assert f"the run {run_id} was kept" in err
+    command = (
+        f"fluxsim apply {FIXTURE} --run-id {run_id} --sink parquet:s3://b/p --state-dir {state}"
+    )
+    assert command in err
+    # The command it prints publishes the run for real.
+    monkeypatch.undo()
+    for name, value in TEST_CREDENTIALS.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(obstore_store, "from_url", from_url)
+    assert main(command.split()[1:]) == 0
+    assert any(key.startswith("p/payment_recovery_moment/") for key in _stored(from_url.store))
+
+
+def test_a_failed_publish_of_an_apply_without_a_run_id_says_which_run_was_kept(
+    tmp_path: Path,
+    from_url: FromUrl,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from flux_engine.cli import main
+
+    from .test_run_with_sink import FIXTURE
+
+    def refuse(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("Error performing PUT http://169.254.169.254/latest/api/token")
+
+    monkeypatch.setattr(obstore, "put", refuse)
+    state = tmp_path / "st"
+    code = main(["apply", str(FIXTURE), "--state-dir", str(state), "--sink", "parquet:s3://b/p"])
+    err = capsys.readouterr().err
+    assert code == 1
+    [run_id] = [entry.name for entry in (state / "runs").iterdir()]
+    assert f"the run {run_id} was kept" in err
+    command = (
+        f"fluxsim apply {FIXTURE} --run-id {run_id} --sink parquet:s3://b/p --state-dir {state}"
+    )
+    assert command in err

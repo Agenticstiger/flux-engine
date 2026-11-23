@@ -1,0 +1,61 @@
+{
+  "declaredGoldenBaseline": null,
+  "emits": {
+    "customer": {
+      "declaresFidelity": true,
+      "outputDigest": "sha256:2ac9f1475d4cf4641326fb1bf1ffc5c420586ea44d45d2ab6d7605aaf347a538",
+      "rows": 40,
+      "source": "generator"
+    },
+    "date_dim": {
+      "declaresFidelity": true,
+      "outputDigest": "sha256:053efb24cbe4eae0daa4de695e422984cbc64712abb2e63fd340d988ba3e6551",
+      "rows": 365,
+      "source": "generator"
+    },
+    "item": {
+      "declaresFidelity": true,
+      "outputDigest": "sha256:f30e2d3f584c34319f08917e1c93daf07bc1ef35341c460f5081cccda2d801bc",
+      "rows": 40,
+      "source": "generator"
+    },
+    "store_returns": {
+      "declaresFidelity": true,
+      "outputDigest": "sha256:2e7aaf2e4b2f0d0a31a33f41ebe998ba1f48947057c9122082ee9057d01d921e",
+      "rows": 20,
+      "source": "generator"
+    },
+    "store_sales": {
+      "declaresFidelity": true,
+      "outputDigest": "sha256:bb9706e579fb21cba1042088eebdba0b249a4591c023dda611d835e28fa16f2d",
+      "rows": 200,
+      "source": "generator"
+    }
+  },
+  "engineVersion": "0.9.0",
+  "events": 16,
+  "fidelity": "deterministic",
+  "inputDigest": "sha256:9a6e272a5398ed20f6ed9230bf50fa5269dc9661a909e4c0221727d6cd9fd0ec",
+  "kernelVersion": "0.2.0",
+  "planDigest": "sha256:d2eff202de47ef18c3e68520a7f315d5c13dbde4514fd284738927baafd29d67",
+  "population": 20,
+  "runDigest": "sha256:452eb2b62bde4ac1ca3bcce16654dfece1ac89f631ecd983866b1cb41dacfc5e",
+  "runId": "d2eff202de47ef18",
+  "seed": 42,
+  "seedTreeDigest": "sha256:cd3666caaffe20702cd800ad8f97fa8e5cfd9e43293357a00d439ec386dee95c",
+  "seedTreeVersion": "flux-seed/2",
+  "simulationId": "sim-store-star",
+  "sovereigntyAudit": [
+    {
+      "allowedZones": [
+        "eu-west",
+        "eu-central"
+      ],
+      "documentId": "q3-retention-world",
+      "documentKind": "World",
+      "eventTime": "2026-07-01T00:00:00Z",
+      "zone": null
+    }
+  ],
+  "traceVersion": "flux-trace/1"
+}

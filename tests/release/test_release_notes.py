@@ -1,0 +1,104 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""The release body that .github/workflows/release.yml writes, run as a script.
+
+Nothing else exercises that heredoc before a tag, so a mistake in it would show up
+after the tag is pushed. These tests extract it, run it with a sample release, and
+read the notes it writes. The install section follows the ``PYPI_PUBLISH`` setting:
+a ``pip install`` line only when the workflow will upload the package, and never a
+sentence saying the repository is private or the package is not on PyPI.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+ROOT = Path(__file__).resolve().parents[2]
+WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+VERSION = "9.9.9"
+
+
+def _script() -> str:
+    step = WORKFLOW.read_text(encoding="utf-8").split("- name: Write the release body", 1)[1]
+    heredoc = re.search(r"python3 - <<'PY'\n(.*?)\n\s+PY\n", step, re.DOTALL)
+    assert heredoc, "the release body step no longer runs a python heredoc"
+    return textwrap.dedent(heredoc.group(1))
+
+
+def _notes(tmp_path: Path, publish: str) -> str:
+    (tmp_path / "hashes.txt").write_text(
+        f"abc  flux_sim_engine-{VERSION}-py3-none-any.whl\n", encoding="utf-8"
+    )
+    env = {
+        **os.environ,
+        "VERSION": VERSION,
+        "GITHUB_REF_NAME": f"v{VERSION}",
+        "GITHUB_REPOSITORY": "example-org/flux-engine",
+        "GITHUB_SHA": "0" * 40,
+        "RUNNER_TEMP": str(tmp_path),
+        "PYPI_PUBLISH": publish,
+    }
+    env.pop("PIN_STATUS", None)
+    done = subprocess.run(
+        [sys.executable, "-c", _script()],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return (tmp_path / "notes.md").read_text(encoding="utf-8")
+
+
+#: The two wheels one tag releases (ADR 0009): the engine and the flux-stats it pins.
+WHEELS = (f"flux_sim_engine-{VERSION}-py3-none-any.whl", f"flux_stats-{VERSION}-py3-none-any.whl")
+
+
+def _verifies_and_installs_both_wheels(notes: str) -> None:
+    for wheel in WHEELS:
+        assert f"gh attestation verify {wheel}" in notes, wheel
+    # One pip command for both: the engine's wheel alone would look for its
+    # flux-stats on PyPI, which the release does not publish first when PyPI is off.
+    assert f"pip install ./{WHEELS[0]} ./{WHEELS[1]}" in notes
+
+
+def test_with_publishing_on_the_notes_give_the_pip_command_and_the_wheel(tmp_path: Path) -> None:
+    notes = _notes(tmp_path, "true")
+    assert f"`pip install flux-sim-engine=={VERSION}`" in notes
+    assert f"`flux-stats=={VERSION}`" in notes
+    _verifies_and_installs_both_wheels(notes)
+
+
+def test_with_publishing_off_the_notes_give_only_the_wheel(tmp_path: Path) -> None:
+    notes = _notes(tmp_path, "")
+    assert "pip install flux-sim-engine==" not in notes
+    _verifies_and_installs_both_wheels(notes)
+
+
+@pytest.mark.parametrize("publish", ["true", ""])
+def test_the_notes_never_call_the_repository_private_or_the_package_unpublished(
+    tmp_path: Path, publish: str
+) -> None:
+    notes = _notes(tmp_path, publish)
+    assert not re.search(r"(?i)\bprivate\b|not on pypi|git\+https", notes), notes
+
+
+def test_the_notes_name_the_flux_stats_requirement_as_the_range_it_is(tmp_path: Path) -> None:
+    """The engine requires a range of flux-stats, not one release (ADR 0009, amended)."""
+    notes = _notes(tmp_path, "true")
+    assert re.search(
+        r"flux-stats requirement, `flux-stats>=[^`,]+,<[^`,]+`, admits that version", notes
+    ), notes
+    assert "exact flux-stats pin" not in notes

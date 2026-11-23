@@ -1,0 +1,18 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "declaration": {
+      "dist": "categorical",
+      "levels": {
+        "a": 0.5,
+        "b": 0.5
+      }
+    },
+    "name": "aaNew",
+    "seed": 3,
+    "size": 10
+  },
+  "note": "a categorical trait sorted before every existing one",
+  "property": "mr5_world_added_trait",
+  "tier": "hand-written"
+}

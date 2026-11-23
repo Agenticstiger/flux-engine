@@ -1,0 +1,3017 @@
+# Changelog
+
+What changed in the **flux-sim-engine package**, release by release, and in
+**flux-stats**, which is released with it from the same tag (ADR 0009, amended).
+
+This is not `GOLDEN-CHANGELOG.md`, which sits beside it at the repository
+root and records something else entirely: every deliberate move of a pinned
+digest or golden baseline. The two are easy to confuse and answer different
+questions. Ask `GOLDEN-CHANGELOG.md` why a digest changed. Ask this file what
+a given released version contains.
+
+`scripts/release_guard.py` refuses a tag whose version has no `## X.Y.Z`
+section here, so the entry lands in the same pull request as the version
+bump and is reviewed like any other change. See `docs/RELEASING.md`.
+
+Versions here are **package** versions. They are not `KERNEL_VERSION`,
+`SEED_TREE_VERSION` or `TRACE_VERSION`, which version normative engine
+behaviour, are hashed into `inputDigest`, and never move as part of cutting
+a release.
+
+Headings follow `## X.Y.Z - YYYY-MM-DD`.
+
+## 0.10.0 - 2026-11-23
+
+This release lets a Simulation link tables, copy a column from a linked row and publish a catalogue whole; lay a
+relationship's child rows out by exact counts per parent and allot a column's classes exactly; give dates a lifetime,
+seasonal rates and a calendar; give an entity a history that projects into other tables; declare the SQL its consumers
+run, check it and calibrate to it; make and score forecasts of the next state; overlay a profile with a named scenario;
+and generate through a plugin, publish to object stores, Iceberg and Delta Lake, and tell one entity's story from a run.
+It also ships eight agent skills with a plugin that installs them. flux-stats 0.10.0 is released with it, and the engine
+requires the line `>=0.10,<0.11`.
+
+It moves four formats, each additively, so a document of the earlier format reads as before and a run that uses nothing
+new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, scorecard `1-4-0` and parameter register
+`1-3-0`.
+
+### Added
+
+- The repository holds eight agent skills that drive the `fluxsim` command line (ADR 0033), in `skills/`, and a plugin
+  that installs them, `flux-engine`, from the marketplace at `.claude-plugin/marketplace.json`. `flux-docs-lookup`
+  answers from the engine's offline help first, then the docs folder of a clone, then the docs of the installed
+  release. `flux-run-and-verify` runs `plan`, `apply` and `verify` or `run`, and explains the run summary, the
+  scorecard and every refusal with its remedy from `fluxsim explain`. `flux-author-bundle` writes a bundle with
+  `fluxsim init` and adds module declarations. `flux-privacy-and-profiling` chooses the grade each column's
+  sensitivity needs and writes the profile request. `flux-scale-and-ship` covers `--scale`, `--shard`, `--jobs`, the
+  sinks, `ship` and the evidence pack. `flux-relational-modeling` covers links, copies, sentinels, bridges, a
+  catalogue and an exact number of children per parent. `flux-consumer-queries` registers, checks and calibrates to
+  the SQL consumers run. `flux-forecasts` makes forecasts of the next state and scores them. The skills pre-approve
+  nothing, so an agent asks before every command it runs. The plugin's version is the engine's, and its documentation
+  links name the tag of that version.
+- `make skills-check` (`scripts/check_skills.py`) keeps the skills in step with the engine. It holds every `fluxsim`
+  command and option a skill names to the engine's own parser, every FLX code to the catalogue, every link to the docs
+  and every declaration to the schemas, and it refuses what a skill must never tell an agent to do. It runs in
+  `make check`, `make ci-local` and CI, and the release guard requires all eight skills of ADR 0033 at a tag.
+- Python 3.14 is supported, for the engine and flux-stats: CI runs the fast suite, the pinned digests and the coverage measurement on it, and `tests/cli/help-snapshots/py3.14` holds its help text.
+- Three checks keep the promise that FLUX needs no internet to produce results. Every pytest run in CI blocks sockets except loopback and Unix sockets (the `OFFLINE` flags in the Makefile). A CI job, "Offline journey", runs `scripts/offline_journey.sh` (`init` from a contract and a profile, `plan`, `run --verify --ship`, `story` and a consumer query check) inside `sudo unshare --net`, and every command must exit 0. `tests/test_offline_guard.py` scans the source for a network or model client outside the sinks and the OpenLineage emitter.
+- The page [Runs offline: your data and your model stay yours](docs/explanation/offline.md) lists every place the network can be touched, how to keep each off, how object store targets treat instance metadata, that a generator plugin is not sandboxed, and the limits of the checks. The README and the agent skills say the same in short.
+- Parameter register format `1-3-0` also adds `replacedBy` to an `assumption` or `default` entry, `{pointer, definition}`:
+  the statistic a profile of the contract would publish for the number (ADR 0030 section 8). It is a request for a
+  measurement, read for its form alone: `plan` never reads it in the pinned profile, and the shares are the same with or
+  without it. `fluxsim init` writes it for each number it assumes that a statistic would answer (a row count, a
+  column's metric such as `nullCount`, a level or marginal histogram) and for no setting (a tolerance, the bounds of a
+  committed state), so the registers `init` writes are format `1-3-0`. The ledger lists the statistics, and `init` writes
+  `<name>.assumptions.profile-request.yml` beside the bundle, a profile request in format `1-0-0` for exactly those
+  statistics, which it never writes over a file. Running `init` again with a profile that publishes them turns each of
+  those assumptions into a profile citation. The evidence names the statistic that would replace each assumption.
+- `fluxsim init --contract C --profile P --overlay FILE`, repeatable, writes one bundle for each profile overlay (ADR 0030
+  sections 7 and 8), each in a directory of the one given named after the overlay. A file holds `name` and `patch`, and is
+  read with the reader the namespace key uses. Each bundle is written from the overlaid profile, declares the overlay in
+  its Simulation beside the pin of the profile as published, and its register cites the overlay (`source: overlay`) for
+  the numbers whose statistic the patch changed and the profile for every other number. Every overlay is read and every
+  bundle checked before anything is written, and a directory that cannot take its bundle removes the ones written before
+  it. An overlay that gives a table with a `history` another `rowCount` is refused with `FLX-3105`, because the entities
+  are read from a history no overlay can patch, so the rows would only lengthen each chain. A `mean/1` that differs from
+  `sum` over `count` by more than a grid step, as an overlay's restated mean does, is the mean the column is drawn to, so
+  the run passes the `mean` property that same statistic gives. An overlay that restates a `mean/1` beyond what the
+  column can reach, the mean of its published quantiles, minimum and maximum, or histogram at their upper or lower edges
+  (69 against a highest of 51.25, say), is refused by `init` and by `plan` with `FLX-3402`, naming the bound it breaks,
+  since no run drawn to the profile could pass that mean. Without `--overlay`,
+  `init` writes the bytes it wrote before. The API gains
+  `flux_engine.seam.overlay.read_overlay_file` and an `overlay` argument of `flux_engine.author.author_bundle`.
+- Parameter register format `1-3-0` adds `source: overlay`, with `overlay`, the name of the Simulation's overlay, and
+  `statistic`, a citation into the overlaid profile in the form a `profile` citation takes (schema
+  `docs/spec/parameter-register-1-3.schema.json`). `plan` reads a `profile` citation in the pinned profile and an
+  `overlay` citation in the overlaid one, and refuses, with `FLX-3113`, a `profile` citation of a number the patch
+  changed, so every number an overlay changed names it. A register that cites no overlay stays at the format and the
+  bytes it had; the format is shared within the release, and later additions extend it. `verify` and `ship` score the
+  run against the overlaid profile, and scorecard format `1-4-0` gains the top-level `overlay` member, `{name, digest}`
+  (a scorecard with no overlay is byte for byte what it was). `EVIDENCE.md` names the overlay and says its numbers are
+  the maintainers' scenario, not measured, and the plan's line counts the numbers that come from the overlay. The register's spec now names the namespace keys
+  whose numbers it does not count (`counts`, `history`, `lifetimes`, `conditions` and the like), as the code never did.
+- A Simulation can declare a profile overlay under the new top-level namespace key `overlay`, `{name, patch}`: a named
+  RFC 7396 merge patch over the profile it pins (ADR 0030 section 7). `name` matches `[a-z][a-z0-9-]*` and has at most
+  63 characters. The patch may touch only a table's `rowCount`, a column's `metrics` and `statistics`, a table's
+  `columnPairs` and `periods`, and the top-level `relationships` and `invariants`; anything else, a statistic it
+  restates with `noise`, a table or column the pinned profile does not hold, and an overlay in a Simulation that pins no
+  profile are `FLX-3105`. `plan` reads the overlaid profile, `MergePatch(profile, patch)`, with flux-stats' profile
+  reader at the pinned profile's format, records the overlay in `plan.json` as `overlay`, and still grades the run from
+  the pinned, unpatched profile. Each emit's `H` gains an `overlay` member, the `jcs-document` digest of `{name, patch}`,
+  only when the overlay is declared, so a bundle that declares none keeps every digest; kernel 0.1.0 refuses the key
+  with `FLX-3105`. The API gains `flux_engine.seam.overlay` and `declared_overlay`.
+- A Simulation can declare the SQL its consumers run, under `extensions['com.agentics.flux/1'].consumers`
+  (`dialect`, `asOf`, `tables`, `prefixes`, `columns`, `views`, `queries`, `limits`, `calibration`). A query has an
+  `id`, its `sql`, and optionally a `unit` whose rows its rate counts, a `groupBy`, `heldOut`, a `tolerance` and
+  `parameters`. The block is read exactly and bounded (at most 1,024 queries, 256 views, 64 KiB of SQL a query), it
+  changes no generated row, and a bundle without it has the bytes and digests it had. Kernel 0.1.0 refuses it with
+  `FLX-3105`, naming the kernel. The rules are CONSUMER-QUERIES-SPEC.md; the design is ADR 0028.
+- Consumer SQL is checked with sqlglot before anything runs, when a bundle is validated, planned, verified or shipped.
+  A text must be one query, every node and function must be on a closed list the specification names (a test holds the
+  page to `flux_engine/consumers/_allow.py`), every table and column must resolve to the bundle, a placeholder must
+  have its value, the current time reads the registry's `asOf`, and `LIMIT`, `OFFSET` and an ordered window need a
+  total order. The query is rewritten on the tree to one DuckDB text, the canonical text, which is parsed and checked
+  again, and its digest is what the scorecard and the profile request carry. No alias is ever expanded: a column
+  that reads a projection alias of its own select is refused, and the columns its stars become and the projections
+  its positional `GROUP BY` keys copy are counted before sqlglot writes them out, more than 100,000 nodes refused. A
+  `LIKE` pattern holds at most 512 characters. Each refusal is a named code from `FLX-3601` to `FLX-3637` or
+  `FLX-3713` to `FLX-3715`, and a text that raises inside sqlglot is refused, never raised. The two node classes
+  sqlglot writes for `YEAR`, `MONTH` and `DAY` in MySQL, T-SQL, Spark, Hive and Databricks and for integer division in
+  PostgreSQL, Redshift, T-SQL, SQLite, Trino and Drill are admitted with checked arguments; weekday and week date
+  parts are refused in every dialect but duckdb, whose numbering the canonical text follows (`FLX-3622`); and a query
+  over a hidden table is refused at validate and plan, naming the table (`FLX-3624`). Without the `[sql]` extra
+  a bundle is not refused: the queries are reported as not checked, with the command that installs it.
+- `fluxsim verify` and `fluxsim ship` count every consumer query on the run in a locked DuckDB, in a process of its own
+  (`python -I -m flux_engine.consumers._child`) that starts with only `PATH`, `LC_ALL` and `TZ`, lowers its own
+  resource limits before it imports DuckDB, and opens an in-memory database with external access, extension loading,
+  secrets and configuration changes all off. It reads the run's tables as Arrow IPC bytes over a pipe, never a
+  pickle, runs only the engine's own `count(*)` over a canonical text, and returns whole numbers, so no value of the
+  run is printed or logged. A query that passes its seconds is `timedOut`, one that passes its memory is
+  `outOfMemory`, one DuckDB refuses is `error`, and one whose process dies is `crashed`; the others still run. The
+  locks are defense in depth and not a sandbox: a bundle from someone else runs in a container. A bundle may only lower
+  the ceilings of 30 seconds and 1GiB; `--max-query-seconds` (to 600) and `--max-query-memory` (to 16GiB) raise them
+  for one command.
+- A query's rate is its rows over its unit's rows, an exact fraction, set against the target the profile states for
+  the query of that name (the `true` count over `k` of its `levelHistogram/1`, per group for a `groupBy`). `verify`
+  and `ship` report each rate, its target, its gap and its status (`measured`, `noRows`, `notARate`, `noTarget`,
+  `withheld`, `timedOut`, `outOfMemory`, `error`, `crashed` or `versionsDiffer`). The calibration queries take their
+  targets from the profile the bundle pins and the held-out queries from `verify --held-out FILE`; the pinned profile
+  may not name a held-out query (`FLX-3701`) and the held-out profile may not name a calibration query
+  (`FLX-3702`). The held-out profile is graded under ADR 0020's rule 2 beside the pinned one. `ship --held-out`
+  states the weakest grade of every profile it read in "Privacy Grade", with or without forecasts, and holds each
+  labelled column's minimum to it (`FLX-4005`, naming the held-out profile); a ship that reads one profile keeps its
+  `EVIDENCE.md`.
+- Every consumer query is read for what it needs the copy to hold: a level (`plan = 'premium'`), a value, a pattern
+  (`LIKE`), nulls and a range. `fluxsim init --consumers FILE` embeds the registry, declares each needed level of a
+  categorical column with ADR 0014's share and the query as its reason in the register, and reports every
+  requirement as met, unmet or left to `verify`; it refuses nothing for an unmet one. `verify` counts the rows that
+  meet each requirement on the run. A requirement compiled under another sqlglot version is `versionsDiffer`, never
+  compared silently. A query derives at most 256 requirements and a registry 10,000 (`FLX-3715`).
+- `fluxsim init --consumers FILE`, given a contract and no profile, writes a profile request that asks for the
+  rate of each calibration query and lists, per table, the sets of categorical columns the queries read together (a
+  `workload` of `{ columns, weight }` that holds no value). The held-out queries go in a separate
+  `<directory>.held-out-request.yml`, whose answer only `verify` and `calibrate` read. The request's specification
+  states what a profiler owes the entries: check each query again, run it under locks at least as strong, and judge
+  disclosure over the whole set of queries.
+- `fluxsim calibrate --fit BUNDLE --profile PROFILE --held-out FILE --out DIR` fits the numbers a `calibration` block
+  names (a document, an RFC 6901 pointer, a range and a step; at most 64, each a value the parameter register lists as
+  an assumption or a default) to the calibration queries' rates with CMA-ES. It runs the bundle once per candidate at
+  the block's `scale`, every candidate and the held-out check on the same draws, seeded from the unpatched bundle's
+  `H`, so the fit follows the parameters and not the seed; it minimizes the sum of the squared gaps to the pinned
+  profile's targets, and writes the result as
+  a calibration patch, `DIR.patch.json`: the method `flux.calibration.cma/1`, the library versions, the seed, the
+  evaluations, the pinned profile's digest, each query's gap and RFC 6902 `replace` operations. The same engine,
+  cma version and platform give the same patch, and no seed-tree path is added. The declared mode, `fluxsim
+  calibrate BUNDLE`, is unchanged. `--max-evaluations` raises the ceiling of 64 to at most 4,096.
+- A fit is called calibrated only when the held-out queries hold. The patch is written, and its digest taken, before
+  the held-out profile is opened. The calibrated values then run at the block's scale, and each held-out query that
+  has a target is set against its own tolerance or the block's `heldOutTolerance`. Only when at least one has a target
+  and every one that has one is within does the fit write the calibrated bundle at `DIR`: the input bundle with each
+  operation spliced into the text of its document, every other byte as it was, and each moved value in the register
+  with the source `calibrated` and a `calibration` member. Otherwise it writes the patch and its report, names each
+  query that missed, writes no bundle and exits 1 (`FLX-3712`). A register entry with the source `calibrated` whose
+  held-out gap is larger than its tolerance is refused (`FLX-3716`), and `EVIDENCE.md` says that the bundle declares
+  its calibrated values, with the digests it names.
+- A Simulation can declare `conditions`, per emit, a list of groups of rows that hold fixed values, with the rest of
+  each row drawn given them. A group has `values` and a `count`; groups take their rows in the order listed, a seed row
+  is a group of one, and the counts are the emit's rows. The draw is exact: the junction tree (ADR 0021) or the
+  Chow-Liu forest is conditioned by setting the cells that disagree with the values to zero and passing messages, in
+  rational arithmetic, with no rejection and no seed-tree path. `--scale` and `--shard` scale and share the groups.
+  Kernel 0.1.0 refuses the key with `FLX-3105`. A key, an identifier, a column a rule or a link sets, a column that
+  is not categorical, a column with a `nullFraction`, and a column whose sensitivity needs grade P3 are refused
+  (`FLX-3640` to `FLX-3647`), and a group the weights make impossible is refused at `plan`, naming it. Groups on an
+  emit that declares a history, on a projected emit, and next to an `allocation: exact` column (joined to a fixed
+  column by a `given` edge) are refused at validate and plan (`FLX-3643`), so no group the rows would not hold is
+  ever reported applied. A number
+  column is refused as not categorical, whether or not it declares a `nullFraction`. No group can leave rows free, so
+  a seed row beside a level group for each other level, as the how-to shows, keeps the rest of the rows as declared.
+  `EVIDENCE.md` names each conditioned emit under "What Was Not Proven" with its groups' row counts and fixed
+  columns, never a fixed value.
+- A Simulation can declare response families under `responses` and forecasts under `forecasts` (ADR 0029). A family
+  names a treatment, an experiment, a journey and a segment for each group of a grouped query, and reads from a
+  profile each segment's control rate and the treatment's effect, with an interval, by an exact two-proportion
+  readout; the journey applies them to the subjects whose experiment variant names the treatment. A withheld cell
+  gives its segment no estimate. `fluxsim forecast make BUNDLE --registered-at T --horizon-end T` runs the
+  Simulation's sweep (at least 20 runs at a confidence of 0.9; a confidence that needs more than 100,000 is
+  refused, `FLX-3674`), takes the effect at the midpoint of each
+  replicate's share of its interval, and registers each forecast, the median with an interval, in the
+  outcome-accuracy store, sealed and write-once under the item's id and the first 16 hexadecimal digits of the
+  pinned profile's digest; when that id is sealed by another bundle that pins the same profile, `FLX-7007` names
+  both input digests and asks for the item's own id. Kernel 0.1.0 refuses the keys with `FLX-3105`.
+- `fluxsim forecast score BUNDLE --profile STATE --next NEXT --observed-at T` reads the next state's profile and gives
+  every registered forecast a verdict, none skipped: inside or outside its interval, the absolute error and the
+  interval score of Gneiting and Raftery, in exact decimals, with the grade of both profiles. A withheld cell leaves
+  its forecast not scored, with the reason. It also compares the two states over every statistic both hold with the same
+  definition, by the metric (`psi`, `kl` or `ks`) and threshold of the Playback that `forecasts.playback` names, and
+  flags the calibration on the earlier state stale when one statistic drifts (a statistic with no records in either
+  state is left out and listed with the reason, as a withheld cell is); with `onBreach: fail` it exits 1 after it
+  has written every verdict (`FLX-7146`).
+- `EVIDENCE.md` gains a "Forecast Accuracy" section after "Fidelity" when the outcome-accuracy store holds a forecast
+  registered for the run's input digest: each forecast with its metric, state, registration time, interval,
+  observation, verdict, scores and drift, hit or miss or pending, the measured interval coverage beside the one the
+  Playback declares (the engine never rewrites the declared figure), and the weakest grade of every profile the run
+  read. `forecast-accuracy.json` in the run directory holds the same rows. A run with no such forecast keeps its
+  `EVIDENCE.md` and its pack as they were.
+- Format versions, each one new version for the release, optional and additive, so a document without the addition
+  keeps its format, its bytes and its digest: profile `1-3-0` lets a query's `levelHistogram/1` carry `groupBy`
+  (its groups keyed by the column's levels, the disclosure rules applied group by group); profile request `1-1-0`
+  adds `queries` and `tables.<exposeId>.workload`, and the held-out request; scorecard `1-4-0` adds the `queries`
+  member of the `queries` dimension (per-query rows, requirements, the shares of calibration and held-out queries
+  within tolerance, versions and grades; the dimension's score is the smaller share that exists); parameter register
+  `1-3-0` adds the source `calibrated` and its `calibration` member, and the entries for each response estimate and
+  the cells it was read from. The Simulation's namespace gains the keys `consumers`, `conditions`, `responses` and
+  `forecasts`.
+- Two new extras. `[sql]` installs `sqlglot==30.33.0`, `duckdb>=2.0.1,<2.1` and `pyarrow>=18`, and `[calibrate]`
+  adds `cma==4.6.0`, pinned exactly so a fit replays. The engine imports none of them unless a command needs them:
+  generation reads no SQL, so a bundle that declares `consumers` plans and applies without either extra, and `verify`
+  then reports the queries as not measured, with the command that installs `[sql]`. Only the consumer-query package
+  may import sqlglot, and only the sinks may import pyarrow.
+- Documentation: CONSUMER-QUERIES-SPEC.md fixes the rules of consumer queries, the calibration patch and conditions,
+  and three how-to guides run end to end under the docs tests: "Check consumer queries and calibrate to them", "Fix
+  values and seed rows" and "Forecast the next state and score it".
+- A Simulation can give the entities of a versioned table a history under the new top-level namespace key `history`, a
+  list of `{emit, entities, parent, versions, start, length, until, chain, openEnd, activation, tracked, reasons, end}`.
+  Under kernel 0.2.0 each entity has a chain of versions on its own streams: a first start, whole-day lengths drawn from
+  `length`, and versions that meet end to start (`chain: nextStart`) or the day before (`dayBefore`), the last one open
+  at `until`. The entities per parent and the versions per entity are two counted layouts, one inside the other, so a
+  `parent` takes `minChildren`, `parentWhen` and `children` as a `counts` entry does and `versions` is met class for
+  class. Each later version changes one `tracked` column along its `transitions`, `reasons` gives the share of the
+  changes each column makes, and every other column is carried from the entity's first version. An `end` of
+  `closeLast` or `finalVersion` ends an exact share of the entities. `--scale` scales the entities, and the natural
+  key's range with them. The rows come grouped by parent, then entity, then version. Nothing in a history reads
+  `spec.timeBounds.end`: a history stops changing at `until`, and a longer window rewrites no row. EVIDENCE.md's
+  Column Provenance says where each column of a history and of its projections comes from: the `history` entry, a
+  tracked column's transitions, the entity's key, or the version a row reads. The key is bound into the emit's `H`
+  and refused under kernel 0.1.0 with `FLX-3105`, so a bundle that declares none keeps every digest.
+- A FLUX-side rule on a history's emit may read `previous.<column>` and `previous.<relationship>.<column>`, the
+  previous version's final value, NULL on an entity's first version. A plan works each row's final values out once
+  and replays each entity's chain once, so the cost of `previous` grows with the rows. An `asOf` list of
+  `{emit, relationship, date}` makes a path through a to-one relationship into a history read the version valid on
+  the row's date, in a contract-side invariant and a FLUX-side rule alike, found by bisection over the entity's
+  starts; a row dated outside the entity's life reads NULL. Without an `asOf` entry a path into a history reads only
+  what is the same on every version, and a tracked, validity or rule column stays `FLX-6106`, now naming `asOf`.
+- A history can be projected into other tables of the same contract with three more namespace keys, `snapshots`,
+  `events` and `periods`. A snapshot holds each entity's last version (`ended: keep` or `drop`); events are one row for
+  each change, `c`, `u` and `d` as Debezium writes them, with `before` and `after` columns, an optional `lag` from the
+  change to its recording date, a `type` text for each change reason, for `c` and `d` and for a `closeLast` ending,
+  whichever entities end, and a `when` condition; periodic rows are one row for each entity and period while a
+  version is valid (`match: overlap`, `end` or `start`, `grain` from day to year, `kinds` with a count, a condition
+  and overrides), laid out from the window's start. A projected emit declares no
+  `rows`: `fluxsim plan` works its count out from the history and records it in `plan.json` as `rows`, with `rowsFrom`
+  naming the history and the projection, in the plan digest only. Rows come in the history's order for a snapshot, by
+  entity for events, and period by period for periodic rows; a periodic emit's key is laid out one step for each row,
+  so a longer window appends periods and every earlier row, and every snapshot and event row, keeps its bytes. Each
+  key is refused under kernel 0.1.0 with `FLX-3105`.
+- `fluxsim verify` checks a history and its projections on the run's rows. It adds the enforced lines
+  `history:no_gaps_no_overlap`, `history:one_current` and `history:ended_is_last`, `snapshot:equals_last_version`,
+  `event:matches_transition` and `event:transition_matches`, and `period:within_validity` and
+  `period:matches_valid_version`, and the measured `asOf:<relationship>.<date>`, how many rows read a version. Events
+  that map only some tracked columns, or that show a `closeLast` ending neither in `end.column` nor as a type text,
+  pass `event:transition_matches` on the rows the engine wrote. A bundle that declares none of it prints the lines it
+  printed. The scorecard format does not change.
+- New refusals, all under existing codes and all at plan time: `FLX-3105` for each new key under kernel 0.1.0 and for
+  an unknown key inside an entry; `FLX-3403` for a history on a table without a validity window, a `parent`, `versions`,
+  `until`, `start`, `length`, `chain`, key, tracked, end or activation setting that cannot be laid out, a date column of
+  a history or projected emit that declares no range or lies outside the window, a projected emit that declares `rows`,
+  a `before` or `after` column the contract requires, a missing `type` text, a `when` that reads a drawn column, a
+  parent that is a periodic emit, and a required column an `asOf` link would leave NULL; `FLX-6203` for a `lifetimes` or
+  `within` entry on a history's start, end or activation column; `FLX-6210` for a rule that reads `previous` with a
+  window over siblings. `fluxsim explain` names each of these causes under its code.
+- `fluxsim init` writes a `history` entry for a table with a validity window when the profile publishes its `history`,
+  an `asOf` entry for a relationship into it from a table with a default time dimension, and a `snapshots`, `events` or
+  `periods` entry for a table whose contract reads the history (no lag, one row for each pair). A bundle made again from
+  the same contract and profile can differ from one made before, and one that declares these keys plans only under
+  kernel 0.2.0. A column of a projected emit that holds the history's values (every column of a snapshot, the columns
+  an event maps or names like the history's, the columns a periodic row carries) declares no `range`, `support` or
+  `maxCardinality` and no property of the table's own statistics, which the history's values may leave (`FLX-5005`);
+  a table left with no property says so.
+- flux-stats, released with the engine: profile format `1-3-0` adds `tables.<id>.history` for a table with a validity
+  window, optional and additive: `versionsPerEntity`, `firstStart`, `versionLength`, `chain`, `lastVersion`, and for each
+  candidate tracked column `initial` and `transitions`, and `reasons`, each a statistic kind the reader already knows,
+  with its disclosure rules and noise. A profile without it reads as before. The API gains `TableEntry.history`,
+  `HistoryEntry` and `HistoryColumn`. No scorecard format changes: scorecard `1-4-0` keeps its members, and the new
+  checks are lines of the rules.
+- Engine modules can give the counted layout a parent's expected number of children through
+  `flux_engine.generator.counts.ExpectedCountHook`, registered with `register_expected_count_hook` (it returns the
+  function that unregisters it). A hook's `member` binds what it declares into the child plan's document, and its
+  `expected` returns a parent's exact, non-negative expected count; with no shape the children are allotted in
+  proportion to the counts, and with a shape the parents take the shape's slot values in the order of their expected
+  counts, so the histogram is still met class for class. A hook draws nothing and moves no position. A count that is
+  negative or not exact, and two hooks for one relationship, are `FLX-3403`. None is registered in this release, and a
+  bundle cannot load one.
+- A `one_to_one` relationship may have a `counts` entry. No parent has more than one child: a `children` shape that
+  allows a count above one, or a `minChildren` above one, is `FLX-3403` at plan time, and so is an expected count above
+  one when the layout is worked out. `fluxsim init` writes such an entry with `levels: ["0", "1"]`.
+- `fluxsim verify` checks a counted layout on the run's rows. Each `counts` entry adds the enforced rules lines
+  `counts:<relationship>.minChildren` (the eligible parents with at least the minimum) and
+  `counts:<relationship>.parentWhen` (the parents outside the condition with no child), and a contract `derive` with
+  `aggregate` over a counted relationship is checked on every parent and enforced. A bundle that declares none of it
+  prints the lines it printed.
+- The scorecard gains a `childrenPerParent` row under `crossTable` for each relationship the pinned profile describes
+  with a `marginalHistogram/1` of children per parent: the run's parents counted into the profile's bins by their
+  children, within when the total variation distance is at most the entry's `tolerance` (default `0.10`), with
+  `propertyId` `children:<child exposeId>.<relationship>`. Scorecard format `1-4-0` (schema
+  `docs/spec/scorecard-1-4.schema.json`) adds the row and the `widening.sampling` member of a property row; a
+  scorecard with neither names `1-3-0` and is byte for byte what that format wrote.
+- A distance tolerance in a fidelity block may declare `sampling: true`. `fluxsim verify` then widens its margin, group
+  by group, by the sampling error of the run's rows in the group (SCORECARD-SPEC section 9a), so a small table is not
+  judged by a margin only a large one can meet; for a column under `allocation: exact` only the rounding term remains.
+  A tolerance without the key is compared as before, and a non-boolean value, or the key on a tolerance that is not a
+  distance, is `FLX-5030`.
+- `fluxsim init` writes the counted layout from a profile. For each relationship it can place, with a published
+  `marginalHistogram/1` of children per parent, it writes a `counts` entry whose `children` are the histogram's classes
+  and no longer spreads the foreign key over the parent's keys; the class of none is read as published, and a
+  relationship the profile marks `structural: [childless]` takes `minChildren: 1`. A `one_to_one` relationship takes
+  `levels: ["0", "1"]`, unless its histogram has parents in a class above one, which keeps the spread with a note.
+  Every distance tolerance it writes declares `sampling: true`, and every column `allocation` can read in a small table
+  (one whose sampling widening at its rows exceeds the default tolerance) declares `allocation: exact`, except
+  a column that a guarded `derive` or aggregate (one with a `when`) sets. A bundle made
+  again from the same contract and profile differs from one made before, and one that declares these keys plans only
+  under kernel 0.2.0.
+- A `counts` weight or count that needs too many digits, such as `1E-999999999`, is refused with `FLX-3403`, read as a
+  fidelity block reads its numbers, where it used to stall the plan or raise an overflow; an exact-allocation weight
+  whose exponent is beyond 4096 is refused with `FLX-5020`. No row or digest moves.
+- flux-stats, released with the engine: profile format `1-3-0` adds `structural` to a `relationships` entry, a
+  non-empty list of `childless` and `orphan`, optional and additive. The fidelity block gains the column key
+  `allocation` and the distance tolerance key `sampling`, both refused as unknown before. The API gains
+  `RelationshipEntry.structural`, `flux_stats.noise.sampling_widening` (the widening beside the noise widening),
+  `Tolerance.sampling`, and `ColumnDeclaration.allocation` and `ColumnDeclaration.given`.
+- Under kernel 0.2.0 a column that declares `allocation: exact` gives each class exactly its share of the expose's
+  rows, the Largest Remainder count over the rows after `--scale`, in place of a class each row draws for itself. The
+  classes are a categorical column's levels, or a histogram's bins drawn from `bins` and `binWeights`; with a
+  `nullFraction` above 0, NULL is one more exact class. Each row takes the class of its slot of a permutation keyed by
+  a new path, `("sim", sim_id, "gen", exposeId, "allocate", column)`, so a different seed moves which rows hold which
+  class and never a count. Every cell still makes the draws it made and leaves them unread, a bin's value inside the
+  bin is the draw it always was, and a plan that declares no `allocation` keeps its digests. A column drawn from
+  `levelWeightsGiven` or `binWeightsGiven` given one exact column may declare it too: the rows of each parent level
+  are the slots of that level's class, and the level's own counts and permutation over those rows give each row its
+  class, so each pair of a parent level and a child level holds exactly its share. A column given a linked row's
+  column, given a column that is not exact, given several columns or given an exact column that is itself given
+  another, a key column, a column a rule sets, any other family and kernel 0.1.0 are refused, and a value other than
+  `exact` is. A column drawn `given` an exact column reads the level the exact column holds. flux-stats reads
+  `allocation` as a column key, which it refused as unknown before.
+- Under kernel 0.2.0 a contract `derive` with `aggregate` (`count`, `sum`, `min` or `max` of a child's column, with
+  `filter` and `ifNone`) generates when its `via` relationship has a `counts` entry: the parent's value is the summary
+  of its children, the run of child rows the counted layout gives it, as the child's own pass writes them, so every
+  parent holds its summary exactly. The parent's plan document gains `sums`, the `generatorDigest` of each summed child
+  plan, only when it has one; a child that reads a summary through a link, or a column computed from one, is `FLX-6208`.
+  Over a relationship with no `counts` entry, and on kernel 0.1.0, it stays `FLX-6210`, and the message names the key.
+- A Simulation can lay a relationship out by counts under the new top-level namespace key `counts`, a list of
+  `{emit, relationship, minChildren, parentWhen, children, tolerance}`. Under kernel 0.2.0 the child's rows take their parents from the counted
+  layout of KERNEL-SPEC-2 section 8.1 in place of a pick for each row: every parent has a whole number of children,
+  in a run of consecutive child rows, the histogram of children per parent is the declared `children` shape class
+  for class, the counts total the child rows exactly, and the foreign key column draws nothing. The key is read and
+  refused like `links` (`FLX-3105`) and bound into the emit's `H`, so a bundle that declares none keeps every digest.
+  A relationship that is `distinct`, part of a key, implied by another, a bridge side or a self-relationship, a first
+  column that declares a `nullFraction` or a draw, a `links` condition or weight on it, a dependency that sets it, and
+  a shape that is not strictly ascending whole counts with weights that sum to 1 are `FLX-3403`; kernel 0.1.0
+  refuses the key with `FLX-3105`. `minChildren` (a whole number, default 0) gives every parent at least that many
+  children, so a class of none in `children` folds into it; a `minChildren` above the shape's top count, and child rows
+  fewer than `minChildren` times the parent rows, are `FLX-3403` at plan time, and the second names `--scale`
+  only when the scale causes the shortfall, never when scale 1 falls short the same way. `parentWhen`, a FLUID
+  SQL/1 predicate over the parent's own columns, leaves every
+  parent whose final row does not make it TRUE with no children; it is worked out once per process over every parent
+  row, the child's plan digest holds the parent's, and child rows too few for the eligible parents are `FLX-3403` when
+  the layout is first worked out, which `plan`, `apply` and `--shard` report with the same note about `--scale` when
+  it applies. A `links` condition or weight on a counted relationship is refused once, with a message that names the
+  relationship and its `counts` entry, or the expected count a hook declares, and never first as advice about
+  `joinType`. A required `sum`, `min` or `max` with no `ifNone` over parents a `parentWhen`
+  leaves childless is `FLX-3403` at `plan` and `validate`, whatever the `minChildren`.
+- A hidden column: an emit's `hiddenColumns` lists `{name, type}` entries, columns the expose's
+  contract does not declare that are planned and drawn as a contract column is, after the contract's
+  columns, and never written (ADR 0024 section 2). A hidden column has statistics in the emit's
+  `fidelity` block, a rule may set it or read it, and a path through a link may read a parent row's.
+  It is in no stream, header, `outputDigest` or sink, and `fluxsim verify` does not expect it in the
+  run's rows. The key is part of the emit's block and so of `H`, and `G` leaves it out. Kernel 0.2.0
+  only: kernel 0.1.0 refuses it (`FLX-3105`). A bundle that does not declare it plans, generates and
+  digests as before. A history emit that declares `hiddenColumns` can now carry the hidden column's
+  `fidelity.columns` statistic: the date check of a history reads the emit with its hidden columns,
+  as the plan does, so `validate` no longer refuses the statistic with `FLX-3402` as naming a column
+  the expose lacks, and the refusal for a missing statistic is one that can be satisfied.
+- A hidden table: an emit's `hidden: true` makes the emit a hidden table (ADR 0024 section 3).
+  It is planned and generated as any emit, and a path through a link reads its rows, but it has
+  no stream, file, sink, `outputDigest` or entry in the receipt, the run digest or the staged
+  files. Its plan entry says `hidden: true` and keeps its `generatorDigest`. `fluxsim verify` and
+  `ship` pass over it, and a fact or rule that reads it is not scored. `hidden` takes only `true`,
+  needs a `fidelity` block, and is refused (`FLX-3105`) when no written emit reads the table
+  through a relationship, and on kernel 0.1.0. The key is in `H` and `G` leaves it out.
+- The namespace keys `lifetimes` and `within` (ADR 0024 sections 4 and 5): `lifetimes` lists, per
+  emit, a start column, an optional end column, an optional `duration` histogram, an `endPastWindow`
+  and a `target`; `within` lists dates, or periods (`lifetime: true`), that lie within the lifetime
+  of the row a to-one relationship, or a chain of them, reaches. Both are read and checked against
+  the contract (the columns exist and are DATE or TIMESTAMP, the end is the start's kind, `open` is
+  not declared on a required end, the relationships are the contract's, the last target declares a
+  lifetime, entries for one column lie on one chain with at most one offset), each refused with
+  `FLX-3105`, and bound into `H` of the emit that declares them, as written. `G` leaves both out.
+  Kernel 0.2.0 only: kernel 0.1.0 refuses each (`FLX-3105`), naming kernel 0.2.0 and kernel 0.1.0 before anything
+  checks what the declaration holds, as it does for `rates`, `hiddenColumns` and `hidden`, so a `within` with no
+  lifetime to follow reports the kernel first. A bundle that declares neither plans,
+  generates and digests as before. A `lifetimes` entry whose `start` or `end`, or a `within` entry
+  whose `date`, is the start, the end or the activation column of a history emit is now refused with
+  `FLX-6203` at `validate` and at `plan`, naming the column, the history and the entry, as the
+  history documentation promises; before, the bundle validated and the run broke its own
+  `no_gaps_no_overlap` history check. A how-to page,
+  `docs/how-to/keep-dates-inside-their-parents-lifetime.md`, walks through the temporal features
+  that `fluxsim init` writes from a profile with date pairs, calendars and exposure (`lifetimes`
+  with a duration histogram or a dwell family, `within` entries with their offset, target and
+  widened declared range, `rates`, and `exposure: true`), shows the unused register and its reasons,
+  reads the `lifetime:`, `within:` (with chain lines), `calendar:` and `exposure:` lines of `fluxsim
+  verify` and what a failure means, and says how to change a fact; every command on the page runs in
+  the docs test.
+- A lifetime's end is drawn as a duration (ADR 0024 section 4): a `lifetimes` entry with a
+  `duration` makes its end column one a rule determines, set per row after the row's cells from
+  the row's own start. The end is the start plus a number of whole days drawn from the histogram
+  as EXPR-SPEC-2 section 6 draws a `distribution`, on integer thresholds and one `uniform53`, at
+  the end column's grain (a day for a DATE, a millisecond for a TIMESTAMP); the optional `open`
+  weight is one more slot, which gives NULL. An end after the run's window is NULL under
+  `endPastWindow: open` and the drawn date under `kept`. A column that declares a `nullFraction`
+  keeps its own NULLs first, and a row whose start is NULL keeps the end its cell drew. The draw
+  is on the dates stream `<row path> + ("rule", R)` with `R` the canonical JSON of
+  `["dates", <column>]`, at position 1; its key, counters and blocks are pinned in
+  `tests/vectors/kernel2-dates-vectors.json`, and no existing vector moves. The step enters the
+  plan's rules and `generatorDigest` only for an emit whose lifetime has a duration. A `target`
+  beside a `duration` is refused (`FLX-3105`) until violating rows are generated. A duration's bins start at 0 or later, since an end drawn before its start would break the lifetime on a row the generator made (`FLX-3105`). Kernel 0.2.0
+  only. A bundle without a duration plans, generates and digests as before.
+- The dates steps keep to the column's own declared range (kernel 0.2.0, only where a bundle
+  declares `lifetimes`, `within` or `rates`). A `within` date or a period start is drawn in the
+  parent's lifetime cut at the window and cut again to the date column's declared range (`range`, or
+  a `marginalHistogram`'s first and last edges), and a duration's end is cut so that start plus
+  duration stays inside the end column's range (a histogram through the cut arithmetic of `within`,
+  an exponential exactly); so `fluxsim ship` no longer withholds such a bundle with `FLX-5005`. A
+  row where the lifetime and the range do not meet keeps the value its own cell drew and counts as
+  `infeasible` in the receipt's `dates` tally; a nullable end under `endPastWindow: open` with no
+  value that fits is NULL. `plan` refuses with `FLX-6204` an enforced `within` entry whose declared
+  ranges allow such a row (widen the column's range or give the entry a `target`), and a duration
+  whose end column's range some row's start leaves no value in. A bundle without the temporal keys
+  keeps every byte and digest. ADR 0024 sections 4 and 5, ADR 0025 section 3 and SEAM-FIDELITY-SPEC
+  say so.
+- The exposure hook is bounded in memory and in what it keeps. A `rates` weight is read with at most
+  30 digits (`FLX-3105`, naming the key; `init` writes six), the table of a window holds at most 1
+  000 000 cells (`FLX-3403`) and the last two tables are kept, and the hook keeps its declarations
+  under the simulation, the relationship and the parent expose, overwritten by each plan and capped
+  at 1 024. Two exposes of one plan that reach one parent through a relationship of one name are
+  refused at plan time (`FLX-3403`, naming both).
+- A `within` entry may carry `exposure: true` (ADR 0025 section 4): the number of children a parent
+  has follows the days it is active inside the run's window, weighted by the child column's seasonal
+  rates, through the expected-count hook of the counted layout. Without a `children` shape the child
+  rows are allotted in proportion to each parent's exposure, and with one the parents are ranked by
+  it. Kernel 0.2.0 only; an entry without it keeps every digest. `fluxsim verify` adds a line
+  `exposure:<relationship>` for each such entry whose relationship the pinned profile publishes an
+  `exposure` for: the run's children per active day against the profile's, within the relative
+  tolerance of a `facts` entry that names the line, or 10 %.
+- `fluxsim init` no longer crashes on a profile whose timestamp `max` is in December 9999 (the
+  `9999-12-31` open-end sentinel): calendar level occurrences are counted on integer epoch days and
+  hours, only when a calendar becomes `rates`, and a window longer than a year now sums each month's
+  days across years. A suppressed calendar cell takes the smallest positive weight the histogram
+  publishes instead of 1. An exponential dwell whose mean puts the rate outside `[2^-900, 2^900]` is
+  refused with `FLX-5021` instead of raising `OverflowError`, and a `Rates` entry parses its weights
+  once when built, so an emit with more than 256 rated columns is no longer slow; a dwell family
+  looks a state up in a dict.
+- Dates follow seasonal rates (ADR 0025 section 2). The namespace key `rates` lists `{emit, column,
+  month, dayOfWeek, hourOfWeek}` entries, at most one per column of an emit, for a DATE or TIMESTAMP
+  column that a `within` entry sets, a period's start, or the end of a lifetime with a `duration`;
+  any other column, and `hourOfWeek` on a DATE column, are `FLX-3105`. Each factor is a list of
+  decimal weights of at least zero, not all zero: `month` (12, January first), `dayOfWeek` (7,
+  Monday first) and `hourOfWeek` (168, Monday 00:00 UTC first). The intensity of a value is the
+  product of the factors read in UTC, and the step's own draw becomes proposal 0 of 128 of a
+  thinning on the column's dates stream: proposal `k` is drawn at position `1 + 2k` and tested by
+  one `uniform53` at position `2 + 2k`, accepted when `a * lambda_max < lambda(value) * 2^53` on
+  exact rationals, and the value is the first proposal accepted (a NULL proposal at once, proposal 0
+  when none is, counted as a rates fallback). A violating row's value is never thinned. The entry is
+  bound into `H` of the declaring emit and left out of `G`, kernel 0.1.0 refuses the key, and a
+  bundle without it keeps every row and digest. The receipt's `dates` member is also present for an
+  emit with `rates`, and counts `ratesFallbacks`. The thinning positions are pinned in
+  `tests/vectors/kernel2-dates-vectors.json`.
+- A lifetime's `duration` may be an exponential or a dwell family (ADR 0025 section 3), besides the
+  histogram. An exponential is `{mean, open}`, a mean in days above zero and an optional share of
+  rows with no end, from 0 up to below 1; it draws one `uniform53` at position 1 of the end's dates
+  stream, as KERNEL-SPEC-2 section 5.4's exponential at the end column's grain. A dwell family is
+  `{given, states, otherwise}`: the dwell, a histogram or an exponential, is chosen by the text of
+  the row's final value of `given` (a column of the emit, hidden or not, other than the start and
+  the end), `otherwise` is the dwell of a NULL or unlisted state, and without it such a row keeps
+  the end its own cell drew. The end is set after `given`, and a `given` the end decides is
+  `FLX-6208`. The forms are told apart by their keys, a mix or an unknown key is `FLX-3105`, and so
+  is an `open` share on a `kept` end. A plain histogram plans, draws and digests as before.
+- Lifetimes and `within` entries are bounded and no longer crash or stall: a bin edge of more than 7
+  digits, a weight or a `target` of more than 1 000 digits, and a `relationship` of more than 32
+  hops are refused with `FLX-3105` naming the key; the implied outer lines of a long period chain
+  are planned in polynomial time (a 24-level chain was exponential); and `verify` scores a TIMESTAMP
+  against a DATE end of 9999-12-31 (or any bound at either end of the calendar) in integer
+  microseconds instead of raising `OverflowError`.
+- A temporal golden pins the fixture bundle without `lifetimes`, `within`, `hiddenColumns` or
+  `hidden` to the digests origin/main gives, under kernel 0.1.0 and kernel 0.2.0 and with `--jobs 1`
+  and `--jobs 4`, and pins the bundle with lifetimes and `within` dates under kernel 0.2.0 as a
+  guard; kernel 0.1.0 refuses the keyed bundle with FLX-3105.
+- A date within its linked row's lifetime: a `within` entry that names a `date` column now sets it
+  (ADR 0024 section 5), through one relationship or a chain (`account.customer`), and with several
+  entries for one column along a chain. The date is drawn per row, after the row's cells, inside the
+  parent's final lifetime, closed so its last day is included and open when the parent has no end, a
+  NULL end or an end before its start; the entries' lifetimes are intersected and cut at the run's
+  window (the whole lifetime when it ended before the window, its start alone when it starts after).
+  With an `offset` the date is the value of the histogram cut to that interval on integer
+  thresholds, one `uniform53` at position 1 of the column's dates stream; without one, or where no
+  bin keeps a value inside, it is uniform over the interval, one `bounded`. A DATE bounds a
+  TIMESTAMP from its midnight and up to the end of its last day, and a TIMESTAMP bounds a DATE by
+  its day. A row whose link reaches no row, or whose parent has no start, keeps the value its own
+  cell drew, and a column keeps its declared NULLs first. A `within` entry on a column a rule or a
+  duration also sets is `FLX-6203`; a duration may start at a date a `within` entry sets. Without
+  `spec.timeBounds` an entry that has no `offset` with weight on a day from 0 up is `FLX-6205` (a
+  new code, the interval open on one side with nothing declared), and several entries for one date
+  along a chain need the first middle expose tied to the next level by an entry on its start or a
+  period, and every deeper one tied by a period (`FLX-6204` otherwise, so a chain of three levels
+  waits for periods). A period (`lifetime: true`) and an entry with a `target` are refused
+  (`FLX-3105`) until later changes generate them. The step is listed in the plan, and in
+  `generatorDigest`, only for an emit that declares an entry, and coverage names the column
+  `bundle.within.<column>`. Kernel 0.2.0 only; a bundle without the keys plans, generates and
+  digests as before. The draws are pinned in `tests/vectors/kernel2-dates-vectors.json`, which gains
+  entries and changes none. `fluxsim verify` makes a chain's implied outer line only through period
+  ties, since a tie on a middle row's start alone does not keep a date before the outer row's end.
+- Measured violation shares of dates: a `target` on a lifetime with a `duration` and on a `within`
+  entry, a date or a period, now generates violating rows instead of `FLX-3105` (ADR 0024 section
+  7). On a covered row whose own value is not NULL, position 0 of the column's dates stream draws
+  `bernoulli(1 - t / 100)`, exactly; a row that does not hold takes the first of 16 candidates,
+  drawn from the column's own statistics at `257 + j * m`, that lies outside the fact's interval and
+  inside every other entry's, else the first end of the column's declared range that does, else it
+  keeps the value that holds and is counted as not violated. A lifetime's violation is an end before
+  its start; a period's is drawn on its start, and its end is then not cut at the parent's end. At
+  most one entry for a column carries a target (`FLX-3105`), and a middle expose's tie with a target
+  needs a target on every entry further out on the chain (`FLX-6204`); rows whose levels do not meet
+  are drawn inside the nearest link's interval and counted as `infeasible`. The receipt's emit entry
+  gains a `dates` member, only for an emit whose facts carry a target above zero, with the counts of
+  rows that held, were violated (`drawn`, `infeasible`), were `notViolated` or fell back from an
+  offset, per fact, and the evidence pack lists the violations injected on purpose. A value a dates
+  step sets outside the milliseconds a TIMESTAMP holds is `FLX-6112` instead of a crash when it is
+  rendered. A bundle without a target plans, generates and digests as before; `fluxsim init` no
+  longer plans its bundle without the targets it declares. The new draws are pinned in
+  `tests/vectors/kernel2-dates-vectors.json`, whose existing entries are unchanged.
+- A period (`lifetime: true` in a `within` entry) now generates under kernel 0.2.0: the emit's
+  lifetime start is drawn as a date within the linked row's lifetime, like a date entry on that
+  column, and its end is drawn as the lifetime draws it, then cut at the end of each linked row that
+  has ended, so a child ends with its parent; only where no parent has ended does `endPastWindow`
+  apply. Chains of periods of three levels generate and hold at every level, DATE and TIMESTAMP
+  mixed, `fluxsim init` no longer strips periods before its pre-flight, and a bundle without a
+  period gives the rows it gave before.
+- `fluxsim verify` scores every temporal fact and every level of a chain, as facts and invariants
+  (ADR 0024 section 8). Each `lifetimes` entry with an end is the line `lifetime:<start>.<end>`,
+  each `within` entry is `within:<relationship>.<column>` (`within:<relationship>.lifetime` for a
+  period), and for each chain the outer level is `within:<r1>.<r2>.<column>`, scoring the date
+  against the lifetime of the row the whole chain reaches, with the units the ADR fixes (a lifetime
+  includes its last day, a DATE bounds a TIMESTAMP by its midnight UTC). A line is named
+  `<exposeId>.<ruleId>`, so a `facts` entry may give it a tolerance and the profile's `invariants`
+  and the scorecard's `invariants` dimension score it. A line with no `target` is enforced: one
+  violating covered row fails the run. A line with a target fails when its violating share exceeds
+  the target by more than the allowance, which is the fact's tolerance when it has one and otherwise
+  four standard deviations of a draw at that target; an implied outer level is held to the sum of
+  its levels' targets, zero when every level is enforced, unless an entry states that level itself.
+  A fact that reads a hidden column or a hidden table is listed by `verify` (`facts: not scored`,
+  and `rules.notScored` in its result) and by `EVIDENCE.md`, with the reason, and never counts as
+  passing. A bundle that declares neither key verifies as before.
+- The scorecard's `temporal` dimension now scores a date column's calendar. For each `calendar`
+  histogram of the pinned profile that `verify` scores (month, day of week, hour of week), the
+  scorecard gains a `calendar` row in the column's table: the score is one minus the total variation
+  distance the `calendar:<column>` line already prints, within when the distance is at most the
+  tolerance (0.10, widened by the noise of a noisy profile histogram). A histogram the profile
+  withheld is `censored` and one the comparison refused is `refused`; a calendar entry `verify`
+  lists as not scored has no row. The rows are scorecard format 1-4-0, extended and not renamed
+  (`scorecard-1-4.schema.json` gains the `Calendar` definition, SCORECARD-SPEC states it), and a
+  scorecard without a calendar row names the format it did before and keeps its bytes. A threshold
+  on `temporal` is now accepted, and is not met when no calendar was scored; `ship` reads the same
+  rows for its gate.
+- `fluxsim verify` scores a date column's calendar against the pinned profile (ADR 0025 section 8).
+  Each `calendar` entry of the profile is the line `calendar:<column>` for the emit whose expose is
+  that table: the run's non-NULL values counted by month, ISO day of week and, for a TIMESTAMP, hour
+  of week in UTC, each compared with the published `levelHistogram/1` by the total variation
+  distance a level histogram is scored with (suppressed cells left out on both sides, a noisy
+  histogram's margin widened as for a column statistic) within the tolerance a distance is written
+  with, `0.10`. The line prints each histogram's distance and tolerance and fails the run when one
+  is outside; the result document gains a `calendar` key. A published `hourOfWeek` of a DATE column,
+  and a calendar of a hidden column or hidden table, are listed as `facts: not scored`, with the
+  reason. A run whose profile publishes no calendar verifies byte for byte as before. `verify` and
+  `ship` fail a run on a `calendar:<column>` line only for a column a `rates` entry shapes. A
+  profile calendar on any other column (a root date that no `within` entry or duration sets, which
+  `fluxsim init` lists as unused) is still computed and printed with its distances, marked `not
+  gated: no rates entry shapes this column`; its scorecard rows keep their outcome, and the result's
+  calendar line carries `"gated": false`. `fluxsim ship` no longer packs a run that `fluxsim verify`
+  fails. It forms the rule, integrity, calendar and exposure lines with the functions `verify` forms
+  them with and withholds (`FLX-8001`) every emit a failed line is about, naming each line as
+  `verify` prints it (`run.rules`, `run.calendar`, `run.exposure`). The scorecard's `met` is false
+  when any such line failed, so a scorecard never reads `met: true` beside a failed check, and a
+  withheld ship's `--json` result carries that scorecard. `ship` also refuses (`FLX-2101`) a bundle
+  that is not the run's, as `verify` does, and writes nothing.
+- Profile format `1-3-0` gains two optional members, `tables.<id>.datePairs` and
+  `relationships[].dates`: the whole days between two date columns of a table, or between a parent's
+  and a child's, as a histogram or quantile and an `order` over `["after", "before", "same"]`, each
+  read under the disclosure rules of a column statistic. An exact date-pair statistic or order grades the profile
+  `P1`, with a reason that names the section; a section grades `P3` only when every statistic in it carries noise. The profile request gains format `1-1-0`,
+  which asks for them (`datePairs` per table, `dates` per relationship); a request that asks for
+  neither is still written as `1-0-0`, byte for byte as before.
+- `fluxsim init` writes lifetimes, `within` entries and their targets from a profile's `datePairs`
+  and relationship `dates`, and asks for those pairs in its request. It declares an order only where
+  the profile shows it holds on at least 90 % of the rows where both dates are known
+  (`ORDER_HOLDS_AT_LEAST`): a table's lifetime from the pair that holds on the most rows, oriented,
+  with the pair's histogram cut at day 0 as its `duration`, the share that breaks the order as its
+  `target` and `endPastWindow: kept` when the end column's published maximum lies after the window;
+  a start-only lifetime for a parent date that a child is ordered after; and a `within` entry per
+  relationship pair, with its `offset` and a target summing the share before the parent's start and
+  after its end. Every published pair it does not use is recorded as unused with its reason. The
+  profile request `fluxsim init` writes asks for the `calendar` of every date and timestamp column
+  of every table, and for the `exposure` of every relationship, for each pair of the parent's date
+  columns that its `datePairs` asks for and for each of the parent's date columns alone, up to the
+  request format's bounds; a contract with no date column keeps a format 1-0-0 request, byte for
+  byte. `fluxsim init` keeps an enforced `within` entry when the date column's declared range could
+  leave a row with no value inside its parent's lifetime: it runs the plan's own check on the bundle
+  it writes and widens that column's declared `range` (and, for a period, its end column's minimum)
+  just enough to meet it, clipped to the run's time bounds, and says so in the used note of the
+  statistic ("declared range widened to the parent's lifetime so every child date can lie inside
+  it"), so the bundle plans, applies and verifies instead of init exiting 1 with `FLX-6204`.
+  `fluxsim init` no longer writes a widened child date whose histogram `verify` refuses
+  (`FLX-5037`): the widened column keeps its draw, loses the histogram property that cannot
+  partition the new range, and, when that leaves the table no property to verify, the `within` entry
+  is left out and recorded as unused with the reason.
+- `fluxsim init` writes `exposure: true` on the first `within` entry over a relationship whose
+  profile publishes an `exposure` for the lifetime it writes for the parent (the same start, the
+  same end or none, both counts published, an active day above 0), and records every other published
+  exposure as unused with its reason (ADR 0025 section 7). A profile without exposure members gives
+  the bytes it gave before. `fluxsim init` no longer writes an exposure that its own bundle fails in
+  `verify`: the exposure line now counts a run's active days over the profile's window clipped to
+  the run's time bounds, and an exposure over a lifetime cut to its parent's lifetime that a trial
+  run of the bundle scores outside its tolerance is left out and recorded as unused with the trial's
+  numbers. An exposure no trial run can check (the run is refused, or forms no line for it) is
+  left out too, with the reason, and the trial runs at a plain decimal scale `run` accepts.
+  `fluxsim init` trials every exposure and every `rates` entry it writes, a root lifetime's
+  included, and leaves out, with the trial's numbers, the ones the run does not reproduce. A trial
+  whose plan holds more than 60000 rows, the rows a history projection derives included, is not run,
+  and its items are left out with that reason.
+- `fluxsim init` writes a `rates` entry (ADR 0025 section 7) for each date column a `within` entry
+  or a duration it writes sets, when the profile publishes a `calendar` for that column: each
+  published histogram is divided level by level by the number of times the level occurs inside the
+  window `init` writes (the days of each month, the days of each weekday, the hours of each hour of
+  the week), scaled so its largest weight is 1 and written to six significant digits; a suppressed
+  level or one the window does not hold weighs 1. A noisy or withheld histogram, one with no usable
+  weight, a DATE's `hourOfWeek`, and a calendar for a column no entry sets are recorded as unused
+  with their reasons, and the ledger now lists published calendars. A profile without calendars
+  gives the bundle `init` wrote before. `fluxsim init` writes the `month` and `hourOfWeek` rates of
+  a timestamp column when the profile publishes `hourOfWeek`, and leaves `dayOfWeek` out with the
+  reason "hourOfWeek already carries the weekday", so the weekday is counted once and the bundle
+  passes its own `calendar:` verdict; a date column, or a profile without `hourOfWeek`, keeps
+  `month` and `dayOfWeek`.
+  A `rates` entry whose gated `calendar:` line a trial run of the bundle scores outside its
+  tolerance, or forms no line for, is left out and recorded as unused with the trial's distances,
+  and the column's calendar line is then printed and does not gate.
+- `fluxsim init` writes a lifetime's `duration` as a dwell family when its date pair also publishes
+  a histogram of the days grouped by a column of the table: one histogram per published group as
+  `states`, the ungrouped histogram as `otherwise`, a withheld group or one with no day from 0 up
+  left out and recorded. A pair with no usable duration now gives a lifetime with its start only,
+  never an end drawn apart from its start, so `verify` no longer fails the lifetime's order on
+  generated rows.
+- Profile format 1-3-0 gains two optional members: `tables.<id>.calendar`, a timestamp column's
+  known values counted by month, day of week and hour of week over fixed zero-padded levels, and
+  `relationships[].exposure`, the children and the active days inside a stated window of a parent's
+  lifetime columns, each count a `count/1` metric under the profile's disclosure rules. An exact calendar histogram
+  or exposure member grades the profile `P1`, with a reason that names it, and the grade reads any member of a table,
+  column or relationship it does not know as released without noise. The example profile
+  `docs/spec/profile-1-3-example.json` counts only the months that its `min` and `max` span, so a bundle `init` writes
+  from it passes `run --verify`. Request
+  format 1-1-0 asks for them with `tables.<id>.calendar` and `relationships[].exposure`; a request
+  that asks for none of the 1-1-0 members is still written as 1-0-0, byte for byte as before.
+- `RelationReader.parent_row` names the row of a relationship's target that a foreign key
+  took at a row, or none when the key is NULL. Every pick records its parent row in a bounded
+  cache (ADR 0022 section 2), and a row not recorded is computed with the same draws. Internal
+  machinery: no row and no digest changes.
+- `RelationReader.parent_row` also answers for a relationship absorbed into a several-column
+  key, from the part's index in the key's decoded point. Internal machinery: no row and no
+  digest changes.
+- `GeneratorPlan` has an optional `reads`, the plans of the exposes its paths reach, which
+  puts each reached plan's `generatorDigest` in the plan document only when it is not empty;
+  every existing plan document and digest is unchanged. `RelationReader.final_row` makes a
+  row of such an expose exactly as its own pass writes it, with its rules, dependencies and
+  `given` columns. Nothing sets `reads` yet.
+- PROFILE-SPEC format `1-3-0` adds, all optional, a `references` section (the rows of a table
+  the owner releases whole), a `groupBy` on a number column, `groupByLink` (a statistic grouped
+  by a column of the row a relationship names; a `noise` block on one is refused with `FLX-5036` naming
+  `<path>.noise`, since removing one row moves every row that links to it) and `per` (a statistic counted once per
+  entity).
+  Its schema is `docs/spec/profile-1-3.schema.json`; the schema of `1-2-0` is kept as published.
+- EXPR-SPEC-2 section 8 says that a trait stable per entity is a contract `dependency` from the
+  entity's key, and that a profile publishes its shares as a statistic `per` that key.
+- `flux_stats.profile` reads profile format `1-3-0` and its `references` section, the rows of a
+  table released whole, as `Profile.references` (a `ReferenceTable` per `exposeId`, empty for an
+  earlier format). It refuses a cell that is not a string or null, a row of the wrong width,
+  repeated column names, an unknown disclosure rule and a table beyond the bounds, with `FLX-5036`.
+- `fluxsim init` passes over a statistic of profile format `1-3-0` that no rule reads yet (grouped
+  by a linked row, grouped by a number column, or counted per entity) and lists it among the
+  statistics it does not use, with the reason. The bundle it writes is the one written without it.
+  `flux_stats.profile` reads those forms: `StatisticEntry.group_by_link` (a `LinkGrouping`) and
+  `StatisticEntry.per`, and refuses a link to an unknown table or column, a link whose two keys
+  differ in width, `groupBy` with `groupByLink`, `per` beside either, a `per` naming its own
+  column or a column twice, and a group key that is not the canonical text of its value. A profile
+  that holds `references` is no longer graded P3.
+- Kernel 0.2.0 generates a rule that reads its parent's column through a link. A contract `derive`
+  with `expr` over `<relationship>.<column>`, a FLUX-side `derive` that follows a chain of to-one
+  relationships, and a difference form in days whose `k` and `x` read a link, hold the value the
+  linked row ends with: its draw, its own rules and dependencies, and a column drawn `given`
+  another. A NULL key gives NULL, and a column that declares a `nullFraction` keeps its own NULLs.
+  The plan lists each rule's `paths` and each reading plan's `reads` (the digests of the plans it
+  reaches) only when it has any, so every plan without such a rule keeps its bytes and digests.
+  A cycle among the exposes that rules read through, a path into an expose the Simulation does not
+  generate, a rule over a link that determines a key or foreign key, and a bounds form or a share
+  below 100 % over a link stay `FLX-6210`, and so does every rule over a link on kernel 0.1.0, whose
+  message now says that kernel 0.2.0 generates it. A column whose rule's whole value is a path is
+  `copied` by `rule` in the coverage, and `verify` reads the rows of every expose a path crosses,
+  and the bundle's own rules, when it scores a rule.
+- `fluxsim init` declares an INT column as a categorical over its integer levels when the profile
+  groups another column by it and lists at most 64 whole numbers of it (a `levelHistogram/1` or
+  a `support/1`, each level canonical decimal text inside the contract's range), so the grouped
+  column is drawn `given` it under the rules that apply to a categorical parent. A statistic
+  grouped by a number column of the profile stays unused, with a reason that says a number
+  column publishes bins, not levels. To score such a column, flux-stats and `verify` read a whole
+  number of a categorical column as the category of its decimal text, as they read a boolean.
+- `fluxsim init` draws a column a contract `dependency` sets from the profile's statistic counted
+  per the `from` columns (profile format `1-3-0`, `per`), when those columns are a key of the
+  table or a relationship's foreign key, in place of the statistic that counts rows, because the
+  dependency draws once per key. The column then has no mean or histogram property, since a
+  run's properties count rows and the statistic counts entities, and the bundle's choices say so.
+  A statistic counted per entity of a column no such dependency sets stays unused, with the
+  reason that a stable trait is a contract `dependency` from the entity key, to declare in the
+  contract. `init` never writes the contract.
+- Kernel 0.2.0 generates a FLUX-side `derive` whose value holds `ROW_NUMBER`, `RANK` or
+  `DENSE_RANK` over the row's siblings (EXPR-SPEC-2 sections 5 and 6, ADR 0022 section 7).
+  An expose with such a rule is made whole in each process that needs any of its rows: its
+  cells, then the rule steps in order, each over every row before the next, so a window sees
+  every sibling's final values, with the rows with a NULL link as one partition. The whole is
+  kept per process for its plan and run, and a slice is cut from it, so `--jobs`, chunking and
+  `--shard` give the same bytes; that costs one pass over the expose in each process that
+  writes a slice of it. The other window functions stay `FLX-6210`, and kernel 0.1.0 refuses a
+  window and says kernel 0.2.0 generates it. A plan with no window is generated as before.
+- Kernel 0.2.0 generates `FIRST_VALUE`, `LAST_VALUE`, `LAG` and `LEAD` over siblings the same
+  way as the ranks (EXPR-SPEC-2 section 5): `FIRST_VALUE` and `LAST_VALUE` over the whole
+  partition, `LAG` and `LEAD` with a positive integer literal offset and a default literal, and an
+  argument may read through a link of the sibling. The order must still be total (`FLX-6108`).
+  Every FLUX-side window now generates on kernel 0.2.0.
+- `fluxsim verify` checks each `sharedColumns` entry and each non-owner `sharedAttribute` member of a
+  Simulation that declares `copies: true` as a copy through its link. A Simulation that does not has no copy
+  line, scored or reported. Its line in the `rules` of the emit has the form `derive`, the origin `shared` and the
+  copy's name; the covered rows are those whose link reaches a row, and a row holds when the column is the
+  source's value. A copy the run made is enforced: one violating row fails the run. A copy the run did not
+  make (a key or foreign key member, a relationship of the expose to itself) is
+  reported as a share and fails nothing, read from the run's recorded plan. A copy whose parent expose the
+  run does not emit is named in the module notes as one that cannot be checked, and it no longer hides the
+  emit's other rules.
+- A Simulation can give a relationship a condition under the new top-level namespace key `links`, a list of
+  `{emit, relationship, when}` entries (`sentinels` and `weight` are refused in this version). Under kernel
+  0.2.0 the plan gets a step, ordered with the rules, that sets the relationship's `fromColumns` to NULL on a
+  row where the `when` predicate, over the emit's own columns, is not TRUE; the foreign key's own draws
+  are unchanged on every row, the step runs before any copy, window partition or rule that reads the link,
+  and a copy through the link reads NULL there. The entry is bound into the emit's `H` and left out of `G`, so a
+  bundle that declares none keeps every digest and plan document. A read beyond the row is `FLX-6210`,
+  a condition on an `inner` relationship, on one whose columns are a key or part of one, or on one another
+  relationship implies is `FLX-3403`, and kernel 0.1.0 refuses the key with `FLX-3105`, naming the kernel.
+- A `links` entry can declare `sentinels`, a mapping from a column its relationship copies (a
+  `sharedColumns` column of it, a `sharedAttribute` copy through it, or a `derive` whose whole value is a path
+  that starts with it) to the text of its sentinel. The text is read as the column's type and must fit it
+  (`FLX-3105` otherwise). Under kernel 0.2.0, on a row whose path reaches no row (a NULL key, a key that matches
+  nothing, a condition that cleared the link) the copy writes the sentinel instead of NULL; a row whose path
+  reaches a row whose value is NULL keeps NULL, and so does a row whose own value is NULL under NULLs first. A
+  rule's document records the sentinel only when declared, and kernel 0.1.0 refuses the key as for a condition.
+  `fluxsim verify` now covers a copy with the rows whose link reaches a row, as the copy line was documented to,
+  so a row with no link, which holds NULL or its sentinel, no longer counts for or against it.
+- `fluxsim verify` checks each conditional link and each declared sentinel as a line of the emit's `rules`, of
+  form `check` and origin `bundle`. `link:<relationship>` covers the rows whose link reaches a row and holds
+  where the condition is TRUE; `sentinel:<relationship>.<column>` covers the rows whose path reaches no row
+  and holds where the column is the sentinel. Both are enforced when the run generated them, so one violating
+  row fails the run, and a conditional link whose parent expose the run does not emit is named in the notes as
+  one that cannot be checked.
+- A Simulation can declare a bridge table under the new top-level namespace key `bridges`, a list of
+  `{emit, relationships: [a, b]}`: two distinct relationships of one emitted expose. Under kernel 0.2.0 the
+  two are laid out together as one key of two parts, the point `permute/2(k, rows_a * rows_b, rowIndex)` decoded
+  in mixed radix with `a` first, `k` the layout key of the label `("sim", sim_id, "gen", exposeId, "pair", a, b)`,
+  so no pair repeats and each side names a row its parent holds, and a copy through either side works. The key
+  is read and refused like `links` (`FLX-3105`) and bound into the emit's `H`, so a bundle that declares none
+  keeps every digest. More rows than pairs, a `nullFraction` on either side's first column, a side that is
+  `one_to_one`, whose columns are a key, that is already part of a key or that another relationship implies, a
+  `links` condition on a side, and one relationship in two bridges are `FLX-3403`; kernel 0.1.0 refuses the key
+  with `FLX-3105`. `fluxsim verify` adds the line `bridge:<a>,<b>` for each bridge, covering every row and
+  holding where the row's pair occurs once; it is enforced.
+- An emit's block may declare `reference: true`, and kernel 0.2.0 then makes the expose from the
+  rows the pinned profile publishes for it (profile format `1-3-0`, `references`): one row per
+  published row in published order, each cell read as its contract column's type, and no draw, so
+  its bytes do not depend on the seed. The block carries no other key, the Simulation pins a
+  profile that holds the expose, and kernel 0.1.0 refuses it (`FLX-3105`). Every contract column
+  is published, every cell fits, every key is unique and never NULL, and a relationship points at
+  a reference expose that holds the keys it uses (`FLX-3403`). A foreign key into it picks a row as
+  any foreign key does, and a `declared` pick takes the row whose key equals the drawn level, a
+  level that is no key being refused at plan time (`FLX-3403`). A published `0` is accepted in a `DECIMAL(p,p)`
+  column such as a rate or a fraction, which has no integer digit. A column with a FLUID `sensitivity`
+  that sets a minimum grade is refused (`FLX-4005`), since the expose is released whole;
+  `EVIDENCE.md` lists each reference expose as released outside the run's guarantee. `plan.json`
+  records the published rows, so `apply --run-id` and `verify` need no profile for them, and
+  `verify` checks that the output equals them. A bundle with no reference expose plans, runs and
+  digests as before. See [Publish a catalogue whole](docs/how-to/publish-a-catalogue.md).
+- Kernel 0.2.0 draws a column given a column of a linked row: `given: <relationship>.<column>` with
+  `levelWeightsGiven` or `binWeightsGiven` keyed by that column's levels, as `given` keys them for a
+  column of the same row. The level a row draws given is the level of the parent's final value at
+  the parent row the relationship names, so an order line's price can follow the price of the
+  product it names. The cell is drawn on its own path at the index it always takes, so no seed-tree
+  path is added and every other draw is the byte it was. It is `FLX-3402` at plan time unless the
+  relationship is a to-one one that reaches a row on every row (its first column declares no
+  `nullFraction`), no rule sets its columns, the parent column is a categorical drawn from its own
+  declared levels with no `nullFraction`, the `to` column of a contract dependency, or a column of a
+  reference expose, no `derive` or check rule sets it, and the weight tables name exactly its
+  levels; a path of two links, a list of given columns that holds a path and kernel 0.1.0 are
+  refused too. The plan lists the plan it reads, only when it has such a column, and the column
+  path leaves such a plan to the per-row path.
+- `fluxsim verify` checks a property grouped by a link: `groupBy: <relationship>.<column>` groups the
+  property's column by a column of the row a to-one relationship of the expose names. Each row of the
+  emit is joined to the row of the relationship's target that its key columns name, in the target's
+  emitted rows, and that row's value is the group key; a row whose link reaches no row has no group
+  and is never compared. The column is declared in `fidelity.columns` under the same dotted name with
+  its `support`, and the reference is the profile's statistic of format 1-3-0 grouped by the same
+  link (`groupByLink`), where a profile that holds no such statistic is `FLX-5037`. `ship` compares
+  the same way; a committed slice and `--sample`, which hold one emit's rows, refuse such a property.
+  An existing bundle declares none, so its rows, digests and verdicts are unchanged. See
+  [Draw a column given another](docs/how-to/draw-a-column-given-another.md).
+- `fluxsim init` writes a catalogue and the rows that follow it from a profile of format 1-3-0. A
+  table the profile publishes whole under `references` is written as `reference: true` with no
+  fidelity block. A column whose statistic is grouped by a linked row (`groupByLink`) is drawn
+  `given: <relationship>.<column>` with the grouped counts as `levelWeightsGiven` or
+  `binWeightsGiven`, and scored by a property grouped by the same link, when the contract
+  declares one relationship over the grouping's columns, the foreign key reaches a row on every
+  row, no rule sets the column and the parent column is text drawn from its own levels or a
+  column of a reference expose; otherwise the statistic is listed as unused with the reason the
+  generator would refuse it for. A foreign key into a reference expose declares the levels its
+  `levelHistogram/1` counts over the catalogue's keys, and one counted over other values draws
+  a catalogue row uniformly.
+- A `links` entry's `weight` names a number column of the relationship's target, and the
+  relationship's parent row is then picked by the weights of the parent's final rows (kernel
+  0.2.0): the first row `i` with `u < T_i`, `u` one `uniform53` at the draw index the uniform
+  pick takes and `T_i` the exact integer thresholds of the running weights, a NULL weighing zero.
+  A weight that names no number column, or sits on a one-to-one or key relationship, a declared
+  pick, a bridge side or a reference expose is `FLX-3403`, as is a negative weight or weights
+  that total zero (at plan time for a reference parent, at the first pick for any other). A
+  plan with such a pick is generated on the per-row path. An existing bundle declares none, so
+  its rows, digests and verdicts are unchanged.
+- A Simulation that declares `copies: true` (the top-level key
+  `extensions['com.agentics.flux/1'].copies`, whose only value is `true`, anything else `FLX-3105`)
+  has kernel 0.2.0 generate a relationship's `sharedColumns`. Each listed column is the copy
+  `derive: <column>` with `expr: <relationship>.<column>` and no `when`, on every row: a row holds the
+  value the row its link names ends with, and a row whose key is NULL holds NULL. Without the key
+  nothing changes, under either kernel: the declaration stays listed as declared and not generated,
+  and every plan, row and digest keeps its bytes, which a contract that already declared
+  `sharedColumns` needs to replay a kernel 0.2.0 plan written before (KERNEL-SPEC-2 section 12). The
+  key is bound into `H` of each emit that lists something to copy, only when declared, and kernel
+  0.1.0 refuses it (`FLX-3105`, naming the kernel). A column that is a key or a foreign key of the
+  copying expose stays listed, now with its reason, and a column another source also sets (a
+  `derive`, a dependency, a FLUX-side rule, a mapping) is `FLX-6203`. The copy is named in the
+  coverage and `column-provenance.json` by its relationship and column
+  (`semantics.relationships.<relationship>.sharedColumns.<column>`), `fluxsim verify` scores it as a
+  rule of origin `shared`, and `fluxsim init` writes `copies: true` for a contract that declares a
+  `sharedColumns` or a `sharedAttribute`, and no draw for a copied column. The text of `plan`'s
+  `--strict-coverage` help and of `FLX-3305` names what each kernel leaves out.
+- With `copies: true`, kernel 0.2.0 generates a column's `sharedAttribute`. The members of an attribute
+  (columns of exposes of one contract that carry it) are read together: the owner is the member every
+  other member reaches by following relationships, on exactly one path, and keeps its own draw, and
+  every other member is a copy of the owner's column along that path, named by the attribute. A member
+  holds the owner's value on every row whose path reaches an owner row and NULL elsewhere. No owner,
+  two paths to it, and a path through an expose the Simulation does not generate are `FLX-6210`,
+  naming the attribute and its members, and a member that is a key or a foreign key stays listed as
+  declared and not generated, with its reason. `fluxsim verify` scores each copy as a rule of origin
+  `shared`, the coverage names it by its attribute (`contract.sharedAttribute.<attribute>`), and
+  `fluxsim init` writes no draw for a member that copies. Without `copies: true` a bundle that
+  declares `sharedAttribute` keeps every plan and digest it had.
+- A column that a rule over a link determines (a copy from `sharedColumns` or `sharedAttribute`, or a
+  contract or FLUX-side `derive` over a path), whose rule allows no violating row (no band, or a
+  band of zero violations), and that declares a `nullFraction` above zero is `FLX-6204` at plan time
+  under kernel 0.2.0, in every run, naming the emit, the column and the rule. The column's own NULLs
+  come first and would violate the rule, which `fluxsim verify` counts, so `plan`, `apply` and
+  `verify` agree; drop the `nullFraction`, or give the rule a `rows` band that admits the NULLs,
+  which then keep coming first.
+  A bundle that declares no such column is unchanged.
+- Every sink refuses an option named like a credential (`FLX-3508`) and a URL target that
+  carries user information, a query or a fragment (`FLX-3509`) before any sink runs, and a
+  writer's error is reported scrubbed of URL credentials and of the values of credential
+  environment variables, without the writer's traceback (ADR 0031 section 5); the working
+  directory variable `PWD` is not read as a credential, so a path in an error stays readable.
+- `flux_engine.generators` lists generator plugin entry points without importing them, resolves
+  a declared plugin to exactly one entry point of a pinned distribution installed where its
+  code is, and loads it only after those checks (`FLX-3114` to `FLX-3118`, ADR 0032 section 3);
+  `fluxsim plugins` and its `--json` list them, marked `editable` or `outside an installation
+  directory`. A generator plugin's options refuse a credential-shaped value (a URL with user
+  information or a signature, an access key id, a private key block), and a key ending in `-env`
+  is allowed for plugin options as for sink options.
+- `fluxsim story --run-id RUN --emit EXPOSE --key VALUE` tells one entity's history from a
+  committed run: the rows that link to it and the rows it links to, to `--depth` hops and at
+  most `--limit` rows, in time order, read only from streams that match the receipt's
+  `outputDigest`, with control and bidirectional characters escaped (ADR 0031 section 3). It
+  starts from every row that matches `--key` and says how many matched on its first line, the
+  entity's own rows come first, and every row carries `hop` and `relationship` (the relationship
+  it was reached by, null at hop 0), in the text lines and in the `--json` rows. Under `--json`
+  a refusal is the usual envelope with exit code 1: an unknown run id is `FLX-2109`, an expose
+  the run does not emit is `FLX-2111`, and a key that matches no row or is malformed is
+  `FLX-2121`; a mistyped column in `--key` is named, with the columns the expose has.
+- `EVIDENCE.md` gains a Population section after Fidelity that charts each scored histogram
+  property, the profile's shares against the run's, as Mermaid `xychart-beta` text with the
+  same numbers in a table; titles and labels are cut to a safe character set, and
+  `scorecard.json` keeps its bytes (ADR 0031 section 1). It draws a children-per-parent histogram,
+  the profile's bins as bars and the run's as a line, for every `childrenPerParent` property the
+  scorecard scores; its "left out" line counts every scored property it did not draw against the
+  scorecard's own total and names a left-out property outside its tolerance with its distance and
+  tolerance. A level or column name in the data that holds a word the report reserves is printed
+  as `cell N` or `column`, as the Provenance section withholds a name, so `ship` is not refused
+  with `FLX-8030`; the data keeps the real name.
+- The `parquet` and `arrow-ipc` sinks take an `s3://`, `gs://`, `az://` or `abfs://` target and
+  upload their files with obstore, from the new `[publish]` extra (pyiceberg, deltalake,
+  obstore and the ADBC driver manager), with credentials and endpoints taken only from the
+  environment; a bucket or prefix that could leave its place is refused (`FLX-3510`, ADR 0031
+  section 4). The `delivered` line names the real key directory once, and a failed upload or
+  setup names the settings to check for its scheme (`AWS_*` and `AWS_ALLOW_HTTP`, `GOOGLE_*`,
+  `AZURE_*`), never their values; an Azure target with no account fails before the run starts.
+  When a sink fails after the run was written, `fluxsim run` and `fluxsim apply` say the run was
+  kept and print the `fluxsim apply --run-id ... --sink ...` command that publishes it again,
+  with credentials removed from each `--sink` and `--sink-opt` value. `FLX-3505` covers object
+  stores and says objects can stay behind without a manifest. A target written as a URL that is not an object store
+  URL (`file://`, `memory://`, `ftp://`) is refused up front with `FLX-3504`, before any row is generated and without
+  leaving a directory behind; a local directory is given as a plain path.
+- A bundle may declare generator plugins under the namespace key `generators` (kernel 0.2.0
+  only): a pinned entry point, distribution and version, a grade of `P4` (a differentially
+  private model, with its account and model digest) or `P5` (a learned model with no account),
+  and its reproducibility. The run's grade is the weakest of the profile's and every plugin's,
+  and the governance gate checks it at `plan` before any plugin code would load; `P5` is below
+  every sensitivity floor (ADR 0032 sections 2 and 4, amending ADR 0020).
+- `--sink iceberg:CATALOG/NAMESPACE` and `--sink delta:URL-OR-DIRECTORY` write one Iceberg or
+  Delta Lake table per stream through pyiceberg and deltalake (`[publish]`), with `mode` the
+  only option, a table named by a tuple so a dotted `exposeId` stays one name, and credentials
+  and catalogue configuration only from the environment and the home directory; a
+  `.pyiceberg.yaml` in a current directory that is neither the home directory nor
+  `PYICEBERG_HOME` is refused (`FLX-3511`, ADR 0031 sections 4 and 5).
+- `--allow-generator NAME` on `plan`, `run`, `apply` and `replay` lets a generator plugin the
+  bundle declares be imported; without it the command is refused (`FLX-3119`) before anything
+  is imported, and the plugin's statement must equal its declaration (`FLX-3120`, ADR 0032
+  section 3). `FLX-3119` says that only the person running `fluxsim` decides whether a plugin
+  runs, after reviewing it, and that an agent stops and asks them, naming the plugin.
+- A generator plugin generates the columns of its expose that the engine does not derive, once
+  per expose and `--shard` range, from a seed of its own (KERNEL-SPEC-2 section 6.3); the
+  engine checks each value against its column and the contract's checks (`FLX-3121`), renders
+  every line itself, and refuses at `validate` the constructs a plugin expose cannot combine
+  with yet (ADR 0032 section 5). A bundle with no plugin keeps every digest.
+- A bundle that declares `generators` is planned with a stage always and applied from it only:
+  `plan --no-stage` (`FLX-3122`) and an `apply --run-id` with no usable stage, another
+  `--simulation-id` or `--zone`, or `--strict-coverage` (`FLX-3123`) are refused. `plan.json`
+  records each plugin's reproducibility and the engine-measured environment digest, `replay`
+  generates again, into a scratch directory and never over the stored run, only for `bytes`, or
+  `environment` in the same environment with an install that is not editable, and otherwise is
+  refused (`FLX-3123`) saying the bytes are stored and it verified nothing; whether a run's
+  plugin bytes are stored is decided from the bundle's declaration, and a `plan.json` whose
+  `generators` record differs from it is refused by `apply`, `replay` and `ship`; and
+  `EVIDENCE.md` says which exposes were stored (ADR 0032 section 6). `run`, `apply` (with or
+  without `--run-id`) and the Python facade never ask a plugin again, or write over the run
+  directory, when the run is already committed: the stored output is kept, one line says so,
+  and `--verify`, `--ship` and `--sink` go on against it. `apply --run-id RUN_ID --sink`
+  delivers a committed plugin run from its files, which is how a failed delivery is retried. A
+  committed run whose files no longer match its receipt is refused (`FLX-2110`), never generated
+  again, and `FLX-3123` gives a working remedy for every cause it keeps.
+- Generator plugin, sink and `fluxsim story` refusals quote any text that comes from a bundle,
+  a contract, a run directory or installed metadata, an editable plugin's module must lie under
+  the source directory its install records (`FLX-3117`), and `apply --run-id --shard` of a run
+  with stored plugin bytes is refused (`FLX-3123`).
+
+### Changed
+
+- An S3, GCS or Azure object store target with no explicit credentials is now refused before the run with `FLX-3505`, and nothing is contacted, unless you pass `--sink-opt instance-identity=true`. Before, the store's credential chain could ask the cloud's instance metadata service. This is a behaviour change for anyone who relies on an instance or workload role (an EC2, ECS or pod role, an Azure managed identity, a GCE service account): add the option and the run behaves as it did. The `parquet`, `arrow-ipc` and `delta` sinks accept it. The `adbc` sink and Iceberg catalogues are unchanged.
+- flux-stats and `fluxsim verify` read a whole number of a categorical column as the category of its
+  decimal text (`7`, `-3`), in every format, as they read a boolean (`flux_stats.reading.category`,
+  and the readers of the shape flags and of the decoded rows). 0.9.0 refused it with `FLX-5005`
+  (`value class 'int'`), so a property that read an `INT` column drawn over a few integer levels, such as
+  a `support` or a `levelHistogram`, failed `fluxsim verify`, and the shape of the column was not read.
+  The same property now compares. A run made before reads the same rows, and its `runDigest` and
+  its golden baseline do not change: the reproducibility check compares the digest and no verdict.
+  Any other class that is not a string, a boolean or a whole number still refuses.
+- A name with a dot that is exactly a column of the expose is that column and never a link, wherever a
+  declaration reads a dotted path: `given`, a `fidelity.columns` key for a column of a linked row, a
+  property's `groupBy`, and what `fluxsim init` writes for them, so a column named `tier.code` keeps the
+  meaning it had in 0.9.0 when a link form `<relationship>.<column>` is read beside it. A dotted name is a
+  link only when no column of the expose has that exact name and its first part names a relationship the
+  contract declares. `fluxsim init` lists a link grouping as unused,
+  with that reason, when the name it would write is the name of a column of the child.
+- A sink factory's own error that is not an engine error is reported as `FLX-3504`, scrubbed,
+  instead of reaching the caller unchanged, and an ADBC option named like a credential, such as
+  `db.password`, is refused with `FLX-3508` rather than `FLX-3504`.
+- flux-stats refuses a `noise` block on a statistic that has `per` and on every statistic of a table's
+  `history` (`FLX-5036`): one changed row can move an entity between two cells, and the reader charges a
+  noisy statistic a sensitivity of 1.
+- The grade of a run reads `history` too: its statistics are exact, so a profile that holds one is graded `P1` with a
+  reason that names the history, and its account does not charge them. A table, column or member name from the
+  profile never forges a heading, a table row or a comment in a grade reason of `EVIDENCE.md`: such a name is quoted,
+  or shown as withheld when it is not plain text.
+- The engine requires `flux-stats>=0.10,<0.11`, where 0.9.0 required `>=0.9,<0.10`. flux-stats 0.10.0 is built and
+  released from the same tag.
+- Release tags are annotated and not signed, and the release's GitHub attestations prove which workflow built the
+  files. `docs/RELEASING.md` says how to check one with `gh attestation verify`.
+- The profile text reader refuses a document nested more than 128 levels with `FLX-5036`, on every Python. It used to rely on `json.loads` raising `RecursionError`, which Python 3.14 no longer does for a deeply nested array, so the same text was refused on 3.11 to 3.13 and read on 3.14.
+
+### Fixed
+- `fluxsim verify` and `fluxsim ship` refuse a run directory whose `receipt.json` names a simulation id or an
+  expose id that is not an identifier (`FLX-2112`), before a path is built from it. A `simulationId` such as
+  `../../../victim` made `verify --update-golden` write its baseline to a file outside `golden/`, and an expose id
+  with a separator named an emit, seam attestation or fidelity file outside the run directory. A run that
+  `fluxsim apply` wrote never holds either, because the bundle's schemas pin both ids to the identifier grammar, so
+  no run made before is refused and no digest or golden baseline moves.
+- The profile reader checks the share of every pairing of a noise mechanism and a measure, where it checked two before
+  (a Gaussian under zero-concentrated DP and a Laplace under approximate DP). A Laplace under zero-concentrated DP must
+  state a rho of at least `(1 / scale)^2 / 2`, and a Gaussian or discrete Gaussian under approximate DP a delta above
+  zero and an epsilon of at least `rho + 2 sqrt(rho ln(1 / delta))` with `rho = 1 / (2 scale^2)`, computed in
+  fixed precision decimals rounded up (Bun and Steinke 2016, Propositions 1.3 and 1.4). A profile that stated a loss far
+  below what its noise spends, a Gaussian of scale 0.001 stated as epsilon 0.0001 and delta 0 for instance, was read and
+  graded `P3`; it is now refused with `FLX-5036`. A tighter stated share than the reader can confirm is refused, so the
+  check fails closed: a tight but valid approximate-DP statement may be refused, and zero-concentrated DP is the
+  measure to state such a release under.
+- The register note of `EVIDENCE.md` says what the register counts, as section 2 of the parameter register
+  specification names it: the numbers under `spec` in the documents the run reads and the numbers at the positions the
+  Simulation's `com.agentics.flux/1` namespace names, but not seeds, a sweep, `encoding` and `budget`, or the
+  namespace's own declarations of how rows relate and fall in time. It read "this run reads N declared numbers", which
+  said more than the register counts.
+- `--sink adbc:...` with `uri-env=VAR` shows its target as `driver:$VAR` in the `delivered` line, errors,
+  receipts and the envelope, where it printed the variable's value.
+- An ADBC `uri` with a credential named query parameter (`sig`, `sas`, `X-Amz-Signature`, `access_token`) is
+  refused as an inline password is (`FLX-3504`, pass it through `uri-env`), and an option key is read as a
+  credential whatever its separators and case: `db.accesskey` is refused with `FLX-3508`, like `db.access-key`.
+  The refusal covers every connection string form: `//user:PW@host` and `user:PW@account/db`, pairs in a query
+  split on `?`, `&` or `;`, a fragment such as `#access_token=...`, a libpq `password='...'` string and an ODBC
+  `PWD=...;` string. Sink targets are printed and stored only as a label of their non-secret parts (the `delivered`
+  line, the `FLX-3505` re-publish command, receipts, errors): a URL keeps its scheme, host, port and path (a host
+  that is not a plain name, a port that is not digits and a path holding `%`, `=`, `@` or `;` are shown as `…`, and
+  a `/` before the last `@` leaves `scheme://…`), a connection string its `host`, `database` and similar pairs with
+  a count of the rest, a local path is shown whole only for a sink that writes a directory, and anything else,
+  an ADBC `uri` or a `db.*` value that is no URL included, a short digest, so a secret in a form the refusal misses
+  is never echoed. A message a library wrote is cleaned of a known string in its percent-encoded and quoted forms
+  too, and an option's validation error names the option, never its value. Plugin and sink option names `secretaccesskey`, `authkey`,
+  `passphrase`, `authorization` and `bearer`, and plugin values that are a `Bearer` token, a JWT, a `password=`
+  pair, `//user:PW@host`, a PGP private key block or an AWS access key id in lower case or with the `A3T`, `ABIA` or
+  `ACCA` prefix, are refused too.
+- `fluxsim init --profile` no longer writes a `marginalHistogram` property over a column the profile gives only
+  order statistics, such as a timestamp's `min` and `max`, when the table has a check the profile can score: that
+  property could only be refused by `verify --profile` (`FLX-5037`), so a bundle `init` wrote failed its own verify.
+  The table's one check is then the assumed `mean` of a number column whose `mean/1` the profile publishes, which
+  `init` counts as scorable. A table with no such column gets `properties: []` instead (see the empty property list
+  below).
+- A fidelity block may list no property: `properties: []` is a table with nothing to score, where an empty list was
+  refused with `FLX-5034` before (a missing section, or one that is not a list, still is, and a block with no empty list
+  reads and digests as it did). `verify` reports such a table as not scored, in its fidelity line, in the scorecard's
+  table line and in `EVIDENCE.md`, and never as passed or within tolerance: no score forms from it, so it meets no
+  threshold or `minCredibility`. When the pinned profile publishes a statistic a property of that table could be scored
+  against, `verify` prints a note naming it and still exits 0. `fluxsim init --profile` writes the empty list for a
+  table whose columns the profile gives only order statistics, such as a timestamp's `min` and `max`, keeps the ranges
+  and lifetimes in the block, and says the table has nothing to verify. It writes no property the profile has no
+  statistic to score, for any table, so a bundle it wrote now passes its own `run --verify` where it failed with
+  `FLX-5037` before: a table that would have kept an assumed `mean` or a histogram the profile cannot answer, such as
+  the orders table of a profile with no `mean/1`, or the keys-only table of a history, gets the empty list, and the
+  report names what was left out under `leftOut` of the table, with the reason.
+
+### Known issues
+
+These are logged for the next release.
+
+- The release job installs its dependencies before it attests the build, and does not pin them with hashes.
+- `fluxsim verify` does not yet compare the receipt's simulation id with the plan's.
+- `recorded_grade` reads a forged P0 grade for a pinned run.
+- A P3 profile can hold the group keys of a number `groupBy` and `groupByLink`, and an exact `sampleSize` band, under `publicStructure`.
+- A calibrated register entry does not carry the digest of the profile it was fitted to.
+- `fluxsim plan` on an already committed plugin run still asks the plugin for rows, and writes only the generation time to `plan.json`.
+- A file added to a committed run's directory is not caught by the receipt check of `verify` and `ship`.
+- Under `--json`, a `story` refusal also prints its message on stderr, and only the `FLX-2109` envelope carries `artifacts.code`.
+- Two `uri-env` deliveries that use the same variable name share one key in `sink-receipts.json`.
+- The note about too few child rows below `--scale 1` is given even when scale 1 fails the same way, and never under a `parentWhen`.
+- `apply --run-id` on a bundle edited after its run was made reports the run as kept and exits 0; a delivery from it is still refused.
+- A generator plugin whose import or factory raises ends in an uncoded crash message, and `FLX-3118` does not name a missing module.
+- A plugin expose read by an aggregate or a `parentWhen`, an `allocation: exact` column of a plugin and an `options` integer above 2^53 pass `validate` and are refused by `plan` with a message that names nothing useful.
+- `validate` still says valid for some bundles that `plan` refuses (key allocation, `nullFraction` givens, zero declared rows, counted layout arithmetic, an overlay that names an unknown table).
+- An `abfs://container@account.dfs.core.windows.net/prefix` target is refused as naming no usable bucket.
+- Object uploads cannot be tuned, an endpoint that never answers takes about 3 minutes before `FLX-3505`, and a failed upload leaves data objects without a manifest.
+- When `apply --sink` fails partway, the message names neither the failing stream nor how many streams were delivered.
+- `story --depth` keeps looping after the frontier is empty, so a very large depth costs time in proportion to it.
+- Population labels turn every non-ASCII character into `_`, so labels such as 東京 and 大阪 read the same.
+- A link sentinel of a string column that is not in NFC form makes `verify` refuse a correct run.
+- A period end's `nullFraction` is met only under open parents, so the share generated can be lower than declared.
+- `calibrate --fit` leaves its `.patch.json` behind when a held-out profile is refused after the fit, and the calibration search never evaluates its start point.
+- `forecast make` registers item by item, so a conflict (`FLX-7007`) on one item leaves the items before it registered while the message says nothing was written.
+- `accuracy register` accepts an `interval_low` above `interval_high`, and `forecast score` does not compare `--observed-at` with the sealed horizon end.
+- A shaped counted layout costs about 390 MB per million parents and, like a windowed table, is rebuilt in every `--jobs` worker.
+- `lifetimes` and `within` cost about 2 ms per child row at plan time.
+- A counted plan replays only on engine 0.10 and later, though kernel 0.2.0 is unchanged.
+- A few messages read roughly ("1 children", "1 bins", a Python list in `FLX-3403`, some validation errors with no key path), and a few documentation pages and skills lag the engine (the seam fidelity key list, the `verify` help for `counts:` lines).
+- A T-SQL `YEAR(0)` in a consumer query fails at runtime, and the query is refused safely.
+- The parameter register does not count the numbers of namespace keys outside `emits`, such as `counts`, `history`, `lifetimes` and `conditions`, as its specification now says.
+- Some dialect spellings of a consumer query stay refused with `FLX-3622`: T-SQL `DATEDIFF` with `GETDATE()`, BigQuery `DATE_TRUNC(x, WEEK)` and Snowflake `LEN`.
+- Weekday and week parts of a consumer query are refused outside the duckdb dialect, rather than mapped between dialects.
+- Generator plugins are unsandboxed user code, and `--allow-generator` is the only gate.
+- The `adbc` sink and Iceberg catalogues take their settings from the user's own configuration, and the rule against metadata endpoints does not cover them.
+- `init` leaves out an exposure when customers still open at the end of the profile's window are not drawn as open, so the bundle holds fewer exposures than the profile publishes.
+- The trial run `init` makes does not allow for its own sample size, so a large bundle can lose a `rates` entry that the full run would pass.
+- Planning a bundle whose time bounds pass the year 9999 raises a plain `ValueError` rather than an `FLX` code.
+- A fidelity property that `init` leaves out is reported in its output and in `--json`, not in the register's `unused` list.
+
+## 0.9.0 - 2026-11-22
+
+What 0.9.0 does not reach, first:
+
+- **16 jobs are not 8 times faster than one.** The speedup target of 8 times at 16 jobs is not
+  met. Planning the related-star fixture's `store_sales` at 400,000 rows with `--no-stage`, best
+  of five, on a shared 16-core macOS arm64 machine at a load average of 7 to 30, with Python
+  3.13.14 and numpy 2.4.6: kernel 0.1.0 takes 64.48 s on one job and 8.73 s on 16, 7.39 times
+  faster, and kernel 0.2.0, the default from this release, takes 3.27 s on one job and 1.27 s on
+  16, 2.58 times faster. About 1.2 s of start-up and compile time does not shrink with the number
+  of jobs, and it is most of a kernel 0.2.0 run. The machine was not idle, so these are not the
+  figures of an idle one.
+- **`verify --jobs` does not speed up a run whose rows sit in one emit.** On a world of 462,865
+  rows in which one emit holds 90 % of them, `verify --jobs 4` took 1.67 s and `--jobs 1` took
+  1.36 s. Each emit is verified in one worker, so a large emit gets no help from the others, and
+  starting the pool costs more than the other emits save. Rows, verdicts and every scorecard byte
+  are the same for any number of jobs.
+- **One test depends on the order tests run in.**
+  `tests/stages/test_parallel.py::test_workers_spawn_where_there_is_no_forkserver` sets
+  `sys.platform` to `win32` before the standard library has imported `multiprocessing.reduction`,
+  and fails with `No module named '_winapi'` when no earlier test of its process has imported
+  it, as when it is run alone. The gates run the file in order and pass. The defect is in the
+  test, not in the engine.
+- **Four CodeQL alerts are open on main.** The rule is `py/overly-permissive-file`, at the calls
+  that create a file with mode 0o666 in `flux_engine/safeio.py` (two) and
+  `flux_engine/accuracy/_entries.py` (two). The mode is left to the process's umask, so the files
+  are not writable by group or others under the usual umask of 022, and are writable by everyone
+  under a umask of 0. The engine does not set the mode itself. The alerts have been open since
+  2026-11-19.
+
+### Added
+
+- `--timings` on `plan`, `apply` and `run` prints where the time went (load, compile,
+  simulate, each emit, framing, digests, attestation, writes) and adds it to the `--json`
+  envelope. The numbers are written to no plan, receipt, digest or run file.
+- `--scale F` on `plan`, `apply` (fresh plan) and `run` multiplies every emit's rows, the `records`
+  bounds of its fidelity block and the span of every integer or decimal key column that declares a
+  range. A table built from the run's events keeps the rows its events give it, and its summary line
+  says so (`--scale leaves a table built from events as it is`) when the scale is not 1. `F = 1`
+  keeps every digest; any other value is recorded in `plan.json` as `scale`, and `apply` and
+  `replay` read it back. `F` is a plain decimal above 0 and at most 1000000 (`FLX-3405`: "a scale is
+  above 0 and at most 1000000"). `--json` carries the code in `error.code`, and the message points
+  to its catalog entry with a `more:` line, as for every catalogued refusal. Below 1, a key column's
+  bin edges are cut by the rule that cuts its range end and every edge is held to the new end; a
+  scale that leaves a key column no value, or fewer values than its bins, is refused as `FLX-3405`
+  naming `--scale` and the column. A key that a scale leaves fewer values than rows is refused as
+  `FLX-3403` with a note that names `--scale` and which way to move it: below 1 a key over two or
+  more key columns loses values faster than rows, and above 1 a key with no column that grows with
+  the rows falls short. Kernel 0.2.0 only. `fluxsim run --help` shows an example.
+- `--shard I/N` on `apply` makes the I-th of N contiguous shares of every emit's rows and writes
+  `emits/<exposeId>.shard-I-of-N.ndjson` and `shard-I-of-N.json`. The shares joined in order are the
+  bytes of one run's stream. A share writes no run digest and no receipt, so a joined set of shares
+  is not a run: check a split run by applying it whole and comparing its streams with the joined
+  shares, or by verifying the whole run. The share files stay in the run directory beside the whole
+  streams, and a share's summary line labels its counts as the share's own
+  (`(this share: date_dim: 912 rows; ...)`). `verify` and `ship` on a run directory that holds only
+  shares say so and say to apply without `--shard` (`FLX-2109`), and `--shard` with `--sink` says to
+  apply the run whole, without `--shard`: a sink takes a run, and joined shares are not one. `I` is
+  1 to `N` (`FLX-3404`), carried into `error.code` and pointed to by the `more:` line in the same
+  way. `plan --shard` and `run --shard` say that `--shard` belongs to `apply`: a flag that a command
+  beside the one typed takes is named with that command, in the message and under `--json`. Kernel
+  0.2.0 only. `fluxsim apply --help` shows an example.
+- `fluxsim apply` takes `--sink` and `--sink-opt`, as `run` does. With `--run-id` it writes the sink
+  from the run directory's files after digesting each stream and comparing it with the receipt. The
+  Parquet and Arrow IPC sinks write an integer column at the width its contract names (`tinyint`,
+  `smallint`, `integer`, `bigint` and their aliases; a bare `INT` stays an int64), a decimal at its
+  precision and scale, and the receipt records the Parquet writer and its version.
+  `fluxsim apply --help` shows a `--sink parquet:` example.
+- `verify` reads the run's emits in parallel with `--jobs N` (or `FLUX_JOBS`): each emit
+  is decoded, checked for row conformance, compared with the profile and counted for
+  shape in one worker, and the results are joined in the order of the emits, so the
+  verdicts and every byte of the scorecard are the same for any number. `verify` is
+  now a sequence of named steps, one function each, which a new leg or a new dimension
+  of the scorecard joins without reading the rest.
+- The Simulation's `scorecard` block takes `shape: { maxFlags: n }` (SCORECARD-SPEC.md §4
+  and §6), the most shape flags a run may show over every column of every emit. Past it
+  `verify` fails and the scorecard's `met` is false, and `ship` withholds each emit with a
+  flagged column (the check `scorecard.shape`). It is opt-in: without the key the flags
+  inform and withhold nothing, and the plan holds the bytes it did. The limit is recorded in
+  `plan.json` as `scorecard.shape`.
+- `verify` checks every rule of every emit on the run's rows, the contract's and the
+  bundle's own, and reports each as the share that holds, `satisfied` of `total` rows it
+  covers (`derive`, `check` and `dependency`). A rule with a band fails the run outside it,
+  and so does a rule the engine enforces; the share of any other rule is reported. A
+  bundle that declares no rule adds nothing to `verify`.
+- `verify` checks every relationship the contract declares on the run's rows, as four shares that
+  hold: each child key is found in its parent, parent keys are unique, nulls appear only where
+  `joinType: left` allows them, and a `one_to_one` parent has at most one child. One broken key
+  shows as a share under 100 % and fails the run. Keys are read as they are decoded, whatever they
+  are: a negative key and a key near 1e13 are counted over dense codes of the parent and child keys
+  together, and give the shares the row path gives, and a table with no rows (`rows: 0`) that a
+  relationship reads counts as empty columns.
+- Scorecard format 1-3-0: the `invariants` dimension scores each fact, a rule of an emit,
+  against the share the profile measured (`1 - |profile share - run share|`, within the fact's
+  tolerance), and `crossTable` scores the referential integrity of every declared
+  relationship. A fact the profile gave no share for is censored. A scorecard with neither
+  keeps format 1-2-0 and its bytes, and a threshold on `invariants` or `crossTable` is
+  accepted without a declared property.
+- ADR 0018: module facts are declared in the FLUX bundle, under the Simulation's
+  `extensions['com.agentics.flux/1']`, never in the FLUID contract. A profile
+  request tells the profiler what to measure.
+- `fluxsim init --contract C` with no profile writes the profile request: the statistics, column
+  metrics and fact shares a profiler must measure for that contract
+  (`docs/spec/PROFILE-REQUEST-SPEC.md`). `init` then runs a second time with `--profile`. The file
+  starts with two comment lines that name what it is and its format, lists each table's columns in
+  name order, and sits beside the directory `init` was given, named after it, however the directory
+  is spelled (`init .` and `init ..` too). It is created readable and writable by its owner only.
+  flux-stats gains `flux_stats.request`, which takes the text of a document (the caller opens the
+  file) and reads it exactly and within bounds (`FLX-5038`); the change is additive. `init` applies
+  the reader's own rules before it writes, and refuses, as `FLX-5038` naming the table, column or
+  fact, a name the reader would refuse: a separator other than U+0020, a control character, more
+  than 512 characters, a duplicate. `_schemaURL` is compared as a string, and no JSON Schema
+  document is published for it.
+- Profile format 1-2-0, read beside 1-0-0 and 1-1-0, adds the `invariants` section: for
+  each declared fact, the rows that do and do not satisfy it, as one `levelHistogram/1`
+  over `false` and `true`. A profile of an earlier format keeps its bytes and its digest.
+  flux-stats reads it additively (`InvariantEntry`, `Profile.invariants`).
+- A Simulation can declare facts under its namespace's `facts` key: the rules of an emit,
+  each with an optional tolerance (`{emit, rule, tolerance}`). A fact with a tolerance is
+  part of the run's fidelity predicate, so it is bound into `H` before any row is drawn. `G`
+  leaves it out, and a bundle that declares no fact keeps every digest.
+- ADR 0003 is amended for an opt-in noise mode. A profile may carry marginals released under
+  differential privacy, and a run built from them carries that release's guarantee, as stated
+  by the profiler, for the stated unit of privacy, as post-processing of it; the engine checks the
+  accounting, not that noise was applied. The amendment lists what is not covered:
+  a statistic released without noise, hand-written bundle parameters, a unit larger than the
+  stated one, and any other release of the same data.
+- ADR 0019 decides one privacy budget per profile release, split across the statistics the
+  profile request asks for. Rho adds under zero-concentrated DP, and epsilon and delta add
+  under basic composition. The engine checks that the parts add up to no more than the stated
+  total and refuses a profile whose parts exceed it.
+- Profile format 1-2-0 can state that a profile was released under differential privacy
+  (PROFILE-SPEC.md sections 3a and 5a). A `privacy` block holds the measure (approximate DP or
+  zero-concentrated DP), the total privacy loss and the unit of privacy, an expose id, with OpenDP's
+  vocabulary as words only. A count statistic can carry a `noise` block, its mechanism (Gaussian,
+  discrete Gaussian or Laplace), scale and share of the budget, and write its `noisyCounts` as
+  decimal strings. A table can carry `cliques`, the joint noisy counts of two or more categorical
+  columns, which must agree on the columns they share. The reader refuses (`FLX-5036`) a release
+  whose parts add up to more than its total (rho adds, and epsilon and delta add), a share below
+  what its mechanism spends on a count table (sensitivity 1: rho at least `1 / (2 scale^2)`, epsilon
+  at least `1 / scale` for Laplace), a noisy statistic outside the unit's expose, and cliques that
+  disagree, naming them. The block may declare `publicStructure`, `true` or `false` (any other
+  present value is refused, as the profile schema refuses it), that levels, bin edges and
+  `sampleSize` bands were chosen without the data. A noisy group reads as a point estimate that is
+  made a distribution by one exact rule, and a clique answers the one- and two-way level histograms
+  of its columns. A document with none of it reads as it did.
+- `fluxsim init` reads a noisy statistic of a profile released under differential privacy as a
+  point estimate with a variance. The noisy counts become a distribution by one exact rule
+  (projected onto the non-negative vectors that add up to their noisy total, then normalised, as
+  whole counts that add up to the estimated records), a table with no `rowCount` takes its rows
+  from the larger estimate of the records, a register citation of a noisy cell points at the
+  profile's `noisyCounts`, and the output and the ledger record each statistic's mechanism,
+  scale and per-cell variance. The spread of a foreign key laid out from a relationship's children
+  per parent now cites that histogram in the register, as a number that rests on the profile.
+- `fluxsim init` compiles the noisy cliques of a profile into a junction tree: the maximum
+  spanning forest of the cliques by the columns they share (the Chow-Liu forest is its
+  degree-one case), refused when the cliques lack the running intersection property, naming
+  them. The root is the clique with the most columns, the first by name among equals, and the
+  walk and the order do not depend on the order the profile lists the cliques in. Each column is
+  written drawn given its separator, its weights the point estimate of the clique's noisy counts,
+  and the run is scored on the level histograms the cliques answer. ADR 0021 records the rule and the
+  Private-PGM receipts. A clique that needs a column drawn given several columns is
+  refused until the generator reads one.
+- A column can be drawn given several columns. `given` may be a list of two or more names, and
+  `levelWeightsGiven` or `binWeightsGiven` then nests one mapping per given column, keyed by the
+  combination of their levels. The column path of kernel 0.2.0 searches each row's uniform in the
+  cumulative table of its combination, and the per-row path is the oracle it is tested against.
+  The draw is on the column's own seed path, so no path is added and no kernel version moves:
+  every existing plan, digest and golden is unchanged, and a run has the same bytes on every
+  platform and for any `--jobs`. A list of one name is refused, so is one of more than 8, a cycle
+  through any parent is refused, the register counts every weight of a nested table, and
+  `fluxsim init` now writes a clique of three or more columns this way.
+- `verify` and `verify --sample` widen the tolerance of a property compared with a noisy statistic by
+  a bound derived from the statistic's noise variance (SCORECARD-SPEC.md section 9): `w = sqrt(m) *
+  (sqrt(m v) + sqrt(10 v)) / T + m / (2 K)` for `m` cells of variance `v`, noisy values adding up
+  to `T` and whole counts over `K` records, roots rounded up in exact integers. A column drawn from a
+  clique and compared with another noisy statistic of its own widens by both noises. A run whose rows match the profile passes at least 95
+  of 100 noise seeds (100 of 100 measured, against 14 of 100 unwidened). The scorecard row of such a
+  property carries `noise` (the mechanism, the cell variance and the widening), and a scorecard that holds one
+  names format 1-3-0. An exact reference is compared as before.
+  `tests/fixtures/private-telco` is a profile released under differential privacy that `init` compiles,
+  the run draws and `verify` scores within its noise-derived tolerances, with its rows pinned by their
+  sha256 for every platform and any `--jobs`.
+- `EVIDENCE.md` has a seventh section, "Privacy Grade", between "Fidelity" and "Column Provenance"
+  (ADR 0020). A run has one grade, read from the profile its Simulation pins and from nothing the
+  bundle says about itself: P0 assumed (no profile pinned, every parameter declared by hand; the engine
+  read no data and cannot confirm that none shaped the numbers), P1 checked (a profile of aggregates
+  under output checks, no formal guarantee) or P3 differentially private marginals (the profile states
+  one release under differential privacy, declares `publicStructure`, and holds only noisy statistics:
+  no row count, no metric, no exact statistic, no pair, period, relationship, query or fact section).
+  P4 is reserved and P2 unassigned. A profile that is not P3 is P1, and the section lists why. For P3
+  it states the guarantee as the profile's own ("the engine checks that the stated shares add up, not
+  that noise was applied") in the terms NIST SP 800-226 asks for: the unit of privacy, the privacy
+  loss (epsilon and delta, or rho) and the accounting. A grade for each column is a later refinement.
+  Any `EVIDENCE.md` shipped before this section is unchanged.
+- A column's FLUID `sensitivity` (`exposes[].contract.schema[].sensitivity`) sets the minimum
+  privacy grade of the run (ADR 0020). `pii`, `phi`, `restricted`, `pseudonymized` and `tokenized`
+  require P3 or stronger (P0, no data read, also meets it), `confidential` and `internal` require P1
+  or stronger, and every other label allows any pattern. Each column's minimum is compared with the
+  run's one grade. `plan` refuses a run with a column below its minimum, `FLX-4005`, in the
+  governance gate beside the sovereignty check (`FLX-4001`), before any row is drawn and before
+  anything is written. A plan that pins a profile records its grade (`privacyGrade`), and `apply` (a
+  fresh plan, `apply --run-id`, and so `replay`) and `ship` enforce the minimum again: from the
+  recorded grade, and for a plan that pins a profile and records none, from P1. A Simulation may
+  raise a floor under `extensions['com.agentics.flux/1'].privacy.minimumGrade` and never lower one:
+  a lowered floor, a label FLUID does not define and the unassigned P2 are `FLX-3105`. The "Privacy
+  Grade" table of `EVIDENCE.md` lists every column with its sensitivity, its minimum and whether the
+  run meets it. The `FLX-4005` message names up to ten columns below their minimum and then "and N
+  more", and ends with what leads out: release every statistic of the profile under noise and run
+  `init` again with that profile, write the bundle by hand without a profile (a run that pins none
+  grades P0), or correct the label. `fluxsim init` says so before `plan` does. With no profile, when
+  a column's sensitivity sets a floor above what a profile of exact statistics grades (`pii` needs
+  P3), the request step prints a `grade:` line naming each such column, its label and its minimum,
+  and that `plan` refuses the bundle (`FLX-4005`) unless the profile releases every statistic under
+  noise. With `--profile`, it warns in a `grade:` line and in the `grade` artifact when the
+  profile's grade is below the floor a labelled column sets, and prints no `next:` run command that
+  `plan` would refuse.
+
+### Changed
+
+- Kernel 0.2.0 is the default for new plans (ADR 0010, amended). A plan made with no
+  `--kernel` now draws on counter-based streams, so every new plan's digests change, and
+  the goldens of the sets that plan with the default move with their GOLDEN-CHANGELOG rows.
+  A recorded plan, a run directory and an evidence pack replay on the kernel they name, to
+  the digests they had, and `fluxsim plan --kernel 0.1.0` plans on the first kernel.
+  KERNEL-SPEC-2 now says that a seed path only an opt-in declaration reads is additive.
+- `fluxsim plan` stages its execution under the run directory (`.stage/`) and
+  `fluxsim apply --run-id` commits it after checking the plan, the bundle's bytes and every staged
+  file, so planning and applying cost one generation instead of two (ADR 0015). `plan --no-stage`
+  keeps the plan that writes only `plan.json`. A staged file that is a link, a path that leaves the
+  run directory, bytes that no longer match the record, and an emit entry of `stage.json` whose
+  `source`, `rows` or `processes` is not what `apply` reads are refused (`FLX-2120`) before anything
+  is written, and the message ends with what to do: delete the run's `.stage` directory and apply
+  again, or plan again. `plan.json`, every digest and every run file are unchanged.
+- A run starts one pool of worker processes for all its emits, not one per emit.
+  The pool starts from a forkserver on POSIX with the engine already loaded (spawn
+  elsewhere), each worker receives every plan once through the pool's initializer,
+  and the slices of the emits that are worth workers are submitted together. The
+  workers hand back framed lines and keep the rows, which nothing downstream reads
+  (`EmitOutcome.rows` is empty for an emit made by worker processes), and the run
+  works out the trace's component digests in one pass instead of five. Rows,
+  lines and digests are the same for any `--jobs`.
+- Kernel 0.2.0 draws a column given another on the column path. Each row's uniform is searched in
+  the cumulative table of its parent's level, so a plan whose profile-driven bundle writes `given`
+  no longer takes the per-row path whole. The rows are the rows the per-row path draws. A level name
+  that holds a NUL character is refused where the bundle is read (`FLX-3402`), in `levels`,
+  `support.values`, `levelWeightsGiven` and `binWeightsGiven`: a numpy string array drops a trailing
+  NUL, so two parent levels that differed only by one would be a single key on the column path and
+  two on the per-row path.
+- Kernel 0.2.0 sets a contract's `derive` rules on scaled integers where the rule's
+  numbers are whole units at their columns' scales and every result fits an int64:
+  `+`, `-`, `*`, comparisons, `ROUND` in both modes, `COALESCE`, `CASE`, `IN`,
+  `BETWEEN` and the NULL rules of each. A dependency draws once per distinct key.
+  Division, dates and anything the evaluator does not take stay on the exact
+  per-row path, rule by rule, and so do results that would leave int64. Every row
+  and every digest is unchanged.
+- `flux_engine.seam.emit.frame_rows` renders and frames a slice a column at a time:
+  levels, dates and booleans through a lookup table of each distinct value, integers
+  and decimals (at their scale) by formatting, then each line is its tokens joined.
+  The lines are the bytes `row_line(render_row(row))` writes, and a slice it does
+  not take, or that the row renderer refuses anything of, is rendered row by row so
+  the refusal is the same. `EmitWriter.write_all` uses it when no sink reads a
+  rendered row.
+- `verify` decodes each emit once. The lines are parsed in one call, and each column
+  becomes exact integers: decimals as units at their scale, dates as days, instants
+  as milliseconds, categories as level codes. The properties the profile is compared
+  on (mean, histogram, quantile with or without bins, level histogram, support) and
+  the shape counts are formed from those arrays with numpy, with the integers exact
+  and no sum allowed to wrap. A cell the fast reading does not take is read by the
+  row reader as before, so every verdict, refusal and scorecard byte is unchanged.
+- The rule shares, the referential-integrity checks and the `invariants` and `crossTable`
+  dimensions read the columns `verify` decoded for each emit, in the emit's own worker, and
+  join the emits in their order, so the shares and every scorecard byte are the same for any
+  `--jobs`. A key or an emit the decoded reader does not take is read by the row path.
+- `verify --sample` estimates marginal histograms and quantiles with bins as well as
+  means, with the cluster ratio estimator and its 95 % interval. A histogram's bins
+  are shares of the group's records, and the two bounds the intervals put on the total
+  variation distance decide it against its margin; a binned quantile is decided by the
+  two shares its rank test reads. A sample of every block gives the full comparison's
+  own answer. Quantiles without bins, level histograms and supports are still named as
+  not estimated.
+- A boolean reads as the category `"false"` or `"true"`, in flux-stats and in the shape
+  flags. A `BOOL` column could not be checked before: its cells were refused as a value of
+  class `bool` (`FLX-5005`), and a `support` or `levelHistogram` over it, or its shape
+  flags, were not read. A boolean is still no number.
+- The engine requires flux-stats as a range, the line it is tested with
+  (`flux-stats>=X.Y,<X.Z`), in place of one exact release. flux-stats is versioned by its
+  own format and API (ADR 0009, amended), so an environment can hold the engine and a later
+  release of that line, and the engine and forge-cli's profiler can share one. One tag still
+  releases both distributions. The release guard now checks that the requirement is a plain
+  range with a floor and a ceiling that admits the flux-stats version in the tree, where it
+  checked that three strings agreed.
+
+### Fixed
+
+- `fluxsim validate` refuses a column whose bins leave its declared range (`FLX-3402`). A last bin
+  closed at an edge above `range.max` drew that edge on about 7 % of rows, on both kernels. It also
+  refuses a range or bin edge a contract's integer width cannot hold (`smallint`, `integer`,
+  `bigint` and their aliases; a bare `INT` names no width), and a count is held to the width, on
+  kernel 0.2.0's column path as on the per-row path: a `smallint` or `tinyint` with a mean at or
+  past its width no longer draws values outside it. A DATE or TIMESTAMP range or bin outside
+  `timeBounds` is reported as a warning.
+- `fluxsim init` keeps what it writes inside those rules: a histogram or a rule
+  that leaves one grid value in the last bin no longer writes a half-step edge
+  past the range (the bin joins the one before it, as an assumption), bins of a
+  date or timestamp column are cut at the run's time window, and a published
+  value beyond a column's integer width is not declared.
+- Every reader of a JSON-lines file ends a line at a newline and nowhere else. The writers
+  emit U+2028, U+2029 and U+0085 raw inside a string, and `str.splitlines` ended a line at each,
+  so a level holding one made `fluxsim verify` reject a correct run ("line N is not JSON"),
+  read a ledger as tampered (`FLX-2110`), made `ship` refuse (`FLX-8001`) and a committed slice
+  read as `FLX-5035`. The sampled and the full readers split the same way, so a sample counts
+  the same records.
+- `fluxsim verify` and `fluxsim ship` refuse an emit that is not UTF-8 text with a code (a
+  problem with the rows, `FLX-8001`), and a committed slice that is not UTF-8 is `FLX-5035`;
+  both stopped with an uncaught `UnicodeDecodeError`.
+- `plan.json`, `receipt.json` and `run-digest.json` that are truncated, not UTF-8 or not a
+  JSON object are refused by code, naming the file and what to do, by `apply`, `verify`,
+  `ship` and `deliver` (`FLX-2102` for the plan, `FLX-2109` for the receipt, `FLX-2110` for
+  the run digest). They stopped with `JSONDecodeError` or `AttributeError`.
+- `verify` and `ship` no longer call a refused property "not within the declared margin": a refused
+  property was never compared, and the line reads `refused, not compared (FLX-5037)` with the code
+  of its refusal. The `FLX-5037` message now names which of `groupBy`, `bins`, `levels` or `level`
+  the profile lacks, as its page says. A `verify` that fails only on refusals carries the first
+  refusal's code, so `--json` `error.code` is filled and the `more: fluxsim explain` line prints.
+- `fluxsim ship` withheld output says why. It renders a refusal as `FLX-5037: <reason>`, where it
+  printed a Python dict, and calls a property that a refusal is about "refused", where it read
+  "outside the declared margin" with a margin nothing had compared. Its last line,
+  `FLX-8001: withheld orders`, and `--json` `error.message` carry the first check that failed, what
+  to do about it and how many more there are; the reasons list above it is unchanged. The `FLX-8001`
+  page says what to do.
+- `fluxsim run ... --verify --ship` prints the `parameters: N declared ...` line once. It
+  appeared after plan, again under verify, and a third time after ship; each command still prints
+  it when run alone.
+- `FLX-2112` says what a run id is: "--run-id is 16 lowercase hex characters, as `fluxsim plan`
+  prints", where it printed `run_id='deadbeef'` and not the shape expected.
+- `FLX-2101` from `fluxsim verify` prints the resolved path of the bundle ("this run was not
+  produced from /work/bundle"), where `verify .` ended "not produced from .".
+
+## 0.8.0 - 2026-11-19
+
+- `fluxsim init` reads `quantile/2`, the binned quantile `fluid profile` publishes
+  by default: each group is two points of a number, date or timestamp column's
+  distribution, and the bins are laid over them. A withheld `min` or `max` beyond
+  such a point is closed by a maximum-entropy tail with the published mean, or by
+  the next bin of the profile's ladder, and each is an assumption. A published
+  `distinctCount` is checked against the bins' span.
+- `fluxsim init --contract --profile` keeps a ledger of the profile (ADR 0014):
+  every statistic and metric, by its JSON Pointer, is used, unused with the
+  reason no rule reads it, or withheld. The command prints the counts and every
+  unused statistic, and the Simulation lists the unused ones under
+  `extensions['com.agentics.flux/1'].unused`, beside the register. `--json`
+  carries the whole ledger and the gaps.
+- Parameter register format 1-2-0 (PARAMETER-REGISTER-SPEC section 1.1): a
+  Simulation may list the statistics of its pinned profile that no number rests
+  on, each with its reason. `plan` reads each citation in the profile
+  (`FLX-3113`), the record carries the list, the `parameters:` line counts it,
+  and `EVIDENCE.md` names each one under "What Was Not Proven". A register that
+  lists none keeps its format 1-0-0 or 1-1-0 record, bytes and digest.
+- `fluxsim init --strict` writes nothing, and exits 1, when a statistic of the
+  profile is unused or an assumption stands in for something the profile did
+  not publish, a gap. `--allow POINTER`, repeatable, accepts the
+  findings at or below a profile pointer or a Simulation pointer, and one that
+  accepts nothing is refused too.
+
+- `fluxsim init` never draws a column as one value unless its profile shows one
+  (ADR 0014). A lone published `min` or `max` is a bound: with a mean it is
+  filled by the distribution of largest entropy from it, a geometric tilt over
+  bins found in exact fractions, whose mean as drawn is the published one; with
+  `distinctCount` alone, that many grid values from it. A mean with no spread
+  and no bound is filled from 0 on its side. A column with nothing published,
+  or with values beyond what a row carries, is a placeholder spread rather than
+  0 on every row, and a number foreign key with no spread of its own is drawn
+  over its parent's keys, never under one parent.
+- A declared level that a level histogram does not list, and a withheld cell,
+  share what the published counts leave of the group's `k`; a cell withheld as
+  small takes no more than half the minimum cell. The 0.7.0 rule, the mean of
+  the published cells, holds only when the group publishes no `k`. A histogram
+  whose levels are a subset of the contract's `enum` now weighs the draw, and the
+  message names the levels it did not list.
+
+- `fluxsim init` reads grouped statistics (ADR 0014 section 4). A level or
+  marginal histogram grouped by a categorical column is a two-way table; each
+  is scored by its mutual information, and the Chow-Liu forest under the
+  generator's rules decides which column is drawn `given` which. The child
+  declares `levelWeightsGiven` or `binWeightsGiven` from the group counts, a
+  withheld cell filled from its group's `k`, and a grouped property the run is
+  scored on. A grouping the forest leaves out is unused in the ledger, with the
+  reason. `calibrate.structure.spanning_forest` is the selection step of
+  `suggest_tree`, callable with scores of the caller's own.
+- A categorical column is written with no assumed `nullFraction`, and none for a
+  published null count of zero: an absent one draws no null, and a declared one
+  kept the column from being drawn on (`FLX-3402`).
+
+- `fluxsim init` reads a profile's `relationships` (ADR 0014 section 5). For a
+  one-column number foreign key the contract declares, the classes of a
+  children-per-parent histogram are laid over the parent's key range, each a
+  share of the keys equal to its share of the parents (the Largest Remainder
+  Method) and weighted by its parents times their mean number of children, the
+  class of none at 0; the open class's mean is solved from the relationship's
+  mean. With a histogram of the foreign key's own values the classes are laid
+  inside each of its bins, so both hold. A mean alone leaves the spread even.
+  The approximation is documented: about `e^-m` more parents of a class of mean
+  `m` receive no child.
+
+- `fluxsim init` never draws a column a contract `derive` sets, and never gives
+  it its own profiled range, which made `verify` refuse the run (`FLX-5005`)
+  once a property read the column (ADR 0014 section 6). Its range is the exact
+  bounds of the rule over the ranges of the columns it reads, an interval in
+  fractions over the expression's syntax tree (`+`, `-`, `*`, `/` away from
+  zero, `ROUND`, `COALESCE`, `CASE`), or its published histogram's edges when
+  they hold those bounds, widened to the column's own published `min` and `max`
+  when they lie beyond, since the check reads those against the range too; its
+  published mean becomes a property the rule's values are scored on. Bounds
+  pass down a chain of rules, and a guarded `derive` leaves its column drawn.
+- A column a contract `dependency` sets gets no `mean` property from `fluxsim
+  init`: the run draws it once for each value of the columns it follows, so
+  its mean rests on those few draws, and a tenth of the mean is no margin.
+- A DATE column is spelled one way. Its fidelity `range` and `bins` can be
+  `YYYY-MM-DD` (a whole number of days since 1970-01-01 still works), where a
+  fidelity block that spelled them as dates was refused at `fluxsim validate`
+  with `FLX-5022`. `verify` reads the column's rows as dates, so a value
+  outside its range is refused as it is for an INT. A DATE column bounded by
+  RFC 3339 instants reads them as before, as a timestamp column in
+  milliseconds, so a block a profiler declares with instants still reads.
+- A profile holds a DATE column as a timestamp in milliseconds, and `verify
+  --profile` now scores a mean, a marginal histogram and a quantile over it
+  against that profile, where it refused every such property with `FLX-5037`.
+  The check converts the profile's numbers to days exactly and refuses one that
+  is not a whole day. The shape flags read a `YYYY-MM-DD` value against a
+  profile's timestamp column. No profile format, digest or golden baseline
+  changes.
+- `fluxsim init` spells a DATE column's bounds `YYYY-MM-DD`, and a DATE column
+  now carries the properties a number or a timestamp does, scored against the
+  profile's dates.
+- The scorecard states how much of the contract its score speaks for. Per table
+  and for the run, `coverage` counts the contract's columns that carry at least
+  one scored property, and the relationships the contract declares (the child
+  expose's `semantics.relationships`, FLUID 0.7.7) that the profile constrains:
+  its `relationships` list holds an entry for that parent and child with at
+  least one published statistic. No property scores children per parent yet, so
+  a relationship is counted as constrained, not scored. The overall line of
+  `verify`, `ship` and `EVIDENCE.md` prints it with the score, for example
+  `scorecard: overall 0.93 against profile sha256:... (covers 12 of 20 columns, 0 of 3 relationships)`,
+  and each table's line ends with its own counts. A table with no fidelity
+  block records no contract, so it is left out of the run's coverage and the
+  line says how many tables are.
+- The `scorecard` block of a Simulation may floor the coverage:
+  `coverage: {columns: "0.8", relationships: "0.5"}`. A run below a floor is
+  withheld as a score below a threshold is, and the plan records the floors
+  beside the thresholds as `coverage.columns` and `coverage.relationships`.
+  A plan whose Simulation declares none keeps its bytes and its `planDigest`.
+- The scorecard record is format 1-2-0, which adds `coverage`. Its schema is
+  `docs/spec/scorecard-1-2.schema.json`; `docs/spec/scorecard-1.schema.json`
+  stays as published for the documents of formats 1-0-0 and 1-1-0, and a test
+  pins its bytes. No digest of a bundle, a plan or a golden moves.
+- `fluxsim plan` names what a bundle declares and the run does not
+  generate. Three declarations are accepted and were drawn as if absent: a
+  relationship's `sharedColumns` (and a column's `sharedAttribute`), a `check`
+  that determines no column (a contract `check` with no `generates` setting, or
+  a FLUX-side `check`), and a `check` that reads another row through a
+  relationship. `plan` names each per expose after the coverage lines and in a
+  `declared_not_generated` artifact, the evidence report lists them under "What
+  Was Not Proven", and `--strict-coverage`, or `strictCoverage: true` in the
+  Simulation's extensions, refuses the run before any row exists with the new
+  `FLX-3305`, which says what is not generated and what to do. `ship` works the
+  list out again from the bundle, so no plan, record or digest of any bundle
+  moves.
+- Migration: a Simulation with `strictCoverage: true` (or a run with
+  `--strict-coverage`) whose contract has a `check` with no `generates`
+  setting, `sharedColumns`, `sharedAttribute` or a check over a link planned
+  before and is now refused with `FLX-3305`. Drop strict coverage, or the
+  declaration, or set `generates` on the check.
+- `e2e/roundtrip` is a local round trip against a generated truth, run by hand with no
+  cloud. It draws three related business-to-business tables from a contract and
+  a bundle it knows, profiles them with `fluid profile`, writes a bundle back
+  with `fluxsim init --contract --profile`, runs it with `--verify`, and judges
+  the copy against the truth: the scorecard and its coverage, a k-marginal
+  score, childless and top 1 % shares per relationship, grouped shares and
+  Cramér's V, the contract derives, init's unused statistics and any `CONSTANT`
+  shape flag. Each target prints PASS or FAIL, and `--record` appends one
+  line to a committed `history.jsonl`. It is its own uv project and no CI job
+  runs it.
+- `fluxsim init` keeps a column inside the range its contract declares: a
+  `validationRules` entry of type `range` (`between A and B`, or `>=`, `>`, `<=`,
+  `<` joined by `and`) bounds the bins, the levels and the maximum-entropy tail of a
+  drawn number column (the check's range and a property's bins keep the profile's
+  edges), and a column the profile publishes nothing for is drawn
+  evenly over it instead of a placeholder. A range that leaves the profile no weight is
+  drawn evenly within what it leaves, one that leaves a single grid value gives that
+  value, and one that lies wholly outside the profile's values is drawn evenly over the
+  range, each statistic the draw had read then unused with that reason. A range the
+  column's type cannot hold keeps the placeholder and says so.
+- `fluxsim init` reads a key's own statistics: with its `min` or `max` withheld the
+  keys are centred on the published mean, a `count` or `distinctCount` equal to the
+  rows is checked as one value per row, and a published mean, `min`, `max` or `quantile/2`
+  is checked against the even layout of the keys, unused with the reason when it
+  disagrees. The checks run on the span the bundle ends with, after the foreign keys
+  that reference a key have widened it.
+- `fluxsim init` reads the statistics of a foreign key that a relationship gives a
+  spread: its binned quantiles cut the parent's keys when it has no histogram, its mean
+  is read from `sum` and `count` and a `mean/1` that agrees, and a published `min` or
+  `max` is checked against the parent's key span.
+- `fluxsim init` checks the level histogram of a column that another is drawn given
+  against the sizes of the groups its weights come from, so it is used when they agree
+  and unused with the differing counts when they do not.
+- `fluxsim init` checks each binned quantile a profile publishes for a column a contract
+  `derive` sets against the range the rule gives: the quantile is used when the bin that
+  holds it overlaps that range and unused with the reason when it lies outside. It also
+  checks a published `distinctCount` of that column against the grid values the range holds.
+  A column under a range its contract declares is not clipped: the rule's values are, and
+  an assumption says so when they can pass it. A quantile's bin is checked against the
+  range the rule gives and the contract's range together.
+- `fluxsim init` no longer fails on a foreign key whose binned quantile has one cut: it
+  bounds no bucket, so the keys are laid out as without it and the statistic is unused.
+- `fluxsim init` reads the binned quantiles of a number foreign key that has no relationship
+  in the profile, like any other number column's, and checks a level histogram of a column
+  drawn given another against the sums of the groups it is drawn from. Both statistics were
+  left unused.
+- A contract's texts take `ADD_DAYS`, `ADD_MONTHS` and `ADD_YEARS`, with
+  flux-expr/3's meaning, parser, checker, evaluator and canonical text (a month or
+  year move clamps the day, and a result outside 0001 to 9999 is NULL), so a
+  contract `derive` such as `ADD_DAYS(issued_on, 30)` generates on every row and
+  its check holds. `EXTRACT` and `||` stay flux-expr/3's, `FLX-6103` in a
+  contract's text, and a FLUX-side flux-expr/2 text still refuses all of them. A
+  derived date's bounds follow the move.
+
+## 0.7.0 - 2026-11-19
+
+flux-stats exports the read of a FLUX bundle that the engine takes its digests
+over, so forge-cli's profiler can read a Simulation the way the engine does,
+and that read is now bounded. A quantile can be published as the bin that
+holds it, so a profile can answer a quantile property on a continuous column.
+A bundle within the bounds reads to the same documents as before, a profile
+that ran before compares as it did, and no digest or golden moves. The engine
+now needs flux-spec 0.5.4, which reads a bundle's files as UTF-8 whatever the
+locale, as the engine's own pre-reads of them do.
+
+### Added
+
+- `docs/spec/profile-1-0.schema.json` keeps the profile schema of format 1-0-0, unchanged, beside format
+  1-1-0 (`docs/spec/profile-1.schema.json`), as the parameter register keeps both of its formats. A profile
+  written before this release names the 1-0-0 `$id` in its `_schemaURL`, so that id still resolves.
+
+- FLUX reads FLUX-side rules from a bundle, at `extensions["com.agentics.flux/1"].emits[<exposeId>].rules`
+  (a new per-emit key, EXPR-SPEC-2 §1), and generates from the `derive` rules among them whose reads stay
+  in the row, in flux-expr/2 or flux-expr/3 (ADR 0011 step 1, ADR 0013). Their ids are unique across a
+  Simulation's emits (`FLX-6201`), a column has one source (`FLX-6203`), and the columns of the contract's rules and the
+  FLUX-side rules are set in one order (`FLX-6208`), so a calendar's day of the month, first day of the
+  month, same day a year back and quarter name follow the date. A FLUX-side rule that reads `previous`, a
+  path, children or siblings, and a FLUX-side `check` that would generate, are `FLX-6210`. Coverage names
+  such a column's source `bundle.rules.<ids>`, and the plan records each rule with its origin and language.
+  A bundle that declares no FLUX-side rule keeps every byte and digest.
+- FLUX generates a contract's one-way `dependency` (ADR 0011 step 2, EXPR-SPEC-2 section 8): each key gets its
+  `to` values once, on a stream keyed by the key, and every row of the key copies them, whatever the slicing or
+  `--jobs`, under kernel `0.1.0` and `0.2.0`. A `to` column that is a single foreign key draws the foreign key's own
+  statistics on that stream and takes the parent's nearest key, so it always names a row the parent holds. A
+  dependency with `bothWays` or a band with a lower bound above zero, a `to` column that is a key, a composite or
+  one-to-one foreign key, an identifier, a column drawn `given` another or one with no draw that is not a foreign
+  key, a column another is drawn `given`, and an emit with no `fidelity` block are `FLX-6210`; a column another
+  rule also determines is `FLX-6203`, and a cycle through rules and dependencies is `FLX-6208`. The band decides a
+  `to` column's NULLs. No band or zero violations draw them per key, so a key's rows agree. An upper bound draws
+  them per row, on NULL rows: a share of the covered rows the plan reads off the band, so that every column keeps
+  its declared null fraction while the share of rows the NULLs make violate stays four standard deviations inside
+  the band, as on a source whose NULLs fall on the same lines; an emit with no declared row count takes the fewest
+  violating rows for a `percent` band, and a `rows` band there, or any upper bound in a strict run, is `FLX-6204`
+  until the emit declares its `rows`. A band below what the column with the most NULLs can give alone, or below
+  zero, is `FLX-6204` in every run, and so, in a strict run, is one that leaves less than the four deviations above
+  it. A dependency none of whose `to` columns declares a NULL takes no NULL rows, whatever its band. The plan records
+  the share as the dependency's `nullRows`. Coverage names such a column `derived` by `dependency`, with the source `contract.invariants.<id>`,
+  and the plan records each dependency with its id, `from`, `to` and origin. `fluxsim validate` builds the
+  generator plan of an emit whose rules determine columns, so it refuses what `plan` refuses about those columns.
+  A bundle with no dependency keeps every byte and digest.
+- The model FLUX checks rule texts against now knows which exposes have versions, so a contract text whose
+  path crosses a relationship into an expose with a validity window is `FLX-6106`, as RFC-data-rules.md
+  section 2.2 and EXPR-SPEC-2 section 3 say. It used to pass, because the model left versions out.
+- Kernel `0.2.0` runs beside kernel `0.1.0` (ADR 0010, step 3;
+  docs/spec/KERNEL-SPEC-2.md). `fluxsim plan --kernel 0.2.0` plans a run under
+  it, and `apply`, `replay`, `verify` and `ship` run the kernel the plan names.
+  Its streams are Philox4x64-10, keyed by a path with its ordinals left out and
+  counted by those ordinals, a draw index and an attempt. A bounded draw takes
+  Lemire's test on the draw's own attempts, and `poisson` searches integer
+  thresholds of kernel `0.1.0`'s sums. The truncated normal and the exponential
+  are binary64, every operation written out and none fused. Generated
+  identifiers and `permute/2`'s round function come from Philox, and key layouts
+  are labelled `flux-key/2`. `flux_engine.core.kernel2` holds it, and
+  `tests/kernel2/test_engine_conformance.py` holds it to the vector files. A
+  process that flushes subnormal results to zero is refused before a kernel
+  `0.2.0` run draws anything (`FLX-5050`). Kernel `0.1.0` stays the default and
+  byte-identical: none of its digests or goldens moves. The new golden set
+  `tests/golden/related-star-v2/`, and the determinism manifest's new `run2.*`
+  and `kernel2.*` digests, each have a `GOLDEN-CHANGELOG.md` row.
+- `flux-expr/3`, the expression language of FLUX-side rules with a date part, date
+  arithmetic and string concatenation (ADR 0013, accepted, and EXPR-SPEC-3). It is
+  flux-expr/2 plus `EXTRACT(YEAR|MONTH|DAY FROM d)`, `ADD_DAYS`, `ADD_MONTHS` and
+  `ADD_YEARS` (a month or year move clamps the day, and a result outside 0001 to
+  9999 is NULL), and `a || b` over strings and integers (a NULL operand gives NULL).
+  `flux_engine.expr2.parse` takes `language="flux-expr/3"`, and a text that names no
+  language is flux-expr/2, whose texts, canonical forms and vectors are unchanged.
+  The new forms are `FLX-6103` under flux-expr/2 and in a contract's text, a
+  concatenation derived into an enum column is `FLX-6110`, `check_language` accepts
+  `flux-expr/3`, and a flux-expr/3 rule that uses none of the seven extensions is
+  `FLX-6209`. A bundle's FLUX-side rules are read in either language (see the
+  FLUX-side rules entry above), and a bundle that declares none keeps every byte,
+  digest and golden.
+- `flux_stats.canonical` is the canonical form a digest is taken over
+  (KERNEL-SPEC §2.1), standard library only. `flux_stats.exact_yaml` is the
+  exact read of a bundle's YAML text, behind a new `yaml` extra
+  (`pip install 'flux-stats[yaml]'`, which adds PyYAML). It reads text and opens
+  no file. `import flux_stats` loads nothing outside the standard library.
+  `flux_engine.core.canonical` and `flux_engine.seam.resolve` re-export them,
+  and `FLX-1001`, `FLX-1003` to `FLX-1007` and `FLX-3105` move with them.
+- A `quantile` fidelity property may declare `bins`, under a
+  `marginalHistogram`'s rules. It is then formed and compared by a new
+  statistic, `quantile/2` (ADR 0012): a group states the declared bin that
+  holds the order statistic and the records below and through that bin, never
+  the order statistic itself, and the check passes when the synthetic order
+  statistic lies within the margin of that bin. The scorecard scores the
+  distance from the bin. A quantile without bins is `quantile/1`, unchanged.
+- Profile format `1-1-0` carries `quantile/2`. The reader reads formats
+  `1-0-0` and `1-1-0` (`flux_stats.profile.SCHEMA_URL_1_1_0`), and refuses a
+  document that names `1-0-0` and holds a `quantile/2` statistic.
+- `flux_stats.definition_for_property` picks a property's registered
+  definition from its declaration, and `definition_for_kind` takes `binned=`.
+- `flux_stats.edge_counts.check_edge_counts` applies ADR 0012's publication
+  rule to every statistic of a column that counts records between edges
+  (`marginalHistogram/1`, `levelHistogram/1` over its declared levels,
+  `quantile/2` and `quantile/1`), so a profiler implements none of its own:
+  - a quantile group's cells below, in and above its bin, or its witness, each
+    hold at least `minimumCell` records, or none at the ends of the range (for
+    a `quantile/1`, none only where zeros are not disclosive);
+  - the column's statistics share one partition, and a `quantile/1`, which
+    counts at its witness, is published only as the column's one such
+    statistic;
+  - a group of too few records, or of none where zeros are disclosive, is
+    withheld with every group of its groupBy;
+  - more is withheld until no cell a reader can form by adding or subtracting
+    is small, a cell of no records included where the rule holds zeros
+    disclosive (`zeros_disclosive`);
+  - only then are the counts rounded.
+  It refuses counts that cannot describe one set of records, such as groups
+  that do not add up to the column.
+- A count table's withheld groups and cells (`marginalHistogram/1`,
+  `levelHistogram/1`, `quantile/2`), and a `quantile/1`'s withheld groups, are
+  all published `C`, whatever withheld them (PROFILE-SPEC §3, ADR 0012): an `A` told a reader that a cell holds
+  fewer than `minimumCell` records, which a known total could turn into the
+  count. `check_edge_counts` publishes only `F` and `C`, and returns the reason
+  for the profiler's report. A profile that marks a count table's cell `A` or
+  `D` still reads.
+
+- FLUX generates columns from a FLUID contract's rules (EXPR-SPEC-2 §6) for the
+  two forms whose value is a function of the row alone: a `derive` with `expr`
+  that reads only the row's own columns, and a `check` of difference form over
+  days whose column the Simulation names under
+  `extensions["com.agentics.flux/1"].emits[<exposeId>].invariants.<id>.generates`.
+  Determined columns are set after the row's own cells are drawn, in the order
+  their rules read each other, and the coverage report and
+  `column-provenance.json` name them as derived by `rule`. Every other rule that
+  would determine a column is refused at plan time with the new `FLX-6210`, and
+  `FLX-6202`, `FLX-6203`, `FLX-6204` and `FLX-6208` join the catalog. A bundle
+  whose contracts declare no rule keeps its bytes and every digest; a rule of any
+  kind, a check included, is part of its contract, and the plan of an emit that
+  generates its rows records it.
+  `fluxsim init`'s pre-flight reads the rules as `fluxsim run` does.
+
+### Changed
+
+- The seam's pre-check, the evidence packer's archive pre-read and the position a broken
+  document's message names decode a bundle's files as UTF-8, whatever the locale, as flux-spec
+  reads them from 0.5.4. They mirror its read and decoded in the locale's encoding, as flux-spec
+  0.5.3 does, so under a locale whose encoding is not UTF-8 a file flux-spec reads as written
+  is no longer refused or misplaced.
+- Under kernel `0.2.0` the generator computes a slice a column at a time
+  (ADR 0010, step 4), so `fluxsim plan` and `fluxsim apply` on one job run about
+  ten times faster than under kernel `0.1.0`: 9.0 to 9.5 s of CPU time against
+  97.8 to 104.9 s on the related-star fixture scaled to 216,065 rows. A
+  column's draws for every row of a slice are one Philox call over the rows'
+  counters, and `flux_engine.core.kernel2` has an array twin of each draw, of
+  generated identifiers and of `permute/2`, each held to its scalar function
+  bit for bit. A related plan works out its keys, its foreign keys' nulls and
+  picks, and the parent rows they name, for a whole slice at once. A plan with
+  a column drawn `given` another, and a slice in which anything is refused,
+  keep the per-row path, so a refusal is raised as before, and the rules, a
+  contract's and a bundle's FLUX-side ones, still set their columns on each row
+  after it is drawn. The rows are the same: no digest or golden moves, and
+  `GOLDEN-CHANGELOG.md` has no new row.
+  Kernel `0.1.0` is unchanged and stays the default for this release; a minor
+  release of its own switches it. ADR 0010's last amendment records the
+  measurement, decides step 5 (no compiled accelerator) and the default.
+- `flux_stats.exact_yaml` says where YAML it cannot read goes wrong. `load_documents`
+  named only PyYAML's error type (`unreadable YAML (ParserError)`), and
+  `check_documents` the first line of its message, with no place. Both now name
+  PyYAML's problem and its line and column: `unreadable YAML: expected ',' or
+  ']', but got ':' (line 3, column 2)`. A character YAML does not allow, which
+  PyYAML places by an offset rather than a mark, is placed by line and column,
+  counting line breaks as YAML does. A scalar its explicit tag cannot build,
+  such as `!!bool maybe`, for which PyYAML raises a `KeyError` with no place,
+  is refused by its position, as `check_documents` refuses it. forge-cli's
+  profiler reads a bundle through this read once it adopts it, and so keeps the
+  line numbers its own reader gave.
+- A bundle's files are held to two size caps before any is read (ADR 0009,
+  amendment of 2026-11-18, item 6): 4 MiB for one file and 256 MiB for its
+  documents and lockfile together. Every read of a bundle file took it whole,
+  the validator's, the exact read and the digests, so a multi-gigabyte
+  `.flux.yml` was read into memory before any bound applied.
+  - `load_bundle` takes every file's size with `stat` before it opens any.
+    Each read, through `flux_engine.seam.resolve.read_bundle_file`, takes the
+    file's `stat` again and reads at most one byte past the cap.
+  - The same read refuses a path that is not a regular file, such as a FIFO or
+    a device, with no byte read. That covers `fluxsim ship`'s read of the
+    bundle's contract, which `/dev/zero` behind a `.fluid.yml` link could keep
+    reading without end, and `fluxsim init --contract`'s read of its contract.
+  - `load_bundle`, `fluxsim ship` and `fluxsim init` refuse a file or a bundle
+    past a cap with `FLX-3105`, naming the file and its size, or the total.
+  - In an evidence archive, `verify_evidence` holds each document, lockfile and
+    pack product (the manifest, which flux_spec reads whole) to the file cap by
+    the size its header declares, before flux_spec reads it. flux_spec's own
+    cap, the same 256 MiB, holds the archive's members together.
+
+  `MAX_FILE_BYTES` and `MAX_BUNDLE_READ_BYTES` are constants, with no override.
+  The largest bundle file in this repository holds 4,895 bytes.
+- Every stage runs and stamps the kernel its plan names (ADR 0010, step 2).
+  `plan.json` records `kernelVersion`, and `apply`, `replay`, `verify` (with
+  `--update-golden` too) and `ship` now take the kernel from it rather than
+  from one constant, so a plan recomputes the same `inputDigest`, and every
+  digest after it, whatever kernel a new plan takes. `flux_engine.core.kernels`
+  lists the kernels this engine implements, kernel `0.1.0` alone, and
+  `DEFAULT_KERNEL` is the one a new plan takes. A plan that names a kernel this
+  engine does not implement is refused with the new `FLX-2119`, and a
+  `run-digest.json` that names a different kernel from its plan's with
+  `FLX-2113`. `flux_engine.stages.pipeline` no longer has `KERNEL_VERSION`,
+  `SEED_TREE_VERSION` or `TRACE_VERSION`. A new plan's versions are
+  `DEFAULT_KERNEL`'s, and the kernel registry takes the seed tree and trace
+  versions from `flux_engine.core.seedtree` and `flux_engine.core.trace`, which
+  own them, so the release guard no longer compares copies of them.
+  `pipeline.input_digest_of` and `verify.recompute_input_digest` take the
+  kernel as a keyword, and the `FLX-4103` refusal names no kernel version. No
+  digest or golden moves, and `GOLDEN-CHANGELOG.md` has no new row.
+- ADR 0012, amended 2026-11-18, records two ways a profile says that a range
+  holds no record which lie outside the publication rule: the declared levels
+  missing from a `support/1` or from a grouped statistic's groups, and the
+  part of the declared range beyond a published `min` or `max`. PROFILE-SPEC
+  §3 already named the first and now names the second: where zeros are
+  disclosive, the rule withholds a `quantile/1` whose witness is the column's
+  smallest or largest value, though a published `min` or `max` already shows
+  that no record lies beyond it. Nothing a profiler publishes changes.
+
+### Fixed
+
+- flux-stats' refusal of a document that writes out too many values through
+  its aliases stopped mid-sentence: "writes out more than 1000000 values once
+  its aliases are". It now ends "once its aliases and merge keys are written
+  out", as `flux_stats.exact_yaml`'s docstring names the bound.
+- `fluxsim ship` and `verify_evidence` hold a bundle's documents to the exact
+  read's bounds before flux_spec's validator reads them. Both handed a bundle to
+  flux_spec's own read, a plain SafeLoader that bounds nothing, so a document of
+  a few hundred bytes made of aliases stood for millions of values, which the
+  schema check then walked. The seam already held its own reads to the bounds,
+  and these two did not; an archive verified from anywhere is the likelier
+  case. `pack_evidence` checks the staged tree it packs, so nothing can change
+  between the check and the pack. `verify_evidence` reads the archive's
+  documents and lockfile once, front to back, within flux_spec's own member and
+  byte caps, decoded as the validator will decode them, and refuses one past the
+  bounds with `FLX-3105` before flux_spec reads any. It takes a member for the
+  lockfile under any name a case-insensitive filesystem opens for `flux.lock`,
+  such as `FLUX.LOCK` on macOS. Both check the lockfile whenever it is there,
+  though flux_spec reads it only for a versioned ref, so a lockfile past the
+  bounds, or one that does not decode, is refused even then. Otherwise a bundle
+  within the bounds packs and verifies as before.
+- A bundle's YAML is read within bounds:
+  - a document may write out at most 1,000,000 values and 64 MiB of characters
+    once its aliases and merge keys are written out, and nest at most 64
+    levels;
+  - the merge keys of one document may name at most 1,000,000 mappings;
+  - a number may need at most 1,000 digits written out, a zero counting the digits its scale spells;
+  - the merge keys of one bundle read may copy at most 100,000 pairs.
+  A string is one value however long it is, so its characters are counted too:
+  2,000 aliases of one 50,000 character string, 58 KB of text, write out 100
+  MB. So is a number, which is spelled in full: it counts as the digits its
+  decimal is spelled in when that is more than its text, so `1.e+999` is a
+  thousand characters, and about 320 bytes of aliases of it write out 200 MB. A merge
+  key that names empty mappings writes out nothing, yet building the document
+  visits each of them for every mapping that holds the key, so they are counted
+  too: an empty mapping, a list of 4,000 aliases of it and 4,000 mappings that
+  each merge the list are 56 KB, 8,007 values and 16 million visits. What a
+  merge key names is worked out once however many mappings hold it. The measure
+  walks a document with a stack of generators, as PyYAML's constructor does, so
+  how deep a document is does not use the interpreter's stack.
+  Past a bound the read refuses with `FLX-3105`, naming the file and the line.
+  So does a document that holds itself through an alias, and one nested too
+  deeply to parse. No released FLUX reference validator bounds its read. Its main
+  branch has held a document to the same four bounds, on values, levels,
+  mappings named and characters, since 2026-11-19 (Agenticstiger/flux#37), and
+  counts a number as its text, so it accepts what only a number spelled in full
+  makes too long. Every file is still checked against these bounds first,
+  decoded as the validator decodes it. Before, a kilobyte of aliases, or a few
+  hundred bytes of merge keys, could take minutes and gigabytes, and a deep
+  document ended the run with a `RecursionError`.
+  The canonical form keeps the scale a number was written with, so a zero
+  counts the digits its scale spells: `0.e-10000000` was read, and then spelled
+  in 10,000,002 characters, and is refused now as a zero of a scale of ten
+  million digits, as `1.0e-10000000` is. The count is the one the fidelity
+  block's readers and the parameter register share, so a quoted `"0e-10000000"`
+  there, which was spelled in full, is refused too (`FLX-5030`).
+- A bundle file that is not text in the locale's encoding, or that holds a
+  character YAML does not allow, is refused with `FLX-3105` before the
+  validator reads it. The validator meets either only where the file holds
+  it, after building every document before it, and a file that did not
+  decode ended the run with a `UnicodeDecodeError`. A path that is not a
+  regular file, such as a FIFO or a device, is refused without being read.
+- A scalar in a bundle file that its explicit tag cannot build
+  (`!!bool maybe`, `!!float ZZZ`) is refused with `FLX-3105` by its position,
+  where the validator's read raised a bare `KeyError` or `ValueError`.
+- `fluxsim init --contract` reads the contract within the same bounds. A
+  contract nested too deeply to parse, or with a scalar its explicit tag
+  cannot build (`!!bool maybe`), is refused with `FLX-3105` instead of a bare
+  Python error.
+- A FLUID column declared `decimal(p,s)` with leading zeros in p or s, such as
+  `numeric(000012, 00002)`, had no FLUID SQL/1 type once a part ran past four
+  characters, because the four-digit cap counted the zeros, so every text
+  naming it was `FLX-6111`. p and s are now read by value, as the SQL standard
+  reads an unsigned integer and forge-cli's reader does: that column is
+  `numeric(12, 2)`. The bounds are unchanged, a type only when
+  1 <= p <= 1,000 and 0 <= s <= p. The shared vectors, re-vendored from
+  forge-cli, gain 13 cases at those bounds, from `decimal(1)` and
+  `decimal(1000, 1000)` to `decimal(0)` and `decimal(1000,1001)`. No digest or
+  golden moves.
+
+## 0.6.2 - 2026-11-18
+
+Related tables are generated together, `fluxsim init --contract --profile`
+writes a bundle from a FLUID contract and a profile, and a FLUID 0.7.7 enum
+level reads as written. The engine now needs flux-spec 0.5.3.
+
+Two bundles that the FLUX reference validator accepts and this engine cannot
+run are now refused with an `FLX` code at `fluxsim validate`, instead of
+stopping `plan` with a Python `KeyError`. The FLUX specification's quickstart
+bundle declares neither key. A bundle that ran before plans to the same bytes,
+and no digest or golden moves.
+
+### Added
+
+- `fluxsim init <dir> --contract <file> --profile <file>` writes a bundle for
+  your own data: the FLUID contract, copied unchanged, the least World and
+  Persona a run needs, and a Simulation with one generator emit per expose the
+  profile describes. It reads the two documents and no record. The Simulation
+  pins the profile's digest, and its parameter register labels every number it
+  declares: a published aggregate of the profile (cited by a JSON Pointer), a
+  fact of the contract, an assumption with its reason, or a template default.
+  A statistic of the profile is used first, then the column metrics, then the
+  contract; a column's `range` and `support`, which the fidelity check reads,
+  come only from published values or the contract. A count withheld as small
+  (status `A`) is assumed to be half the disclosure rule's minimum cell, a
+  cell withheld under any other status the mean of the published cells, and a
+  withheld null count no nulls. A published mean shapes the histogram on the
+  grid the generator draws on (each bin keeps its share of the rows), a
+  histogram's draw keeps to the published `min` and `max`, and a `mean/1` over
+  a number column whose range is published becomes a `mean` property, so a run
+  made from a profile `fluid profile` writes can pass `verify --profile` and
+  ship. A boolean or a date column carries no property, since the check cannot
+  read one against a profile. Keys come from the contract and are never
+  restated: a number key lies between its published `min` and `max`, or over
+  an assumed span that covers the foreign keys that reference it and lies
+  inside the key it references, down a chain of keys, and a foreign key the
+  profile says nothing of is drawn over the span of the key it references. A
+  column of a key over several columns spans its rows too, and a composite
+  foreign key takes its nulls from its first column. An integer column whose
+  published values pass 2^53, which a run's rows cannot hold exactly, is a
+  labelled placeholder. The bundle is checked as `validate` and `plan` check
+  it from the documents alone before a file is written, and nothing either
+  refuses is written, such as a foreign key into a table the command leaves
+  out (`FLX-3403`). See `docs/how-to/write-a-bundle-from-a-profile.md`.
+- Parameter register format 1-1-0 adds the `contract` source: a number the
+  FLUID contract fixes, such as the number of levels an `enum(...)` type
+  declares, cites the contract by its `productRef` and a JSON Pointer into it.
+  `validate` and every other command refuse a citation that names no contract
+  the run emits from, or reaches nothing in it (`FLX-3105`). A register with
+  no contract entry keeps format 1-0-0, so no existing record, plan or digest
+  moves. The plan, verify and ship lines and the evidence report give the
+  contract's share when there is one. The 1-1-0 schema is
+  `docs/spec/parameter-register-1-1.schema.json`.
+- Related tables are generated together. For the exposes a Simulation generates
+  from statistics, every key a FLUID 0.7.7 contract declares is unique, and every
+  foreign key value is a key its parent's rows hold, with nothing held in memory,
+  so `--jobs` gives the same bytes. A one-column number or date key is laid out in
+  ascending order over its declared range or bins; a text key, and a key of
+  several columns, is a keyed permutation of the row index, so it never repeats at
+  any length. A foreign key that declares a draw keeps its shape and takes the
+  parent's nearest key; one that declares none picks its parent uniformly; a
+  `one_to_one` relationship references each parent row once. An optional foreign
+  key keeps its `nullFraction` when the relationship's `joinType` is `left`. What
+  cannot hold is refused before any row exists (`FLX-3403`). Contracts without
+  keys, and every existing golden, are unchanged. KERNEL-SPEC sections 4.1 and 8.2,
+  a vector file for the permutation, and a new golden set,
+  `tests/golden/related-star`.
+
+- flux-stats: `flux_stats.fidelity`, the fidelity-block grammar. It parses
+  the block a Simulation declares (`parse_fidelity_block`) against the expose
+  it names, refuses what SEAM-FIDELITY-SPEC section 2 refuses with `FLX-5030`
+  to `FLX-5034`, and reads a `support: declared` column's levels from its
+  `enum(...)` type (`declared_enum_values`, `FLX-3001`). It also holds
+  `measure_group`, which forms one group of a property from the parsed
+  declaration, so a profiler forms each group with the check's own function.
+  The module moved from the engine: every engine name is an import of the
+  same object, the codes keep their titles and explanations, and the engine's
+  behaviour is unchanged.
+
+### Changed
+
+- The engine needs flux-spec 0.5.3 or later (`flux-spec>=0.5.3,<0.6`). Its
+  FLUID 0.7.7 preview, re-pinned to forge-cli `e88301f7`, accepts every enum
+  level the engine reads: a quoted level may hold any character but a control
+  character, its own quote doubled. `docs/reference/schemas.md` now describes
+  FLUX 0.5.3.
+
+### Fixed
+
+- A World with no `spec.vertical`, or one naming a pack this engine does not
+  ship, passed `fluxsim validate`, and `fluxsim plan`, `run` and `expr` then
+  stopped with a `KeyError` (`unknown vertical ''` for a World with none) and
+  the generic "run again with FLUX_DEBUG=1" hint, even when a fidelity block
+  declared every column.
+  `validate` now refuses it with the new `FLX-5042`, and `plan`, `run` and
+  `expr` give the same refusal. The message names the World, the missing key
+  and the packs this engine ships, for example `vertical: telco`.
+- A Simulation with no `spec.timeBounds` passed `fluxsim validate`, and
+  `fluxsim plan` and `run` then stopped with `KeyError: 'start'`. `validate`
+  now refuses it with the new `FLX-5023`, and `plan` and `run` give the same
+  refusal, before the population is built. The message names the Simulation
+  and the missing key, with an example window.
+- The README, the architecture page and the how-to "Score a run against a
+  profile" said that `fluid profile` writes no statistics, so a run checked
+  against its profile is always refused. From data-product-forge 0.31.0 it
+  writes an ungrouped `mean/1` for each number column, unless the output checks
+  withhold it, and a `mean` property over such a column is scored. The pages
+  now say so, and which properties such a profile cannot answer.
+- A FLUID 0.7.7 enum level reads as written. A quoted level may hold any
+  character but a control character, a comma, a parenthesis, a dot and `>`
+  among them, and a doubled quote inside it now reads as one quote (`'O''Brien'`
+  is `O'Brien`, where it used to read `O''Brien`). A level holding a comma used
+  to be cut in two, and one holding a parenthesis read as no levels or made the
+  engine refuse the contract. A list the grammar refuses, such as
+  `enum('a' 'b')`, is refused with `FLX-3001`, and so is an unquoted level that
+  is not a word list of ASCII letters, digits, `_` and `-`, such as `enum(1.5)` or
+  `enum(a.b)`, which used to read as written: quote it, as in `enum('1.5')`.
+  `flux_stats.fidelity.split_type_params` is new and splits a column type the
+  way forge-cli does.
+- A FLUID SQL/1 text can name an enum column whose quoted level holds a
+  parenthesis, such as one typed `enum('a (b)', 'c')`. The column-type table
+  read a type up to its first `)`, so the column had no FLUID SQL/1 type and
+  every text naming it was `FLX-6111`. It now cuts the type with
+  `split_type_params`, as the seam and forge-cli's FLUID SQL/1 reader do, and
+  only a type whose parameter list holds a parenthesis inside quotes reads
+  differently. The shared vectors, re-vendored from forge-cli, gain three cases:
+  a level holding a parenthesis, one holding a comma and a doubled quote, and a
+  mistyped level that is still refused. No digest or golden moves.
+
+## 0.6.1 - 2026-11-17
+
+A documentation release: nothing the engine writes changes.
+
+### Added
+
+- An architecture page (`docs/explanation/architecture.md`), linked from the
+  README and both documentation indexes: what crosses over from the data, the
+  parts you install, the packages inside the engine and the import rules
+  between them, the life of a run, the design patterns behind it, and how
+  quality is kept. Its diagrams are Mermaid flowcharts. The documentation
+  harness now accepts a `mermaid` block and holds it to a flowchart subset
+  that GitHub and the site both draw, and a test checks that every repository
+  path a page names exists.
+- Documentation: how-tos for scoring a run against a profile, in full or
+  sampled, and for sealing and scoring a prediction; indexes for the
+  specifications and the decision records; a tutorial that reads its run id
+  instead of printing a fixed one; and a plain statement that a profile from
+  `fluid profile` cannot score a run yet, because it carries metrics but no
+  statistics (`FLX-5037`).
+
+## 0.6.0 - 2026-11-17
+
+Every column of every exposed table now has a recorded producer, the columns
+that have none are reported, and the plan holds a digest of that record. The
+digest is a new key in `plan.json`, so it moves the `planDigest` of every
+bundle, and with it every run id, the `lineage` ledger and every `runDigest`
+(`GOLDEN-CHANGELOG.md` has two new rows for it). The rows, every component
+digest, `run-digest.json` once its plan digest is masked and every seam
+attestation are the bytes they were. `KERNEL_VERSION`, `SEED_TREE_VERSION` and
+`TRACE_VERSION` keep their values.
+
+Upgrading moves every run digest once, so a golden baseline recorded with
+`fluxsim verify --update-golden` holds the old value, and so does a
+`spec.golden.baselineDigest` a bundle declares. The first `verify` then reads
+the golden leg as moved while every component reproduces. Check that no other
+leg failed and record the baseline again with `--update-golden --reason
+"<why>"`.
+
+### Added
+
+- Sample-based verification (`docs/spec/SAMPLE-SPEC.md`). `fluxsim verify
+  --profile PATH --sample FRACTION` compares each emit's means with the
+  pinned profile on a sample of whole blocks of records (`--sample-block`,
+  1000 by default) chosen by a seeded hash of the run, the emit and the
+  block (`--sample-seed`), and decodes only those blocks for the
+  comparison; the digests and the rows' conformance still read every
+  record. Each `mean/1` group is estimated with the one-stage cluster ratio
+  estimator and carries its sample size and a 95 % interval, exact and
+  widened only by rounding a t table up and a square root up
+  (`flux_stats.sampling`). The interval decides: `within` inside the
+  property's band, `outside` wholly beyond it, and `undecided` across an
+  edge, which fails the check as `outside` does. The full comparison's
+  floors and refusals hold on the sample, and a refusal names a row by its
+  place in the emit (`flux_stats.reading`'s `group_keys` and `read_column`
+  take a `first_row`). The other kinds are named as not estimated, a
+  sampled verify forms no scorecard, and `ship` still reads every record. A
+  five per cent sample covers the full mean at least ninety times in a
+  hundred (the tests).
+- Keys from the FLUID contract (KERNEL-SPEC section 8.1, `flux_engine.seam.keys`). A contract on FLUID 0.7.7
+  declares its primary and foreign keys as `exposes[].semantics.relationships` (a composite key is one relationship)
+  and as primary, unique and natural entities, and the engine reads them instead of a FLUX declaration. A
+  relationship's `toColumns` are a key of its target; in a generator-driven emit a one-column STRING key is
+  generated as an identifier with no fidelity `unique` and no tag. Three codes are new: `FLX-3005` refuses a key the contract declares that does not
+  resolve, `FLX-3111` refuses a Simulation that restates a key (a key block in its extensions, or a fidelity
+  `unique` that contradicts the contract), and `FLX-3112` refuses an emit of a keyed contract that pins no
+  `provenance.contractDigest`, so a moved key stops the seam. A contract on FLUID 0.7.6 or earlier is read as
+  before, and no golden moved; a key-like entry in a Simulation's extensions, refused before as `FLX-3105`, is
+  now `FLX-3111` whatever the contract's version. A keyed contract cannot carry a YAML float, or text not in Unicode
+  NFC, yet: the reference validator and the engine canonicalise those differently, so no one pin satisfies both. Until a flux-spec release carries FLUID 0.7.7, the engine builds against
+  Agenticstiger/flux#23 through a uv git source.
+- A parameter register (docs/spec/PARAMETER-REGISTER-SPEC.md). A Simulation can declare, under the new
+  top-level `parameters` key of its `com.agentics.flux/1` namespace, what each number its run reads rests on: a
+  statistic of the profile it pins (a JSON Pointer into the profile and the statistic's registered definition), an
+  assumption with its reason, or a default. Entries name numbers by document id and RFC 6901 pointer, a pointer to a
+  mapping or a list names every number under it, and the most specific entry decides. The register counts every JSON
+  number under `spec` in the run's cast and in the Playbacks bound to its World, and the numbers the namespace's
+  fidelity block and scorecard thresholds declare; seeds, the sweep and the fidelity block's `encoding` and `budget`
+  are not counted, and a number no entry names is a default. `apply` writes `run/parameter-register.json`, the plan
+  holds its digest as `parameterRegisterDigest`, `verify` and `ship` read it only through that digest, `ship` packs
+  the bytes it checked, and `plan`, `verify` and `ship` report the shares on a `parameters:` line. `EVIDENCE.md`
+  states them under "What Was Not Proven" and lists every assumption with its reason. `plan` refuses a citation the
+  pinned profile does not publish (`FLX-3113`), and a record that is missing, moved or not bound by the plan is
+  `FLX-2116`. A Simulation that declares no register plans to the same bytes as before: no golden, digest or
+  report moves.
+- Shape flags (`docs/spec/SCORECARD-SPEC.md` §6). `fluxsim verify`
+  and `fluxsim ship` read every emit whose table the pinned profile
+  describes, column by column, whether or not a fidelity property is declared
+  on it, and flag what the profile makes unlikely: `EMPTY_BINS`, cells the
+  profile publishes a count for that the run leaves empty, when the exact
+  chance of an empty cell, `(1 - p)^n`, is at most the test level, a record
+  outside every cell counting against every cell; `IMBALANCE`, each value
+  holding at least a tenth of a column's records that the profile's share of
+  its cell cannot explain (Chernoff's bound on the binomial tail); `CONSTANT`,
+  one distinct value where the profile makes that too unlikely; and
+  `HIGH_CARDINALITY` or `LOW_CARDINALITY`, a distinct count above twice the
+  most, or below half the fewest, distinct values the profile allows a run of
+  that size. The names are ydata-profiling's where one fits. The level is `1/1000` per run, split
+  across every test (Bonferroni); a count a disclosure rule rounded is read as
+  the share least favourable to a flag, and a withheld cell is never tested.
+  The document carries the run's counts and the profile's cells by ordinal,
+  and no count of the profile.
+  The flags inform: they are in the scorecard's `shapeFlags`, `verify`'s lines
+  and `EVIDENCE.md`, and withhold nothing. The scorecard format is `1-1-0`,
+  which adds `shapeFlags`' status `checked` and changes nothing format `1-0-0`
+  says, so a pinned run's `scorecard.json` changes once. A run that pins no
+  profile is unchanged, and no golden moves.
+- `flux_stats.tails` (flux-stats): exact decisions about binomial tails
+  without writing them out, from binary bounds rounded outwards and, where
+  those cannot tell, the exact `Fraction`.
+- flux-expr/2, the language of the rules about valid data (EXPR-SPEC-2, ADR 0008), as `flux_engine.expr2`. Its core is
+  FLUID SQL/1 (forge-cli's `RFC-data-rules.md` §2), the text of a contract's invariants, and a FLUX-side text may also
+  use the previous version of an entity, paths over several links, aggregates over a parent's children and windows
+  over a row's siblings. The package parses a text (no parser library: the core gains no dependency), checks its names
+  and types against the expose's row scope, gives its static scale and what it reads, writes its canonical text, and
+  evaluates it exactly: numbers are `Fraction`s, `x / 0` is NULL, truth is two-valued, `ROUND` rounds ties away from
+  zero or to the even neighbor, and `DAYS_BETWEEN`, `MONTHS_BETWEEN` and `YEARS_BETWEEN` count whole units. Sixteen
+  codes are new: `FLX-6101` to `FLX-6113`, `FLX-6201`, `FLX-6206` and `FLX-6209`. A text is at most 4,096 code points
+  and 64 levels deep, where every operator, call, `CASE` and parenthesis is a level, and `ROUND`'s scale is at most 38.
+  The core passes every vector of forge-cli's `fluid-sql-vectors.json` (251, vendored unchanged as
+  `tests/vectors/fluid-sql-vectors.json`), and reads FLUID SQL/1 as that file does where the RFC leaves a reading open:
+  a NULL literal takes its type only from a typed operand beside it, `timestamp with time zone` is `timestamptz`, and a
+  string column's placeholders are exempt from its enum. `tests/vectors/expr2-core-vectors.json` (175 vectors, in the
+  same shape) and `expr2-vectors.json` (77) pin further trees, types, canonical texts and values, and DuckDB checks
+  every aggregate, window and date difference among the three files in the test suite, except `AVG` and division,
+  which DuckDB computes in `DOUBLE` and the vectors pin as exact rationals. flux-expr/1 is unchanged, and nothing
+  reads flux-expr/2 yet, so no bundle, digest or golden moves.
+- Column coverage (SEAM-FIDELITY-SPEC §1). A column is `declared` (its entry
+  under `fidelity.columns`), `copied` (a runtime attribute, named by the emit's
+  `mapping` block, the vertical's alias table or the column's own name),
+  `derived` (an identifier, from the seam digest and the row index) or
+  `default`. `profile` is in the set for later and nothing produces it yet. A
+  `default` is an optional column nothing maps onto, which renders `null`, or a
+  DATE or TIMESTAMP column that declares no draw of its own, which is drawn
+  uniformly within the simulation's time bounds. `fluxsim plan` names every
+  such column and goes on.
+- `--strict-coverage` on `plan`, `apply` and `run` (`strict_coverage` in the
+  library) refuses a run in which a column fell back to a type default. The
+  new `FLX-3304` names every such column of every emit in one table, before any
+  row is drawn, the shape dbt gives a failed enforced model contract, and says
+  how to cover a column of each kind of emit: a mapping for a scenario-driven
+  one, a range, a rate, or bins with `binWeights` under `fidelity.columns` for
+  a generator-driven one. The setting changes whether a run is accepted and
+  never what an accepted run produces. A Simulation can declare it as well
+  (the `strictCoverage` entry below).
+- `apply` writes `column-provenance.json` into the run directory: per expose,
+  each column's origin, its source and who chose it, with an OpenLineage
+  `ColumnLineageDatasetFacet` (1-2-0) that gives each copied column its source
+  attribute as the input field. `flux_engine.lineage.emitter` builds the facet
+  with no OpenLineage import, and `tests/lineage` reads it with the client's own
+  classes when the `lineage` extra is installed. `apply` writes it through a
+  staged rename, so a link planted at its name is replaced and not written
+  through.
+- `plan.json` records `columnProvenanceDigest`, the `raw-bytes` digest of that
+  file, the way it records `seedTreeDigest` for `seed-paths.ndjson`. Any change
+  to the file moves it, reformatting and a repeated key included. `ship` and
+  `verify` read the record only through it: a record that is missing, is not a
+  regular file, no longer hashes to the plan's digest, or is not one this build
+  can read ends the command with the new `FLX-2115`, and a ship packs nothing.
+  The pack carries the bytes `ship` checked, not whatever the file holds by the
+  time the directory is copied. `apply` makes the same comparison on the record
+  it is about to write and refuses before it writes a row when the plan names a
+  different one. A record edited on its own, for a generator-driven emit as for
+  a scenario-driven one, can no longer reach a pack. Both `ship` and `verify`
+  also refuse a `run-digest.json` that names a different plan from the
+  `plan.json` beside it (`FLX-2113`), the link between the plan's digest and the
+  run digest the runtime statement names. A plan written before this carries no
+  digest and binds no record, so `ship` says that no column provenance is bound
+  to the run, says to plan and apply again, and believes nothing of a file it
+  cannot check.
+- `EVIDENCE.md` has a sixth section, "Column Provenance", before "What Was Not
+  Proven", and that last section names the columns that fell back to a type
+  default, or says none did, or says that no record is bound to the run. The
+  sentence for each column comes from a fixed table keyed by origin and
+  producer, and a row whose origin, producer and source do not fit together is
+  refused, so the file supplies no wording. The section says that the plan holds
+  a digest of the record and that `ship` checked the record against it, and that
+  `ship` does not work out again how a column was produced.
+- The design of flux-expr/2 (`docs/spec/EXPR-SPEC-2.md`, ADR 0008). Its core
+  is FLUID SQL/1, the SQL expression subset that the FLUID RFC
+  `RFC-data-rules.md` defines for the rules about valid data a contract
+  declares: invariants with a band of violating rows, dependencies and shared
+  attributes, which FLUX reads, never restates, and uses both to generate the
+  rows and to check them. On top of the core, FLUX adds the previous version,
+  paths over several links, aggregates over a parent's children and SQL
+  windows over a row's siblings, for the rules only a generator needs.
+  flux-expr/1 is unchanged and stays a language of its own. Nothing is
+  implemented yet, and no code changed.
+- The profile document (`docs/spec/PROFILE-SPEC.md`, with its JSON Schema
+  `docs/spec/profile-1.schema.json` and an example). A profile carries
+  aggregate statistics of the data a bundle imitates, computed where the data
+  lives: per column, per column pair, per relationship (children per parent),
+  per period (counts and sums per month) and per query (rates). Every
+  statistic names its registered definition, a sample-size band and the
+  disclosure rule applied to it, and a group or cell the rule withheld carries
+  its SDMX `CL_CONF_STATUS` code and no value. Counts are integers and every
+  other number is a decimal string. The envelope (`_producer`, `_schemaURL`)
+  and the column metric names (`count`, `nullCount`, `distinctCount`, `sum`,
+  `min`, `max`, `quantiles`) are OpenLineage's, and the bin layout is
+  mostlyai-qa's. `flux_stats.profile` reads a profile whole or refuses
+  it with the new `FLX-5036`. The format grows by minor versions that only
+  add, and the spec says how the planned additions fit that rule: uncertainty
+  inputs, statistics by period and as series, query-result cells, and the
+  share of rows that satisfy each declared invariant.
+- A Simulation pins a profile by its digest, under the new top-level
+  `profile` key of the `com.agentics.flux/1` namespace. `fluxsim plan
+  --profile PATH`, and `run` and `apply` when they take a fresh plan, refuse a
+  pin with no profile, or a profile with no pin, with the new `FLX-3109`, and
+  a profile whose digest is not the pinned one with the new `FLX-3110`, before
+  anything is written. `apply --run-id` refuses `--profile`: the recorded plan
+  was paired with its profile when it was taken. A bundle that pins no profile
+  plans exactly as before.
+- The fidelity property kinds can read their expected statistics from a
+  profile instead of a committed slice, compared by the same registered
+  definitions (`flux_engine.concordance.verifier.ClearProfile`). A group or a
+  count-table cell the profile withheld is censored, never scored as zero: a
+  count table is compared over the cells it published, each side renormalised
+  to them. A profile that holds no statistic of a property's shape, or holds
+  one that depends on the grid (a sum, a moment, an order statistic, a bin
+  count) formed on another grid, is refused with the new `FLX-5037`. A
+  profile formed over a committed slice gives the slice path's outcomes on
+  every vectors case. The record of SEAM-FIDELITY-SPEC §6 is still written for
+  committed states only.
+- A Simulation can declare strict coverage itself: `strictCoverage: true` at
+  the top level of its `com.agentics.flux/1` extensions refuses a run in which a
+  column fell back to a type default, with the same `FLX-3304` and table as
+  `--strict-coverage`, before any row is drawn. The run is strict when the flag
+  or the declaration asks, and the flag cannot turn the declaration off: it is
+  part of the bundle `inputDigest` covers. The refusal names which one asked.
+  The value is a boolean (anything else is `FLX-3105`, `validate` included);
+  `false` and a null declare nothing. The key is a bundle edit, so it moves
+  `inputDigest`, but `plan.json` has the same keys with it as without, and a run
+  it accepts makes the rows, the column provenance record and every component
+  digest it makes without it. No bundle in the repository declares it, so no
+  golden moves.
+- The scorecard (`docs/spec/SCORECARD-SPEC.md`, with its JSON Schema
+  `docs/spec/scorecard-1.schema.json` and an example). `fluxsim verify` and
+  `fluxsim ship` take `--profile PATH`, pair it with the pin the run's plan
+  records (`FLX-3109`, `FLX-3110`, `FLX-5036`), compare every emit that
+  declares a fidelity block with the profile, and score the run per property,
+  per table, per fidelity dimension and overall. A property scores the exact
+  similarity of its scored groups to the profile, SDMetrics' measures formed
+  from the comparison's own integer quantities: one minus the total variation
+  for a count table, the share of records on the support for a support, one
+  minus the difference over the declared range for a mean and a quantile, and
+  an exact lower bound of one minus half the difference for a correlation. A
+  table and a dimension score the mean of their scored properties, and the run
+  the mean of its measured dimensions. A censored or refused property is shown
+  and left out of every mean, and a score that was never formed is `null`,
+  never a default number. The eight dimensions are `structure`, `marginals`,
+  `joint`, `crossTable`, `temporal`, `invariants`, `queries` and `defects`;
+  this release scores the first three. Each table carries an OpenLineage
+  `DataQualityAssertionsDatasetFacet` (1-1-0) with one assertion per compared
+  property. Groups are named by ordinal, and no value of the data appears in
+  the document. `ship` withholds an emit whose comparison with the profile is
+  not within, packs `run/scorecard.json` when the run ships, and summarises it
+  in `EVIDENCE.md`. `fluxsim run --profile` hands the profile to `--verify`
+  and `--ship`. The slots for the shape flags and the sample-based intervals say
+  `not checked` and `not computed`.
+- Thresholds on the scorecard, under the new top-level `scorecard` key of the
+  `com.agentics.flux/1` namespace: a floor on the overall score, on a
+  dimension or on a table, written with ODCS's `mustBeGreaterOrEqualTo` or
+  `mustBeGreaterThan`. A missed threshold withholds every emit whose
+  properties feed the score, with a check that names the lowest-scoring
+  property. An emit's `minCredibility` is read against its table's computed
+  score wherever the table was measured, which replaces the Playback's
+  declared credibility as its basis. A threshold that could only withhold (in
+  a Simulation that pins no profile, on the overall score, a dimension or a
+  table no declared property is scored in, or `mustBeGreaterThan 1`) is
+  refused with `FLX-3105` by every command, before anything is written.
+
+### Security
+
+- The files `plan`, `apply`, `ship` and `verify` write under the state directory no longer follow a link. They
+  go through `flux_engine.safeio`: a file written whole is staged beside its name and renamed over it, so a link
+  planted at the name is replaced and its target is not touched; the lineage ledger is appended to through an
+  open that refuses a link, a directory or a pipe (`FLX-2117`); and the files `ship` and `verify` read back to
+  digest or report on are opened without following a link. `RunLayout.ensure` refuses a `runs/`, run or
+  `emits/` directory that is itself a link, and a run directory that already holds a link, and `verify
+  --update-golden` does the same for `golden/` (`FLX-2118`). A link at the name of a file `apply` writes was
+  replaced before and is refused now, with nothing written. The same rule covers the boundary vault
+  (`<state>/boundary/`: its directory, its lock and its store), the four outputs of an evidence pack (packed in
+  a private directory and moved into the output directory by a staged rename, which must not itself be a link)
+  and the file sinks' stream directory and manifest. A file is written with the mode the umask leaves, and its
+  directory is synced after the rename. A `.<name>-XXXX.tmp` file a killed write left behind is not packed. A
+  read that meets a link is `FLX-2117`, which is also an `OSError`. What is left open (checks that run before
+  the use, the Windows fallback) is recorded in the `flux_engine.safeio` docstring. No output byte moves: no
+  golden, digest or pinned file changes.
+
+### Changed
+
+- **flux-stats, a second distribution.** The statistic registry, the column
+  metrics, the profile document reader, the fixed-point grid and the
+  `FLX-nnnn` catalog are now the `flux-stats` distribution (import
+  `flux_stats`), built from `packages/flux-stats` in this repository and
+  released from the same tag at the same version (ADR 0009). It depends on
+  the Python standard library alone, runs on Python 3.10 or newer (one release
+  below the engine, for forge-cli's profiler) and imports nothing of the engine,
+  so a profiler can form the fidelity statistics where the data lives without
+  installing the engine. flux-sim-engine depends on exactly the flux-stats of
+  its own release (`flux-stats==X.Y.Z`), so `pip install flux-sim-engine`
+  installs both and the engine's core gains no third-party dependency.
+  `flux_engine.core.fixedpoint` is now `flux_stats.fixedpoint`, with no alias.
+  `flux_engine.core.errors` stays and re-exports the same catalog and the same
+  `FluxError` class, so a sink plugin's imports keep working. Every FLX code
+  and message, every digest and golden, and `KERNEL_VERSION`,
+  `SEED_TREE_VERSION` and `TRACE_VERSION` are unchanged.
+- **The record reader is flux-stats's too** (ADR 0009, amended 2026-11-17).
+  `flux_stats.reading` reads a record the way the fidelity check does: a
+  number as the exact rational it spells, an RFC 3339 instant as integer
+  milliseconds, a category as its NFC string, each column's null policy, the
+  groups, and the refusals `FLX-5005`, `FLX-5022` and `FLX-5031`. A profiler
+  calls it with its own column objects, and the check calls it with the
+  engine's. `FLX-5022` and `FLX-5031` are registered there now, with the same
+  titles and explanations, and the engine's names for the moved functions and
+  enums (`flux_engine.core.clock.parse_rfc3339_ms`,
+  `flux_engine.core.canonical.nfc`, `NullPolicy` and `ValueDomain` in
+  `flux_engine.concordance.predicate`, and the boundary's `encode_value` and
+  `level_cells`) are the same objects. Every digest and golden is
+  byte-identical.
+- `parse_rfc3339_ms` no longer calls `datetime.fromisoformat`, whose accepted
+  forms differ between Python versions, so an instant reads the same on every
+  Python: on 3.11 to 3.13 every value and every refusal is the one it was, and
+  3.14 no longer accepts hour 24. A date-time whose instant falls outside the
+  years 1 to 9999 once moved to UTC, such as `0001-01-01T00:00:00+00:01`, is
+  refused with `FLX-5022` where it used to escape as an `OverflowError`.
+- `plan.json` records `profileDigest`, and any scorecard thresholds as
+  `scorecard`, when the Simulation pins a profile, so `verify` and `ship` read
+  both through the plan's digest. A pinned bundle's `planDigest`, run id and
+  `runDigest` therefore move once against a plan taken before this change; a
+  plan whose Simulation pins none keeps its bytes and its `planDigest`, and no
+  golden moves (no golden bundle pins a profile).
+- `ship`'s withheld summary no longer lists a censored property as a failure.
+- `fluxsim plan` plans every emit before it draws the rows of any of them, so
+  a refusal in a later emit no longer waits for the earlier emits' rows.
+- The `com.agentics.flux/1` namespace is closed: a key other than `emits`,
+  `profile`, `scorecard` and `strictCoverage` at its top level is refused with
+  `FLX-3105`, where it was ignored.
+- `fluxsim verify` refuses a run directory that has no plan (`FLX-2107`), as
+  `ship` and `apply` do. Without a plan it used to skip the checks that run
+  through one, which now include the record's digest. Every `apply` reads a plan
+  before it writes anything, so a run an engine wrote always has one.
+- ADR 0003 is amended (2026-11-16). The engine never reads a record of the
+  data a bundle imitates: a separate profiler package reads records only
+  where they live and emits only aggregates. Its disclosure defaults take
+  their values from ACRO: cells with fewer than 10 records suppressed, zero
+  cells disclosive, counts rounded to a multiple of 5, and no noise by
+  default. These are output-checking conventions only; no privacy or
+  anonymity guarantee is made or implied. A fidelity check's result states a
+  statistical relation and nothing more. Today `--committed-slice` is the one
+  path that reads records, and it applies none of these defaults; it moves
+  into the profiler package when that package ships. No code changed.
+
+- One definition per statistic. `flux_stats` is a registry that maps a
+  stable identifier (`mean/1`, `marginalHistogram/1`, `levelHistogram/1`,
+  `support/1`, `correlation/1`, `quantile/1`) to the quantities the statistic
+  keeps, the pure function that forms them, their spelling in `S` and the
+  comparison SEAM-FIDELITY-SPEC §5 gives them. The fidelity check's statistic
+  and verifier now go through it, and the profiler that comes next will share
+  it: it imports the standard library alone, and a test pins that. Each identifier and each property kind
+  has exactly one definition. The pattern is Deequ's single `Analyzer`, which
+  feeds both its profiles and its checks. Nothing a run computes changed:
+  every digest and golden is byte-identical.
+- flux-sim-engine no longer depends on pydantic. No module imported it, so
+  `pip install flux-sim-engine` stops installing pydantic and the three
+  packages only it needed: pydantic-core, annotated-types and
+  typing-inspection.
+- The vendored copy of `flux_spec` under `flux_engine/_vendor/` is gone
+  (ADR 0005, amended 2026-11-17). The `flux-spec` distribution, already a
+  declared dependency, is the only source of the document validator, the
+  RFC-04 enforcement decision, the evidence bundler and the schemas they read.
+  An environment without it now fails with a `ModuleNotFoundError` that names
+  the install command, where the engine used to run on its copy. `fluxsim
+  describe --self` reports `spec_source: flux_spec` and the installed version
+  as before. `flux_engine.describe.VENDORED_SPEC_VERSION` and its older
+  spelling `SPEC_VERSION` are removed. `docs/reference/schemas.md` is
+  generated from the installed distribution, chosen by the floor of the
+  `flux-spec` requirement, so it reads the same wherever it is built. Every
+  digest and golden is byte-identical.
+
+### Fixed
+
+- A record's number can no longer stall the fidelity check or a profiler. A
+  cell such as `"1E+99999999"`, eleven characters naming a number of a hundred
+  million digits, was formed as an exact rational before anything bounded it,
+  which took minutes and gigabytes. `flux_stats.reading.exact` now refuses a
+  number that needs more than 1000 digits written out (`FLX-5005`, value class
+  `over-long number`, with no count in the message) before forming it. The
+  count is the one a fidelity block's numbers are bounded by (SEAM-FIDELITY-SPEC
+  §2: no exponent, a leading `0.` not counted), now
+  `flux_stats.reading.digits_written_out`, which the engine's declaration
+  reader imports, so one rule bounds every number read. A cell of at most 1000
+  digits reads as before, and every digest and golden is unchanged.
+- The outcome-accuracy store keeps the seal it writes. A second `fluxsim
+  accuracy register` of a prediction id replaced the sealed record and exited
+  0, so a claim could be swapped after its outcome was known. A record is now
+  written once: registering the same claim again (a document that seals to the
+  same digest) succeeds and writes nothing, and the `--json` result says so
+  with `created: false`; a different claim under a registered id is refused
+  with the new `FLX-7007`, which names the record and both digests.
+- `fluxsim accuracy score` and `fluxsim accuracy record` used a sealed
+  prediction without checking it against its `sealDigest`, so a record edited
+  by hand was scored, and published with a digest recomputed from the edit.
+  Every read now recomputes the seal from the record's fields and refuses a
+  record that does not match it, is not a sealed PredictionRecord, or is the
+  record of another id than its file's name, with the new `FLX-7008`. `record`
+  checks every record in the store, not only those registered at
+  `--registered-at`, because an edited `registered_at` would move a record out
+  of its registration, and it names every record that fails in one refusal.
+  Two ids that differ only by case are one file on a filesystem that ignores
+  case (macOS's default): registering the second replaced the first's record,
+  and is now refused with `FLX-7008` naming the first.
+- The accuracy store no longer follows a symbolic link. A link planted at a
+  record's name inside the store sent `register` through it, so it could
+  replace another prediction's sealed record. Records are now read and written
+  relative to their directory, and the store's directory
+  (`<state-dir>/accuracy`) and the `predictions` and `verdicts` directories in
+  it are opened with `O_NOFOLLOW`; a link, or the wrong type of file, where a
+  record or one of those directories belongs is refused with the new
+  `FLX-7009`, wherever the link points, and the file it points at is not
+  touched. The state directory itself may still be reached through a link. A
+  sealed record is published with `link` from a staged file, so it appears
+  whole or not at all; a verdict is written through a staged file and one
+  `os.replace`, which replaces a link at its name instead of writing through
+  it. Records written by earlier builds keep their bytes and verify.
+  The seal is a digest, not a signature: the check catches a record changed
+  without being sealed again, and the digest `register` prints is what a third
+  party checks a record against.
+
+### Development
+
+- An import-linter contract forbids `flux_stats` the whole engine, and the
+  modules the kernel may not use (`random`, `uuid`, `socket`, `time`, `os`,
+  `secrets`, `hashlib`), so the profiler can import it alone. The kernel's AST
+  scan reads it too. The CI job `flux-stats alone` installs its wheel and its
+  test group where no engine is installed and runs its tests, and
+  `make packaging-smoke` installs the flux-stats wheel alone, with no index,
+  and reads the example profile.
+- The release workflow builds, attests and attaches four files, the wheel and
+  the sdist of each distribution, and uploads flux-stats to PyPI before the
+  engine. `scripts/release_guard.py` refuses a tree or a tag where the engine's
+  version, flux-stats's version and the engine's `flux-stats==` pin disagree.
+  The first-run check runs the engine wheel it builds with the flux-stats wheel
+  built beside it.
+- The weekly mutation run covers the statistic registry, at a 95% floor for
+  each of its two modules. `tests/concordance/test_statistic_diagnostics.py`
+  pins every refusal the record reader can raise, column, row and value class
+  included, which took `statistic.py` from 90.6% to 97.8% once the arithmetic
+  had moved out, so its floor went up from 90% to 95%.
+- The weekly mutation run covers `flux_stats.reading` at the reader's 95%
+  floor, held by flux-stats's own tests (`packages/flux-stats/tests/test_reading.py`),
+  which pin every refusal the reader raises and compare the instant parser
+  with the `datetime.fromisoformat` reading it replaced, on Python 3.11 to 3.13.
+
+- The sinks tests skip where pyarrow cannot import. pyarrow 26 needs NumPy 2.0
+  or newer, raises `ImportError` at import on NumPy 1.x, and does not declare
+  the requirement in its wheel, so pip installs the pair without a word. The
+  nightly's NumPy 1.26.0 determinism cells install `.[dev]`, pin NumPy and
+  collect the whole tree for `make test-vectors`. pytest 9.1 skips only on
+  `ModuleNotFoundError`, so the sinks modules failed at collection and the
+  step that holds the pinned digest set exited non-zero. `pyarrow_or_skip`, in
+  `tests/sinks/conftest.py`, skips below NumPy 2 and lets an import failure
+  stand from NumPy 2 on, where a pyarrow that will not import is a broken
+  environment. `dev` asks for pytest 8.2 or newer, the first release whose
+  `importorskip` takes `exc_type`. No engine code, digest or golden moved.
+- The empty `flux_engine.accuracy._scoring` package is gone, with the
+  import-linter contract that fenced it ("accuracy scoring mechanism is not
+  wired until v0.3") and the test that pinned it empty. It held a place for a
+  proper scoring rule planned for v0.3, which no release has built; the
+  engine scores a prediction by plain containment.
+- The CLI is one module per command. `flux_engine/cli/__init__.py`, 2,368
+  lines, keeps the parser's root, `main` and the dispatch; each command, its
+  `configure(sub)`, its worked examples and the functions `main` calls, is a
+  module under `flux_engine/cli/commands/`, listed in the order `--help` shows;
+  the parser class, the shared flags and the output are `cli/_parser.py`,
+  `cli/_args.py` and `cli/_output.py`. `tests/cli/test_help_snapshots.py` holds
+  every parser's arguments and every command's `--help`, recorded before the
+  split, and `make help-snapshots` rewrites them after a deliberate change. The
+  help, the usage errors with and without `--json`, `--version`,
+  `describe --self --json` and both entry points print the same bytes as
+  before on Python 3.11 to 3.14.
+
+## 0.5.0 - 2026-11-14
+
+A FLUID `INTEGER` column takes a drawn count, a fidelity column can be drawn
+given another, the fidelity check counts two categorical columns together,
+`validate` and `plan` check a fidelity block before any run exists, and
+`plan.json` records every fidelity block's epsilons. That last change moves
+the `planDigest` of every bundle that declares a fidelity block, and
+`GOLDEN-CHANGELOG.md` has one new row for it. A bundle without a block keeps
+every digest. `KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep
+their values.
+
+### Added
+
+- A fidelity column can be drawn given another column of the same expose
+  (SEAM-FIDELITY-SPEC §2). `given` names that column, and one weight table per
+  level of it takes the place of the column's own weights. A histogram column
+  declares `binWeightsGiven`: one `binWeights` list per level, which a grouped
+  `marginalHistogram`'s (group, bin) counts state directly. A categorical
+  column declares `levelWeightsGiven`: one mapping of level to weight per
+  level. The links form a forest: a column has at most one `given`, a cycle is
+  refused, a histogram column is a leaf, and each column is drawn after the
+  column it is given, whatever the declared order. Every cell keeps its own
+  stream, so column-first generation and slices are unchanged, and a root
+  column (one drawn given nothing) draws exactly the values it drew without
+  the links. A declaration the generator cannot draw is refused at plan
+  time with `FLX-3402`. A plan without `given` documents none of the new keys,
+  so its rows and its `generatorDigest` do not move.
+- `flux_engine.calibrate.structure` suggests which column each column is drawn
+  given, offline and from two-way count tables alone. It builds a Chow-Liu tree
+  (Chow and Liu, 1968), the selection step of the MST synthesizer (McKenna,
+  Miklau and Sheldon, 2021) without its privacy noise, with every numeric
+  column a leaf, and `declarations` writes the matching `columns.<name>`
+  entries.
+- A how-to, "Draw a column given another", declares `given` from a grouped
+  histogram's counts and shows the fidelity gate catch the link missing.
+- A `levelHistogram` fidelity property (SEAM-FIDELITY-SPEC §2, §4 and §5)
+  counts a support column's records per declared level. Grouped by a second
+  support column, it commits a two-way count table of two categorical columns
+  into S, and the check compares the synthetic table with it group by group,
+  in the total-variation form. Its cells are the declared levels, so a value
+  outside either column's declared support is refused with `FLX-5005`, and a
+  group below `records.min` is refused as every group is.
+  `pair_table_from_level_groups` reads its counts back as a two-way table for
+  `suggest_tree` and `declarations`. A bundle that declares no
+  `levelHistogram` keeps its S, its digests and its rows.
+- What the fidelity check covers: every declared link. A histogram drawn given
+  a categorical is checked by a grouped `marginalHistogram`, and a categorical
+  drawn given a categorical by a grouped `levelHistogram`.
+- `fluxsim verify --json` names each declared property of a fidelity check that
+  did not land within its margin, under `artifacts.fidelity.<exposeId>.outside`:
+  `propertyId`, `property`, `columns` and `refused`, and for a grouped
+  property `groupBy` and `groupOrdinals`, the zero-based ordinals of the groups
+  that landed outside, in the sorted group order that the `group #N` of an
+  `FLX-5005` refusal uses. A property the check refused is listed too, as the
+  fidelity record's `outside` row lists it, with `refused` true, and its
+  `refusals` entry says why. A group is named by its ordinal and never by its
+  key. Before, a property outside its margin left only `"status": "failed"`.
+  The list is there whenever the check ran, and empty when it passed.
+- The published fidelity vectors, `tests/vectors/fidelity-vectors.json`, are
+  `vectorsVersion` 2. `kinds.levelHistogram` is a block of its own, with a
+  contract, a committed slice, the digests, plan fragment, counts and
+  commitment they pin, and nine evaluation cases for the ungrouped and the
+  grouped property: a total variation exactly on the margin and one record
+  past it, a link lost with the channel counts intact, a declared level a group
+  never holds, a null level under `null: exclude`, and the two refusals. Every
+  version 1 key but `vectorsVersion` itself is what it was, and a test pins
+  them by digest. A kind is a block of its own because a property added to
+  version 1's block would move every digest that block pins. The coverage test
+  now asks that the published blocks together name every property kind, and the
+  exception that pinned `levelHistogram` outside the file is gone.
+
+### Changed
+
+- `fluxsim describe --self` no longer reports a `synth` capability. ADR 0003
+  rules record-level synthesis out, its 2026-11-11 amendment removed the
+  `[synth]` extra, and nothing in the engine could use synthcity, so an
+  installed copy read as a feature.
+- A FLUID `INTEGER` column of a scenario-driven emit takes a drawn count, such
+  as the towers `tenancyCount`. Whether the column's source is always a whole
+  number is decided at plan time from the declared families: a rate count, a
+  bounded normal at scale 0, a constant whole number, or an integer scalar such
+  as `moment.eventCount`. A source that is not, such as an amount, stops
+  planning with the new `FLX-3303`, where before the run failed on its first
+  row with `FLX-3003`, or passed when it had no rows. The renderer still
+  refuses a `Decimal` in an `INT` column from every other caller. KERNEL-SPEC
+  §9 states the rule.
+- `fluxsim validate --json` names the code of a refusal found in one
+  Simulation, such as `FLX-4103` for `fidelity: stochastic`, as it already did
+  for a refusal of the whole bundle, and the text output points to the code's
+  page. It reported `null` before. Problems with different codes still report
+  `null`.
+- `fluxsim plan` writes every fidelity block it compiles into `plan.json`, as
+  SEAM-FIDELITY-SPEC §3 says: "Both `H` and `G` and every `ε` are written to
+  `plan.json`." The emit's entry carries the block under `fidelity`, the key
+  the block is declared under: `exposeId`, `H`, `G`, the `encoding`,
+  `fieldCapacityBits`, and per property its `epsilon`, `margin`,
+  `maxNonMembers` and `magnitudeBits`. That is
+  `CompiledFidelity.plan_document()`, the fragment the published vectors pin
+  as `expect.plan`. Before, `plan` compiled the block and dropped the result,
+  so a plan recorded no epsilon, and a reader checking a fidelity record later
+  had no planned number to hold it against. The key moves the `planDigest` of
+  a bundle that declares a block, and so its run id: a fresh plan lands in a
+  new run directory. Its run's `runDigest` moves too, because `run-digest.json`
+  records `planDigest`, so a `replay --assert-digest` pin taken from a fresh
+  plan needs the new value. A recorded run replays to the `runDigest` it had.
+  An emit without a block gets no key, so its `plan.json` and its digests stay
+  as they were. A plan recorded by 0.4.0 still applies,
+  verifies, replays and ships under this version, under its own run id: no
+  stage after `plan` reads the key.
+- The failed fidelity leg of `fluxsim verify` names the property. It printed the
+  expose id and nothing else, on stdout and on stderr. It now prints one line
+  per property that did not land within its margin, worded after `ship`'s
+  lines, such as `property 003:mean:amount@market (mean of amount, grouped by
+  market): outside the declared margin in group #1`, under the leg line and on
+  stderr after `<exposeId>: fidelity check failed`, then one line per refusal
+  with its code and reason. A line names fields, codes and group ordinals,
+  never a record value. The `error.message` of the `--json` envelope is the
+  same text. The refusal of `--update-golden` over a failed leg names them on
+  its one line, and in `artifacts.golden.problems`, as `<exposeId>: fidelity
+  check failed: property ...`.
+
+### Fixed
+
+- A group whose category is the empty string was held to the ungrouped floor
+  of one record rather than to `records.min`, in every grouped fidelity
+  property, because the ungrouped group's key is the empty string too. A
+  one-record group could reach S. Whether a property is grouped is now read
+  from its `groupBy`, so that group is refused below `records.min` with
+  `FLX-5005` and named by its ordinal, as every group is.
+- Two kinds of fidelity weights that sum to one failed on every draw with
+  `FLX-5021` ("categorical weight ... is negative"): a histogram whose
+  `binWeights` render to a little more than one in total and whose last bin
+  is `0`, such as twelve bins of `2`, one of `13` and a last bin of `0`; and
+  `levels` within `1e-9` of one whose NFC-last level is `0`. The rounding
+  residue went to that last level, which had no mass to give. It now goes to
+  the NFC-last level that can take it. A plan that generated before
+  generates the same rows and the same plan digest.
+- `binWeights` that are all zero are refused with `FLX-3402` when the plan
+  is formed. Before, the refusal came on the first row drawn, so a plan with
+  no rows passed.
+- A categorical level that cannot be read as its column's type, such as `p`
+  on a `DECIMAL(18,2)` column, is refused with `FLX-3402` when the plan is
+  formed, whatever its weight. Before, the plan passed, and the first row
+  that drew the level raised a bare `decimal.InvalidOperation`, or a
+  `ValueError` for `NaN` on an `INT` column. A plan whose bad level is
+  declared at `0` used to generate rows and is now refused too. Such a level
+  is outside the column's domain, and when it is the NFC-last level it takes
+  any positive rounding residue, so a row can still draw it. A `BOOL` level
+  other than `true` or `false` follows the same rule and keeps its message.
+- `fluxsim validate` checks a fidelity block's properties, as
+  SEAM-FIDELITY-SPEC §2 says it does. It read only the block's columns, so a
+  malformed property of any kind, such as a `levelHistogram` that carries
+  `bins` or a `marginalHistogram` over a `support` column, passed it and was
+  refused only by `verify` or `ship`, once a run and a committed slice
+  existed. It now runs the parser `verify` uses, offline, and refuses the
+  property with the code and the message `verify` gives (`FLX-5030`,
+  `FLX-5032`, `FLX-5033` or `FLX-5034`), under the Simulation's id.
+- `fluxsim plan` compiles every declared fidelity block before the population
+  exists, as SEAM-FIDELITY-SPEC §3 says it does. A malformed property is
+  refused there too, with the code and the message `verify` gives; so is a
+  tolerance no larger than its encoding error (`FLX-5002`) and a comparison
+  wider than its field (`FLX-5001`). `apply` and `run` plan the same way.
+  Before, `plan` passed all of these, and the run wrote rows that no check
+  could accept. A bundle that planned before still plans, to the same rows.
+  Its `plan.json` also records the compiled block now: see Changed.
+- A number in a fidelity block that has more than 1000 digits written out,
+  such as a range bound of `"1E+99999999"`, is refused with `FLX-5030` by its
+  length, before its value is formed. Forming it exactly took minutes, so
+  `validate`, `plan`, `verify` and `ship` each stalled on twelve characters.
+  1000 is jackson-core's default longest number. It also keeps what an
+  accepted number becomes inside CPython's 4300-digit limit on printing an
+  `int`: a `maxStateAge` or a tolerance of about 4300 digits made `ship` or
+  `plan` stop with a bare `ValueError` in place of its refusal. A block whose
+  numbers all have 1000 digits or fewer reads exactly as before. A range
+  bound that a property reads already failed the field-capacity check
+  (`FLX-5001`) long before that length, but a tolerance or a quantile `level`
+  that long used to compile, and is now refused.
+- An unquoted integer of more than 4300 digits in a bundle document, or in
+  the `flux.lock` that a versioned ref makes the validator read, is refused
+  with `FLX-1003`, the code an integer outside the JSON safe-integer domain
+  already gets when its digest is taken. PyYAML builds an integer with
+  `int()`, and CPython converts at most 4300 digits, so `validate` and `plan`
+  stopped with a bare `ValueError` before any reader ran. A value that long
+  spelled in hex loaded, and then broke the first message that printed it; it
+  is refused the same way. The refusal names the file, the line and the
+  column, never the value. A scalar that YAML reads as an integer but that
+  has no integer value, such as `0b_` or `!!int ''`, is refused with
+  `FLX-3105` in place of a bare `ValueError` or `IndexError`. A lockfile the
+  validator never reads still has no say in whether a bundle loads.
+- A draw parameter that only the generator reads, such as
+  `mean: "1E+99999999"`, is refused by `plan` with `FLX-5030`, by the same
+  1000-digit rule and with the same message as a number the check reads.
+  Before, the check never saw it, and `plan` stopped in about a second on an
+  uncaught `decimal.Overflow` while it drew rows. `validate` does not read
+  draw parameters; `plan` is the first command that does.
+- A `fidelity` value that is not a mapping, such as `fidelity: oops`, is
+  refused with `FLX-5030` ("fidelity must be a mapping") by `validate`, `plan`
+  and every command after them. It counted as no block: `validate` passed it,
+  and `verify` reported the emit `not declared`. A null value still declares
+  no block, as a null extension namespace or entry does.
+
+## 0.4.0 - 2026-11-12
+
+A second vertical, `towers`, and FLUID 0.7.6. No telco digest moved:
+`GOLDEN-CHANGELOG.md` gains one row, for the new `tests/golden/towers-public/`
+set, and `KERNEL_VERSION`, `SEED_TREE_VERSION` and `TRACE_VERSION` keep their
+values.
+
+### Added
+
+- The `towers` vertical pack: a tower company whose subjects are its tenants,
+  one operator in one market. Subject attributes `tenancyCount`,
+  `monthlyRecurringCharge`, `slaTargetPct`, `chronicSlaBreaches` and
+  `monthsToLeaseExpiry`; the signals `sig-sla-breach`, `sig-site-outage` and
+  `sig-billing-dispute`; emit aliases for the `tenant_renewal_risk_moment`
+  contract; and markets named by ISO country code, so a tenant's market is its
+  country. Its derivation draws more chronic breaches and fewer months to lease
+  expiry for at-risk and notice-giving tenants. `fluxsim plugins` lists it.
+- Arrival shapes per vertical (`flux_engine.runtime.signals.ARRIVAL_MODELS`). A
+  tower tenant's breaches arrive days apart, so the towers gap mean is nine
+  days. A vertical with no row, telco among them, keeps the default.
+- FLUID 0.7.6. The vendored specification (`flux_engine/_vendor/flux_spec`) is
+  re-synced to FLUX 0.5.1, which accepts an exact `fluidVersion: "0.7.6"` pin
+  and vendors the FLUID 0.7.6 schema. An installed `flux-spec` still takes
+  precedence: running a 0.7.6 contract needs a `flux-spec` that carries
+  FLUID 0.7.6.
+- A golden baseline for the FLUX repository's `examples/towers-tenant-renewal`
+  bundle, including the `runDigest` that `fluxsim replay --assert-digest` must
+  reproduce.
+
+### Changed
+
+- `fluxsim describe --self` reports `0.5.1` when the vendored specification is
+  the one running, and `docs/reference/schemas.md` links each schema family's
+  current file (FLUX 0.5.1 kept the 0.5.0 enforcement and manifest schemas).
+- CI installs `flux-spec` from the sibling FLUX checkout in the jobs that read
+  its example bundles, so an example and the validator that checks it come
+  from one commit.
+- The `flux-spec` floor is `0.5.1` (`flux-spec>=0.5.1,<0.6`), the first
+  release that carries FLUID 0.7.6. An older installed `flux-spec` refuses the
+  towers example's `fluxVersion: "0.5.1"` documents (`FLX-3105`).
+
+## 0.3.1 - 2026-11-12
+
+A fix for the HTTP lineage emitter. No pinned digest moved:
+`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
+and `TRACE_VERSION` keep their values.
+
+### Fixed
+
+- `OpenLineageHttpEmitter` delivers its events. Since 0.2.0 it handed the
+  OpenLineage client a plain dict, which the client refuses, and swallowed
+  the error, so with the `[lineage]` extra installed no event reached the
+  receiver: `failed` counted each one and `flush()` returned `False`. Events
+  now go through the client's HTTP transport, and the body leaves out null
+  values, which the NDJSON lines keep. `OPENLINEAGE_DISABLED` still turns
+  delivery off.
+
+### Development
+
+- A `Lineage extra` CI job, and `make lineage-extra`, run the lineage tests
+  against the real client. `make ci-local` runs that target first and needs
+  the extra: `uv sync --extra dev --extra lineage`.
+
+## 0.3.0 - 2026-11-12
+
+Output sinks, and generation several times faster. No pinned digest moved:
+`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
+and `TRACE_VERSION` keep their values. Every row, line and digest is the one
+0.2.1 produces.
+
+### Sinks
+
+- `fluxsim run --sink NAME:TARGET` writes every stream of a run to a sink,
+  after verify and before ship, and records each delivery in
+  `sink-receipts.json`; `--sink-opt KEY=VALUE` passes a sink its settings, and
+  `fluxsim plugins` lists the sinks.
+- `parquet:DIR` and `arrow-ipc:DIR` write files named by the stream's
+  `outputDigest`, behind the new `[arrow]` extra.
+- `adbc:DRIVER` loads a stream into a database through ADBC, behind the new
+  `[adbc]` extra; `uri-env=VAR` keeps a connection string off the command line.
+- A how-to, "Load a simulation into a database", and `make bench`, which
+  measures what each sink adds to a run.
+
+### Faster generation
+
+- One process makes the same rows in under half the time and a fraction of
+  the memory: 100,000 rows of the small telco fixture took 21.4 s and 511 MB,
+  and now take 8.3 s and 127 MB.
+- `--jobs N`, or `--jobs auto`, on `plan`, `apply`, `run` and `replay` (and
+  `FLUX_JOBS`, and `jobs=` in the Python API and the async facade) makes an
+  emit's rows in up to N processes and joins them in row order, so the output
+  is the one a single job gives. The same 100,000 rows take 1.8 s with 12 jobs.
+  Runs in one process share one worker per CPU, a small emit stays in one
+  process, and the run summary says how many processes made an emit.
+- Workers start with the current directory off their import path and end
+  with the process that started them. A script that passes more than one job
+  needs an `if __name__ == "__main__":` guard. `fluxsim` sets
+  `PYTHONSAFEPATH` for its whole process, so a Python script that a sink or
+  plugin starts as a child process does not have its own directory on its
+  import path either.
+- New public helpers: `core.canonical.canonical_array_bytes`,
+  `core.seedtree.stream_entropy_of_label` and `stream_of_label`,
+  `core.rng.equal_weights` and `clear_memos`, `generator.paths.CellStreams`,
+  `generator.generate_row_slice` and `seam.emit.EmitWriter.from_framed`.
+
+## 0.2.1 - 2026-11-11
+
+Docs and wording fixes; no behaviour change. No pinned digest moved:
+`GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`, `SEED_TREE_VERSION`
+and `TRACE_VERSION` keep their values.
+
+- The README and the tutorial no longer say the package is unpublished or that
+  you need a clone and a built wheel, so the PyPI page shows the install line
+  that works.
+- `fluxsim explain FLX-8030` and its page say "generated evidence prose contains
+  a reserved word" and point at the list in `flux_engine/_vocabulary.py`. The
+  check itself is unchanged.
+- The specifications under `docs/spec/`, the ADR status lines and a few
+  comments lose wording that was only meant for the people building the engine.
+- The accuracy report links the nightly workflow instead of a run that no longer
+  exists.
+- `SECURITY.md` supports 0.2.x, `docs/RELEASING.md` describes Trusted Publishing
+  as live, the release notes template has one Install section, and
+  `CONTRIBUTING.md` says the sibling FLUX clone is optional.
+- Packaging metadata: `Documentation` and `Issues` project URLs, and
+  `CITATION.cff` carries the version, the release date and the licence.
+
+## 0.2.0 - 2026-11-11
+
+The command is now `fluxsim`, the distribution is now `flux-sim-engine`, and
+the licence is Apache-2.0. The engine also gets documentation and an accuracy
+program, which found four defects; all four are fixed here. No pinned digest
+moved: `GOLDEN-CHANGELOG.md` has no new row, and `KERNEL_VERSION`,
+`SEED_TREE_VERSION` and `TRACE_VERSION` keep their values.
+
+- Renamed the distribution from `flux-simulation-engine` to `flux-sim-engine`.
+  The import package stays `flux_engine`, and the product keeps its name, the
+  FLUX Simulation Engine.
+- Changed the licence to Apache-2.0, declared with PEP 639 metadata (`license`
+  and `license-files`). `LICENSE`, `NOTICE` and the notice of the vendored
+  `flux_spec` copy go into the wheel and the sdist.
+- The engine now depends on `flux-spec>=0.5,<0.6` from PyPI instead of a pinned
+  git commit, so the package can be installed from an index. The pin-drift
+  alert in CI went with the pin.
+- Renamed the command from `flux` to `fluxsim`, with no alias. `flux` is the
+  command line of Flux CD, and the two collide on a shared `PATH`. The console
+  script, `--help`, error messages, the docs and the examples all say
+  `fluxsim`. The `FLUX_*` environment variables, the `.flux/` state directory
+  and the `flux_engine` package keep their names: they name the engine and the
+  specification, not the command. Nothing digest-bearing changed, so no golden
+  moved. Text that names the command moved with it, so a host that matches on
+  it should expect that: the `stage` of a `--json` envelope for a usage error
+  at the top level, before any subcommand, is now `fluxsim`; the
+  `error.message` of a usage error starts `fluxsim ...:` instead of
+  `flux ...:`; the remediation text in error messages and in `fluxsim explain`
+  entries says `fluxsim` where it said `flux`; and so do the `help` strings in
+  the command tree of `fluxsim describe --self --json`. The `FLX-nnnn` codes
+  themselves did not change.
+- Added `fluxsim init <dir>`. It writes a small FLUX bundle (nine documents)
+  and its FLUID contract into a directory that is missing or empty, and never
+  overwrites anything, so a first run needs no sibling checkout of the
+  specification. `fluxsim run . --verify --ship -o out` inside it gives a
+  verified run and an evidence pack in seconds. The starter ships as package
+  data (`flux_engine/starter/`), and its result is pinned by
+  `tests/starter/test_starter_bundle.py`.
+- Added `make first-run` and a `First run` workflow. They build the wheel and
+  run that path through `uvx` from outside the checkout, with an empty uv
+  cache, then check the evidence pack and record the time to first success.
+  Linux runs on every pull request; macOS runs weekly. The job is advisory: it
+  is not one of the jobs `CI gate` waits for.
+  `make packaging-smoke` now also runs `init` and the run from the installed
+  wheel.
+- Fixed the evidence report naming no bundle when the bundle was given as `.`:
+  it began `# Evidence: ` with a blank where the name goes.
+- Fixed `-o` pointing at a directory inside the bundle (`fluxsim run . --ship
+  -o out` from the bundle directory): the next archive packed the previous
+  one, and every re-run grew it. The output directory is left out of the
+  staged copy.
+- Removed the `calibrate` and `synth` extras. Nothing in the engine imported
+  what they installed, except that the default experiment readout used `gbstats`
+  whenever it happened to be installed, so the same run could read out
+  differently on two machines. `GbstatsReadout` is gone. The readout is now
+  always the exact two-proportion interval, with no switch that depends on which
+  packages are installed.
+- Fixed: `accuracy score` read a registered interval bound of the JSON
+  number `0` (or `0.0`) as no bound, so the prediction was scored
+  `not-scored` instead of `within-interval` or `outside-interval`. It
+  now reads the bounds the way `accuracy register` does.
+- Fixed: `accuracy record` published, for every prediction with an
+  interval, a digest that was not the `sealDigest` `accuracy register`
+  returned, so the record could not be matched to its seals. It now
+  rebuilds each prediction with its interval before digesting it.
+- Fixed: a run read the caller's ambient `decimal` context in three
+  places (the arrival gap rate, a scalar Persona trait's quantisation
+  and the equal Persona share). A library caller at a precision other
+  than 28 got different events and a run digest that did not replay,
+  and at precision 5 the run raised. Those sites now use the kernel's
+  pinned context, and `stages.pipeline.execute` runs the whole pipeline
+  inside it. Under the default context nothing moves.
+- Fixed: a draw whose value or bounds need more digits than the kernel's
+  50-digit working precision at the declared scale (for example a
+  Persona trait `{dist: normal, stddev: 1.25e43}`) raised a bare
+  `decimal.InvalidOperation`. It is now refused with `FLX-5021`.
+- Reworked `--help` after clig.dev. Examples come first, printed verbatim (a
+  long one continues with a backslash, so it can be pasted), then the options,
+  then a link to the command's reference page; the top level also says where to
+  report a problem. A typo in a command name suggests the command, a missing
+  argument shows that command's worked example, and leftover arguments are now
+  reported by the command they were typed to rather than by the program: the
+  `stage` of a `--json` usage error for `fluxsim validate . --bogus` is
+  `validate`, not `fluxsim`. The command tree of `describe --self --json` is
+  unchanged except for one full stop that became a semicolon in the help of
+  `--committed-slice`.
+- A failing command now says where to read more. A catalogued failure prints
+  `more: fluxsim explain FLX-nnnn` and the address of that code's page; any
+  other failure says how to get the traceback (`FLUX_DEBUG=1`) and where to
+  report it. `fluxsim explain FLX-nnnn` ends with the same address. The
+  `--json` envelope is unchanged. **The addresses point into the engine's
+  documentation, which is published with the specification's site at
+  https://agenticstiger.github.io/flux/engine/.**
+- On a terminal, a command in the six-step loop now ends with `next:` and the
+  command to run after it, built from the bundle and run id it just used, with
+  the flags the next command needs again (`--simulation-id`, `--zone`,
+  `--committed-slice`). The lines go to stderr only, never under `--json`, and
+  `FLUX_NO_PROGRESS` silences them like the progress lines.
+- Added the reference pages for the command line and for every `FLX-nnnn` code
+  under `docs/reference/`, generated from the argparse tree and the error
+  catalog (`make docs-gen`). `tests/docs/test_generated_docs.py` fails when a
+  page is stale, when a code has no page, and when an address the CLI prints
+  names a page that does not exist.
+- `scripts/register_lint.py` now requires a worked example for every command,
+  where it used to require an epilog.
+- Added the rest of the documentation under `docs/`, in the Diátaxis layout: a
+  tutorial, five how-to guides and four explanations, beside the reference. The
+  README is now a front door that points into them. The examples in the
+  documentation and in the README run as tests in CI (Sybil), so a page that
+  stops working fails the build.
+- Added the accuracy program under `tests/accuracy/`: nine families of tests
+  that measure whether what the engine does is right, not only whether it
+  repeats itself. They cover fidelity metrics on aggregates, goodness of fit for
+  every sampler and declared distribution, the fidelity gate's own accuracy,
+  metamorphic and schema-driven properties, seed-tree stream quality, journey
+  conformance, a determinism matrix and speed, and the last family renders the
+  report. A pull-request tier runs at fixed seeds; a nightly tier runs at fresh
+  ones. The design is `docs/accuracy/DESIGN.md` and the committed report is
+  `docs/accuracy/REPORT.md`. The program is test-only and changes nothing at
+  runtime. It found the four engine defects fixed in this release.
+- Added a CycloneDX SBOM of the installed wheel to the release assets, and a
+  release job that publishes to PyPI through Trusted Publishing, with
+  attestations. It runs only when the repository variable `PYPI_PUBLISH` is
+  `true`. Every action in the workflows is pinned by commit, and
+  `tests/test_workflow_pins.py` keeps it that way.
+- Added the community files (`CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
+  `SECURITY.md`, issue and pull request templates), a DCO sign-off check and
+  `make check`, a quick local run of the checks a pull request goes through.
+
+## 0.1.0 - 2026-11-08
+
+First release.
+
+- Added a release pipeline: `.github/workflows/release.yml`,
+  `scripts/release_guard.py` with its self-test, `tests/release/` and
+  `docs/RELEASING.md`.
+- Removed the `tags: ["v*"]` push trigger from `.github/workflows/ci.yml`.
+  A tag now reaches the six-cell whole-suite matrix through that file's
+  `workflow_call` hook, which the release workflow calls, so one tag runs
+  the matrix once rather than twice.

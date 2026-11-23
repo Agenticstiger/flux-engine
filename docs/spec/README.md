@@ -1,0 +1,20 @@
+# Specifications
+
+The normative specifications of the engine: what it must do, rule by rule. They are
+reference text, not walkthroughs; the [how-to guides](../how-to/README.md) show many of
+the features in use. Tests, vectors and goldens hold their rules.
+
+| Specification | What it fixes |
+|---|---|
+| [KERNEL-SPEC.md](./KERNEL-SPEC.md) | The kernel: versions, canonical digests, the seed tree, draws, the clock, the emit stream, keys from the contract, value rendering, the trace and the run digest. |
+| [KERNEL-SPEC-2.md](./KERNEL-SPEC-2.md) | Kernel v2 (`0.2.0`): Philox streams keyed by path and counted by ordinal, draw and attempt; continuous draws in binary64 from basic operations; identifiers and permutations from Philox; what it keeps of KERNEL-SPEC. Implemented beside kernel `0.1.0`, and the kernel a new plan takes by default from 0.9.0; `fluxsim plan --kernel 0.1.0` plans a run under the first one. A seed path that only an opt-in declaration reads is additive (section 12). |
+| [SEAM-FIDELITY-SPEC.md](./SEAM-FIDELITY-SPEC.md) | The generator that writes rows in a contract's shape, the fidelity block, the fidelity check and the gate `ship` runs. |
+| [EXPR-SPEC.md](./EXPR-SPEC.md) | flux-expr/1, the language of a Segment's query. |
+| [EXPR-SPEC-2.md](./EXPR-SPEC-2.md) | flux-expr/2, the language of derived columns and of rules about valid data. The engine implements the language; generating from rules and checking runs against them come next. |
+| [EXPR-SPEC-3.md](./EXPR-SPEC-3.md) | flux-expr/3, flux-expr/2 plus a date part, date arithmetic and string concatenation, for FLUX-side rules. Accepted with ADR 0013; the engine implements the language. |
+| [PROFILE-SPEC.md](./PROFILE-SPEC.md) | The profile a data owner makes, and how a Simulation pins one. Beside it: the schemas of format [1-3-0](./profile-1-3.schema.json), [1-2-0](./profile-1-2.schema.json), [1-1-0](./profile-1.schema.json) and [1-0-0](./profile-1-0.schema.json), and examples of [1-0-0](./profile-example.json), [1-2-0](./profile-1-2-example.json), [1-2-0 released under differential privacy](./profile-1-2-private-example.json) and [1-3-0](./profile-1-3-example.json). |
+| [PROFILE-REQUEST-SPEC.md](./PROFILE-REQUEST-SPEC.md) | The list of statistics, column metrics and fact shares a profiler must measure for a bundle, which `fluxsim init` writes when it is given a contract and no profile. |
+| [SCORECARD-SPEC.md](./SCORECARD-SPEC.md) | The scores of a run against its pinned profile, how much of the contract they cover, their thresholds, the shape flags, and the facts, relationships, children per parent and calendar histograms the `invariants`, `crossTable` and `temporal` dimensions score. Beside it: the schemas of format [1-4-0](./scorecard-1-4.schema.json), [1-3-0](./scorecard-1-3.schema.json), [1-2-0](./scorecard-1-2.schema.json) and of formats 1-0-0 and 1-1-0 ([one file](./scorecard-1.schema.json)), and examples of [1-2-0](./scorecard-example.json) and [1-3-0](./scorecard-1-3-example.json). |
+| [CONSUMER-QUERIES-SPEC.md](./CONSUMER-QUERIES-SPEC.md) | The consumers' SQL a Simulation declares: the `consumers` block, the check and the allowlist, the locked runner, rates and statuses, requirements, what the profile request carries, the scorecard's `queries` dimension, the calibration patch, the held-out gate, and `conditions`. |
+| [SAMPLE-SPEC.md](./SAMPLE-SPEC.md) | Checking a run's means against the profile on a sample of blocks, each with an interval. |
+| [PARAMETER-REGISTER-SPEC.md](./PARAMETER-REGISTER-SPEC.md) | The register of what each number a run reads rests on. Beside it: the schemas of format [1-3-0](./parameter-register-1-3.schema.json), [1-2-0](./parameter-register-1-2.schema.json), [1-1-0](./parameter-register-1-1.schema.json) and [1-0-0](./parameter-register-1.schema.json), and [an example](./parameter-register-example.json). |

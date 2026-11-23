@@ -1,0 +1,26 @@
+# A kind of customer. Traits are either a single number or a distribution the
+# engine draws from, one value per simulated customer.
+fluxVersion: "0.5.0"
+kind: Persona
+id: persona-pragmatic-family
+name: Pragmatic Family Subscriber
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  demographics: { ageBand: "35-44", household: family }
+  traits:
+    digitalFluency: 0.6
+    financialLiteracy: 0.4
+    priceSensitivity:
+      dist: categorical
+      levels: { low: 0.2, medium: 0.5, high: 0.3 }
+    monthlySpend:
+      dist: normal
+      mean: 42.0
+      stddev: 11.0
+      min: 0
+  worldview:
+    riskTolerance: low
+    trustInInstitutions: 0.55
+    trendFollowing: 0.3

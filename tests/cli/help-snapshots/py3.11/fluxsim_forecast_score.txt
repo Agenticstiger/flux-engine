@@ -1,0 +1,44 @@
+usage: fluxsim forecast score [-h] [--simulation-id SIMULATION_ID] --profile
+                              STATE_K --next STATE_K1 --observed-at T
+                              [--state-dir STATE_DIR] [-j]
+                              bundle
+
+Read the next state's profile and give a verdict to every forecast registered
+for the bundle, none skipped. The observation is the next state's cell for the
+forecast's query and segment; a withheld cell, or one that holds no records,
+leaves the forecast not scored, with the reason. Beside inside or outside the
+interval, each verdict holds the absolute error and the interval score, and
+the grade of each state's profile. A next state that is the pinned state is
+refused (FLX-7143). When forecasts.playback names a Playback that declares
+drift, the two states' histograms and the query cells the families read are
+compared with its metric (psi, kl or ks), each verdict records the largest
+value, and a statistic past the threshold marks the calibration stale; a cell
+withheld or with no records in either state is left out and listed. With
+onBreach fail the command then exits 1 (FLX-7146), after every verdict is
+written.
+
+examples:
+  # score every forecast against the next state's cells
+  fluxsim forecast score ./bundle --profile state.json --next next-state.json --observed-at 2026-10-01T00:00:00Z
+
+arguments:
+  bundle                path to the FLUX bundle directory
+
+options:
+  -h, --help            show this help message and exit
+  --simulation-id SIMULATION_ID
+                        which Simulation document to resolve (default: the
+                        bundle's only one)
+  --profile STATE_K     the profile the Simulation pins, the state the
+                        forecasts were made on; refused when its digest is not
+                        the pinned one
+  --next STATE_K1       the profile of the next state, a later release
+                        answering the same request; refused when it is the
+                        pinned state (FLX-7143)
+  --observed-at T       the instant the next state was read, as RFC 3339; it
+                        may not predate a forecast's registration (FLX-7001)
+  --state-dir STATE_DIR
+                        run-state directory (default: ./.flux)
+  -j, --json            emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/forecast.html

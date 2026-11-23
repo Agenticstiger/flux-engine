@@ -1,0 +1,11 @@
+fluxVersion: 0.5.0
+kind: Treatment
+id: tr-no-offer
+name: No Offer
+metadata:
+  owner:
+    team: billing
+spec:
+  actionType: none
+  payloadTemplate:
+    message: Your plan renews

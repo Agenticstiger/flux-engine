@@ -1,0 +1,1849 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-4-0/FluxScorecard.json",
+  "title": "FLUX scorecard, format 1-4-0",
+  "description": "A run scored against the profile its Simulation pins: per property, per table, per dimension and overall, with the declared thresholds and each emit's minCredibility read against the computed scores, and the coverage: how much of the contract the score speaks for. Format 1-2-0 adds the coverage to format 1-1-0 and changes nothing else it says. Format 1-3-0 adds the fact and relationship rows of a table, which score the invariants and crossTable dimensions, and changes nothing else it says; a scorecard that holds none names 1-2-0. Format 1-4-0 adds the children-per-parent row of a table, which scores the crossTable dimension, and the calendar row of a table, which scores the temporal dimension, and changes nothing else it says; a scorecard that holds none keeps the format it would have named without them. Format 1-4-0 also adds the queries member of the queries dimension, which holds the consumers' queries as counted on the run, and changes nothing else it says; a scorecard whose queries dimension holds none keeps the format it would have named without it. Format 1-4-0 also adds the sampling member of a property row's widening, and changes nothing else it says. Counts are JSON integers and every other number is an exact decimal or a reduced fraction written as a string. The shape is checked here; docs/spec/SCORECARD-SPEC.md states how each number is formed.",
+  "type": "object",
+  "required": [
+    "_producer",
+    "_schemaURL",
+    "run",
+    "profile",
+    "met",
+    "overall",
+    "dimensions",
+    "tables",
+    "thresholds",
+    "shapeFlags",
+    "intervals",
+    "coverage"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_producer": {
+      "type": "string",
+      "format": "uri",
+      "description": "The tool that wrote the scorecard (OpenLineage BaseFacet)."
+    },
+    "_schemaURL": {
+      "const": "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-4-0/FluxScorecard.json",
+      "description": "This schema's $id (OpenLineage BaseFacet). Documents of format 1-3-0 are checked by scorecard-1-3.schema.json, of format 1-2-0 by scorecard-1-2.schema.json, and of formats 1-0-0 and 1-1-0 by scorecard-1.schema.json."
+    },
+    "run": {
+      "type": "object",
+      "description": "The run the scorecard was formed for.",
+      "required": [
+        "runId",
+        "planDigest",
+        "runDigest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "runId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "planDigest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "runDigest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "description": "The profile the run was scored against, by its pinned digest.",
+      "required": [
+        "digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "met": {
+      "type": "boolean",
+      "description": "Every declared threshold is met and every measured minCredibility is reached."
+    },
+    "overall": {
+      "$ref": "#/$defs/Overall"
+    },
+    "coverage": {
+      "$ref": "#/$defs/RunCoverage"
+    },
+    "dimensions": {
+      "type": "array",
+      "description": "The eight dimensions, always all eight, in this order.",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Dimension",
+          "properties": {
+            "dimension": {
+              "const": "structure"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/Dimension",
+          "properties": {
+            "dimension": {
+              "const": "marginals"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/Dimension",
+          "properties": {
+            "dimension": {
+              "const": "joint"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/Dimension",
+          "properties": {
+            "dimension": {
+              "const": "crossTable"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/Dimension",
+          "properties": {
+            "dimension": {
+              "const": "temporal"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/Dimension",
+          "properties": {
+            "dimension": {
+              "const": "invariants"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/Dimension",
+          "properties": {
+            "dimension": {
+              "const": "queries"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/Dimension",
+          "properties": {
+            "dimension": {
+              "const": "defects"
+            }
+          }
+        }
+      ],
+      "minItems": 8,
+      "items": false
+    },
+    "tables": {
+      "type": "array",
+      "description": "One entry per emit of the run, sorted by exposeId.",
+      "items": {
+        "$ref": "#/$defs/Table"
+      }
+    },
+    "thresholds": {
+      "type": "array",
+      "description": "The thresholds the run's plan records, overall first, then dimensions, then tables, then coverage. A coverage floor reads a share of the contract, never a score.",
+      "items": {
+        "$ref": "#/$defs/Threshold"
+      }
+    },
+    "shapeFlags": {
+      "description": "Per-column shape checks against the pinned profile (SCORECARD-SPEC.md \u00a76). They inform: no flag withholds an emit.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "A scorecard formed without them, and every format 1-0-0 document.",
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "const": "not checked"
+            }
+          }
+        },
+        {
+          "$ref": "#/$defs/ShapeFlags"
+        }
+      ]
+    },
+    "intervals": {
+      "type": "object",
+      "description": "Confidence intervals of sampled estimates (sample-based verification). Not built in format 1-0-0.",
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "not computed"
+        }
+      }
+    },
+    "overlay": {
+      "type": "object",
+      "description": "The profile overlay the run was scored with (ADR 0030 section 7): its name and the jcs-document digest of {name, patch}. The profile member still names the pinned profile, and the scores are those against the overlaid profile. Present only when the Simulation declares an overlay.",
+      "required": [
+        "name",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "maxLength": 63
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Exact": {
+      "type": "string",
+      "description": "An exact rational: a terminating decimal, or a reduced fraction numerator/denominator.",
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$|^-?[1-9][0-9]*/[1-9][0-9]*$"
+    },
+    "Score": {
+      "description": "A score in [0, 1], exact, or null when nothing was scored.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^(0|1|0\\.[0-9]*[1-9]|[1-9][0-9]*/[1-9][0-9]*)$"
+        }
+      ]
+    },
+    "Weight": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$|^[1-9][0-9]*/[1-9][0-9]*$"
+    },
+    "Share": {
+      "type": "object",
+      "description": "covered of of, and the exact share. The share is null when the contract declares none of the thing counted.",
+      "required": [
+        "covered",
+        "of",
+        "share"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "covered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "share": {
+          "$ref": "#/$defs/Score"
+        }
+      }
+    },
+    "Coverage": {
+      "type": "object",
+      "description": "How much of a contract the score speaks for. columns counts the contract's columns that carry at least one scored property; relationships counts the declared relationships the profile constrains, which is counted and not scored.",
+      "required": [
+        "columns",
+        "relationships"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "$ref": "#/$defs/Share"
+        },
+        "relationships": {
+          "$ref": "#/$defs/Share"
+        }
+      }
+    },
+    "RunCoverage": {
+      "type": "object",
+      "description": "The coverage summed over the tables whose contract the run records. tables.counted of tables.total are in the sum.",
+      "required": [
+        "columns",
+        "relationships",
+        "tables"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "$ref": "#/$defs/Share"
+        },
+        "relationships": {
+          "$ref": "#/$defs/Share"
+        },
+        "tables": {
+          "type": "object",
+          "required": [
+            "counted",
+            "total"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "counted": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "Counts": {
+      "type": "object",
+      "description": "How many properties the score could use.",
+      "required": [
+        "properties",
+        "scored",
+        "censored",
+        "refused"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "properties": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scored": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "censored": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "refused": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "Overall": {
+      "type": "object",
+      "required": [
+        "status",
+        "score",
+        "counts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "measured",
+            "not measured"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "counts": {
+          "$ref": "#/$defs/Counts"
+        }
+      }
+    },
+    "Dimension": {
+      "type": "object",
+      "required": [
+        "dimension",
+        "status",
+        "score",
+        "weight",
+        "counts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "dimension": {
+          "enum": [
+            "structure",
+            "marginals",
+            "joint",
+            "crossTable",
+            "temporal",
+            "invariants",
+            "queries",
+            "defects"
+          ]
+        },
+        "status": {
+          "enum": [
+            "measured",
+            "not measured"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "weight": {
+          "$ref": "#/$defs/Weight"
+        },
+        "counts": {
+          "$ref": "#/$defs/Counts"
+        },
+        "queries": {
+          "$ref": "#/$defs/Queries"
+        }
+      },
+      "if": {
+        "required": [
+          "queries"
+        ]
+      },
+      "then": {
+        "properties": {
+          "dimension": {
+            "const": "queries"
+          }
+        }
+      },
+      "description": "One of the eight dimensions. Only the dimension named queries may hold the queries member (format 1-4-0)."
+    },
+    "Refusal": {
+      "type": "object",
+      "description": "A fail-closed condition: its code, and a reason that names columns, rows and counts, never a value.",
+      "required": [
+        "code",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^FLX-[0-9]{4}$"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "Property": {
+      "type": "object",
+      "required": [
+        "propertyId",
+        "property",
+        "statistic",
+        "columns",
+        "dimension",
+        "outcome",
+        "score",
+        "weight",
+        "groups",
+        "tolerance",
+        "margin",
+        "refusals"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "propertyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "property": {
+          "enum": [
+            "mean",
+            "marginalHistogram",
+            "levelHistogram",
+            "support",
+            "correlation",
+            "quantile"
+          ]
+        },
+        "statistic": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9]*/[1-9][0-9]*$"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1,
+          "maxItems": 2
+        },
+        "groupBy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dimension": {
+          "enum": [
+            "structure",
+            "marginals",
+            "joint",
+            "crossTable",
+            "temporal",
+            "invariants",
+            "queries",
+            "defects"
+          ]
+        },
+        "outcome": {
+          "enum": [
+            "within",
+            "outside",
+            "censored",
+            "refused"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "weight": {
+          "$ref": "#/$defs/Weight"
+        },
+        "groups": {
+          "type": "object",
+          "description": "Groups by ordinal in the NFC-sorted group order, never by key.",
+          "required": [
+            "scored",
+            "censored",
+            "outside"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "scored": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "censored": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "outside": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "uniqueItems": true
+            }
+          }
+        },
+        "tolerance": {
+          "type": "object",
+          "description": "The tolerance as declared.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "margin": {
+          "description": "The compiled margin, or null for a kind that has none.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Exact"
+            }
+          ]
+        },
+        "refusals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Refusal"
+          }
+        },
+        "widening": {
+          "description": "Present when a distance tolerance of the property declares sampling: true (ADR 0016 section 8, SCORECARD-SPEC.md section 9a): the widening the run's sampling gave the margin, the largest any group took, exact.",
+          "type": "object",
+          "required": [
+            "sampling"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "sampling": {
+              "$ref": "#/$defs/Exact"
+            }
+          }
+        },
+        "noise": {
+          "description": "Present when the profile statistic the property was compared with was released under noise (SCORECARD-SPEC.md section 9): the mechanism, the variance of each cell of that statistic and the largest widening any group's margin took, both exact.",
+          "type": "object",
+          "required": [
+            "mechanism",
+            "cellVariance",
+            "widening"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "mechanism": {
+              "enum": [
+                "gaussian",
+                "discreteGaussian",
+                "laplace"
+              ]
+            },
+            "cellVariance": {
+              "$ref": "#/$defs/Exact"
+            },
+            "widening": {
+              "$ref": "#/$defs/Exact"
+            }
+          }
+        }
+      }
+    },
+    "Assertion": {
+      "type": "object",
+      "description": "One entry of OpenLineage's DataQualityAssertionsDatasetFacet 1-1-0.",
+      "required": [
+        "assertion",
+        "success",
+        "severity",
+        "name",
+        "params"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "column": {
+          "type": "string"
+        },
+        "severity": {
+          "const": "error"
+        },
+        "name": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "Assertions": {
+      "type": "object",
+      "required": [
+        "_producer",
+        "_schemaURL",
+        "assertions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "_producer": {
+          "type": "string",
+          "format": "uri"
+        },
+        "_schemaURL": {
+          "const": "https://openlineage.io/spec/facets/1-1-0/DataQualityAssertionsDatasetFacet.json#/$defs/DataQualityAssertionsDatasetFacet"
+        },
+        "assertions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Assertion"
+          }
+        }
+      }
+    },
+    "Credibility": {
+      "type": "object",
+      "description": "The emit's minCredibility, read against the table's computed score when it has one.",
+      "required": [
+        "minCredibility",
+        "basis",
+        "score",
+        "met"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "minCredibility": {
+          "type": "string"
+        },
+        "basis": {
+          "enum": [
+            "measured",
+            "declared"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "met": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "Table": {
+      "type": "object",
+      "required": [
+        "exposeId",
+        "declaresFidelity",
+        "status",
+        "score",
+        "counts",
+        "refusals",
+        "properties",
+        "coverage",
+        "dataQualityAssertions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "exposeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "declaresFidelity": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "measured",
+            "not measured",
+            "refused"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "counts": {
+          "$ref": "#/$defs/Counts"
+        },
+        "refusals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Refusal"
+          }
+        },
+        "properties": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Property"
+              },
+              {
+                "$ref": "#/$defs/Fact"
+              },
+              {
+                "$ref": "#/$defs/Relationship"
+              },
+              {
+                "$ref": "#/$defs/ChildrenPerParent"
+              },
+              {
+                "$ref": "#/$defs/Calendar"
+              }
+            ]
+          }
+        },
+        "coverage": {
+          "description": "What the table's score speaks for, or null when the run records no contract for the emit (one with no fidelity block).",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Coverage"
+            }
+          ]
+        },
+        "dataQualityAssertions": {
+          "$ref": "#/$defs/Assertions"
+        },
+        "credibility": {
+          "$ref": "#/$defs/Credibility"
+        }
+      }
+    },
+    "Threshold": {
+      "type": "object",
+      "required": [
+        "target",
+        "operator",
+        "value",
+        "score",
+        "met"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string",
+          "pattern": "^(overall|dimensions\\.(structure|marginals|joint|crossTable|temporal|invariants|queries|defects)|tables\\..+|coverage\\.(columns|relationships))$"
+        },
+        "operator": {
+          "enum": [
+            "mustBeGreaterOrEqualTo",
+            "mustBeGreaterThan"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "met": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ShapeFlags": {
+      "type": "object",
+      "description": "Every emit of the run, every column the profile describes, and the flags raised.",
+      "required": [
+        "status",
+        "level",
+        "tests",
+        "testLevel",
+        "tables"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "checked"
+        },
+        "level": {
+          "$ref": "#/$defs/Exact"
+        },
+        "tests": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "testLevel": {
+          "$ref": "#/$defs/Exact"
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShapeTable"
+          }
+        }
+      }
+    },
+    "ShapeTable": {
+      "type": "object",
+      "required": [
+        "exposeId",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "exposeId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "checked",
+            "refused",
+            "not profiled"
+          ]
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShapeColumn"
+          }
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^FLX-[0-9]{4}$"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "checked"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "columns"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "refused"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "code",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "ShapeColumn": {
+      "type": "object",
+      "description": "One column the profile describes, in counts: no value of the data.",
+      "required": [
+        "column",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "checked",
+            "refused",
+            "absent"
+          ]
+        },
+        "records": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "distinct": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShapeFlag"
+          }
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^FLX-[0-9]{4}$"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "checked"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "records",
+              "distinct",
+              "flags"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "refused"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "code",
+              "reason"
+            ]
+          }
+        }
+      ]
+    },
+    "ShapeFlag": {
+      "description": "One flag, named after ydata-profiling's alert where one fits.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "alert",
+            "cells"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "alert": {
+              "const": "EMPTY_BINS"
+            },
+            "cells": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "alert",
+            "cell",
+            "count"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "alert": {
+              "const": "IMBALANCE"
+            },
+            "cell": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "alert"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "alert": {
+              "enum": [
+                "CONSTANT",
+                "HIGH_CARDINALITY",
+                "LOW_CARDINALITY"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Holds": {
+      "type": "object",
+      "required": [
+        "satisfied",
+        "total",
+        "share"
+      ],
+      "additionalProperties": false,
+      "description": "Rows that satisfy a check, of the rows it covers, and the exact share (null when it covers none).",
+      "properties": {
+        "satisfied": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "share": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Exact"
+            }
+          ]
+        }
+      }
+    },
+    "Fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "propertyId",
+        "property",
+        "dimension",
+        "outcome",
+        "score",
+        "weight",
+        "fact",
+        "run",
+        "profile",
+        "tolerance",
+        "gap",
+        "enforced"
+      ],
+      "properties": {
+        "propertyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dimension": {
+          "const": "invariants"
+        },
+        "outcome": {
+          "enum": [
+            "within",
+            "outside",
+            "censored"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "weight": {
+          "$ref": "#/$defs/Weight"
+        },
+        "property": {
+          "const": "fact"
+        },
+        "fact": {
+          "type": "string",
+          "minLength": 1,
+          "description": "<exposeId>.<ruleId>"
+        },
+        "run": {
+          "$ref": "#/$defs/Holds"
+        },
+        "profile": {
+          "description": "The share the profile measured, or null when it holds none.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Holds"
+            }
+          ]
+        },
+        "tolerance": {
+          "$ref": "#/$defs/Exact"
+        },
+        "gap": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Exact"
+            }
+          ]
+        },
+        "enforced": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "propertyId",
+        "property",
+        "dimension",
+        "outcome",
+        "score",
+        "weight",
+        "relationship",
+        "child",
+        "parent",
+        "fromColumns",
+        "toColumns",
+        "cardinality",
+        "joinType",
+        "checks"
+      ],
+      "properties": {
+        "propertyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dimension": {
+          "const": "crossTable"
+        },
+        "outcome": {
+          "enum": [
+            "within",
+            "outside",
+            "censored"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "weight": {
+          "$ref": "#/$defs/Weight"
+        },
+        "property": {
+          "const": "referentialIntegrity"
+        },
+        "relationship": {
+          "type": "string",
+          "minLength": 1
+        },
+        "child": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fromColumns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "toColumns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "cardinality": {
+          "enum": [
+            "many_to_one",
+            "one_to_one"
+          ]
+        },
+        "joinType": {
+          "enum": [
+            "left",
+            "inner"
+          ]
+        },
+        "checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "found"
+          ],
+          "properties": {
+            "found": {
+              "$ref": "#/$defs/Holds"
+            },
+            "unique": {
+              "$ref": "#/$defs/Holds"
+            },
+            "nulls": {
+              "$ref": "#/$defs/Holds"
+            },
+            "oneToOne": {
+              "$ref": "#/$defs/Holds"
+            }
+          }
+        }
+      }
+    },
+    "ChildrenPerParent": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Children per parent of one relationship (format 1-4-0): the run's parents counted into the profile's bins by their children, compared with the profile's marginalHistogram/1 of children per parent as a histogram is.",
+      "required": [
+        "propertyId",
+        "property",
+        "dimension",
+        "outcome",
+        "score",
+        "weight",
+        "relationship",
+        "child",
+        "parent",
+        "bins",
+        "run",
+        "profile",
+        "tolerance",
+        "distance"
+      ],
+      "properties": {
+        "propertyId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "children:<child exposeId>.<relationship>"
+        },
+        "dimension": {
+          "const": "crossTable"
+        },
+        "outcome": {
+          "enum": [
+            "within",
+            "outside",
+            "censored"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "weight": {
+          "$ref": "#/$defs/Weight"
+        },
+        "property": {
+          "const": "childrenPerParent"
+        },
+        "relationship": {
+          "type": "string",
+          "minLength": 1
+        },
+        "child": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bins": {
+          "type": "array",
+          "minItems": 2,
+          "description": "The profile's bin edges, whole numbers of children; a bin is half open and the last is closed.",
+          "items": {
+            "$ref": "#/$defs/Exact"
+          }
+        },
+        "run": {
+          "$ref": "#/$defs/ParentsByBin"
+        },
+        "profile": {
+          "description": "The profile's counts, or null when it withheld them.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/ParentsByBin"
+            }
+          ]
+        },
+        "tolerance": {
+          "$ref": "#/$defs/Exact"
+        },
+        "distance": {
+          "description": "The total variation distance between the two histograms, or null when one is missing.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Exact"
+            }
+          ]
+        }
+      }
+    },
+    "ParentsByBin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parents",
+        "binCounts"
+      ],
+      "description": "Parents counted into the bins by their number of children.",
+      "properties": {
+        "parents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "binCounts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "Calendar": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One histogram of a published calendar (format 1-4-0): the run's known values of a DATE or TIMESTAMP column counted by month, ISO day of week or hour of week in UTC, compared with the profile's levelHistogram/1 as a histogram is. The score is one minus the total variation distance. A histogram the profile withheld is censored and one the comparison refused is refused; neither has a score.",
+      "required": [
+        "propertyId",
+        "property",
+        "dimension",
+        "outcome",
+        "score",
+        "weight",
+        "column",
+        "histogram",
+        "records",
+        "distance",
+        "tolerance",
+        "refusals"
+      ],
+      "properties": {
+        "propertyId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "calendar:<column>.<histogram>"
+        },
+        "property": {
+          "const": "calendar"
+        },
+        "dimension": {
+          "const": "temporal"
+        },
+        "outcome": {
+          "enum": [
+            "within",
+            "outside",
+            "censored",
+            "refused"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/Score"
+        },
+        "weight": {
+          "$ref": "#/$defs/Weight"
+        },
+        "column": {
+          "type": "string",
+          "minLength": 1
+        },
+        "histogram": {
+          "enum": [
+            "month",
+            "dayOfWeek",
+            "hourOfWeek"
+          ]
+        },
+        "records": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The run's count of known values of the column."
+        },
+        "distance": {
+          "description": "The total variation distance between the two histograms, or null when none was formed.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Exact"
+            }
+          ]
+        },
+        "tolerance": {
+          "description": "The largest distance the histogram may have, widened by the noise of a noisy profile histogram, or null when none was formed.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Exact"
+            }
+          ]
+        },
+        "widening": {
+          "description": "The widening a noisy profile histogram gave the tolerance; present only when the histogram was scored and the profile's was noisy.",
+          "$ref": "#/$defs/Exact"
+        },
+        "refusals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Refusal"
+          }
+        }
+      }
+    },
+    "QueriesVersions": {
+      "type": "object",
+      "description": "Format 1-4-0, the queries dimension (SCORECARD-SPEC.md section 3a, ADR 0028 section 7). The versions of the libraries that counted.",
+      "required": [
+        "duckdb",
+        "sqlglot",
+        "pyarrow"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "duckdb": {
+          "type": "string"
+        },
+        "sqlglot": {
+          "type": "string"
+        },
+        "pyarrow": {
+          "type": "string"
+        }
+      }
+    },
+    "QueryGroup": {
+      "type": "object",
+      "description": "Format 1-4-0, the queries dimension (SCORECARD-SPEC.md section 3a, ADR 0028 section 7). The rate of one group of a query with groupBy, named by its ordinal and never by its key.",
+      "required": [
+        "group",
+        "nullGroup",
+        "rows",
+        "unitRows",
+        "rate",
+        "target",
+        "gap",
+        "status",
+        "met"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nullGroup": {
+          "type": "boolean"
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unitRows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rate": {
+          "$ref": "#/$defs/Score"
+        },
+        "target": {
+          "$ref": "#/$defs/Score"
+        },
+        "gap": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Exact"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "measured",
+            "noRows",
+            "notARate",
+            "noTarget",
+            "withheld",
+            "timedOut",
+            "outOfMemory",
+            "error",
+            "crashed",
+            "versionsDiffer"
+          ]
+        },
+        "met": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "Queries": {
+      "description": "Format 1-4-0, the queries dimension (SCORECARD-SPEC.md section 3a, ADR 0028 section 7). What counting the consumers' queries on the run found, or why they were not counted. A scorecard that holds it names format 1-4-0.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/QueriesCounted"
+        },
+        {
+          "$ref": "#/$defs/QueriesNotCounted"
+        }
+      ]
+    },
+    "QueryRow": {
+      "type": "object",
+      "description": "Format 1-4-0, the queries dimension (SCORECARD-SPEC.md section 3a, ADR 0028 section 7). One consumer query as counted. rate is rows over unitRows, exact; gap is the rate less the target; met is true when the gap is within the tolerance, false when it is not, and null when the query has no target, no tolerance or no rate. A query with groupBy holds one group row per group, and its own target, gap and met are the groups' together.",
+      "required": [
+        "name",
+        "set",
+        "digest",
+        "rows",
+        "unitRows",
+        "rate",
+        "target",
+        "gap",
+        "tolerance",
+        "status",
+        "met",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "set": {
+          "enum": [
+            "calibration",
+            "heldOut"
+          ]
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "rows": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 0
+            }
+          ]
+        },
+        "unitRows": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 0
+            }
+          ]
+        },
+        "rate": {
+          "$ref": "#/$defs/Score"
+        },
+        "target": {
+          "$ref": "#/$defs/Score"
+        },
+        "gap": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Exact"
+            }
+          ]
+        },
+        "tolerance": {
+          "$ref": "#/$defs/Score"
+        },
+        "status": {
+          "enum": [
+            "measured",
+            "noRows",
+            "notARate",
+            "noTarget",
+            "withheld",
+            "timedOut",
+            "outOfMemory",
+            "error",
+            "crashed",
+            "versionsDiffer"
+          ]
+        },
+        "met": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why a query that was not counted was not, as the query process named it. Never a value of the data."
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueryGroup"
+          },
+          "description": "Present for a query with groupBy: the null group first, then the levels by code point."
+        }
+      }
+    },
+    "QueriesNotCounted": {
+      "type": "object",
+      "description": "Format 1-4-0, the queries dimension (SCORECARD-SPEC.md section 3a, ADR 0028 section 7). The queries were not counted: the sql extra is not installed, or the run's artifacts do not reproduce its digest. The dimension is not measured, and a threshold declared on it is not met.",
+      "required": [
+        "status",
+        "detail",
+        "install"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "not counted"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "install": {
+          "type": "string",
+          "description": "The command that installs the libraries the queries need."
+        }
+      }
+    },
+    "QueriesCounted": {
+      "type": "object",
+      "description": "Format 1-4-0, the queries dimension (SCORECARD-SPEC.md section 3a, ADR 0028 section 7). Every query counted on the run, the requirements, the two shares, the versions that counted and the grades of the two profiles.",
+      "required": [
+        "status",
+        "versions",
+        "shares",
+        "grades",
+        "queries",
+        "requirements"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "counted"
+        },
+        "versions": {
+          "$ref": "#/$defs/QueriesVersions"
+        },
+        "shares": {
+          "type": "object",
+          "description": "The share of the calibration queries, and of the held-out queries, that have a target and a tolerance and fall within it. The dimension's score is the smaller of the shares that exist.",
+          "required": [
+            "calibration",
+            "heldOut"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "calibration": {
+              "$ref": "#/$defs/Share"
+            },
+            "heldOut": {
+              "$ref": "#/$defs/Share"
+            }
+          }
+        },
+        "grades": {
+          "type": "object",
+          "description": "The privacy grade of the pinned profile and of the held-out profile (ADR 0020, rule 2), or null for one that was not read.",
+          "required": [
+            "pinned",
+            "heldOut"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "pinned": {
+              "enum": [
+                "P0",
+                "P1",
+                "P3",
+                "P4",
+                null
+              ]
+            },
+            "heldOut": {
+              "enum": [
+                "P0",
+                "P1",
+                "P3",
+                "P4",
+                null
+              ]
+            }
+          }
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueryRow"
+          },
+          "description": "One row per query of the registry, in its order."
+        },
+        "requirements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QueryRequirement"
+          },
+          "description": "One row per requirement the queries put on the copy."
+        }
+      }
+    },
+    "QueryRequirement": {
+      "type": "object",
+      "description": "Format 1-4-0, the queries dimension (SCORECARD-SPEC.md section 3a, ADR 0028 section 7). What a query needs the copy to hold, as the consumers wrote it, and whether the run's rows hold it. It names no value of the data.",
+      "required": [
+        "query",
+        "exposeId",
+        "column",
+        "kind",
+        "description",
+        "status",
+        "met"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "exposeId": {
+          "type": "string"
+        },
+        "column": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "level",
+            "value",
+            "pattern",
+            "nulls",
+            "range"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "met",
+            "unmet",
+            "versionsDiffer",
+            "timedOut",
+            "outOfMemory",
+            "error",
+            "crashed"
+          ]
+        },
+        "met": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

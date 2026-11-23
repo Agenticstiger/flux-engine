@@ -1,0 +1,71 @@
+usage: fluxsim calibrate [-h] [--playback-id PLAYBACK_ID] [--dry-run]
+                         [--write] [--run-id RUN_ID] [--fit BUNDLE]
+                         [--profile PATH] [--out DIR] [--max-evaluations N]
+                         [--held-out FILE] [--max-query-seconds N]
+                         [--max-query-memory SIZE] [--state-dir STATE_DIR]
+                         [-j]
+                         [bundle]
+
+Read a Playback's declared scorecard and report the credibility and grade it
+carries; no fitting is performed. With --fit, fit the parameters a bundle's
+consumers calibration block declares to the rates of its calibration queries
+(CMA-ES, from the [calibrate] extra), and write the result as a calibration
+patch, DIR.patch.json, beside the output.
+
+examples:
+  # print the declared scorecard; nothing is written
+  fluxsim calibrate ./bundle
+
+  # record it in the run directory
+  fluxsim calibrate ./bundle --write --run-id de72fa4b22711c52
+
+  # fit the declared parameters to the calibration queries and write ./calibrated.patch.json
+  fluxsim calibrate --fit ./bundle --profile pinned.profile.json --held-out held-out.profile.json --out ./calibrated
+
+arguments:
+  bundle                path to the FLUX bundle directory
+
+options:
+  -h, --help            show this help message and exit
+  --playback-id PLAYBACK_ID
+                        default: the bundle's only Playback
+  --dry-run             print the scorecard without writing calibration-
+                        provenance.json (default)
+  --write               write calibration-provenance.json into the run
+                        directory
+  --run-id RUN_ID       required without --dry-run
+  --fit BUNDLE          fit the declared parameters of this bundle to its
+                        calibration queries instead of reading a declared
+                        scorecard; needs --profile, --held-out and --out
+  --profile PATH        with --fit: the profile the Simulation pins, whose
+                        queries section holds the targets the fit reads;
+                        refused when its digest is not the pinned one
+  --out DIR             with --fit: where the calibration patch
+                        (DIR.patch.json) and, only when the held-out error
+                        holds, the calibrated bundle (DIR) are written;
+                        neither may exist
+  --max-evaluations N   with --fit: raise the evaluations a fit may run above
+                        the engine's 64, up to 4096, for a bundle whose
+                        calibration block declares no evaluations; a bundle's
+                        own value is kept and may only lower the ceiling
+  --held-out FILE       the held-out profile: a profile document whose queries
+                        section holds the targets of the bundle's held-out
+                        consumer queries, which the pinned profile may not
+                        name; it is graded beside the pinned profile and read
+                        by nothing else
+  --max-query-seconds N
+                        raise the seconds one consumer query may take above
+                        the engine's 30, up to 600, for a bundle that declares
+                        no limits.seconds; a bundle's own value is kept and
+                        may only lower the ceiling
+  --max-query-memory SIZE
+                        raise the memory DuckDB may use for the consumer
+                        queries above the engine's 1GiB, up to 16GiB, such as
+                        4GiB, for a bundle that declares no limits.memory; a
+                        bundle's own value is kept and may only lower the
+                        ceiling
+  --state-dir STATE_DIR
+                        run-state directory (default: ./.flux)
+  -j, --json            emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/calibrate.html

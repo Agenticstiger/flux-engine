@@ -1,0 +1,1050 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
+
+# Every pull request is built, whatever its base branch. The old
+# `pull_request: branches: [main]` filter meant a stacked pull request, one
+# whose base is another open branch, triggered no run at all, and an empty
+# check list on a pull request reads exactly like a passing one.
+#
+# No `paths-ignore` filter anywhere, on purpose: a required status check that
+# never runs stays pending forever, so path filters and required checks do not
+# mix.
+#
+# There is deliberately NO `tags:` filter under `push`. This file used to
+# carry `tags: ["v*"]`, which meant a tag started the six-cell matrix
+# natively. .github/workflows/release.yml now triggers on that tag and calls
+# this file through `workflow_call` below, so restoring the filter would give
+# one tag TWO independent seven-cell runs. The matrix still reads the tag: a
+# called workflow runs at the caller's ref, so
+# `startsWith(github.ref, 'refs/tags/v')` is true inside the call.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:  # the only schedule in this file, now that the pin-drift alert is gone
+    # Mondays 04:17 UTC. This is what wakes the seven-cell whole-suite matrix.
+    # Runtime dependencies are range-pinned (numpy>=1.26,<3, cryptography>=42),
+    # so the resolved set drifts under an unchanged commit and only a schedule
+    # catches that class of regression at all.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: "Run the whole suite, slow included, on all seven operating-system x Python cells."
+        type: boolean
+        default: false
+  # Exposed so that a release workflow can call this file with full_matrix:
+  # true, and a release then cannot be built on a commit the seven-cell matrix
+  # has not run against.
+  #
+  # This input HAS a caller now: the `ci` job in
+  # .github/workflows/release.yml, which `needs`-depends the build job on it,
+  # so a red cell means no artifact is built and no release is published. It
+  # was the hook; it is now the guarantee. The `tags:` filter that used to sit
+  # under `push` above was deleted in the same change, so the call is the only
+  # way a tag reaches this matrix.
+  workflow_call:
+    inputs:
+      full_matrix:
+        description: "Run the whole suite, slow included, on all seven operating-system x Python cells."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Naming bash explicitly is what turns on `-o pipefail`. The implicit
+    # default is `bash -e`, where a failing command on the left of a pipe is
+    # masked by a succeeding command on the right.
+    shell: bash
+
+env:
+  # Set once, for every job in this file, including any job added later.
+  #
+  # A missing sibling FLUX checkout must FAIL a pytest job, never skip it. CI
+  # once ran green with 226 tests silently skipped, covering the whole
+  # real-binary six-step acceptance path, the public evidence-archive verify
+  # and tamper tests, the public golden regression and the runtime telco
+  # end-to-end, because thirteen skipif gates key on `../FLUX` and CI checked
+  # out only this repository. The coverage gate still passed, because coverage
+  # is measured over what ran. Declaring the flag at workflow level rather
+  # than per job means a pytest job added later cannot reopen that hole by
+  # omission.
+  FLUX_EXAMPLES_REQUIRED: "1"
+  # Unbuffered output, so a step's log is complete when a job is cancelled or
+  # hits its timeout rather than losing the last buffered block.
+  PYTHONUNBUFFERED: "1"
+  # The Makefile's tool prefix. It defaults to `.venv/bin/` for a developer;
+  # CI installs into the runner's own interpreter, so an empty value resolves
+  # every tool on PATH. GNU Make's `?=` does not override a variable that is
+  # already defined in the environment, and an empty environment value counts
+  # as defined (verified on GNU Make 3.81). If that override ever failed to
+  # apply, the recipe would invoke a `.venv/bin/...` path that does not exist
+  # on a runner and the step would fail loudly rather than skip quietly.
+  BIN: ""
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Only a pull request cancels its own older run. Pushes to main, tags and the
+  # scheduled matrix run to completion: main's run is the record of what
+  # merged, and cancelling it leaves a merge unverified.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # --------------------------------------------------------------- gates
+  # Everything that does not need pytest, once.
+  #
+  # ruff, black, mypy and lint-imports used to run SEVEN times per CI run,
+  # inside all six matrix cells and again in the full-suite job, against one
+  # identical commit. Running them once is equivalent for three of the four by
+  # configuration: ruff pins target-version = "py311", black pins
+  # target-version = ["py311"], mypy pins python_version = "3.12". The fourth,
+  # import-linter, analyses an import graph with no interpreter branching in
+  # it. mypy is repeated as a four-second step on each full test cell below,
+  # because it is the one tool whose verdict can still move with the running
+  # interpreter through third-party stub resolution (numpy is range-pinned).
+  #
+  # This job also absorbs the whole former `register-lint` job, whose
+  # 19-second dependency install was 65% of its 29-second runtime; the install
+  # happens here anyway for mypy and import-linter.
+  gates:
+    name: Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          # Stated, not inferred. With no requirements.txt in the tree,
+          # setup-python silently falls back to hashing **/pyproject.toml, a
+          # fallback that lives inside the action, is invisible in this file,
+          # and stops applying the day any requirements.txt appears anywhere
+          # in the repository.
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev]"
+
+      # Every check below is a `make` target. That is what keeps
+      # `make ci-local` honest: a check CI runs and ci-local does not cannot
+      # be added here without adding the target. The steps in this file that
+      # are not `make` targets are setup and plumbing rather than checks:
+      # installing the dev extras, asserting the sibling checkout is on disk,
+      # printing the runner width, and the `CI gate` aggregation itself.
+      # scripts/ is inside the lint paths because scripts/register_lint.py is
+      # itself a merge gate, and lint scope is the paths you pass.
+      - name: Lint (ruff)
+        run: make lint
+
+      - name: Format (black --check)
+        run: make format-check
+
+      - name: Types (mypy)
+        run: make typecheck
+
+      - name: Import hygiene (import-linter)
+        run: make imports
+
+      - name: Register-discipline lint (README / docs / --help)
+        run: make register-lint
+
+      # The positive side of the same discipline. register_lint.py bans a fixed
+      # vocabulary; this checks the names we DO use are the canonical ones.
+      # --self-test runs first because a corrupt registry must fail loudly
+      # rather than quietly bless the tree.
+      - name: Product Guardrail (terminology)
+        run: make guardrail
+
+      # Every command, option, FLX code, link and declaration an agent skill
+      # names is held to the engine as it is (ADR 0033).
+      - name: Agent skills in step with the CLI (make skills-check)
+        run: make skills-check
+
+      # Every file states its licence and copyright holder: a short header
+      # in each source file, REUSE.toml for the rest. reuse-tool is a dev extra.
+      - name: Licence headers (reuse lint)
+        run: make reuse
+
+      # Exit code AND content. Both smoke steps used to gate on exit code
+      # alone, so truncated or malformed output would have passed.
+      - name: fluxsim describe --self --json
+        run: make describe
+
+      - name: fluxsim gate conform (RFC-04 vectors)
+        run: make gate-conform
+
+  # ----------------------------------------------------------- durations
+  # The per-test durations every shard of the run splits by. pytest-split uses
+  # them only to balance the groups, and the `Fast partition` job proves the
+  # groups are an exact partition whatever they say, so a stale or odd file can
+  # make a shard longer; it cannot make a test run twice or not at all.
+  #
+  # Picked ONCE per run, here, and handed to every job as an artifact. Each job
+  # restoring the cache on its own could see two different files if a push to
+  # main saved a newer one while the run was going, and shards that split by
+  # different numbers are not a partition. One file, one split.
+  #
+  # The file is the newest one a push to main saved (see `durations-save`), and
+  # the committed tests/fast-durations.json when none is saved yet, or the cache
+  # has been evicted.
+  durations:
+    name: Test durations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+          persist-credentials: false
+
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: saved
+        with:
+          path: durations-cache
+          key: fast-durations-${{ github.sha }}
+          restore-keys: fast-durations-
+
+      - name: Pick the durations file
+        env:
+          SAVED_KEY: ${{ steps.saved.outputs.cache-matched-key }}
+        run: |
+          mkdir -p picked
+          if [ -f durations-cache/fast-durations.json ]; then
+            cp durations-cache/fast-durations.json picked/fast-durations.json
+            echo "splitting by the durations saved under $SAVED_KEY"
+          else
+            cp flux-engine/tests/fast-durations.json picked/fast-durations.json
+            echo "splitting by the committed tests/fast-durations.json"
+          fi
+          python3 - <<'PY'
+          import json
+
+          durations = json.load(open("picked/fast-durations.json"))
+          assert durations and all(
+              isinstance(v, (int, float)) and v >= 0 for v in durations.values()
+          ), "not a file of test id to seconds"
+          print(f"{len(durations)} tests, {sum(durations.values()):.0f} s")
+          PY
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fast-durations
+          path: picked/fast-durations.json
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  # ---------------------------------------------------------------- test
+  # The operating-system x interpreter matrix, in two shapes.
+  #
+  #   pull request, push to main
+  #       ubuntu 3.11 / 3.12 / 3.13 run the fast subset; macOS 3.12 runs the
+  #       determinism set. The other macOS cells wait for the shape below.
+  #
+  #   schedule, v* tag, dispatch or release call with full_matrix
+  #       all six cells run the fast subset AND the slow subset. This is the
+  #       release-grade shape; the release workflow's build job needs it, so a
+  #       red cell means no artifact is built.
+  #
+  # EVERY cell of BOTH shapes runs the pinned-digest set. The old pipeline did
+  # not, and this is the hole that mattered most: the matrix cells ran
+  # `-m "not slow"`, and `pytest -m "not slow" tests/golden` collects nothing
+  # ("no tests collected (15 deselected)"; tests/acceptance the same, 17
+  # deselected), so the byte-for-byte digest baselines only ever ran in the one
+  # ubuntu 3.12 full-suite job. Determinism across operating system and
+  # interpreter was a product claim with no cross-platform test behind it.
+  #
+  # The macOS determinism cell is pinned to 3.12 on purpose: ubuntu already
+  # varies the interpreter across 3.11/3.12/3.13 with the same digest set, so
+  # holding 3.12 constant here means a macOS mismatch isolates the operating
+  # system rather than the interpreter.
+  #
+  # Every `full` cell is four jobs, one per `shard`, except the coverage cell,
+  # which has 6: the fast subset is the slowest step by far (1715 s on ubuntu
+  # 3.11 and 1358 s on 3.13 on the two-core runners, and past the 45-minute cap
+  # with branch coverage on 3.12), and pytest-split cuts it into groups balanced
+  # by per-test durations. The `least_duration` algorithm puts each test in the
+  # group with the least work so far, which evens the groups out where cutting
+  # the collection into contiguous chunks leaves whole heavy modules to set the
+  # slowest shard. Each shard still runs `-n auto`. Every test runs on every
+  # interpreter it ran on before, and the `Fast partition` job below checks
+  # that the four groups, and the 6, are each exactly the subset, none
+  # dropped and none run twice. The steps that belong to a cell, not to a share
+  # of its tests (mypy, the pinned digests, the slow subset, describe, gate
+  # conform and the determinism vectors), run on shard 1 only, so each still
+  # runs once per cell. The digests cell is one job, and carries shard 1.
+  #
+  # Coverage is measured on Python 3.14 only. coverage.py runs branch coverage
+  # on its fast `sys.monitoring` core there, and falls back to the much slower
+  # C tracer on 3.12 and 3.13, which is what made the coverage shards the
+  # longest jobs of the run. `COVERAGE_CORE=sysmon` states the core, and a
+  # step on shard 1 fails if coverage did not take it. The coverage cell's
+  # shards each write their own data file and enforce no floor; the `Coverage`
+  # job below combines them and enforces it.
+  #
+  # Every shard splits by the same durations file, which the `durations` job
+  # picks once per run, so the groups cannot disagree about who runs what.
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.py }}, ${{ matrix.suite }}${{ matrix.suite == 'full' && format(', shard {0}/{1}', matrix.shard, matrix.cov && 6 || 4) || '' }})
+    runs-on: ${{ matrix.os }}
+    needs: durations
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: flux-engine
+    strategy:
+      fail-fast: false
+      matrix:
+        # A malformed expression here fails the whole workflow parse, which
+        # means the required `CI gate` check is never reported and the pull
+        # request cannot merge. That is the fail-closed direction.
+        #
+        # One entry per job. A `full` cell has four, shard 1 to 4, and the
+        # coverage cell (`cov`) has 6, shard 1 to 6 (the counts are also in
+        # the job name and in SHARDS and COVERAGE_SHARDS in the Makefile, which
+        # the `Fast partition` job reads; a matrix that disagrees with them
+        # fails, since pytest-split refuses a group above its split count and
+        # `Coverage (combined)` names all 6 data files); the digests cell
+        # has one. `durations` marks the cell whose shards time the suite for
+        # the next run (see the `durations` job). The lines below are folded
+        # into one expression, so the JSON inside them is whitespace-insensitive
+        # and may break between entries.
+        include: >-
+          ${{ (github.event.schedule == '17 4 * * 1'
+          || startsWith(github.ref, 'refs/tags/v')
+          || inputs.full_matrix)
+          && fromJSON('[{"os":"ubuntu-latest","py":"3.11","suite":"full","slow":true,"shard":1},
+          {"os":"ubuntu-latest","py":"3.11","suite":"full","slow":true,"shard":2},
+          {"os":"ubuntu-latest","py":"3.11","suite":"full","slow":true,"shard":3},
+          {"os":"ubuntu-latest","py":"3.11","suite":"full","slow":true,"shard":4},
+          {"os":"ubuntu-latest","py":"3.12","suite":"full","durations":true,"shard":1},
+          {"os":"ubuntu-latest","py":"3.12","suite":"full","durations":true,"shard":2},
+          {"os":"ubuntu-latest","py":"3.12","suite":"full","durations":true,"shard":3},
+          {"os":"ubuntu-latest","py":"3.12","suite":"full","durations":true,"shard":4},
+          {"os":"ubuntu-latest","py":"3.13","suite":"full","slow":true,"shard":1},
+          {"os":"ubuntu-latest","py":"3.13","suite":"full","slow":true,"shard":2},
+          {"os":"ubuntu-latest","py":"3.13","suite":"full","slow":true,"shard":3},
+          {"os":"ubuntu-latest","py":"3.13","suite":"full","slow":true,"shard":4},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":1},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":2},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":3},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":4},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":5},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":6},
+          {"os":"macos-latest","py":"3.11","suite":"full","slow":true,"shard":1},
+          {"os":"macos-latest","py":"3.11","suite":"full","slow":true,"shard":2},
+          {"os":"macos-latest","py":"3.11","suite":"full","slow":true,"shard":3},
+          {"os":"macos-latest","py":"3.11","suite":"full","slow":true,"shard":4},
+          {"os":"macos-latest","py":"3.12","suite":"full","slow":true,"shard":1},
+          {"os":"macos-latest","py":"3.12","suite":"full","slow":true,"shard":2},
+          {"os":"macos-latest","py":"3.12","suite":"full","slow":true,"shard":3},
+          {"os":"macos-latest","py":"3.12","suite":"full","slow":true,"shard":4},
+          {"os":"macos-latest","py":"3.13","suite":"full","slow":true,"shard":1},
+          {"os":"macos-latest","py":"3.13","suite":"full","slow":true,"shard":2},
+          {"os":"macos-latest","py":"3.13","suite":"full","slow":true,"shard":3},
+          {"os":"macos-latest","py":"3.13","suite":"full","slow":true,"shard":4}]')
+          || fromJSON('[{"os":"ubuntu-latest","py":"3.11","suite":"full","shard":1},
+          {"os":"ubuntu-latest","py":"3.11","suite":"full","shard":2},
+          {"os":"ubuntu-latest","py":"3.11","suite":"full","shard":3},
+          {"os":"ubuntu-latest","py":"3.11","suite":"full","shard":4},
+          {"os":"ubuntu-latest","py":"3.12","suite":"full","durations":true,"shard":1},
+          {"os":"ubuntu-latest","py":"3.12","suite":"full","durations":true,"shard":2},
+          {"os":"ubuntu-latest","py":"3.12","suite":"full","durations":true,"shard":3},
+          {"os":"ubuntu-latest","py":"3.12","suite":"full","durations":true,"shard":4},
+          {"os":"ubuntu-latest","py":"3.13","suite":"full","shard":1},
+          {"os":"ubuntu-latest","py":"3.13","suite":"full","shard":2},
+          {"os":"ubuntu-latest","py":"3.13","suite":"full","shard":3},
+          {"os":"ubuntu-latest","py":"3.13","suite":"full","shard":4},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":1},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":2},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":3},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":4},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":5},
+          {"os":"ubuntu-latest","py":"3.14","suite":"full","cov":true,"shard":6},
+          {"os":"macos-latest","py":"3.12","suite":"digests","shard":1}]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      # The sibling FLUX specification repository, checked out BESIDE this one,
+      # because thirteen skipif gates key on it. See the workflow-level
+      # FLUX_EXAMPLES_REQUIRED comment for what its absence once cost.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Agenticstiger/FLUX
+          path: FLUX
+          token: ${{ secrets.FLUX_SPEC_REPO_TOKEN || github.token }}
+          # The FLUX checkout is installed and run below, so its token is not
+          # left in FLUX/.git/config for that code to read; nothing here pushes.
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.py }}
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev]"
+
+      # The durations this run splits by, the same file in every job of the run.
+      - name: The durations this run splits by
+        if: matrix.suite == 'full'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fast-durations
+          path: flux-engine/tests
+
+      # The specification package from the sibling checkout, over the PyPI
+      # release the dev install pulled in. This job reads its example bundles
+      # from FLUX main, so the validator that checks them comes from the same
+      # commit: an example that needs a newer schema than the released
+      # flux-spec (the towers bundle pins FLUID 0.7.6) would otherwise fail
+      # here until the next spec release. --no-deps keeps every dependency at
+      # the version the engine pins, and flux_engine.spec still refuses a
+      # flux_spec outside SUPPORTED_SPEC_VERSION_RANGE. That refusal couples
+      # these cells to FLUX main: the change that moves FLUX main's package
+      # version out of that range turns them red here until the engine widens
+      # the range, which is the point -- it is the first engine build that would
+      # run against that specification.
+      - name: Install flux_spec from the sibling FLUX checkout
+        run: pip install --no-deps ../FLUX
+
+      # Fail in two seconds on a checkout misconfiguration, naming the path,
+      # rather than in five minutes as a wall of test failures.
+      - name: The sibling FLUX example bundle is on disk
+        run: |
+          bundle="../FLUX/examples/telco-payment-recovery"
+          test -f "$bundle/flux.lock" || {
+            echo "sibling FLUX checkout missing: no $bundle/flux.lock"
+            exit 1
+          }
+          echo "sibling FLUX bundle present at $bundle"
+
+      # `-n auto` sizes itself from the runner. Printing the count makes the
+      # parallel width a fact in the log instead of an assumption in a plan.
+      - name: Runner width
+        run: python -c "import os, sys; print(sys.version); print('cpu_count', os.cpu_count())"
+
+      # The one linter whose verdict can move with the interpreter. Four to six
+      # seconds. ruff, black and import-linter are pinned to a fixed target by
+      # configuration and run once, in `gates`.
+      # Ungated on purpose. The old pipeline ran mypy on macOS 3.11, 3.12 and
+      # 3.13 on every pull request; gating this on `full` would drop macOS cover
+      # entirely on the pull-request path, and the step costs four to six
+      # seconds.
+      - name: mypy (cross-version confirmation)
+        if: matrix.shard == 1
+        run: make typecheck
+
+      # One shard of the fast subset: group `shard` of four (6 on the
+      # coverage cell), `-n auto` inside it.
+      #
+      # On a push to main, the cell marked `durations` also times its tests
+      # (--store-durations --clean-durations: the file then holds exactly the
+      # tests this shard ran) and uploads the file; `durations-save` joins the
+      # four and keeps them for the runs that follow.
+      - name: pytest, fast subset
+        if: matrix.suite == 'full' && !matrix.cov
+        env:
+          DURATIONS_STORE: ${{ matrix.durations && github.event_name == 'push' && github.ref == 'refs/heads/main' && '--store-durations --clean-durations' || '' }}
+        run: make test-fast-shard SHARD=${{ matrix.shard }}
+
+      - name: Upload this shard's durations
+        if: matrix.durations && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: durations-shard-${{ matrix.shard }}
+          path: flux-engine/tests/fast-durations.json
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      # Coverage is measured on exactly one cell: it is a property of the
+      # source, not of the interpreter. That cell's shards write
+      # .coverage.shard-N and enforce no floor, since a shard ran a fraction of
+      # the tests; the `Coverage` job combines the files and enforces the floor
+      # of 70, with the same flags as before.
+      #
+      # Branch coverage on 3.14 runs on the sys.monitoring core, which costs a
+      # fraction of what the C tracer does on the older interpreters. Naming the
+      # core makes a fall-back an error rather than a slow run: coverage.py
+      # reports the core it chose, and the first step checks that.
+      - name: The coverage core is sys.monitoring
+        if: matrix.cov && matrix.shard == 1
+        env:
+          COVERAGE_CORE: sysmon
+          COVERAGE_FILE: ${{ runner.temp }}/core-probe.coverage
+        run: |
+          echo "pass" > "$RUNNER_TEMP/core-probe.py"
+          # --debug=sys prints to stderr
+          python -m coverage run --debug=sys "$RUNNER_TEMP/core-probe.py" 2>&1 | tee "$RUNNER_TEMP/core-probe.txt"
+          grep -E '^ *core: SysMonitor$' "$RUNNER_TEMP/core-probe.txt"
+
+      - name: pytest, fast subset, with coverage
+        if: matrix.suite == 'full' && matrix.cov
+        env:
+          COVERAGE_CORE: sysmon
+        run: make test-fast-cov-shard SHARD=${{ matrix.shard }}
+
+      # Coverage data files start with a dot, and upload-artifact leaves hidden
+      # files out unless told otherwise: without include-hidden-files the
+      # artifact is empty and the combine fails on "No data to combine".
+      # `error` on a missing file, so a shard that wrote none fails here by name.
+      - name: Upload this shard's coverage data
+        if: matrix.suite == 'full' && matrix.cov
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: flux-engine/.coverage.shard-${{ matrix.shard }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          # A re-run of a failed job uploads again into the same run.
+          overwrite: true
+
+      # The seed-tree, LRM and expression-vector determinism tests. On a `full`
+      # cell they already ran inside the fast subset above. They are a separate
+      # selection from tests/golden and do NOT overlap it: no test under
+      # tests/golden carries the `golden` marker (verified by grep), so the
+      # determinism cell needs both selections, not one.
+      - name: Determinism vectors (golden marker)
+        if: matrix.suite == 'digests' && matrix.shard == 1
+        run: make test-vectors
+
+      # The pinned baselines: plan.json, run-digest.json, the component
+      # digests, the artifact-size baseline and the one-byte differentials.
+      # This is the step that turns "same bundle, same digest, on every
+      # operating system and interpreter" into a checked claim, so it runs on
+      # every cell of every shape, once per cell, on its shard 1.
+      - name: Pinned digests and one-byte differentials
+        if: matrix.shard == 1
+        run: make test-digests
+
+      # Release-grade only. Absent from the ubuntu 3.12 and 3.14 cells
+      # because the `slow` job below already runs that suite, sharded, on every
+      # event.
+      - name: pytest, slow subset
+        if: matrix.slow && matrix.shard == 1
+        run: make test-slow
+
+      - name: fluxsim describe --self --json
+        if: matrix.shard == 1
+        run: make describe
+
+      - name: fluxsim gate conform (RFC-04 vectors)
+        if: matrix.shard == 1
+        run: make gate-conform
+
+  # ------------------------------------------------------ fast partition
+  # The shards of the fast subset, four ways and 6 ways, are exactly the
+  # subset. Compares collected node-id lists, not exit codes: the groups
+  # pytest-split cuts, with the algorithm and the durations file the shards use, must
+  # together be the whole `-m "not slow"` collection, with no test claimed by
+  # two groups and none by no group, so sharding cannot drop a test or run one
+  # twice. It is the property the whole sharding rests on, so it is a job of
+  # its own and one of those `ci-gate` waits for. Collection only, no test runs,
+  # and one interpreter is enough: the split is a function of the collected list
+  # and the durations file.
+  fast-partition:
+    name: Fast partition
+    needs: durations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      # Collection reads the sibling FLUX examples (parametrised ids and
+      # skipif gates), so this job sets up the same tree as the test cells.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Agenticstiger/FLUX
+          path: FLUX
+          token: ${{ secrets.FLUX_SPEC_REPO_TOKEN || github.token }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev]"
+
+      # The file the shards of this run split by.
+      - name: The durations this run splits by
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: fast-durations
+          path: flux-engine/tests
+
+      - name: Install flux_spec from the sibling FLUX checkout
+        run: pip install --no-deps ../FLUX
+
+      - name: The sibling FLUX example bundle is on disk
+        run: |
+          bundle="../FLUX/examples/telco-payment-recovery"
+          test -f "$bundle/flux.lock" || {
+            echo "sibling FLUX checkout missing: no $bundle/flux.lock"
+            exit 1
+          }
+          echo "sibling FLUX bundle present at $bundle"
+
+      - name: The fast subset's shards partition it
+        run: make fast-partition
+
+  # ------------------------------------------------------------ coverage
+  # The coverage floor, enforced on the union of the 6 shards of the
+  # coverage cell (ubuntu, Python 3.14). Each shard uploads its own data file;
+  # this job downloads them all, runs `coverage combine`, and fails below 70
+  # with branch coverage, the floor and flags `make test-fast-cov` has always
+  # used. The package is installed, as in the shards, so `source` resolves to the
+  # same files and the unexecuted ones count against the total. The sibling
+  # FLUX checkout is not needed: nothing runs.
+  coverage:
+    name: Coverage (combined)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev]"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-shard-*
+          path: flux-engine
+          merge-multiple: true
+
+      - name: Combine the shards and enforce the floor
+        run: make coverage-combine
+
+  # ------------------------------------------------------ durations-save
+  # On a push to main only: join the four shards' timings into one file and keep
+  # it under a key of this commit, for the runs that follow (`durations` restores
+  # the newest). Not one of the jobs `ci-gate` waits for, since it does not run on
+  # a pull request; a failure here costs the next runs some balance and nothing
+  # else.
+  durations-save:
+    name: Save test durations
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: durations-shard-*
+          path: shard-durations
+
+      - name: Join the shards' durations
+        run: |
+          set -- shard-durations/*/fast-durations.json
+          test "$#" -eq 4 || { echo "expected the 4 shards' files, found $#"; exit 1; }
+          python3 flux-engine/scripts/merge_durations.py durations-cache/fast-durations.json "$@"
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: durations-cache
+          key: fast-durations-${{ github.sha }}
+
+  # ---------------------------------------------------------------- slow
+  # The other half of the suite. `-m slow` and `-m "not slow"` partition the
+  # collected tests exactly, so this job plus the ubuntu 3.12 cell above is the
+  # whole suite on ubuntu, previously one serialised job whose pytest step was
+  # 2261s in one sampled run and 2852s in the other.
+  #
+  # Three shards (`rest` is two), each under `--dist loadscope` so a module's expensive session
+  # fixtures build once rather than once per worker they scatter to. The
+  # selections are complementary BY CONSTRUCTION, not by an enumerated list:
+  #
+  #   acceptance  -m slow tests/acceptance, minus test_one_byte.py
+  #   rest        -m slow, minus tests/acceptance, minus tests/golden
+  #   digests     tests/golden + test_one_byte.py, on every test cell
+  #
+  # A new slow test anywhere lands in exactly one of the three with no list to
+  # update, and the partition guard below checks it every run.
+  slow:
+    name: Slow suite (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: flux-engine
+    strategy:
+      fail-fast: false
+      matrix:
+        # `rest` is the longest selection, so it is two groups, split by the
+        # durations committed in tests/slow-durations.json; `make slow-partition`
+        # checks the two groups are exactly the selection.
+        include:
+          - shard: acceptance
+            target: test-slow-acceptance
+            group: 1
+          - shard: rest 1/2
+            target: test-slow-rest-shard
+            group: 1
+          - shard: rest 2/2
+            target: test-slow-rest-shard
+            group: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Agenticstiger/FLUX
+          path: FLUX
+          token: ${{ secrets.FLUX_SPEC_REPO_TOKEN || github.token }}
+          # The FLUX checkout is installed and run below, so its token is not
+          # left in FLUX/.git/config for that code to read; nothing here pushes.
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev]"
+
+      # The same spec install as the `test` job, for the same reason.
+      - name: Install flux_spec from the sibling FLUX checkout
+        run: pip install --no-deps ../FLUX
+
+      - name: The sibling FLUX example bundle is on disk
+        run: |
+          bundle="../FLUX/examples/telco-payment-recovery"
+          test -f "$bundle/flux.lock" || {
+            echo "sibling FLUX checkout missing: no $bundle/flux.lock"
+            exit 1
+          }
+          echo "sibling FLUX bundle present at $bundle"
+
+      # Compares collected node-id SETS, not exit codes: the three selections
+      # must cover the slow marker exactly, with nothing claimed twice and
+      # nothing dropped. Run once, on one shard, because it is a property of
+      # the selections rather than of either shard.
+      - name: Slow selections partition the slow marker
+        if: matrix.shard == 'acceptance'
+        run: make slow-partition
+
+      - name: pytest, slow shard
+        run: make ${{ matrix.target }} SHARD=${{ matrix.group }}
+
+  # ----------------------------------------------------------- packaging
+  # Every other job runs from an editable install, where the source tree is on
+  # the path and package data is whatever happens to be on disk. This one
+  # builds both distributions, installs the flux-stats wheel alone into one
+  # clean interpreter and both wheels into another, and runs the two CLI gates
+  # from a directory that is not the source tree, so a broken
+  # [tool.setuptools.package-data], specifically the starter project that
+  # `fluxsim init` writes, fails here rather than in a user's environment.
+  packaging:
+    name: Packaging (wheel smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Build both distributions and smoke-test each from a clean interpreter
+        run: make packaging-smoke
+
+  # ------------------------------------------------------- flux-stats alone
+  # flux-stats is released on its own, and a profiler installs it without the
+  # engine (ADR 0009). Every other job installs both, so a flux-stats test that
+  # leaned on the engine would pass there. This one installs the flux-stats
+  # wheel and its test group into a clean interpreter that has no
+  # flux-sim-engine, checks that flux_engine cannot be imported, and runs
+  # packages/flux-stats/tests. On 3.10, the floor flux-stats declares (one
+  # below the engine's, for forge-cli's profiler), so nothing newer creeps in.
+  stats-alone:
+    name: flux-stats alone
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: flux-stats tests, without the engine
+        run: make test-stats-alone
+
+  # --------------------------------------------------------------- proof-guard
+  # The engine ships the ProofSystem port and the no-op NoProofSystem, nothing that
+  # proves anything: proof-system backends are out of scope for this repository
+  # (CONTRIBUTING.md). This job fails a pull request that adds one: a ProofSystem
+  # implementation other than NoProofSystem, a spikes/ directory, ADR 0007, Rust, Noir
+  # or zkVM guest sources, or an import, dependency or module named for a backend.
+  #
+  # It runs on every event and is one of the jobs `ci-gate` waits for. It is a
+  # tripwire, not a lock: a pull request runs its own copy of this file, the Makefile
+  # and the script, so a change to any of them needs a maintainer's eye. Its own job
+  # with no dependency install: the guard is a standard-library script, so it starts
+  # in seconds and does not wait for, or slow down, the Gates job.
+  proof-guard:
+    name: Proof material
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Proof-system backends are out of scope
+        run: make proof-guard
+
+  # ------------------------------------------------------------ lineage-extra
+  # Every other job installs the dev extras only, so the OpenLineage client is
+  # absent and the real-client tests skip. A fake client that accepts anything
+  # once hid a delivery bug here for several releases; this job installs the
+  # `lineage` extra and runs the lineage tests (and the describe surface, whose
+  # capability list depends on what is installed) against the real package, and
+  # type-checks with the client's own annotations in view. The check is the
+  # `make lineage-extra` target, which `make ci-local` runs too.
+  lineage-extra:
+    name: Lineage extra
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev and lineage extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev,lineage]"
+
+      - name: Types and the real-client tests (make lineage-extra)
+        run: make lineage-extra
+
+  # ----------------------------------------------------------- publish-extra
+  # Every other job installs the dev extras only, so pyiceberg, deltalake and
+  # obstore are absent and the Iceberg, Delta and object-store sink tests skip
+  # at import. This job installs the `publish` extra (plus SQLAlchemy, which
+  # the Iceberg in-memory catalogue needs) and runs them against the real
+  # libraries; it fails if any of them skips. The check is the
+  # `make publish-extra` target, which `make ci-local` runs too.
+  publish-extra:
+    name: Publish extra
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev and publish extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev,publish]" "sqlalchemy>=2.0.18,<3"
+
+      - name: The real-library sink tests, none skipped (make publish-extra)
+        run: make publish-extra
+
+  # ------------------------------------------------------- offline journey
+  # FLUX needs no network to produce results (docs/explanation/offline.md). The test
+  # jobs check that in the test process, with sockets blocked (make's OFFLINE flags).
+  # This job checks it for the whole program: a real command-line journey inside a
+  # network namespace that has a loopback interface and nothing else, so a command
+  # that opens a connection to anywhere, in any process it starts, fails. The
+  # namespace is made as root, and the journey runs as the runner user.
+  offline-journey:
+    name: Offline journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      # Installed with the network still on; everything after this runs without it.
+      - name: Install flux_engine and flux-stats (sql extra)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[sql]"
+
+      - name: init, plan, run --verify --ship, story and a consumer-query check, with no network interface
+        run: |
+          sudo unshare --net -- sh -ec '
+            ip link set lo up
+            ip -brief link
+            if [ "$(ip -brief link | wc -l)" -ne 1 ]; then
+              echo "expected the loopback interface alone" >&2
+              exit 1
+            fi
+            exec setpriv --reuid "$1" --regid "$2" --clear-groups \
+              env "PATH=$3" "HOME=$4" scripts/offline_journey.sh "$5/offline-journey"
+          ' sh "$(id -u)" "$(id -g)" "$PATH" "$HOME" "$RUNNER_TEMP"
+
+  # ------------------------------------------------------------- ci-gate
+  # The one required status check on main.
+  #
+  # A branch-protection context is the job NAME alone, so requiring
+  # "Test (ubuntu-latest, Python 3.12, full)" directly means the day someone
+  # edits the matrix that context stops being produced and main quietly stops
+  # being protected by it. This job's name never changes, and it fails unless
+  # every job above reports success. A skipped or cancelled dependency is a
+  # failure here, not a pass. Every job it needs runs on every event, so
+  # `skipped` never has an innocent explanation.
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - gates
+      - durations
+      - test
+      - fast-partition
+      - coverage
+      - slow
+      - packaging
+      - stats-alone
+      - proof-guard
+      - lineage-extra
+      - publish-extra
+      - offline-journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every gate job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s\n' "$RESULTS"
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          results = json.loads(os.environ["RESULTS"])
+          not_green = {
+              name: job["result"]
+              for name, job in results.items()
+              if job["result"] != "success"
+          }
+          if not_green:
+              sys.exit(f"gate jobs that did not succeed: {not_green}")
+          print(f"all {len(results)} gate jobs succeeded")
+          PY

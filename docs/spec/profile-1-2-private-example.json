@@ -1,0 +1,134 @@
+{
+  "_producer": "https://github.com/Agenticstiger/flux-engine",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile/1-2-0/FluxProfile.json",
+  "encoding": {
+    "fractionalBits": 16,
+    "rounding": "floor"
+  },
+  "disclosureRules": {
+    "noisy": {}
+  },
+  "privacy": {
+    "measure": "zeroConcentratedDP",
+    "privacyLoss": {
+      "rho": "0.5"
+    },
+    "privacyUnit": {
+      "expose": "subscriber"
+    },
+    "publicStructure": true
+  },
+  "tables": {
+    "subscriber": {
+      "columns": {
+        "region": {
+          "domain": "category",
+          "statistics": [
+            {
+              "definition": "levelHistogram/1",
+              "sampleSize": {
+                "min": 13000,
+                "max": 15000
+              },
+              "disclosure": "noisy",
+              "levels": [
+                "east",
+                "north",
+                "west"
+              ],
+              "noise": {
+                "mechanism": "gaussian",
+                "scale": "2.24",
+                "privacyLoss": {
+                  "rho": "0.1"
+                }
+              },
+              "groups": [
+                {
+                  "group": "",
+                  "status": "F",
+                  "noisyCounts": [
+                    "5999.5",
+                    "4501",
+                    "3500.5"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "plan": {
+          "domain": "category"
+        },
+        "channel": {
+          "domain": "category"
+        }
+      },
+      "cliques": [
+        {
+          "definition": "cliqueMarginal/1",
+          "columns": [
+            "region",
+            "plan"
+          ],
+          "levels": [
+            [
+              "east",
+              "north",
+              "west"
+            ],
+            [
+              "basic",
+              "pro"
+            ]
+          ],
+          "noisyCounts": [
+            "4012.5",
+            "1987",
+            "3001",
+            "1499.5",
+            "2490",
+            "1010"
+          ],
+          "noise": {
+            "mechanism": "gaussian",
+            "scale": "2.24",
+            "privacyLoss": {
+              "rho": "0.1"
+            }
+          }
+        },
+        {
+          "definition": "cliqueMarginal/1",
+          "columns": [
+            "plan",
+            "channel"
+          ],
+          "levels": [
+            [
+              "basic",
+              "pro"
+            ],
+            [
+              "online",
+              "store"
+            ]
+          ],
+          "noisyCounts": [
+            "6100.25",
+            "3403.25",
+            "2100",
+            "2396.5"
+          ],
+          "noise": {
+            "mechanism": "gaussian",
+            "scale": "2.24",
+            "privacyLoss": {
+              "rho": "0.1"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

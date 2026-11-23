@@ -1,0 +1,20 @@
+{
+  "components": {
+    "assignment": "sha256:832e767323d67f521e63c0e7c596b38b6b4a802ebca2ee59c7e92e04b1432c5d",
+    "decisions": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "delivery": "sha256:8cb7bc3b220c4dc3133c30b0fefb2908d97bff2ac987cee033d5b3dd42af9db6",
+    "emits": {
+      "account": "sha256:a25f2f8cddc31710eeb1ead1a5af64d8f2e61146da826fade1f5a4544cf9bb1f",
+      "invoice": "sha256:d7ff23d781ae7f7c658fad7f5f59a69d1ce155420df5bffd3514f182dce45aa9",
+      "invoice_line": "sha256:b1135b24dc55056922c68bd8cf71aba8f31c55abe9aa66ae1398f94f71ba935b",
+      "product": "sha256:4f24b70254ea69faa616f6b75d5c92f7ccf107dee1520bbce89e1d87cb94a958"
+    },
+    "events": "sha256:a45bfe9c75c6ee09b0cf0f1ff539d40e10d5d001072b5590e1b48c63df511dff",
+    "journeys": "sha256:4ab92b80ec8618957b41e9d08a1da8d107af13afba037bd3c4dcc53c7a5561b3",
+    "population": "sha256:a29130619e9f657fccb13fc3e7c0b928fa67378dc4955d322c5b4fa21bc772ff"
+  },
+  "inputDigest": "sha256:56bc589ef51832e5afbbd0943edc246e724dc12dd2f411b6e3ae35a2557ed13c",
+  "kernelVersion": "0.1.0",
+  "runFormatVersion": 1,
+  "traceVersion": "flux-trace/1"
+}

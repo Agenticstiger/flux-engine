@@ -1,0 +1,28 @@
+{"occurrence": 0, "op": "signal", "ordinal": 1, "payloadDigest": "sha256:abecfb24ff5cffcea58220bbb27c72fae4cdeecf12aa1c9180f3f3d9f4c3bc66", "signalId": "sig-payment-aborted", "t": 1782886681115}
+{"occurrence": 0, "op": "signal", "ordinal": 12, "payloadDigest": "sha256:c8c978c80a562bf9c8c8da55bc269be3b6dea4ad7fd1a8dddcbdeba85a42d318", "signalId": "sig-payment-aborted", "t": 1783022285493}
+{"occurrence": 1, "op": "signal", "ordinal": 12, "payloadDigest": "sha256:82639dbcabbd28a581c3cd59fa387af681585537112263b942b7f99475363670", "signalId": "sig-payment-aborted", "t": 1783023260315}
+{"occurrence": 2, "op": "signal", "ordinal": 12, "payloadDigest": "sha256:d4c57c133e12f8d0b0e3ab8e8fcdd3c2c1de4243654dc0fd1fb849191c750928", "signalId": "sig-payment-aborted", "t": 1783023784852}
+{"occurrence": 0, "op": "signal", "ordinal": 17, "payloadDigest": "sha256:455c17bcba6680e41d8cdc87928d0dc38b8af0ff1683eb4157b126fb48ef6eb7", "signalId": "sig-payment-aborted", "t": 1783036047391}
+{"occurrence": 1, "op": "signal", "ordinal": 17, "payloadDigest": "sha256:552e65269d8b5be553bed740c919d98617c99dd195f75da4383b353b828ec3d9", "signalId": "sig-payment-aborted", "t": 1783037404257}
+{"occurrence": 2, "op": "signal", "ordinal": 17, "payloadDigest": "sha256:afa77410913b21e8f153fd11877ddab082a1e189bbc4eb21c092933157cb6997", "signalId": "sig-payment-aborted", "t": 1783037437689}
+{"occurrence": 0, "op": "signal", "ordinal": 19, "payloadDigest": "sha256:ddf90ff4d019f0e587ca3798fc81039076ee855fb68007be91638245e33274be", "signalId": "sig-payment-aborted", "t": 1783162921010}
+{"occurrence": 1, "op": "signal", "ordinal": 19, "payloadDigest": "sha256:b4dcf010a5f825ebe56bb05b0b6158f9d95f18f2d3f2492c65311aa95253ba8b", "signalId": "sig-payment-aborted", "t": 1783162962835}
+{"occurrence": 2, "op": "signal", "ordinal": 19, "payloadDigest": "sha256:6ec5daf96546d8ebcac1fd5cdcc0dfd5c291289aff749ced9043a256485893cc", "signalId": "sig-payment-aborted", "t": 1783163216058}
+{"occurrence": 0, "op": "signal", "ordinal": 2, "payloadDigest": "sha256:3b25a4d5f3e5cbaffd6f57bf947b21c1891c68eb85163092b562f17b0885802c", "signalId": "sig-payment-aborted", "t": 1783216574346}
+{"occurrence": 1, "op": "signal", "ordinal": 2, "payloadDigest": "sha256:8a19ebd430b8fb93a3a2f7d371bd13b0af3287941ab114e33a62f9b7243ca095", "signalId": "sig-payment-aborted", "t": 1783217030872}
+{"occurrence": 0, "op": "signal", "ordinal": 11, "payloadDigest": "sha256:e01feaab02c23df348d231f6db43df230b297d3ba26c2e121381c5e91f4a0c2a", "signalId": "sig-payment-aborted", "t": 1783293031744}
+{"occurrence": 1, "op": "signal", "ordinal": 11, "payloadDigest": "sha256:e9310a6d6f48afd54cc6aaa3f15f8560ba7bc425419ad72a07074c3bf6012490", "signalId": "sig-payment-aborted", "t": 1783293102851}
+{"occurrence": 2, "op": "signal", "ordinal": 11, "payloadDigest": "sha256:9180cccba1638709a953db257fb29e7c1fe226c4e2c00345a6f0144f3b1f5d75", "signalId": "sig-payment-aborted", "t": 1783295364059}
+{"occurrence": 0, "op": "signal", "ordinal": 0, "payloadDigest": "sha256:f3ce79163baabd9c9ab937aaaf4c1c4000c160a5d0513dbd0295331f4047f218", "signalId": "sig-payment-aborted", "t": 1783337757071}
+{"detectorId": "det-payment-aborted-burst", "eventCount": 2, "firstT": 1783023260315, "lastT": 1783023784852, "op": "detect", "ordinal": 12, "t": 1783023784852}
+{"detectorId": "det-payment-aborted-burst", "eventCount": 2, "firstT": 1783037404257, "lastT": 1783037437689, "op": "detect", "ordinal": 17, "t": 1783037437689}
+{"detectorId": "det-payment-aborted-burst", "eventCount": 2, "firstT": 1783162921010, "lastT": 1783162962835, "op": "detect", "ordinal": 19, "t": 1783162962835}
+{"detectorId": "det-payment-aborted-burst", "eventCount": 2, "firstT": 1783216574346, "lastT": 1783217030872, "op": "detect", "ordinal": 2, "t": 1783217030872}
+{"detectorId": "det-payment-aborted-burst", "eventCount": 2, "firstT": 1783293031744, "lastT": 1783293102851, "op": "detect", "ordinal": 11, "t": 1783293102851}
+{"fromState": "atrisk", "journeyId": "jr-payment-recovery", "op": "transition", "ordinal": 12, "outcome": "payment_completed", "success": true, "t": 1783023260315, "toState": "active"}
+{"fromState": "new", "journeyId": "jr-payment-recovery", "op": "transition", "ordinal": 17, "outcome": "payment_completed", "success": true, "t": 1783036047391, "toState": "active"}
+{"fromState": "new", "journeyId": "jr-payment-recovery", "op": "transition", "ordinal": 19, "outcome": "not_payment_completed", "success": false, "t": 1783162921010, "toState": "new"}
+{"fromState": "new", "journeyId": "jr-payment-recovery", "op": "transition", "ordinal": 19, "outcome": "not_payment_completed", "success": false, "t": 1783162962835, "toState": "new"}
+{"fromState": "atrisk", "journeyId": "jr-payment-recovery", "op": "transition", "ordinal": 11, "outcome": "not_payment_completed", "success": false, "t": 1783293031744, "toState": "atrisk"}
+{"fromState": "atrisk", "journeyId": "jr-payment-recovery", "op": "transition", "ordinal": 11, "outcome": "not_payment_completed", "success": false, "t": 1783293102851, "toState": "atrisk"}
+{"fromState": "atrisk", "journeyId": "jr-payment-recovery", "op": "transition", "ordinal": 11, "outcome": "not_payment_completed", "success": false, "t": 1783295364059, "toState": "atrisk"}

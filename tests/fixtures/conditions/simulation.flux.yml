@@ -1,0 +1,70 @@
+# One table of subscriptions whose categorical columns are drawn through a chain of conditionals:
+# plan, then region given plan, channel given region, and tier given plan and channel. `spend`
+# is a histogram given plan, and `note` has a null fraction, so neither can be fixed.
+# tests/golden/conditions pins the run as it is written here; the tests add `conditions` under
+# the namespace.
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-plans
+name: Plans
+metadata:
+  owner:
+    team: billing
+spec:
+  worldRef: world-plans
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2026-07-01T00:00:00Z"
+    end: "2026-09-30T23:59:59Z"
+  personaRefs: [persona-plans]
+  emits:
+    - productRef: retail.plans
+      exposeId: subscriptions
+      fluidVersion: "0.7.7"
+extensions:
+  com.agentics.flux/1:
+    emits:
+      subscriptions:
+        rows: 1000
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            plan: { levels: { basic: '0.6', premium: '0.4' } }
+            region:
+              given: plan
+              levelWeightsGiven:
+                basic: { APAC: '1', EU: '3', US: '1' }
+                premium: { APAC: '2', EU: '1', US: '2' }
+            channel:
+              given: region
+              levelWeightsGiven:
+                APAC: { online: '1', store: '1' }
+                EU: { online: '1', store: '3' }
+                US: { online: '4', store: '1' }
+            tier:
+              given: [plan, channel]
+              levelWeightsGiven:
+                basic:
+                  online: { gold: '1', silver: '2' }
+                  store: { gold: '0', silver: '1' }
+                premium:
+                  online: { gold: '3', silver: '1' }
+                  store: { gold: '1', silver: '1' }
+            spend:
+              range: { min: '0', max: '300' }
+              bins: ['0', '100', '300']
+              given: plan
+              binWeightsGiven:
+                basic: ['3', '1']
+                premium: ['1', '3']
+            note:
+              nullFraction: '0.5'
+              levels: { a: '0.5', b: '0.5' }
+          properties:
+            - property: mean
+              column: spend
+              tolerance: { type: absolute, value: "300" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle

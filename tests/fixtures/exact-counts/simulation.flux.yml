@@ -1,0 +1,97 @@
+# Four related tables, product and account to invoice to invoice_line, with no counts, allocation
+# or sampling declared. tests/golden/exact-counts pins the run as it is written here.
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-sales
+name: Sales
+metadata:
+  owner:
+    team: sales
+spec:
+  worldRef: world-sales
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2026-07-01T00:00:00Z"
+    end: "2026-09-30T23:59:59Z"
+  personaRefs: [persona-sales]
+  emits:
+    - productRef: retail.sales_chain
+      exposeId: product
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:8ab49a74f25b18de2c0ec299e23606b3d6a9d6cbd0b7ff8ee2fedb1168bbb005" }
+    - productRef: retail.sales_chain
+      exposeId: account
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:8ab49a74f25b18de2c0ec299e23606b3d6a9d6cbd0b7ff8ee2fedb1168bbb005" }
+    - productRef: retail.sales_chain
+      exposeId: invoice
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:8ab49a74f25b18de2c0ec299e23606b3d6a9d6cbd0b7ff8ee2fedb1168bbb005" }
+    - productRef: retail.sales_chain
+      exposeId: invoice_line
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:8ab49a74f25b18de2c0ec299e23606b3d6a9d6cbd0b7ff8ee2fedb1168bbb005" }
+extensions:
+  com.agentics.flux/1:
+    emits:
+      product:
+        rows: 26
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            product_id: { range: { min: '1', max: '26' } }
+            category: { levels: { tools: '0.4', toys: '0.3', books: '0.2', games: '0.1' } }
+            list_price: { range: { min: '1', max: '500' } }
+          properties:
+            - property: mean
+              column: list_price
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      account:
+        rows: 300
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            account_id: { range: { min: '1', max: '300' } }
+            segment: { levels: { retail: '0.6', trade: '0.3', public: '0.1' } }
+            status: { levels: { active: '0.8', closed: '0.2' } }
+          properties:
+            - property: mean
+              column: account_id
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      invoice:
+        rows: 1200
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            invoice_id: { range: { min: '1', max: '1200' } }
+            status: { levels: { paid: '0.7', open: '0.25', void: '0.05' } }
+            issued_on: { range: { min: '2026-07-01', max: '2026-09-30' } }
+          properties:
+            - property: mean
+              column: invoice_id
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      invoice_line:
+        rows: 4000
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            line_id: { range: { min: '1', max: '4000' } }
+            quantity: { range: { min: '1', max: '10' } }
+            amount: { range: { min: '1', max: '900' } }
+          properties:
+            - property: mean
+              column: amount
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle

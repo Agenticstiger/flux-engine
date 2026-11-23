@@ -1,0 +1,8 @@
+{
+  "emit-customer": 50,
+  "emit-invoice": 600,
+  "emit-subscription_change": 300,
+  "emit-subscription_current": 120,
+  "emit-subscription_month": 400,
+  "emit-subscription_version": 200
+}

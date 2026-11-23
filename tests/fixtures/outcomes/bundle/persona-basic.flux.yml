@@ -1,0 +1,10 @@
+fluxVersion: 0.5.0
+kind: Persona
+id: persona-basic
+name: Basic Subscriber
+metadata:
+  owner:
+    team: billing
+spec:
+  traits:
+    digitalFluency: 0.5

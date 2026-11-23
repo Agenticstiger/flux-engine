@@ -1,0 +1,14 @@
+fluxVersion: "0.5.0"
+kind: Experiment
+id: exp-recovery-ab
+name: Recovery A/B Experiment
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  variants:
+    - { name: control, weight: 0.5, treatmentRef: tr-standard-dunning, isControl: true }
+    - { name: fast-recovery, weight: 0.5, treatmentRef: tr-fast-recovery }
+  assignment: { method: largest_remainder, seed: 7 }
+  metrics:
+    - { name: saved_customers, semanticRef: telco/saved_customers }   # RFC-07

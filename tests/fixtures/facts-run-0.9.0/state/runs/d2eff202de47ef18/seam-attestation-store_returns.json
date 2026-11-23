@@ -1,0 +1,31 @@
+{
+  "G": "sha256:b8e6fea2428f6da109fb4297b99b41ee0b0f8da4e993ea81f43e6d841209b1f4",
+  "H": "sha256:017f0dae8a67c800057d5e479a75275a467a41e3a4b33657ba9b5eb1a18ae8f8",
+  "columns": [
+    "sr_item_sk",
+    "sr_ticket_number",
+    "sr_returned_date_sk",
+    "sr_return_amt"
+  ],
+  "emitIndex": 4,
+  "reference": {
+    "contractDigest": "sha256:89b4675ab044d2fbb9a712079d6ba91241c41b1cd2e741a5d1938bc23a77f3a0",
+    "contractFileDigest": "sha256:9a28b56a04c7a06695639d9a4ff42d58027a6efbb6b22df44d070623df2f5999",
+    "exposeId": "store_returns",
+    "fluidVersion": "0.7.7",
+    "productRef": "retail.store_star"
+  },
+  "shippedContract": null,
+  "simulationId": "sim-store-star",
+  "synthetic": {
+    "generatorDigest": "sha256:2cb89b8e996900ed536e29e4d2b5db5f2edd6dc3186e1a39da01fff092789a4f",
+    "outputDigest": "sha256:2e7aaf2e4b2f0d0a31a33f41ebe998ba1f48947057c9122082ee9057d01d921e",
+    "rows": 20
+  },
+  "types": [
+    "INT",
+    "INT",
+    "INT",
+    "DECIMAL(7,2)"
+  ]
+}

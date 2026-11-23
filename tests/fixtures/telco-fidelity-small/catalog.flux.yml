@@ -1,0 +1,12 @@
+fluxVersion: "0.5.0"
+kind: Catalog
+id: cat-tv-addons
+name: TV Add-on Catalog
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  items:
+    - sku: tv-sport-pack
+      name: Sport Pack
+      attributes: { tier: premium, monthly: true }

@@ -1,0 +1,234 @@
+{
+  "columnProvenanceDigest": "sha256:e03fcfea55dcd9592e6d8990748b23813152e65bd313f536224c17627c763238",
+  "emits": {
+    "customer": {
+      "G": "sha256:03efdfb64348d908632fb0f8d52a926b69caefbe32bf4401071af83b2487a574",
+      "H": "sha256:10a9dc8b43d0dd025d8a1e8a9f17a649d7c0512ed7475dd5ea9e477b0d01d8fd",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:03efdfb64348d908632fb0f8d52a926b69caefbe32bf4401071af83b2487a574",
+        "H": "sha256:10a9dc8b43d0dd025d8a1e8a9f17a649d7c0512ed7475dd5ea9e477b0d01d8fd",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "customer",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "c_birth_year"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 83,
+              "sum": 47,
+              "value": 27
+            },
+            "margin": "4.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:c_birth_year"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "c_customer_id",
+          "c_birth_year"
+        ],
+        "generatorDigest": "sha256:2fe6cdc46816f73f1ad1f6dcd4cb57119aa489b07abac813d7a81b2893d3d3a1",
+        "rows": 40
+      },
+      "productRef": "retail.store_star"
+    },
+    "date_dim": {
+      "G": "sha256:d14c617b79f443cb12bb6a24d03b3ffc9c7d70c813a70b271ec1798d3b28eb2e",
+      "H": "sha256:a1447e407444445e8a634e342c67e92d9d9f0ba3cfde7421410ec341a1cc22af",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:23b2b19559da3ab91032790c1271f94957845ab63878c0181239ab7d1595c81f",
+        "H": "sha256:a1447e407444445e8a634e342c67e92d9d9f0ba3cfde7421410ec341a1cc22af",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "date_dim",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "d_date_sk"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 94,
+              "sum": 58,
+              "value": 38
+            },
+            "margin": "0.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:d_date_sk"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "d_date_sk",
+          "d_year",
+          "d_date"
+        ],
+        "generatorDigest": "sha256:a2c5730b8b35539e27c8a2c4fc1c503870211edfbeaaad59420bb642e82450d2",
+        "rows": 365
+      },
+      "productRef": "retail.store_star"
+    },
+    "item": {
+      "G": "sha256:94132bd523f41f1c6f9be84213efb6c0c97ef9a7cb6f0388ec31c68e22f716e5",
+      "H": "sha256:98e6570599e7859d013c4d6129756eeda8e560e88c338ca182edba7e34e397ab",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:94132bd523f41f1c6f9be84213efb6c0c97ef9a7cb6f0388ec31c68e22f716e5",
+        "H": "sha256:98e6570599e7859d013c4d6129756eeda8e560e88c338ca182edba7e34e397ab",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "item",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "i_price"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 79,
+              "sum": 43,
+              "value": 23
+            },
+            "margin": "9.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:i_price"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "i_item_sk",
+          "i_brand",
+          "i_price"
+        ],
+        "generatorDigest": "sha256:52df3a31eea643ea0d0f9b6d11b1b76a6ce513bd3a8e1089e34fd8f5bb94a785",
+        "rows": 40
+      },
+      "productRef": "retail.store_star"
+    },
+    "store_returns": {
+      "G": "sha256:b8e6fea2428f6da109fb4297b99b41ee0b0f8da4e993ea81f43e6d841209b1f4",
+      "H": "sha256:017f0dae8a67c800057d5e479a75275a467a41e3a4b33657ba9b5eb1a18ae8f8",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:b8e6fea2428f6da109fb4297b99b41ee0b0f8da4e993ea81f43e6d841209b1f4",
+        "H": "sha256:017f0dae8a67c800057d5e479a75275a467a41e3a4b33657ba9b5eb1a18ae8f8",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "store_returns",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "sr_return_amt"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 79,
+              "sum": 43,
+              "value": 23
+            },
+            "margin": "9.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:sr_return_amt"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "sr_item_sk",
+          "sr_ticket_number",
+          "sr_returned_date_sk",
+          "sr_return_amt"
+        ],
+        "generatorDigest": "sha256:2cb89b8e996900ed536e29e4d2b5db5f2edd6dc3186e1a39da01fff092789a4f",
+        "rows": 20
+      },
+      "productRef": "retail.store_star"
+    },
+    "store_sales": {
+      "G": "sha256:191e774db89620d88db29893fae6b719533d2866f43e98c9b67bafeca02a91bb",
+      "H": "sha256:69f7681477d3ab3a838bb23dcf6bb32ec52bcc7a33b2448356ea82149f4afeee",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:191e774db89620d88db29893fae6b719533d2866f43e98c9b67bafeca02a91bb",
+        "H": "sha256:69f7681477d3ab3a838bb23dcf6bb32ec52bcc7a33b2448356ea82149f4afeee",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "store_sales",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "ss_quantity"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 76,
+              "sum": 40,
+              "value": 20
+            },
+            "margin": "0.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:ss_quantity"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "ss_sold_date_sk",
+          "ss_item_sk",
+          "ss_customer_id",
+          "ss_ticket_number",
+          "ss_quantity",
+          "ss_net_paid"
+        ],
+        "generatorDigest": "sha256:b1f2c591cd5e03d90a7e995fc07eeb4bf471ad77dc9c8450073a9659e8a44f2f",
+        "rows": 200
+      },
+      "productRef": "retail.store_star"
+    }
+  },
+  "fidelity": "deterministic",
+  "generated_at": "2026-11-23T05:37:00+00:00",
+  "inputDigest": "sha256:9a6e272a5398ed20f6ed9230bf50fa5269dc9661a909e4c0221727d6cd9fd0ec",
+  "kernelVersion": "0.2.0",
+  "planDigest": "sha256:d2eff202de47ef18c3e68520a7f315d5c13dbde4514fd284738927baafd29d67",
+  "seed": 42,
+  "seedTreeDigest": "sha256:cd3666caaffe20702cd800ad8f97fa8e5cfd9e43293357a00d439ec386dee95c",
+  "seedTreeShapes": {
+    "sim.signal": 16,
+    "sim.temperature": 15,
+    "world.market": 20,
+    "world.subject.products": 20,
+    "world.subject.trait": 40
+  },
+  "seedTreeVersion": "flux-seed/2",
+  "simulationId": "sim-store-star"
+}

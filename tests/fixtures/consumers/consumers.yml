@@ -1,0 +1,32 @@
+# The consumers block of ../bundle/simulation.flux.yml, as the file `fluxsim init --consumers`
+# reads it: the keys of the block at the top level. Two calibration queries and one held out.
+dialect: snowflake
+asOf: '2026-06-30'
+tables:
+  prod.analytics.subscriptions: subscriptions
+prefixes:
+- prod.analytics
+columns:
+  subscriptions:
+    sub_plan: plan
+views:
+- name: offered
+  sql: SELECT * FROM subscriptions WHERE offered
+queries:
+- id: premium-renewed
+  sql: SELECT * FROM prod.analytics.subscriptions WHERE sub_plan = 'premium' AND renewed
+  unit: subscriptions
+  tolerance: '0.02'
+- id: renewed-offered
+  sql: SELECT plan FROM offered WHERE renewed
+  unit: offered
+  groupBy: plan
+- id: renewed-since
+  sql: SELECT * FROM subscriptions WHERE renewed_at >= :since
+  parameters:
+    since: '2025-03-01'
+  unit: subscriptions
+  heldOut: true
+limits:
+  seconds: 30
+  memory: 1GiB

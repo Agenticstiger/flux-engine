@@ -1,0 +1,46 @@
+usage: fluxsim forecast make [-h] [--simulation-id SIMULATION_ID]
+                             --registered-at T --horizon-end T [--jobs N]
+                             [--profile PATH] [--state-dir STATE_DIR] [-j]
+                             bundle
+
+Run the Simulation's spec.sweep as replicates, each seeded as the sweep seeds
+it and each taking the effect at the midpoint of its part of the response
+estimate's interval. For each forecast item, take the median of its value over
+the replicates and an interval around it, and register that, sealed and write-
+once, under the item's id and the pinned profile's digest. The same forecast
+again changes nothing; another forecast under that id is refused (FLX-7007),
+and the refusal says when the id belongs to another bundle.
+
+examples:
+  # run the sweep, then register each item's forecast
+  fluxsim forecast make ./bundle --profile state.json --registered-at 2026-07-01T00:00:00Z --horizon-end 2026-09-30T23:59:59Z
+
+arguments:
+  bundle                path to the FLUX bundle directory
+
+options:
+  -h, --help            show this help message and exit
+  --simulation-id SIMULATION_ID
+                        which Simulation document to resolve (default: the
+                        bundle's only one)
+  --registered-at T     the instant the forecasts are sealed at, as RFC 3339;
+                        the engine reads no clock, and a later score may not
+                        observe anything before it (FLX-7001)
+  --horizon-end T       the instant after which the next state can be read, as
+                        RFC 3339
+  --jobs N              the most processes that may generate the rows of an
+                        emit declared by statistics: a number (never more than
+                        one per CPU) or auto for one per CPU; the run summary
+                        says how many it used, and the rows and every digest
+                        are the same whatever the number (default: FLUX_JOBS,
+                        else 1)
+  --profile PATH        the profile document the Simulation pins under
+                        extensions['com.agentics.flux/1'].profile
+                        (docs/spec/PROFILE-SPEC.md); refused when its digest
+                        is not the pinned one, and when the Simulation pins
+                        none
+  --state-dir STATE_DIR
+                        run-state directory (default: ./.flux)
+  -j, --json            emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/forecast.html

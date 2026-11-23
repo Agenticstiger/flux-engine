@@ -1,0 +1,39 @@
+fluidVersion: 0.7.7
+kind: DataProduct
+id: telco.silver.subscriptions
+name: Subscriptions
+metadata:
+  owner:
+    team: billing
+exposes:
+- exposeId: subscriptions
+  kind: table
+  contract:
+    schema:
+    - name: subscription_id
+      type: STRING
+      required: true
+    - name: plan
+      type: enum('basic','standard','premium')
+      required: true
+    - name: region
+      type: enum('north','south','east','west')
+      required: true
+    - name: offered
+      type: BOOL
+    - name: renewed
+      type: BOOL
+    - name: renewed_at
+      type: DATE
+    - name: amount
+      type: DECIMAL(10,2)
+  semantics:
+    entities:
+    - name: subscription
+      type: primary
+      expr: subscription_id
+  binding:
+    platform: local
+    format: parquet
+    location:
+      path: ./out/subscriptions.parquet

@@ -1,0 +1,10 @@
+fluxVersion: 0.5.0
+kind: Segment
+id: seg-basic
+name: Basic Subscribers
+metadata:
+  owner:
+    team: billing
+spec:
+  query: persona == 'persona-basic'
+  queryLanguage: flux-expr/1

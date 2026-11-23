@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""Generate THIRD_PARTY_LICENSES.md.
+
+Uses `pip-licenses` when it's importable (``pip install pip-licenses``);
+falls back to a documented manual list otherwise, so this script never
+hard-requires a tool outside [dev].
+
+The manual list is *derived*, not transcribed: :func:`declared_requirements`
+reads ``pyproject.toml``'s ``[project.dependencies]`` and
+``[project.optional-dependencies]`` and the table is built from that, so
+the two cannot drift. What this file holds per distribution is only what
+pyproject does not carry -- its licence and the one line saying why it is
+here. A dependency with no entry in :data:`LICENSE_NOTES` is a hard error
+(:func:`missing_entries`, gated by ``tests/test_third_party_licenses.py``)
+rather than a row that quietly goes missing: ``NOTICE`` points at the
+generated file as the authoritative inventory, and ``cryptography`` sat
+outside it for exactly as long as the list was hand-maintained.
+"""
+
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+import tomllib
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PYPROJECT = REPO_ROOT / "pyproject.toml"
+OUTPUT = REPO_ROOT / "THIRD_PARTY_LICENSES.md"
+
+#: Per distribution: (display name, SPDX licence expression, why it is here).
+#: Keyed by the PEP 503 normalized name so "PyYAML"/"pyyaml" and
+#: "import-linter"/"import_linter" are one entry, not two.
+LICENSE_NOTES: Dict[str, Tuple[str, str, str]] = {
+    "numpy": ("numpy", "BSD-3-Clause", "core: seed-tree bit source"),
+    "pyyaml": ("PyYAML", "MIT", "core: FLUX/FLUID document parsing"),
+    "jsonschema": ("jsonschema", "MIT", "core: FLUX/FLUID schema validation"),
+    "rfc8785": ("rfc8785", "MIT", "core: JSON Canonicalization Scheme"),
+    "cloudevents": ("cloudevents", "Apache-2.0", "core: event envelope"),
+    "cryptography": (
+        "cryptography",
+        "Apache-2.0 OR BSD-3-Clause",
+        "core: ed25519 signature over the fidelity record",
+    ),
+    "flux-spec": (
+        "flux-spec",
+        "Apache-2.0",
+        "core: FLUX validator, RFC-04 enforcement gate, RFC-09 bundler",
+    ),
+    "flux-stats": (
+        "flux-stats",
+        "Apache-2.0",
+        "core: the statistic registry, record reader, fixed-point grid and FLX"
+        " catalog, released from this repository (packages/flux-stats)",
+    ),
+    "openlineage-python": ("openlineage-python", "Apache-2.0", "[lineage]: RunEvent client"),
+    "pyarrow": (
+        "pyarrow",
+        "Apache-2.0",
+        "[arrow]: Arrow batches, Parquet and Arrow IPC files for the output sinks",
+    ),
+    "adbc-driver-manager": (
+        "adbc-driver-manager",
+        "Apache-2.0",
+        "[adbc]: loads the ADBC driver the database sink writes through",
+    ),
+    "pyiceberg": (
+        "pyiceberg",
+        "Apache-2.0",
+        "[publish]: writes one Iceberg table per stream through a catalogue",
+    ),
+    "deltalake": (
+        "deltalake",
+        "Apache-2.0",
+        "[publish]: writes one Delta Lake table per stream",
+    ),
+    "obstore": (
+        "obstore",
+        "MIT",
+        "[publish]: uploads the Parquet and Arrow IPC files to S3, GCS and Azure object stores",
+    ),
+    "adbc-driver-sqlite": (
+        "adbc-driver-sqlite",
+        "Apache-2.0",
+        "[dev]: the database sink's tests, against SQLite",
+    ),
+    "duckdb": (
+        "duckdb",
+        "MIT",
+        "[sql]: runs a consumer query over generated rows; also the database sink's tests",
+    ),
+    "sqlglot": ("sqlglot", "MIT", "[sql]: reads and checks the SQL of a consumer query"),
+    "cma": ("cma", "BSD-3-Clause", "[calibrate]: CMA-ES optimiser for calibration"),
+    "pytest": ("pytest", "MIT", "[dev]"),
+    "pytest-cov": ("pytest-cov", "MIT", "[dev]"),
+    "hypothesis": ("hypothesis", "MPL-2.0", "[dev]: property-based testing"),
+    "mypy": ("mypy", "MIT", "[dev]"),
+    "ruff": ("ruff", "MIT", "[dev]"),
+    "black": ("black", "MIT", "[dev]"),
+    "import-linter": ("import-linter", "BSD-2-Clause", "[dev]: architecture contracts"),
+    "pytest-xdist": ("pytest-xdist", "MIT", "[dev]: parallel test execution"),
+    "pytest-timeout": ("pytest-timeout", "MIT", "[dev]: per-test hang backstop"),
+    "pytest-split": (
+        "pytest-split",
+        "MIT",
+        "[dev]: splits the fast test subset into balanced CI shards",
+    ),
+    "pytest-socket": (
+        "pytest-socket",
+        "MIT",
+        "[dev]: blocks sockets in the tests, the offline guarantee's test-time check",
+    ),
+    "sybil": ("sybil", "MIT", "[dev]: runs the examples in the documentation as tests"),
+    "reuse": (
+        "reuse",
+        "Apache-2.0 AND CC0-1.0 AND CC-BY-SA-4.0 AND GPL-3.0-or-later",
+        "[dev]: licence-header check, run as a tool and not distributed",
+    ),
+}
+
+_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def normalize(name: str) -> str:
+    """PEP 503 normalization: lower-case, runs of ``-``/``_``/``.`` collapsed to ``-``."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def requirement_name(requirement: str) -> str:
+    """The distribution name from a PEP 508 requirement string.
+
+    Handles the plain (``numpy>=1.26,<3``), extras (``foo[bar]>=1``) and
+    direct-reference (``flux-spec @ git+https://...@<sha>``) forms alike --
+    every one of them starts with the distribution name.
+    """
+    match = _NAME.match(requirement)
+    if match is None:  # pragma: no cover - defensive; no such requirement today
+        raise ValueError(f"cannot read a distribution name from {requirement!r}")
+    return normalize(match.group(1))
+
+
+def _own_name() -> str:
+    data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    return normalize(data["project"]["name"])
+
+
+def declared_requirements() -> List[str]:
+    """Every distribution pyproject declares, core first then each extra, deduplicated."""
+    data = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+    project = data["project"]
+    names: List[str] = [
+        requirement_name(requirement) for requirement in project.get("dependencies", [])
+    ]
+    for _extra, requirements in sorted(project.get("optional-dependencies", {}).items()):
+        names.extend(requirement_name(requirement) for requirement in requirements)
+    own = _own_name()  # an extra that includes another extra names this distribution
+    seen: Dict[str, None] = {}
+    for name in names:
+        if name != own:
+            seen.setdefault(name, None)
+    return list(seen)
+
+
+def missing_entries() -> List[str]:
+    """Declared dependencies with no row in :data:`LICENSE_NOTES`."""
+    return [name for name in declared_requirements() if name not in LICENSE_NOTES]
+
+
+def stale_entries() -> List[str]:
+    """Rows in :data:`LICENSE_NOTES` naming something pyproject no longer declares."""
+    declared = set(declared_requirements())
+    return sorted(name for name in LICENSE_NOTES if name not in declared)
+
+
+def _pip_licenses_table() -> Optional[str]:
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "piplicenses", "--format=markdown", "--with-urls"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    return result.stdout
+
+
+def _manual_table() -> str:
+    missing = missing_entries()
+    if missing:
+        raise SystemExit(
+            "third_party_licenses: pyproject declares "
+            f"{', '.join(missing)} with no entry in LICENSE_NOTES -- "
+            "add the licence and the reason, then regenerate."
+        )
+    lines = ["| Package | License | Used for |", "|---|---|---|"]
+    for name in declared_requirements():
+        display, license_name, note = LICENSE_NOTES[name]
+        lines.append(f"| {display} | {license_name} | {note} |")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    generated_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    table = _pip_licenses_table()
+    source_note = (
+        "pip-licenses"
+        if table
+        else "documented list derived from pyproject.toml (pip-licenses not installed)"
+    )
+    if not table:
+        table = _manual_table()
+
+    body = (
+        "# Third-party licenses\n\n"
+        f"Generated {generated_at} by `scripts/third_party_licenses.py` ({source_note}).\n"
+        "Every distribution `pyproject.toml` declares appears below; the list is\n"
+        "derived from those declarations rather than maintained by hand, and\n"
+        "`tests/test_third_party_licenses.py` fails when one has no entry.\n\n"
+        f"{table}\n"
+    )
+    OUTPUT.write_text(body)
+    print(f"Wrote {OUTPUT.relative_to(REPO_ROOT)} ({source_note})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

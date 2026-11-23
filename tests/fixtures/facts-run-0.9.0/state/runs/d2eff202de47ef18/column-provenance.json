@@ -1,0 +1,347 @@
+{
+  "exposes": [
+    {
+      "columns": [
+        {
+          "column": "d_date_sk",
+          "decidedBy": "key",
+          "detail": "a key the contract declares, laid out from the row index so that no value repeats, never drawn",
+          "origin": "derived",
+          "required": true,
+          "source": "semantics+rowIndex",
+          "type": "INT"
+        },
+        {
+          "column": "d_year",
+          "decidedBy": "rule",
+          "detail": "set by the rule that determines it (a contract invariant or a FLUX-side rule), on the rows the rule covers; any other row keeps the value the column's own declaration gives it",
+          "origin": "derived",
+          "required": true,
+          "source": "contract.invariants.year_of_date",
+          "type": "INT"
+        },
+        {
+          "column": "d_date",
+          "decidedBy": "rule",
+          "detail": "set by the rule that determines it (a contract invariant or a FLUX-side rule), on the rows the rule covers; any other row keeps the value the column's own declaration gives it",
+          "origin": "derived",
+          "required": true,
+          "source": "contract.invariants.date_of_key",
+          "type": "DATE"
+        }
+      ],
+      "counts": {
+        "copied": 0,
+        "declared": 0,
+        "default": 0,
+        "derived": 3,
+        "profile": 0
+      },
+      "dataset": {
+        "name": "retail",
+        "namespace": "flux"
+      },
+      "exposeId": "date_dim",
+      "facets": {
+        "columnLineage": {
+          "_producer": "https://github.com/Agenticstiger/flux-engine",
+          "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+          "dataset": [],
+          "fields": {
+            "d_date": {
+              "inputFields": []
+            },
+            "d_date_sk": {
+              "inputFields": []
+            },
+            "d_year": {
+              "inputFields": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "columns": [
+        {
+          "column": "i_item_sk",
+          "decidedBy": "key",
+          "detail": "a key the contract declares, laid out from the row index so that no value repeats, never drawn",
+          "origin": "derived",
+          "required": true,
+          "source": "semantics+rowIndex",
+          "type": "INT"
+        },
+        {
+          "column": "i_brand",
+          "decidedBy": "fidelity",
+          "detail": "declared under fidelity.columns",
+          "origin": "declared",
+          "required": true,
+          "source": "fidelity.columns.i_brand",
+          "type": "STRING"
+        },
+        {
+          "column": "i_price",
+          "decidedBy": "fidelity",
+          "detail": "declared under fidelity.columns",
+          "origin": "declared",
+          "required": true,
+          "source": "fidelity.columns.i_price",
+          "type": "DECIMAL(7,2)"
+        }
+      ],
+      "counts": {
+        "copied": 0,
+        "declared": 2,
+        "default": 0,
+        "derived": 1,
+        "profile": 0
+      },
+      "dataset": {
+        "name": "retail",
+        "namespace": "flux"
+      },
+      "exposeId": "item",
+      "facets": {
+        "columnLineage": {
+          "_producer": "https://github.com/Agenticstiger/flux-engine",
+          "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+          "dataset": [],
+          "fields": {
+            "i_brand": {
+              "inputFields": []
+            },
+            "i_item_sk": {
+              "inputFields": []
+            },
+            "i_price": {
+              "inputFields": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "columns": [
+        {
+          "column": "c_customer_id",
+          "decidedBy": "key",
+          "detail": "a key the contract declares, laid out from the row index so that no value repeats, never drawn",
+          "origin": "derived",
+          "required": true,
+          "source": "semantics+rowIndex",
+          "type": "STRING"
+        },
+        {
+          "column": "c_birth_year",
+          "decidedBy": "fidelity",
+          "detail": "declared under fidelity.columns",
+          "origin": "declared",
+          "required": true,
+          "source": "fidelity.columns.c_birth_year",
+          "type": "INT"
+        }
+      ],
+      "counts": {
+        "copied": 0,
+        "declared": 1,
+        "default": 0,
+        "derived": 1,
+        "profile": 0
+      },
+      "dataset": {
+        "name": "retail",
+        "namespace": "flux"
+      },
+      "exposeId": "customer",
+      "facets": {
+        "columnLineage": {
+          "_producer": "https://github.com/Agenticstiger/flux-engine",
+          "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+          "dataset": [],
+          "fields": {
+            "c_birth_year": {
+              "inputFields": []
+            },
+            "c_customer_id": {
+              "inputFields": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "columns": [
+        {
+          "column": "ss_sold_date_sk",
+          "decidedBy": "relationship",
+          "detail": "declared under fidelity.columns, then held at the nearest key of the parent its relationship names",
+          "origin": "declared",
+          "required": false,
+          "source": "fidelity.columns.ss_sold_date_sk",
+          "type": "INT"
+        },
+        {
+          "column": "ss_item_sk",
+          "decidedBy": "relationship",
+          "detail": "the parent's key at the parent row the relationship picks, so it always names a row the parent holds",
+          "origin": "derived",
+          "required": true,
+          "source": "semantics.relationships.item",
+          "type": "INT"
+        },
+        {
+          "column": "ss_customer_id",
+          "decidedBy": "relationship",
+          "detail": "the parent's key at the parent row the relationship picks, so it always names a row the parent holds",
+          "origin": "derived",
+          "required": false,
+          "source": "semantics.relationships.customer",
+          "type": "STRING"
+        },
+        {
+          "column": "ss_ticket_number",
+          "decidedBy": "key",
+          "detail": "a key the contract declares, laid out from the row index so that no value repeats, never drawn",
+          "origin": "derived",
+          "required": true,
+          "source": "semantics+rowIndex",
+          "type": "INT"
+        },
+        {
+          "column": "ss_quantity",
+          "decidedBy": "fidelity",
+          "detail": "declared under fidelity.columns",
+          "origin": "declared",
+          "required": true,
+          "source": "fidelity.columns.ss_quantity",
+          "type": "INT"
+        },
+        {
+          "column": "ss_net_paid",
+          "decidedBy": "fidelity",
+          "detail": "declared under fidelity.columns",
+          "origin": "declared",
+          "required": true,
+          "source": "fidelity.columns.ss_net_paid",
+          "type": "DECIMAL(7,2)"
+        }
+      ],
+      "counts": {
+        "copied": 0,
+        "declared": 3,
+        "default": 0,
+        "derived": 3,
+        "profile": 0
+      },
+      "dataset": {
+        "name": "retail",
+        "namespace": "flux"
+      },
+      "exposeId": "store_sales",
+      "facets": {
+        "columnLineage": {
+          "_producer": "https://github.com/Agenticstiger/flux-engine",
+          "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+          "dataset": [],
+          "fields": {
+            "ss_customer_id": {
+              "inputFields": []
+            },
+            "ss_item_sk": {
+              "inputFields": []
+            },
+            "ss_net_paid": {
+              "inputFields": []
+            },
+            "ss_quantity": {
+              "inputFields": []
+            },
+            "ss_sold_date_sk": {
+              "inputFields": []
+            },
+            "ss_ticket_number": {
+              "inputFields": []
+            }
+          }
+        }
+      }
+    },
+    {
+      "columns": [
+        {
+          "column": "sr_item_sk",
+          "decidedBy": "relationship",
+          "detail": "the parent's key at the parent row the relationship picks, so it always names a row the parent holds",
+          "origin": "derived",
+          "required": true,
+          "source": "semantics.relationships.sale",
+          "type": "INT"
+        },
+        {
+          "column": "sr_ticket_number",
+          "decidedBy": "relationship",
+          "detail": "the parent's key at the parent row the relationship picks, so it always names a row the parent holds",
+          "origin": "derived",
+          "required": true,
+          "source": "semantics.relationships.sale",
+          "type": "INT"
+        },
+        {
+          "column": "sr_returned_date_sk",
+          "decidedBy": "relationship",
+          "detail": "declared under fidelity.columns, then held at the nearest key of the parent its relationship names",
+          "origin": "declared",
+          "required": false,
+          "source": "fidelity.columns.sr_returned_date_sk",
+          "type": "INT"
+        },
+        {
+          "column": "sr_return_amt",
+          "decidedBy": "fidelity",
+          "detail": "declared under fidelity.columns",
+          "origin": "declared",
+          "required": true,
+          "source": "fidelity.columns.sr_return_amt",
+          "type": "DECIMAL(7,2)"
+        }
+      ],
+      "counts": {
+        "copied": 0,
+        "declared": 2,
+        "default": 0,
+        "derived": 2,
+        "profile": 0
+      },
+      "dataset": {
+        "name": "retail",
+        "namespace": "flux"
+      },
+      "exposeId": "store_returns",
+      "facets": {
+        "columnLineage": {
+          "_producer": "https://github.com/Agenticstiger/flux-engine",
+          "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+          "dataset": [],
+          "fields": {
+            "sr_item_sk": {
+              "inputFields": []
+            },
+            "sr_return_amt": {
+              "inputFields": []
+            },
+            "sr_returned_date_sk": {
+              "inputFields": []
+            },
+            "sr_ticket_number": {
+              "inputFields": []
+            }
+          }
+        }
+      }
+    }
+  ],
+  "format": "flux-column-provenance/1",
+  "simulationId": "sim-store-star"
+}

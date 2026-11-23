@@ -1,0 +1,85 @@
+{
+  "keyed": {
+    "kernels": {
+      "0.2.0": {
+        "emits": {
+          "account": "sha256:604d23f747fd529c2dfcf85d8d7fb2aec0b98ee2da9f4d58fa734f62570ac131",
+          "customer": "sha256:e6d0ce0ce8f5ec78da56f3e575261c80cf76539726364ba87a1079d40d967c6d",
+          "invoice": "sha256:3743cce6eed7ad6f2e96704b8498ae2a204bd07f6356da3abc7dee188caf5d62",
+          "payment": "sha256:6cdb2c431aaab0191a3460d18e8404f3cbd5f97e677739a19400dbd24946e858"
+        },
+        "generatorDigests": {
+          "account": "sha256:44a259e613597ed597bab987c32ebb68d1231d69bc59aea7ab94c9ff992fde06",
+          "customer": "sha256:682b3b1a9f47b490171b0f347df4241a77fe189657b5057879d84dfc7403941d",
+          "invoice": "sha256:fe6b2a55a1ea50a985020523e5f9d9dffd295b616eb1b23e1cfd7558d1bd2b00",
+          "payment": "sha256:122362491b29473f66bcd16b608c2bbd3157282a17aedca92e80787860e0aeaf"
+        },
+        "inputDigest": "sha256:c2709d68cd325cb62d94c7cae3daeadefef4c24805e09f2744fcb24a0b17e6d7",
+        "rows": {
+          "account": 150,
+          "customer": 60,
+          "invoice": 900,
+          "payment": 700
+        },
+        "runDigest": "sha256:613dfa44f523dc6d1a50aea0df49851aed994365ba388b31c3d89a392f887cf1",
+        "runId": "52c0b187f448225a"
+      }
+    },
+    "refusal": {
+      "code": "FLX-3105",
+      "kernel": "0.1.0"
+    },
+    "source": "this branch after the dates steps keep to the declared range: the frozen files in tests/golden/temporal/keyed (the fixture's lifetimes and within chain, with a duration on the customer and account lifetimes), planned and applied with --jobs 1 and --jobs 4 giving the same values. A guard, not a baseline: a later change to periods, targets, rates or exposure must not move these rows"
+  },
+  "keyless": {
+    "kernels": {
+      "0.1.0": {
+        "emits": {
+          "account": "sha256:755da8412504be1c3445a1d0e847461e36a298c702d4173f7def4f3c82c27762",
+          "customer": "sha256:ac56369c0e5a6c4ed917ac1f95eee4c85d86e5f05d3e5eae6e20d1270875a2ee",
+          "invoice": "sha256:02777145563b0e7f2bf3dcfa78702ec260d86c6f869ddf340a0ae4a5498657ca",
+          "payment": "sha256:b4383221ccc6b83377825e224f0cad5057980b79fdfce1d6969bfdd9ae589d68"
+        },
+        "generatorDigests": {
+          "account": "sha256:cd4a80917e8b8d82c2b4d46f86440edd74d2d44665bb25bd2c509cc412aeb76e",
+          "customer": "sha256:098c00c53474c4e8fdb08db20b8d8a5a193a70f747d2cbb74b0f364e36888c58",
+          "invoice": "sha256:6118458a380d077b1453a17ea4844dc9997500fc99ed1683fbb958201ace8a9b",
+          "payment": "sha256:d3e083db8d0a5258e261b2bc363bf9ff53a29aa6dcd98684fe93a1008b3043ea"
+        },
+        "inputDigest": "sha256:487ae0dc52d9acb963c4c279bacccef6c0e31e907236a928ee42777204d9433b",
+        "rows": {
+          "account": 150,
+          "customer": 60,
+          "invoice": 900,
+          "payment": 700
+        },
+        "runDigest": "sha256:3513127246d9d879fc7c3ed58119dd13630694c9585e79f272957103cd154c24",
+        "runId": "0f2f464c264bb5fc"
+      },
+      "0.2.0": {
+        "emits": {
+          "account": "sha256:f6a919e9d71a609d0429ce4643658d898d63b3be980b4e72e5cc20803033cec1",
+          "customer": "sha256:f06ac89055e37f6a72bef427e4ae9288a0f65fcd12b9e7c2f823a9fad1d1fb03",
+          "invoice": "sha256:db2041b9d08b0e6c0ee07e12a00680769c2b8adea836f7119843a2b6dd1fd008",
+          "payment": "sha256:395762ea45bfaf52fe31ad1369f5b20dfb7c61f485b2c02ce21029eb1d8376e4"
+        },
+        "generatorDigests": {
+          "account": "sha256:959cd3c1e2fd4c5b265e79dfd171fe4ed5c3b461507632e4266a96811eb01be8",
+          "customer": "sha256:6d9cf292739453fffc678540e4e92788b1d3d17edcfa2787ea4817db4b9d6e54",
+          "invoice": "sha256:5d7de8d262fa643959a92e490f164cc91cfbdd37062d08480e1e1df48aa66a3c",
+          "payment": "sha256:b980a1d5a6f9de047408bd942bf4c7ec0c55360b711a22f74bd6a0b833612a7d"
+        },
+        "inputDigest": "sha256:ce7a1d6c1c63aee787a6cd92ef57f56218655ceba94c5518d768f2e8d9509c6b",
+        "rows": {
+          "account": 150,
+          "customer": 60,
+          "invoice": 900,
+          "payment": 700
+        },
+        "runDigest": "sha256:4dcb94ae2f74fd917a20c88feec05b79e78afd128b89d0c39dfacd49ae36ad1a",
+        "runId": "901b9eddf2c1d025"
+      }
+    },
+    "source": "origin/main at 1c317c0c41faebc0c5cbe1726f4a6ebb8db6af9c: the frozen files in tests/golden/temporal/keyless planned and applied by that checkout's own fluxsim, with --jobs 1 and --jobs 4 giving the same values"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "emit-account": 120,
+  "emit-customer": 40,
+  "emit-invoice": 1200
+}

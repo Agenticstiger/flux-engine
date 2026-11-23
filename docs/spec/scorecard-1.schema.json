@@ -1,0 +1,452 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-1-0/FluxScorecard.json",
+  "title": "FLUX scorecard, format 1-1-0",
+  "description": "A run scored against the profile its Simulation pins: per property, per table, per dimension and overall, with the declared thresholds and each emit's minCredibility read against the computed scores. Counts are JSON integers and every other number is an exact decimal or a reduced fraction written as a string. The shape is checked here; docs/spec/SCORECARD-SPEC.md states how each number is formed.",
+  "type": "object",
+  "required": [
+    "_producer",
+    "_schemaURL",
+    "run",
+    "profile",
+    "met",
+    "overall",
+    "dimensions",
+    "tables",
+    "thresholds",
+    "shapeFlags",
+    "intervals"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_producer": {
+      "type": "string",
+      "format": "uri",
+      "description": "The tool that wrote the scorecard (OpenLineage BaseFacet)."
+    },
+    "_schemaURL": {
+      "enum": [
+        "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-0-0/FluxScorecard.json",
+        "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-1-0/FluxScorecard.json"
+      ],
+      "description": "The $id of the format the document was written in (OpenLineage BaseFacet). Format 1-1-0 adds the shape flags and changes nothing format 1-0-0 says."
+    },
+    "run": {
+      "type": "object",
+      "description": "The run the scorecard was formed for.",
+      "required": ["runId", "planDigest", "runDigest"],
+      "additionalProperties": false,
+      "properties": {
+        "runId": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+        "planDigest": {"$ref": "#/$defs/Digest"},
+        "runDigest": {"$ref": "#/$defs/Digest"}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "description": "The profile the run was scored against, by its pinned digest.",
+      "required": ["digest"],
+      "additionalProperties": false,
+      "properties": {
+        "digest": {"$ref": "#/$defs/Digest"}
+      }
+    },
+    "met": {
+      "type": "boolean",
+      "description": "Every declared threshold is met and every measured minCredibility is reached."
+    },
+    "overall": {"$ref": "#/$defs/Overall"},
+    "dimensions": {
+      "type": "array",
+      "description": "The eight dimensions, always all eight, in this order.",
+      "prefixItems": [
+        {"$ref": "#/$defs/Dimension", "properties": {"dimension": {"const": "structure"}}},
+        {"$ref": "#/$defs/Dimension", "properties": {"dimension": {"const": "marginals"}}},
+        {"$ref": "#/$defs/Dimension", "properties": {"dimension": {"const": "joint"}}},
+        {"$ref": "#/$defs/Dimension", "properties": {"dimension": {"const": "crossTable"}}},
+        {"$ref": "#/$defs/Dimension", "properties": {"dimension": {"const": "temporal"}}},
+        {"$ref": "#/$defs/Dimension", "properties": {"dimension": {"const": "invariants"}}},
+        {"$ref": "#/$defs/Dimension", "properties": {"dimension": {"const": "queries"}}},
+        {"$ref": "#/$defs/Dimension", "properties": {"dimension": {"const": "defects"}}}
+      ],
+      "minItems": 8,
+      "items": false
+    },
+    "tables": {
+      "type": "array",
+      "description": "One entry per emit of the run, sorted by exposeId.",
+      "items": {"$ref": "#/$defs/Table"}
+    },
+    "thresholds": {
+      "type": "array",
+      "description": "The thresholds the run's plan records, overall first, then dimensions, then tables.",
+      "items": {"$ref": "#/$defs/Threshold"}
+    },
+    "shapeFlags": {
+      "description": "Per-column shape checks against the pinned profile (SCORECARD-SPEC.md §6). They inform: no flag withholds an emit.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "A scorecard formed without them, and every format 1-0-0 document.",
+          "required": ["status"],
+          "additionalProperties": false,
+          "properties": {
+            "status": {"const": "not checked"}
+          }
+        },
+        {"$ref": "#/$defs/ShapeFlags"}
+      ]
+    },
+    "intervals": {
+      "type": "object",
+      "description": "Confidence intervals of sampled estimates (sample-based verification). Not built in format 1-0-0.",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {"const": "not computed"}
+      }
+    }
+  },
+  "$defs": {
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Exact": {
+      "type": "string",
+      "description": "An exact rational: a terminating decimal, or a reduced fraction numerator/denominator.",
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$|^-?[1-9][0-9]*/[1-9][0-9]*$"
+    },
+    "Score": {
+      "description": "A score in [0, 1], exact, or null when nothing was scored.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "string",
+          "pattern": "^(0|1|0\\.[0-9]*[1-9]|[1-9][0-9]*/[1-9][0-9]*)$"
+        }
+      ]
+    },
+    "Weight": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$|^[1-9][0-9]*/[1-9][0-9]*$"
+    },
+    "Counts": {
+      "type": "object",
+      "description": "How many properties the score could use.",
+      "required": ["properties", "scored", "censored", "refused"],
+      "additionalProperties": false,
+      "properties": {
+        "properties": {"type": "integer", "minimum": 0},
+        "scored": {"type": "integer", "minimum": 0},
+        "censored": {"type": "integer", "minimum": 0},
+        "refused": {"type": "integer", "minimum": 0}
+      }
+    },
+    "Overall": {
+      "type": "object",
+      "required": ["status", "score", "counts"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {"enum": ["measured", "not measured"]},
+        "score": {"$ref": "#/$defs/Score"},
+        "counts": {"$ref": "#/$defs/Counts"}
+      }
+    },
+    "Dimension": {
+      "type": "object",
+      "required": ["dimension", "status", "score", "weight", "counts"],
+      "additionalProperties": false,
+      "properties": {
+        "dimension": {
+          "enum": [
+            "structure",
+            "marginals",
+            "joint",
+            "crossTable",
+            "temporal",
+            "invariants",
+            "queries",
+            "defects"
+          ]
+        },
+        "status": {"enum": ["measured", "not measured"]},
+        "score": {"$ref": "#/$defs/Score"},
+        "weight": {"$ref": "#/$defs/Weight"},
+        "counts": {"$ref": "#/$defs/Counts"}
+      }
+    },
+    "Refusal": {
+      "type": "object",
+      "description": "A fail-closed condition: its code, and a reason that names columns, rows and counts, never a value.",
+      "required": ["code", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {"type": "string", "pattern": "^FLX-[0-9]{4}$"},
+        "reason": {"type": "string"}
+      }
+    },
+    "Property": {
+      "type": "object",
+      "required": [
+        "propertyId",
+        "property",
+        "statistic",
+        "columns",
+        "dimension",
+        "outcome",
+        "score",
+        "weight",
+        "groups",
+        "tolerance",
+        "margin",
+        "refusals"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "propertyId": {"type": "string", "minLength": 1},
+        "property": {
+          "enum": [
+            "mean",
+            "marginalHistogram",
+            "levelHistogram",
+            "support",
+            "correlation",
+            "quantile"
+          ]
+        },
+        "statistic": {"type": "string", "pattern": "^[a-z][A-Za-z0-9]*/[1-9][0-9]*$"},
+        "columns": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "minItems": 1,
+          "maxItems": 2
+        },
+        "groupBy": {"type": "string", "minLength": 1},
+        "dimension": {
+          "enum": [
+            "structure",
+            "marginals",
+            "joint",
+            "crossTable",
+            "temporal",
+            "invariants",
+            "queries",
+            "defects"
+          ]
+        },
+        "outcome": {"enum": ["within", "outside", "censored", "refused"]},
+        "score": {"$ref": "#/$defs/Score"},
+        "weight": {"$ref": "#/$defs/Weight"},
+        "groups": {
+          "type": "object",
+          "description": "Groups by ordinal in the NFC-sorted group order, never by key.",
+          "required": ["scored", "censored", "outside"],
+          "additionalProperties": false,
+          "properties": {
+            "scored": {"type": "integer", "minimum": 0},
+            "censored": {"type": "integer", "minimum": 0},
+            "outside": {
+              "type": "array",
+              "items": {"type": "integer", "minimum": 0},
+              "uniqueItems": true
+            }
+          }
+        },
+        "tolerance": {
+          "type": "object",
+          "description": "The tolerance as declared.",
+          "additionalProperties": {"type": "string"}
+        },
+        "margin": {
+          "description": "The compiled margin, or null for a kind that has none.",
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/Exact"}]
+        },
+        "refusals": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Refusal"}
+        }
+      }
+    },
+    "Assertion": {
+      "type": "object",
+      "description": "One entry of OpenLineage's DataQualityAssertionsDatasetFacet 1-1-0.",
+      "required": ["assertion", "success", "severity", "name", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "assertion": {"type": "string"},
+        "success": {"type": "boolean"},
+        "column": {"type": "string"},
+        "severity": {"const": "error"},
+        "name": {"type": "string"},
+        "params": {"type": "object"}
+      }
+    },
+    "Assertions": {
+      "type": "object",
+      "required": ["_producer", "_schemaURL", "assertions"],
+      "additionalProperties": false,
+      "properties": {
+        "_producer": {"type": "string", "format": "uri"},
+        "_schemaURL": {
+          "const": "https://openlineage.io/spec/facets/1-1-0/DataQualityAssertionsDatasetFacet.json#/$defs/DataQualityAssertionsDatasetFacet"
+        },
+        "assertions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Assertion"}
+        }
+      }
+    },
+    "Credibility": {
+      "type": "object",
+      "description": "The emit's minCredibility, read against the table's computed score when it has one.",
+      "required": ["minCredibility", "basis", "score", "met"],
+      "additionalProperties": false,
+      "properties": {
+        "minCredibility": {"type": "string"},
+        "basis": {"enum": ["measured", "declared"]},
+        "score": {"$ref": "#/$defs/Score"},
+        "met": {"type": ["boolean", "null"]}
+      }
+    },
+    "Table": {
+      "type": "object",
+      "required": [
+        "exposeId",
+        "declaresFidelity",
+        "status",
+        "score",
+        "counts",
+        "refusals",
+        "properties",
+        "dataQualityAssertions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "exposeId": {"type": "string", "minLength": 1},
+        "declaresFidelity": {"type": "boolean"},
+        "status": {"enum": ["measured", "not measured", "refused"]},
+        "score": {"$ref": "#/$defs/Score"},
+        "counts": {"$ref": "#/$defs/Counts"},
+        "refusals": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Refusal"}
+        },
+        "properties": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Property"}
+        },
+        "dataQualityAssertions": {"$ref": "#/$defs/Assertions"},
+        "credibility": {"$ref": "#/$defs/Credibility"}
+      }
+    },
+    "Threshold": {
+      "type": "object",
+      "required": ["target", "operator", "value", "score", "met"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string",
+          "pattern": "^(overall|dimensions\\.(structure|marginals|joint|crossTable|temporal|invariants|queries|defects)|tables\\..+)$"
+        },
+        "operator": {"enum": ["mustBeGreaterOrEqualTo", "mustBeGreaterThan"]},
+        "value": {"type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$"},
+        "score": {"$ref": "#/$defs/Score"},
+        "met": {"type": "boolean"}
+      }
+    },
+    "ShapeFlags": {
+      "type": "object",
+      "description": "Every emit of the run, every column the profile describes, and the flags raised.",
+      "required": ["status", "level", "tests", "testLevel", "tables"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {"const": "checked"},
+        "level": {"$ref": "#/$defs/Exact"},
+        "tests": {"type": "integer", "minimum": 0},
+        "testLevel": {"$ref": "#/$defs/Exact"},
+        "tables": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ShapeTable"}
+        }
+      }
+    },
+    "ShapeTable": {
+      "type": "object",
+      "required": ["exposeId", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "exposeId": {"type": "string"},
+        "status": {"enum": ["checked", "refused", "not profiled"]},
+        "columns": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ShapeColumn"}
+        },
+        "code": {"type": "string", "pattern": "^FLX-[0-9]{4}$"},
+        "reason": {"type": "string"}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "checked"}}}, "then": {"required": ["columns"]}},
+        {"if": {"properties": {"status": {"const": "refused"}}}, "then": {"required": ["code", "reason"]}}
+      ]
+    },
+    "ShapeColumn": {
+      "type": "object",
+      "description": "One column the profile describes, in counts: no value of the data.",
+      "required": ["column", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "column": {"type": "string"},
+        "status": {"enum": ["checked", "refused", "absent"]},
+        "records": {"type": "integer", "minimum": 0},
+        "distinct": {"type": "integer", "minimum": 0},
+        "flags": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/ShapeFlag"}
+        },
+        "code": {"type": "string", "pattern": "^FLX-[0-9]{4}$"},
+        "reason": {"type": "string"}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "checked"}}}, "then": {"required": ["records", "distinct", "flags"]}},
+        {"if": {"properties": {"status": {"const": "refused"}}}, "then": {"required": ["code", "reason"]}}
+      ]
+    },
+    "ShapeFlag": {
+      "description": "One flag, named after ydata-profiling's alert where one fits.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["alert", "cells"],
+          "additionalProperties": false,
+          "properties": {
+            "alert": {"const": "EMPTY_BINS"},
+            "cells": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["alert", "cell", "count"],
+          "additionalProperties": false,
+          "properties": {
+            "alert": {"const": "IMBALANCE"},
+            "cell": {"oneOf": [{"type": "integer", "minimum": 0}, {"type": "null"}]},
+            "count": {"type": "integer", "minimum": 1}
+          }
+        },
+        {
+          "type": "object",
+          "required": ["alert"],
+          "additionalProperties": false,
+          "properties": {
+            "alert": {"enum": ["CONSTANT", "HIGH_CARDINALITY", "LOW_CARDINALITY"]}
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+fluxVersion: 0.5.0
+kind: Journey
+id: jr-renewal
+name: Renewal Journey
+metadata:
+  owner:
+    team: billing
+spec:
+  trigger:
+    signalRef: sig-renewal-due
+  intervention:
+    treatmentRef: tr-retention-offer
+    action: offer_renewal
+  taxonomyRef: jt-subscriber-lifecycle
+  personaReactions:
+    persona-basic:
+      successProbability: 0.5
+      outcome: renewed
+      nextState: active
+    persona-premium:
+      successProbability: 0.6
+      outcome: renewed
+      nextState: active

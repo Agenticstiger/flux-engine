@@ -1,0 +1,16 @@
+fluxVersion: 0.5.0
+kind: Module
+id: module-renewal
+name: Renewal Module
+metadata:
+  owner:
+    team: billing
+version: 1.0.0
+spec:
+  resources:
+  - sig-renewal-due
+  - jr-renewal
+  binds:
+  - port: event-envelope
+    config:
+      spec: cloudevents/1.0

@@ -1,0 +1,24 @@
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: private.telco
+name: Private telco
+metadata:
+  owner:
+    team: telco-team
+exposes:
+  - exposeId: subscriber
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/subscriber.parquet }
+    contract:
+      schema:
+        - { name: subscriber_id, type: INT, required: true }
+        - { name: region, type: "enum('east','north','west')", required: true }
+        - { name: plan, type: "enum('basic','pro')", required: true }
+        - { name: channel, type: "enum('online','store')", required: true }
+        - { name: tier, type: "enum('gold','silver')", required: true }
+    semantics:
+      entities:
+        - { name: subscriber, type: primary, expr: subscriber_id }

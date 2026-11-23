@@ -1,0 +1,6 @@
+{
+  "emit-account": 300,
+  "emit-invoice": 1200,
+  "emit-invoice_line": 4000,
+  "emit-product": 26
+}

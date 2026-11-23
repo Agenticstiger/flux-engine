@@ -1,0 +1,353 @@
+{
+  "contract": {
+    "exposes": [
+      {
+        "binding": {
+          "format": "glue_table",
+          "location": {
+            "database": "retail",
+            "region": "eu-west-1",
+            "table": "date_dim"
+          },
+          "platform": "aws"
+        },
+        "contract": {
+          "invariants": [
+            {
+              "check": "d_date_sk - 2415021 = DAYS_BETWEEN(DATE '1900-01-01', d_date)",
+              "id": "date_of_key"
+            },
+            {
+              "derive": "d_year",
+              "expr": "YEARS_BETWEEN(DATE '1900-01-01', d_date) + 1900",
+              "id": "year_of_date"
+            },
+            {
+              "check": "d_year < 2000",
+              "id": "before_2000"
+            }
+          ],
+          "schema": [
+            {
+              "name": "d_date_sk",
+              "required": true,
+              "type": "INT"
+            },
+            {
+              "name": "d_year",
+              "required": true,
+              "type": "INT"
+            },
+            {
+              "name": "d_date",
+              "required": true,
+              "type": "DATE"
+            }
+          ]
+        },
+        "exposeId": "date_dim",
+        "kind": "table",
+        "semantics": {
+          "entities": [
+            {
+              "expr": "d_date_sk",
+              "name": "date",
+              "type": "primary"
+            }
+          ]
+        }
+      },
+      {
+        "binding": {
+          "format": "glue_table",
+          "location": {
+            "database": "retail",
+            "region": "eu-west-1",
+            "table": "item"
+          },
+          "platform": "aws"
+        },
+        "contract": {
+          "schema": [
+            {
+              "name": "i_item_sk",
+              "required": true,
+              "type": "INT"
+            },
+            {
+              "name": "i_brand",
+              "required": true,
+              "type": "STRING"
+            },
+            {
+              "name": "i_price",
+              "required": true,
+              "type": "DECIMAL(7,2)"
+            }
+          ]
+        },
+        "exposeId": "item",
+        "kind": "table",
+        "semantics": {
+          "entities": [
+            {
+              "expr": "i_item_sk",
+              "name": "item",
+              "type": "primary"
+            }
+          ]
+        }
+      },
+      {
+        "binding": {
+          "format": "glue_table",
+          "location": {
+            "database": "retail",
+            "region": "eu-west-1",
+            "table": "customer"
+          },
+          "platform": "aws"
+        },
+        "contract": {
+          "schema": [
+            {
+              "name": "c_customer_id",
+              "required": true,
+              "type": "STRING"
+            },
+            {
+              "name": "c_birth_year",
+              "required": true,
+              "type": "INT"
+            }
+          ]
+        },
+        "exposeId": "customer",
+        "kind": "table",
+        "semantics": {
+          "entities": [
+            {
+              "expr": "c_customer_id",
+              "name": "customer",
+              "type": "primary"
+            }
+          ]
+        }
+      },
+      {
+        "binding": {
+          "format": "glue_table",
+          "location": {
+            "database": "retail",
+            "region": "eu-west-1",
+            "table": "store_sales"
+          },
+          "platform": "aws"
+        },
+        "contract": {
+          "schema": [
+            {
+              "name": "ss_sold_date_sk",
+              "required": false,
+              "type": "INT"
+            },
+            {
+              "name": "ss_item_sk",
+              "required": true,
+              "type": "INT"
+            },
+            {
+              "name": "ss_customer_id",
+              "required": false,
+              "type": "STRING"
+            },
+            {
+              "name": "ss_ticket_number",
+              "required": true,
+              "type": "INT"
+            },
+            {
+              "name": "ss_quantity",
+              "required": true,
+              "type": "INT"
+            },
+            {
+              "name": "ss_net_paid",
+              "required": true,
+              "type": "DECIMAL(7,2)"
+            }
+          ]
+        },
+        "exposeId": "store_sales",
+        "kind": "table",
+        "semantics": {
+          "relationships": [
+            {
+              "cardinality": "many_to_one",
+              "fromColumns": [
+                "ss_sold_date_sk"
+              ],
+              "name": "sold_date",
+              "to": "date_dim",
+              "toColumns": [
+                "d_date_sk"
+              ]
+            },
+            {
+              "cardinality": "many_to_one",
+              "fromColumns": [
+                "ss_item_sk"
+              ],
+              "name": "item",
+              "to": "item",
+              "toColumns": [
+                "i_item_sk"
+              ]
+            },
+            {
+              "cardinality": "many_to_one",
+              "fromColumns": [
+                "ss_customer_id"
+              ],
+              "name": "customer",
+              "to": "customer",
+              "toColumns": [
+                "c_customer_id"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "binding": {
+          "format": "glue_table",
+          "location": {
+            "database": "retail",
+            "region": "eu-west-1",
+            "table": "store_returns"
+          },
+          "platform": "aws"
+        },
+        "contract": {
+          "schema": [
+            {
+              "name": "sr_item_sk",
+              "required": true,
+              "type": "INT"
+            },
+            {
+              "name": "sr_ticket_number",
+              "required": true,
+              "type": "INT"
+            },
+            {
+              "name": "sr_returned_date_sk",
+              "required": false,
+              "type": "INT"
+            },
+            {
+              "name": "sr_return_amt",
+              "required": true,
+              "type": "DECIMAL(7,2)"
+            }
+          ]
+        },
+        "exposeId": "store_returns",
+        "kind": "table",
+        "semantics": {
+          "relationships": [
+            {
+              "cardinality": "one_to_one",
+              "fromColumns": [
+                "sr_item_sk",
+                "sr_ticket_number"
+              ],
+              "name": "sale",
+              "to": "store_sales",
+              "toColumns": [
+                "ss_item_sk",
+                "ss_ticket_number"
+              ]
+            },
+            {
+              "cardinality": "many_to_one",
+              "fromColumns": [
+                "sr_item_sk"
+              ],
+              "name": "item",
+              "to": "item",
+              "toColumns": [
+                "i_item_sk"
+              ]
+            },
+            {
+              "cardinality": "many_to_one",
+              "fromColumns": [
+                "sr_returned_date_sk"
+              ],
+              "name": "returned_date",
+              "to": "date_dim",
+              "toColumns": [
+                "d_date_sk"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "fluidVersion": "0.7.7",
+    "id": "retail.store_star",
+    "kind": "DataProduct",
+    "metadata": {
+      "owner": {
+        "team": "growth-lab"
+      }
+    },
+    "name": "Store Star"
+  },
+  "emit": {
+    "$extension": {
+      "fidelity": {
+        "budget": {
+          "maxChecksPerState": 20,
+          "maxStateAge": "P30D"
+        },
+        "columns": {
+          "c_birth_year": {
+            "range": {
+              "max": "2005",
+              "min": "1950"
+            }
+          }
+        },
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "failureAction": "withholdBundle",
+        "properties": [
+          {
+            "column": "c_birth_year",
+            "property": "mean",
+            "tolerance": {
+              "type": "absolute",
+              "value": "5"
+            }
+          }
+        ],
+        "records": {
+          "max": 1000000,
+          "min": 1
+        }
+      },
+      "rows": 40
+    },
+    "exposeId": "customer",
+    "fluidVersion": "0.7.7",
+    "productRef": "retail.store_star",
+    "provenance": {
+      "contractDigest": "sha256:89b4675ab044d2fbb9a712079d6ba91241c41b1cd2e741a5d1938bc23a77f3a0"
+    }
+  },
+  "exposeId": "customer"
+}

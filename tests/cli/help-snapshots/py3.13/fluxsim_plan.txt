@@ -1,0 +1,102 @@
+usage: fluxsim plan [-h] [--simulation-id SIMULATION_ID] [--zone ZONE]
+                    [--kernel VERSION] [--no-stage] [--allow-generator NAME]
+                    [--scale F] [--timings] [--jobs N] [--strict-coverage]
+                    [--profile PATH] [--state-dir STATE_DIR] [-j]
+                    bundle
+
+Execute the whole pipeline once, in memory, and write down what it saw:
+inputDigest, the seed-tree paths it materialised, the per-emit seam digests,
+and each declared fidelity block as it compiled, every epsilon included.
+Writes plan.json and seed-paths.ndjson under the run directory, and stages the
+rows it generated there too, so that apply --run-id commits them instead of
+generating them again. A child table that a counts entry lays out comes out
+grouped by parent in row order, as a table loaded parent by parent does; a
+consumer that needs another order sorts it. The child's own key is laid out
+from the row index, so a number or date key in ascending order gives a
+parent's children consecutive keys, and a text or UUID key, permuted, does
+not.
+
+examples:
+  # record what a run would do
+  fluxsim plan ./bundle
+
+  # keep the run state somewhere else
+  fluxsim plan ./bundle --state-dir ./.flux
+
+  # plan the run under kernel 0.1.0
+  fluxsim plan ./bundle --kernel 0.1.0
+
+  # record the plan only, without staging rows
+  fluxsim plan ./bundle --no-stage
+
+  # plan ten times the rows, and time it
+  fluxsim plan ./bundle --scale 10 --timings
+
+arguments:
+  bundle                path to the FLUX bundle directory
+
+options:
+  -h, --help            show this help message and exit
+  --simulation-id SIMULATION_ID
+                        which Simulation document to resolve (default: the
+                        bundle's only one)
+  --zone ZONE           declared run zone, for sovereignty checks
+  --kernel VERSION      the kernel the new plan takes, one of 0.1.0, 0.2.0
+                        (default 0.2.0). The plan records it, and apply,
+                        replay, verify and ship run the kernel their plan
+                        names; 0.2.0's streams are counter-based and its
+                        continuous draws binary64 (docs/spec/KERNEL-
+                        SPEC-2.md), so its digests differ from 0.1.0's
+  --no-stage            write only plan.json and the seed paths; apply --run-
+                        id then generates the rows itself, as a plan did
+                        before it staged them (refused for a bundle that
+                        declares generator plugins, whose bytes are stored and
+                        never generated again)
+  --allow-generator NAME
+                        allow the generator plugin of that entry-point name to
+                        be imported and run, when the plan generates the rows;
+                        repeat it for each plugin the bundle declares under
+                        generators (without it the command is refused,
+                        FLX-3119, before anything is imported); a plugin is
+                        trusted code that runs with your rights, so name only
+                        plugins you have reviewed; no environment variable and
+                        no bundle key allows one
+  --scale F             multiply every emit's rows, the records bounds of its
+                        fidelity block and the span of every integer or
+                        decimal key column that declares a range, by F (above
+                        0, at most 1000000); the plan records it and apply
+                        reads it back, and 1 changes nothing; a table built
+                        from the run's events is left as it is
+  --timings             print where the time went (load, compile, each emit,
+                        framing, attestation); the numbers are wall-clock
+                        seconds, reported and recorded nowhere in a run's
+                        files
+  --jobs N              the most processes that may generate the rows of an
+                        emit declared by statistics: a number (never more than
+                        one per CPU) or auto for one per CPU; the run summary
+                        says how many it used, and the rows and every digest
+                        are the same whatever the number (default: FLUX_JOBS,
+                        else 1)
+  --strict-coverage     refuse the run when a column falls back to a type
+                        default (an optional column nothing maps onto, a DATE
+                        or TIMESTAMP column with no declaration of its own),
+                        with a table of every such column (FLX-3304), or when
+                        the contract declares what the run does not generate,
+                        such as a check without generates or, on kernel 0.1.0
+                        or in a Simulation that does not declare copies: true,
+                        sharedColumns or sharedAttribute (FLX-3305), before
+                        any row is drawn; a Simulation can ask for the same
+                        with strictCoverage: true in its extensions; without
+                        either the plan names those columns and goes on, and
+                        with this flag the rows and every digest are the same
+                        either way
+  --profile PATH        the profile document the Simulation pins under
+                        extensions['com.agentics.flux/1'].profile
+                        (docs/spec/PROFILE-SPEC.md); refused when its digest
+                        is not the pinned one, and when the Simulation pins
+                        none
+  --state-dir STATE_DIR
+                        run-state directory (default: ./.flux)
+  -j, --json            emit machine-readable JSON
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/plan.html

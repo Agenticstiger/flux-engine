@@ -1,0 +1,121 @@
+# A small store star in FLUID 0.7.7, the first version with relationships. The
+# contract declares every key FLUX generates: a primary entity per dimension,
+# and one relationship per foreign key. A return points at the sale line it
+# returns through two columns, one to one, and at that line's item.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: retail.store_star
+name: Store Star
+metadata:
+  owner:
+    team: growth-lab
+exposes:
+  - exposeId: date_dim
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: date_dim, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: d_date_sk, type: INT, required: true }
+        - { name: d_year, type: INT, required: true }
+        - { name: d_date, type: DATE, required: true }
+      invariants:
+        - id: date_of_key
+          check: "d_date_sk - 2415021 = DAYS_BETWEEN(DATE '1900-01-01', d_date)"
+        - id: year_of_date
+          derive: d_year
+          expr: "YEARS_BETWEEN(DATE '1900-01-01', d_date) + 1900"
+        - id: before_2000
+          check: "d_year < 2000"
+    semantics:
+      entities:
+        - { name: date, type: primary, expr: d_date_sk }
+  - exposeId: item
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: item, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: i_item_sk, type: INT, required: true }
+        - { name: i_brand, type: STRING, required: true }
+        - { name: i_price, type: "DECIMAL(7,2)", required: true }
+    semantics:
+      entities:
+        - { name: item, type: primary, expr: i_item_sk }
+  - exposeId: customer
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: customer, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: c_customer_id, type: STRING, required: true }
+        - { name: c_birth_year, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: customer, type: primary, expr: c_customer_id }
+  - exposeId: store_sales
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: store_sales, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: ss_sold_date_sk, type: INT, required: false }
+        - { name: ss_item_sk, type: INT, required: true }
+        - { name: ss_customer_id, type: STRING, required: false }
+        - { name: ss_ticket_number, type: INT, required: true }
+        - { name: ss_quantity, type: INT, required: true }
+        - { name: ss_net_paid, type: "DECIMAL(7,2)", required: true }
+    semantics:
+      relationships:
+        - name: sold_date
+          to: date_dim
+          fromColumns: [ss_sold_date_sk]
+          toColumns: [d_date_sk]
+          cardinality: many_to_one
+        - name: item
+          to: item
+          fromColumns: [ss_item_sk]
+          toColumns: [i_item_sk]
+          cardinality: many_to_one
+        - name: customer
+          to: customer
+          fromColumns: [ss_customer_id]
+          toColumns: [c_customer_id]
+          cardinality: many_to_one
+  - exposeId: store_returns
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: store_returns, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: sr_item_sk, type: INT, required: true }
+        - { name: sr_ticket_number, type: INT, required: true }
+        - { name: sr_returned_date_sk, type: INT, required: false }
+        - { name: sr_return_amt, type: "DECIMAL(7,2)", required: true }
+    semantics:
+      relationships:
+        - name: sale
+          to: store_sales
+          fromColumns: [sr_item_sk, sr_ticket_number]
+          toColumns: [ss_item_sk, ss_ticket_number]
+          cardinality: one_to_one
+        - name: item
+          to: item
+          fromColumns: [sr_item_sk]
+          toColumns: [i_item_sk]
+          cardinality: many_to_one
+        - name: returned_date
+          to: date_dim
+          fromColumns: [sr_returned_date_sk]
+          toColumns: [d_date_sk]
+          cardinality: many_to_one

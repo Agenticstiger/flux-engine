@@ -1,0 +1,124 @@
+# Five related tables generated together from declared statistics. Keys are
+# laid out so that none repeats; every foreign key takes a key its parent's
+# rows hold. ss_sold_date_sk declares a histogram, so sales keep its shape and
+# move to the nearest date key; the other foreign keys pick their parents.
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-store-star
+name: Related Store Tables
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  worldRef: q3-retention-world
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2026-07-01T00:00:00Z"
+    end: "2026-09-30T23:59:59Z"
+  personaRefs: [persona-pragmatic-family]
+  signalRefs: [sig-payment-aborted]
+  moduleRefs: [module-payment-recovery]
+  emits:
+    - productRef: retail.store_star
+      exposeId: date_dim
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:84f55c7aefd168d49d252ff5a89aad37bf9222a8cd2c753ea7197c1ad806258e" }
+    - productRef: retail.store_star
+      exposeId: item
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:84f55c7aefd168d49d252ff5a89aad37bf9222a8cd2c753ea7197c1ad806258e" }
+    - productRef: retail.store_star
+      exposeId: customer
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:84f55c7aefd168d49d252ff5a89aad37bf9222a8cd2c753ea7197c1ad806258e" }
+    - productRef: retail.store_star
+      exposeId: store_sales
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:84f55c7aefd168d49d252ff5a89aad37bf9222a8cd2c753ea7197c1ad806258e" }
+    - productRef: retail.store_star
+      exposeId: store_returns
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:84f55c7aefd168d49d252ff5a89aad37bf9222a8cd2c753ea7197c1ad806258e" }
+extensions:
+  com.agentics.flux/1:
+    emits:
+      date_dim:
+        rows: 365
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            d_date_sk: { range: { min: "2461042", max: "2461406" } }
+            d_year: { levels: { "2026": "1" } }
+          properties:
+            - property: mean
+              column: d_date_sk
+              tolerance: { type: absolute, value: "1" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      item:
+        rows: 200
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            i_item_sk: { range: { min: "1", max: "200" } }
+            i_brand: { support: { values: [acme, globex, initech] }, maxCardinality: 3 }
+            i_price: { range: { min: "1", max: "99" } }
+          properties:
+            - property: mean
+              column: i_price
+              tolerance: { type: absolute, value: "10" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      customer:
+        rows: 500
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            c_birth_year: { range: { min: "1950", max: "2005" } }
+          properties:
+            - property: mean
+              column: c_birth_year
+              tolerance: { type: absolute, value: "5" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      store_sales:
+        rows: 4000
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            ss_sold_date_sk:
+              nullFraction: "0.04"
+              range: { min: "2461042", max: "2461406" }
+              bins: ["2461042", "2461223", "2461406"]
+              binWeights: ["0.3", "0.7"]
+            ss_customer_id: { nullFraction: "0.05" }
+            ss_ticket_number: { range: { min: "1", max: "1000" } }
+            ss_quantity: { range: { min: "1", max: "10" } }
+            ss_net_paid: { range: { min: "1", max: "500" } }
+          properties:
+            - property: mean
+              column: ss_quantity
+              tolerance: { type: absolute, value: "1" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      store_returns:
+        rows: 300
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            sr_returned_date_sk:
+              nullFraction: "0.02"
+              range: { min: "2461142", max: "2461406" }
+            sr_return_amt: { range: { min: "1", max: "100" } }
+          properties:
+            - property: mean
+              column: sr_return_amt
+              tolerance: { type: absolute, value: "10" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle

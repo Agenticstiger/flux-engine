@@ -1,0 +1,617 @@
+fluxVersion: 0.5.0
+kind: Simulation
+id: sim-subscriptions
+name: Subscriptions
+metadata:
+  owner:
+    team: subscriptions
+spec:
+  worldRef: world-subscriptions
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: '2023-01-01T00:00:00Z'
+    end: '2027-01-01T00:00:00Z'
+  personaRefs:
+  - persona-subscriptions
+  emits:
+  - productRef: billing.subscriptions
+    exposeId: customer
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: subscription_version
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: device_version
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: invoice
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: subscription_current
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: subscription_change
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: subscription_month
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: device_current
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: device_change
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+  - productRef: billing.subscriptions
+    exposeId: device_week
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:e5033cd6cebd8bec31f606c75ae921bd3e442fef9ca543c04b6d257cf5806e35
+extensions:
+  com.agentics.flux/1:
+    history:
+    - emit: subscription_version
+      entities: 60
+      parent:
+        relationship: customer
+        minChildren: 1
+      versions:
+        levels:
+        - '1'
+        - '2'
+        - '3'
+        - '8'
+        levelWeights:
+        - '0.4'
+        - '0.3'
+        - '0.2'
+        - '0.1'
+      start:
+        bins:
+        - '2023-01-01'
+        - '2024-01-01'
+        - '2025-07-01'
+        binWeights:
+        - '0.55'
+        - '0.45'
+      length:
+        bins:
+        - '200'
+        - '400'
+        - '1000'
+        binWeights:
+        - '0.7'
+        - '0.3'
+        closed: lower
+      until: '2025-12-31'
+      chain: nextStart
+      tracked:
+      - column: plan
+        transitions:
+          basic:
+            pro: '0.6'
+            team: '0.4'
+          pro:
+            basic: '0.5'
+            team: '0.5'
+          team:
+            basic: '0.5'
+            pro: '0.5'
+      end:
+        mode: finalVersion
+        share: '0.25'
+        column: status
+        value: cancelled
+    - emit: device_version
+      entities: 30
+      length:
+        bins:
+        - '7'
+        - '30'
+        - '90'
+        binWeights:
+        - '0.6'
+        - '0.4'
+        closed: lower
+      until: '2025-12-31T00:00:00Z'
+      chain: nextStart
+      tracked:
+      - column: firmware
+        transitions:
+          v1:
+            v2: '0.7'
+            v3: '0.3'
+          v2:
+            v1: '0.5'
+            v3: '0.5'
+          v3:
+            v1: '0.5'
+            v2: '0.5'
+      end:
+        mode: closeLast
+        share: '0.3'
+        column: status
+        value: retired
+    asOf:
+    - emit: invoice
+      relationship: subscription
+      date: invoice_date
+    snapshots:
+    - emit: subscription_current
+      of: subscription_version
+    - emit: device_current
+      of: device_version
+    events:
+    - emit: subscription_change
+      of: subscription_version
+      at: changed_at
+      date: recorded_at
+      lag:
+        bins:
+        - '0'
+        - '1'
+        - '4'
+        - '20'
+        binWeights:
+        - '0.5'
+        - '0.3'
+        - '0.2'
+      op: op
+      type:
+        column: change_type
+        values:
+          c: created
+          d: deleted
+          end: ended
+          plan: plan_change
+      before:
+        before_plan: plan
+      after:
+        after_plan: plan
+    - emit: device_change
+      of: device_version
+      at: changed_at
+      date: recorded_at
+      lag:
+        bins:
+        - '0'
+        - '1'
+        - '5'
+        binWeights:
+        - '0.5'
+        - '0.5'
+      op: op
+      before:
+        before_fw: firmware
+      after:
+        after_fw: firmware
+    periods:
+    - emit: subscription_month
+      of: subscription_version
+      column: month
+      grain: month
+      match: overlap
+      kinds:
+      - count:
+          levels:
+          - '0'
+          - '1'
+          - '3'
+          levelWeights:
+          - '0.2'
+          - '0.5'
+          - '0.3'
+        when: valid_from < DATE '2024-06-01'
+        overrides:
+          kind: old
+      - count: 1
+        when: valid_from >= DATE '2024-06-01' AND month >= DATE '2024-01-01'
+        overrides:
+          kind: new
+    - emit: device_week
+      of: device_version
+      column: week
+      grain: week
+      match: end
+    emits:
+      customer:
+        rows: 50
+        fidelity:
+          encoding:
+            fractionalBits: 16
+            rounding: floor
+          records:
+            min: 1
+            max: 1000000
+          columns:
+            customer_id:
+              range:
+                min: '1'
+                max: '50'
+            region:
+              levels:
+                eu: '0.6'
+                us: '0.4'
+            signed_up_on:
+              range:
+                min: '2023-01-01'
+                max: '2025-12-31'
+          properties:
+          - property: mean
+            column: customer_id
+            tolerance:
+              type: absolute
+              value: '1000'
+          budget:
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+      subscription_version:
+        rows: 144
+        fidelity:
+          encoding:
+            fractionalBits: 16
+            rounding: floor
+          records:
+            min: 1
+            max: 1000000
+          columns:
+            subscription_sk:
+              range:
+                min: '1'
+                max: '144'
+            subscription_id:
+              range:
+                min: '1'
+                max: '60'
+            valid_from:
+              range:
+                min: '2023-01-01'
+                max: '2025-12-31'
+            valid_to:
+              range:
+                min: '2023-01-01'
+                max: '2025-12-31'
+            plan:
+              levels:
+                basic: '0.5'
+                pro: '0.3'
+                team: '0.2'
+            status:
+              levels:
+                active: '1'
+                cancelled: '0'
+            started_on:
+              range:
+                min: '2023-01-01'
+                max: '2025-12-31'
+          properties:
+          - property: mean
+            column: subscription_sk
+            tolerance:
+              type: absolute
+              value: '1000'
+          budget:
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+      device_version:
+        rows: 90
+        fidelity:
+          encoding:
+            fractionalBits: 16
+            rounding: floor
+          records:
+            min: 1
+            max: 1000000
+          columns:
+            device_sk:
+              range:
+                min: '1'
+                max: '90'
+            device_id:
+              range:
+                min: '1'
+                max: '35'
+            valid_from:
+              range:
+                min: '2023-01-01T00:00:00Z'
+                max: '2025-12-31T00:00:00Z'
+            valid_to:
+              range:
+                min: '2023-01-01T00:00:00Z'
+                max: '2025-12-31T00:00:00Z'
+            firmware:
+              levels:
+                v1: '0.5'
+                v2: '0.3'
+                v3: '0.2'
+            status:
+              levels:
+                active: '1'
+                retired: '0'
+          properties:
+          - property: mean
+            column: device_sk
+            tolerance:
+              type: absolute
+              value: '1000'
+          budget:
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+      invoice:
+        rows: 600
+        fidelity:
+          encoding:
+            fractionalBits: 16
+            rounding: floor
+          records:
+            min: 1
+            max: 1000000
+          columns:
+            invoice_id:
+              range:
+                min: '1'
+                max: '600'
+            subscription_id:
+              range:
+                min: '1'
+                max: '60'
+            invoice_date:
+              range:
+                min: '2026-01-01'
+                max: '2026-12-31'
+          properties:
+          - property: mean
+            column: invoice_id
+            tolerance:
+              type: absolute
+              value: '1000'
+          budget:
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+      subscription_current:
+        fidelity:
+          encoding:
+            fractionalBits: 16
+            rounding: floor
+          records:
+            min: 1
+            max: 1000000
+          columns:
+            subscription_id:
+              range:
+                min: '1'
+                max: '60'
+            plan:
+              levels:
+                basic: '0.5'
+                pro: '0.3'
+                team: '0.2'
+            status:
+              levels:
+                active: '1'
+                cancelled: '0'
+            started_on:
+              range:
+                min: '2023-01-01'
+                max: '2025-12-31'
+          properties:
+          - property: mean
+            column: subscription_id
+            tolerance:
+              type: absolute
+              value: '1000'
+          budget:
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+      subscription_change:
+        fidelity:
+          encoding:
+            fractionalBits: 16
+            rounding: floor
+          records:
+            min: 1
+            max: 1000000
+          columns:
+            event_id:
+              range:
+                min: '1'
+                max: '1000000000'
+            subscription_id:
+              range:
+                min: '1'
+                max: '60'
+            op:
+              levels:
+                c: '1'
+            change_type:
+              levels:
+                created: '1'
+            changed_at:
+              range:
+                min: '2023-01-01'
+                max: '2025-12-31'
+            recorded_at:
+              range:
+                min: '2023-01-01'
+                max: '2025-12-31'
+            before_plan:
+              levels:
+                basic: '0.5'
+                pro: '0.3'
+                team: '0.2'
+            after_plan:
+              levels:
+                basic: '0.5'
+                pro: '0.3'
+                team: '0.2'
+            channel:
+              levels:
+                web: '0.5'
+                app: '0.5'
+          properties:
+          - property: mean
+            column: event_id
+            tolerance:
+              type: absolute
+              value: '1000000000'
+          budget:
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+      subscription_month:
+        fidelity:
+          encoding:
+            fractionalBits: 16
+            rounding: floor
+          records:
+            min: 1
+            max: 1000000
+          columns:
+            period_id:
+              range:
+                min: '1'
+                max: '1000000000'
+            subscription_id:
+              range:
+                min: '1'
+                max: '60'
+            month:
+              range:
+                min: '2023-01-01'
+                max: '2026-12-31'
+            plan:
+              levels:
+                basic: '0.5'
+                pro: '0.3'
+                team: '0.2'
+            kind:
+              levels:
+                plain: '1'
+            usage:
+              range:
+                min: '1'
+                max: '500'
+          properties:
+          - property: mean
+            column: period_id
+            tolerance:
+              type: absolute
+              value: '1000000000'
+          budget:
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+      device_current:
+        fidelity:
+          encoding: &id002
+            fractionalBits: 16
+            rounding: floor
+          records: &id003
+            min: 1
+            max: 1000000
+          properties:
+          - property: mean
+            column: device_id
+            tolerance:
+              type: absolute
+              value: '1000000000'
+          budget: &id004
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+          columns:
+            device_id:
+              range:
+                min: '1'
+                max: '35'
+            valid_from: &id001
+              range:
+                min: '2023-01-01T00:00:00Z'
+                max: '2025-12-31T00:00:00Z'
+            valid_to: *id001
+            firmware: &id005
+              levels:
+                v1: '0.5'
+                v2: '0.3'
+                v3: '0.2'
+            status:
+              levels:
+                active: '1'
+                retired: '0'
+      device_change:
+        fidelity:
+          encoding: *id002
+          records: *id003
+          properties:
+          - property: mean
+            column: event_id
+            tolerance:
+              type: absolute
+              value: '1000000000'
+          budget: *id004
+          failureAction: withholdBundle
+          columns:
+            event_id:
+              range:
+                min: '1'
+                max: '1000000000'
+            device_id:
+              range:
+                min: '1'
+                max: '35'
+            op:
+              levels:
+                c: '1'
+            changed_at: *id001
+            recorded_at: *id001
+            before_fw: *id005
+            after_fw: *id005
+      device_week:
+        fidelity:
+          encoding: *id002
+          records: *id003
+          properties:
+          - property: mean
+            column: period_id
+            tolerance:
+              type: absolute
+              value: '1000000000'
+          budget: *id004
+          failureAction: withholdBundle
+          columns:
+            period_id:
+              range:
+                min: '1'
+                max: '1000000000'
+            device_id:
+              range:
+                min: '1'
+                max: '35'
+            week:
+              range:
+                min: '2023-01-01'
+                max: '2026-12-31'
+            firmware: *id005

@@ -1,0 +1,239 @@
+# plans.fluid.yml (tests/fixtures/history-init) with the exposes that read plan_version, by how much of
+# a projection rule of ADR 0027 section 9 each meets. plan_invoice is read by no rule; plan_current, plan_change and plan_month meet a
+# rule whole; the others each miss one part of one rule. The profile is built in
+# tests/author/test_projection_init.py.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: billing.plans
+name: Plans
+metadata:
+  owner:
+    team: plans-team
+exposes:
+  - exposeId: account
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/account.parquet }
+    contract:
+      schema:
+        - { name: account_id, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: account, type: primary, expr: account_id }
+  - exposeId: plan_version
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_version.parquet }
+    contract:
+      schema:
+        - { name: version_id, type: INT, required: true }
+        - { name: plan_id, type: INT, required: true }
+        - { name: account_id, type: INT, required: true }
+        - { name: valid_from, type: DATE, required: true }
+        - { name: valid_to, type: DATE, required: false }
+        - { name: tier, type: STRING, required: true }
+        - { name: channel, type: STRING, required: true }
+        - { name: signed_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: plan_version, type: primary, expr: version_id }
+        - { name: plan, type: natural, expr: plan_id }
+      dimensions:
+        - { name: valid_from, type: time, typeParams: { validityParams: { isStart: true } } }
+        - { name: valid_to, type: time, typeParams: { validityParams: { isEnd: true } } }
+        - { name: tier, type: categorical }
+        - { name: channel, type: categorical }
+        - { name: signed_on, type: time }
+      relationships:
+        - name: account
+          to: account
+          fromColumns: [account_id]
+          toColumns: [account_id]
+          cardinality: many_to_one
+  - exposeId: plan_invoice
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_invoice.parquet }
+    contract:
+      schema:
+        - { name: invoice_id, type: INT, required: true }
+        - { name: plan_id, type: INT, required: true }
+        - { name: amount, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: invoice, type: primary, expr: invoice_id }
+      dimensions:
+        - { name: amount, type: categorical }
+      relationships:
+        - name: plan
+          to: plan_version
+          fromColumns: [plan_id]
+          toColumns: [plan_id]
+          cardinality: many_to_one
+  - exposeId: plan_current
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_current.parquet }
+    contract:
+      schema:
+        - { name: plan_id, type: INT, required: true }
+        - { name: tier, type: STRING, required: true }
+        - { name: channel, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: plan, type: primary, expr: plan_id }
+      dimensions:
+        - { name: tier, type: categorical }
+        - { name: channel, type: categorical }
+  - exposeId: plan_stale
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_stale.parquet }
+    contract:
+      schema:
+        - { name: plan_id, type: INT, required: true }
+        - { name: tier, type: STRING, required: true }
+        - { name: owner, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: plan, type: primary, expr: plan_id }
+      dimensions:
+        - { name: tier, type: categorical }
+        - { name: owner, type: categorical }
+  - exposeId: plan_change
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_change.parquet }
+    contract:
+      schema:
+        - { name: event_id, type: INT, required: true }
+        - { name: plan_id, type: INT, required: true }
+        - { name: op, type: "enum('c','u','d')", required: true }
+        - { name: recorded_on, type: DATE, required: true }
+        - { name: before_tier, type: STRING, required: false }
+        - { name: after_tier, type: STRING, required: false }
+        - { name: before_channel, type: STRING, required: true }
+        - { name: after_channel, type: STRING, required: false }
+    semantics:
+      defaultAggTimeDimension: recorded_on
+      entities:
+        - { name: event, type: primary, expr: event_id }
+      dimensions:
+        - { name: op, type: categorical }
+        - { name: recorded_on, type: time }
+        - { name: before_tier, type: categorical }
+        - { name: after_tier, type: categorical }
+        - { name: before_channel, type: categorical }
+        - { name: after_channel, type: categorical }
+      relationships:
+        - name: plan
+          to: plan_version
+          fromColumns: [plan_id]
+          toColumns: [plan_id]
+          cardinality: many_to_one
+  - exposeId: plan_log
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_log.parquet }
+    contract:
+      schema:
+        - { name: event_id, type: INT, required: true }
+        - { name: plan_id, type: INT, required: true }
+        - { name: op, type: "enum('c','u')", required: true }
+        - { name: recorded_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: event, type: primary, expr: event_id }
+      dimensions:
+        - { name: op, type: categorical }
+        - { name: recorded_on, type: time }
+      relationships:
+        - name: plan
+          to: plan_version
+          fromColumns: [plan_id]
+          toColumns: [plan_id]
+          cardinality: many_to_one
+  - exposeId: plan_month
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_month.parquet }
+    contract:
+      schema:
+        - { name: period_id, type: INT, required: true }
+        - { name: plan_id, type: INT, required: true }
+        - { name: month, type: DATE, required: true }
+        - { name: tier, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: period, type: primary, expr: period_id }
+      dimensions:
+        - { name: month, type: time, typeParams: { timeGranularity: month } }
+        - { name: tier, type: categorical }
+      relationships:
+        - name: plan
+          to: plan_version
+          fromColumns: [plan_id]
+          toColumns: [plan_id]
+          cardinality: many_to_one
+  - exposeId: plan_week
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_week.parquet }
+    contract:
+      schema:
+        - { name: period_key, type: STRING, required: true }
+        - { name: plan_id, type: INT, required: true }
+        - { name: week, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: period, type: primary, expr: period_key }
+      dimensions:
+        - { name: week, type: time, typeParams: { timeGranularity: week } }
+      relationships:
+        - name: plan
+          to: plan_version
+          fromColumns: [plan_id]
+          toColumns: [plan_id]
+          cardinality: many_to_one
+  - exposeId: plan_span
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_span.parquet }
+    contract:
+      schema:
+        - { name: period_id, type: INT, required: true }
+        - { name: plan_id, type: INT, required: true }
+        - { name: first_day, type: DATE, required: true }
+        - { name: last_day, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: period, type: primary, expr: period_id }
+      dimensions:
+        - { name: first_day, type: time, typeParams: { timeGranularity: day } }
+        - { name: last_day, type: time, typeParams: { timeGranularity: day } }
+      relationships:
+        - name: plan
+          to: plan_version
+          fromColumns: [plan_id]
+          toColumns: [plan_id]
+          cardinality: many_to_one

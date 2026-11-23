@@ -1,0 +1,18 @@
+fluxVersion: "0.5.0"
+kind: Module
+id: module-payment-recovery
+name: Payment Recovery Module
+version: 2.1.3
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  resources: [sig-payment-aborted, det-payment-aborted-burst, jr-payment-recovery, cam-payment-recovery]
+  binds:
+    - { port: event-envelope, config: { spec: cloudevents/1.0 } }
+    - { port: fluid-contract }
+    - port: ossie-model            # RFC-07: the bundle's governed measures
+      config:
+        model: telco
+        measures:
+          - { name: saved_customers, type: count }

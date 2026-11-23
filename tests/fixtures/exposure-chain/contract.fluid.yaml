@@ -1,0 +1,133 @@
+fluidVersion: 0.7.7
+kind: DataProduct
+id: shop.silver.subs
+name: Subscriptions shop
+metadata:
+  owner:
+    team: shop
+exposes:
+- exposeId: customer
+  kind: table
+  contract:
+    schema:
+    - name: customer_id
+      type: STRING
+      required: true
+    - name: signed_up
+      type: DATE
+      required: true
+    - name: closed_on
+      type: DATE
+    - name: plan
+      type: STRING
+  semantics:
+    entities:
+    - name: customer
+      type: primary
+      expr: customer_id
+  binding:
+    platform: local
+    format: parquet
+    location:
+      path: ./out/customer.parquet
+- exposeId: subscription
+  kind: table
+  contract:
+    schema:
+    - name: subscription_id
+      type: STRING
+      required: true
+    - name: customer_id
+      type: STRING
+      required: true
+    - name: starts_on
+      type: DATE
+      required: true
+    - name: ends_on
+      type: DATE
+    - name: tier
+      type: STRING
+  semantics:
+    entities:
+    - name: subscription
+      type: primary
+      expr: subscription_id
+    relationships:
+    - name: subscription_to_customer
+      to: customer
+      fromColumns:
+      - customer_id
+      toColumns:
+      - customer_id
+      cardinality: many_to_one
+  binding:
+    platform: local
+    format: parquet
+    location:
+      path: ./out/subscription.parquet
+- exposeId: invoice
+  kind: table
+  contract:
+    schema:
+    - name: invoice_id
+      type: STRING
+      required: true
+    - name: subscription_id
+      type: STRING
+      required: true
+    - name: issued_on
+      type: DATE
+      required: true
+    - name: amount
+      type: INTEGER
+  semantics:
+    entities:
+    - name: invoice
+      type: primary
+      expr: invoice_id
+    relationships:
+    - name: invoice_to_subscription
+      to: subscription
+      fromColumns:
+      - subscription_id
+      toColumns:
+      - subscription_id
+      cardinality: many_to_one
+  binding:
+    platform: local
+    format: parquet
+    location:
+      path: ./out/invoice.parquet
+- exposeId: shop_order
+  kind: table
+  contract:
+    schema:
+    - name: order_id
+      type: STRING
+      required: true
+    - name: customer_id
+      type: STRING
+      required: true
+    - name: ordered_at
+      type: TIMESTAMP
+      required: true
+    - name: amount
+      type: INTEGER
+  semantics:
+    entities:
+    - name: shop_order
+      type: primary
+      expr: order_id
+    relationships:
+    - name: order_to_customer
+      to: customer
+      fromColumns:
+      - customer_id
+      toColumns:
+      - customer_id
+      cardinality: many_to_one
+  binding:
+    platform: local
+    format: parquet
+    location:
+      path: ./out/shop_order.parquet

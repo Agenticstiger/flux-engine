@@ -1,0 +1,55 @@
+# An account and its plans' history: a versioned expose (a validity window, one natural entity) with a
+# tier that changes, a channel that is carried, and a date the versions share. The profile that goes
+# with it is built in tests/author/test_history_init.py.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: billing.plans
+name: Plans
+metadata:
+  owner:
+    team: plans-team
+exposes:
+  - exposeId: account
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/account.parquet }
+    contract:
+      schema:
+        - { name: account_id, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: account, type: primary, expr: account_id }
+  - exposeId: plan_version
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/plan_version.parquet }
+    contract:
+      schema:
+        - { name: version_id, type: INT, required: true }
+        - { name: plan_id, type: INT, required: true }
+        - { name: account_id, type: INT, required: true }
+        - { name: valid_from, type: DATE, required: true }
+        - { name: valid_to, type: DATE, required: false }
+        - { name: tier, type: STRING, required: true }
+        - { name: channel, type: STRING, required: true }
+        - { name: signed_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: plan_version, type: primary, expr: version_id }
+        - { name: plan, type: natural, expr: plan_id }
+      dimensions:
+        - { name: valid_from, type: time, typeParams: { validityParams: { isStart: true } } }
+        - { name: valid_to, type: time, typeParams: { validityParams: { isEnd: true } } }
+        - { name: tier, type: categorical }
+        - { name: channel, type: categorical }
+        - { name: signed_on, type: time }
+      relationships:
+        - name: account
+          to: account
+          fromColumns: [account_id]
+          toColumns: [account_id]
+          cardinality: many_to_one

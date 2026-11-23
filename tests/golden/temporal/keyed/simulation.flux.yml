@@ -1,0 +1,102 @@
+# Four related tables with dates: customer to account to invoice, and payments of invoices.
+# Without the namespace's lifetimes and within keys it runs as it would before they existed;
+# tests/golden/test_temporal_golden.py pins that run to origin/main's digests under both kernels.
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-billing-dates
+name: Billing dates
+metadata:
+  owner:
+    team: billing
+spec:
+  worldRef: world-billing
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2025-01-01T00:00:00Z"
+    end: "2025-12-31T23:59:59Z"
+  personaRefs: [persona-billing]
+  emits:
+    - productRef: retail.billing_dates
+      exposeId: customer
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:8d0bfac56a029742791402300989494668526814465d3f1e4df5ad1bb4d093bd" }
+    - productRef: retail.billing_dates
+      exposeId: account
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:8d0bfac56a029742791402300989494668526814465d3f1e4df5ad1bb4d093bd" }
+    - productRef: retail.billing_dates
+      exposeId: invoice
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:8d0bfac56a029742791402300989494668526814465d3f1e4df5ad1bb4d093bd" }
+    - productRef: retail.billing_dates
+      exposeId: payment
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:8d0bfac56a029742791402300989494668526814465d3f1e4df5ad1bb4d093bd" }
+extensions:
+  com.agentics.flux/1:
+    lifetimes:
+      - { emit: customer, start: cu_start, end: cu_end, duration: { bins: ['0', '100', '400', '900'], binWeights: ['5', '3', '1'] } }
+      - { emit: account, start: a_open, end: a_close, duration: { bins: ['0', '300', '900'], binWeights: ['2', '1'] } }
+      - { emit: invoice, start: i_issued }
+    within:
+      - { emit: account, relationship: customer, date: a_open }
+      - { emit: invoice, relationship: account, date: i_issued }
+      - { emit: payment, relationship: invoice, date: p_paid }
+    emits:
+      customer:
+        rows: 60
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            cu_start: { range: { min: '2023-01-01', max: '2025-06-30' } }
+            cu_end: { nullFraction: '0.6', range: { min: '2024-01-01', max: '2025-12-31' } }
+            cu_score: { range: { min: '0', max: '100' } }
+          properties:
+            - property: mean
+              column: cu_score
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      account:
+        rows: 150
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            a_open: { range: { min: '2023-01-01', max: '2025-09-30' } }
+            a_close: { nullFraction: '0.7', range: { min: '2024-01-01', max: '2025-12-31' } }
+            a_limit: { range: { min: '100', max: '5000' } }
+          properties:
+            - property: mean
+              column: a_limit
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      invoice:
+        rows: 900
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            i_amount: { range: { min: '1', max: '500' } }
+          properties:
+            - property: mean
+              column: i_amount
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      payment:
+        rows: 700
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            p_amount: { range: { min: '1', max: '500' } }
+          properties:
+            - property: mean
+              column: p_amount
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle

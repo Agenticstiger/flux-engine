@@ -1,0 +1,1725 @@
+{
+ "_producer": "https://example.invalid/profiler",
+ "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile/1-3-0/FluxProfile.json",
+ "encoding": {
+  "fractionalBits": 16,
+  "rounding": "floor"
+ },
+ "disclosureRules": {
+  "acro-default": {
+   "dominance": {
+    "k": "0.90",
+    "n": 2
+   },
+   "minimumCell": 10,
+   "pRatio": "0.10",
+   "roundingBase": 5,
+   "zerosDisclosive": true
+  },
+  "none": {}
+ },
+ "tables": {
+  "account": {
+   "rowCount": 1000,
+   "columns": {
+    "account_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1000"
+      }
+     }
+    },
+    "segment": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "retail",
+        "smb"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 1000,
+         "levelCounts": [
+          700,
+          300
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "signed_up": {
+     "domain": "timestamp",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1704067200000"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1740787200000"
+      }
+     }
+    },
+    "closed_at": {
+     "domain": "timestamp",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1709251200000"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1756684800000"
+      }
+     }
+    }
+   },
+   "datePairs": [
+    {
+     "start": "signed_up",
+     "end": "closed_at",
+     "statistics": [
+      {
+       "definition": "marginalHistogram/1",
+       "bins": [
+        "0",
+        "30",
+        "90",
+        "365"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 1000
+       },
+       "disclosure": "none",
+       "groups": [
+        {
+         "group": "",
+         "k": 1000,
+         "binCounts": [
+          300,
+          400,
+          300
+         ],
+         "status": "F"
+        }
+       ]
+      },
+      {
+       "definition": "marginalHistogram/1",
+       "groupBy": "segment",
+       "bins": [
+        "0",
+        "30",
+        "90",
+        "365"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 1000
+       },
+       "disclosure": "none",
+       "groups": [
+        {
+         "group": "retail",
+         "k": 700,
+         "binCounts": [
+          150,
+          300,
+          250
+         ],
+         "status": "F"
+        },
+        {
+         "group": "smb",
+         "k": 300,
+         "binCounts": [
+          150,
+          100,
+          50
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ],
+     "order": {
+      "definition": "levelHistogram/1",
+      "levels": [
+       "after",
+       "before",
+       "same"
+      ],
+      "sampleSize": {
+       "min": 1000,
+       "max": 1000
+      },
+      "disclosure": "none",
+      "groups": [
+       {
+        "group": "",
+        "k": 1000,
+        "levelCounts": [
+         900,
+         0,
+         100
+        ],
+        "status": "F"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  "plan_version": {
+   "rowCount": 1850,
+   "columns": {
+    "version_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1850
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1850"
+      }
+     }
+    },
+    "plan_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1850
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1000"
+      }
+     }
+    },
+    "account_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1850
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1000"
+      }
+     }
+    },
+    "valid_from": {
+     "domain": "timestamp",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1850
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1735689600000"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1756684800000"
+      }
+     }
+    },
+    "valid_to": {
+     "domain": "timestamp",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1850
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1738368000000"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1759276800000"
+      }
+     }
+    },
+    "tier": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "basic",
+        "plus",
+        "pro"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 1850,
+         "levelCounts": [
+          1000,
+          600,
+          250
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "channel": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "app",
+        "web"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 1850,
+         "levelCounts": [
+          1100,
+          750
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "signed_on": {
+     "domain": "timestamp",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1850
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1717200000000"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1748736000000"
+      }
+     }
+    }
+   },
+   "history": {
+    "entity": [
+     "plan_id"
+    ],
+    "start": "valid_from",
+    "end": "valid_to",
+    "versionsPerEntity": {
+     "definition": "marginalHistogram/1",
+     "bins": [
+      "1",
+      "2",
+      "3",
+      "4"
+     ],
+     "sampleSize": {
+      "min": 1000,
+      "max": 9999
+     },
+     "disclosure": "acro-default",
+     "groups": [
+      {
+       "group": "",
+       "k": 1000,
+       "binCounts": [
+        400,
+        350,
+        250
+       ],
+       "status": "F"
+      }
+     ]
+    },
+    "firstStart": {
+     "definition": "marginalHistogram/1",
+     "bins": [
+      "1735689600000",
+      "1743465600000",
+      "1751328000000",
+      "1756684800000"
+     ],
+     "sampleSize": {
+      "min": 1000,
+      "max": 9999
+     },
+     "disclosure": "acro-default",
+     "groups": [
+      {
+       "group": "",
+       "k": 1000,
+       "binCounts": [
+        420,
+        330,
+        250
+       ],
+       "status": "F"
+      }
+     ]
+    },
+    "versionLength": {
+     "definition": "marginalHistogram/1",
+     "bins": [
+      "1",
+      "30",
+      "90",
+      "365"
+     ],
+     "sampleSize": {
+      "min": 1000,
+      "max": 9999
+     },
+     "disclosure": "acro-default",
+     "groups": [
+      {
+       "group": "",
+       "k": 850,
+       "binCounts": [
+        250,
+        350,
+        250
+       ],
+       "status": "F"
+      }
+     ]
+    },
+    "chain": {
+     "definition": "levelHistogram/1",
+     "levels": [
+      "dayBefore",
+      "gap",
+      "nextStart",
+      "overlap"
+     ],
+     "sampleSize": {
+      "min": 1000,
+      "max": 9999
+     },
+     "disclosure": "acro-default",
+     "groups": [
+      {
+       "group": "",
+       "k": 850,
+       "levelCounts": [
+        20,
+        10,
+        800,
+        20
+       ],
+       "status": "F"
+      }
+     ]
+    },
+    "lastVersion": {
+     "definition": "levelHistogram/1",
+     "levels": [
+      "closed",
+      "open"
+     ],
+     "sampleSize": {
+      "min": 1000,
+      "max": 9999
+     },
+     "disclosure": "acro-default",
+     "groups": [
+      {
+       "group": "",
+       "k": 1000,
+       "levelCounts": [
+        150,
+        850
+       ],
+       "status": "F"
+      }
+     ]
+    },
+    "columns": {
+     "tier": {
+      "initial": {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "basic",
+        "plus",
+        "pro"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 1000,
+         "levelCounts": [
+          500,
+          350,
+          150
+         ],
+         "status": "F"
+        }
+       ]
+      },
+      "transitions": {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "basic",
+        "plus",
+        "pro"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "basic",
+         "k": 400,
+         "levelCounts": [
+          0,
+          300,
+          100
+         ],
+         "status": "F"
+        },
+        {
+         "group": "plus",
+         "k": 300,
+         "levelCounts": [
+          100,
+          0,
+          200
+         ],
+         "status": "F"
+        },
+        {
+         "group": "pro",
+         "k": 100,
+         "levelCounts": [
+          40,
+          60,
+          0
+         ],
+         "status": "F"
+        }
+       ],
+       "groupBy": "tier"
+      }
+     },
+     "channel": {
+      "initial": {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "app",
+        "web"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 1000,
+         "levelCounts": [
+          600,
+          400
+         ],
+         "status": "F"
+        }
+       ]
+      },
+      "transitions": {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "app",
+        "web"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "app",
+         "k": 0,
+         "levelCounts": [
+          0,
+          0
+         ],
+         "status": "F"
+        },
+        {
+         "group": "web",
+         "k": 0,
+         "levelCounts": [
+          0,
+          0
+         ],
+         "status": "F"
+        }
+       ],
+       "groupBy": "channel"
+      }
+     }
+    },
+    "reasons": {
+     "definition": "levelHistogram/1",
+     "levels": [
+      "channel",
+      "several",
+      "tier"
+     ],
+     "sampleSize": {
+      "min": 1000,
+      "max": 9999
+     },
+     "disclosure": "acro-default",
+     "groups": [
+      {
+       "group": "",
+       "k": 850,
+       "levelCounts": [
+        0,
+        50,
+        800
+       ],
+       "status": "F"
+      }
+     ]
+    }
+   }
+  },
+  "plan_current": {
+   "rowCount": 1000,
+   "columns": {
+    "plan_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1000"
+      }
+     }
+    },
+    "tier": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "basic",
+        "plus",
+        "pro"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 1000,
+         "levelCounts": [
+          500,
+          333,
+          167
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "channel": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "app",
+        "web"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 1000,
+         "levelCounts": [
+          500,
+          500
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  "plan_change": {
+   "rowCount": 3000,
+   "columns": {
+    "event_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 3000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "3000"
+      }
+     }
+    },
+    "plan_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1000"
+      }
+     }
+    },
+    "op": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "c",
+        "d",
+        "u"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 3000,
+         "levelCounts": [
+          1000,
+          200,
+          1800
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "recorded_on": {
+     "domain": "timestamp",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 3000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1735689600000"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1756684800000"
+      }
+     }
+    },
+    "before_tier": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "basic",
+        "plus",
+        "pro"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 3000,
+         "levelCounts": [
+          1500,
+          1000,
+          500
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "after_tier": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "basic",
+        "plus",
+        "pro"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 3000,
+         "levelCounts": [
+          1500,
+          1000,
+          500
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "before_channel": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "app",
+        "web"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 3000,
+         "levelCounts": [
+          1500,
+          1500
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "after_channel": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "app",
+        "web"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 3000,
+         "levelCounts": [
+          1500,
+          1500
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  "plan_month": {
+   "rowCount": 4000,
+   "columns": {
+    "period_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 4000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "4000"
+      }
+     }
+    },
+    "plan_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 1000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1000"
+      }
+     }
+    },
+    "month": {
+     "domain": "timestamp",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 4000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1735689600000"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1756684800000"
+      }
+     }
+    },
+    "tier": {
+     "domain": "category",
+     "statistics": [
+      {
+       "definition": "levelHistogram/1",
+       "levels": [
+        "basic",
+        "plus",
+        "pro"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 4000,
+         "levelCounts": [
+          2000,
+          1333,
+          667
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  "plan_invoice": {
+   "rowCount": 3000,
+   "columns": {
+    "invoice_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 3000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "3000"
+      }
+     }
+    },
+    "account_id": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 3000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1000"
+      }
+     }
+    },
+    "issued_at": {
+     "domain": "timestamp",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 3000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1704067200000"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1756684800000"
+      }
+     },
+     "statistics": [
+      {
+       "definition": "marginalHistogram/1",
+       "bins": [
+        "1704067200000",
+        "1756684800000"
+       ],
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "groups": [
+        {
+         "group": "",
+         "k": 3000,
+         "binCounts": [
+          3000
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ]
+    },
+    "amount": {
+     "domain": "number",
+     "metrics": {
+      "count": {
+       "definition": "count/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": 3000
+      },
+      "min": {
+       "definition": "min/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "1"
+      },
+      "max": {
+       "definition": "max/1",
+       "status": "F",
+       "sampleSize": {
+        "min": 1000,
+        "max": 9999
+       },
+       "disclosure": "acro-default",
+       "value": "3"
+      }
+     }
+    }
+   },
+   "calendar": [
+    {
+     "column": "issued_at",
+     "month": {
+      "definition": "levelHistogram/1",
+      "levels": [
+       "01",
+       "02",
+       "03",
+       "04",
+       "05",
+       "06",
+       "07",
+       "08",
+       "09",
+       "10",
+       "11",
+       "12"
+      ],
+      "sampleSize": {
+       "min": 3220,
+       "max": 3220
+      },
+      "disclosure": "none",
+      "groups": [
+       {
+        "group": "",
+        "k": 3220,
+        "levelCounts": [
+         260,
+         260,
+         290,
+         270,
+         290,
+         250,
+         230,
+         250,
+         290,
+         290,
+         290,
+         250
+        ],
+        "status": "F"
+       }
+      ]
+     },
+     "dayOfWeek": {
+      "definition": "levelHistogram/1",
+      "levels": [
+       "1",
+       "2",
+       "3",
+       "4",
+       "5",
+       "6",
+       "7"
+      ],
+      "sampleSize": {
+       "min": 52,
+       "max": 52
+      },
+      "disclosure": "none",
+      "groups": [
+       {
+        "group": "",
+        "k": 52,
+        "levelCounts": [
+         10,
+         10,
+         10,
+         10,
+         10,
+         1,
+         1
+        ],
+        "status": "F"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "relationships": [
+  {
+   "parent": {
+    "table": "account",
+    "columns": [
+     "account_id"
+    ]
+   },
+   "child": {
+    "table": "plan_invoice",
+    "columns": [
+     "account_id"
+    ]
+   },
+   "statistics": [
+    {
+     "definition": "marginalHistogram/1",
+     "bins": [
+      "0",
+      "2",
+      "8"
+     ],
+     "sampleSize": {
+      "min": 100,
+      "max": 100
+     },
+     "disclosure": "none",
+     "groups": [
+      {
+       "group": "",
+       "k": 100,
+       "binCounts": [
+        60,
+        40
+       ],
+       "status": "F"
+      }
+     ]
+    }
+   ],
+   "dates": [
+    {
+     "parent": "signed_up",
+     "child": "issued_at",
+     "statistics": [
+      {
+       "definition": "marginalHistogram/1",
+       "bins": [
+        "0",
+        "30",
+        "90",
+        "365",
+        "600"
+       ],
+       "sampleSize": {
+        "min": 3000,
+        "max": 3000
+       },
+       "disclosure": "none",
+       "groups": [
+        {
+         "group": "",
+         "k": 3000,
+         "binCounts": [
+          1200,
+          900,
+          600,
+          300
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ],
+     "order": {
+      "definition": "levelHistogram/1",
+      "levels": [
+       "after",
+       "before",
+       "same"
+      ],
+      "sampleSize": {
+       "min": 3000,
+       "max": 3000
+      },
+      "disclosure": "none",
+      "groups": [
+       {
+        "group": "",
+        "k": 3000,
+        "levelCounts": [
+         2900,
+         0,
+         100
+        ],
+        "status": "F"
+       }
+      ]
+     }
+    },
+    {
+     "parent": "closed_at",
+     "child": "issued_at",
+     "statistics": [
+      {
+       "definition": "marginalHistogram/1",
+       "bins": [
+        "-300",
+        "-30",
+        "0"
+       ],
+       "sampleSize": {
+        "min": 150,
+        "max": 150
+       },
+       "disclosure": "none",
+       "groups": [
+        {
+         "group": "",
+         "k": 150,
+         "binCounts": [
+          100,
+          50
+         ],
+         "status": "F"
+        }
+       ]
+      }
+     ],
+     "order": {
+      "definition": "levelHistogram/1",
+      "levels": [
+       "after",
+       "before",
+       "same"
+      ],
+      "sampleSize": {
+       "min": 3000,
+       "max": 3000
+      },
+      "disclosure": "none",
+      "groups": [
+       {
+        "group": "",
+        "k": 3000,
+        "levelCounts": [
+         50,
+         2900,
+         50
+        ],
+        "status": "F"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

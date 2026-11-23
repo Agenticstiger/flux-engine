@@ -1,0 +1,51 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# The end-to-end accuracy harness on AWS. It is its own uv project: it is not a
+# member of the repository's workspace, ships in no wheel, and no CI job runs
+# it. Every step that touches AWS needs FLUX_E2E_AWS_LIVE=1.
+[project]
+name = "flux-e2e-aws"
+version = "0.0.0"
+description = "End-to-end accuracy harness for FLUX on AWS (S3, Glue, Athena)."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+  # The source: DuckDB's tpcds extension (dsdgen). 2.0 writes TPC-DS v4 output,
+  # so the version is pinned exactly and recorded in every report.
+  "duckdb==2.0.0",
+  # S3, the Glue catalog and Athena (Apache-2.0).
+  "awswrangler==3.18.0",
+  # `fluid profile`, the profiler on the data owner's side.
+  "data-product-forge[profile]==0.32.0",
+  # bundle.py and its tests read enum levels with the engine's own reader.
+  "flux-stats>=0.6.2,<0.8",
+  "pyyaml>=6",
+  # The query judge reads each query's tables and output roles (MIT).
+  "sqlglot>=25",
+  # The profile document's digest: RFC 8785 canonical JSON (Apache-2.0).
+  "rfc8785>=0.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.2", "ruff>=0.5", "black==26.10.1"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E203", "E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

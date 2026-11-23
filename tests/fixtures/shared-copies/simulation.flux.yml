@@ -1,0 +1,79 @@
+# Three related tables, customer to account to invoice. Accounts and invoices list
+# sharedColumns and a sharedAttribute; tests/golden/shared-copies pins the run as it is
+# written here, and again with `copies: true` added under the namespace.
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-billing
+name: Billing
+metadata:
+  owner:
+    team: billing
+spec:
+  worldRef: world-billing
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2026-07-01T00:00:00Z"
+    end: "2026-09-30T23:59:59Z"
+  personaRefs: [persona-billing]
+  emits:
+    - productRef: retail.store_star
+      exposeId: customer
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:dda7022b33e4b96e411c795102c756af06b49201e0ad2c042ce0cd09c64c2b90" }
+    - productRef: retail.store_star
+      exposeId: account
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:dda7022b33e4b96e411c795102c756af06b49201e0ad2c042ce0cd09c64c2b90" }
+    - productRef: retail.store_star
+      exposeId: invoice
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:dda7022b33e4b96e411c795102c756af06b49201e0ad2c042ce0cd09c64c2b90" }
+extensions:
+  com.agentics.flux/1:
+    emits:
+      customer:
+        rows: 40
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            region: { levels: { north: '0.5', south: '0.3', west: '0.2' } }
+            cu_age: { range: { min: '18', max: '90' } }
+          properties:
+            - property: mean
+              column: cu_age
+              tolerance: { type: absolute, value: "100" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      account:
+        rows: 120
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            region: { levels: { x: '0.5', y: '0.5' } }
+            a_customer: { nullFraction: '0.1' }
+            a_score: { range: { min: '0', max: '100' } }
+          properties:
+            - property: mean
+              column: a_score
+              tolerance: { type: absolute, value: "100" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      invoice:
+        rows: 1200
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            region: { levels: { x: '0.5', y: '0.5' } }
+            i_account: { nullFraction: '0.1' }
+            a_score: { range: { min: '0', max: '100' } }
+            i_amount: { range: { min: '1', max: '500' } }
+          properties:
+            - property: mean
+              column: i_amount
+              tolerance: { type: absolute, value: "100" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle

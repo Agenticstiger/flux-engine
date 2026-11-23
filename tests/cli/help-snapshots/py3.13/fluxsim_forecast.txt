@@ -1,0 +1,20 @@
+usage: fluxsim forecast [-h] <command> ...
+
+Forecast what the next profile will show, before it is seen, and seal each
+forecast in the outcome-accuracy store.
+
+examples:
+  # forecast the next state and seal every forecast
+  fluxsim forecast make ./bundle --profile state.json --registered-at 2026-07-01T00:00:00Z --horizon-end 2026-09-30T23:59:59Z
+
+  # score every forecast once the next state exists
+  fluxsim forecast score ./bundle --profile state.json --next next-state.json --observed-at 2026-10-01T00:00:00Z
+
+options:
+  -h, --help  show this help message and exit
+
+commands:
+  make        run the sweep and register each forecast
+  score       score every forecast against the next state
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/forecast.html

@@ -1,0 +1,53 @@
+fluidVersion: 0.7.6
+kind: DataProduct
+id: bronze.orders.orders
+name: orders / orders
+domain: data
+description: Source-aligned Bronze ingestion for orders / orders.
+metadata:
+  layer: Bronze
+  productType: SDP
+  owner:
+    team: data-platform
+builds:
+- id: ingest_orders
+  description: Discovered-source ingest of 1 stream(s).
+  pattern: acquisition
+  engine: duckdb
+  capabilities:
+  - full_refresh
+  - schema_discovery
+  properties:
+    source:
+      kind: filesystem
+      connection:
+        uri: file:///srv/orders/data
+      mode: full_refresh
+      streams:
+      - orders
+    sink:
+      format: parquet
+  outputs:
+  - orders
+exposes:
+- exposeId: orders
+  kind: table
+  binding:
+    platform: local
+    format: parquet
+    location:
+      path: ./out/orders.parquet
+  contract:
+    schema:
+    - name: order_id
+      type: varchar
+      required: false
+    - name: country
+      type: varchar
+      required: false
+    - name: amount
+      type: decimal(10,2)
+      required: false
+    - name: created_at
+      type: timestamp
+      required: false

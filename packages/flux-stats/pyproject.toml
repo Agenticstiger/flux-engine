@@ -1,0 +1,116 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# flux-stats: the statistics the FLUX engine's fidelity check compares, as a
+# distribution of its own, so that a profiler can form the same numbers where
+# the data lives without installing the engine (ADR 0009). It is a member of
+# the uv workspace the repository root declares, and it is built, tested and
+# released from this repository with flux-sim-engine.
+
+[build-system]
+requires = ["setuptools>=77.0.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flux-stats"
+# Versioned by its own format and API (ADR 0009, amended): the engine requires
+# a range of it, with a floor and a ceiling (the root pyproject.toml). One `v*`
+# tag still releases both distributions, and the release workflow builds this
+# one's files at the tag's version. scripts/release_guard.py refuses a tag that
+# this version disagrees with, and a tree whose engine requirement does not
+# admit this version.
+version = "0.10.0"
+description = "FLUX statistics: one definition per statistic, the record reader, the fixed-point grid they are compared on, and the profile document reader, on the Python standard library alone."
+readme = "README.md"
+# One release below the engine's floor, on purpose: the profiler that imports
+# this package runs inside forge-cli, which still supports Python 3.10. The
+# package uses the standard library alone, and the CI job "flux-stats alone"
+# runs its tests on 3.10, so nothing newer can creep in. Raise it when
+# forge-cli drops 3.10 (ADR 0009).
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Agentics Transformation Ltd" }]
+keywords = ["FLUX", "statistics", "profiling", "synthetic data", "data contracts"]
+
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+
+# None, on purpose. A profiler installs this package next to the data it
+# profiles, so it carries nothing but the standard library: no third-party
+# package, and nothing of the engine. tests/test_registry.py imports it in a
+# fresh interpreter and checks that nothing else loads.
+dependencies = []
+
+[project.optional-dependencies]
+# flux_stats.exact_yaml reads a FLUX bundle's YAML with PyYAML. The rest of
+# the package imports the standard library alone, and `import flux_stats`
+# never loads it.
+yaml = ["PyYAML>=6"]
+
+[project.urls]
+Documentation = "https://agenticstiger.github.io/flux/engine/"
+Repository = "https://github.com/Agenticstiger/flux-engine"
+Issues = "https://github.com/Agenticstiger/flux-engine/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["flux_stats*"]
+
+[tool.setuptools.package-data]
+flux_stats = ["py.typed"]
+
+# What this package's own tests need, and nothing of the engine. Never part of
+# the distribution (PEP 735). `make test-stats-alone` installs the built wheel
+# and this group into an environment that has no flux-sim-engine, and runs
+# tests/ there.
+[dependency-groups]
+test = [
+  "pytest>=8.2",
+  # The exact YAML read's tests (flux_stats.exact_yaml, the `yaml` extra).
+  "PyYAML>=6",
+  "hypothesis>=6.100",
+  # The profile tests check the reader against the published JSON Schema,
+  # docs/spec/profile-1.schema.json at the repository root.
+  "jsonschema>=4.22",
+]
+
+# Read when the tests run from this directory, or from the repository root as
+# `pytest packages/flux-stats/tests`. The engine's suite collects these tests
+# too (testpaths in the root pyproject.toml), under the root's settings.
+[tool.pytest.ini_options]
+minversion = "8.2"
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+  "unit: Unit tests (fast, no I/O)",
+  "property: Property-based tests (hypothesis)",
+]
+
+# The weekly mutation run of this package's numeric modules, driven from this
+# directory by .github/workflows/accuracy-nightly.yml. mutmut 3.8.1 maps a file
+# to its module through the `src/` prefix only, so the run starts here, where
+# src/flux_stats/fixedpoint.py is flux_stats.fixedpoint, rather than at the
+# repository root. Only this package's own tests run against the mutants: the
+# kill rate measures the suite that ships with the package.
+[tool.mutmut]
+source_paths = ["src/"]
+only_mutate = [
+  "src/flux_stats/fixedpoint.py",
+  "src/flux_stats/definitions.py",
+  "src/flux_stats/registry.py",
+  "src/flux_stats/reading.py",
+  "src/flux_stats/fidelity.py",
+]
+pytest_add_cli_args_test_selection = ["tests"]
+also_copy = ["tests/", "README.md"]
+mutate_only_covered_lines = true

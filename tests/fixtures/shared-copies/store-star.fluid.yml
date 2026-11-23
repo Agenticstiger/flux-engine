@@ -1,0 +1,67 @@
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: retail.store_star
+name: Billing
+metadata:
+  owner:
+    team: billing
+exposes:
+  - exposeId: customer
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: customer, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: cu_id, type: STRING, required: true }
+        - { name: region, type: STRING, required: false }
+        - { name: cu_age, type: INT, required: false }
+    semantics:
+      entities:
+        - { name: customer, type: primary, expr: cu_id }
+  - exposeId: account
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: account, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: a_id, type: STRING, required: true }
+        - { name: a_customer, type: STRING, required: false }
+        - { name: region, type: STRING, required: false }
+        - { name: a_score, type: INT, required: false, sharedAttribute: score }
+    semantics:
+      entities:
+        - { name: account, type: primary, expr: a_id }
+      relationships:
+        - name: customer
+          to: customer
+          fromColumns: [a_customer]
+          toColumns: [cu_id]
+          cardinality: many_to_one
+          sharedColumns: [region]
+  - exposeId: invoice
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: invoice, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: i_id, type: STRING, required: true }
+        - { name: i_account, type: STRING, required: false }
+        - { name: region, type: STRING, required: false }
+        - { name: a_score, type: INT, required: false, sharedAttribute: score }
+        - { name: i_amount, type: INT, required: false }
+    semantics:
+      entities:
+        - { name: invoice, type: primary, expr: i_id }
+      relationships:
+        - name: account
+          to: account
+          fromColumns: [i_account]
+          toColumns: [a_id]
+          cardinality: many_to_one
+          sharedColumns: [region]

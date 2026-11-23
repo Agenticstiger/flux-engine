@@ -1,0 +1,166 @@
+# A customer, a versioned subscription (a validity window) and four exposes that read it. The
+# simulation declares a history for subscription_version and an as-of link on invoice, whose amount
+# follows the plan its subscription had on the invoice's date.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: billing.subscriptions
+name: Subscriptions
+metadata:
+  owner:
+    team: subscriptions
+exposes:
+  - exposeId: customer
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: customer, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: customer_id, type: INT, required: true }
+        - { name: region, type: STRING, required: true }
+        - { name: signed_up_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: customer, type: primary, expr: customer_id }
+      dimensions:
+        - { name: signed_up_on, type: time }
+        - { name: region, type: categorical }
+  - exposeId: subscription_version
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: subscription_version, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: subscription_sk, type: INT, required: true }
+        - { name: subscription_id, type: INT, required: true }
+        - { name: customer_id, type: INT, required: true }
+        - { name: valid_from, type: DATE, required: true }
+        - { name: valid_to, type: DATE, required: false }
+        - { name: plan, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+        - { name: started_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: subscription_version, type: primary, expr: subscription_sk }
+        - { name: subscription, type: natural, expr: subscription_id }
+      dimensions:
+        - { name: valid_from, type: time, typeParams: { validityParams: { isStart: true } } }
+        - { name: valid_to, type: time, typeParams: { validityParams: { isEnd: true } } }
+        - { name: plan, type: categorical }
+        - { name: status, type: categorical }
+        - { name: started_on, type: time }
+      relationships:
+        - name: customer
+          to: customer
+          fromColumns: [customer_id]
+          toColumns: [customer_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: invoice
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: invoice, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: invoice_id, type: INT, required: true }
+        - { name: subscription_id, type: INT, required: true }
+        - { name: invoice_date, type: DATE, required: true }
+        - { name: amount, type: "DECIMAL(10,2)", required: true }
+      invariants:
+        - id: amount_of_plan
+          derive: amount
+          expr: "CASE WHEN subscription.plan = 'team' THEN 99 WHEN subscription.plan = 'pro' THEN 49 ELSE 19 END"
+    semantics:
+      defaultAggTimeDimension: invoice_date
+      entities:
+        - { name: invoice, type: primary, expr: invoice_id }
+      dimensions:
+        - { name: invoice_date, type: time }
+      relationships:
+        - name: subscription
+          to: subscription_version
+          fromColumns: [subscription_id]
+          toColumns: [subscription_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: subscription_current
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: subscription_current, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: subscription_id, type: INT, required: true }
+        - { name: plan, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+        - { name: started_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: subscription, type: primary, expr: subscription_id }
+      dimensions:
+        - { name: plan, type: categorical }
+        - { name: status, type: categorical }
+        - { name: started_on, type: time }
+  - exposeId: subscription_change
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: subscription_change, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: event_id, type: INT, required: true }
+        - { name: subscription_id, type: INT, required: true }
+        - { name: op, type: STRING, required: true }
+        - { name: changed_at, type: DATE, required: true }
+        - { name: recorded_at, type: DATE, required: true }
+        - { name: before_plan, type: STRING, required: false }
+        - { name: after_plan, type: STRING, required: false }
+    semantics:
+      defaultAggTimeDimension: recorded_at
+      entities:
+        - { name: event, type: primary, expr: event_id }
+      dimensions:
+        - { name: op, type: categorical }
+        - { name: changed_at, type: time }
+        - { name: recorded_at, type: time }
+        - { name: before_plan, type: categorical }
+        - { name: after_plan, type: categorical }
+      relationships:
+        - name: subscription
+          to: subscription_version
+          fromColumns: [subscription_id]
+          toColumns: [subscription_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: subscription_month
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: subscription_month, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: period_id, type: INT, required: true }
+        - { name: subscription_id, type: INT, required: true }
+        - { name: month, type: DATE, required: true }
+        - { name: plan, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: period, type: primary, expr: period_id }
+      dimensions:
+        - { name: month, type: time, typeParams: { timeGranularity: month } }
+        - { name: plan, type: categorical }
+      relationships:
+        - name: subscription
+          to: subscription_version
+          fromColumns: [subscription_id]
+          toColumns: [subscription_id]
+          cardinality: many_to_one
+          joinType: inner

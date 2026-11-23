@@ -1,0 +1,1643 @@
+{
+  "_producer": "https://github.com/Agenticstiger/flux-engine",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile/1-3-0/FluxProfile.json",
+  "encoding": {
+    "fractionalBits": 16,
+    "rounding": "floor"
+  },
+  "disclosureRules": {
+    "none": {},
+    "acro-default": {
+      "minimumCell": 10,
+      "zerosDisclosive": true,
+      "roundingBase": 5,
+      "dominance": {
+        "n": 2,
+        "k": "0.90"
+      },
+      "pRatio": "0.10"
+    }
+  },
+  "tables": {
+    "payment": {
+      "rowCount": 5400,
+      "columns": {
+        "subscriber_id": {
+          "domain": "category"
+        },
+        "amount": {
+          "domain": "number",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "status": "F",
+              "value": 5400,
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "sum": {
+              "definition": "sum/1",
+              "status": "F",
+              "value": "282150",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            }
+          },
+          "statistics": [
+            {
+              "definition": "mean/1",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 5400,
+                  "Sx": "18490982400",
+                  "status": "F"
+                }
+              ]
+            },
+            {
+              "definition": "mean/1",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "1",
+                  "k": 3100,
+                  "Sx": "10649600000",
+                  "status": "F"
+                },
+                {
+                  "group": "2",
+                  "k": 1900,
+                  "Sx": "6543000000",
+                  "status": "F"
+                },
+                {
+                  "group": "3",
+                  "status": "C"
+                }
+              ],
+              "groupBy": "attempts"
+            },
+            {
+              "definition": "mean/1",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "basic",
+                  "k": 3000,
+                  "Sx": "8200000000",
+                  "status": "F"
+                },
+                {
+                  "group": "premium",
+                  "k": 2400,
+                  "Sx": "10290982400",
+                  "status": "F"
+                }
+              ],
+              "groupByLink": {
+                "parent": {
+                  "table": "plan",
+                  "columns": [
+                    "plan_id"
+                  ]
+                },
+                "columns": [
+                  "plan_id"
+                ],
+                "column": "tier"
+              }
+            }
+          ]
+        },
+        "attempts": {
+          "domain": "number"
+        },
+        "paid_at": {
+          "domain": "timestamp",
+          "metrics": {
+            "min": {
+              "definition": "min/1",
+              "status": "F",
+              "value": "1751328000000",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "max": {
+              "definition": "max/1",
+              "status": "F",
+              "value": "1759276799000",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            }
+          }
+        },
+        "plan_id": {
+          "domain": "category"
+        },
+        "segment": {
+          "domain": "category",
+          "statistics": [
+            {
+              "definition": "levelHistogram/1",
+              "levels": [
+                "gold",
+                "standard"
+              ],
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "per": [
+                "subscriber_id"
+              ],
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1200,
+                  "levelCounts": [
+                    310,
+                    890
+                  ],
+                  "status": "F"
+                }
+              ]
+            }
+          ]
+        },
+        "settled_at": {
+          "domain": "timestamp"
+        }
+      },
+      "columnPairs": [
+        {
+          "columns": [
+            "amount",
+            "attempts"
+          ],
+          "statistics": [
+            {
+              "definition": "correlation/1",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 5400,
+                  "Sx": "18490982400",
+                  "Sy": "601620480",
+                  "Sxx": "81174881894400000",
+                  "Sxy": "2138893713408000",
+                  "Syy": "85040352460800",
+                  "status": "F"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "periods": [
+        {
+          "column": "paid_at",
+          "period": "P1M",
+          "statistics": [
+            {
+              "definition": "mean/1",
+              "of": "amount",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "2025-07",
+                  "k": 1800,
+                  "Sx": "6104678400",
+                  "status": "F"
+                },
+                {
+                  "group": "2025-08",
+                  "k": 1750,
+                  "Sx": "6009651200",
+                  "status": "F"
+                },
+                {
+                  "group": "2025-09",
+                  "k": 1850,
+                  "Sx": "6376652800",
+                  "status": "F"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "datePairs": [
+        {
+          "start": "paid_at",
+          "end": "settled_at",
+          "statistics": [
+            {
+              "definition": "marginalHistogram/1",
+              "bins": [
+                "0",
+                "1",
+                "3",
+                "30"
+              ],
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1100,
+                  "binCounts": [
+                    620,
+                    310,
+                    170
+                  ],
+                  "status": "F"
+                }
+              ]
+            }
+          ],
+          "order": {
+            "definition": "levelHistogram/1",
+            "levels": [
+              "after",
+              "before",
+              "same"
+            ],
+            "sampleSize": {
+              "min": 1000,
+              "max": 9999
+            },
+            "disclosure": "acro-default",
+            "groups": [
+              {
+                "group": "",
+                "k": 1100,
+                "levelCounts": [
+                  480,
+                  20,
+                  600
+                ],
+                "status": "F"
+              }
+            ]
+          }
+        }
+      ],
+      "calendar": [
+        {
+          "column": "paid_at",
+          "month": {
+            "definition": "levelHistogram/1",
+            "levels": [
+              "01",
+              "02",
+              "03",
+              "04",
+              "05",
+              "06",
+              "07",
+              "08",
+              "09",
+              "10",
+              "11",
+              "12"
+            ],
+            "sampleSize": {
+              "min": 1000,
+              "max": 9999
+            },
+            "disclosure": "acro-default",
+            "groups": [
+              {
+                "group": "",
+                "k": 5400,
+                "levelCounts": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  1860,
+                  1860,
+                  1680,
+                  0,
+                  0,
+                  0
+                ],
+                "status": "F"
+              }
+            ]
+          },
+          "dayOfWeek": {
+            "definition": "levelHistogram/1",
+            "levels": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "6",
+              "7"
+            ],
+            "sampleSize": {
+              "min": 1000,
+              "max": 9999
+            },
+            "disclosure": "acro-default",
+            "groups": [
+              {
+                "group": "",
+                "k": 5400,
+                "levelCounts": [
+                  900,
+                  800,
+                  750,
+                  700,
+                  800,
+                  750,
+                  700
+                ],
+                "status": "F"
+              }
+            ]
+          },
+          "hourOfWeek": {
+            "definition": "levelHistogram/1",
+            "levels": [
+              "000",
+              "001",
+              "002",
+              "003",
+              "004",
+              "005",
+              "006",
+              "007",
+              "008",
+              "009",
+              "010",
+              "011",
+              "012",
+              "013",
+              "014",
+              "015",
+              "016",
+              "017",
+              "018",
+              "019",
+              "020",
+              "021",
+              "022",
+              "023",
+              "024",
+              "025",
+              "026",
+              "027",
+              "028",
+              "029",
+              "030",
+              "031",
+              "032",
+              "033",
+              "034",
+              "035",
+              "036",
+              "037",
+              "038",
+              "039",
+              "040",
+              "041",
+              "042",
+              "043",
+              "044",
+              "045",
+              "046",
+              "047",
+              "048",
+              "049",
+              "050",
+              "051",
+              "052",
+              "053",
+              "054",
+              "055",
+              "056",
+              "057",
+              "058",
+              "059",
+              "060",
+              "061",
+              "062",
+              "063",
+              "064",
+              "065",
+              "066",
+              "067",
+              "068",
+              "069",
+              "070",
+              "071",
+              "072",
+              "073",
+              "074",
+              "075",
+              "076",
+              "077",
+              "078",
+              "079",
+              "080",
+              "081",
+              "082",
+              "083",
+              "084",
+              "085",
+              "086",
+              "087",
+              "088",
+              "089",
+              "090",
+              "091",
+              "092",
+              "093",
+              "094",
+              "095",
+              "096",
+              "097",
+              "098",
+              "099",
+              "100",
+              "101",
+              "102",
+              "103",
+              "104",
+              "105",
+              "106",
+              "107",
+              "108",
+              "109",
+              "110",
+              "111",
+              "112",
+              "113",
+              "114",
+              "115",
+              "116",
+              "117",
+              "118",
+              "119",
+              "120",
+              "121",
+              "122",
+              "123",
+              "124",
+              "125",
+              "126",
+              "127",
+              "128",
+              "129",
+              "130",
+              "131",
+              "132",
+              "133",
+              "134",
+              "135",
+              "136",
+              "137",
+              "138",
+              "139",
+              "140",
+              "141",
+              "142",
+              "143",
+              "144",
+              "145",
+              "146",
+              "147",
+              "148",
+              "149",
+              "150",
+              "151",
+              "152",
+              "153",
+              "154",
+              "155",
+              "156",
+              "157",
+              "158",
+              "159",
+              "160",
+              "161",
+              "162",
+              "163",
+              "164",
+              "165",
+              "166",
+              "167"
+            ],
+            "sampleSize": {
+              "min": 1000,
+              "max": 9999
+            },
+            "disclosure": "acro-default",
+            "groups": [
+              {
+                "group": "",
+                "k": 5400,
+                "levelCounts": [
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  33,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32,
+                  32
+                ],
+                "status": "F"
+              }
+            ]
+          }
+        },
+        {
+          "column": "settled_at",
+          "month": {
+            "definition": "levelHistogram/1",
+            "levels": [
+              "01",
+              "02",
+              "03",
+              "04",
+              "05",
+              "06",
+              "07",
+              "08",
+              "09",
+              "10",
+              "11",
+              "12"
+            ],
+            "sampleSize": {
+              "min": 1000,
+              "max": 9999
+            },
+            "disclosure": "acro-default",
+            "groups": [
+              {
+                "group": "",
+                "k": 3460,
+                "levelCounts": [
+                  300,
+                  280,
+                  null,
+                  310,
+                  320,
+                  330,
+                  340,
+                  330,
+                  310,
+                  300,
+                  290,
+                  350
+                ],
+                "status": "F",
+                "cellStatus": [
+                  "F",
+                  "F",
+                  "A",
+                  "F",
+                  "F",
+                  "F",
+                  "F",
+                  "F",
+                  "F",
+                  "F",
+                  "F",
+                  "F"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "subscriber": {
+      "rowCount": 1200,
+      "columns": {
+        "subscriber_id": {
+          "domain": "category",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "status": "F",
+              "value": 1200,
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "nullCount": {
+              "definition": "nullCount/1",
+              "status": "F",
+              "value": 0,
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "distinctCount": {
+              "definition": "distinctCount/1",
+              "status": "F",
+              "value": 1200,
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            }
+          }
+        },
+        "market": {
+          "domain": "category",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "status": "F",
+              "value": 1200,
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "distinctCount": {
+              "definition": "distinctCount/1",
+              "status": "F",
+              "value": 4,
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            }
+          },
+          "statistics": [
+            {
+              "definition": "levelHistogram/1",
+              "levels": [
+                "DE",
+                "FR",
+                "GB",
+                "IE"
+              ],
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1200,
+                  "levelCounts": [
+                    310,
+                    null,
+                    455,
+                    430
+                  ],
+                  "cellStatus": [
+                    "F",
+                    "A",
+                    "F",
+                    "F"
+                  ],
+                  "status": "F"
+                }
+              ]
+            },
+            {
+              "definition": "support/1",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1200,
+                  "support": [
+                    "DE",
+                    "FR",
+                    "GB",
+                    "IE"
+                  ],
+                  "status": "F"
+                }
+              ]
+            }
+          ]
+        },
+        "tenure_months": {
+          "domain": "number",
+          "metrics": {
+            "count": {
+              "definition": "count/1",
+              "status": "F",
+              "value": 1195,
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "nullCount": {
+              "definition": "nullCount/1",
+              "status": "A",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "sum": {
+              "definition": "sum/1",
+              "status": "F",
+              "value": "34655",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "min": {
+              "definition": "min/1",
+              "status": "A",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "max": {
+              "definition": "max/1",
+              "status": "A",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            },
+            "quantiles": {
+              "definition": "quantiles/1",
+              "status": "F",
+              "values": {
+                "0.25": "11",
+                "0.5": "26",
+                "0.75": "44"
+              },
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default"
+            }
+          },
+          "statistics": [
+            {
+              "definition": "mean/1",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1195,
+                  "Sx": "2271150080",
+                  "status": "F"
+                }
+              ]
+            },
+            {
+              "definition": "marginalHistogram/1",
+              "bins": [
+                "0",
+                "12",
+                "24",
+                "48",
+                "120"
+              ],
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1195,
+                  "binCounts": [
+                    305,
+                    260,
+                    465,
+                    null
+                  ],
+                  "cellStatus": [
+                    "F",
+                    "F",
+                    "F",
+                    "A"
+                  ],
+                  "status": "F"
+                }
+              ]
+            },
+            {
+              "definition": "quantile/1",
+              "level": "0.5",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1195,
+                  "quantileWitness": "1703936",
+                  "quantileBelow": 590,
+                  "quantileAtOrBelow": 620,
+                  "status": "F"
+                }
+              ]
+            },
+            {
+              "definition": "mean/1",
+              "groupBy": "market",
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "DE",
+                  "k": 310,
+                  "Sx": "609484800",
+                  "status": "F"
+                },
+                {
+                  "group": "FR",
+                  "status": "A"
+                },
+                {
+                  "group": "GB",
+                  "k": 455,
+                  "Sx": "834928640",
+                  "status": "F"
+                },
+                {
+                  "group": "IE",
+                  "status": "D"
+                }
+              ]
+            }
+          ]
+        },
+        "joined_at": {
+          "domain": "timestamp"
+        }
+      }
+    },
+    "plan_version": {
+      "rowCount": 1850,
+      "columns": {
+        "plan_id": {
+          "domain": "category"
+        },
+        "tier": {
+          "domain": "category"
+        },
+        "valid_from": {
+          "domain": "timestamp"
+        },
+        "valid_to": {
+          "domain": "timestamp"
+        }
+      },
+      "history": {
+        "entity": [
+          "plan_id"
+        ],
+        "start": "valid_from",
+        "end": "valid_to",
+        "versionsPerEntity": {
+          "definition": "marginalHistogram/1",
+          "bins": [
+            "1",
+            "2",
+            "3",
+            "4"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 1000,
+              "binCounts": [
+                400,
+                350,
+                250
+              ],
+              "status": "F"
+            }
+          ]
+        },
+        "firstStart": {
+          "definition": "marginalHistogram/1",
+          "bins": [
+            "1735689600000",
+            "1743465600000",
+            "1751328000000",
+            "1759276800000"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 1000,
+              "binCounts": [
+                420,
+                330,
+                250
+              ],
+              "status": "F"
+            }
+          ]
+        },
+        "versionLength": {
+          "definition": "marginalHistogram/1",
+          "bins": [
+            "0",
+            "30",
+            "90",
+            "365"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 850,
+              "binCounts": [
+                250,
+                350,
+                250
+              ],
+              "status": "F"
+            }
+          ]
+        },
+        "chain": {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "dayBefore",
+            "gap",
+            "nextStart",
+            "overlap"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 850,
+              "levelCounts": [
+                550,
+                100,
+                150,
+                50
+              ],
+              "status": "F"
+            }
+          ]
+        },
+        "lastVersion": {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "closed",
+            "open"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 1000,
+              "levelCounts": [
+                150,
+                850
+              ],
+              "status": "F"
+            }
+          ]
+        },
+        "columns": {
+          "tier": {
+            "initial": {
+              "definition": "levelHistogram/1",
+              "levels": [
+                "basic",
+                "plus",
+                "pro"
+              ],
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1000,
+                  "levelCounts": [
+                    500,
+                    350,
+                    150
+                  ],
+                  "status": "F"
+                }
+              ]
+            },
+            "transitions": {
+              "definition": "levelHistogram/1",
+              "levels": [
+                "basic",
+                "plus",
+                "pro"
+              ],
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groupBy": "tier",
+              "groups": [
+                {
+                  "group": "basic",
+                  "k": 400,
+                  "levelCounts": [
+                    0,
+                    300,
+                    100
+                  ],
+                  "status": "F"
+                },
+                {
+                  "group": "plus",
+                  "k": 300,
+                  "levelCounts": [
+                    100,
+                    0,
+                    200
+                  ],
+                  "status": "F"
+                },
+                {
+                  "group": "pro",
+                  "k": 100,
+                  "levelCounts": [
+                    40,
+                    60,
+                    0
+                  ],
+                  "status": "F"
+                }
+              ]
+            }
+          }
+        },
+        "reasons": {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "several",
+            "tier"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 850,
+              "levelCounts": [
+                50,
+                800
+              ],
+              "status": "F"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "relationships": [
+    {
+      "structural": [
+        "orphan"
+      ],
+      "parent": {
+        "table": "subscriber",
+        "columns": [
+          "subscriber_id"
+        ]
+      },
+      "child": {
+        "table": "payment",
+        "columns": [
+          "subscriber_id"
+        ]
+      },
+      "statistics": [
+        {
+          "definition": "marginalHistogram/1",
+          "bins": [
+            "0",
+            "1",
+            "3",
+            "6",
+            "60"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 1200,
+              "binCounts": [
+                null,
+                140,
+                580,
+                470
+              ],
+              "cellStatus": [
+                "A",
+                "F",
+                "F",
+                "F"
+              ],
+              "status": "F"
+            }
+          ]
+        },
+        {
+          "definition": "mean/1",
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 1200,
+              "Sx": "353894400",
+              "status": "F"
+            }
+          ]
+        }
+      ],
+      "dates": [
+        {
+          "parent": "joined_at",
+          "child": "paid_at",
+          "statistics": [
+            {
+              "definition": "marginalHistogram/1",
+              "bins": [
+                "0",
+                "30",
+                "90",
+                "365"
+              ],
+              "sampleSize": {
+                "min": 1000,
+                "max": 9999
+              },
+              "disclosure": "acro-default",
+              "groups": [
+                {
+                  "group": "",
+                  "k": 1150,
+                  "binCounts": [
+                    300,
+                    500,
+                    350
+                  ],
+                  "status": "F"
+                }
+              ]
+            }
+          ],
+          "order": {
+            "definition": "levelHistogram/1",
+            "levels": [
+              "after",
+              "before",
+              "same"
+            ],
+            "sampleSize": {
+              "min": 1000,
+              "max": 9999
+            },
+            "disclosure": "acro-default",
+            "groups": [
+              {
+                "group": "",
+                "k": 1150,
+                "levelCounts": [
+                  1100,
+                  null,
+                  50
+                ],
+                "status": "F",
+                "cellStatus": [
+                  "F",
+                  "A",
+                  "F"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "exposure": [
+        {
+          "start": "joined_at",
+          "children": {
+            "definition": "count/1",
+            "status": "F",
+            "value": 5400,
+            "sampleSize": {
+              "min": 1000,
+              "max": 9999
+            },
+            "disclosure": "acro-default"
+          },
+          "activeDays": {
+            "definition": "count/1",
+            "status": "F",
+            "value": 1051200,
+            "sampleSize": {
+              "min": 1000,
+              "max": 9999
+            },
+            "disclosure": "acro-default"
+          },
+          "window": {
+            "start": "1704067200000",
+            "end": "1735689600000"
+          }
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "name": "late_payment_rate",
+      "statistics": [
+        {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "false",
+            "true"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 5400,
+              "levelCounts": [
+                4995,
+                405
+              ],
+              "status": "F"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "invariants": [
+    {
+      "name": "payment.paid_after_due",
+      "statistics": [
+        {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "false",
+            "true"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 8000,
+              "levelCounts": [
+                40,
+                7960
+              ],
+              "status": "F"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "subscriber.tenure_within_term",
+      "statistics": [
+        {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "false",
+            "true"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "status": "A"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "references": {
+    "plan": {
+      "disclosure": "none",
+      "columns": [
+        "plan_id",
+        "tier",
+        "monthly_price"
+      ],
+      "rows": [
+        [
+          "P1",
+          "basic",
+          "9.5"
+        ],
+        [
+          "P2",
+          "basic",
+          "12"
+        ],
+        [
+          "P3",
+          "premium",
+          "30.25"
+        ],
+        [
+          "P4",
+          "premium",
+          null
+        ]
+      ]
+    }
+  }
+}

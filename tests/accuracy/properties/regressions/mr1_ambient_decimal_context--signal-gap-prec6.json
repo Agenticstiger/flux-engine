@@ -1,0 +1,12 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "prec": 6,
+    "rounding": "ROUND_UP",
+    "seed": 42,
+    "size": 200
+  },
+  "note": "signals.py computed the gap rate Decimal(1)/gap_mean_ms in the caller's context, so at prec=6 ROUND_UP the rate was rounded up and signal times moved by 1 ms (events.ndjson differed, silently). Fixed: the run pins the kernel context.",
+  "property": "mr1_ambient_decimal_context",
+  "tier": "hand-written"
+}

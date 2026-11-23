@@ -1,0 +1,51 @@
+{
+  "_producer": "https://github.com/Agenticstiger/flux-engine",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile/1-3-0/FluxProfile.json",
+  "disclosureRules": {
+    "acro-default": {
+      "dominance": {
+        "k": "0.90",
+        "n": 2
+      },
+      "minimumCell": 10,
+      "pRatio": "0.10",
+      "roundingBase": 5,
+      "zerosDisclosive": true
+    }
+  },
+  "encoding": {
+    "fractionalBits": 16,
+    "rounding": "floor"
+  },
+  "queries": [
+    {
+      "name": "renewed-since",
+      "statistics": [
+        {
+          "definition": "levelHistogram/1",
+          "disclosure": "acro-default",
+          "groups": [
+            {
+              "group": "",
+              "k": 1200,
+              "levelCounts": [
+                480,
+                720
+              ],
+              "status": "F"
+            }
+          ],
+          "levels": [
+            "false",
+            "true"
+          ],
+          "sampleSize": {
+            "max": 9999,
+            "min": 1000
+          }
+        }
+      ]
+    }
+  ],
+  "tables": {}
+}

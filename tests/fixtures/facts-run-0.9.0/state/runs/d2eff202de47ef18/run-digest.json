@@ -1,0 +1,22 @@
+{
+  "components": {
+    "assignment": "sha256:832e767323d67f521e63c0e7c596b38b6b4a802ebca2ee59c7e92e04b1432c5d",
+    "decisions": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "delivery": "sha256:8cb7bc3b220c4dc3133c30b0fefb2908d97bff2ac987cee033d5b3dd42af9db6",
+    "emits": {
+      "customer": "sha256:2ac9f1475d4cf4641326fb1bf1ffc5c420586ea44d45d2ab6d7605aaf347a538",
+      "date_dim": "sha256:053efb24cbe4eae0daa4de695e422984cbc64712abb2e63fd340d988ba3e6551",
+      "item": "sha256:f30e2d3f584c34319f08917e1c93daf07bc1ef35341c460f5081cccda2d801bc",
+      "store_returns": "sha256:2e7aaf2e4b2f0d0a31a33f41ebe998ba1f48947057c9122082ee9057d01d921e",
+      "store_sales": "sha256:bb9706e579fb21cba1042088eebdba0b249a4591c023dda611d835e28fa16f2d"
+    },
+    "events": "sha256:c2e24b502f6c33bb848a9699bcdf851afe32242e7056fe3f64c2655b4ad55f2c",
+    "journeys": "sha256:827c701e68dc7c3ce91abd3016f8cc61fb6099c94600f3b3d22c50bcab4b989e",
+    "population": "sha256:79e7daeeb8f6e3fc1500cb13e82e6285bace1ae14b580dc4da69e03ff9f77903"
+  },
+  "inputDigest": "sha256:9a6e272a5398ed20f6ed9230bf50fa5269dc9661a909e4c0221727d6cd9fd0ec",
+  "kernelVersion": "0.2.0",
+  "planDigest": "sha256:d2eff202de47ef18c3e68520a7f315d5c13dbde4514fd284738927baafd29d67",
+  "runFormatVersion": 1,
+  "traceVersion": "flux-trace/1"
+}

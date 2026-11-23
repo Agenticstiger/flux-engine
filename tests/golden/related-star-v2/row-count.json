@@ -1,0 +1,7 @@
+{
+  "emit-customer": 500,
+  "emit-date_dim": 365,
+  "emit-item": 200,
+  "emit-store_returns": 300,
+  "emit-store_sales": 4000
+}

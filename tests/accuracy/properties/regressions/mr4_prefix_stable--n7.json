@@ -1,0 +1,10 @@
+{
+  "baseSeed": 0,
+  "input": {
+    "n": 7,
+    "seed": 9
+  },
+  "note": "7 rows against 14",
+  "property": "mr4_prefix_stable",
+  "tier": "hand-written"
+}

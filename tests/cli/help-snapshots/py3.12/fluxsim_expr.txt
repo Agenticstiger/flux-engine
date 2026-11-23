@@ -1,0 +1,16 @@
+usage: fluxsim expr [-h] <command> ...
+
+Parse, check and evaluate one flux-expr/1 expression, or print the model.
+
+examples:
+  # every attribute in scope
+  fluxsim expr model --bundle ./bundle
+
+options:
+  -h, --help  show this help message and exit
+
+commands:
+  eval        parse, check and evaluate one expression
+  model       print the attrmodel/1 document for a bundle
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/expr.html

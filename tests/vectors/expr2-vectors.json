@@ -1,0 +1,3664 @@
+{
+ "$comment": "flux-expr/2 extension vectors (EXPR-SPEC-2 §2, §3, §5, §11): previous versions, paths over several links, aggregates over children and windows over siblings, in the shape of expr-vectors.json (EXPR-SPEC §5). Each vector carries its text ('expr'), the side it is read for ('flux': a FLUX-side rule's text), the model fragment ('model_fragment', an entry of 'models') and expose it is checked against, and its position ('predicate': it must be bool; 'value': a derive's expr, with 'target' naming the derived column when there is one). 'expect.parse' is the syntax tree (EXPR-SPEC-2 §11), or the FLX code when the text does not parse; 'expect.check' is 'ok' or the code the check refuses it with; an accepted vector also gives its type, its static scale for a number (null is unbounded), its canonical text ('expect.unparse') and its values ('expect.eval'). An eval case names a dataset of 'data' and a row of the vector's expose (its 0-based position, as a string). No JSON number appears: a number is a decimal string, or 'p/q' for a rational with no finite decimal expansion, compared by value; a date is YYYY-MM-DD. A predicate's value is always true or false.",
+ "version": "1",
+ "language": "flux-expr/2",
+ "models": {
+  "telco": {
+   "exposes": {
+    "segments": {
+     "columns": {
+      "segment_id": {
+       "type": "string"
+      },
+      "name": {
+       "type": "string"
+      }
+     },
+     "key": [
+      "segment_id"
+     ]
+    },
+    "groups": {
+     "columns": {
+      "group_id": {
+       "type": "string"
+      },
+      "segment_id": {
+       "type": "string"
+      }
+     },
+     "key": [
+      "group_id"
+     ],
+     "links": {
+      "segment": {
+       "to": "segments",
+       "fromColumns": [
+        "segment_id"
+       ],
+       "toColumns": [
+        "segment_id"
+       ]
+      }
+     }
+    },
+    "accounts": {
+     "columns": {
+      "account_id": {
+       "type": "string"
+      },
+      "group_id": {
+       "type": "string"
+      },
+      "name": {
+       "type": "string"
+      },
+      "opened": {
+       "type": "date"
+      }
+     },
+     "key": [
+      "account_id"
+     ],
+     "links": {
+      "group": {
+       "to": "groups",
+       "fromColumns": [
+        "group_id"
+       ],
+       "toColumns": [
+        "group_id"
+       ]
+      }
+     }
+    },
+    "subscriptions": {
+     "columns": {
+      "subscription_id": {
+       "type": "string"
+      },
+      "account_id": {
+       "type": "string"
+      },
+      "start_date": {
+       "type": "date"
+      },
+      "plan_code": {
+       "type": "string"
+      },
+      "quantity": {
+       "type": "int"
+      },
+      "unit_price": {
+       "type": "decimal(10,2)"
+      },
+      "active": {
+       "type": "boolean"
+      }
+     },
+     "key": [
+      "subscription_id"
+     ],
+     "links": {
+      "account": {
+       "to": "accounts",
+       "fromColumns": [
+        "account_id"
+       ],
+       "toColumns": [
+        "account_id"
+       ]
+      }
+     }
+    },
+    "invoice_lines": {
+     "columns": {
+      "line_id": {
+       "type": "string"
+      },
+      "subscription_id": {
+       "type": "string"
+      },
+      "amount": {
+       "type": "decimal(10,2)"
+      },
+      "kind": {
+       "type": "string",
+       "enum": [
+        "base_fee",
+        "usage"
+       ]
+      }
+     },
+     "key": [
+      "line_id"
+     ],
+     "links": {
+      "subscription": {
+       "to": "subscriptions",
+       "fromColumns": [
+        "subscription_id"
+       ],
+       "toColumns": [
+        "subscription_id"
+       ]
+      }
+     }
+    },
+    "payments": {
+     "columns": {
+      "payment_id": {
+       "type": "string"
+      },
+      "payer_id": {
+       "type": "string"
+      },
+      "beneficiary_id": {
+       "type": "string"
+      },
+      "amount": {
+       "type": "decimal(10,2)"
+      }
+     },
+     "key": [
+      "payment_id"
+     ],
+     "links": {
+      "payer": {
+       "to": "accounts",
+       "fromColumns": [
+        "payer_id"
+       ],
+       "toColumns": [
+        "account_id"
+       ]
+      },
+      "beneficiary": {
+       "to": "accounts",
+       "fromColumns": [
+        "beneficiary_id"
+       ],
+       "toColumns": [
+        "account_id"
+       ]
+      }
+     }
+    },
+    "plans": {
+     "columns": {
+      "plan_id": {
+       "type": "string"
+      },
+      "valid_from": {
+       "type": "date"
+      },
+      "valid_to": {
+       "type": "date"
+      },
+      "price": {
+       "type": "decimal(10,2)"
+      },
+      "account_id": {
+       "type": "string"
+      }
+     },
+     "key": [
+      "plan_id",
+      "valid_from"
+     ],
+     "versions": {
+      "entity": [
+       "plan_id"
+      ],
+      "start": "valid_from",
+      "end": "valid_to"
+     },
+     "links": {
+      "account": {
+       "to": "accounts",
+       "fromColumns": [
+        "account_id"
+       ],
+       "toColumns": [
+        "account_id"
+       ]
+      }
+     }
+    },
+    "plan_features": {
+     "columns": {
+      "feature_id": {
+       "type": "string"
+      },
+      "plan_id": {
+       "type": "string"
+      }
+     },
+     "key": [
+      "feature_id"
+     ],
+     "links": {
+      "plan": {
+       "to": "plans",
+       "fromColumns": [
+        "plan_id"
+       ],
+       "toColumns": [
+        "plan_id"
+       ]
+      }
+     }
+    },
+    "employees": {
+     "columns": {
+      "employee_id": {
+       "type": "string"
+      },
+      "manager_id": {
+       "type": "string"
+      }
+     },
+     "key": [
+      "employee_id"
+     ],
+     "links": {
+      "manager": {
+       "to": "employees",
+       "fromColumns": [
+        "manager_id"
+       ],
+       "toColumns": [
+        "employee_id"
+       ]
+      }
+     }
+    },
+    "orders": {
+     "columns": {
+      "order_id": {
+       "type": "string"
+      },
+      "customer": {
+       "type": "string"
+      },
+      "placed": {
+       "type": "date"
+      }
+     },
+     "key": [
+      "order_id"
+     ],
+     "links": {
+      "customer": {
+       "to": "accounts",
+       "fromColumns": [
+        "customer"
+       ],
+       "toColumns": [
+        "account_id"
+       ]
+      }
+     }
+    },
+    "quirks": {
+     "columns": {
+      "quirk_id": {
+       "type": "string"
+      },
+      "link": {
+       "type": "string"
+      },
+      "previous": {
+       "type": "string"
+      },
+      "segment_id": {
+       "type": "string"
+      }
+     },
+     "key": [
+      "quirk_id"
+     ],
+     "links": {
+      "row": {
+       "to": "segments",
+       "fromColumns": [
+        "segment_id"
+       ],
+       "toColumns": [
+        "segment_id"
+       ]
+      }
+     }
+    },
+    "logs": {
+     "columns": {
+      "log_id": {
+       "type": "string"
+      },
+      "account_id": {
+       "type": "string"
+      },
+      "seq": {
+       "type": "int"
+      }
+     },
+     "links": {
+      "account": {
+       "to": "accounts",
+       "fromColumns": [
+        "account_id"
+       ],
+       "toColumns": [
+        "account_id"
+       ]
+      }
+     }
+    }
+   }
+  }
+ },
+ "data": {
+  "telco": {
+   "model": "telco",
+   "rows": {
+    "segments": [
+     {
+      "segment_id": "s1",
+      "name": "retail"
+     },
+     {
+      "segment_id": "s2",
+      "name": "business"
+     }
+    ],
+    "groups": [
+     {
+      "group_id": "g1",
+      "segment_id": "s1"
+     },
+     {
+      "group_id": "g2",
+      "segment_id": "s2"
+     },
+     {
+      "group_id": "g3",
+      "segment_id": null
+     }
+    ],
+    "accounts": [
+     {
+      "account_id": "a1",
+      "group_id": "g1",
+      "name": "Ada",
+      "opened": "2020-01-15"
+     },
+     {
+      "account_id": "a2",
+      "group_id": "g3",
+      "name": "Bo",
+      "opened": "2021-06-30"
+     },
+     {
+      "account_id": "a3",
+      "group_id": "g9",
+      "name": null,
+      "opened": null
+     },
+     {
+      "account_id": "a4",
+      "group_id": null,
+      "name": "Cy",
+      "opened": "2022-02-28"
+     }
+    ],
+    "subscriptions": [
+     {
+      "subscription_id": "sub1",
+      "account_id": "a1",
+      "start_date": "2025-01-10",
+      "plan_code": "A",
+      "quantity": "2",
+      "unit_price": "3.50",
+      "active": true
+     },
+     {
+      "subscription_id": "sub2",
+      "account_id": "a1",
+      "start_date": "2024-05-01",
+      "plan_code": "B",
+      "quantity": "1",
+      "unit_price": "9.00",
+      "active": false
+     },
+     {
+      "subscription_id": "sub3",
+      "account_id": "a1",
+      "start_date": "2025-01-10",
+      "plan_code": "C",
+      "quantity": null,
+      "unit_price": "1.25",
+      "active": null
+     },
+     {
+      "subscription_id": "sub4",
+      "account_id": "a2",
+      "start_date": "2025-03-01",
+      "plan_code": "A",
+      "quantity": "3",
+      "unit_price": "2.00",
+      "active": true
+     },
+     {
+      "subscription_id": "sub5",
+      "account_id": null,
+      "start_date": "2025-02-01",
+      "plan_code": "D",
+      "quantity": "1",
+      "unit_price": "5.00",
+      "active": true
+     },
+     {
+      "subscription_id": "sub6",
+      "account_id": null,
+      "start_date": "2023-01-01",
+      "plan_code": "E",
+      "quantity": "4",
+      "unit_price": "0.50",
+      "active": false
+     }
+    ],
+    "invoice_lines": [
+     {
+      "line_id": "l1",
+      "subscription_id": "sub1",
+      "amount": "7.00",
+      "kind": "base_fee"
+     },
+     {
+      "line_id": "l2",
+      "subscription_id": "sub1",
+      "amount": "1.50",
+      "kind": "usage"
+     },
+     {
+      "line_id": "l3",
+      "subscription_id": "sub2",
+      "amount": "9.00",
+      "kind": "base_fee"
+     },
+     {
+      "line_id": "l4",
+      "subscription_id": "sub4",
+      "amount": null,
+      "kind": "usage"
+     },
+     {
+      "line_id": "l5",
+      "subscription_id": "sub9",
+      "amount": "3.00",
+      "kind": "usage"
+     }
+    ],
+    "payments": [
+     {
+      "payment_id": "p1",
+      "payer_id": "a1",
+      "beneficiary_id": "a2",
+      "amount": "10.00"
+     },
+     {
+      "payment_id": "p2",
+      "payer_id": "a2",
+      "beneficiary_id": "a1",
+      "amount": "5.00"
+     },
+     {
+      "payment_id": "p3",
+      "payer_id": "a1",
+      "beneficiary_id": "a1",
+      "amount": "1.00"
+     }
+    ],
+    "plans": [
+     {
+      "plan_id": "pl1",
+      "valid_from": "2025-01-01",
+      "valid_to": "2025-06-30",
+      "price": "10.00",
+      "account_id": "a1"
+     },
+     {
+      "plan_id": "pl1",
+      "valid_from": "2025-07-01",
+      "valid_to": null,
+      "price": "12.00",
+      "account_id": "a1"
+     },
+     {
+      "plan_id": "pl1",
+      "valid_from": "2024-01-01",
+      "valid_to": "2024-12-31",
+      "price": "8.00",
+      "account_id": "a1"
+     },
+     {
+      "plan_id": "pl2",
+      "valid_from": "2025-01-01",
+      "valid_to": null,
+      "price": "5.00",
+      "account_id": "a2"
+     }
+    ],
+    "plan_features": [
+     {
+      "feature_id": "f1",
+      "plan_id": "pl1"
+     }
+    ],
+    "employees": [
+     {
+      "employee_id": "e1",
+      "manager_id": null
+     },
+     {
+      "employee_id": "e2",
+      "manager_id": "e1"
+     },
+     {
+      "employee_id": "e3",
+      "manager_id": "e1"
+     },
+     {
+      "employee_id": "e4",
+      "manager_id": "e2"
+     }
+    ],
+    "orders": [
+     {
+      "order_id": "o1",
+      "customer": "a1",
+      "placed": "2025-01-01"
+     },
+     {
+      "order_id": "o2",
+      "customer": "a1",
+      "placed": "2025-02-01"
+     }
+    ],
+    "quirks": [
+     {
+      "quirk_id": "q1",
+      "link": "lk",
+      "previous": null,
+      "segment_id": "s1"
+     },
+     {
+      "quirk_id": "q2",
+      "link": "x",
+      "previous": "pv",
+      "segment_id": "s9"
+     }
+    ],
+    "logs": [
+     {
+      "log_id": "lg1",
+      "account_id": "a1",
+      "seq": "1"
+     },
+     {
+      "log_id": "lg2",
+      "account_id": "a1",
+      "seq": "2"
+     }
+    ]
+   }
+  }
+ },
+ "vectors": [
+  {
+   "id": "previous-column",
+   "expr": "previous.price",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "plans",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "path",
+     "root": "previous",
+     "parts": [
+      "price"
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "2",
+    "unparse": "previous.price",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "8"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "10"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "previous-through-link",
+   "expr": "previous.account.name",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "plans",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "path",
+     "root": "previous",
+     "parts": [
+      "account",
+      "name"
+     ]
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "previous.account.name",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "Ada"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "Ada"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "previous-in-comparison",
+   "expr": "price > previous.price",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "plans",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": ">",
+     "left": {
+      "node": "column",
+      "name": "price"
+     },
+     "right": {
+      "node": "path",
+      "root": "previous",
+      "parts": [
+       "price"
+      ]
+     }
+    },
+    "check": "ok",
+    "type": "bool",
+    "unparse": "price > previous.price",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": true
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": true
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": false
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "previous-without-versions",
+   "expr": "previous.name",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "path",
+     "root": "previous",
+     "parts": [
+      "name"
+     ]
+    },
+    "check": "FLX-6106"
+   }
+  },
+  {
+   "id": "previous-too-long",
+   "expr": "previous.account.group.group_id",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "plans",
+   "position": "value",
+   "expect": {
+    "parse": "FLX-6103"
+   }
+  },
+  {
+   "id": "path-two-links",
+   "expr": "group.segment.name",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "path",
+     "root": "link",
+     "parts": [
+      "group",
+      "segment",
+      "name"
+     ]
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "group.segment.name",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "retail"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "path-two-links-from-link-root",
+   "expr": "link.group.segment.name",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "path",
+     "root": "link",
+     "parts": [
+      "group",
+      "segment",
+      "name"
+     ]
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "group.segment.name",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "retail"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "path-one-link-from-link-root",
+   "expr": "link.group.segment_id",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "column",
+     "name": "segment_id",
+     "relationship": "group"
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "group.segment_id",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "s1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "path-row-root",
+   "expr": "row.name",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "column",
+     "name": "name"
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "name",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "Ada"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "Bo"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "Cy"
+     }
+    ]
+   }
+  },
+  {
+   "id": "path-validity-window",
+   "expr": "plan.price > 1",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "plan_features",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": ">",
+     "left": {
+      "node": "column",
+      "name": "price",
+      "relationship": "plan"
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "check": "FLX-6106"
+   }
+  },
+  {
+   "id": "path-unknown-hop",
+   "expr": "group.sector.name",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "path",
+     "root": "link",
+     "parts": [
+      "group",
+      "sector",
+      "name"
+     ]
+    },
+    "check": "FLX-6113"
+   }
+  },
+  {
+   "id": "path-relationship-alone",
+   "expr": "link.group = 'x'",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "predicate",
+   "expect": {
+    "parse": "FLX-6106"
+   }
+  },
+  {
+   "id": "path-row-root-with-link",
+   "expr": "row.group.segment_id",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": "FLX-6106"
+   }
+  },
+  {
+   "id": "root-bare-name-is-also-column",
+   "expr": "link = 'lk'",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "quirks",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "link"
+     },
+     "right": {
+      "node": "string",
+      "value": "lk"
+     }
+    },
+    "check": "FLX-6105"
+   }
+  },
+  {
+   "id": "root-row-prefix",
+   "expr": "row.link = 'lk'",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "quirks",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "link"
+     },
+     "right": {
+      "node": "string",
+      "value": "lk"
+     }
+    },
+    "check": "ok",
+    "type": "bool",
+    "unparse": "row.link = 'lk'",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": true
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "root-quoted-name-is-a-column",
+   "expr": "\"previous\" IS NULL",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "quirks",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "is_null",
+     "operand": {
+      "node": "column",
+      "name": "previous"
+     },
+     "negated": false
+    },
+    "check": "ok",
+    "type": "bool",
+    "unparse": "row.previous IS NULL",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": true
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "root-previous-is-also-column",
+   "expr": "previous.quirk_id = 'x'",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "quirks",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "path",
+      "root": "previous",
+      "parts": [
+       "quirk_id"
+      ]
+     },
+     "right": {
+      "node": "string",
+      "value": "x"
+     }
+    },
+    "check": "FLX-6105"
+   }
+  },
+  {
+   "id": "root-relationship-named-row",
+   "expr": "link.row.name = 'retail'",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "quirks",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "name",
+      "relationship": "row"
+     },
+     "right": {
+      "node": "string",
+      "value": "retail"
+     }
+    },
+    "check": "ok",
+    "type": "bool",
+    "unparse": "link.row.name = 'retail'",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": true
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "root-row-is-not-a-relationship",
+   "expr": "row.name = 'x'",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "quirks",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "name"
+     },
+     "right": {
+      "node": "string",
+      "value": "x"
+     }
+    },
+    "check": "FLX-6113"
+   }
+  },
+  {
+   "id": "root-bare-without-path",
+   "expr": "previous = 'x'",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "column",
+      "name": "previous"
+     },
+     "right": {
+      "node": "string",
+      "value": "x"
+     }
+    },
+    "check": "FLX-6106"
+   }
+  },
+  {
+   "id": "aggregate-count",
+   "expr": "COUNT(CHILDREN.subscriptions)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": null
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "COUNT(CHILDREN.subscriptions)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "3"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "0"
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-count-filter",
+   "expr": "COUNT(CHILDREN.subscriptions, active)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "column",
+      "name": "active"
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "COUNT(CHILDREN.subscriptions, active)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "0"
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-sum-of-expression",
+   "expr": "SUM(CHILDREN.subscriptions, quantity * unit_price)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "SUM",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "arith",
+      "op": "*",
+      "left": {
+       "node": "column",
+       "name": "quantity"
+      },
+      "right": {
+       "node": "column",
+       "name": "unit_price"
+      }
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "2",
+    "unparse": "SUM(CHILDREN.subscriptions, quantity * unit_price)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "16"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "6"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-sum-only-nulls",
+   "expr": "SUM(CHILDREN.subscriptions, CASE WHEN plan_code = 'Z' THEN unit_price END)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "SUM",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "case",
+      "whens": [
+       {
+        "when": {
+         "node": "compare",
+         "op": "=",
+         "left": {
+          "node": "column",
+          "name": "plan_code"
+         },
+         "right": {
+          "node": "string",
+          "value": "Z"
+         }
+        },
+        "then": {
+         "node": "column",
+         "name": "unit_price"
+        }
+       }
+      ]
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "2",
+    "unparse": "SUM(CHILDREN.subscriptions, CASE WHEN plan_code = 'Z' THEN unit_price END)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-min-date",
+   "expr": "MIN(CHILDREN.subscriptions, start_date)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "MIN",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "column",
+      "name": "start_date"
+     }
+    },
+    "check": "ok",
+    "type": "date",
+    "unparse": "MIN(CHILDREN.subscriptions, start_date)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "2024-05-01"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2025-03-01"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-max-string",
+   "expr": "MAX(CHILDREN.subscriptions, plan_code)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "MAX",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "column",
+      "name": "plan_code"
+     }
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "MAX(CHILDREN.subscriptions, plan_code)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "C"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "A"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-avg-exact",
+   "expr": "AVG(CHILDREN.subscriptions, unit_price)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "AVG",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "column",
+      "name": "unit_price"
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": null,
+    "unparse": "AVG(CHILDREN.subscriptions, unit_price)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "55/12"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-of-grandchildren",
+   "expr": "SUM(CHILDREN.subscriptions, COUNT(CHILDREN.invoice_lines))",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "SUM",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "aggregate",
+      "name": "COUNT",
+      "children": {
+       "node": "children",
+       "expose": "invoice_lines",
+       "relationship": null
+      },
+      "arg": null
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "SUM(CHILDREN.subscriptions, COUNT(CHILDREN.invoice_lines))",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "3"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-named-relationship",
+   "expr": "SUM(CHILDREN.payments.payer, amount)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "SUM",
+     "children": {
+      "node": "children",
+      "expose": "payments",
+      "relationship": "payer"
+     },
+     "arg": {
+      "node": "column",
+      "name": "amount"
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "2",
+    "unparse": "SUM(CHILDREN.payments.payer, amount)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "11"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "5"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-filter-reads-child-links",
+   "expr": "COUNT(CHILDREN.subscriptions, account.name = 'Ada')",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "compare",
+      "op": "=",
+      "left": {
+       "node": "column",
+       "name": "name",
+       "relationship": "account"
+      },
+      "right": {
+       "node": "string",
+       "value": "Ada"
+      }
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "COUNT(CHILDREN.subscriptions, account.name = 'Ada')",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "3"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "0"
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-in-predicate",
+   "expr": "COUNT(CHILDREN.subscriptions) > 1",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": ">",
+     "left": {
+      "node": "aggregate",
+      "name": "COUNT",
+      "children": {
+       "node": "children",
+       "expose": "subscriptions",
+       "relationship": null
+      },
+      "arg": null
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "check": "ok",
+    "type": "bool",
+    "unparse": "COUNT(CHILDREN.subscriptions) > 1",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": true
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": false
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": false
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-if-none",
+   "expr": "COALESCE(SUM(CHILDREN.subscriptions, unit_price), 0)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "coalesce",
+     "args": [
+      {
+       "node": "aggregate",
+       "name": "SUM",
+       "children": {
+        "node": "children",
+        "expose": "subscriptions",
+        "relationship": null
+       },
+       "arg": {
+        "node": "column",
+        "name": "unit_price"
+       }
+      },
+      {
+       "node": "number",
+       "value": "0"
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "2",
+    "unparse": "COALESCE(SUM(CHILDREN.subscriptions, unit_price), 0)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "13.75"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "0"
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-avg-of-rounded-quotient",
+   "expr": "AVG(CHILDREN.subscriptions, ROUND(unit_price / 3, 2))",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "AVG",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "round",
+      "arg": {
+       "node": "arith",
+       "op": "/",
+       "left": {
+        "node": "column",
+        "name": "unit_price"
+       },
+       "right": {
+        "node": "number",
+        "value": "3"
+       }
+      },
+      "scale": "2",
+      "mode": "HALF_AWAY_FROM_ZERO"
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": null,
+    "unparse": "AVG(CHILDREN.subscriptions, ROUND(unit_price / 3, 2))",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1.53"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "0.67"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-self-relationship",
+   "expr": "COUNT(CHILDREN.employees)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "employees",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "employees",
+      "relationship": null
+     },
+     "arg": null
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "COUNT(CHILDREN.employees)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "0"
+     }
+    ]
+   }
+  },
+  {
+   "id": "aggregate-several-relationships",
+   "expr": "COUNT(CHILDREN.payments)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "payments",
+      "relationship": null
+     },
+     "arg": null
+    },
+    "check": "FLX-6106"
+   }
+  },
+  {
+   "id": "aggregate-no-relationship",
+   "expr": "COUNT(CHILDREN.invoice_lines)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "invoice_lines",
+      "relationship": null
+     },
+     "arg": null
+    },
+    "check": "FLX-6106"
+   }
+  },
+  {
+   "id": "aggregate-relationship-to-another-expose",
+   "expr": "COUNT(CHILDREN.invoice_lines.subscription)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "invoice_lines",
+      "relationship": "subscription"
+     },
+     "arg": null
+    },
+    "check": "FLX-6106"
+   }
+  },
+  {
+   "id": "aggregate-unknown-expose",
+   "expr": "COUNT(CHILDREN.subscription)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "subscription",
+      "relationship": null
+     },
+     "arg": null
+    },
+    "check": "FLX-6113"
+   }
+  },
+  {
+   "id": "aggregate-not-over-children",
+   "expr": "COUNT(name)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": "FLX-6107"
+   }
+  },
+  {
+   "id": "aggregate-sum-unbounded",
+   "expr": "SUM(CHILDREN.subscriptions, unit_price / 2)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "SUM",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "arith",
+      "op": "/",
+      "left": {
+       "node": "column",
+       "name": "unit_price"
+      },
+      "right": {
+       "node": "number",
+       "value": "2"
+      }
+     }
+    },
+    "check": "FLX-6110"
+   }
+  },
+  {
+   "id": "aggregate-sum-without-value",
+   "expr": "SUM(CHILDREN.subscriptions)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "SUM",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": null
+    },
+    "check": "FLX-6109"
+   }
+  },
+  {
+   "id": "aggregate-min-of-bool",
+   "expr": "MIN(CHILDREN.subscriptions, active)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "MIN",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "column",
+      "name": "active"
+     }
+    },
+    "check": "FLX-6109"
+   }
+  },
+  {
+   "id": "aggregate-count-filter-not-bool",
+   "expr": "COUNT(CHILDREN.subscriptions, quantity)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "column",
+      "name": "quantity"
+     }
+    },
+    "check": "FLX-6109"
+   }
+  },
+  {
+   "id": "aggregate-nested-over-same-collection",
+   "expr": "COUNT(CHILDREN.employees, COUNT(CHILDREN.employees) > 0)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "employees",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "employees",
+      "relationship": null
+     },
+     "arg": {
+      "node": "compare",
+      "op": ">",
+      "left": {
+       "node": "aggregate",
+       "name": "COUNT",
+       "children": {
+        "node": "children",
+        "expose": "employees",
+        "relationship": null
+       },
+       "arg": null
+      },
+      "right": {
+       "node": "number",
+       "value": "0"
+      }
+     }
+    },
+    "check": "FLX-6107"
+   }
+  },
+  {
+   "id": "aggregate-window-inside",
+   "expr": "SUM(CHILDREN.subscriptions, ROW_NUMBER() OVER (PARTITION BY account ORDER BY subscription_id))",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "SUM",
+     "children": {
+      "node": "children",
+      "expose": "subscriptions",
+      "relationship": null
+     },
+     "arg": {
+      "node": "window",
+      "name": "ROW_NUMBER",
+      "args": [],
+      "partition": "account",
+      "order": [
+       {
+        "key": {
+         "node": "column",
+         "name": "subscription_id"
+        },
+        "desc": false,
+        "nullsFirst": false
+       }
+      ]
+     }
+    },
+    "check": "FLX-6107"
+   }
+  },
+  {
+   "id": "aggregate-written-as-window",
+   "expr": "SUM(CHILDREN.subscriptions, quantity) OVER (PARTITION BY group ORDER BY account_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "value",
+   "expect": {
+    "parse": "FLX-6103"
+   }
+  },
+  {
+   "id": "aggregate-validity-window-target",
+   "expr": "COUNT(CHILDREN.plan_features)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "plans",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "aggregate",
+     "name": "COUNT",
+     "children": {
+      "node": "children",
+      "expose": "plan_features",
+      "relationship": null
+     },
+     "arg": null
+    },
+    "check": "FLX-6106"
+   }
+  },
+  {
+   "id": "aggregate-children-as-value",
+   "expr": "CHILDREN.subscriptions IS NULL",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "accounts",
+   "position": "predicate",
+   "expect": {
+    "parse": "FLX-6106"
+   }
+  },
+  {
+   "id": "window-primary-subscription",
+   "expr": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY start_date, subscription_id) = 1",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "predicate",
+   "expect": {
+    "parse": {
+     "node": "compare",
+     "op": "=",
+     "left": {
+      "node": "window",
+      "name": "ROW_NUMBER",
+      "args": [],
+      "partition": "account",
+      "order": [
+       {
+        "key": {
+         "node": "column",
+         "name": "start_date"
+        },
+        "desc": false,
+        "nullsFirst": false
+       },
+       {
+        "key": {
+         "node": "column",
+         "name": "subscription_id"
+        },
+        "desc": false,
+        "nullsFirst": false
+       }
+      ]
+     },
+     "right": {
+      "node": "number",
+      "value": "1"
+     }
+    },
+    "check": "ok",
+    "type": "bool",
+    "unparse": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY start_date, subscription_id) = 1",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": false
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": true
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": false
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": true
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": false
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-rank-ties",
+   "expr": "RANK() OVER (PARTITION BY account ORDER BY start_date)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "RANK",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "RANK() OVER (PARTITION BY account ORDER BY start_date)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-dense-rank-desc",
+   "expr": "DENSE_RANK() OVER (PARTITION BY account ORDER BY start_date DESC)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "DENSE_RANK",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": true,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "DENSE_RANK() OVER (PARTITION BY account ORDER BY start_date DESC)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "2"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-first-value",
+   "expr": "FIRST_VALUE(plan_code) OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "FIRST_VALUE",
+     "args": [
+      {
+       "node": "column",
+       "name": "plan_code"
+      }
+     ],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": false,
+       "nullsFirst": false
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "FIRST_VALUE(plan_code) OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "B"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "B"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "B"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "A"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "E"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "E"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-last-value-whole-partition",
+   "expr": "LAST_VALUE(plan_code) OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "LAST_VALUE",
+     "args": [
+      {
+       "node": "column",
+       "name": "plan_code"
+      }
+     ],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": false,
+       "nullsFirst": false
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "LAST_VALUE(plan_code) OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "C"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "C"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "C"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "A"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "D"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "D"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-lag",
+   "expr": "LAG(quantity) OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "LAG",
+     "args": [
+      {
+       "node": "column",
+       "name": "quantity"
+      }
+     ],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": false,
+       "nullsFirst": false
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "LAG(quantity) OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "4"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-lead-with-default",
+   "expr": "LEAD(plan_code, 2, 'none') OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "LEAD",
+     "args": [
+      {
+       "node": "column",
+       "name": "plan_code"
+      },
+      {
+       "node": "number",
+       "value": "2"
+      },
+      {
+       "node": "string",
+       "value": "none"
+      }
+     ],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": false,
+       "nullsFirst": false
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "string",
+    "unparse": "LEAD(plan_code, 2, 'none') OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "none"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "C"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "none"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "none"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "none"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "none"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-nulls-first",
+   "expr": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY quantity NULLS FIRST, subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "ROW_NUMBER",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "quantity"
+       },
+       "desc": false,
+       "nullsFirst": true
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY quantity NULLS FIRST, subscription_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "3"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "2"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-desc-nulls-last",
+   "expr": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY quantity DESC, subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "ROW_NUMBER",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "quantity"
+       },
+       "desc": true,
+       "nullsFirst": false
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY quantity DESC, subscription_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "3"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-canonical-defaults",
+   "expr": "row_number() over (partition by link.account order by start_date asc nulls last, subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "ROW_NUMBER",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": false,
+       "nullsFirst": false
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "3"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-sort-key-through-link",
+   "expr": "RANK() OVER (PARTITION BY account ORDER BY account.name)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "RANK",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "name",
+        "relationship": "account"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "RANK() OVER (PARTITION BY account ORDER BY account.name)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-aggregate-in-argument",
+   "expr": "LAG(COUNT(CHILDREN.invoice_lines), 1, 0) OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "LAG",
+     "args": [
+      {
+       "node": "aggregate",
+       "name": "COUNT",
+       "children": {
+        "node": "children",
+        "expose": "invoice_lines",
+        "relationship": null
+       },
+       "arg": null
+      },
+      {
+       "node": "number",
+       "value": "1"
+      },
+      {
+       "node": "number",
+       "value": "0"
+      }
+     ],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": false,
+       "nullsFirst": false
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "LAG(COUNT(CHILDREN.invoice_lines), 1, 0) OVER (PARTITION BY account ORDER BY start_date, subscription_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "0"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "0"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-rank-any-order",
+   "expr": "RANK() OVER (PARTITION BY account ORDER BY plan_code)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "RANK",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "plan_code"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "RANK() OVER (PARTITION BY account ORDER BY plan_code)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": "3"
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "2"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-rank-without-key",
+   "expr": "RANK() OVER (PARTITION BY account ORDER BY seq)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "logs",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "RANK",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "seq"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "RANK() OVER (PARTITION BY account ORDER BY seq)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-partition-link-prefix-kept",
+   "expr": "ROW_NUMBER() OVER (PARTITION BY link.customer ORDER BY placed, order_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "orders",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "ROW_NUMBER",
+     "args": [],
+     "partition": "customer",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "placed"
+       },
+       "desc": false,
+       "nullsFirst": false
+      },
+      {
+       "key": {
+        "node": "column",
+        "name": "order_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "0",
+    "unparse": "ROW_NUMBER() OVER (PARTITION BY link.customer ORDER BY placed, order_id)",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "1"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "2"
+     }
+    ]
+   }
+  },
+  {
+   "id": "window-order-not-total",
+   "expr": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY start_date)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "ROW_NUMBER",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "start_date"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "FLX-6108"
+   }
+  },
+  {
+   "id": "window-no-key",
+   "expr": "ROW_NUMBER() OVER (PARTITION BY account ORDER BY seq)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "logs",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "ROW_NUMBER",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "seq"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "FLX-6108"
+   }
+  },
+  {
+   "id": "window-partition-name-is-also-column",
+   "expr": "ROW_NUMBER() OVER (PARTITION BY customer ORDER BY order_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "orders",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "ROW_NUMBER",
+     "args": [],
+     "partition": "customer",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "order_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "FLX-6105"
+   }
+  },
+  {
+   "id": "window-partition-not-relationship",
+   "expr": "ROW_NUMBER() OVER (PARTITION BY plan_code ORDER BY subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "ROW_NUMBER",
+     "args": [],
+     "partition": "plan_code",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "FLX-6106"
+   }
+  },
+  {
+   "id": "window-inside-window",
+   "expr": "LAG(ROW_NUMBER() OVER (PARTITION BY account ORDER BY subscription_id)) OVER (PARTITION BY account ORDER BY subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "LAG",
+     "args": [
+      {
+       "node": "window",
+       "name": "ROW_NUMBER",
+       "args": [],
+       "partition": "account",
+       "order": [
+        {
+         "key": {
+          "node": "column",
+          "name": "subscription_id"
+         },
+         "desc": false,
+         "nullsFirst": false
+        }
+       ]
+      }
+     ],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "FLX-6107"
+   }
+  },
+  {
+   "id": "window-without-over",
+   "expr": "ROW_NUMBER() = 1",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "predicate",
+   "expect": {
+    "parse": "FLX-6103"
+   }
+  },
+  {
+   "id": "window-arity",
+   "expr": "ROW_NUMBER(quantity) OVER (PARTITION BY account ORDER BY subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": "FLX-6109"
+   }
+  },
+  {
+   "id": "window-lag-offset-zero",
+   "expr": "LAG(quantity, 0) OVER (PARTITION BY account ORDER BY subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": "FLX-6109"
+   }
+  },
+  {
+   "id": "window-lag-offset-fraction",
+   "expr": "LAG(quantity, 1.5) OVER (PARTITION BY account ORDER BY subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": "FLX-6109"
+   }
+  },
+  {
+   "id": "window-lag-default-type",
+   "expr": "LAG(quantity, 1, 'none') OVER (PARTITION BY account ORDER BY subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "LAG",
+     "args": [
+      {
+       "node": "column",
+       "name": "quantity"
+      },
+      {
+       "node": "number",
+       "value": "1"
+      },
+      {
+       "node": "string",
+       "value": "none"
+      }
+     ],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "FLX-6109"
+   }
+  },
+  {
+   "id": "window-first-value-null",
+   "expr": "FIRST_VALUE(NULL) OVER (PARTITION BY account ORDER BY subscription_id)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "FIRST_VALUE",
+     "args": [
+      {
+       "node": "null"
+      }
+     ],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "subscription_id"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "FLX-6104"
+   }
+  },
+  {
+   "id": "window-order-by-bool",
+   "expr": "RANK() OVER (PARTITION BY account ORDER BY active)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "window",
+     "name": "RANK",
+     "args": [],
+     "partition": "account",
+     "order": [
+      {
+       "key": {
+        "node": "column",
+        "name": "active"
+       },
+       "desc": false,
+       "nullsFirst": false
+      }
+     ]
+    },
+    "check": "FLX-6109"
+   }
+  },
+  {
+   "id": "window-order-by-expression",
+   "expr": "RANK() OVER (PARTITION BY account ORDER BY quantity + 1)",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": "FLX-6103"
+   }
+  },
+  {
+   "id": "flux-side-core-text",
+   "expr": "quantity * unit_price",
+   "side": "flux",
+   "model_fragment": "telco",
+   "expose": "subscriptions",
+   "position": "value",
+   "expect": {
+    "parse": {
+     "node": "arith",
+     "op": "*",
+     "left": {
+      "node": "column",
+      "name": "quantity"
+     },
+     "right": {
+      "node": "column",
+      "name": "unit_price"
+     }
+    },
+    "check": "ok",
+    "type": "number",
+    "scale": "2",
+    "unparse": "quantity * unit_price",
+    "eval": [
+     {
+      "data": "telco",
+      "row": "0",
+      "result": "7"
+     },
+     {
+      "data": "telco",
+      "row": "1",
+      "result": "9"
+     },
+     {
+      "data": "telco",
+      "row": "2",
+      "result": null
+     },
+     {
+      "data": "telco",
+      "row": "3",
+      "result": "6"
+     },
+     {
+      "data": "telco",
+      "row": "4",
+      "result": "5"
+     },
+     {
+      "data": "telco",
+      "row": "5",
+      "result": "2"
+     }
+    ]
+   }
+  }
+ ]
+}

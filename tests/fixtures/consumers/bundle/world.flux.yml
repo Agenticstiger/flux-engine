@@ -1,0 +1,18 @@
+# Written by `fluxsim init` from subscriptions.fluid.yaml and subscriptions.profile.json.
+# Every number below has its source in the parameter register
+# (extensions.com.agentics.flux/1.parameters): the profile, the contract, an
+# assumption with its reason, or a default. Replace the assumptions you can.
+fluxVersion: 0.5.0
+kind: World
+id: world-telco.silver.subscriptions
+name: World for Subscriptions
+metadata:
+  owner:
+    team: billing
+spec:
+  seed: 42
+  vertical: telco
+  population:
+    size: 1
+    lifecycleMix:
+      active: 1

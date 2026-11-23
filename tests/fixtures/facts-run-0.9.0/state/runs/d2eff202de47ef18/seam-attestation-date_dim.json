@@ -1,0 +1,29 @@
+{
+  "G": "sha256:d14c617b79f443cb12bb6a24d03b3ffc9c7d70c813a70b271ec1798d3b28eb2e",
+  "H": "sha256:a1447e407444445e8a634e342c67e92d9d9f0ba3cfde7421410ec341a1cc22af",
+  "columns": [
+    "d_date_sk",
+    "d_year",
+    "d_date"
+  ],
+  "emitIndex": 0,
+  "reference": {
+    "contractDigest": "sha256:89b4675ab044d2fbb9a712079d6ba91241c41b1cd2e741a5d1938bc23a77f3a0",
+    "contractFileDigest": "sha256:9a28b56a04c7a06695639d9a4ff42d58027a6efbb6b22df44d070623df2f5999",
+    "exposeId": "date_dim",
+    "fluidVersion": "0.7.7",
+    "productRef": "retail.store_star"
+  },
+  "shippedContract": null,
+  "simulationId": "sim-store-star",
+  "synthetic": {
+    "generatorDigest": "sha256:a2c5730b8b35539e27c8a2c4fc1c503870211edfbeaaad59420bb642e82450d2",
+    "outputDigest": "sha256:053efb24cbe4eae0daa4de695e422984cbc64712abb2e63fd340d988ba3e6551",
+    "rows": 365
+  },
+  "types": [
+    "INT",
+    "INT",
+    "DATE"
+  ]
+}

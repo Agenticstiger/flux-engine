@@ -1,0 +1,81 @@
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: billing.subscriptions
+name: Subscriptions
+metadata:
+  owner:
+    team: subscriptions
+exposes:
+  - exposeId: subscription_version
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: subscription_version, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: subscription_sk, type: INT, required: true }
+        - { name: subscription_id, type: INT, required: true }
+        - { name: valid_from, type: DATE, required: true }
+        - { name: valid_to, type: DATE, required: false }
+        - { name: plan, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: subscription_version, type: primary, expr: subscription_sk }
+        - { name: subscription, type: natural, expr: subscription_id }
+      dimensions:
+        - { name: valid_from, type: time, typeParams: { validityParams: { isStart: true } } }
+        - { name: valid_to, type: time, typeParams: { validityParams: { isEnd: true } } }
+        - { name: plan, type: categorical }
+        - { name: status, type: categorical }
+  - exposeId: subscription_current
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: subscription_current, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: subscription_id, type: INT, required: true }
+        - { name: plan, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: subscription, type: primary, expr: subscription_id }
+  - exposeId: subscription_change
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: subscription_change, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: event_id, type: INT, required: true }
+        - { name: subscription_id, type: INT, required: true }
+        - { name: op, type: STRING, required: true }
+        - { name: changed_at, type: DATE, required: true }
+        - { name: recorded_at, type: DATE, required: true }
+        - { name: before_plan, type: STRING, required: false }
+        - { name: after_plan, type: STRING, required: false }
+    semantics:
+      entities:
+        - { name: event, type: primary, expr: event_id }
+  - exposeId: subscription_month
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: billing, table: subscription_month, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: period_id, type: INT, required: true }
+        - { name: subscription_id, type: INT, required: true }
+        - { name: month, type: DATE, required: true }
+        - { name: plan, type: STRING, required: true }
+        - { name: kind, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: period, type: primary, expr: period_id }
+      dimensions:
+        - { name: month, type: time, typeParams: { timeGranularity: month } }

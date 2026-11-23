@@ -1,0 +1,3817 @@
+{
+  "fluxsim": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim",
+    "usage": null,
+    "description": "FLUX Simulation Engine: runs a FLUX bundle deterministically against the FLUID contract it references, and packs the evidence.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {},
+    "examples": [
+      {
+        "command": "fluxsim init demo\ncd demo\nfluxsim run . --verify --ship -o out",
+        "note": "start with a small working project"
+      },
+      {
+        "command": "fluxsim explain FLX-3105",
+        "note": "look up what an error code means"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/",
+    "footer": [
+      "issues: https://github.com/Agenticstiger/flux-engine/issues"
+    ],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--version"
+        ],
+        "dest": "version",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "print the version and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_SubParsersAction",
+        "option_strings": [],
+        "dest": "command",
+        "nargs": "A...",
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": null,
+        "metavar": "<command>",
+        "choices": [
+          "init",
+          "validate",
+          "plan",
+          "apply",
+          "run",
+          "verify",
+          "ship",
+          "replay",
+          "story",
+          "calibrate",
+          "accuracy",
+          "forecast",
+          "gate",
+          "expr",
+          "describe",
+          "plugins",
+          "explain"
+        ],
+        "commands": [
+          {
+            "name": "init",
+            "help": "write a small working project into a new directory"
+          },
+          {
+            "name": "validate",
+            "help": "validate a FLUX bundle"
+          },
+          {
+            "name": "plan",
+            "help": "execute the loop once and record plan.json"
+          },
+          {
+            "name": "apply",
+            "help": "apply a recorded plan and write its run directory"
+          },
+          {
+            "name": "run",
+            "help": "plan + apply, with --verify/--sink/--ship sugar"
+          },
+          {
+            "name": "verify",
+            "help": "golden regression + row conformance + RFC-04 + fidelity"
+          },
+          {
+            "name": "ship",
+            "help": "the fidelity gate, then the evidence pack"
+          },
+          {
+            "name": "replay",
+            "help": "re-execute a recorded plan; assert its digest"
+          },
+          {
+            "name": "story",
+            "help": "one entity's history, read from a committed run"
+          },
+          {
+            "name": "calibrate",
+            "help": "declared-scorecard calibration for a Playback"
+          },
+          {
+            "name": "accuracy",
+            "help": "outcome-accuracy gate: register, score, record"
+          },
+          {
+            "name": "forecast",
+            "help": "forecast the next state and seal the forecasts"
+          },
+          {
+            "name": "gate",
+            "help": "RFC-04 enforcement gate: decide, conform"
+          },
+          {
+            "name": "expr",
+            "help": "flux-expr/1: evaluate an expression, print an attribute model"
+          },
+          {
+            "name": "describe",
+            "help": "self-describe this installation"
+          },
+          {
+            "name": "plugins",
+            "help": "list installed vertical packs, sinks and generator plugins"
+          },
+          {
+            "name": "explain",
+            "help": "print the catalog entry for one FLX-nnnn code, or list them all"
+          }
+        ]
+      }
+    ]
+  },
+  "fluxsim init": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim init",
+    "usage": null,
+    "description": "Write a small FLUX bundle and its FLUID contract into a directory, so a first run needs nothing else checked out. With --contract and --profile, write a bundle for your own data instead: the contract, and a Simulation declared from the profile's published aggregates, with every number labelled in its parameter register (from the profile, from the contract, or assumed, with the reason). Each assumed number a profile statistic would answer names it, and the profile request for exactly those statistics is written beside the directory, named after it with the suffix .assumptions.profile-request.yml. With --contract and no profile, write the profile request instead: the list of statistics and fact shares a profiler must measure for that contract, to run init again with. A profile with date pairs, calendars or exposure also gives the Simulation lifetimes, within entries, rates and exposure: docs/how-to/keep-dates-inside-their-parents-lifetime.md reads them. The directory must not exist yet, or must be empty: nothing is ever overwritten.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'init'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim init demo",
+        "note": "write a project into a new directory"
+      },
+      {
+        "command": "fluxsim init .",
+        "note": "or into the current directory, if it is empty"
+      },
+      {
+        "command": "fluxsim init bundle --contract contract.orders.fluid.yaml",
+        "note": "no profile yet: write the profile request a profiler measures, then run again"
+      },
+      {
+        "command": "fluxsim init bundle --contract contract.orders.fluid.yaml \\\n    --profile orders.profile.json",
+        "note": "write a bundle for your own data, from its contract and its profile"
+      },
+      {
+        "command": "fluxsim init bundles --contract contract.orders.fluid.yaml \\\n    --profile orders.profile.json --overlay double-orders.yml",
+        "note": "write one bundle for each profile overlay, such as what if the table doubles"
+      },
+      {
+        "command": "fluxsim init bundle --contract contract.orders.fluid.yaml \\\n    --profile orders.profile.json --consumers consumers.yml",
+        "note": "declare what your consumers' SQL needs: its levels, and report the rest"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/init.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "directory",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "where to write the project (created if missing)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--contract"
+        ],
+        "dest": "contract",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "a FLUID contract: the bundle generates rows for each of its exposes the profile describes; copied into the bundle unchanged. Without --profile, writes the profile request for this contract",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "a profile document of that data (docs/spec/PROFILE-SPEC.md), such as `fluid profile` writes: the Simulation pins its digest and is declared from its published aggregates; it stays outside the bundle (needs --contract)",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--request"
+        ],
+        "dest": "request",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "with --contract and no --profile: where to write the profile request (docs/spec/PROFILE-REQUEST-SPEC.md); default: beside the directory, named after it, with the suffix .profile-request.yml",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--overlay"
+        ],
+        "dest": "overlay",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "with --contract and --profile: a profile overlay (name and patch, docs/adr/0030), a named RFC 7396 merge patch of the numbers the profile publishes; repeatable. Writes one bundle per overlay, each in a directory of the one given named after the overlay, written from the overlaid profile, with the overlay in its Simulation and its register citing the overlay for the numbers it changed",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--consumers"
+        ],
+        "dest": "consumers",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "a YAML file that holds a consumers block: the SQL your consumers run, in the dialect they write (docs/adr/0028). The bundle embeds it, declares the levels its queries filter on, and init reports which literals, patterns, nulls and ranges the bundle meets. With no --profile, the request also asks for the rate of each query and lists the columns they read together, and a held-out request (<directory>.held-out-request.yml) holds the queries you hold back. Needs --contract and the sql extra",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--strict"
+        ],
+        "dest": "strict",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "with --contract and --profile: write nothing, and exit 1, when a statistic the profile publishes is unused or an assumption stands in for something the profile did not publish, a gap (docs/adr/0014); each one is named",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--allow"
+        ],
+        "dest": "allow",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "with --strict: accept the unused statistics of the profile, or the gaps of the Simulation, at or below this JSON Pointer; repeatable, and refused when it accepts nothing",
+        "metavar": "POINTER",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim validate": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim validate",
+    "usage": null,
+    "description": "Check a bundle against the FLUX schema and its cross-document rules. Reads only; writes nothing.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'validate'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim validate ./bundle",
+        "note": "check a bundle; nothing is written"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/validate.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim plan": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim plan",
+    "usage": null,
+    "description": "Execute the whole pipeline once, in memory, and write down what it saw: inputDigest, the seed-tree paths it materialised, the per-emit seam digests, and each declared fidelity block as it compiled, every epsilon included. Writes plan.json and seed-paths.ndjson under the run directory, and stages the rows it generated there too, so that apply --run-id commits them instead of generating them again. A child table that a counts entry lays out comes out grouped by parent in row order, as a table loaded parent by parent does; a consumer that needs another order sorts it. The child's own key is laid out from the row index, so a number or date key in ascending order gives a parent's children consecutive keys, and a text or UUID key, permuted, does not.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'plan'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim plan ./bundle",
+        "note": "record what a run would do"
+      },
+      {
+        "command": "fluxsim plan ./bundle --state-dir ./.flux",
+        "note": "keep the run state somewhere else"
+      },
+      {
+        "command": "fluxsim plan ./bundle --kernel 0.1.0",
+        "note": "plan the run under kernel 0.1.0"
+      },
+      {
+        "command": "fluxsim plan ./bundle --no-stage",
+        "note": "record the plan only, without staging rows"
+      },
+      {
+        "command": "fluxsim plan ./bundle --scale 10 --timings",
+        "note": "plan ten times the rows, and time it"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/plan.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--simulation-id"
+        ],
+        "dest": "simulation_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "which Simulation document to resolve (default: the bundle's only one)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--zone"
+        ],
+        "dest": "zone",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "declared run zone, for sovereignty checks",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--kernel"
+        ],
+        "dest": "kernel",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the kernel the new plan takes, one of 0.1.0, 0.2.0 (default 0.2.0). The plan records it, and apply, replay, verify and ship run the kernel their plan names; 0.2.0's streams are counter-based and its continuous draws binary64 (docs/spec/KERNEL-SPEC-2.md), so its digests differ from 0.1.0's",
+        "metavar": "VERSION",
+        "choices": [
+          "0.1.0",
+          "0.2.0"
+        ]
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--no-stage"
+        ],
+        "dest": "no_stage",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "write only plan.json and the seed paths; apply --run-id then generates the rows itself, as a plan did before it staged them (refused for a bundle that declares generator plugins, whose bytes are stored and never generated again)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--allow-generator"
+        ],
+        "dest": "allow_generator",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_generator_name_type",
+        "required": false,
+        "help": "allow the generator plugin of that entry-point name to be imported and run, when the plan generates the rows; repeat it for each plugin the bundle declares under generators (without it the command is refused, FLX-3119, before anything is imported); a plugin is trusted code that runs with your rights, so name only plugins you have reviewed; no environment variable and no bundle key allows one",
+        "metavar": "NAME",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--scale"
+        ],
+        "dest": "scale",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_scale_type",
+        "required": false,
+        "help": "multiply every emit's rows, the records bounds of its fidelity block and the span of every integer or decimal key column that declares a range, by F (above 0, at most 1000000); the plan records it and apply reads it back, and 1 changes nothing; a table built from the run's events is left as it is",
+        "metavar": "F",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--timings"
+        ],
+        "dest": "timings",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "print where the time went (load, compile, each emit, framing, attestation); the numbers are wall-clock seconds, reported and recorded nowhere in a run's files",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--jobs"
+        ],
+        "dest": "jobs",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_jobs_type",
+        "required": false,
+        "help": "the most processes that may generate the rows of an emit declared by statistics: a number (never more than one per CPU) or auto for one per CPU; the run summary says how many it used, and the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1)",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--strict-coverage"
+        ],
+        "dest": "strict_coverage",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "refuse the run when a column falls back to a type default (an optional column nothing maps onto, a DATE or TIMESTAMP column with no declaration of its own), with a table of every such column (FLX-3304), or when the contract declares what the run does not generate, such as a check without generates or, on kernel 0.1.0 or in a Simulation that does not declare copies: true, sharedColumns or sharedAttribute (FLX-3305), before any row is drawn; a Simulation can ask for the same with strictCoverage: true in its extensions; without either the plan names those columns and goes on, and with this flag the rows and every digest are the same either way",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the profile document the Simulation pins under extensions['com.agentics.flux/1'].profile (docs/spec/PROFILE-SPEC.md); refused when its digest is not the pinned one, and when the Simulation pins none",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim apply": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim apply",
+    "usage": null,
+    "description": "Write every run artifact of a recorded plan: the population, the events, the emit streams and their seam attestations, the run digest and the receipt. With --run-id, commits what plan staged after checking the plan, the bundle and every staged file, and generates nothing; with no staged rows it executes the plan again. Refuses when the plan or the bundle has moved since the plan was recorded. A run whose bundle declares generator plugins, once committed, is kept as it stands: apply never asks the plugin for its rows again or writes the run directory over, and with --sink it delivers the run's files. A child table that a counts entry lays out comes out grouped by parent in row order, as a table loaded parent by parent does; a consumer that needs another order sorts it. The child's own key is laid out from the row index, so a number or date key in ascending order gives a parent's children consecutive keys, and a text or UUID key, permuted, does not.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'apply'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim apply ./bundle --run-id de72fa4b22711c52",
+        "note": "apply the plan recorded under that id (`plan` prints it)"
+      },
+      {
+        "command": "fluxsim apply ./bundle --run-id de72fa4b22711c52 --shard 1/4",
+        "note": "write the first of four shares of that run (no receipt; a share is not a run)"
+      },
+      {
+        "command": "fluxsim apply ./bundle --run-id de72fa4b22711c52 --sink parquet:./out/parquet",
+        "note": "apply the run whole and write every stream as Parquet"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/apply.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--run-id"
+        ],
+        "dest": "run_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the run id to act on (as reported by `fluxsim plan`/`fluxsim run`) (default: take a fresh plan first)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--simulation-id"
+        ],
+        "dest": "simulation_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "which Simulation document to resolve (default: the bundle's only one)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--zone"
+        ],
+        "dest": "zone",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "declared run zone, for sovereignty checks",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--shard"
+        ],
+        "dest": "shard",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_shard_type",
+        "required": false,
+        "help": "make only the I-th of N contiguous shares of every emit's rows and write them as emits/<exposeId>.shard-I-of-N.ndjson; the shares joined in order are the bytes of the run's emit streams. A share is part of a run: no run digest and no receipt",
+        "metavar": "I/N",
+        "choices": null
+      },
+      {
+        "class": "_OnceAction",
+        "option_strings": [
+          "--sink"
+        ],
+        "dest": "sink",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "also write every stream to a sink, after the run is written: parquet:DIR or arrow-ipc:DIR (a directory, or an s3://, gs://, az:// or abfs:// prefix), adbc:DRIVER, iceberg:CATALOG/NAMESPACE or delta:DIR (a directory or an object store URL) (`fluxsim plugins` lists them)",
+        "metavar": "NAME:TARGET",
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--sink-opt"
+        ],
+        "dest": "sink_opt",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_sink_opt_type",
+        "required": false,
+        "help": "a --sink setting, repeatable, for example row-group-size=100000 or uri=sim.duckdb; never a password: pass uri-env=VAR instead",
+        "metavar": "KEY=VALUE",
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--allow-generator"
+        ],
+        "dest": "allow_generator",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_generator_name_type",
+        "required": false,
+        "help": "allow the generator plugin of that entry-point name to be imported and run, when apply generates the rows rather than committing a stage; repeat it for each plugin the bundle declares under generators (without it the command is refused, FLX-3119, before anything is imported); a plugin is trusted code that runs with your rights, so name only plugins you have reviewed; no environment variable and no bundle key allows one",
+        "metavar": "NAME",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--scale"
+        ],
+        "dest": "scale",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_scale_type",
+        "required": false,
+        "help": "multiply every emit's rows, the records bounds of its fidelity block and the span of every integer or decimal key column that declares a range, by F (above 0, at most 1000000); the plan records it and apply reads it back, and 1 changes nothing; a table built from the run's events is left as it is; read only when a fresh plan is taken, since the plan of --run-id records its own",
+        "metavar": "F",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--timings"
+        ],
+        "dest": "timings",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "print where the time went (load, compile, each emit, framing, attestation); the numbers are wall-clock seconds, reported and recorded nowhere in a run's files",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--jobs"
+        ],
+        "dest": "jobs",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_jobs_type",
+        "required": false,
+        "help": "the most processes that may generate the rows of an emit declared by statistics: a number (never more than one per CPU) or auto for one per CPU; the run summary says how many it used, and the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1)",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--strict-coverage"
+        ],
+        "dest": "strict_coverage",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "refuse the run when a column falls back to a type default (an optional column nothing maps onto, a DATE or TIMESTAMP column with no declaration of its own), with a table of every such column (FLX-3304), or when the contract declares what the run does not generate, such as a check without generates or, on kernel 0.1.0 or in a Simulation that does not declare copies: true, sharedColumns or sharedAttribute (FLX-3305), before any row is drawn; a Simulation can ask for the same with strictCoverage: true in its extensions; without either the plan names those columns and goes on, and with this flag the rows and every digest are the same either way",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the profile document the Simulation pins under extensions['com.agentics.flux/1'].profile (docs/spec/PROFILE-SPEC.md); refused when its digest is not the pinned one, and when the Simulation pins none; read only for a fresh plan, so refused with --run-id",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim run": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim run",
+    "usage": null,
+    "description": "Plan and apply in one call, then optionally verify, write every stream to a sink, and ship. Stops at the first stage that exits non-zero; the artifacts of every stage that did run are still returned under that stage's own key. When the run is already committed and its bundle declares generator plugins, the run is kept as it stands, the plugin is not asked again, and the rest of what was asked is done against it; a new sample needs a new run, for example another seed.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'run'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim run ./bundle --verify --ship -o ./out",
+        "note": "plan, apply, verify and ship in one command"
+      },
+      {
+        "command": "fluxsim run ./bundle",
+        "note": "plan and apply only"
+      },
+      {
+        "command": "fluxsim run ./bundle --scale 10",
+        "note": "plan and apply at ten times the declared row counts (tables built from events stay as they are)"
+      },
+      {
+        "command": "fluxsim run ./bundle --sink parquet:./out/parquet",
+        "note": "plan, apply and write every stream as Parquet"
+      },
+      {
+        "command": "fluxsim run ./bundle --sink adbc:duckdb --sink-opt uri=./sim.duckdb",
+        "note": "plan, apply and load every stream into a DuckDB table"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/run.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--simulation-id"
+        ],
+        "dest": "simulation_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "which Simulation document to resolve (default: the bundle's only one)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--zone"
+        ],
+        "dest": "zone",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "declared run zone, for sovereignty checks",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--verify"
+        ],
+        "dest": "verify",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "run `fluxsim verify` on the applied run",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--ship"
+        ],
+        "dest": "ship",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "run `fluxsim ship` on the applied run; requires -o",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "-o",
+          "--out-dir"
+        ],
+        "dest": "out_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "directory the evidence archive and its statements are written to (required with --ship)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_OnceAction",
+        "option_strings": [
+          "--sink"
+        ],
+        "dest": "sink",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "also write every stream to a sink, after verify and before ship: parquet:DIR or arrow-ipc:DIR (a directory, or an s3://, gs://, az:// or abfs:// prefix), adbc:DRIVER, iceberg:CATALOG/NAMESPACE or delta:DIR (a directory or an object store URL) (`fluxsim plugins` lists them)",
+        "metavar": "NAME:TARGET",
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--sink-opt"
+        ],
+        "dest": "sink_opt",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_sink_opt_type",
+        "required": false,
+        "help": "a --sink setting, repeatable, for example row-group-size=100000 or uri=sim.duckdb; never a password: pass uri-env=VAR instead",
+        "metavar": "KEY=VALUE",
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--committed-slice"
+        ],
+        "dest": "committed_slice",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_kv_pair_type",
+        "required": false,
+        "help": "the committed real-data slice one expose's fidelity check is measured against, as EXPOSE_ID=file://PATH; repeatable, once per expose; the file holds one JSON object per line, keyed by the expose's contract column names (e.g. {\"subscriber_id\": \"s-1\", \"amount\": \"12.50\"})",
+        "metavar": "EXPOSE_ID=file://PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--update-golden"
+        ],
+        "dest": "update_golden",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "record this run as the golden baseline (requires --reason)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--reason"
+        ],
+        "dest": "reason",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "why the golden baseline is being updated",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--allow-declared-baseline-drift"
+        ],
+        "dest": "allow_declared_baseline_drift",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "exit 0 even when the bundle's declared golden.baselineDigest does not match this run's runDigest",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--signing-key"
+        ],
+        "dest": "signing_key",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_signing_key_type",
+        "required": false,
+        "help": "file holding a 32-byte ed25519 seed (raw or hex) to sign fidelity records with; without it ship signs with a per-invocation key attributable to nobody",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--trust-key"
+        ],
+        "dest": "trust_key",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_trust_key_type",
+        "required": false,
+        "help": "file holding the 32-byte raw ed25519 PUBLIC key (raw or hex -- the `publicKey` a fidelity record prints) the gate checks the record's signature against; without it the record is checked against the public half of the key that signed it and says it is self-attested",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--allow-generator"
+        ],
+        "dest": "allow_generator",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_generator_name_type",
+        "required": false,
+        "help": "allow the generator plugin of that entry-point name to be imported and run, while the run's plan generates the rows; repeat it for each plugin the bundle declares under generators (without it the command is refused, FLX-3119, before anything is imported); a plugin is trusted code that runs with your rights, so name only plugins you have reviewed; no environment variable and no bundle key allows one",
+        "metavar": "NAME",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--scale"
+        ],
+        "dest": "scale",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_scale_type",
+        "required": false,
+        "help": "multiply every emit's rows, the records bounds of its fidelity block and the span of every integer or decimal key column that declares a range, by F (above 0, at most 1000000); the plan records it and apply reads it back, and 1 changes nothing; a table built from the run's events is left as it is",
+        "metavar": "F",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--timings"
+        ],
+        "dest": "timings",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "print where the time went (load, compile, each emit, framing, attestation); the numbers are wall-clock seconds, reported and recorded nowhere in a run's files",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--jobs"
+        ],
+        "dest": "jobs",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_jobs_type",
+        "required": false,
+        "help": "the most processes that may generate the rows of an emit declared by statistics: a number (never more than one per CPU) or auto for one per CPU; the run summary says how many it used, and the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1)",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--strict-coverage"
+        ],
+        "dest": "strict_coverage",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "refuse the run when a column falls back to a type default (an optional column nothing maps onto, a DATE or TIMESTAMP column with no declaration of its own), with a table of every such column (FLX-3304), or when the contract declares what the run does not generate, such as a check without generates or, on kernel 0.1.0 or in a Simulation that does not declare copies: true, sharedColumns or sharedAttribute (FLX-3305), before any row is drawn; a Simulation can ask for the same with strictCoverage: true in its extensions; without either the plan names those columns and goes on, and with this flag the rows and every digest are the same either way",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the profile document the Simulation pins under extensions['com.agentics.flux/1'].profile (docs/spec/PROFILE-SPEC.md); refused when its digest is not the pinned one, and when the Simulation pins none; --verify and --ship score the run against it (docs/spec/SCORECARD-SPEC.md)",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim verify": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim verify",
+    "usage": null,
+    "description": "Re-check an applied run on five independent legs: the run's own artifacts against its recorded digest, the golden regression, row conformance against the referenced contract, the RFC-04 enforcement vectors, and every declared fidelity check. One line per leg, with the flag that turns a `not checked` leg into a result. A run whose plan pins a profile is also scored against it, per property, table, dimension and overall, when the profile is passed with --profile. A bundle that declares consumer queries has every query counted on the run, the calibration queries apart from the held-out ones (--held-out), in the scorecard's queries dimension.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'verify'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim verify ./bundle --run-id de72fa4b22711c52",
+        "note": "re-check an applied run on five independent legs"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/verify.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--run-id"
+        ],
+        "dest": "run_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the run id to act on (as reported by `fluxsim plan`/`fluxsim run`)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--update-golden"
+        ],
+        "dest": "update_golden",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "record this run as the golden baseline (requires --reason)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--reason"
+        ],
+        "dest": "reason",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "why the golden baseline is being updated",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--committed-slice"
+        ],
+        "dest": "committed_slice",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_kv_pair_type",
+        "required": false,
+        "help": "the committed real-data slice one expose's fidelity check is measured against, as EXPOSE_ID=file://PATH; repeatable, once per expose; the file holds one JSON object per line, keyed by the expose's contract column names (e.g. {\"subscriber_id\": \"s-1\", \"amount\": \"12.50\"})",
+        "metavar": "EXPOSE_ID=file://PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the profile document this run's plan pins (docs/spec/PROFILE-SPEC.md): every declared fidelity property with no --committed-slice is checked against it, and the run is scored per property, table, dimension and overall (docs/spec/SCORECARD-SPEC.md); refused when its digest is not the pinned one, and when the run pins none",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--sample"
+        ],
+        "dest": "sample",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_sample_fraction_type",
+        "required": false,
+        "help": "compare each emit's means, histograms and quantile bins with the pinned profile on a sample: FRACTION of its blocks of records, each estimate decided by its 95 per cent interval (docs/spec/SAMPLE-SPEC.md)",
+        "metavar": "FRACTION",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--sample-block"
+        ],
+        "dest": "sample_block",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_whole_number_type.<locals>.parse",
+        "required": false,
+        "help": "records in a block of the sample (default: 1000); needs --sample",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--sample-seed"
+        ],
+        "dest": "sample_seed",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_whole_number_type.<locals>.parse",
+        "required": false,
+        "help": "seed of the choice of blocks (default: 0); needs --sample",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--vectors"
+        ],
+        "dest": "vectors",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "path to an RFC-04 vectors file",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--allow-declared-baseline-drift"
+        ],
+        "dest": "allow_declared_baseline_drift",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "exit 0 even when the bundle's declared golden.baselineDigest does not match this run's runDigest",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--signing-key"
+        ],
+        "dest": "signing_key",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_signing_key_type",
+        "required": false,
+        "help": "file holding the 32-byte ed25519 seed a prior `fluxsim ship` signed with; its public half becomes the trust anchor, and the check says it is self-attested",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--trust-key"
+        ],
+        "dest": "trust_key",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_trust_key_type",
+        "required": false,
+        "help": "file holding the 32-byte raw ed25519 PUBLIC key (raw or hex -- the `publicKey` a fidelity record prints) any fidelity record this run already holds is checked against; without it, and without --signing-key, the signature is reported as not checked",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--jobs"
+        ],
+        "dest": "jobs",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_jobs_type",
+        "required": false,
+        "help": "the most processes that may read the run's emits at once, one emit to a process: a number or auto for one per CPU; the verdicts and every byte of the scorecard are the same whatever the number (default: FLUX_JOBS, else 1)",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--held-out"
+        ],
+        "dest": "held_out",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the held-out profile: a profile document whose queries section holds the targets of the bundle's held-out consumer queries, which the pinned profile may not name; it is graded beside the pinned profile and read by nothing else",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-query-seconds"
+        ],
+        "dest": "max_query_seconds",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_whole_number_type.<locals>.parse",
+        "required": false,
+        "help": "raise the seconds one consumer query may take above the engine's 30, up to 600, for a bundle that declares no limits.seconds; a bundle's own value is kept and may only lower the ceiling",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-query-memory"
+        ],
+        "dest": "max_query_memory",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_memory_size_type",
+        "required": false,
+        "help": "raise the memory DuckDB may use for the consumer queries above the engine's 1GiB, up to 16GiB, such as 4GiB, for a bundle that declares no limits.memory; a bundle's own value is kept and may only lower the ceiling",
+        "metavar": "SIZE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim ship": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim ship",
+    "usage": null,
+    "description": "Run the fidelity gate over every emit that declares a fidelity block, and only if none is withheld, pack the bundle and the run into one evidence archive with its in-toto statements. A run whose plan pins a profile needs it with --profile: it is gated and scored against it, and its scorecard travels in the archive. A bundle that declares consumer queries has them counted for the scorecard's queries dimension, as verify counts them.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'ship'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim ship ./bundle --run-id de72fa4b22711c52 -o ./out",
+        "note": "pack the evidence archive"
+      },
+      {
+        "command": "fluxsim ship ./bundle --run-id de72fa4b22711c52 -o ./out \\\n    --committed-slice payment_recovery_moment=file:///data/slice.ndjson",
+        "note": "a bundle that declares a fidelity block needs the slice it is measured against"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/ship.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--run-id"
+        ],
+        "dest": "run_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the run id to act on (as reported by `fluxsim plan`/`fluxsim run`)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "-o",
+          "--out-dir"
+        ],
+        "dest": "out_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "directory the evidence archive and its statements are written to",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--committed-slice"
+        ],
+        "dest": "committed_slice",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_kv_pair_type",
+        "required": false,
+        "help": "the committed real-data slice one expose's fidelity check is measured against, as EXPOSE_ID=file://PATH; repeatable, once per expose; the file holds one JSON object per line, keyed by the expose's contract column names (e.g. {\"subscriber_id\": \"s-1\", \"amount\": \"12.50\"})",
+        "metavar": "EXPOSE_ID=file://PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the profile document this run's plan pins (docs/spec/PROFILE-SPEC.md): every declared fidelity property with no --committed-slice is checked against it, and the run is scored per property, table, dimension and overall (docs/spec/SCORECARD-SPEC.md); refused when its digest is not the pinned one, and when the run pins none",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--signing-key"
+        ],
+        "dest": "signing_key",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_signing_key_type",
+        "required": false,
+        "help": "file holding a 32-byte ed25519 seed (raw or hex) to sign fidelity records with; without it the record is signed by a per-invocation key and says so",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--trust-key"
+        ],
+        "dest": "trust_key",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_trust_key_type",
+        "required": false,
+        "help": "file holding the 32-byte raw ed25519 PUBLIC key (raw or hex -- the `publicKey` a fidelity record prints) the gate checks the record's signature against; without it the record is checked against the public half of the key that signed it and says it is self-attested",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--held-out"
+        ],
+        "dest": "held_out",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the held-out profile: a profile document whose queries section holds the targets of the bundle's held-out consumer queries, which the pinned profile may not name; it is graded beside the pinned profile and read by nothing else",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-query-seconds"
+        ],
+        "dest": "max_query_seconds",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_whole_number_type.<locals>.parse",
+        "required": false,
+        "help": "raise the seconds one consumer query may take above the engine's 30, up to 600, for a bundle that declares no limits.seconds; a bundle's own value is kept and may only lower the ceiling",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-query-memory"
+        ],
+        "dest": "max_query_memory",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_memory_size_type",
+        "required": false,
+        "help": "raise the memory DuckDB may use for the consumer queries above the engine's 1GiB, up to 16GiB, such as 4GiB, for a bundle that declares no limits.memory; a bundle's own value is kept and may only lower the ceiling",
+        "metavar": "SIZE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim replay": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim replay",
+    "usage": null,
+    "description": "Re-execute a recorded plan and refuse unless the run digest it produces is the one asserted. The determinism claim, as a command.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'replay'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim replay ./bundle --run-id de72fa4b22711c52 \\\n    --assert-digest sha256:42d923fd6f4b8c0a1e7d59b2c8a4f36e0d15927acb3e8f6410d2b7c95e8a3f01",
+        "note": "re-execute the plan; refuse unless the run digest is the one asserted"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/replay.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--run-id"
+        ],
+        "dest": "run_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the run id to act on (as reported by `fluxsim plan`/`fluxsim run`)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--assert-digest"
+        ],
+        "dest": "assert_digest",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_digest_type",
+        "required": true,
+        "help": "the runDigest this replay must reproduce, as sha256:<64 hex chars>; the bare hex is accepted and the prefix put back",
+        "metavar": "sha256:HEX",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--simulation-id"
+        ],
+        "dest": "simulation_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "which Simulation document to resolve (default: the bundle's only one)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--zone"
+        ],
+        "dest": "zone",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "declared run zone, for sovereignty checks",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--allow-generator"
+        ],
+        "dest": "allow_generator",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_generator_name_type",
+        "required": false,
+        "help": "allow the generator plugin of that entry-point name to be imported and run, while the replay generates the rows again; repeat it for each plugin the bundle declares under generators (without it the command is refused, FLX-3119, before anything is imported); a plugin is trusted code that runs with your rights, so name only plugins you have reviewed; no environment variable and no bundle key allows one",
+        "metavar": "NAME",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--jobs"
+        ],
+        "dest": "jobs",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_jobs_type",
+        "required": false,
+        "help": "the most processes that may generate the rows of an emit declared by statistics: a number (never more than one per CPU) or auto for one per CPU; the run summary says how many it used, and the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1)",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim story": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim story",
+    "usage": null,
+    "description": "Tell the history of one row of a committed run: the rows that link to it and the rows it links to, through the relationships the run's contract declares, a few hops out, ordered by their first date or timestamp column. Each stream is checked against the receipt's outputDigest before it is read, and nothing is written. Every row of the expose that matches --key is the entity, and its rows come first. A first line says how many rows matched. Then one line per row: its date, its expose, its key, its hop (0 for the entity's own rows, n for a row reached after n relationships), the relationship it was reached by (- at hop 0), then column=value pairs, with control characters written out. With --json, a story is one JSON object per row, with hop and relationship, and no envelope; a refusal is the usual JSON envelope.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'story'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim story --run-id de72fa4b22711c52 --emit customer --key 42",
+        "note": "the rows that link to customer 42 and the rows it links to, two hops out"
+      },
+      {
+        "command": "fluxsim story --run-id de72fa4b22711c52 --emit store_returns \\\n    --key sr_item_sk=7 --key sr_ticket_number=1001 --depth 1 --json",
+        "note": "one row of a composite key and its direct neighbours, one JSON object per line"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/story.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--run-id"
+        ],
+        "dest": "run_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the run id to act on (as reported by `fluxsim plan`/`fluxsim run`)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--emit"
+        ],
+        "dest": "emit",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the expose whose row is the entity, by its exposeId",
+        "metavar": "EXPOSE",
+        "choices": null
+      },
+      {
+        "class": "_AppendAction",
+        "option_strings": [
+          "--key"
+        ],
+        "dest": "key",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the entity's key, compared as the canonical text of the column's value: one VALUE for the expose's one-column key, or COLUMN=VALUE once per column of a composite key",
+        "metavar": "VALUE|COLUMN=VALUE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--depth"
+        ],
+        "dest": "depth",
+        "nargs": null,
+        "const": "None",
+        "default": "2",
+        "type": "_whole_number_type.<locals>.parse",
+        "required": false,
+        "help": "how many links away from the entity the story reaches (default: 2)",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--limit"
+        ],
+        "dest": "limit",
+        "nargs": null,
+        "const": "None",
+        "default": "200",
+        "type": "_whole_number_type.<locals>.parse",
+        "required": false,
+        "help": "the most rows the story keeps, nearest the entity first; says when it cut (default: 200)",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim calibrate": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim calibrate",
+    "usage": null,
+    "description": "Read a Playback's declared scorecard and report the credibility and grade it carries; no fitting is performed. With --fit, fit the parameters a bundle's consumers calibration block declares to the rates of its calibration queries (CMA-ES, from the [calibrate] extra), and write the result as a calibration patch, DIR.patch.json, beside the output.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'calibrate'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim calibrate ./bundle",
+        "note": "print the declared scorecard; nothing is written"
+      },
+      {
+        "command": "fluxsim calibrate ./bundle --write --run-id de72fa4b22711c52",
+        "note": "record it in the run directory"
+      },
+      {
+        "command": "fluxsim calibrate --fit ./bundle --profile pinned.profile.json --held-out held-out.profile.json --out ./calibrated",
+        "note": "fit the declared parameters to the calibration queries and write ./calibrated.patch.json"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/calibrate.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": "?",
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--playback-id"
+        ],
+        "dest": "playback_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "default: the bundle's only Playback",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--dry-run"
+        ],
+        "dest": "dry_run",
+        "nargs": 0,
+        "const": "True",
+        "default": "True",
+        "type": null,
+        "required": false,
+        "help": "print the scorecard without writing calibration-provenance.json (default)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreFalseAction",
+        "option_strings": [
+          "--write"
+        ],
+        "dest": "dry_run",
+        "nargs": 0,
+        "const": "False",
+        "default": "True",
+        "type": null,
+        "required": false,
+        "help": "write calibration-provenance.json into the run directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--run-id"
+        ],
+        "dest": "run_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "required without --dry-run",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--fit"
+        ],
+        "dest": "fit",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "fit the declared parameters of this bundle to its calibration queries instead of reading a declared scorecard; needs --profile, --held-out and --out",
+        "metavar": "BUNDLE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "with --fit: the profile the Simulation pins, whose queries section holds the targets the fit reads; refused when its digest is not the pinned one",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--out"
+        ],
+        "dest": "out",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "with --fit: where the calibration patch (DIR.patch.json) and, only when the held-out error holds, the calibrated bundle (DIR) are written; neither may exist",
+        "metavar": "DIR",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-evaluations"
+        ],
+        "dest": "max_evaluations",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_whole_number_type.<locals>.parse",
+        "required": false,
+        "help": "with --fit: raise the evaluations a fit may run above the engine's 64, up to 4096, for a bundle whose calibration block declares no evaluations; a bundle's own value is kept and may only lower the ceiling",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--held-out"
+        ],
+        "dest": "held_out",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the held-out profile: a profile document whose queries section holds the targets of the bundle's held-out consumer queries, which the pinned profile may not name; it is graded beside the pinned profile and read by nothing else",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-query-seconds"
+        ],
+        "dest": "max_query_seconds",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_whole_number_type.<locals>.parse",
+        "required": false,
+        "help": "raise the seconds one consumer query may take above the engine's 30, up to 600, for a bundle that declares no limits.seconds; a bundle's own value is kept and may only lower the ceiling",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-query-memory"
+        ],
+        "dest": "max_query_memory",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_memory_size_type",
+        "required": false,
+        "help": "raise the memory DuckDB may use for the consumer queries above the engine's 1GiB, up to 16GiB, such as 4GiB, for a bundle that declares no limits.memory; a bundle's own value is kept and may only lower the ceiling",
+        "metavar": "SIZE",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim accuracy": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim accuracy",
+    "usage": null,
+    "description": "Seal a prediction before its horizon, score it against an observed readout afterwards, and publish the outcomes-only accuracy record.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {},
+    "examples": [
+      {
+        "command": "fluxsim accuracy register --file prediction.json",
+        "note": "seal a prediction first"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/accuracy.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_SubParsersAction",
+        "option_strings": [],
+        "dest": "accuracy_command",
+        "nargs": "A...",
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": null,
+        "metavar": "<command>",
+        "choices": [
+          "register",
+          "score",
+          "record"
+        ],
+        "commands": [
+          {
+            "name": "register",
+            "help": "seal a prediction before its horizon"
+          },
+          {
+            "name": "score",
+            "help": "score a registered prediction against a readout"
+          },
+          {
+            "name": "record",
+            "help": "publish one registration's outcomes-only record"
+          }
+        ]
+      }
+    ]
+  },
+  "fluxsim accuracy register": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim accuracy register",
+    "usage": null,
+    "description": "Seal a PredictionRecord so it cannot be edited after the outcome is known. A prediction id is registered once: the same claim again writes nothing, and a different claim under that id is refused (FLX-7007).",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'accuracy-register'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim accuracy register --file prediction.json",
+        "note": "seal a prediction"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/accuracy.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--file"
+        ],
+        "dest": "file",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "a PredictionRecord as JSON -- fields: prediction_id (string), run_digest (string), metric_id (string), statement (string), predicted (decimal), horizon_end (string), registered_at (string), interval_low (decimal) [optional], interval_high (decimal) [optional], stateDigest (string) [optional], inputDigest (string) [optional]",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim accuracy score": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim accuracy score",
+    "usage": null,
+    "description": "Bind an ObservedReadout to a sealed prediction and record the verdict. A prediction whose record no longer matches its seal is refused (FLX-7008).",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'accuracy-score'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim accuracy score --prediction-id p-1 --readout readout.json",
+        "note": "score it once the outcome is known"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/accuracy.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--prediction-id"
+        ],
+        "dest": "prediction_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the id the prediction was registered under",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--readout"
+        ],
+        "dest": "readout",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "an ObservedReadout as JSON -- fields: prediction_id (string), metric_id (string), observed (decimal), sample_size (integer), basis (live-ab|historical-holdout|none), observed_at (string)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim accuracy record": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim accuracy record",
+    "usage": null,
+    "description": "Publish the outcomes-only accuracy record for everything registered at one registration timestamp.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'accuracy-record'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim accuracy record --registered-at 2026-01-01T00:00:00Z --out accuracy.json",
+        "note": "publish the outcomes-only record"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/accuracy.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--registered-at"
+        ],
+        "dest": "registered_at",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the registration timestamp to publish, as RFC 3339; only the predictions whose registered_at is exactly this are covered",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--out"
+        ],
+        "dest": "out",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path the accuracy record is written to",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim forecast": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim forecast",
+    "usage": null,
+    "description": "Forecast what the next profile will show, before it is seen, and seal each forecast in the outcome-accuracy store.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {},
+    "examples": [
+      {
+        "command": "fluxsim forecast make ./bundle --profile state.json --registered-at 2026-07-01T00:00:00Z --horizon-end 2026-09-30T23:59:59Z",
+        "note": "forecast the next state and seal every forecast"
+      },
+      {
+        "command": "fluxsim forecast score ./bundle --profile state.json --next next-state.json --observed-at 2026-10-01T00:00:00Z",
+        "note": "score every forecast once the next state exists"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/forecast.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_SubParsersAction",
+        "option_strings": [],
+        "dest": "forecast_command",
+        "nargs": "A...",
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": null,
+        "metavar": "<command>",
+        "choices": [
+          "make",
+          "score"
+        ],
+        "commands": [
+          {
+            "name": "make",
+            "help": "run the sweep and register each forecast"
+          },
+          {
+            "name": "score",
+            "help": "score every forecast against the next state"
+          }
+        ]
+      }
+    ]
+  },
+  "fluxsim forecast make": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim forecast make",
+    "usage": null,
+    "description": "Run the Simulation's spec.sweep as replicates, each seeded as the sweep seeds it and each taking the effect at the midpoint of its part of the response estimate's interval. For each forecast item, take the median of its value over the replicates and an interval around it, and register that, sealed and write-once, under the item's id and the pinned profile's digest. The same forecast again changes nothing; another forecast under that id is refused (FLX-7007), and the refusal says when the id belongs to another bundle.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'forecast-make'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim forecast make ./bundle --profile state.json --registered-at 2026-07-01T00:00:00Z --horizon-end 2026-09-30T23:59:59Z",
+        "note": "run the sweep, then register each item's forecast"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/forecast.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--simulation-id"
+        ],
+        "dest": "simulation_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "which Simulation document to resolve (default: the bundle's only one)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--registered-at"
+        ],
+        "dest": "registered_at",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the instant the forecasts are sealed at, as RFC 3339; the engine reads no clock, and a later score may not observe anything before it (FLX-7001)",
+        "metavar": "T",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--horizon-end"
+        ],
+        "dest": "horizon_end",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the instant after which the next state can be read, as RFC 3339",
+        "metavar": "T",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--jobs"
+        ],
+        "dest": "jobs",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_jobs_type",
+        "required": false,
+        "help": "the most processes that may generate the rows of an emit declared by statistics: a number (never more than one per CPU) or auto for one per CPU; the run summary says how many it used, and the rows and every digest are the same whatever the number (default: FLUX_JOBS, else 1)",
+        "metavar": "N",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the profile document the Simulation pins under extensions['com.agentics.flux/1'].profile (docs/spec/PROFILE-SPEC.md); refused when its digest is not the pinned one, and when the Simulation pins none",
+        "metavar": "PATH",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim forecast score": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim forecast score",
+    "usage": null,
+    "description": "Read the next state's profile and give a verdict to every forecast registered for the bundle, none skipped. The observation is the next state's cell for the forecast's query and segment; a withheld cell, or one that holds no records, leaves the forecast not scored, with the reason. Beside inside or outside the interval, each verdict holds the absolute error and the interval score, and the grade of each state's profile. A next state that is the pinned state is refused (FLX-7143). When forecasts.playback names a Playback that declares drift, the two states' histograms and the query cells the families read are compared with its metric (psi, kl or ks), each verdict records the largest value, and a statistic past the threshold marks the calibration stale; a cell withheld or with no records in either state is left out and listed. With onBreach fail the command then exits 1 (FLX-7146), after every verdict is written.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'forecast-score'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim forecast score ./bundle --profile state.json --next next-state.json --observed-at 2026-10-01T00:00:00Z",
+        "note": "score every forecast against the next state's cells"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/forecast.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--simulation-id"
+        ],
+        "dest": "simulation_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "which Simulation document to resolve (default: the bundle's only one)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the profile the Simulation pins, the state the forecasts were made on; refused when its digest is not the pinned one",
+        "metavar": "STATE_K",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--next"
+        ],
+        "dest": "next_profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the profile of the next state, a later release answering the same request; refused when it is the pinned state (FLX-7143)",
+        "metavar": "STATE_K1",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--observed-at"
+        ],
+        "dest": "observed_at",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the instant the next state was read, as RFC 3339; it may not predate a forecast's registration (FLX-7001)",
+        "metavar": "T",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--state-dir"
+        ],
+        "dest": "state_dir",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "run-state directory (default: ./.flux)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim gate": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim gate",
+    "usage": null,
+    "description": "Decide one AI-call request against a policy, or run the conformance vectors.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {},
+    "examples": [
+      {
+        "command": "fluxsim gate conform",
+        "note": "run the published conformance vectors"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/gate.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_SubParsersAction",
+        "option_strings": [],
+        "dest": "gate_command",
+        "nargs": "A...",
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": null,
+        "metavar": "<command>",
+        "choices": [
+          "decide",
+          "conform"
+        ],
+        "commands": [
+          {
+            "name": "decide",
+            "help": "decide one AI-call request against a policy"
+          },
+          {
+            "name": "conform",
+            "help": "run the RFC-04 conformance vectors against the enforcement gate"
+          }
+        ]
+      }
+    ]
+  },
+  "fluxsim gate decide": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim gate decide",
+    "usage": null,
+    "description": "Decide one request against one policy. Exit 0 allowed, 3 denied, 1 the request could not be decided at all.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'gate-decide'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim gate decide --request request.json",
+        "note": "exit 0 allowed, 3 denied"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/gate.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--request"
+        ],
+        "dest": "request",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the request to decide, as JSON -- fields: policy (object), request (object), skill (object) [optional]",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim gate conform": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim gate conform",
+    "usage": null,
+    "description": "Run the published RFC-04 conformance vectors and report the pass count.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'gate-conform'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim gate conform",
+        "note": "run the published conformance vectors"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/gate.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--vectors"
+        ],
+        "dest": "vectors",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "path to an RFC-04 vectors file (default: the published set)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim expr": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim expr",
+    "usage": null,
+    "description": "Parse, check and evaluate one flux-expr/1 expression, or print the model.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {},
+    "examples": [
+      {
+        "command": "fluxsim expr model --bundle ./bundle",
+        "note": "every attribute in scope"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/expr.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_SubParsersAction",
+        "option_strings": [],
+        "dest": "expr_command",
+        "nargs": "A...",
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": null,
+        "metavar": "<command>",
+        "choices": [
+          "eval",
+          "model"
+        ],
+        "commands": [
+          {
+            "name": "eval",
+            "help": "parse, check and evaluate one expression"
+          },
+          {
+            "name": "model",
+            "help": "print the attrmodel/1 document for a bundle"
+          }
+        ]
+      }
+    ]
+  },
+  "fluxsim expr eval": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim expr eval",
+    "usage": null,
+    "description": "Evaluate one expression against a subject view supplied as JSON.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'expr-eval'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim expr eval \"tenureMonths > 12\" --bundle ./bundle \\\n    --values '{\"tenureMonths\": 24}'",
+        "note": "check an expression and evaluate it against one subject"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/expr.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "source",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "the expression source",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--bundle"
+        ],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--simulation-id"
+        ],
+        "dest": "simulation_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "which Simulation document to resolve (default: the bundle's only one)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--values"
+        ],
+        "dest": "values",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "a subject view as JSON",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim expr model": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim expr model",
+    "usage": null,
+    "description": "Print the attribute model an expression in this bundle is checked against.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'expr-model'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim expr model --bundle ./bundle",
+        "note": "every attribute in scope"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/expr.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--bundle"
+        ],
+        "dest": "bundle",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": true,
+        "help": "path to the FLUX bundle directory",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--simulation-id"
+        ],
+        "dest": "simulation_id",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "which Simulation document to resolve (default: the bundle's only one)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim describe": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim describe",
+    "usage": null,
+    "description": "Report this installation's identity, engine capabilities and full command tree, so a consumer can render UI without lagging the CLI.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'describe'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim describe --self --json",
+        "note": "identity, capabilities and the command tree"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/describe.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--self"
+        ],
+        "dest": "self_",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "describe this installation (currently the only mode)",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim plugins": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim plugins",
+    "usage": null,
+    "description": "List the vertical packs, the output sinks and the generator plugins available in this environment, with the extra each sink needs and whether it is installed, and for each generator plugin its distribution and whether it is an editable install or lies outside an installation directory. Nothing is imported to find them. A generator plugin is your own code: it runs with your rights, and FLUX does not sandbox its network or file access, so allow only plugins you trust (docs/explanation/offline.md).",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'plugins'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim plugins",
+        "note": "list the vertical packs, the sinks and the generator plugins"
+      },
+      {
+        "command": "fluxsim plugins --json",
+        "note": "the same, as JSON"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/plugins.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  },
+  "fluxsim explain": {
+    "class": "_FluxArgumentParser",
+    "prog": "fluxsim explain",
+    "usage": null,
+    "description": "Print the title and operator-facing explanation of one FLX-nnnn code. With --list, print every registered code instead, so the catalog is discoverable without grepping the source.",
+    "epilog": null,
+    "formatter_class": "_HelpFormatter",
+    "defaults": {
+      "stage_name": "'explain'"
+    },
+    "examples": [
+      {
+        "command": "fluxsim explain FLX-1001",
+        "note": "print one code's explanation"
+      },
+      {
+        "command": "fluxsim explain --list",
+        "note": "list every code"
+      }
+    ],
+    "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/explain.html",
+    "footer": [],
+    "actions": [
+      {
+        "class": "_HelpAction",
+        "option_strings": [
+          "-h",
+          "--help"
+        ],
+        "dest": "help",
+        "nargs": 0,
+        "const": "None",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "show this help message and exit",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [],
+        "dest": "code",
+        "nargs": "?",
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the FLX-nnnn code to explain (case-insensitive); omit it with --list",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "--list"
+        ],
+        "dest": "list_codes",
+        "nargs": 0,
+        "const": "True",
+        "default": "False",
+        "type": null,
+        "required": false,
+        "help": "print every registered code as `code  [family]  title`",
+        "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreTrueAction",
+        "option_strings": [
+          "-j",
+          "--json"
+        ],
+        "dest": "json",
+        "nargs": 0,
+        "const": "True",
+        "default": "'==SUPPRESS=='",
+        "type": null,
+        "required": false,
+        "help": "emit machine-readable JSON",
+        "metavar": null,
+        "choices": null
+      }
+    ]
+  }
+}

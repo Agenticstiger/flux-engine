@@ -1,0 +1,2746 @@
+{
+  "$comment": "flux-expr/1 conformance vectors (EXPR-SPEC 5). Each vector carries an expression, the scope it is written in, the model fragment it is checked against, and the expected outcome. 'model_fragment' names an entry of the top-level 'models' table rather than repeating the fragment inline. 'expect.parse' is the canonical AST object, or the error code when the text does not parse; 'expect.check' is 'ok' or the static-check error code; 'expect.unparse' is the canonical text; 'expect.eval' is a list of {row, result} cases (the spec's singular form is the one-element case). Row values are encoded by their declared type: number as a decimal string, set<string> as an array, string and enum as a string, bool as a boolean, null as null. No JSON numbers appear anywhere in this file.",
+  "version": "flux-expr/1",
+  "attrModelVersion": "attrmodel/1",
+  "models": {
+    "telco-event-payment-aborted": {
+      "scope": "event",
+      "paths": {
+        "data.amount": {
+          "type": "number"
+        },
+        "data.attempts": {
+          "type": "number"
+        },
+        "data.channel": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "aliases": {
+        "amount": "data.amount",
+        "attempts": "data.attempts",
+        "channel": "data.channel"
+      }
+    },
+    "telco-observed": {
+      "scope": "observed",
+      "paths": {
+        "arpu": {
+          "type": "number"
+        },
+        "late_payment_count": {
+          "type": "number"
+        },
+        "tenure_months": {
+          "type": "number"
+        }
+      },
+      "aliases": {}
+    },
+    "telco-subject": {
+      "scope": "subject",
+      "paths": {
+        "subject.arpu": {
+          "type": "number"
+        },
+        "subject.id": {
+          "type": "string"
+        },
+        "subject.latePaymentCount": {
+          "type": "number"
+        },
+        "subject.lifecycle": {
+          "type": "enum",
+          "levels": [
+            "active",
+            "atrisk",
+            "churned",
+            "new"
+          ]
+        },
+        "subject.market": {
+          "type": "enum",
+          "levels": [
+            "mkt-a",
+            "mkt-b",
+            "mkt-c"
+          ]
+        },
+        "subject.ordinal": {
+          "type": "number"
+        },
+        "subject.persona": {
+          "type": "enum",
+          "levels": [
+            "persona-pragmatic-family"
+          ]
+        },
+        "subject.products": {
+          "type": "set<string>"
+        },
+        "subject.tenureMonths": {
+          "type": "number"
+        },
+        "subject.traits.digitalFluency": {
+          "type": "number"
+        },
+        "subject.traits.financialLiteracy": {
+          "type": "number"
+        },
+        "subject.traits.monthlySpend": {
+          "type": "number"
+        },
+        "subject.traits.priceSensitivity": {
+          "type": "enum",
+          "levels": [
+            "high",
+            "low",
+            "medium"
+          ]
+        },
+        "subject.worldview.riskTolerance": {
+          "type": "enum",
+          "levels": [
+            "high",
+            "low",
+            "medium"
+          ]
+        },
+        "subject.worldview.trendFollowing": {
+          "type": "number"
+        },
+        "subject.worldview.trustInInstitutions": {
+          "type": "number"
+        }
+      },
+      "aliases": {
+        "arpu": "subject.arpu",
+        "id": "subject.id",
+        "latePaymentCount": "subject.latePaymentCount",
+        "lifecycle": "subject.lifecycle",
+        "market": "subject.market",
+        "ordinal": "subject.ordinal",
+        "persona": "subject.persona",
+        "products": "subject.products",
+        "tenureMonths": "subject.tenureMonths",
+        "traits.digitalFluency": "subject.traits.digitalFluency",
+        "traits.financialLiteracy": "subject.traits.financialLiteracy",
+        "traits.monthlySpend": "subject.traits.monthlySpend",
+        "traits.priceSensitivity": "subject.traits.priceSensitivity",
+        "worldview.riskTolerance": "subject.worldview.riskTolerance",
+        "worldview.trendFollowing": "subject.worldview.trendFollowing",
+        "worldview.trustInInstitutions": "subject.worldview.trustInInstitutions"
+      }
+    },
+    "tiny": {
+      "scope": "subject",
+      "paths": {
+        "flag": {
+          "type": "bool"
+        },
+        "grade": {
+          "type": "enum",
+          "levels": [
+            "bronze",
+            "gold",
+            "silver"
+          ]
+        },
+        "m": {
+          "type": "number"
+        },
+        "n": {
+          "type": "number"
+        },
+        "s": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "set<string>"
+        }
+      },
+      "aliases": {}
+    },
+    "unicode": {
+      "scope": "subject",
+      "paths": {
+        "café": {
+          "type": "number"
+        }
+      },
+      "aliases": {}
+    }
+  },
+  "vectors": [
+    {
+      "id": "shipped-segment-seg-atrisk-tv",
+      "expr": "lifecycle == 'atrisk' && products.has('tv')",
+      "scope": "subject",
+      "model_fragment": "telco-subject",
+      "expect": {
+        "parse": {
+          "node": "and",
+          "left": {
+            "node": "compare",
+            "op": "==",
+            "left": {
+              "node": "path",
+              "parts": [
+                "lifecycle"
+              ]
+            },
+            "right": {
+              "node": "string",
+              "value": "atrisk"
+            }
+          },
+          "right": {
+            "node": "method",
+            "target": {
+              "node": "path",
+              "parts": [
+                "products"
+              ]
+            },
+            "name": "has",
+            "args": [
+              {
+                "node": "string",
+                "value": "tv"
+              }
+            ]
+          }
+        },
+        "check": "ok",
+        "unparse": "lifecycle == 'atrisk' && products.has('tv')",
+        "eval": [
+          {
+            "row": {
+              "lifecycle": "atrisk",
+              "products": [
+                "tv",
+                "broadband"
+              ]
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "lifecycle": "active",
+              "products": [
+                "tv"
+              ]
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "lifecycle": "atrisk",
+              "products": [
+                "broadband"
+              ]
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "lifecycle": "atrisk",
+              "products": null
+            },
+            "result": false
+          },
+          {
+            "row": {},
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "shipped-detector-det-payment-aborted-burst",
+      "expr": "amount > 0",
+      "scope": "event",
+      "model_fragment": "telco-event-payment-aborted",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "amount"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "0"
+          }
+        },
+        "check": "ok",
+        "unparse": "amount > 0",
+        "eval": [
+          {
+            "row": {
+              "amount": "1"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "amount": "0"
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "amount": "-1"
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "amount": null
+            },
+            "result": false
+          },
+          {
+            "row": {},
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "shipped-journey-jr-payment-recovery",
+      "expr": "attempts >= 2",
+      "scope": "event",
+      "model_fragment": "telco-event-payment-aborted",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">=",
+          "left": {
+            "node": "path",
+            "parts": [
+              "attempts"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "2"
+          }
+        },
+        "check": "ok",
+        "unparse": "attempts >= 2",
+        "eval": [
+          {
+            "row": {
+              "attempts": "2"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "attempts": "3"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "attempts": "1"
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "attempts": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "shipped-playback-pb-billing-history",
+      "expr": "late_payment_count >= 2",
+      "scope": "observed",
+      "model_fragment": "telco-observed",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">=",
+          "left": {
+            "node": "path",
+            "parts": [
+              "late_payment_count"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "2"
+          }
+        },
+        "check": "ok",
+        "unparse": "late_payment_count >= 2",
+        "eval": [
+          {
+            "row": {
+              "late_payment_count": "2"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "late_payment_count": "1"
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "late_payment_count": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "sugar-bare-name-is-subject-scope",
+      "expr": "subject.lifecycle == 'atrisk'",
+      "scope": "subject",
+      "model_fragment": "telco-subject",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "subject",
+              "lifecycle"
+            ]
+          },
+          "right": {
+            "node": "string",
+            "value": "atrisk"
+          }
+        },
+        "check": "ok",
+        "unparse": "subject.lifecycle == 'atrisk'",
+        "eval": [
+          {
+            "row": {
+              "lifecycle": "atrisk"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "lifecycle": "new"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "sugar-bare-payload-field-is-data-field",
+      "expr": "data.attempts >= 2",
+      "scope": "event",
+      "model_fragment": "telco-event-payment-aborted",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">=",
+          "left": {
+            "node": "path",
+            "parts": [
+              "data",
+              "attempts"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "2"
+          }
+        },
+        "check": "ok",
+        "unparse": "data.attempts >= 2",
+        "eval": [
+          {
+            "row": {
+              "attempts": "2"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "attempts": "1"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-eq-number",
+      "expr": "n == 1",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "ok",
+        "unparse": "n == 1",
+        "eval": [
+          {
+            "row": {
+              "n": "1"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "2"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-eq-decimal-scale-is-value-not-spelling",
+      "expr": "n == 1.50",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "1.50"
+          }
+        },
+        "check": "ok",
+        "unparse": "n == 1.50",
+        "eval": [
+          {
+            "row": {
+              "n": "1.5"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "1.500"
+            },
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-ne",
+      "expr": "n != 1",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "!=",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "ok",
+        "unparse": "n != 1",
+        "eval": [
+          {
+            "row": {
+              "n": "2"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "1"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-lt",
+      "expr": "n < 10",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "<",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "10"
+          }
+        },
+        "check": "ok",
+        "unparse": "n < 10",
+        "eval": [
+          {
+            "row": {
+              "n": "9"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "10"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-le",
+      "expr": "n <= 10",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "<=",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "10"
+          }
+        },
+        "check": "ok",
+        "unparse": "n <= 10",
+        "eval": [
+          {
+            "row": {
+              "n": "10"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "11"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-gt",
+      "expr": "n > 10",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "10"
+          }
+        },
+        "check": "ok",
+        "unparse": "n > 10",
+        "eval": [
+          {
+            "row": {
+              "n": "11"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "10"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-ge",
+      "expr": "n >= 10",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">=",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "10"
+          }
+        },
+        "check": "ok",
+        "unparse": "n >= 10",
+        "eval": [
+          {
+            "row": {
+              "n": "10"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "9"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-eq-string",
+      "expr": "s == 'a'",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "string",
+            "value": "a"
+          }
+        },
+        "check": "ok",
+        "unparse": "s == 'a'",
+        "eval": [
+          {
+            "row": {
+              "s": "a"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "s": "b"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-eq-bool",
+      "expr": "flag == true",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "flag"
+            ]
+          },
+          "right": {
+            "node": "bool",
+            "value": true
+          }
+        },
+        "check": "ok",
+        "unparse": "flag == true",
+        "eval": [
+          {
+            "row": {
+              "flag": true
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "flag": false
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-and-short-circuits",
+      "expr": "n > 0 && m > 0",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "and",
+          "left": {
+            "node": "compare",
+            "op": ">",
+            "left": {
+              "node": "path",
+              "parts": [
+                "n"
+              ]
+            },
+            "right": {
+              "node": "number",
+              "value": "0"
+            }
+          },
+          "right": {
+            "node": "compare",
+            "op": ">",
+            "left": {
+              "node": "path",
+              "parts": [
+                "m"
+              ]
+            },
+            "right": {
+              "node": "number",
+              "value": "0"
+            }
+          }
+        },
+        "check": "ok",
+        "unparse": "n > 0 && m > 0",
+        "eval": [
+          {
+            "row": {
+              "n": "1",
+              "m": "1"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "1",
+              "m": "0"
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "n": "0"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-or",
+      "expr": "n > 0 || m > 0",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "or",
+          "left": {
+            "node": "compare",
+            "op": ">",
+            "left": {
+              "node": "path",
+              "parts": [
+                "n"
+              ]
+            },
+            "right": {
+              "node": "number",
+              "value": "0"
+            }
+          },
+          "right": {
+            "node": "compare",
+            "op": ">",
+            "left": {
+              "node": "path",
+              "parts": [
+                "m"
+              ]
+            },
+            "right": {
+              "node": "number",
+              "value": "0"
+            }
+          }
+        },
+        "check": "ok",
+        "unparse": "n > 0 || m > 0",
+        "eval": [
+          {
+            "row": {
+              "n": "1",
+              "m": "0"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "0",
+              "m": "1"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "0",
+              "m": "0"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-not",
+      "expr": "!(n > 0)",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "not",
+          "operand": {
+            "node": "compare",
+            "op": ">",
+            "left": {
+              "node": "path",
+              "parts": [
+                "n"
+              ]
+            },
+            "right": {
+              "node": "number",
+              "value": "0"
+            }
+          }
+        },
+        "check": "ok",
+        "unparse": "!(n > 0)",
+        "eval": [
+          {
+            "row": {
+              "n": "0"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "1"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-in-list",
+      "expr": "s in ['a', 'b']",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "list",
+            "items": [
+              {
+                "node": "string",
+                "value": "a"
+              },
+              {
+                "node": "string",
+                "value": "b"
+              }
+            ]
+          }
+        },
+        "check": "ok",
+        "unparse": "s in ['a', 'b']",
+        "eval": [
+          {
+            "row": {
+              "s": "a"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "s": "c"
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "s": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-in-empty-list",
+      "expr": "s in []",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "list",
+            "items": []
+          }
+        },
+        "check": "ok",
+        "unparse": "s in []",
+        "eval": [
+          {
+            "row": {
+              "s": "a"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-in-set-path",
+      "expr": "s in tags",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "path",
+            "parts": [
+              "tags"
+            ]
+          }
+        },
+        "check": "ok",
+        "unparse": "s in tags",
+        "eval": [
+          {
+            "row": {
+              "s": "a",
+              "tags": [
+                "a",
+                "b"
+              ]
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "s": "c",
+              "tags": [
+                "a",
+                "b"
+              ]
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "s": "a",
+              "tags": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "operator-in-list-enum-level",
+      "expr": "grade in ['gold', 'silver']",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "grade"
+            ]
+          },
+          "right": {
+            "node": "list",
+            "items": [
+              {
+                "node": "string",
+                "value": "gold"
+              },
+              {
+                "node": "string",
+                "value": "silver"
+              }
+            ]
+          }
+        },
+        "check": "ok",
+        "unparse": "grade in ['gold', 'silver']",
+        "eval": [
+          {
+            "row": {
+              "grade": "gold"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "grade": "bronze"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "precedence-and-binds-tighter-than-or",
+      "expr": "n > 0 || m > 0 && s == 'a'",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "or",
+          "left": {
+            "node": "compare",
+            "op": ">",
+            "left": {
+              "node": "path",
+              "parts": [
+                "n"
+              ]
+            },
+            "right": {
+              "node": "number",
+              "value": "0"
+            }
+          },
+          "right": {
+            "node": "and",
+            "left": {
+              "node": "compare",
+              "op": ">",
+              "left": {
+                "node": "path",
+                "parts": [
+                  "m"
+                ]
+              },
+              "right": {
+                "node": "number",
+                "value": "0"
+              }
+            },
+            "right": {
+              "node": "compare",
+              "op": "==",
+              "left": {
+                "node": "path",
+                "parts": [
+                  "s"
+                ]
+              },
+              "right": {
+                "node": "string",
+                "value": "a"
+              }
+            }
+          }
+        },
+        "check": "ok",
+        "unparse": "n > 0 || m > 0 && s == 'a'",
+        "eval": [
+          {
+            "row": {
+              "n": "1",
+              "m": "0",
+              "s": "b"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "0",
+              "m": "1",
+              "s": "a"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "0",
+              "m": "1",
+              "s": "b"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "precedence-parentheses-override",
+      "expr": "(n > 0 || m > 0) && s == 'a'",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "and",
+          "left": {
+            "node": "or",
+            "left": {
+              "node": "compare",
+              "op": ">",
+              "left": {
+                "node": "path",
+                "parts": [
+                  "n"
+                ]
+              },
+              "right": {
+                "node": "number",
+                "value": "0"
+              }
+            },
+            "right": {
+              "node": "compare",
+              "op": ">",
+              "left": {
+                "node": "path",
+                "parts": [
+                  "m"
+                ]
+              },
+              "right": {
+                "node": "number",
+                "value": "0"
+              }
+            }
+          },
+          "right": {
+            "node": "compare",
+            "op": "==",
+            "left": {
+              "node": "path",
+              "parts": [
+                "s"
+              ]
+            },
+            "right": {
+              "node": "string",
+              "value": "a"
+            }
+          }
+        },
+        "check": "ok",
+        "unparse": "(n > 0 || m > 0) && s == 'a'",
+        "eval": [
+          {
+            "row": {
+              "n": "1",
+              "m": "0",
+              "s": "b"
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "n": "1",
+              "m": "0",
+              "s": "a"
+            },
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "precedence-or-is-left-associative",
+      "expr": "n > 0 || m > 0 || s == 'a'",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "or",
+          "left": {
+            "node": "or",
+            "left": {
+              "node": "compare",
+              "op": ">",
+              "left": {
+                "node": "path",
+                "parts": [
+                  "n"
+                ]
+              },
+              "right": {
+                "node": "number",
+                "value": "0"
+              }
+            },
+            "right": {
+              "node": "compare",
+              "op": ">",
+              "left": {
+                "node": "path",
+                "parts": [
+                  "m"
+                ]
+              },
+              "right": {
+                "node": "number",
+                "value": "0"
+              }
+            }
+          },
+          "right": {
+            "node": "compare",
+            "op": "==",
+            "left": {
+              "node": "path",
+              "parts": [
+                "s"
+              ]
+            },
+            "right": {
+              "node": "string",
+              "value": "a"
+            }
+          }
+        },
+        "check": "ok",
+        "unparse": "n > 0 || m > 0 || s == 'a'",
+        "eval": [
+          {
+            "row": {
+              "s": "a"
+            },
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "precedence-not-applies-to-the-primary",
+      "expr": "!n > 0",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "not",
+          "operand": {
+            "node": "compare",
+            "op": ">",
+            "left": {
+              "node": "path",
+              "parts": [
+                "n"
+              ]
+            },
+            "right": {
+              "node": "number",
+              "value": "0"
+            }
+          }
+        },
+        "check": "ok",
+        "unparse": "!(n > 0)",
+        "eval": [
+          {
+            "row": {
+              "n": "0"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "1"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "precedence-redundant-parentheses-are-dropped",
+      "expr": "((n > 0))",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "0"
+          }
+        },
+        "check": "ok",
+        "unparse": "n > 0",
+        "eval": [
+          {
+            "row": {
+              "n": "1"
+            },
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "method-has",
+      "expr": "tags.has('a')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "tags"
+            ]
+          },
+          "name": "has",
+          "args": [
+            {
+              "node": "string",
+              "value": "a"
+            }
+          ]
+        },
+        "check": "ok",
+        "unparse": "tags.has('a')",
+        "eval": [
+          {
+            "row": {
+              "tags": [
+                "a"
+              ]
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "tags": [
+                "b"
+              ]
+            },
+            "result": false
+          },
+          {
+            "row": {
+              "tags": []
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "method-isnull",
+      "expr": "s.isNull()",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "name": "isNull",
+          "args": []
+        },
+        "check": "ok",
+        "unparse": "s.isNull()",
+        "eval": [
+          {
+            "row": {
+              "s": null
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "s": "a"
+            },
+            "result": false
+          },
+          {
+            "row": {},
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "method-startswith",
+      "expr": "s.startsWith('ab')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "name": "startsWith",
+          "args": [
+            {
+              "node": "string",
+              "value": "ab"
+            }
+          ]
+        },
+        "check": "ok",
+        "unparse": "s.startsWith('ab')",
+        "eval": [
+          {
+            "row": {
+              "s": "abc"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "s": "bab"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "method-endswith",
+      "expr": "s.endsWith('bc')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "name": "endsWith",
+          "args": [
+            {
+              "node": "string",
+              "value": "bc"
+            }
+          ]
+        },
+        "check": "ok",
+        "unparse": "s.endsWith('bc')",
+        "eval": [
+          {
+            "row": {
+              "s": "abc"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "s": "bca"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "method-contains",
+      "expr": "s.contains('b')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "name": "contains",
+          "args": [
+            {
+              "node": "string",
+              "value": "b"
+            }
+          ]
+        },
+        "check": "ok",
+        "unparse": "s.contains('b')",
+        "eval": [
+          {
+            "row": {
+              "s": "abc"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "s": "ac"
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-eq-is-a-presence-test",
+      "expr": "n == null",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "null"
+          }
+        },
+        "check": "ok",
+        "unparse": "n == null",
+        "eval": [
+          {
+            "row": {
+              "n": null
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": "1"
+            },
+            "result": false
+          },
+          {
+            "row": {},
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-ne-is-a-presence-test",
+      "expr": "n != null",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "!=",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "null"
+          }
+        },
+        "check": "ok",
+        "unparse": "n != null",
+        "eval": [
+          {
+            "row": {
+              "n": "1"
+            },
+            "result": true
+          },
+          {
+            "row": {
+              "n": null
+            },
+            "result": false
+          },
+          {
+            "row": {},
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-comparison-is-false",
+      "expr": "n > 0",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "0"
+          }
+        },
+        "check": "ok",
+        "unparse": "n > 0",
+        "eval": [
+          {
+            "row": {
+              "n": null
+            },
+            "result": false
+          },
+          {
+            "row": {},
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-equality-with-a-literal-is-false",
+      "expr": "s == 'a'",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "string",
+            "value": "a"
+          }
+        },
+        "check": "ok",
+        "unparse": "s == 'a'",
+        "eval": [
+          {
+            "row": {
+              "s": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-in-list-is-false",
+      "expr": "s in ['a']",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "list",
+            "items": [
+              {
+                "node": "string",
+                "value": "a"
+              }
+            ]
+          }
+        },
+        "check": "ok",
+        "unparse": "s in ['a']",
+        "eval": [
+          {
+            "row": {
+              "s": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-in-set-path-is-false",
+      "expr": "s in tags",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "path",
+            "parts": [
+              "tags"
+            ]
+          }
+        },
+        "check": "ok",
+        "unparse": "s in tags",
+        "eval": [
+          {
+            "row": {
+              "s": "a",
+              "tags": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-method-has-is-false",
+      "expr": "tags.has('a')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "tags"
+            ]
+          },
+          "name": "has",
+          "args": [
+            {
+              "node": "string",
+              "value": "a"
+            }
+          ]
+        },
+        "check": "ok",
+        "unparse": "tags.has('a')",
+        "eval": [
+          {
+            "row": {
+              "tags": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-method-startswith-is-false",
+      "expr": "s.startsWith('a')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "name": "startsWith",
+          "args": [
+            {
+              "node": "string",
+              "value": "a"
+            }
+          ]
+        },
+        "check": "ok",
+        "unparse": "s.startsWith('a')",
+        "eval": [
+          {
+            "row": {
+              "s": null
+            },
+            "result": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "null-not-of-a-false-comparison-is-true",
+      "expr": "!(n > 0)",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "not",
+          "operand": {
+            "node": "compare",
+            "op": ">",
+            "left": {
+              "node": "path",
+              "parts": [
+                "n"
+              ]
+            },
+            "right": {
+              "node": "number",
+              "value": "0"
+            }
+          }
+        },
+        "check": "ok",
+        "unparse": "!(n > 0)",
+        "eval": [
+          {
+            "row": {
+              "n": null
+            },
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "unicode-identifier-composed",
+      "expr": "café > 0",
+      "scope": "subject",
+      "model_fragment": "unicode",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "café"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "0"
+          }
+        },
+        "check": "ok",
+        "unparse": "café > 0",
+        "eval": [
+          {
+            "row": {
+              "café": "1"
+            },
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "unicode-identifier-decomposed-names-the-same-path",
+      "expr": "café > 0",
+      "scope": "subject",
+      "model_fragment": "unicode",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "café"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "0"
+          }
+        },
+        "check": "ok",
+        "unparse": "café > 0",
+        "eval": [
+          {
+            "row": {
+              "café": "1"
+            },
+            "result": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "error-6001-empty",
+      "expr": "",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-bare-path",
+      "expr": "flag",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-arithmetic",
+      "expr": "n + 1 > 0",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-double-quoted-string",
+      "expr": "s == \"a\"",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-double-negation",
+      "expr": "!!(n > 0)",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-unknown-method-name",
+      "expr": "s.toUpper()",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-method-as-operand",
+      "expr": "flag == tags.has('a')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-single-equals",
+      "expr": "n = 1",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-single-ampersand",
+      "expr": "n > 0 & m > 0",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-unterminated-string",
+      "expr": "s == 'a",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-trailing-token",
+      "expr": "n > 0 m",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6001-newline-is-not-whitespace",
+      "expr": "n > 0 &&\nm > 0",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6001"
+      }
+    },
+    {
+      "id": "error-6002-reserved-matches-bare",
+      "expr": "matches",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6002"
+      }
+    },
+    {
+      "id": "error-6002-reserved-matches-method",
+      "expr": "s.matches('a')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": "FLX-6002"
+      }
+    },
+    {
+      "id": "error-6003-enum-literal-not-a-level",
+      "expr": "grade == 'platinum'",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "grade"
+            ]
+          },
+          "right": {
+            "node": "string",
+            "value": "platinum"
+          }
+        },
+        "check": "FLX-6003"
+      }
+    },
+    {
+      "id": "error-6003-enum-literal-not-a-level-in-list",
+      "expr": "grade in ['gold', 'platinum']",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "grade"
+            ]
+          },
+          "right": {
+            "node": "list",
+            "items": [
+              {
+                "node": "string",
+                "value": "gold"
+              },
+              {
+                "node": "string",
+                "value": "platinum"
+              }
+            ]
+          }
+        },
+        "check": "FLX-6003"
+      }
+    },
+    {
+      "id": "error-6003-lifecycle-literal-not-a-level",
+      "expr": "lifecycle == 'lapsed'",
+      "scope": "subject",
+      "model_fragment": "telco-subject",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "lifecycle"
+            ]
+          },
+          "right": {
+            "node": "string",
+            "value": "lapsed"
+          }
+        },
+        "check": "FLX-6003"
+      }
+    },
+    {
+      "id": "error-6004-unknown-path",
+      "expr": "nope == 1",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "nope"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "FLX-6004"
+      }
+    },
+    {
+      "id": "error-6004-unknown-dotted-path",
+      "expr": "traits.nope > 0",
+      "scope": "subject",
+      "model_fragment": "telco-subject",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "traits",
+              "nope"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "0"
+          }
+        },
+        "check": "FLX-6004"
+      }
+    },
+    {
+      "id": "error-6004-observed-scope-has-no-subject-attributes",
+      "expr": "lifecycle == 'atrisk'",
+      "scope": "observed",
+      "model_fragment": "telco-observed",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "lifecycle"
+            ]
+          },
+          "right": {
+            "node": "string",
+            "value": "atrisk"
+          }
+        },
+        "check": "FLX-6004"
+      }
+    },
+    {
+      "id": "error-6005-enum-ordered-against-number",
+      "expr": "market > 3",
+      "scope": "subject",
+      "model_fragment": "telco-subject",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "market"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "3"
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-has-on-a-number",
+      "expr": "traits.digitalFluency.has('x')",
+      "scope": "subject",
+      "model_fragment": "telco-subject",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "traits",
+              "digitalFluency"
+            ]
+          },
+          "name": "has",
+          "args": [
+            {
+              "node": "string",
+              "value": "x"
+            }
+          ]
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-string-literal-vs-number-literal",
+      "expr": "'1' == 1",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "string",
+            "value": "1"
+          },
+          "right": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-string-path-vs-number-literal",
+      "expr": "s == 1",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-bool-vs-number",
+      "expr": "flag == 1",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "flag"
+            ]
+          },
+          "right": {
+            "node": "number",
+            "value": "1"
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-string-ordering",
+      "expr": "s < 'b'",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "<",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "string",
+            "value": "b"
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-set-equality",
+      "expr": "tags == 'a'",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "path",
+            "parts": [
+              "tags"
+            ]
+          },
+          "right": {
+            "node": "string",
+            "value": "a"
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-startswith-on-a-set",
+      "expr": "tags.startsWith('a')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "tags"
+            ]
+          },
+          "name": "startsWith",
+          "args": [
+            {
+              "node": "string",
+              "value": "a"
+            }
+          ]
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-startswith-on-an-enum",
+      "expr": "grade.startsWith('g')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "grade"
+            ]
+          },
+          "name": "startsWith",
+          "args": [
+            {
+              "node": "string",
+              "value": "g"
+            }
+          ]
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-isnull-with-an-argument",
+      "expr": "s.isNull('a')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "name": "isNull",
+          "args": [
+            {
+              "node": "string",
+              "value": "a"
+            }
+          ]
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-has-with-two-arguments",
+      "expr": "tags.has('a', 'b')",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "method",
+          "target": {
+            "node": "path",
+            "parts": [
+              "tags"
+            ]
+          },
+          "name": "has",
+          "args": [
+            {
+              "node": "string",
+              "value": "a"
+            },
+            {
+              "node": "string",
+              "value": "b"
+            }
+          ]
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-in-list-mixed-types",
+      "expr": "s in ['a', 1]",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "list",
+            "items": [
+              {
+                "node": "string",
+                "value": "a"
+              },
+              {
+                "node": "number",
+                "value": "1"
+              }
+            ]
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-in-a-non-set-path",
+      "expr": "s in n",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "s"
+            ]
+          },
+          "right": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-number-in-a-set",
+      "expr": "n in tags",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "in",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "path",
+            "parts": [
+              "tags"
+            ]
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-null-literal-against-a-literal",
+      "expr": "'a' == null",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": "==",
+          "left": {
+            "node": "string",
+            "value": "a"
+          },
+          "right": {
+            "node": "null"
+          }
+        },
+        "check": "FLX-6005"
+      }
+    },
+    {
+      "id": "error-6005-null-ordered",
+      "expr": "n > null",
+      "scope": "subject",
+      "model_fragment": "tiny",
+      "expect": {
+        "parse": {
+          "node": "compare",
+          "op": ">",
+          "left": {
+            "node": "path",
+            "parts": [
+              "n"
+            ]
+          },
+          "right": {
+            "node": "null"
+          }
+        },
+        "check": "FLX-6005"
+      }
+    }
+  ]
+}

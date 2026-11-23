@@ -1,0 +1,18 @@
+usage: fluxsim accuracy [-h] <command> ...
+
+Seal a prediction before its horizon, score it against an observed readout
+afterwards, and publish the outcomes-only accuracy record.
+
+examples:
+  # seal a prediction first
+  fluxsim accuracy register --file prediction.json
+
+options:
+  -h, --help  show this help message and exit
+
+commands:
+  register    seal a prediction before its horizon
+  score       score a registered prediction against a readout
+  record      publish one registration's outcomes-only record
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/accuracy.html

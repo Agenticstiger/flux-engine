@@ -1,0 +1,97 @@
+# A profile request: the statistics a profiler measures for the tables of a FLUID contract.
+# Its format is docs/spec/PROFILE-REQUEST-SPEC.md; a profiler writes the profile it asks for.
+"_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile-request/1-1-0/FluxProfileRequest.json"
+"contract":
+  "digest": "sha256:b58b14b30b9aacd5c0eb3cea2bd14f3b6e994fa03d29124359e3f90fcd3d49f1"
+"encoding":
+  "fractionalBits": 16
+  "rounding": "floor"
+"tables":
+  "subscriptions":
+    "columns":
+      "amount":
+        "domain": "number"
+        "metrics":
+          - "count"
+          - "distinctCount"
+          - "max"
+          - "min"
+          - "nullCount"
+          - "quantiles"
+          - "sum"
+        "statistics":
+          - "mean/1"
+          - "marginalHistogram/1"
+          - "quantile/2"
+      "offered":
+        "domain": "category"
+        "metrics":
+          - "count"
+          - "distinctCount"
+          - "nullCount"
+      "plan":
+        "domain": "category"
+        "metrics":
+          - "count"
+          - "distinctCount"
+          - "nullCount"
+        "statistics":
+          - "levelHistogram/1"
+          - "support/1"
+      "region":
+        "domain": "category"
+        "metrics":
+          - "count"
+          - "distinctCount"
+          - "nullCount"
+        "statistics":
+          - "levelHistogram/1"
+          - "support/1"
+      "renewed":
+        "domain": "category"
+        "metrics":
+          - "count"
+          - "distinctCount"
+          - "nullCount"
+      "renewed_at":
+        "domain": "timestamp"
+        "metrics":
+          - "count"
+          - "distinctCount"
+          - "max"
+          - "min"
+          - "nullCount"
+          - "quantiles"
+        "statistics":
+          - "mean/1"
+          - "marginalHistogram/1"
+          - "quantile/2"
+      "subscription_id":
+        "domain": "category"
+        "metrics":
+          - "count"
+          - "distinctCount"
+          - "nullCount"
+    "rowCount": true
+    "calendar":
+      - "renewed_at"
+    "workload":
+      - "columns":
+          - "offered"
+          - "plan"
+          - "renewed"
+        "weight": 1
+      - "columns":
+          - "plan"
+          - "renewed"
+        "weight": 1
+"queries":
+  - "name": "premium-renewed"
+    "sql": "SELECT \"subscriptions\".\"subscription_id\" AS \"subscription_id\", \"subscriptions\".\"plan\" AS \"plan\", \"subscriptions\".\"region\" AS \"region\", \"subscriptions\".\"offered\" AS \"offered\", \"subscriptions\".\"renewed\" AS \"renewed\", \"subscriptions\".\"renewed_at\" AS \"renewed_at\", \"subscriptions\".\"amount\" AS \"amount\" FROM \"subscriptions\" AS \"subscriptions\" WHERE \"subscriptions\".\"plan\" = 'premium' AND \"subscriptions\".\"renewed\""
+    "unit":
+      "table": "subscriptions"
+  - "name": "renewed-offered"
+    "sql": "WITH \"offered\" AS (SELECT \"subscriptions\".\"subscription_id\" AS \"subscription_id\", \"subscriptions\".\"plan\" AS \"plan\", \"subscriptions\".\"region\" AS \"region\", \"subscriptions\".\"offered\" AS \"offered\", \"subscriptions\".\"renewed\" AS \"renewed\", \"subscriptions\".\"renewed_at\" AS \"renewed_at\", \"subscriptions\".\"amount\" AS \"amount\" FROM \"subscriptions\" AS \"subscriptions\" WHERE \"subscriptions\".\"offered\") SELECT \"offered\".\"plan\" AS \"plan\" FROM \"offered\" AS \"offered\" WHERE \"offered\".\"renewed\""
+    "unit":
+      "sql": "SELECT \"subscriptions\".\"subscription_id\" AS \"subscription_id\", \"subscriptions\".\"plan\" AS \"plan\", \"subscriptions\".\"region\" AS \"region\", \"subscriptions\".\"offered\" AS \"offered\", \"subscriptions\".\"renewed\" AS \"renewed\", \"subscriptions\".\"renewed_at\" AS \"renewed_at\", \"subscriptions\".\"amount\" AS \"amount\" FROM \"subscriptions\" AS \"subscriptions\" WHERE \"subscriptions\".\"offered\""
+    "groupBy": "plan"

@@ -1,0 +1,35 @@
+{
+  "G": "sha256:191e774db89620d88db29893fae6b719533d2866f43e98c9b67bafeca02a91bb",
+  "H": "sha256:69f7681477d3ab3a838bb23dcf6bb32ec52bcc7a33b2448356ea82149f4afeee",
+  "columns": [
+    "ss_sold_date_sk",
+    "ss_item_sk",
+    "ss_customer_id",
+    "ss_ticket_number",
+    "ss_quantity",
+    "ss_net_paid"
+  ],
+  "emitIndex": 3,
+  "reference": {
+    "contractDigest": "sha256:89b4675ab044d2fbb9a712079d6ba91241c41b1cd2e741a5d1938bc23a77f3a0",
+    "contractFileDigest": "sha256:9a28b56a04c7a06695639d9a4ff42d58027a6efbb6b22df44d070623df2f5999",
+    "exposeId": "store_sales",
+    "fluidVersion": "0.7.7",
+    "productRef": "retail.store_star"
+  },
+  "shippedContract": null,
+  "simulationId": "sim-store-star",
+  "synthetic": {
+    "generatorDigest": "sha256:b1f2c591cd5e03d90a7e995fc07eeb4bf471ad77dc9c8450073a9659e8a44f2f",
+    "outputDigest": "sha256:bb9706e579fb21cba1042088eebdba0b249a4591c023dda611d835e28fa16f2d",
+    "rows": 200
+  },
+  "types": [
+    "INT",
+    "INT",
+    "STRING",
+    "INT",
+    "INT",
+    "DECIMAL(7,2)"
+  ]
+}

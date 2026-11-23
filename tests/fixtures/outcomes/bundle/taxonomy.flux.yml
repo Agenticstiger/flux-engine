@@ -1,0 +1,19 @@
+fluxVersion: 0.5.0
+kind: JourneyTaxonomy
+id: jt-subscriber-lifecycle
+name: Subscriber Lifecycle Taxonomy
+metadata:
+  owner:
+    team: billing
+spec:
+  states:
+  - active
+  - atrisk
+  - churned
+  transitions:
+  - from: active
+    to: atrisk
+  - from: atrisk
+    to: active
+  - from: atrisk
+    to: churned

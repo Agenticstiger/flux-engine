@@ -1,0 +1,14 @@
+# Written by `fluxsim init` from subscriptions.fluid.yaml and subscriptions.profile.json.
+# Every number below has its source in the parameter register
+# (extensions.com.agentics.flux/1.parameters): the profile, the contract, an
+# assumption with its reason, or a default. Replace the assumptions you can.
+fluxVersion: 0.5.0
+kind: Persona
+id: persona-telco.silver.subscriptions
+name: Persona for Subscriptions
+metadata:
+  owner:
+    team: billing
+spec:
+  traits:
+    digitalFluency: 0.5

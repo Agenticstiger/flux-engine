@@ -1,0 +1,52 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# The local round-trip harness. It is its own uv project: it is not a member of
+# the repository's workspace, ships in no wheel, and no CI job runs it. It needs
+# no cloud.
+[project]
+name = "flux-roundtrip"
+version = "0.0.0"
+description = "A local round trip against a generated truth: generate, profile, init, run, judge."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+  # The engine of this repository, and its statistics package (both editable).
+  "flux-sim-engine",
+  "flux-stats",
+  # `fluid profile`, the profiler on the data owner's side. The pin is a commit
+  # of forge-cli main: the one that adds default histograms and several exposes
+  # in one call.
+  "data-product-forge[profile] @ git+https://github.com/Agenticstiger/forge-cli@1d7f6dc269795a8d7bbabdfe6f3f6e6c2ac43867",
+  # The truth's rows go from NDJSON to Parquet here.
+  "duckdb==2.0.0",
+  "pyyaml>=6",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.2", "ruff>=0.5", "black==26.10.1"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+flux-sim-engine = { path = "../..", editable = true }
+flux-stats = { path = "../../packages/flux-stats", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = ["E203", "E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

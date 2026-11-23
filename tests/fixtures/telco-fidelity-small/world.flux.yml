@@ -1,0 +1,18 @@
+fluxVersion: "0.5.0"
+kind: World
+id: q3-retention-world
+name: Q3 Retention World
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  seed: 42
+  vertical: telco
+  sovereignty:
+    allowedZones: [eu-west, eu-central]
+    enforcement: block
+  population:
+    size: 500
+    lifecycleMix: { new: 0.15, active: 0.55, atrisk: 0.20, churned: 0.10 }
+    markets: [mkt-a, mkt-b, mkt-c]
+  temperature: { engagement: 0.5, campaignResponse: 0.5 }

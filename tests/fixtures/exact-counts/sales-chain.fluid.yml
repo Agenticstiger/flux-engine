@@ -1,0 +1,89 @@
+# Four related tables for a bundle that declares none of ADR 0016's keys (counts, allocation,
+# sampling); tests/golden/exact-counts pins its runs under both kernels.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: retail.sales_chain
+name: Sales Chain
+metadata:
+  owner:
+    team: sales
+exposes:
+  - exposeId: product
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: product, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: product_id, type: INT, required: true }
+        - { name: category, type: STRING, required: true }
+        - { name: list_price, type: "DECIMAL(10,2)", required: true }
+    semantics:
+      entities:
+        - { name: product, type: primary, expr: product_id }
+  - exposeId: account
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: account, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: account_id, type: INT, required: true }
+        - { name: segment, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: account, type: primary, expr: account_id }
+  - exposeId: invoice
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: invoice, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: invoice_id, type: INT, required: true }
+        - { name: account_id, type: INT, required: true }
+        - { name: status, type: STRING, required: true }
+        - { name: issued_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: invoice, type: primary, expr: invoice_id }
+      relationships:
+        - name: account
+          to: account
+          fromColumns: [account_id]
+          toColumns: [account_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: invoice_line
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: invoice_line, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: line_id, type: INT, required: true }
+        - { name: invoice_id, type: INT, required: true }
+        - { name: product_id, type: INT, required: true }
+        - { name: quantity, type: INT, required: true }
+        - { name: amount, type: "DECIMAL(12,2)", required: true }
+    semantics:
+      entities:
+        - { name: invoice_line, type: primary, expr: line_id }
+      relationships:
+        - name: invoice
+          to: invoice
+          fromColumns: [invoice_id]
+          toColumns: [invoice_id]
+          cardinality: many_to_one
+          joinType: inner
+        - name: product
+          to: product
+          fromColumns: [product_id]
+          toColumns: [product_id]
+          cardinality: many_to_one
+          joinType: inner

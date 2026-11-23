@@ -1,0 +1,368 @@
+fluxVersion: 0.5.0
+kind: Simulation
+id: sim-telco.silver.subscriptions
+name: Synthetic Subscriptions
+metadata:
+  owner:
+    team: billing
+spec:
+  worldRef: world-telco.silver.subscriptions
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: '2025-01-01T00:00:00.000Z'
+    end: '2025-07-01T00:00:00.000Z'
+  personaRefs:
+  - persona-basic
+  - persona-premium
+  emits:
+  - productRef: telco.silver.subscriptions
+    exposeId: subscriptions
+    fluidVersion: 0.7.7
+    provenance:
+      contractDigest: sha256:b58b14b30b9aacd5c0eb3cea2bd14f3b6e994fa03d29124359e3f90fcd3d49f1
+  segmentRefs:
+  - seg-basic
+  - seg-premium
+  signalRefs:
+  - sig-renewal-due
+  experimentRefs:
+  - exp-offer-test
+  moduleRefs:
+  - module-renewal
+  sweep:
+    runs: 20
+extensions:
+  com.agentics.flux/1:
+    profile:
+      digest: sha256:817592e3a22333846d9c4913e07cea2911ced79d414038208e84374b7528a630
+    emits:
+      subscriptions:
+        rows: 1200
+        fidelity:
+          encoding:
+            fractionalBits: 16
+            rounding: floor
+          records:
+            min: 1
+            max: 1000000000
+          columns:
+            plan:
+              support: declared
+              maxCardinality: 3
+              levels:
+                basic: '0.5'
+                premium: '0.2'
+                standard: '0.3'
+            region:
+              support: declared
+              maxCardinality: 4
+              levels:
+                east: '0.25'
+                north: '0.333333333'
+                south: '0.25'
+                west: '0.166666667'
+            offered:
+              levels:
+                'false': '0.25'
+                'true': '0.75'
+            renewed:
+              levels:
+                'false': '0.35'
+                'true': '0.65'
+            renewed_at:
+              bins:
+              - '2025-01-01'
+              - '2025-07-01'
+              binWeights:
+              - '1'
+              range:
+                min: '2025-01-01'
+                max: '2025-07-01'
+              nullFraction: '0'
+            amount:
+              bins:
+              - '5'
+              - '75.01'
+              - '95'
+              binWeights:
+              - '1'
+              - '0'
+              range:
+                min: '5'
+                max: '95'
+              nullFraction: '0'
+          properties:
+          - property: levelHistogram
+            column: plan
+            tolerance:
+              type: distance
+              measure: totalVariation
+              max: '0.10'
+          - property: levelHistogram
+            column: region
+            tolerance:
+              type: distance
+              measure: totalVariation
+              max: '0.10'
+          budget:
+            maxChecksPerState: 20
+            maxStateAge: P30D
+          failureAction: withholdBundle
+    parameters:
+    - document: world-telco.silver.subscriptions
+      pointer: /spec
+      source: default
+      reason: 'fluxsim init writes the least World a run needs: the generator emits
+        read none of its numbers, so they change no row.'
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/rows
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/rowCount
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/records
+      source: assumption
+      reason: Bounds on the size of a committed state, wide on purpose so that any
+        profiled table fits.
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/plan/maxCardinality
+      source: contract
+      contract:
+        productRef: telco.silver.subscriptions
+        pointer: /exposes/0/contract/schema/1/type
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/plan/levels/basic
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/plan/statistics/0/groups/0/levelCounts/0
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/plan/levels/premium
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/plan/statistics/0/groups/0/levelCounts/1
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/plan/levels/standard
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/plan/statistics/0/groups/0/levelCounts/2
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/region/maxCardinality
+      source: contract
+      contract:
+        productRef: telco.silver.subscriptions
+        pointer: /exposes/0/contract/schema/2/type
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/region/levels/east
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/region/statistics/0/groups/0/levelCounts/0
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/region/levels/north
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/region/statistics/0/groups/0/levelCounts/1
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/region/levels/south
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/region/statistics/0/groups/0/levelCounts/2
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/region/levels/west
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/region/statistics/0/groups/0/levelCounts/3
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/offered/levels/false
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/offered/statistics/0/groups/0/levelCounts/0
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/offered/levels/true
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/offered/statistics/0/groups/0/levelCounts/1
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/renewed/levels/false
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/renewed/statistics/0/groups/0/levelCounts/0
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/renewed/levels/true
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/renewed/statistics/0/groups/0/levelCounts/1
+        definition: levelHistogram/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/renewed_at/binWeights
+      source: assumption
+      reason: 'Only min and max are published: the values are drawn evenly between
+        them.'
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/renewed_at/nullFraction
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/renewed_at/metrics/nullCount
+        definition: nullCount/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/amount/bins/0
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/amount/metrics/min
+        definition: min/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/amount/bins/1
+      source: assumption
+      reason: 'Drawn evenly within its bins, the histogram would give a mean other
+        than the one the profile publishes, so within each bin the values are drawn
+        from the part on the mean''s side: each bin keeps its share of the rows, so
+        every published quantile or bin count holds, and the mean is the published
+        one, or as near to it as the bins allow on the column''s grid.'
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/amount/bins/2
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/amount/metrics/max
+        definition: max/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/amount/binWeights/0
+      source: assumption
+      reason: 'Only min and max are published: the values are drawn evenly between
+        them.'
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/amount/binWeights/1
+      source: assumption
+      reason: 'Drawn evenly within its bins, the histogram would give a mean other
+        than the one the profile publishes, so within each bin the values are drawn
+        from the part on the mean''s side: each bin keeps its share of the rows, so
+        every published quantile or bin count holds, and the mean is the published
+        one, or as near to it as the bins allow on the column''s grid.'
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/amount/range/min
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/amount/metrics/min
+        definition: min/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/amount/range/max
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/amount/metrics/max
+        definition: max/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/columns/amount/nullFraction
+      source: profile
+      statistic:
+        pointer: /tables/subscriptions/columns/amount/metrics/nullCount
+        definition: nullCount/1
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/properties/0/tolerance/max
+      source: assumption
+      reason: 'A default tolerance written by fluxsim init: replace it with the margin
+        you accept.'
+    - document: sim-telco.silver.subscriptions
+      pointer: /extensions/com.agentics.flux~11/emits/subscriptions/fidelity/properties/1/tolerance/max
+      source: assumption
+      reason: 'A default tolerance written by fluxsim init: replace it with the margin
+        you accept.'
+    - document: persona-basic
+      pointer: /spec
+      source: default
+      reason: The generator emits read none of a Persona's numbers, so they change
+        no row.
+    - document: persona-premium
+      pointer: /spec
+      source: default
+      reason: The generator emits read none of a Persona's numbers, so they change
+        no row.
+    unused:
+    - statistic:
+        pointer: /tables/subscriptions/columns/offered/metrics/distinctCount
+        definition: distinctCount/1
+      reason: no rule of fluxsim init reads this statistic for this column
+    - statistic:
+        pointer: /tables/subscriptions/columns/plan/metrics/distinctCount
+        definition: distinctCount/1
+      reason: no rule of fluxsim init reads this statistic for this column
+    - statistic:
+        pointer: /tables/subscriptions/columns/region/metrics/distinctCount
+        definition: distinctCount/1
+      reason: no rule of fluxsim init reads this statistic for this column
+    - statistic:
+        pointer: /tables/subscriptions/columns/renewed/metrics/distinctCount
+        definition: distinctCount/1
+      reason: no rule of fluxsim init reads this statistic for this column
+    - statistic:
+        pointer: /tables/subscriptions/columns/subscription_id/metrics/count
+        definition: count/1
+      reason: no rule of fluxsim init reads this statistic for this column
+    - statistic:
+        pointer: /tables/subscriptions/columns/subscription_id/metrics/distinctCount
+        definition: distinctCount/1
+      reason: no rule of fluxsim init reads this statistic for this column
+    - statistic:
+        pointer: /tables/subscriptions/columns/subscription_id/metrics/nullCount
+        definition: nullCount/1
+      reason: no rule of fluxsim init reads this statistic for this column
+    - statistic:
+        pointer: /queries/0/statistics/0
+        definition: levelHistogram/1
+      reason: the count a query matches has no declaration a generator emit draws
+        from
+    - statistic:
+        pointer: /queries/1/statistics/0
+        definition: levelHistogram/1
+      reason: the count a query matches has no declaration a generator emit draws
+        from
+    consumers:
+      dialect: snowflake
+      asOf: '2026-06-30'
+      views:
+      - name: offered
+        sql: SELECT * FROM subscriptions WHERE offered
+      - name: not_offered
+        sql: SELECT * FROM subscriptions WHERE NOT offered
+      queries:
+      - id: renewed-offered
+        sql: SELECT plan FROM offered WHERE renewed
+        unit: offered
+        groupBy: plan
+      - id: renewed-not-offered
+        sql: SELECT plan FROM not_offered WHERE renewed
+        unit: not_offered
+        groupBy: plan
+    responses:
+    - id: offer-by-plan
+      treatment: tr-retention-offer
+      experiment: exp-offer-test
+      journey: jr-renewal
+      segments:
+        basic: seg-basic
+        premium: seg-premium
+      estimate:
+        treated: renewed-offered
+        control: renewed-not-offered
+        confidence: '0.9'
+    forecasts:
+      playback: pb-renewal
+      confidence: '0.9'
+      items:
+      - id: premium-offered
+        response: offer-by-plan
+        arm: treated
+        segment: premium
+        basis: historical-holdout
+      - id: basic-control
+        response: offer-by-plan
+        arm: control
+        segment: basic

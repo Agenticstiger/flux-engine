@@ -1,0 +1,16 @@
+usage: fluxsim gate [-h] <command> ...
+
+Decide one AI-call request against a policy, or run the conformance vectors.
+
+examples:
+  # run the published conformance vectors
+  fluxsim gate conform
+
+options:
+  -h, --help  show this help message and exit
+
+commands:
+  decide      decide one AI-call request against a policy
+  conform     run the RFC-04 conformance vectors against the enforcement gate
+
+docs: https://agenticstiger.github.io/flux/engine/reference/cli/gate.html

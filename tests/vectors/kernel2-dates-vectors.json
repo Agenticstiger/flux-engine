@@ -1,0 +1,2423 @@
+{
+  "description": "The dates stream of ADR 0024 section 6: the rule stream <row path> + (\"rule\", R) of a date column that a lifetime's duration or a within entry sets, with R the canonical JSON of [\"dates\", <column>], and the duration draw on integer thresholds. Every block word is 16 hex digits, every integer a decimal string. Computed by tests/kernel2/test_dates_vectors.py from tests/kernel2/reference.py, never typed.",
+  "regenerate": "python -m tests.kernel2.test_dates_vectors",
+  "kernelVersion": "0.2.0",
+  "root": {
+    "seam": "d3107e2365f8e13e680902dd1c0a871a181ebdc8bc89e7c958fe2dbceadca55d",
+    "seed": 20261122,
+    "root": "5f082d64acdd2eddd8fb29b61e5471ecd225f669e3224243f098cf351b28bcf0"
+  },
+  "simId": "s",
+  "exposeId": "customer",
+  "streams": [
+    {
+      "column": "ended_on",
+      "type": "DATE",
+      "rule": "[\"dates\",\"ended_on\"]",
+      "keyLabel": "73696d1f731f67656e1f637573746f6d65721f726f771f1f72756c651f5b226461746573222c22656e6465645f6f6e225d",
+      "key": [
+        "15322f5a90d28c21",
+        "f8c5650c7a38ddd3"
+      ],
+      "rows": [
+        {
+          "row": "0",
+          "draws": [
+            {
+              "position": 0,
+              "counter": [
+                "0",
+                "0",
+                "0",
+                "0"
+              ],
+              "block": [
+                "07a29ee4bfc2a9f7",
+                "f4a5d13afd95dab7",
+                "643eeca308bf2f0c",
+                "4ea26d42c7ad0ce4"
+              ],
+              "uniform53": "268641020409941"
+            },
+            {
+              "position": 1,
+              "counter": [
+                "0",
+                "0",
+                "1",
+                "0"
+              ],
+              "block": [
+                "4030c7b60dbff9ae",
+                "ed26b88442a626bf",
+                "89fbaeb9d8f898da",
+                "cbd126397b66b836"
+              ],
+              "uniform53": "2258504102557695"
+            },
+            {
+              "position": 257,
+              "counter": [
+                "0",
+                "0",
+                "257",
+                "0"
+              ],
+              "block": [
+                "8000491a7c973802",
+                "a0b075876e7ed89a",
+                "2396b24e61926485",
+                "2a95aa1ff7209b4e"
+              ],
+              "uniform53": "4503638874493671"
+            }
+          ]
+        },
+        {
+          "row": "1",
+          "draws": [
+            {
+              "position": 0,
+              "counter": [
+                "1",
+                "0",
+                "0",
+                "0"
+              ],
+              "block": [
+                "83384db5ba8748ff",
+                "b1483c3c6e8a3940",
+                "64ad02d910e5c752",
+                "9e4344ae058418d5"
+              ],
+              "uniform53": "4616891045204201"
+            },
+            {
+              "position": 1,
+              "counter": [
+                "1",
+                "0",
+                "1",
+                "0"
+              ],
+              "block": [
+                "9b7e8e107d0a9c12",
+                "5feac496bcdb1e8b",
+                "49f540491494f53b",
+                "31d194c8f45ef493"
+              ],
+              "uniform53": "5470971252154707"
+            },
+            {
+              "position": 257,
+              "counter": [
+                "1",
+                "0",
+                "257",
+                "0"
+              ],
+              "block": [
+                "0e25601c1d57914f",
+                "242a75c5e18e2e9d",
+                "45f5e8e6776d56a9",
+                "cab2ed4673e97cec"
+              ],
+              "uniform53": "497718049090290"
+            }
+          ]
+        },
+        {
+          "row": "1099511627776",
+          "draws": [
+            {
+              "position": 0,
+              "counter": [
+                "1099511627776",
+                "0",
+                "0",
+                "0"
+              ],
+              "block": [
+                "e753ef0a9fafd6ea",
+                "0ca536145b5e582f",
+                "e1c510ee04572358",
+                "0453e4af3142216f"
+              ],
+              "uniform53": "8139125720086010"
+            },
+            {
+              "position": 1,
+              "counter": [
+                "1099511627776",
+                "0",
+                "1",
+                "0"
+              ],
+              "block": [
+                "4b5f850991eeb261",
+                "1ea9999cc8dd3cf8",
+                "e7ee1d78a7a39a37",
+                "c33f13b6b75e7eed"
+              ],
+              "uniform53": "2651956031143382"
+            },
+            {
+              "position": 257,
+              "counter": [
+                "1099511627776",
+                "0",
+                "257",
+                "0"
+              ],
+              "block": [
+                "9b1fc8e278dca6fa",
+                "a7921654c6b2a813",
+                "bd559082a53a66f4",
+                "f88430ded69a9dab"
+              ],
+              "uniform53": "5457946130455444"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "column": "ended_at",
+      "type": "TIMESTAMP",
+      "rule": "[\"dates\",\"ended_at\"]",
+      "keyLabel": "73696d1f731f67656e1f637573746f6d65721f726f771f1f72756c651f5b226461746573222c22656e6465645f6174225d",
+      "key": [
+        "5d11a84153a35fa3",
+        "579b2b7c568b8a41"
+      ],
+      "rows": [
+        {
+          "row": "0",
+          "draws": [
+            {
+              "position": 0,
+              "counter": [
+                "0",
+                "0",
+                "0",
+                "0"
+              ],
+              "block": [
+                "b867f7a9cdf35a09",
+                "e2750b8f90698fbf",
+                "b0d37828dea656c1",
+                "f8f738a44fd374af"
+              ],
+              "uniform53": "6488213639773803"
+            },
+            {
+              "position": 1,
+              "counter": [
+                "0",
+                "0",
+                "1",
+                "0"
+              ],
+              "block": [
+                "0e73687c9bf227ae",
+                "8489d1e5e0344847",
+                "361621b92621e66a",
+                "dff69631855fafc0"
+              ],
+              "uniform53": "508442784792132"
+            },
+            {
+              "position": 257,
+              "counter": [
+                "0",
+                "0",
+                "257",
+                "0"
+              ],
+              "block": [
+                "c7073f4a8beab864",
+                "8d643dc19df20574",
+                "260d1ed403e37708",
+                "845be44107f49622"
+              ],
+              "uniform53": "7002686097554775"
+            }
+          ]
+        },
+        {
+          "row": "1",
+          "draws": [
+            {
+              "position": 0,
+              "counter": [
+                "1",
+                "0",
+                "0",
+                "0"
+              ],
+              "block": [
+                "776c735ce2b49dc8",
+                "74a0c1de1bb25b74",
+                "755a3af5d9b7545e",
+                "69807beff3cff554"
+              ],
+              "uniform53": "4201845620496019"
+            },
+            {
+              "position": 1,
+              "counter": [
+                "1",
+                "0",
+                "1",
+                "0"
+              ],
+              "block": [
+                "2d7234027e8c3395",
+                "c3c6142735fb1201",
+                "848e87bc34f5ccec",
+                "06336dbd556bc8b6"
+              ],
+              "uniform53": "1598992707211654"
+            },
+            {
+              "position": 257,
+              "counter": [
+                "1",
+                "0",
+                "257",
+                "0"
+              ],
+              "block": [
+                "f2ce9690dddf11d7",
+                "50bde58a97274c13",
+                "4656fa3c566e8d97",
+                "f3b6b401b71fb203"
+              ],
+              "uniform53": "8543011304356834"
+            }
+          ]
+        },
+        {
+          "row": "1099511627776",
+          "draws": [
+            {
+              "position": 0,
+              "counter": [
+                "1099511627776",
+                "0",
+                "0",
+                "0"
+              ],
+              "block": [
+                "fa8e269d0febab83",
+                "418cfbbe6fabd971",
+                "3fcaee5a8b76dea6",
+                "e18b6b235b81189e"
+              ],
+              "uniform53": "8815630084078965"
+            },
+            {
+              "position": 1,
+              "counter": [
+                "1099511627776",
+                "0",
+                "1",
+                "0"
+              ],
+              "block": [
+                "6e3d2c6514a2128b",
+                "1d16f2137c20a8da",
+                "4851d4eaa27d8e00",
+                "2cf879436aaed26d"
+              ],
+              "uniform53": "3878688540234818"
+            },
+            {
+              "position": 257,
+              "counter": [
+                "1099511627776",
+                "0",
+                "257",
+                "0"
+              ],
+              "block": [
+                "837a48e6b942e6e5",
+                "a0aa2d2cfd15ae9b",
+                "b67e8c347dc5fda0",
+                "eb16fa7908fca9b8"
+              ],
+              "uniform53": "4625959434528860"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "hiddenColumnCell": {
+    "column": "churned_on",
+    "keyLabel": "73696d1f731f67656e1f637573746f6d65721f726f771f1f636875726e65645f6f6e",
+    "key": [
+      "fcff055505d87ff4",
+      "262698deeacc8bd3"
+    ],
+    "rows": [
+      {
+        "row": "0",
+        "block": [
+          "c530a782f129b097",
+          "ff067dc151731ae2",
+          "24d0f73712880ae6",
+          "647df34ae47b1166"
+        ]
+      },
+      {
+        "row": "1",
+        "block": [
+          "8f64f312bb75fdfc",
+          "f0b00d5a783750f6",
+          "a39e44b4c91733e3",
+          "29132c326fb3b91a"
+        ]
+      },
+      {
+        "row": "1099511627776",
+        "block": [
+          "ab5eb34e94987520",
+          "097e4c6334ad3874",
+          "719ced1adb4a36ee",
+          "517619ab70cf1b95"
+        ]
+      }
+    ]
+  },
+  "durations": [
+    {
+      "name": "a DATE end, lower closed",
+      "type": "DATE",
+      "histogram": {
+        "bins": [
+          "0",
+          "7",
+          "30",
+          "90"
+        ],
+        "binWeights": [
+          "5",
+          "3",
+          "1"
+        ],
+        "open": "1"
+      },
+      "start": "20000",
+      "window": null,
+      "thresholds": [
+        "4503599627370496",
+        "7205759403792793",
+        "8106479329266892",
+        "9007199254740992"
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "end": "20000",
+          "open": "20000",
+          "kept": "20000"
+        },
+        {
+          "uniform53": "12345678901234",
+          "end": "20000",
+          "open": "20000",
+          "kept": "20000"
+        },
+        {
+          "uniform53": "4503599627370495",
+          "end": "20006",
+          "open": "20006",
+          "kept": "20006"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "end": "20007",
+          "open": "20007",
+          "kept": "20007"
+        },
+        {
+          "uniform53": "5854679515581644",
+          "end": "20018",
+          "open": "20018",
+          "kept": "20018"
+        },
+        {
+          "uniform53": "7205759403792792",
+          "end": "20029",
+          "open": "20029",
+          "kept": "20029"
+        },
+        {
+          "uniform53": "7205759403792793",
+          "end": "20030",
+          "open": "20030",
+          "kept": "20030"
+        },
+        {
+          "uniform53": "8106479329266891",
+          "end": "20090",
+          "open": "20090",
+          "kept": "20090"
+        },
+        {
+          "uniform53": "8106479329266892",
+          "end": null,
+          "open": null,
+          "kept": null
+        },
+        {
+          "uniform53": "9007199254740991",
+          "end": null,
+          "open": null,
+          "kept": null
+        }
+      ]
+    },
+    {
+      "name": "a DATE end, upper closed",
+      "type": "DATE",
+      "histogram": {
+        "bins": [
+          "0",
+          "7",
+          "30",
+          "90"
+        ],
+        "binWeights": [
+          "5",
+          "3",
+          "1"
+        ],
+        "open": "1",
+        "closed": "upper"
+      },
+      "start": "20000",
+      "window": null,
+      "thresholds": [
+        "4503599627370496",
+        "7205759403792793",
+        "8106479329266892",
+        "9007199254740992"
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "end": "20000",
+          "open": "20000",
+          "kept": "20000"
+        },
+        {
+          "uniform53": "12345678901234",
+          "end": "20000",
+          "open": "20000",
+          "kept": "20000"
+        },
+        {
+          "uniform53": "4503599627370495",
+          "end": "20007",
+          "open": "20007",
+          "kept": "20007"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "end": "20008",
+          "open": "20008",
+          "kept": "20008"
+        },
+        {
+          "uniform53": "5854679515581644",
+          "end": "20019",
+          "open": "20019",
+          "kept": "20019"
+        },
+        {
+          "uniform53": "7205759403792792",
+          "end": "20030",
+          "open": "20030",
+          "kept": "20030"
+        },
+        {
+          "uniform53": "7205759403792793",
+          "end": "20031",
+          "open": "20031",
+          "kept": "20031"
+        },
+        {
+          "uniform53": "8106479329266891",
+          "end": "20090",
+          "open": "20090",
+          "kept": "20090"
+        },
+        {
+          "uniform53": "8106479329266892",
+          "end": null,
+          "open": null,
+          "kept": null
+        },
+        {
+          "uniform53": "9007199254740991",
+          "end": null,
+          "open": null,
+          "kept": null
+        }
+      ]
+    },
+    {
+      "name": "a TIMESTAMP end, lower closed",
+      "type": "TIMESTAMP",
+      "histogram": {
+        "bins": [
+          "0",
+          "7",
+          "30",
+          "90"
+        ],
+        "binWeights": [
+          "5",
+          "3",
+          "1"
+        ],
+        "open": "1"
+      },
+      "start": "1700000000000",
+      "window": null,
+      "thresholds": [
+        "4503599627370496",
+        "7205759403792793",
+        "8106479329266892",
+        "9007199254740992"
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "end": "1700000000000",
+          "open": "1700000000000",
+          "kept": "1700000000000"
+        },
+        {
+          "uniform53": "12345678901234",
+          "end": "1700001657933",
+          "open": "1700001657933",
+          "kept": "1700001657933"
+        },
+        {
+          "uniform53": "4503599627370495",
+          "end": "1700604799999",
+          "open": "1700604799999",
+          "kept": "1700604799999"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "end": "1700604800000",
+          "open": "1700604800000",
+          "kept": "1700604800000"
+        },
+        {
+          "uniform53": "5854679515581644",
+          "end": "1701598399999",
+          "open": "1701598399999",
+          "kept": "1701598399999"
+        },
+        {
+          "uniform53": "7205759403792792",
+          "end": "1702591999999",
+          "open": "1702591999999",
+          "kept": "1702591999999"
+        },
+        {
+          "uniform53": "7205759403792793",
+          "end": "1702592000000",
+          "open": "1702592000000",
+          "kept": "1702592000000"
+        },
+        {
+          "uniform53": "8106479329266891",
+          "end": "1707862399999",
+          "open": "1707862399999",
+          "kept": "1707862399999"
+        },
+        {
+          "uniform53": "8106479329266892",
+          "end": null,
+          "open": null,
+          "kept": null
+        },
+        {
+          "uniform53": "9007199254740991",
+          "end": null,
+          "open": null,
+          "kept": null
+        }
+      ]
+    },
+    {
+      "name": "a DATE end near the window",
+      "type": "DATE",
+      "histogram": {
+        "bins": [
+          "0",
+          "7",
+          "30",
+          "90"
+        ],
+        "binWeights": [
+          "5",
+          "3",
+          "1"
+        ],
+        "open": "1"
+      },
+      "start": "20433",
+      "window": [
+        "19000",
+        "20453"
+      ],
+      "thresholds": [
+        "4503599627370496",
+        "7205759403792793",
+        "8106479329266892",
+        "9007199254740992"
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "end": "20433",
+          "open": "20433",
+          "kept": "20433"
+        },
+        {
+          "uniform53": "12345678901234",
+          "end": "20433",
+          "open": "20433",
+          "kept": "20433"
+        },
+        {
+          "uniform53": "4503599627370495",
+          "end": "20439",
+          "open": "20439",
+          "kept": "20439"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "end": "20440",
+          "open": "20440",
+          "kept": "20440"
+        },
+        {
+          "uniform53": "5854679515581644",
+          "end": "20451",
+          "open": "20451",
+          "kept": "20451"
+        },
+        {
+          "uniform53": "7205759403792792",
+          "end": "20462",
+          "open": null,
+          "kept": "20462"
+        },
+        {
+          "uniform53": "7205759403792793",
+          "end": "20463",
+          "open": null,
+          "kept": "20463"
+        },
+        {
+          "uniform53": "8106479329266891",
+          "end": "20523",
+          "open": null,
+          "kept": "20523"
+        },
+        {
+          "uniform53": "8106479329266892",
+          "end": null,
+          "open": null,
+          "kept": null
+        },
+        {
+          "uniform53": "9007199254740991",
+          "end": null,
+          "open": null,
+          "kept": null
+        }
+      ]
+    },
+    {
+      "name": "a TIMESTAMP end near the window",
+      "type": "TIMESTAMP",
+      "histogram": {
+        "bins": [
+          "0",
+          "7",
+          "30",
+          "90"
+        ],
+        "binWeights": [
+          "5",
+          "3",
+          "1"
+        ],
+        "open": "1"
+      },
+      "start": "1765497599000",
+      "window": [
+        "1735689600000",
+        "1767225599000"
+      ],
+      "thresholds": [
+        "4503599627370496",
+        "7205759403792793",
+        "8106479329266892",
+        "9007199254740992"
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "end": "1765497599000",
+          "open": "1765497599000",
+          "kept": "1765497599000"
+        },
+        {
+          "uniform53": "12345678901234",
+          "end": "1765499256933",
+          "open": "1765499256933",
+          "kept": "1765499256933"
+        },
+        {
+          "uniform53": "4503599627370495",
+          "end": "1766102398999",
+          "open": "1766102398999",
+          "kept": "1766102398999"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "end": "1766102399000",
+          "open": "1766102399000",
+          "kept": "1766102399000"
+        },
+        {
+          "uniform53": "5854679515581644",
+          "end": "1767095998999",
+          "open": "1767095998999",
+          "kept": "1767095998999"
+        },
+        {
+          "uniform53": "7205759403792792",
+          "end": "1768089598999",
+          "open": null,
+          "kept": "1768089598999"
+        },
+        {
+          "uniform53": "7205759403792793",
+          "end": "1768089599000",
+          "open": null,
+          "kept": "1768089599000"
+        },
+        {
+          "uniform53": "8106479329266891",
+          "end": "1773359998999",
+          "open": null,
+          "kept": "1773359998999"
+        },
+        {
+          "uniform53": "8106479329266892",
+          "end": null,
+          "open": null,
+          "kept": null
+        },
+        {
+          "uniform53": "9007199254740991",
+          "end": null,
+          "open": null,
+          "kept": null
+        }
+      ]
+    }
+  ],
+  "withinBounded": [
+    {
+      "column": "ended_on",
+      "type": "DATE",
+      "position": 1,
+      "rows": [
+        {
+          "row": "0",
+          "cases": [
+            {
+              "low": "20089",
+              "high": "20119",
+              "n": "31",
+              "value": "20096"
+            },
+            {
+              "low": "20453",
+              "high": "20453",
+              "n": "1",
+              "value": "20453"
+            }
+          ]
+        },
+        {
+          "row": "1",
+          "cases": [
+            {
+              "low": "20089",
+              "high": "20119",
+              "n": "31",
+              "value": "20107"
+            },
+            {
+              "low": "20453",
+              "high": "20453",
+              "n": "1",
+              "value": "20453"
+            }
+          ]
+        },
+        {
+          "row": "1099511627776",
+          "cases": [
+            {
+              "low": "20089",
+              "high": "20119",
+              "n": "31",
+              "value": "20098"
+            },
+            {
+              "low": "20453",
+              "high": "20453",
+              "n": "1",
+              "value": "20453"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "column": "ended_at",
+      "type": "TIMESTAMP",
+      "position": 1,
+      "rows": [
+        {
+          "row": "0",
+          "cases": [
+            {
+              "low": "1735689600000",
+              "high": "1738367999999",
+              "n": "2678400000",
+              "value": "1735840791631"
+            },
+            {
+              "low": "1767225599000",
+              "high": "1767225599000",
+              "n": "1",
+              "value": "1767225599000"
+            }
+          ]
+        },
+        {
+          "row": "1",
+          "cases": [
+            {
+              "low": "1735689600000",
+              "high": "1738367999999",
+              "n": "2678400000",
+              "value": "1736165079885"
+            },
+            {
+              "low": "1767225599000",
+              "high": "1767225599000",
+              "n": "1",
+              "value": "1767225599000"
+            }
+          ]
+        },
+        {
+          "row": "1099511627776",
+          "cases": [
+            {
+              "low": "1735689600000",
+              "high": "1738367999999",
+              "n": "2678400000",
+              "value": "1736842975104"
+            },
+            {
+              "low": "1767225599000",
+              "high": "1767225599000",
+              "n": "1",
+              "value": "1767225599000"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "withinCuts": [
+    {
+      "name": "a DATE column, a bin cut at both ends",
+      "type": "DATE",
+      "histogram": {
+        "bins": [
+          "0",
+          "10",
+          "30"
+        ],
+        "binWeights": [
+          "1",
+          "3"
+        ]
+      },
+      "parentStart": "20000",
+      "interval": [
+        "20005",
+        "20020"
+      ],
+      "thresholds": [
+        "2174151544247825",
+        "9007199254740992"
+      ],
+      "spans": [
+        [
+          "20005",
+          "20009"
+        ],
+        [
+          "20010",
+          "20020"
+        ]
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "value": "20005"
+        },
+        {
+          "uniform53": "2174151544247824",
+          "value": "20009"
+        },
+        {
+          "uniform53": "2174151544247825",
+          "value": "20010"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "value": "20013"
+        },
+        {
+          "uniform53": "9007199254740991",
+          "value": "20020"
+        }
+      ]
+    },
+    {
+      "name": "a DATE column, upper closed, a zero weight",
+      "type": "DATE",
+      "histogram": {
+        "bins": [
+          "0",
+          "7",
+          "30",
+          "90"
+        ],
+        "binWeights": [
+          "5",
+          "0",
+          "1"
+        ],
+        "closed": "upper"
+      },
+      "parentStart": "20000",
+      "interval": [
+        "20000",
+        "20100"
+      ],
+      "thresholds": [
+        "7505999378950826",
+        "9007199254740992"
+      ],
+      "spans": [
+        [
+          "20000",
+          "20007"
+        ],
+        [
+          "20031",
+          "20090"
+        ]
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "value": "20000"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "value": "20004"
+        },
+        {
+          "uniform53": "7505999378950825",
+          "value": "20007"
+        },
+        {
+          "uniform53": "7505999378950826",
+          "value": "20031"
+        },
+        {
+          "uniform53": "9007199254740991",
+          "value": "20090"
+        }
+      ]
+    },
+    {
+      "name": "a TIMESTAMP column counting from an hour past midnight",
+      "type": "TIMESTAMP",
+      "histogram": {
+        "bins": [
+          "0",
+          "10",
+          "30"
+        ],
+        "binWeights": [
+          "1",
+          "3"
+        ]
+      },
+      "parentStart": "1700003600000",
+      "interval": [
+        "1700781200000",
+        "1701040399999"
+      ],
+      "thresholds": [
+        "2335199806784701",
+        "9007199254740992"
+      ],
+      "spans": [
+        [
+          "1700781200000",
+          "1700867599999"
+        ],
+        [
+          "1700867600000",
+          "1701040399999"
+        ]
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "value": "1700781200000"
+        },
+        {
+          "uniform53": "2335199806784700",
+          "value": "1700867599999"
+        },
+        {
+          "uniform53": "2335199806784701",
+          "value": "1700867600000"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "value": "1700923760000"
+        },
+        {
+          "uniform53": "9007199254740991",
+          "value": "1701040399999"
+        }
+      ]
+    },
+    {
+      "name": "a TIMESTAMP column of a DATE parent",
+      "type": "TIMESTAMP",
+      "histogram": {
+        "bins": [
+          "0",
+          "10",
+          "30"
+        ],
+        "binWeights": [
+          "1",
+          "3"
+        ]
+      },
+      "parentStart": "1728000000000",
+      "interval": [
+        "1728259201000",
+        "1728777605000"
+      ],
+      "thresholds": [
+        "9007199254740992"
+      ],
+      "spans": [
+        [
+          "1728259201000",
+          "1728777605000"
+        ]
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "value": "1728259201000"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "value": "1728518403000"
+        },
+        {
+          "uniform53": "9007199254740991",
+          "value": "1728777605000"
+        }
+      ]
+    },
+    {
+      "name": "a DATE column, an interval with no upper end",
+      "type": "DATE",
+      "histogram": {
+        "bins": [
+          "0",
+          "10",
+          "30"
+        ],
+        "binWeights": [
+          "1",
+          "3"
+        ]
+      },
+      "parentStart": "20000",
+      "interval": [
+        "20020",
+        null
+      ],
+      "thresholds": [
+        "9007199254740992"
+      ],
+      "spans": [
+        [
+          "20020",
+          "20030"
+        ]
+      ],
+      "cases": [
+        {
+          "uniform53": "0",
+          "value": "20020"
+        },
+        {
+          "uniform53": "4503599627370496",
+          "value": "20025"
+        },
+        {
+          "uniform53": "9007199254740991",
+          "value": "20030"
+        }
+      ]
+    }
+  ],
+  "holds": [
+    {
+      "column": "ended_on",
+      "type": "DATE",
+      "position": 0,
+      "rows": [
+        {
+          "row": "0",
+          "uniform53": "268641020409941",
+          "cases": [
+            {
+              "target": "0.5",
+              "threshold": "8962163258467287",
+              "holds": true
+            },
+            {
+              "target": "12.5",
+              "threshold": "7881299347898368",
+              "holds": true
+            },
+            {
+              "target": "50",
+              "threshold": "4503599627370496",
+              "holds": true
+            },
+            {
+              "target": "99.9",
+              "threshold": "9007199254740",
+              "holds": false
+            }
+          ]
+        },
+        {
+          "row": "1",
+          "uniform53": "4616891045204201",
+          "cases": [
+            {
+              "target": "0.5",
+              "threshold": "8962163258467287",
+              "holds": true
+            },
+            {
+              "target": "12.5",
+              "threshold": "7881299347898368",
+              "holds": true
+            },
+            {
+              "target": "50",
+              "threshold": "4503599627370496",
+              "holds": false
+            },
+            {
+              "target": "99.9",
+              "threshold": "9007199254740",
+              "holds": false
+            }
+          ]
+        },
+        {
+          "row": "1099511627776",
+          "uniform53": "8139125720086010",
+          "cases": [
+            {
+              "target": "0.5",
+              "threshold": "8962163258467287",
+              "holds": true
+            },
+            {
+              "target": "12.5",
+              "threshold": "7881299347898368",
+              "holds": false
+            },
+            {
+              "target": "50",
+              "threshold": "4503599627370496",
+              "holds": false
+            },
+            {
+              "target": "99.9",
+              "threshold": "9007199254740",
+              "holds": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "column": "ended_at",
+      "type": "TIMESTAMP",
+      "position": 0,
+      "rows": [
+        {
+          "row": "0",
+          "uniform53": "6488213639773803",
+          "cases": [
+            {
+              "target": "0.5",
+              "threshold": "8962163258467287",
+              "holds": true
+            },
+            {
+              "target": "12.5",
+              "threshold": "7881299347898368",
+              "holds": true
+            },
+            {
+              "target": "50",
+              "threshold": "4503599627370496",
+              "holds": false
+            },
+            {
+              "target": "99.9",
+              "threshold": "9007199254740",
+              "holds": false
+            }
+          ]
+        },
+        {
+          "row": "1",
+          "uniform53": "4201845620496019",
+          "cases": [
+            {
+              "target": "0.5",
+              "threshold": "8962163258467287",
+              "holds": true
+            },
+            {
+              "target": "12.5",
+              "threshold": "7881299347898368",
+              "holds": true
+            },
+            {
+              "target": "50",
+              "threshold": "4503599627370496",
+              "holds": true
+            },
+            {
+              "target": "99.9",
+              "threshold": "9007199254740",
+              "holds": false
+            }
+          ]
+        },
+        {
+          "row": "1099511627776",
+          "uniform53": "8815630084078965",
+          "cases": [
+            {
+              "target": "0.5",
+              "threshold": "8962163258467287",
+              "holds": true
+            },
+            {
+              "target": "12.5",
+              "threshold": "7881299347898368",
+              "holds": false
+            },
+            {
+              "target": "50",
+              "threshold": "4503599627370496",
+              "holds": false
+            },
+            {
+              "target": "99.9",
+              "threshold": "9007199254740",
+              "holds": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "candidates": [
+    {
+      "column": "ended_on",
+      "type": "DATE",
+      "m": 1,
+      "range": [
+        "19000",
+        "20453"
+      ],
+      "rows": [
+        {
+          "row": "0",
+          "cases": [
+            {
+              "candidate": 0,
+              "position": 257,
+              "value": "19727"
+            },
+            {
+              "candidate": 3,
+              "position": 260,
+              "value": "19252"
+            }
+          ]
+        },
+        {
+          "row": "1",
+          "cases": [
+            {
+              "candidate": 0,
+              "position": 257,
+              "value": "19080"
+            },
+            {
+              "candidate": 3,
+              "position": 260,
+              "value": "19546"
+            }
+          ]
+        },
+        {
+          "row": "1099511627776",
+          "cases": [
+            {
+              "candidate": 0,
+              "position": 257,
+              "value": "19881"
+            },
+            {
+              "candidate": 3,
+              "position": 260,
+              "value": "19059"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "column": "ended_at",
+      "type": "TIMESTAMP",
+      "m": 1,
+      "range": [
+        "1735689600000",
+        "1767225599000"
+      ],
+      "rows": [
+        {
+          "row": "0",
+          "cases": [
+            {
+              "candidate": 0,
+              "position": 257,
+              "value": "1760207399099"
+            },
+            {
+              "candidate": 3,
+              "position": 260,
+              "value": "1766885001445"
+            }
+          ]
+        },
+        {
+          "row": "1",
+          "cases": [
+            {
+              "candidate": 0,
+              "position": 257,
+              "value": "1765600384511"
+            },
+            {
+              "candidate": 3,
+              "position": 260,
+              "value": "1741258434883"
+            }
+          ]
+        },
+        {
+          "row": "1099511627776",
+          "cases": [
+            {
+              "candidate": 0,
+              "position": 257,
+              "value": "1751886005561"
+            },
+            {
+              "candidate": 3,
+              "position": 260,
+              "value": "1746647340602"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "dwells": [
+    {
+      "column": "ended_on",
+      "type": "DATE",
+      "mean": "20",
+      "open": "0.25",
+      "start": "20000",
+      "position": 1,
+      "rows": [
+        {
+          "row": "0",
+          "uniform53": "2258504102557695",
+          "units": "0",
+          "end": "20000"
+        },
+        {
+          "row": "1",
+          "uniform53": "5470971252154707",
+          "units": "13",
+          "end": "20013"
+        },
+        {
+          "row": "1099511627776",
+          "uniform53": "2651956031143382",
+          "units": "1",
+          "end": "20001"
+        }
+      ],
+      "probes": [
+        {
+          "uniform53": "0",
+          "units": null,
+          "end": null
+        },
+        {
+          "uniform53": "12345678901234",
+          "units": null,
+          "end": null
+        },
+        {
+          "uniform53": "2251799813685247",
+          "units": null,
+          "end": null
+        },
+        {
+          "uniform53": "2251799813685248",
+          "units": "0",
+          "end": "20000"
+        },
+        {
+          "uniform53": "2251799813685249",
+          "units": "0",
+          "end": "20000"
+        },
+        {
+          "uniform53": "9007199254740991",
+          "units": "721",
+          "end": "20721"
+        }
+      ]
+    },
+    {
+      "column": "ended_at",
+      "type": "TIMESTAMP",
+      "mean": "20",
+      "open": "0.25",
+      "start": "1700000000000",
+      "position": 1,
+      "rows": [
+        {
+          "row": "0",
+          "uniform53": "508442784792132",
+          "units": null,
+          "end": null
+        },
+        {
+          "row": "1",
+          "uniform53": "1598992707211654",
+          "units": null,
+          "end": null
+        },
+        {
+          "row": "1099511627776",
+          "uniform53": "3878688540234818",
+          "units": "476110301",
+          "end": "1700476110301"
+        }
+      ],
+      "probes": [
+        {
+          "uniform53": "0",
+          "units": null,
+          "end": null
+        },
+        {
+          "uniform53": "12345678901234",
+          "units": null,
+          "end": null
+        },
+        {
+          "uniform53": "2251799813685247",
+          "units": null,
+          "end": null
+        },
+        {
+          "uniform53": "2251799813685248",
+          "units": "0",
+          "end": "1700000000000"
+        },
+        {
+          "uniform53": "2251799813685249",
+          "units": "0",
+          "end": "1700000000000"
+        },
+        {
+          "uniform53": "9007199254740991",
+          "units": "62283433056",
+          "end": "1762283433056"
+        }
+      ]
+    }
+  ],
+  "thinning": {
+    "proposals": 128,
+    "positions": [
+      {
+        "column": "ended_on",
+        "type": "DATE",
+        "rows": [
+          {
+            "row": "0",
+            "draws": [
+              {
+                "position": 2,
+                "counter": [
+                  "0",
+                  "0",
+                  "2",
+                  "0"
+                ],
+                "block": [
+                  "d2bdc9dab018e94b",
+                  "24e3784b8c50c8b5",
+                  "0f752b5ce785ed45",
+                  "0b6e21a59777ee34"
+                ],
+                "uniform53": "7414802470535965"
+              },
+              {
+                "position": 3,
+                "counter": [
+                  "0",
+                  "0",
+                  "3",
+                  "0"
+                ],
+                "block": [
+                  "42249f8390f2e4dd",
+                  "19d400bba3c6f3bf",
+                  "9450626ec1e6db31",
+                  "5d62932e9805850b"
+                ],
+                "uniform53": "2327201998577244"
+              },
+              {
+                "position": 256,
+                "counter": [
+                  "0",
+                  "0",
+                  "256",
+                  "0"
+                ],
+                "block": [
+                  "adf8818dadcfea62",
+                  "714758db07cf5525",
+                  "dd18636e0d3ba6ac",
+                  "1ad02440085b576d"
+                ],
+                "uniform53": "6121050785298941"
+              }
+            ],
+            "proposal1": {
+              "position": 3,
+              "low": "20089",
+              "n": "31",
+              "value": "20097"
+            }
+          },
+          {
+            "row": "1",
+            "draws": [
+              {
+                "position": 2,
+                "counter": [
+                  "1",
+                  "0",
+                  "2",
+                  "0"
+                ],
+                "block": [
+                  "0afe299c859d32db",
+                  "39be6cf60a50d06e",
+                  "d14346ed6d6a35a6",
+                  "f1d9a53ebcbe3b36"
+                ],
+                "uniform53": "386775555027878"
+              },
+              {
+                "position": 3,
+                "counter": [
+                  "1",
+                  "0",
+                  "3",
+                  "0"
+                ],
+                "block": [
+                  "e48d1dff58a6cfdb",
+                  "74032f6b9348b0ad",
+                  "c44e0c20de454e36",
+                  "c0186432c7169778"
+                ],
+                "uniform53": "8041431833449689"
+              },
+              {
+                "position": 256,
+                "counter": [
+                  "1",
+                  "0",
+                  "256",
+                  "0"
+                ],
+                "block": [
+                  "dafc7e4d7a57b125",
+                  "b3af16e9e4c5deb0",
+                  "76c1d80e9517a1d1",
+                  "5cfabb374aaf62f4"
+                ],
+                "uniform53": "7704895539858166"
+              }
+            ],
+            "proposal1": {
+              "position": 3,
+              "low": "20089",
+              "n": "31",
+              "value": "20116"
+            }
+          },
+          {
+            "row": "1099511627776",
+            "draws": [
+              {
+                "position": 2,
+                "counter": [
+                  "1099511627776",
+                  "0",
+                  "2",
+                  "0"
+                ],
+                "block": [
+                  "ae87e154aa635fff",
+                  "c466c0442a3a9a81",
+                  "b3c87ffab538c6cb",
+                  "3c97f1f1a9a6b26f"
+                ],
+                "uniform53": "6140755975687275"
+              },
+              {
+                "position": 3,
+                "counter": [
+                  "1099511627776",
+                  "0",
+                  "3",
+                  "0"
+                ],
+                "block": [
+                  "9a81e8c1371a2810",
+                  "a7921cf7c5058c14",
+                  "b41265f232e21c3e",
+                  "df9066aa651b97c7"
+                ],
+                "uniform53": "5436247885931333"
+              },
+              {
+                "position": 256,
+                "counter": [
+                  "1099511627776",
+                  "0",
+                  "256",
+                  "0"
+                ],
+                "block": [
+                  "b32090c57ff3ab00",
+                  "c9b099ccb59f6ab9",
+                  "3623d9db76fcc2f4",
+                  "5ea2754880c39555"
+                ],
+                "uniform53": "6302478374010485"
+              }
+            ],
+            "proposal1": {
+              "position": 3,
+              "low": "20089",
+              "n": "31",
+              "value": "20107"
+            }
+          }
+        ]
+      },
+      {
+        "column": "ended_at",
+        "type": "TIMESTAMP",
+        "rows": [
+          {
+            "row": "0",
+            "draws": [
+              {
+                "position": 2,
+                "counter": [
+                  "0",
+                  "0",
+                  "2",
+                  "0"
+                ],
+                "block": [
+                  "9e64e9dcdedef01c",
+                  "b1a28b1e0cacc089",
+                  "e7c7a5029aefd61b",
+                  "091f5f944435a58c"
+                ],
+                "uniform53": "5573000239504350"
+              },
+              {
+                "position": 3,
+                "counter": [
+                  "0",
+                  "0",
+                  "3",
+                  "0"
+                ],
+                "block": [
+                  "df14fb6cd9ef0683",
+                  "bf7f49a33bc9452b",
+                  "254f53cb1017f9cb",
+                  "60887d94afe8c9e6"
+                ],
+                "uniform53": "7848998737755616"
+              },
+              {
+                "position": 256,
+                "counter": [
+                  "0",
+                  "0",
+                  "256",
+                  "0"
+                ],
+                "block": [
+                  "6fb4ec54d9c1d189",
+                  "61eb0938fc0f98b0",
+                  "1d3b5d07f51e486f",
+                  "9996e9fec99b5a3a"
+                ],
+                "uniform53": "3930331192965178"
+              }
+            ],
+            "proposal1": {
+              "position": 3,
+              "low": "1735689600000",
+              "n": "2678400000",
+              "value": "1738023595021"
+            }
+          },
+          {
+            "row": "1",
+            "draws": [
+              {
+                "position": 2,
+                "counter": [
+                  "1",
+                  "0",
+                  "2",
+                  "0"
+                ],
+                "block": [
+                  "a0a3a8d38306ce1f",
+                  "4f6473ae27dec078",
+                  "c6fc6a7fe3392d29",
+                  "35b00fa5fc8e7043"
+                ],
+                "uniform53": "5651992721514713"
+              },
+              {
+                "position": 3,
+                "counter": [
+                  "1",
+                  "0",
+                  "3",
+                  "0"
+                ],
+                "block": [
+                  "81c9c35e45e65a18",
+                  "5cdc769af6d0c4ff",
+                  "fe01d4dd0c38efc4",
+                  "6d077fae13f7179b"
+                ],
+                "uniform53": "4566514116639947"
+              },
+              {
+                "position": 256,
+                "counter": [
+                  "1",
+                  "0",
+                  "256",
+                  "0"
+                ],
+                "block": [
+                  "454f2749e450d048",
+                  "713973a46b67eccf",
+                  "b8ac6b4040a3a57c",
+                  "11fc52c5354b473c"
+                ],
+                "uniform53": "2438600444381722"
+              }
+            ],
+            "proposal1": {
+              "position": 3,
+              "low": "1735689600000",
+              "n": "2678400000",
+              "value": "1737047508386"
+            }
+          },
+          {
+            "row": "1099511627776",
+            "draws": [
+              {
+                "position": 2,
+                "counter": [
+                  "1099511627776",
+                  "0",
+                  "2",
+                  "0"
+                ],
+                "block": [
+                  "2add9f6404a55fe2",
+                  "7ed1af2eba389899",
+                  "71c66e1e4824060e",
+                  "ff8e2d8065591e0a"
+                ],
+                "uniform53": "1508203208676523"
+              },
+              {
+                "position": 3,
+                "counter": [
+                  "1099511627776",
+                  "0",
+                  "3",
+                  "0"
+                ],
+                "block": [
+                  "bc8edb15c4d9aeb0",
+                  "d7e5c262cfc2148d",
+                  "e2eb14ae6b48e3f1",
+                  "06721c6ec6a2159f"
+                ],
+                "uniform53": "6634295904475957"
+              },
+              {
+                "position": 256,
+                "counter": [
+                  "1099511627776",
+                  "0",
+                  "256",
+                  "0"
+                ],
+                "block": [
+                  "58f3d65431bc1b26",
+                  "ecf310d97d4f9a11",
+                  "9fb3b3f86273c18d",
+                  "f1ddf7b67f4d5351"
+                ],
+                "uniform53": "3129737476454275"
+              }
+            ],
+            "proposal1": {
+              "position": 3,
+              "low": "1735689600000",
+              "n": "2678400000",
+              "value": "1737662388393"
+            }
+          }
+        ]
+      }
+    ],
+    "runs": [
+      {
+        "column": "ended_on",
+        "type": "DATE",
+        "rates": {
+          "dayOfWeek": [
+            "1",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
+        },
+        "lambdaMax": "1/1",
+        "interval": [
+          "20089",
+          "20119"
+        ],
+        "rows": [
+          {
+            "row": "0",
+            "accepted": 3,
+            "fellBack": false,
+            "value": "20094",
+            "proposals": [
+              {
+                "proposal": 0,
+                "value": "20096",
+                "uniform53": "7414802470535965",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 1,
+                "value": "20097",
+                "uniform53": "2497180477806577",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 2,
+                "value": "20090",
+                "uniform53": "1838899292512360",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 3,
+                "value": "20094",
+                "uniform53": "8523833967126661",
+                "lambda": "1/1",
+                "accepted": true
+              }
+            ]
+          },
+          {
+            "row": "1",
+            "accepted": 5,
+            "fellBack": false,
+            "value": "20115",
+            "proposals": [
+              {
+                "proposal": 0,
+                "value": "20107",
+                "uniform53": "386775555027878",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 1,
+                "value": "20116",
+                "uniform53": "3760874541876426",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 2,
+                "value": "20119",
+                "uniform53": "2346236823805582",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 3,
+                "value": "20100",
+                "uniform53": "300797343147932",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 4,
+                "value": "20097",
+                "uniform53": "6928500444753290",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 5,
+                "value": "20115",
+                "uniform53": "109200509313512",
+                "lambda": "1/1",
+                "accepted": true
+              }
+            ]
+          },
+          {
+            "row": "1099511627776",
+            "accepted": 4,
+            "fellBack": false,
+            "value": "20094",
+            "proposals": [
+              {
+                "proposal": 0,
+                "value": "20098",
+                "uniform53": "6140755975687275",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 1,
+                "value": "20107",
+                "uniform53": "1419030010438398",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 2,
+                "value": "20107",
+                "uniform53": "51776747532138",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 3,
+                "value": "20112",
+                "uniform53": "937213629195278",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 4,
+                "value": "20094",
+                "uniform53": "903644598763562",
+                "lambda": "1/1",
+                "accepted": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "column": "ended_at",
+        "type": "TIMESTAMP",
+        "rates": {
+          "month": [
+            "2",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1"
+          ],
+          "dayOfWeek": [
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "0",
+            "0"
+          ],
+          "hourOfWeek": [
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "4",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1",
+            "1"
+          ]
+        },
+        "lambdaMax": "8/1",
+        "interval": [
+          "1735689600000",
+          "1738367999999"
+        ],
+        "rows": [
+          {
+            "row": "0",
+            "accepted": 3,
+            "fellBack": false,
+            "value": "1738320244343",
+            "proposals": [
+              {
+                "proposal": 0,
+                "value": "1735840791631",
+                "uniform53": "5573000239504350",
+                "lambda": "2/1",
+                "accepted": false
+              },
+              {
+                "proposal": 1,
+                "value": "1738023595021",
+                "uniform53": "4413016067333960",
+                "lambda": "2/1",
+                "accepted": false
+              },
+              {
+                "proposal": 2,
+                "value": "1737204325310",
+                "uniform53": "8276890676179857",
+                "lambda": "0/1",
+                "accepted": false
+              },
+              {
+                "proposal": 3,
+                "value": "1738320244343",
+                "uniform53": "5182543697806762",
+                "lambda": "8/1",
+                "accepted": true
+              }
+            ]
+          },
+          {
+            "row": "1",
+            "accepted": 0,
+            "fellBack": false,
+            "value": "1736165079885",
+            "proposals": [
+              {
+                "proposal": 0,
+                "value": "1736165079885",
+                "uniform53": "5651992721514713",
+                "lambda": "8/1",
+                "accepted": true
+              }
+            ]
+          },
+          {
+            "row": "1099511627776",
+            "accepted": 0,
+            "fellBack": false,
+            "value": "1736842975104",
+            "proposals": [
+              {
+                "proposal": 0,
+                "value": "1736842975104",
+                "uniform53": "1508203208676523",
+                "lambda": "2/1",
+                "accepted": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

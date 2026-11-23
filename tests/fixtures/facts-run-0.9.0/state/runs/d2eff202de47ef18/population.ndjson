@@ -1,0 +1,144 @@
+{"count": 11, "lifecycle": "active", "op": "cohort", "worldId": "q3-retention-world"}
+{"count": 4, "lifecycle": "atrisk", "op": "cohort", "worldId": "q3-retention-world"}
+{"count": 2, "lifecycle": "churned", "op": "cohort", "worldId": "q3-retention-world"}
+{"count": 3, "lifecycle": "new", "op": "cohort", "worldId": "q3-retention-world"}
+{"market": "mkt-a", "op": "market", "ordinal": 0}
+{"name": "monthlySpend", "op": "trait", "ordinal": 0, "value": "53.072301"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 0, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 0, "value": "31.08"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 0, "value": "1"}
+{"name": "products", "op": "trait", "ordinal": 0, "value": ["broadband", "mobile", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 0, "value": "47"}
+{"market": "mkt-b", "op": "market", "ordinal": 1}
+{"name": "monthlySpend", "op": "trait", "ordinal": 1, "value": "37.501553"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 1, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 1, "value": "41.84"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 1, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 1, "value": ["broadband"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 1, "value": "21"}
+{"market": "mkt-b", "op": "market", "ordinal": 2}
+{"name": "monthlySpend", "op": "trait", "ordinal": 2, "value": "24.835700"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 2, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 2, "value": "49.46"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 2, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 2, "value": ["mobile", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 2, "value": "38"}
+{"market": "mkt-a", "op": "market", "ordinal": 3}
+{"name": "monthlySpend", "op": "trait", "ordinal": 3, "value": "42.821592"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 3, "value": "high"}
+{"name": "arpu", "op": "trait", "ordinal": 3, "value": "51.49"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 3, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 3, "value": ["broadband", "mobile", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 3, "value": "8"}
+{"market": "mkt-b", "op": "market", "ordinal": 4}
+{"name": "monthlySpend", "op": "trait", "ordinal": 4, "value": "18.287004"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 4, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 4, "value": "35.15"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 4, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 4, "value": ["broadband"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 4, "value": "57"}
+{"market": "mkt-a", "op": "market", "ordinal": 5}
+{"name": "monthlySpend", "op": "trait", "ordinal": 5, "value": "44.548596"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 5, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 5, "value": "49.76"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 5, "value": "1"}
+{"name": "products", "op": "trait", "ordinal": 5, "value": ["broadband", "mobile"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 5, "value": "22"}
+{"market": "mkt-b", "op": "market", "ordinal": 6}
+{"name": "monthlySpend", "op": "trait", "ordinal": 6, "value": "52.805184"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 6, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 6, "value": "34.36"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 6, "value": "2"}
+{"name": "products", "op": "trait", "ordinal": 6, "value": ["broadband"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 6, "value": "38"}
+{"market": "mkt-c", "op": "market", "ordinal": 7}
+{"name": "monthlySpend", "op": "trait", "ordinal": 7, "value": "46.058960"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 7, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 7, "value": "62.59"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 7, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 7, "value": ["broadband", "mobile"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 7, "value": "65"}
+{"market": "mkt-c", "op": "market", "ordinal": 8}
+{"name": "monthlySpend", "op": "trait", "ordinal": 8, "value": "49.098160"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 8, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 8, "value": "21.54"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 8, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 8, "value": ["broadband", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 8, "value": "37"}
+{"market": "mkt-c", "op": "market", "ordinal": 9}
+{"name": "monthlySpend", "op": "trait", "ordinal": 9, "value": "46.791984"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 9, "value": "low"}
+{"name": "arpu", "op": "trait", "ordinal": 9, "value": "43.51"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 9, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 9, "value": ["broadband", "mobile"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 9, "value": "46"}
+{"market": "mkt-b", "op": "market", "ordinal": 10}
+{"name": "monthlySpend", "op": "trait", "ordinal": 10, "value": "60.663458"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 10, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 10, "value": "56.68"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 10, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 10, "value": ["broadband"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 10, "value": "31"}
+{"market": "mkt-a", "op": "market", "ordinal": 11}
+{"name": "monthlySpend", "op": "trait", "ordinal": 11, "value": "52.331973"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 11, "value": "high"}
+{"name": "arpu", "op": "trait", "ordinal": 11, "value": "60.78"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 11, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 11, "value": ["broadband", "mobile"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 11, "value": "19"}
+{"market": "mkt-b", "op": "market", "ordinal": 12}
+{"name": "monthlySpend", "op": "trait", "ordinal": 12, "value": "25.033223"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 12, "value": "high"}
+{"name": "arpu", "op": "trait", "ordinal": 12, "value": "39.34"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 12, "value": "2"}
+{"name": "products", "op": "trait", "ordinal": 12, "value": ["broadband"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 12, "value": "3"}
+{"market": "mkt-c", "op": "market", "ordinal": 13}
+{"name": "monthlySpend", "op": "trait", "ordinal": 13, "value": "49.921355"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 13, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 13, "value": "30.83"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 13, "value": "4"}
+{"name": "products", "op": "trait", "ordinal": 13, "value": ["mobile", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 13, "value": "26"}
+{"market": "mkt-b", "op": "market", "ordinal": 14}
+{"name": "monthlySpend", "op": "trait", "ordinal": 14, "value": "58.256200"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 14, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 14, "value": "34.29"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 14, "value": "5"}
+{"name": "products", "op": "trait", "ordinal": 14, "value": ["broadband"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 14, "value": "22"}
+{"market": "mkt-b", "op": "market", "ordinal": 15}
+{"name": "monthlySpend", "op": "trait", "ordinal": 15, "value": "59.280427"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 15, "value": "high"}
+{"name": "arpu", "op": "trait", "ordinal": 15, "value": "28.92"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 15, "value": "1"}
+{"name": "products", "op": "trait", "ordinal": 15, "value": ["tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 15, "value": "61"}
+{"market": "mkt-a", "op": "market", "ordinal": 16}
+{"name": "monthlySpend", "op": "trait", "ordinal": 16, "value": "23.949082"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 16, "value": "low"}
+{"name": "arpu", "op": "trait", "ordinal": 16, "value": "42.40"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 16, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 16, "value": ["broadband", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 16, "value": "8"}
+{"market": "mkt-b", "op": "market", "ordinal": 17}
+{"name": "monthlySpend", "op": "trait", "ordinal": 17, "value": "35.492082"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 17, "value": "high"}
+{"name": "arpu", "op": "trait", "ordinal": 17, "value": "51.38"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 17, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 17, "value": ["broadband", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 17, "value": "21"}
+{"market": "mkt-b", "op": "market", "ordinal": 18}
+{"name": "monthlySpend", "op": "trait", "ordinal": 18, "value": "40.565387"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 18, "value": "medium"}
+{"name": "arpu", "op": "trait", "ordinal": 18, "value": "30.49"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 18, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 18, "value": ["broadband", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 18, "value": "39"}
+{"market": "mkt-a", "op": "market", "ordinal": 19}
+{"name": "monthlySpend", "op": "trait", "ordinal": 19, "value": "40.359061"}
+{"name": "priceSensitivity", "op": "trait", "ordinal": 19, "value": "high"}
+{"name": "arpu", "op": "trait", "ordinal": 19, "value": "39.22"}
+{"name": "latePaymentCount", "op": "trait", "ordinal": 19, "value": "0"}
+{"name": "products", "op": "trait", "ordinal": 19, "value": ["mobile", "tv"]}
+{"name": "tenureMonths", "op": "trait", "ordinal": 19, "value": "44"}

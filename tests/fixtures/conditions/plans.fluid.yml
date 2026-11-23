@@ -1,0 +1,23 @@
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: retail.plans
+name: Plans
+metadata:
+  owner:
+    team: billing
+exposes:
+  - exposeId: subscriptions
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: subscriptions, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: sub_id, type: STRING, required: true, tags: [identifier] }
+        - { name: plan, type: STRING, required: false }
+        - { name: region, type: STRING, required: false }
+        - { name: channel, type: STRING, required: false }
+        - { name: tier, type: STRING, required: false }
+        - { name: spend, type: INT, required: false }
+        - { name: note, type: STRING, required: false }

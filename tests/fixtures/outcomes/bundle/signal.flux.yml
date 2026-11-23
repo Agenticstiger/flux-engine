@@ -1,0 +1,12 @@
+fluxVersion: 0.5.0
+kind: Signal
+id: sig-renewal-due
+name: Renewal Due Signal
+metadata:
+  owner:
+    team: billing
+spec:
+  envelope: cloudevents/1.0
+  source: urn:flux:billing-gateway
+  type: com.telco.renewal.due
+  dataschema: https://example.com/schemas/renewal-due.json

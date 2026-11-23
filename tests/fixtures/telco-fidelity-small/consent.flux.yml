@@ -1,0 +1,12 @@
+fluxVersion: "0.5.0"
+kind: ConsentProfile
+id: cp-telco-eu
+name: EU Telco Consent Profile
+metadata:
+  owner:
+    team: growth-lab
+spec:
+  allowedJurisdictions: [DE, FR, NL]
+  requiresExplicitOptIn: true
+  allowedUseCases: [payment_recovery]
+  deniedUseCases: [advertising]

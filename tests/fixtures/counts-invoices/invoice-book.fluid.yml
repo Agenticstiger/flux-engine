@@ -1,0 +1,81 @@
+# An account, an invoice header and its lines: the header's total, line_count and max_qty are
+# aggregates of its lines, held on every invoice once the lines are counted.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: retail.invoice_book
+name: Invoice Book
+metadata:
+  owner:
+    team: sales
+exposes:
+  - exposeId: account
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: account, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: account_id, type: INT, required: true }
+        - { name: segment, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: account, type: primary, expr: account_id }
+  - exposeId: invoice
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: invoice, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: invoice_id, type: INT, required: true }
+        - { name: account_id, type: INT, required: true }
+        - { name: status, type: STRING, required: true }
+        - { name: issued_on, type: DATE, required: true }
+        - { name: total, type: "DECIMAL(14,2)", required: true }
+        - { name: line_count, type: INT, required: true }
+        - { name: max_qty, type: INT, required: true }
+      invariants:
+        - id: invoice_total
+          derive: total
+          aggregate: { function: sum, column: amount, from: invoice_line, via: invoice, ifNone: 0 }
+        - id: invoice_line_count
+          derive: line_count
+          aggregate: { function: count, from: invoice_line, via: invoice }
+        - id: invoice_max_qty
+          derive: max_qty
+          aggregate: { function: max, column: quantity, from: invoice_line, via: invoice }
+    semantics:
+      entities:
+        - { name: invoice, type: primary, expr: invoice_id }
+      relationships:
+        - name: account
+          to: account
+          fromColumns: [account_id]
+          toColumns: [account_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: invoice_line
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: invoice_line, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: line_id, type: INT, required: true }
+        - { name: invoice_id, type: INT, required: true }
+        - { name: quantity, type: INT, required: true }
+        - { name: amount, type: "DECIMAL(12,2)", required: true }
+    semantics:
+      entities:
+        - { name: invoice_line, type: primary, expr: line_id }
+      relationships:
+        - name: invoice
+          to: invoice
+          fromColumns: [invoice_id]
+          toColumns: [invoice_id]
+          cardinality: many_to_one
+          joinType: inner
