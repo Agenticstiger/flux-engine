@@ -38,3 +38,17 @@ updates:
     groups:
       actions-minor-and-patch:
         update-types: ["minor", "patch"]
+
+  # The hash-checked toolchain the release build installs. Dependabot rewrites
+  # the pinned versions; regenerate the hashes with the command in each `.in`
+  # file's header before merging.
+  - package-ecosystem: pip
+    directory: /.github/release
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(ci)"
+    cooldown:
+      default-days: 7

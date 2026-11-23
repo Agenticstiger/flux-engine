@@ -1,0 +1,9 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# The tool that writes the release SBOM, installed into its own environment
+# with --require-hashes. Regenerate with:
+#   uv pip compile .github/release/sbom-tool.in --universal --generate-hashes \
+#     --no-header --no-annotate -o .github/release/sbom-tool.txt
+cyclonedx-bom==8.0.1

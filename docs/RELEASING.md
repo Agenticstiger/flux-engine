@@ -89,10 +89,50 @@ The package version is the set of strings below, and only that set.
    ```
 
    `.github/workflows/release.yml` takes it from there: it refuses a tag that
-   disagrees with the tree, runs the whole suite on seven cells, builds and
-   attests both distributions, checks its own attestation refuses an altered
-   wheel, and publishes the GitHub Release. The PyPI upload follows once a
-   reviewer signs off on the `pypi` environment (see "Publishing to PyPI").
+   disagrees with the tree, runs the whole suite on seven cells, builds both
+   distributions in a read-only job, attests them in a second job, checks its
+   own attestation refuses an altered wheel, and publishes the GitHub Release.
+   The PyPI upload follows once a reviewer signs off on the `pypi` environment
+   (see "Publishing to PyPI").
+
+## How the release jobs are split
+
+The workflow keeps the job that installs packages apart from the jobs that can
+sign or publish.
+
+| Job | Permissions | Installs packages |
+|---|---|---|
+| `guard` | `contents: read` | No. `scripts/release_guard.py` uses the standard library only. |
+| `ci` | `contents: read` | The whole suite, as `ci.yml` runs it on any tag or pull request. |
+| `build` | `contents: read` | Yes, from hashes only. It builds the four distributions, smoke-tests them, writes the SBOM and the release body, and uploads the artifacts `dist` and `release-extras`. |
+| `release` | `contents: write`, `id-token: write`, `attestations: write` | No. It downloads the artifacts, checks them against the digests `build` recorded, attests the four files, verifies the attestation, and creates the GitHub Release. |
+| `publish-pypi` | `id-token: write`, and the `pypi` environment | No. It downloads `dist`, checks the digests again, and uploads. |
+
+A package that was compromised at release time therefore runs in `build`, which
+cannot write to the repository, mint a signing token or publish. The signing and
+publishing jobs run pinned actions and the `gh` CLI, and execute nothing they
+downloaded. `tests/test_release_workflow.py` holds that line.
+
+## How the build is pinned
+
+Every install in `build` is checked against hashes, so nothing is resolved on
+the day of a release.
+
+- The build toolchain (uv, the `build` frontend, setuptools and wheel) is in
+  `.github/release/build-tools.txt`, and the SBOM tool is in
+  `.github/release/sbom-tool.txt`. Both are installed with
+  `pip install --require-hashes`. Each is generated from the `.in` file beside
+  it; the command is in that file's header. Regenerate them when you want a newer
+  toolchain, review the diff, and commit them like any other change. Dependabot
+  proposes the update weekly.
+- The engine's runtime dependencies come from `uv.lock`. The job exports them
+  with `uv export --locked`, which fails if the lock is out of step with
+  `pyproject.toml`, and installs the export with `--require-hashes --no-deps`.
+  `pip check` then confirms the locked set satisfies the built wheel.
+- `make packaging-smoke PKG_LOCK_DIR=<dir>` is the locked form of the target
+  `ci.yml` runs. It builds both distributions without build isolation, so the
+  hashed setuptools is the backend that runs. Without `PKG_LOCK_DIR` the target
+  behaves as it always has.
 
 ## Tag shape
 
@@ -212,5 +252,7 @@ constrains what it may become afterwards, for everything that is not an admin.
 ## What a release does not claim
 
 The wheel is built once, so it is not claimed to be byte-reproducible.
-`build-system.requires` floats at `setuptools>=77.0.3`; an exact pin and a
-cross-time rebuild check would have to land together before any such claim.
+`build-system.requires` floats at `setuptools>=77.0.3` for a developer's own
+build, while the release build runs the setuptools in
+`.github/release/build-tools.txt`; a cross-time rebuild check would have to land
+before any claim of reproducibility.

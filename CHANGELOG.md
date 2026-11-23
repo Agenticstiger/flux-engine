@@ -34,6 +34,12 @@ It moves four formats, each additively, so a document of the earlier format read
 new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, scorecard `1-4-0` and parameter register
 `1-3-0`.
 
+### Security
+
+- The release workflow builds and smoke-tests the distributions in a read-only job that installs only from hash-checked files (the build toolchain and an export of `uv.lock`); the job that attests and publishes holds the write and OIDC permissions and installs nothing.
+
+## Unreleased
+
 ### Added
 
 - The repository holds eight agent skills that drive the `fluxsim` command line (ADR 0033), in `skills/`, and a plugin
