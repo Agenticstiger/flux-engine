@@ -78,6 +78,31 @@ def test_a_parent_read_row_by_row_is_made_whole_after_a_share_of_it(
     assert singles <= bound, (singles, parent_rows)
 
 
+def test_a_whole_pass_that_fails_otherwise_leaves_the_one_row_path_to_serve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = _copy(HISTORY, tmp_path)
+    relations._finals_store().clear()
+    expected = _digests(pipeline.execute(bundle, scale=Decimal(15), jobs=1))
+
+    real = rows.generate_row_slice
+    whole_tries: List[str] = []
+
+    def failing(plan: Any, start: int, stop: int, **kwargs: Any) -> Any:
+        filling = relations._finals_of(kwargs["root"], plan).filling
+        if filling and plan.expose.expose_id == PARENT and stop - start > 1:
+            whole_tries.append(plan.expose.expose_id)
+            raise RecursionError("the whole pass ran out of stack")
+        return real(plan, start, stop, **kwargs)
+
+    monkeypatch.setattr(rows, "generate_row_slice", failing)
+    relations._finals_store().clear()
+    got = _digests(pipeline.execute(bundle, scale=Decimal(15), jobs=1))
+
+    assert got == expected
+    assert len(whole_tries) == 1, "the reader tried the whole pass again after it failed"
+
+
 @pytest.mark.skipif(parallel.cpu_jobs() < 2, reason="one CPU: every emit stays in one process")
 @pytest.mark.parametrize(
     ("source", "scale"), [(HISTORY, 15), (TEMPORAL, 12)], ids=["history", "temporal"]

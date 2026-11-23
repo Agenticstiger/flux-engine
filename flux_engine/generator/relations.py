@@ -1692,12 +1692,13 @@ class RelationReader:
 
         Row ``i`` of a slice is row ``i`` of any other (SEAM-FIDELITY-SPEC section 1), so these
         are the rows a slice of one row each would have made. A refusal on a row nothing has read
-        is left to the one-row path, which raises it only for a row that is read.
+        is left to the one-row path, which raises it only for a row that is read; so is any other
+        failure of the whole pass (a recursion limit, say), which the one-row path may not meet.
         """
         memo.filling = True
         try:
             whole = _rows.generate_row_slice(plan, 0, plan.rows, root=self.root)
-        except FluxError:
+        except Exception:
             memo.singles = -(1 << 62)  # do not try again
             return False
         finally:
