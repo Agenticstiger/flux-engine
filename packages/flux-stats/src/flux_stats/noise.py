@@ -36,7 +36,7 @@ from decimal import (
 )
 from fractions import Fraction
 from math import isqrt
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from typing import Any, Mapping, Optional, Protocol, Sequence, Tuple
 
 from flux_stats.spelling import read_decimal, refuse
 
@@ -48,11 +48,14 @@ __all__ = [
     "Noise",
     "PointEstimate",
     "PrivacyLoss",
+    "PrivacyShare",
+    "Spent",
     "ZERO_CONCENTRATED_DP",
     "check_budget",
     "point_estimate",
     "read_accounting",
     "read_noise",
+    "read_share",
     "sampling_widening",
     "variance_of",
     "widening",
@@ -132,6 +135,25 @@ class Noise:
     def variance(self) -> Fraction:
         """The variance of one noisy cell, exact. The discrete Gaussian's is not above ``scale^2``."""
         return variance_of(self.mechanism, self.scale)
+
+
+@dataclass(frozen=True)
+class PrivacyShare:
+    """A share of the budget with no mechanism and no scale: a bare ``privacyLoss``.
+
+    It is what choosing cliques or releasing a domain spent (``cliqueSelection``): the profiler
+    states the loss, and there is no noise block to check it against. It adds to the account as a
+    :class:`Noise` does, in the account's measure.
+    """
+
+    loss: PrivacyLoss
+
+
+class Spent(Protocol):
+    """A part of the account: anything that states the privacy loss it spends."""
+
+    @property
+    def loss(self) -> PrivacyLoss: ...
 
 
 def variance_of(mechanism: str, scale: Fraction) -> Fraction:
@@ -234,6 +256,12 @@ def read_noise(
     loss = _loss(raw["privacyLoss"], f"{where}.privacyLoss", accounting.measure)
     _require_spent(mechanism, scale, loss, f"{where}.privacyLoss", l1=l1, l2_squared=l2_squared)
     return Noise(mechanism=mechanism, scale=scale, loss=loss)
+
+
+def read_share(value: Any, where: str, accounting: Accounting) -> PrivacyShare:
+    """Read ``{"privacyLoss": ...}``, a share stated without a mechanism, in the account's measure."""
+    raw = _mapping(value, where, ("privacyLoss",))
+    return PrivacyShare(loss=_loss(raw["privacyLoss"], f"{where}.privacyLoss", accounting.measure))
 
 
 #: The arithmetic that turns a rho and a delta into an epsilon: 60 significant digits and every
@@ -353,13 +381,14 @@ def _require_gaussian(scale: Fraction, loss: PrivacyLoss, where: str, l2_squared
         )
 
 
-def check_budget(accounting: Accounting, parts: Sequence[Tuple[str, Noise]]) -> None:
+def check_budget(accounting: Accounting, parts: Sequence[Tuple[str, Spent]]) -> None:
     """Refuse a release whose parts add up to more than its total (ADR 0019).
 
     Under zero-concentrated DP the parts' rho adds; under approximate DP their epsilon adds and
     their delta adds (basic composition). Each is compared on its own, in exact arithmetic. A
     release with no noisy part is refused too: its account states a loss nothing spends.
-    ``parts`` pairs each part's place in the document with its :class:`Noise`.
+    ``parts`` pairs each part's place in the document with its :class:`Noise` or
+    :class:`PrivacyShare`.
     """
     if not parts:
         raise refuse(

@@ -26,9 +26,11 @@ and every plugin's.
 
   The parts of the account are the ones the profile reader enumerates
   (:attr:`flux_stats.profile.Profile.parts`), once each, so no statistic can be missing from the
-  spent figure for want of a place in a list kept here. A clique of either definition carries its
-  own ``noise``. A member the grade does not know, at the top level, in the ``privacy`` block, in a
-  table, a column or a relationship, counts as released without noise.
+  spent figure for want of a place in a list kept here. A table's ``cliqueSelection`` is
+  accounting, not a statistic: its ``selection`` and ``domain`` shares are parts, it never makes a
+  profile not P3, and a clique of either definition carries its own ``noise``. A member the grade
+  does not know, at the top level, in the ``privacy`` block, in a table, a column or a relationship,
+  counts as released without noise.
 * **Otherwise P1.** The profile's statistics were released under output checks and carry no formal
   guarantee, and the reasons are listed.
 * **A generator plugin: P4 or P5.** ``P4`` is a differentially private model, with the account the
@@ -50,7 +52,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from flux_engine.core.grades import ORDER, Pattern, at_least, weakest
 from flux_engine.evidence.provenance import quoted_name
 from flux_stats.errors import FluxError
-from flux_stats.noise import Noise
+from flux_stats.noise import Spent
 from flux_stats.profile import parse_profile
 
 __all__ = [
@@ -90,6 +92,7 @@ GRADED_TABLE_MEMBERS = frozenset(
         "columnPairs",
         "periods",
         "cliques",
+        "cliqueSelection",
         "datePairs",
         "calendar",
         "history",
@@ -210,7 +213,7 @@ def _decimal(value: Fraction) -> str:
     return text.rstrip("0").rstrip(".") if "." in text else text
 
 
-def _read_parts(profile: Mapping[str, Any]) -> Optional[Tuple[Tuple[str, Noise], ...]]:
+def _read_parts(profile: Mapping[str, Any]) -> Optional[Tuple[Tuple[str, Spent], ...]]:
     """The noisy parts of a profile, as its reader enumerates them, or ``None`` when it cannot read it."""
     try:
         return parse_profile(profile).parts

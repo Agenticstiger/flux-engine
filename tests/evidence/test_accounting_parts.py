@@ -8,7 +8,8 @@ The grade used to list the noisy parts of a profile by hand, so a statistic the 
 (a rank correlation, say) was missing from the spent figure, and a profile whose only noisy
 statistics were those graded P1 with "an account spent by nothing". It now counts the reader's own
 ``parts``. These tests walk the document generically and check that every ``noise`` block is one part,
-whichever place it sits in, and that a ``cliqueMarginal/2`` is one part like any clique.
+whichever place it sits in, and that the ``selection`` and ``domain`` shares of a ``cliqueSelection``
+(a bare ``privacyLoss`` with no mechanism and no scale) are one part each.
 """
 
 from __future__ import annotations
@@ -48,6 +49,20 @@ def _noise_blocks(node: Any) -> Iterator[Any]:
     elif isinstance(node, list):
         for item in node:
             yield from _noise_blocks(item)
+
+
+def _share_blocks(node: Any) -> Iterator[Any]:
+    """Every ``selection`` and ``domain`` share of a ``cliqueSelection``, anywhere in a document."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "cliqueSelection" and isinstance(value, dict):
+                for name in ("selection", "domain"):
+                    if name in value:
+                        yield value[name]
+            yield from _share_blocks(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _share_blocks(item)
 
 
 def _histogram(levels: List[str], **more: Any) -> Dict[str, Any]:
@@ -124,6 +139,13 @@ def _everywhere() -> Dict[str, Any]:
             "noise": copy.deepcopy(NOISE),
         }
     )
+    table["cliqueSelection"] = {
+        "method": "aim",
+        "producer": "https://example.org/profiler/1.0",
+        "selection": {"privacyLoss": {"rho": "0.01"}},
+        "domain": {"privacyLoss": {"rho": "0.02"}},
+        "published": "measured",
+    }
     table["calendar"] = [{"column": "joined_at", "month": _histogram(MONTHS)}]
     table["datePairs"] = [
         {
@@ -145,7 +167,9 @@ FIXTURES = {
     "the 1-4-0 example, with two rank correlations": lambda: _load(
         SPEC / "profile-1-4-example.json"
     ),
-    "the 1-4-0 example of cliques": lambda: _load(SPEC / "profile-1-4-cliques-example.json"),
+    "the 1-4-0 example of cliques and a selection": lambda: _load(
+        SPEC / "profile-1-4-cliques-example.json"
+    ),
     "every place a noise block sits": _everywhere,
 }
 
@@ -153,7 +177,7 @@ FIXTURES = {
 @pytest.mark.parametrize("name", FIXTURES)
 def test_every_noise_block_is_one_part_of_the_reader_and_of_the_account(name: str) -> None:
     document = FIXTURES[name]()
-    blocks = list(_noise_blocks(document))
+    blocks = list(_noise_blocks(document)) + list(_share_blocks(document))
     profile = parse_profile(document)
     assert len(profile.parts) == len(blocks) > 0
     accounting = accounting_of(document)
@@ -170,12 +194,14 @@ def test_the_everywhere_profile_holds_a_part_in_every_kind_of_place() -> None:
         "columns.usage",
         "cliques[0]",
         "cliques[1]",
+        "cliqueSelection.selection",
+        "cliqueSelection.domain",
         "calendar",
     ):
         assert any(f".{section}" in where for where in places), section
     assert sum(".columnPairs[" in where for where in places) == 3
     assert any(".datePairs[0]" in where for where in places)
-    assert len(places) == 10
+    assert len(places) == 12
 
 
 def test_the_spent_figure_adds_the_share_of_every_part_including_a_rank_correlation() -> None:
@@ -198,10 +224,33 @@ def test_a_profile_whose_only_noisy_statistics_are_rank_correlations_is_p3() -> 
 
 def test_the_spent_figure_of_every_place_adds_up() -> None:
     accounting = accounting_of(_everywhere())
-    assert accounting is not None and accounting.parts == 10
-    # the example's 0.1362, six blocks of 0.05 (two histograms, two cliques, a calendar, an order)
-    # and the second pair's Kendall's 0.0162
-    assert accounting.spent == {"rho": "0.4524"}
+    assert accounting is not None and accounting.parts == 12
+    # the example's 0.1362, six blocks of 0.05 (two histograms, two cliques, a calendar, an order),
+    # the second pair's Kendall's 0.0162 and the selection's 0.01 and the domain's 0.02
+    assert accounting.spent == {"rho": "0.4824"}
+
+
+def test_a_selection_share_alone_is_a_part_so_a_profile_of_shares_is_not_spent_by_nothing() -> None:
+    document = _load(SPEC / "profile-1-4-cliques-example.json")
+    table = document["tables"]["subscriber"]
+    table["cliques"] = []
+    accounting = accounting_of(document)
+    assert accounting is not None and accounting.parts == 2
+    assert accounting.spent == {"rho": "0.02"}
+    assert grade_profile(document, pinned=True).accounting == accounting
+
+
+def test_the_shares_move_the_spent_figure_and_the_cliques_do_not_grade_a_profile_down() -> None:
+    document = _load(SPEC / "profile-1-4-cliques-example.json")
+    accounting = accounting_of(document)
+    assert accounting is not None and accounting.spent == {"rho": "0.06"}
+    graded = grade_profile(document, pinned=True)
+    # nothing in it is released without noise: a clique carries noise, and the selection is accounting
+    assert graded.reasons == () and graded.pattern is Pattern.P3
+    del document["tables"]["subscriber"]["cliqueSelection"]
+    after = accounting_of(document)
+    assert after is not None and after.spent == {"rho": "0.04"} and after.parts == 2
+    assert grade_profile(document, pinned=True).pattern is Pattern.P3
 
 
 def test_a_profile_the_reader_refuses_has_no_parts_and_is_not_p3() -> None:

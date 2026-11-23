@@ -107,7 +107,22 @@
             }
           }
         }
-      ]
+      ],
+      "cliqueSelection": {
+        "method": "aim",
+        "producer": "https://github.com/opendp/opendp",
+        "selection": {
+          "privacyLoss": {
+            "rho": "0.01"
+          }
+        },
+        "domain": {
+          "privacyLoss": {
+            "rho": "0.01"
+          }
+        },
+        "published": "measured"
+      }
     }
   }
 }

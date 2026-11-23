@@ -11,7 +11,8 @@ A ``cliqueMarginal/2`` (profile format 1-4-0) holds one to 32 columns, each a ca
 or a timestamp, a number or a timestamp cut into bins. Cliques that share columns must agree on the
 marginal of the columns they share, exactly, so that the numbers the engine draws from describe
 one distribution and not several that disagree. This module reads a clique, checks that agreement,
-and sums a clique onto a subset of its columns.
+and sums a clique onto a subset of its columns. It also reads a table's ``cliqueSelection``, which
+says how the cliques were chosen and what choosing them spent.
 
 The pattern is the measurement step of the Private-PGM family (McKenna, Sheldon and Miklau,
 https://github.com/ryan112358/private-pgm, Apache-2.0): marginals over cliques of columns,
@@ -23,17 +24,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from fractions import Fraction
 from itertools import product
-from typing import Any, Dict, List, Mapping, Sequence, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from flux_stats.column_metrics import CATEGORY
 from flux_stats.definitions import level_order
-from flux_stats.noise import Accounting, Noise, read_noise
-from flux_stats.spelling import read_decimal, read_texts, refuse, render_exact
+from flux_stats.noise import Accounting, Noise, PrivacyShare, read_noise, read_share
+from flux_stats.spelling import normal_text, read_decimal, read_texts, refuse, render_exact
 
 __all__ = [
     "CLIQUE_DEFINITION",
     "CLIQUE_DEFINITION_2",
+    "CLIQUE_METHODS",
     "CliqueEntry",
+    "CliqueSelection",
     "MOST_CLIQUES",
     "MOST_CLIQUE_COLUMNS",
     "MOST_TABLE_CELLS",
@@ -42,6 +45,7 @@ __all__ = [
     "edge_text",
     "read_clique",
     "read_clique_2",
+    "read_clique_selection",
 ]
 
 #: The identifier of a clique marginal, as a statistic's ``definition`` names one. A parameter
@@ -61,6 +65,10 @@ MOST_CELLS = 1_000_000
 MOST_CLIQUES = 1_024
 MOST_CLIQUE_COLUMNS = 32
 MOST_TABLE_CELLS = 10_000_000
+
+#: How a table's cliques were chosen (PROFILE-SPEC.md section 5a): by AIM or MST as private-pgm
+#: implements them, named before the data was read, or by another method.
+CLIQUE_METHODS: Tuple[str, ...] = ("aim", "mst", "fixed", "other")
 
 #: What the reader says of an estimated release, which this format does not read.
 _NOT_READ = "estimated cliques are not read in this format; a table's cliques are measured"
@@ -121,6 +129,23 @@ class CliqueEntry:
     @property
     def cell_count(self) -> int:
         return len(self.noisy)
+
+
+@dataclass(frozen=True)
+class CliqueSelection:
+    """How a table's cliques were chosen and released (format 1-4-0), and what that spent.
+
+    ``selection`` is the share spent choosing the cliques and ``domain`` the share spent releasing
+    levels or bin edges that were not public; each is ``None`` when the document states none. Both
+    are parts of the account. The reader checks the arithmetic and the structure, and cannot check
+    that the method ran or that a share is what it spent.
+    """
+
+    method: str
+    producer: str
+    selection: Optional[PrivacyShare]
+    domain: Optional[PrivacyShare]
+    published: str = "measured"
 
 
 def read_clique(
@@ -302,6 +327,54 @@ def check_table_limits(where: str, count: int, cells: int) -> None:
         raise refuse(
             f"{where}.cliques", f"a table's cliques hold at most {MOST_TABLE_CELLS} cells together"
         )
+
+
+def read_clique_selection(value: Any, where: str, *, accounting: Accounting) -> CliqueSelection:
+    """Read a table's ``cliqueSelection`` (format 1-4-0), measured, or refuse (``FLX-5036``).
+
+    The keys are ``method``, ``producer``, ``published`` and, optionally, ``selection`` and
+    ``domain``, each of the last two ``{"privacyLoss": ...}`` in the account's measure. ``fixed``
+    states no ``selection``: nothing was spent choosing cliques that were named before the data
+    was read. ``published`` is ``measured``; ``estimated`` and ``measurements`` are refused.
+    """
+    if not isinstance(value, Mapping):
+        raise refuse(where, f"expected an object, got {type(value).__name__}")
+    if "measurements" in value:
+        raise refuse(f"{where}.measurements", _NOT_READ)
+    allowed = {"method", "producer", "selection", "domain", "published"}
+    unknown = sorted({str(key) for key in value} - allowed)
+    if unknown:
+        raise refuse(where, f"unknown key {unknown[0]!r}")
+    for key in ("method", "producer", "published"):
+        if key not in value:
+            raise refuse(where, f"missing key {key!r}")
+    method = value["method"]
+    if not isinstance(method, str) or method not in CLIQUE_METHODS:
+        raise refuse(f"{where}.method", f"a method is one of {list(CLIQUE_METHODS)}")
+    producer = normal_text(value["producer"], f"{where}.producer")
+    if ":" not in producer:
+        raise refuse(f"{where}.producer", "the producer is a URI")
+    published = value["published"]
+    if published == "estimated":
+        raise refuse(f"{where}.published", _NOT_READ)
+    if published != "measured":
+        raise refuse(f"{where}.published", "is 'measured'")
+    if method == "fixed" and "selection" in value:
+        raise refuse(
+            f"{where}.selection",
+            "cliques named before the data was read spent nothing choosing them",
+        )
+    shares = {
+        key: read_share(value[key], f"{where}.{key}", accounting)
+        for key in ("selection", "domain")
+        if key in value
+    }
+    return CliqueSelection(
+        method=method,
+        producer=producer,
+        selection=shares.get("selection"),
+        domain=shares.get("domain"),
+    )
 
 
 def check_consistency(cliques: Sequence[CliqueEntry]) -> None:

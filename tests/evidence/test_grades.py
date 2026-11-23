@@ -477,11 +477,15 @@ _STRUCTURAL_ALLOWLIST = {
 
 
 def test_every_schema_member_of_a_table_column_or_relationship_is_graded_or_allowed() -> None:
-    for name in ("profile-1-3.schema.json", "profile-1-4.schema.json"):
-        _check_members(json.loads((SPEC / name).read_text(encoding="utf-8")))
+    for name, later in (("profile-1-3.schema.json", True), ("profile-1-4.schema.json", False)):
+        _check_members(json.loads((SPEC / name).read_text(encoding="utf-8")), earlier=later)
 
 
-def _check_members(schema: Dict[str, Any]) -> None:
+#: The members of a table that only format 1-4-0 holds, so the 1-3-0 schema does not list them.
+_ADDED_IN_1_4_0 = {"Table": frozenset({"cliqueSelection"})}
+
+
+def _check_members(schema: Dict[str, Any], *, earlier: bool = False) -> None:
     from flux_engine.evidence import grades
 
     graded = {
@@ -505,7 +509,10 @@ def _check_members(schema: Dict[str, Any]) -> None:
             assert member in members or allowed, f"{definition}.{member} is not graded"
             if allowed:
                 assert member in structural[definition], f"{definition}.{member} is flagged"
-        assert members <= found, f"the grade reads {sorted(members - found)} the schema lacks"
+        later = _ADDED_IN_1_4_0.get(definition, frozenset()) if earlier else frozenset()
+        assert (
+            members - later <= found
+        ), f"the grade reads {sorted(members - later - found)} the schema lacks"
     assert {key for key, _ in _STRUCTURAL_ALLOWLIST} <= set(graded)
 
 
@@ -652,3 +659,20 @@ def test_a_hostile_top_level_or_privacy_name_cannot_forge_a_heading_a_row_or_a_c
         assert any("withheld" in reason for reason in graded.reasons)
         assert "\n".join(graded.reasons).count(_HOSTILE) == 0
         _assert_nothing_forged(render_privacy_section(RunGrade(graded, ())))
+
+
+# ---------------------------------------------------------------------------
+# A table's clique selection (profile format 1-4-0)
+# ---------------------------------------------------------------------------
+
+
+def test_a_clique_selection_is_accounting_and_never_makes_a_profile_not_p3() -> None:
+    document: Dict[str, Any] = json.loads(
+        (SPEC / "profile-1-4-cliques-example.json").read_text(encoding="utf-8")
+    )
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
+    assert graded.accounting is not None and graded.accounting.parts == 4
+    # an unknown member beside it is still not graded as noisy
+    document["tables"]["subscriber"]["cliqueSelectionX"] = {}
+    assert grade_profile(document, pinned=True).pattern is Pattern.P1

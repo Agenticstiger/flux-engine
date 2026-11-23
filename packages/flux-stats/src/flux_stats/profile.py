@@ -63,11 +63,13 @@ from flux_stats.cliques import (
     CLIQUE_DEFINITION_2,
     MOST_CLIQUES,
     CliqueEntry,
+    CliqueSelection,
     check_consistency,
     check_table_limits,
     edge_text,
     read_clique,
     read_clique_2,
+    read_clique_selection,
 )
 from flux_stats.column_metrics import (
     CATEGORY,
@@ -83,6 +85,7 @@ from flux_stats.fixedpoint import MAX_FRACTIONAL_BITS
 from flux_stats.noise import (
     Accounting,
     Noise,
+    Spent,
     check_budget,
     point_estimate,
     read_accounting,
@@ -118,6 +121,7 @@ __all__ = [
     "CLIQUE_DEFINITION_2",
     "CONF_STATUS",
     "CliqueEntry",
+    "CliqueSelection",
     "CALENDAR_LEVELS",
     "CalendarEntry",
     "ColumnEntry",
@@ -183,8 +187,8 @@ SCHEMA_URL_1_3_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-3
 
 #: Format ``1-4-0``, the ``$id`` of ``docs/spec/profile-1-4.schema.json``. It adds the rank correlations
 #: ``kendallTau/1`` and ``spearmanRho/1`` of a ``columnPairs`` entry and the ``rowFloor`` key of
-#: PROFILE-SPEC.md section 5 and the clique ``cliqueMarginal/2``, and changes nothing format ``1-3-0``
-#: says. A document that holds one of
+#: PROFILE-SPEC.md section 5, the clique ``cliqueMarginal/2`` and a table's ``cliqueSelection``, and
+#: changes nothing format ``1-3-0`` says. A document that holds one of
 #: :data:`_FORMS_OF_1_4_0` names it.
 SCHEMA_URL_1_4_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json"
 
@@ -197,6 +201,7 @@ _FORMS_OF_1_4_0: Mapping[str, str] = MappingProxyType(
         "rankCorrelation": "a rank correlation (kendallTau/1 or spearmanRho/1)",
         "rowFloor": "a rowFloor",
         "cliqueMarginal/2": "a cliqueMarginal/2",
+        "cliqueSelection": "a cliqueSelection",
     }
 )
 
@@ -624,6 +629,8 @@ class TableEntry:
     #: :attr:`cliques` so that a consumer that draws categorical cliques only does not read a
     #: binned one as one; the agreement of the two lists is checked together.
     cliques2: Tuple[CliqueEntry, ...] = ()
+    #: How the table's cliques were chosen and released (format 1-4-0), or ``None``.
+    clique_selection: Optional[CliqueSelection] = None
     #: The statistics of the days between two timestamp columns of the table (format 1-3-0).
     date_pairs: Tuple[DatePairEntry, ...] = ()
     #: The counts of a timestamp column by month, day of week and hour of week (format 1-3-0).
@@ -726,7 +733,7 @@ class Profile:
     #: Every noisy part of the release, once each: the place in the document and its mechanism,
     #: scale and share. This is the one enumeration of the budget's parts. The reader checks the
     #: total against it, and a grade or a report counts from it and never from the document.
-    parts: Tuple[Tuple[str, Noise], ...] = ()
+    parts: Tuple[Tuple[str, Spent], ...] = ()
 
     def invariant(self, name: str) -> Optional[InvariantEntry]:
         """One fact's entry, or ``None``."""
@@ -1071,7 +1078,7 @@ class _Reader:
         #: The release-level account, when the document states one (format 1-2-0).
         self.accounting = accounting
         #: Every noisy statistic and clique read, by place, for the budget check.
-        self.parts: List[Tuple[str, Noise]] = []
+        self.parts: List[Tuple[str, Spent]] = []
         #: Whether the document names format ``1-0-0``, which holds none of
         #: the statistics :data:`_ADDED_IN_1_1_0` names.
         self.first_format = first_format
@@ -1695,6 +1702,7 @@ class _Reader:
                 "datePairs",
                 "calendar",
                 "history",
+                "cliqueSelection",
             ),
         )
         declared = _object(raw["columns"], f"{where}.columns")
@@ -1728,6 +1736,7 @@ class _Reader:
             categorical,
             {name: domain for name, domain in domains.items() if isinstance(domain, str)},
         )
+        selection = self._clique_selection(raw, where, expose_id)
         if cliques or cliques2:
             formed = {
                 name: _derived(name, cliques + cliques2, entry) for name, entry in columns.items()
@@ -1763,6 +1772,7 @@ class _Reader:
             periods=periods,
             cliques=cliques,
             cliques2=cliques2,
+            clique_selection=selection,
             date_pairs=date_pairs,
             calendar=self._calendar(raw, where, expose_id, domains),
             history=self._history(raw, where, expose_id, domains),
@@ -2066,6 +2076,26 @@ class _Reader:
             self.parts.append((f"{where}.cliques[{clique.index}]", clique.noise))
         check_consistency(read)
         return tuple(first), tuple(second)
+
+    def _clique_selection(
+        self, raw: Mapping[str, Any], where: str, expose_id: str
+    ) -> Optional[CliqueSelection]:
+        """A table's ``cliqueSelection`` (format 1-4-0), its shares entered in the budget, or ``None``.
+
+        A share is a part of the account in the account's measure, once each: ``selection`` and
+        ``domain`` are :class:`flux_stats.noise.PrivacyShare` parts, with no mechanism and no scale.
+        """
+        if "cliqueSelection" not in raw:
+            return None
+        at = f"{where}.cliqueSelection"
+        self.require_1_4_0("cliqueSelection", at)
+        accounting = self._require_account(at)
+        self._in_unit(expose_id, at, accounting)
+        selection = read_clique_selection(raw["cliqueSelection"], at, accounting=accounting)
+        for key, share in (("selection", selection.selection), ("domain", selection.domain)):
+            if share is not None:
+                self.parts.append((f"{at}.{key}", share))
+        return selection
 
     def _pair(self, value: Any, where: str, ordered: Set[str], expose_id: str) -> PairEntry:
         raw = _mapping(value, where, required=("columns", "statistics"))
