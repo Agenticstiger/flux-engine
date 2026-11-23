@@ -157,7 +157,8 @@ def _flatten(document: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _shown(value: Any) -> str:
-    text = repr(value)
+    """What a plugin stated, as a refusal quotes it: scrubbed whole, then cut."""
+    text = registry.plugin_text(repr(value))
     return text if len(text) <= _SHOWN else text[:_SHOWN] + "..."
 
 

@@ -53,9 +53,11 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
+from flux_engine.core.credentials import MASK, dsn_secret_values
 from flux_engine.core.errors import FluxError
 from flux_engine.generators.errors import FLX_3114, FLX_3115, FLX_3116, FLX_3117, FLX_3118, FLX_3124
 from flux_engine.seam.coverage import printable
+from flux_engine.sinks._secrets import scrub
 
 __all__ = [
     "ENTRY_POINT_GROUP",
@@ -467,13 +469,31 @@ def _module_file(loaded: Any) -> Optional[Path]:
 _FIRST_LINE = 200
 
 
+def plugin_text(text: str) -> str:
+    """*text*, which a plugin wrote, with every credential this process can name removed.
+
+    A plugin's message is free text: it may hold the URL of the service it called, a connection
+    string, or the value of a credential it read from the environment. The URL is written as its
+    label, each secret a connection string in it holds (the password of ``user:PW@host``, the value
+    of ``password=``, ``token=`` or ``sig=``) and each value of a credential-named environment
+    variable is replaced by ``***``. Call it on the whole text, before any line is picked or any
+    length is cut: a cut can leave four characters of a secret that no longer match it.
+    """
+    known = [(secret, MASK) for secret in dict.fromkeys(dsn_secret_values(text))]
+    return scrub(text, known)
+
+
 def failure_text(error: BaseException) -> str:
-    """The type and first line of *error*, as it is written into a diagnostic."""
-    lines = str(error).strip().splitlines()
+    """The type and first line of *error*, as it is written into a diagnostic.
+
+    The message is scrubbed (:func:`plugin_text`) whole, then its first line is taken and cut.
+    """
+    lines = plugin_text(str(error)).strip().splitlines()
     first = lines[0] if lines else ""
     if len(first) > _FIRST_LINE:
         first = first[:_FIRST_LINE] + "..."
-    return printable(f"{type(error).__name__}: {first}" if first else type(error).__name__)
+    name = plugin_text(type(error).__name__)
+    return printable(f"{name}: {first}" if first else name)
 
 
 def _missing_module(resolved: ResolvedGenerator, error: ModuleNotFoundError) -> str:
@@ -484,7 +504,7 @@ def _missing_module(resolved: ResolvedGenerator, error: ModuleNotFoundError) -> 
     module = resolved.value.split(":", 1)[0].strip()
     own = module == missing or module.startswith(missing + ".")
     return (
-        f"; the module {printable(missing)} is missing, and it is "
+        f"; the module {printable(plugin_text(missing))} is missing, and it is "
         f"{'the plugin' + chr(39) + 's own module' if own else 'a module it imports'}"
     )
 

@@ -59,6 +59,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - A T-SQL date part that the query parser reads differently from T-SQL (`w` and `y` in every date function, `m` in `DATETRUNC`, `dy` in `DATENAME`) is refused with `FLX-3622` however it is quoted or commented, and a day count too long for any date is refused rather than raised.
 - `validate` refuses a profile overlay that names a table or column the pinned contract does not have, with the `FLX-3105` that `plan` gives; a name the contract has but the profile lacks is still refused by `plan`.
 - `fluxsim` no longer ends in a `BrokenPipeError` traceback and exit 1 when the reader of its output closes the pipe early (`fluxsim plan ... | head -1`): it stops writing and exits quietly, with the status of the command when its work was done and with 141 when the pipe broke while it was still working.
+- The text a generator plugin supplies to a refusal is scrubbed before it is quoted: what an import or a factory raised (`FLX-3124`), the name of a module it lacks and what it stated (`FLX-3120`). A URL is written as its label, and the value of a credential-named environment variable and the secret of a `password=` or `token=` pair or of `user:PW@host` become `***`, in the whole message before its first line is picked and cut, so a secret across the cut leaves no piece of itself.
 
 ### Changed
 
