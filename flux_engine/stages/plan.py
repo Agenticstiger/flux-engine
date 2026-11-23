@@ -146,6 +146,14 @@ def _fidelity_summary(
     return summary
 
 
+def _copula_entry(
+    outcome: Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"],
+) -> Dict[str, Any]:
+    """``copula: {alpha, factor}`` for an emit whose plan holds a copula, else nothing."""
+    copula = None if outcome.plan is None else getattr(outcome.plan, "copula", None)
+    return {} if copula is None else {"copula": copula.as_document()}
+
+
 def _derived_rows_entry(
     outcome: Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"],
 ) -> Dict[str, Any]:
@@ -370,6 +378,9 @@ def _plan_emits(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
             "declaresFidelity": outcome.resolved.fidelity is not None,
             "generator": _fidelity_summary(outcome),
             **_derived_rows_entry(outcome),
+            # An emit that declares a copula records its shrinkage and its factor's digest (ADR
+            # 0035 decision 5); any other emit has no key, so its plan keeps its bytes.
+            **_copula_entry(outcome),
             # SEAM-FIDELITY-SPEC §3: "every ε" is written to plan.json.
             # The key is the one the block is declared under, and an
             # emit that declares none gets no key, so its plan keeps

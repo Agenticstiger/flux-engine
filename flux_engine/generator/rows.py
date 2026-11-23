@@ -94,7 +94,13 @@ from flux_engine.core.seedtree import (
     path_label,
 )
 from flux_engine.generator.allocation import allocated_given, allocated_levels
-from flux_engine.generator.copula import check_copula, declares_copula, read_copula
+from flux_engine.generator.copula import (
+    CopulaDraw,
+    check_copula,
+    declares_copula,
+    plan_copula_draw,
+    read_copula,
+)
 from flux_engine.generator.families import (
     FLX_3401,
     ColumnType,
@@ -452,6 +458,9 @@ class GeneratorPlan:
     #: ``rows`` is then the count worked out from that history. ``None`` for every other emit,
     #: whose document has no ``projection`` entry.
     projection: Optional[Any] = None
+    #: The emit's copula, planned (ADR 0035 decision 5), or ``None`` for an emit that declares none;
+    #: the document then has no ``copula`` entry.
+    copula: Optional[CopulaDraw] = None
 
     @property
     def counter_based(self) -> bool:
@@ -488,6 +497,8 @@ class GeneratorPlan:
             }
         if self.projection is not None:
             document["projection"] = self.projection.as_document()
+        if self.copula is not None:
+            document["copula"] = self.copula.as_document()
         if self.sums:
             document["sums"] = [
                 {
@@ -650,7 +661,9 @@ def build_plan(
     _require_conditionals(plans)
     _require_allocatable(plans, generator_version, related, rules)
     plans = _with_allocation_parents(plans)
-    _require_copula(fidelity, plans, generator_version, related, rules)
+    copula = _require_copula(
+        fidelity, plans, generator_version, related, rules, sim_id, expose.expose_id
+    )
     if generator_version != GENERATOR_VERSION_2:
         for column_plan in plans:
             if column_plan.statistics.given_link is not None:
@@ -669,6 +682,7 @@ def build_plan(
         rules=rules,
         generator_version=generator_version,
         plugin=plugin,
+        copula=copula,
     )
 
 
@@ -678,15 +692,17 @@ def _require_copula(
     generator_version: str,
     related: FrozenSet[str],
     rules: Optional["RulePlan"],
-) -> None:
-    """Refuse a copula the emit cannot draw (ADR 0035 decision 4).
+    sim_id: str,
+    expose_id: str,
+) -> Optional[CopulaDraw]:
+    """Refuse a copula the emit cannot draw (ADR 0035 decision 4), or plan it (decision 5).
 
     Kernel 0.1.0 has no copula path, so the key is ``FLX-3105`` there, naming the kernel. Anything
     else the declaration or the emit's columns get wrong is ``FLX-3402``
-    (:func:`flux_engine.generator.copula.check_copula`).
+    (:func:`flux_engine.generator.copula.check_copula`). ``None`` when the emit declares none.
     """
     if not declares_copula(fidelity):
-        return
+        return None
     if generator_version != GENERATOR_VERSION_2:
         from flux_engine.seam.resolve import FLX_3105
 
@@ -697,6 +713,7 @@ def _require_copula(
     declaration = read_copula(fidelity)
     assert declaration is not None  # declares_copula
     check_copula(declaration, plans, set_elsewhere=_set_elsewhere(plans, related, rules))
+    return plan_copula_draw(declaration, sim_id=sim_id, expose_id=expose_id)
 
 
 def _set_elsewhere(

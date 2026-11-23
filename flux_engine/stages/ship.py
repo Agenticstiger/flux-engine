@@ -140,7 +140,12 @@ from flux_engine.evidence.register import (
     render_register_line,
     render_register_note,
 )
-from flux_engine.evidence.report import ConditionedEmit, StoredGenerator, render_evidence_report
+from flux_engine.evidence.report import (
+    ConditionedEmit,
+    CopulaEmit,
+    StoredGenerator,
+    render_evidence_report,
+)
 from flux_engine.safeio import (
     is_regular_file,
     json_lines,
@@ -1698,6 +1703,37 @@ def _declared_conditions(
     return tuple(found)
 
 
+def _declared_copulas(
+    directory: Path, simulation_id: str, plan_document: Mapping[str, Any]
+) -> Tuple[CopulaEmit, ...]:
+    """Each emit of the run whose plan holds a copula: its columns and measure, and the plan's ``alpha``.
+
+    The columns and the measure come from the bundle the plan binds; the shrinkage is the plan's
+    own. A plan with no ``copula`` member gives ``()``.
+    """
+    from flux_engine.generator.copula import read_copula
+    from flux_engine.seam.resolve import load_bundle, resolve_all_emits
+
+    planned = plan_document.get("emits") or {}
+    if not any(isinstance(entry, Mapping) and "copula" in entry for entry in planned.values()):
+        return ()
+    found = []
+    for resolved in resolve_all_emits(load_bundle(directory), simulation_id=simulation_id):
+        entry = planned.get(resolved.expose_id)
+        declaration = read_copula(resolved.fidelity)
+        if declaration is None or not isinstance(entry, Mapping) or "copula" not in entry:
+            continue
+        found.append(
+            (
+                resolved.expose_id,
+                declaration.columns,
+                declaration.measure,
+                str(entry["copula"].get("alpha")),
+            )
+        )
+    return tuple(found)
+
+
 def _write_evidence_report(
     layout: RunLayout,
     *,
@@ -1719,6 +1755,7 @@ def _write_evidence_report(
     conditioned: Sequence[ConditionedEmit] = (),
     forecast_accuracy: Optional[ForecastAccuracy] = None,
     held_out_grade: Optional[Pattern] = None,
+    copulas: Sequence[CopulaEmit] = (),
 ) -> None:
     """Write ``EVIDENCE.md`` into the run directory, ahead of packing.
 
@@ -1779,6 +1816,7 @@ def _write_evidence_report(
         conditioned=conditioned,
         forecast_accuracy=forecast_accuracy,
         held_out_grade=held_out_grade,
+        copulas=copulas,
     )
     write_text_atomic(layout.run_dir / "EVIDENCE.md", report)
 
@@ -2186,6 +2224,7 @@ def ship(
             conditioned=_declared_conditions(directory, simulation_id, plan_document.get("scale")),
             forecast_accuracy=accuracy,
             held_out_grade=held_out_grade,
+            copulas=_declared_copulas(directory, simulation_id, plan_document),
         )
     except FluxError as error:
         return StageResult(

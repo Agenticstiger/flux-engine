@@ -199,6 +199,42 @@ def render_conditions_note(conditioned: Sequence[ConditionedEmit]) -> Optional[s
     return "\n\n".join(entries)
 
 
+#: One emit whose plan holds a copula: its ``exposeId``, its columns in draw order, its measure and
+#: its shrinkage ``alpha`` as the plan states it.
+CopulaEmit = Tuple[str, Sequence[str], str, str]
+
+
+def render_copula_note(copulas: Sequence[CopulaEmit]) -> Optional[str]:
+    """What "Fidelity" says of each emit drawn through a copula, or ``None`` when there is none.
+
+    The columns, the measure and the shrinkage. A shrunk matrix is said to be: every latent
+    correlation was multiplied by ``1 - alpha``, so the columns are less correlated than declared.
+    """
+    if not copulas:
+        return None
+    entries = []
+    for expose_id, columns, measure, alpha in copulas:
+        names = ", ".join(_cell(name, "a column") for name in columns)
+        text = (
+            f"Copula of emit {_cell(expose_id, 'an emit')}: {names} are drawn together through a "
+            f"Gaussian copula of the declared {_number_word(measure)} rank correlations."
+        )
+        if _number(alpha) != "0":
+            text += (
+                f" The declared matrix was shrunk (alpha {_number(alpha)}): every correlation was "
+                "multiplied by one minus alpha on the latent scale, so the columns are less correlated "
+                "than declared."
+            )
+        else:
+            text += " The declared matrix was valid as written (alpha 0)."
+        entries.append(text)
+    return "\n\n".join(entries)
+
+
+def _number_word(measure: str) -> str:
+    return {"kendall": "Kendall", "spearman": "Spearman"}.get(measure, "rank")
+
+
 _NUMBER = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
 
 
@@ -720,6 +756,7 @@ def render_evidence_report(
     conditioned: Sequence[ConditionedEmit] = (),
     forecast_accuracy: Optional[ForecastAccuracy] = None,
     held_out_grade: Optional[Pattern] = None,
+    copulas: Sequence[CopulaEmit] = (),
 ) -> str:
     """Render ``EVIDENCE.md``'s eight fixed sections for one bundle, and a ninth for forecasts.
 
@@ -766,6 +803,9 @@ def render_evidence_report(
     (:func:`render_conditions_note`); empty, the default, adds nothing, so a run with
     no conditions gets the report it got before.
 
+    *copulas* is each emit of the run whose plan holds a copula (:func:`render_copula_note`),
+    stated under "Fidelity"; empty, the default, adds nothing.
+
     *forecast_accuracy* is the run's forecasts, scored or pending
     (:func:`flux_engine.evidence.forecast_accuracy.build_forecast_accuracy`). Given one, the
     report gains "Forecast Accuracy" after "Fidelity"
@@ -795,7 +835,9 @@ def render_evidence_report(
         ),
         "Conformance": conformance_summary,
         "Reproducibility": render_reproducibility_section(reproducibility, stored_generators),
-        "Fidelity": fidelity_summary,
+        "Fidelity": "\n\n".join(
+            part for part in (fidelity_summary, render_copula_note(copulas)) if part
+        ),
         FORECAST_ACCURACY_SECTION: (
             render_forecast_accuracy_section(forecast_accuracy)
             if forecast_accuracy is not None

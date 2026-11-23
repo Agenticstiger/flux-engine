@@ -27,8 +27,20 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    FrozenSet,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
+from flux_engine.core import copula as core_copula
 from flux_engine.core.canonical import nfc
 from flux_engine.core.errors import FluxError
 from flux_engine.generator.families import ColumnType, Family
@@ -44,8 +56,10 @@ __all__ = [
     "MEASURES",
     "MOST_COLUMNS",
     "CopulaDeclaration",
+    "CopulaDraw",
     "check_copula",
     "declares_copula",
+    "plan_copula_draw",
     "read_copula",
 ]
 
@@ -224,3 +238,64 @@ def _why_not(
     ):
         return "not drawn from bins and binWeights"
     return None
+
+
+class CopulaDraw:
+    """What the plan decides of an emit's copula: the matrix's shrinkage and its factor.
+
+    ``alpha`` is the shrinkage as canonical decimal text and :attr:`digest` the sha256 of the
+    factor's binary64 words (:func:`flux_engine.core.copula.plan_copula`). The emit's plan document
+    gains ``copula: {alpha, factor}`` only when the emit declares one, so it enters ``planDigest``
+    there and nowhere else.
+    """
+
+    def __init__(
+        self,
+        declaration: CopulaDeclaration,
+        plan: core_copula.CopulaPlan,
+        *,
+        sim_id: str,
+        expose_id: str,
+    ) -> None:
+        self.columns = declaration.columns
+        self.measure = declaration.measure
+        self.pairs = tuple((a, b, str(value)) for a, b, value in declaration.pairs)
+        self.alpha = plan.alpha
+        self.digest = plan.digest
+        self.factor = plan.factor
+        self.sim_id = sim_id
+        self.expose_id = expose_id
+
+    def _identity(self) -> Tuple[Any, ...]:
+        return (
+            self.columns,
+            self.measure,
+            self.pairs,
+            self.alpha,
+            self.digest,
+            self.sim_id,
+            self.expose_id,
+        )
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, CopulaDraw) and self._identity() == other._identity()
+
+    def __hash__(self) -> int:
+        return hash(self._identity())
+
+    @property
+    def shrunk(self) -> bool:
+        """Whether the declared matrix was shrunk, so every latent correlation was scaled."""
+        return Decimal(self.alpha) > 0
+
+    def as_document(self) -> Dict[str, str]:
+        """The plan's ``copula`` member: ``{alpha, factor}``."""
+        return {"alpha": self.alpha, "factor": self.digest}
+
+
+def plan_copula_draw(declaration: CopulaDeclaration, *, sim_id: str, expose_id: str) -> CopulaDraw:
+    """Run the plan of ADR 0035 decision 5 for *declaration*."""
+    plan = core_copula.plan_copula(
+        declaration.columns, declaration.measure, declaration.pair_values()  # type: ignore[arg-type]
+    )
+    return CopulaDraw(declaration, plan, sim_id=sim_id, expose_id=expose_id)
