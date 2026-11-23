@@ -20,6 +20,72 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+This release lets number columns be drawn together and given each other, lets a profile released under differential
+privacy describe more than one table, and states how a profiler chose its cliques. It moves three formats, each
+additively, so a document of the earlier format reads as before and a run that uses nothing new keeps its format and
+its digests: profile `1-4-0` (flux-stats), profile request `1-2-0` and scorecard `1-5-0`. The parameter register stays
+at `1-3-0`. The kernel does not change: the new seed path is read only by a bundle that declares a copula
+(KERNEL-SPEC-2 section 12).
+
+### Added
+
+- A Gaussian copula draws number and timestamp columns together (ADR 0035). `fidelity.copula` in an emit's fidelity
+  block names 2 to 64 columns drawn from `bins` and `binWeights` and a rank correlation for each pair, Kendall's tau or
+  Spearman's rho. The plan makes the latent matrix valid in pinned decimal arithmetic, shrinking every correlation
+  towards zero when it has to, and states `copula: { alpha, factor }` in the emit's plan entry; the draw is binary64
+  on the new seed path `("sim", sim_id, "gen", exposeId, "copula", row)`, so a bundle without a copula keeps every
+  byte. Kernel `0.1.0` refuses the key with `FLX-3105`. The column keeps its histogram, and the place inside a bin
+  comes from the copula's own residual. `EVIDENCE.md` names the copula and says when the matrix was shrunk.
+- A profile of format `1-4-0` may publish `kendallTau/1` and `spearmanRho/1` in a `columnPairs` entry, exact or, with
+  a public `rowFloor`, with noise charged `4 / (f + 1)` and `9 / (f + 1)` in L1 and L2. Unlike `correlation/1`, a rank
+  correlation does not depend on the margins of its columns, reads the same for a date in days or milliseconds, and
+  can be noisy, so a profile that holds one can still be graded P3.
+- A `rankCorrelation` property scores a run's rank correlation against a profile, in the `joint` dimension, with a
+  tolerance of 0.05 by default that is widened by the noise of the reference and by the size of the run
+  (SCORECARD-SPEC.md section 9b). A committed slice and a sampled `verify` name it and compare nothing. A scorecard
+  that holds one names format `1-5-0`.
+- `cliqueMarginal/2`, a clique over one to 32 columns that may be categories, numbers or timestamps, the last two by
+  their bins, and the one-way and two-way marginals the reader forms from it. A table may state `cliqueSelection`, how
+  its cliques were chosen (`aim`, `mst`, `fixed` or `other`), by what tool, and the shares spent choosing them and
+  releasing their levels or edges, which now enter the account. A document holds at most 1,024 cliques and 10,000,000
+  cells over a table. Cliques estimated from measurements are not read: `estimate`, `measurements` and
+  `published: estimated` are refused with `FLX-5036`.
+- `groupByBins` groups a column statistic, or a property, by the bins of another number or timestamp column, which is
+  how a profile publishes a two-way table of two number columns. A scorecard row that holds it names format `1-5-0`.
+- A column may be drawn given the bin of another number column: `given` names a column drawn from `bins` with no
+  `nullFraction`, and `levelWeightsGiven` or `binWeightsGiven` are keyed by the text of each lower edge. No seed path is
+  added. A `conditions` group that fixes a category drawn given a bin changes the weights of the bins to their
+  posterior.
+- A profile may state a unit of privacy that follows its child rows: `privacyUnit.follows` lists relationships, each
+  with a fixed public cap `maxChildren`, and they must form a tree rooted at the expose, so that the stated reach never
+  understates what one unit changes (ADR 0037). A noisy statistic of a followed table is charged its reach times the
+  sensitivity of one row. A relationship's statistics may be grouped by a parent column and its histogram may carry
+  noise, and a statistic grouped by a link may too, where the profile states what one unit changes. Any labelled
+  column of a table the unit does not reach counts as P1 for the minimum grade, and `EVIDENCE.md` names the tables the
+  unit treats as fixed.
+- Profile request format `1-2-0` asks for rank correlations (`rankCorrelations`) and the columns a profiler may join
+  into cliques (`cliqueColumns`) in a table, and for a relationship's statistics grouped by parent columns
+  (`groupBy`) and child columns grouped by a parent column (`linked`).
+- Two how-to pages, [Draw number columns together](docs/how-to/draw-number-columns-together.md) and
+  [Draw a column given the bin of another](docs/how-to/draw-a-column-given-the-bin-of-another.md), and a note for the
+  authors of a profiler, `docs/spec/clique-selection-for-profilers.md`, which requires float-safe noise samplers.
+  ADRs 0035, 0036 and 0037 are accepted.
+
+### Changed
+
+- The privacy grade counts the parts of a profile's account from the profile reader's own list, once each, so a
+  statistic the grade did not know about can no longer be missing from the spent figure, and a profile whose only noisy
+  statistics are rank correlations or relationship histograms is graded on them. A `columnPairs` entry is noisy when
+  every statistic in it carries `noise`. The grade fails closed on a key it does not know at the top of a profile or in
+  its `privacy` block.
+- For a profile that names `1-4-0`, the declaration `publicStructure` covers more: the bins of every `groupByBins`, the
+  group keys of grouped noisy statistics, the `sampleSize` bands, every `rowFloor` and every `maxChildren`. A profile of
+  an earlier format keeps the declaration it had.
+- flux-stats: `read_noise` takes the L1 and the squared L2 sensitivity as required keywords, so a statistic whose
+  sensitivity is not one cannot be charged as a count table by a caller that forgot them.
+
 ## 0.10.0 - 2026-11-23
 
 This release lets a Simulation link tables, copy a column from a linked row and publish a catalogue whole; lay a
