@@ -53,6 +53,7 @@ from flux_engine.author.catalogue import (
     reference_table,
 )
 from flux_engine.author.children import count_children, declare_counted, spread_children
+from flux_engine.author.children_given import GivenParent, given_children, with_summed_groups
 from flux_engine.author.cliques import draw_cliques
 from flux_engine.author.columns import (
     MOST_PLACES,
@@ -1563,6 +1564,40 @@ class _Placed(NamedTuple):
     laid: Optional[str]
 
 
+def _given_parent(parent: AuthoredExpose) -> GivenParent:
+    """The parent's columns as a ``counts`` entry's given column reads them, with why some cannot be."""
+    held: Dict[str, str] = {}
+    for plan in parent.columns:
+        name = plan.name
+        if plan.fixed is not None:
+            held[name] = plan.fixed
+        elif name in parent.aggregated:
+            held[name] = "set by a summary over the children of the parent"
+        elif name in parent.derives or name in parent.dependents or name in parent.copies:
+            held[name] = "set by a rule of the contract"
+        elif name in parent.guarded:
+            held[name] = "set by a rule of the contract on some rows"
+        elif _is_link_given(plan):
+            held[name] = "drawn given a column of a linked row"
+    return GivenParent(
+        plans={plan.name: plan for plan in parent.columns}, kinds=parent.kinds, held_back=held
+    )
+
+
+def _is_link_given(plan: ColumnPlan) -> bool:
+    given = plan.declaration.get("given")
+    names = [given] if isinstance(given, str) else given if isinstance(given, list) else []
+    return any(isinstance(name, str) and "." in name for name in names)
+
+
+def _drop_zero_nulls(parent: AuthoredExpose, column: str) -> None:
+    """Take a zero ``nullFraction`` off *column*: a column that is a class to read declares none."""
+    for plan in parent.columns:
+        if plan.name == column and plan.declaration.get("nullFraction") is not None:
+            plan.declaration.pop("nullFraction", None)
+            plan.labels = [label for label in plan.labels if label.tokens != ("nullFraction",)]
+
+
 def _lay_out_children(
     entry: Mapping[str, Any],
     tokens: Tuple[str, ...],
@@ -1581,6 +1616,7 @@ def _lay_out_children(
     child_table = child_expose.expose_id
     notes: List[Tuple[str, str]] = []
     held = _counting_hold(keys, child_expose, child_plan, declared)
+    entry = with_summed_groups(entry) if held is None else entry
     counted = (
         count_children(
             entry,
@@ -1602,7 +1638,26 @@ def _lay_out_children(
     if counted is not None:
         declare_counted(child_plan, counted.assumption)
         counts = {"emit": child_table, "relationship": declared.name, **counted.members}
-        return _Placed(list(counted.used), list(counted.unused), counts, notes, True, None)
+        used, unused = list(counted.used), list(counted.unused)
+        given = given_children(
+            entry,
+            tokens,
+            counted,
+            _given_parent(parent_expose),
+            minimum_cell=minimum_cell,
+        )
+        if given is not None:
+            counts.update(given.members)
+            used += given.used
+            unused += given.unused
+            for sentence in given.assumptions:
+                child_plan.assumptions.append(sentence)
+                notes.append((f"{child_table}.{declared.name}", sentence))
+            if given.drop_null_fraction and given.column is not None:
+                _drop_zero_nulls(parent_expose, given.column)
+            if given.column is not None:
+                child_plan.how += f", its counts given {printable(given.column)} of the parent"
+        return _Placed(used, unused, counts, notes, True, None)
     spread = spread_children(
         entry,
         tokens,

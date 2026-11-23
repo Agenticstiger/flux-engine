@@ -78,7 +78,7 @@ def point_estimates(
     """
     notes: Dict[Tuple[str, ...], NoisyNote] = {}
     tables = profile.get("tables")
-    if not isinstance(tables, Mapping) or not _has_noise(tables):
+    if not isinstance(tables, Mapping) or not _has_noise(profile):
         return profile, notes
     view = copy.deepcopy(dict(profile))
     for expose, table in view["tables"].items():
@@ -99,31 +99,50 @@ def point_estimates(
         for name, column in (columns.items() if isinstance(columns, dict) else ()):
             statistics = column.get("statistics") if isinstance(column, dict) else None
             for index, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
-                if not isinstance(statistic, dict) or "noise" not in statistic:
-                    continue
-                key = _COUNT_KEYS[statistic["definition"]]
-                noise = statistic.pop("noise")
-                records = None
-                for group in statistic["groups"]:
-                    estimate = point_estimate([Fraction(text) for text in group.pop("noisyCounts")])
-                    group["k"] = estimate.records
-                    group[key] = list(estimate.counts)
-                    records = estimate.records if not grouped(statistic) else None
-                variance = variance_of(str(noise["mechanism"]), Fraction(noise["scale"]))
                 tokens = ("tables", str(expose), "columns", str(name), "statistics", str(index))
-                notes[tokens] = NoisyNote(
-                    tokens=tokens,
-                    mechanism=str(noise["mechanism"]),
-                    scale=str(noise["scale"]),
-                    variance=render_exact(variance),
-                    definition=str(statistic["definition"]),
-                    records=records,
-                )
+                _estimate(statistic, tokens, notes)
+    # A relationship's noisy histogram of children per parent, grouped or not (profile format
+    # 1-4-0), is read as a column's is.
+    relationships = view.get("relationships")
+    for number, entry in enumerate(relationships if isinstance(relationships, list) else ()):
+        listed = entry.get("statistics") if isinstance(entry, dict) else None
+        for index, statistic in enumerate(listed if isinstance(listed, list) else ()):
+            _estimate(statistic, ("relationships", str(number), "statistics", str(index)), notes)
     return view, notes
 
 
-def _has_noise(tables: Mapping[str, Any]) -> bool:
-    for table in tables.values():
+def _estimate(
+    statistic: Any, tokens: Tuple[str, ...], notes: Dict[Tuple[str, ...], NoisyNote]
+) -> None:
+    """Replace a noisy histogram's cells by their point estimate, in place, and note its noise."""
+    if not isinstance(statistic, dict) or "noise" not in statistic:
+        return
+    key = _COUNT_KEYS[statistic["definition"]]
+    noise = statistic.pop("noise")
+    records = None
+    for group in statistic["groups"]:
+        estimate = point_estimate([Fraction(text) for text in group.pop("noisyCounts")])
+        group["k"] = estimate.records
+        group[key] = list(estimate.counts)
+        records = estimate.records if not grouped(statistic) else None
+    variance = variance_of(str(noise["mechanism"]), Fraction(noise["scale"]))
+    notes[tokens] = NoisyNote(
+        tokens=tokens,
+        mechanism=str(noise["mechanism"]),
+        scale=str(noise["scale"]),
+        variance=render_exact(variance),
+        definition=str(statistic["definition"]),
+        records=records,
+    )
+
+
+def _has_noise(profile: Mapping[str, Any]) -> bool:
+    tables = profile.get("tables")
+    for entry in profile.get("relationships") or ():
+        statistics = entry.get("statistics") if isinstance(entry, Mapping) else None
+        if any(isinstance(item, Mapping) and "noise" in item for item in statistics or ()):
+            return True
+    for table in tables.values() if isinstance(tables, Mapping) else ():
         if isinstance(table, Mapping) and table.get("cliques"):
             return True
         columns = table.get("columns") if isinstance(table, Mapping) else None

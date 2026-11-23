@@ -50,7 +50,8 @@ _SECTION_REASONS: Mapping[str, str] = {
     "periods": "a generator emit draws no mean month by month",
     "relationships": (
         "children per parent are read from an ungrouped histogram or mean of a one-column "
-        "relationship the contract declares, and this is neither"
+        "relationship the contract declares, or from a histogram grouped by a column of its parent "
+        "that the layout can be given, and this is none of those"
     ),
     "queries": "the count a query matches has no declaration a generator emit draws from",
     "datePairs": "no rule of fluxsim init reads this statistic of the days between two dates",
