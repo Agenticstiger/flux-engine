@@ -46,8 +46,11 @@ from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import new_plan_is_counter_based
 from flux_engine.generator.rows import declared_range_findings
 from flux_engine.runtime import resolve_cast
+from flux_engine.seam.overlay import require_in_contract
 from flux_engine.seam.resolve import (
+    FLX_3105,
     declared_generators,
+    declared_overlay,
     load_bundle,
     resolve_all_emits,
     strict_coverage_declared,
@@ -122,6 +125,24 @@ def _check_emit(
     )
 
 
+def _check_overlay_names(resolved: Any, simulation: Mapping[str, Any], *, where: str) -> None:
+    """Refuse (``FLX-3105``) an overlay that names a table or column the pinned contract lacks.
+
+    `plan` checks the overlay against the profile it is handed; `validate` has no profile, but a
+    profile describes the contract's tables and columns, so a name the contract does not have is
+    refused here with the code `plan` gives it.
+    """
+    overlay = declared_overlay(simulation, where=where)
+    if overlay is None:
+        return
+    contract: Dict[str, List[str]] = {}
+    for entry in resolved:
+        for expose in entry.contract_document.get("exposes") or ():
+            schema = (expose.get("contract") or {}).get("schema") or ()
+            contract[str(expose.get("exposeId"))] = [str(column.get("name")) for column in schema]
+    require_in_contract(contract, overlay, code=FLX_3105)
+
+
 def validate(bundle_directory: Union[str, Path], *, tolerate_additive: bool = True) -> StageResult:
     """Validate the bundle at *bundle_directory*. Never writes anything."""
     directory = Path(bundle_directory)
@@ -165,6 +186,7 @@ def validate(bundle_directory: Union[str, Path], *, tolerate_additive: bool = Tr
             check_overlay_declared(
                 cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
             )
+            _check_overlay_names(resolved, cast.simulation, where=simulation_id)
             plugins = plugin_exposes(
                 resolved, declared_generators(cast.simulation, where=simulation_id)
             )
