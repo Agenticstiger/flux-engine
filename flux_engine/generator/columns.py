@@ -242,6 +242,8 @@ def _vectorized(
         draw = 0 if statistics.null_fraction is None else 1
         return _histogram(column_plan, streams.column_key(column.name), rows, draw, None, labels)
     key = streams.column_key(column.name)
+    if column_plan.copula is not None:
+        return _copula_values(column_plan, streams, rows, key)
     if statistics.null_fraction is None:
         values = _draws(column_plan, key, rows, 0, parents)
         _set_conditioned(column_plan, plan, streams, rows, levels, key, values)
@@ -253,6 +255,24 @@ def _vectorized(
     values = _draws(column_plan, key, rows, 1, parents)
     if values is None:
         return None
+    return [None if null else value for null, value in zip(nulls, values, strict=True)]
+
+
+def _copula_values(
+    column_plan: "_rows.ColumnPlan", streams: CellStreams, rows: "np.ndarray", key: kernel2.Key
+) -> List[Any]:
+    """A copula column's values: the copula's draws for *rows*, and its NULL draw at index 0.
+
+    What :func:`_rows._copula_cell` makes for each row; the copula's draws are shared by the
+    columns of the chunk (:meth:`~flux_engine.generator.copula.CopulaDraw.column_values`).
+    """
+    copula = column_plan.copula
+    assert copula is not None
+    values = copula.column_values(streams.root, rows, _rows.nfc(column_plan.column.name))
+    fraction = column_plan.statistics.null_fraction
+    if fraction is None:
+        return values
+    nulls = kernel2.column_bernoulli(kernel2.column_uniform53(key, rows, 0), fraction).tolist()
     return [None if null else value for null, value in zip(nulls, values, strict=True)]
 
 

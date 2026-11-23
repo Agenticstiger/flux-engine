@@ -383,6 +383,10 @@ class ColumnPlan:
     #: 8.3), ``None`` for any other. Like ``allocated_rows`` it is read from the plan's own
     #: statistics, so it is not part of the plan's document.
     allocated_given: Optional[ColumnStatistics] = None
+    #: The emit's copula when this column is one of its columns (ADR 0035 decision 6): its value
+    #: is drawn through the copula, and its own cell path draws only its NULL draw. Like
+    #: ``allocated_rows`` it is not part of the plan's document, which holds the copula once.
+    copula: Optional[CopulaDraw] = None
 
     def as_document(self) -> Dict[str, Any]:
         """The plan for this column, as canonical-ready JSON."""
@@ -664,6 +668,11 @@ def build_plan(
     copula = _require_copula(
         fidelity, plans, generator_version, related, rules, sim_id, expose.expose_id
     )
+    if copula is not None:
+        plans = [
+            replace(item, copula=copula) if nfc(item.column.name) in copula.columns else item
+            for item in plans
+        ]
     if generator_version != GENERATOR_VERSION_2:
         for column_plan in plans:
             if column_plan.statistics.given_link is not None:
@@ -713,7 +722,7 @@ def _require_copula(
     declaration = read_copula(fidelity)
     assert declaration is not None  # declares_copula
     check_copula(declaration, plans, set_elsewhere=_set_elsewhere(plans, related, rules))
-    return plan_copula_draw(declaration, sim_id=sim_id, expose_id=expose_id)
+    return plan_copula_draw(declaration, plans, sim_id=sim_id, expose_id=expose_id)
 
 
 def _set_elsewhere(
@@ -1780,9 +1789,28 @@ def _cell_in_context(
         stream = source.stream_at(row_index, column.name)
     else:
         stream = source.stream(generator_column_path(sim_id, expose_id, row_index, column.name))
+    if plan.copula is not None:
+        return _copula_cell(plan, stream, source, row_index)
     if plan.allocated_rows is None:
         return _draw_cell(plan, stream, given_level)
     return _allocated_cell(plan, stream, source, sim_id, expose_id, row_index, given_level)
+
+
+def _copula_cell(plan: ColumnPlan, stream: DrawStream, source: _Source, row_index: int) -> Any:
+    """One cell of a copula column: its value from the row's copula draws, or null.
+
+    The cell's own stream draws only the NULL draw, at index 0, when the column declares a
+    ``nullFraction``; the copula draws its value whether or not the cell is NULL.
+    """
+    assert plan.copula is not None
+    root = getattr(source, "root", None)
+    if not isinstance(root, SeedTreeRoot):
+        raise FluxError(FLX_2202, f"{plan.column.name}: a copula is drawn over the run's root")
+    is_null = plan.statistics.null_fraction is not None and bernoulli(
+        stream, plan.statistics.null_fraction
+    )
+    value = plan.copula.row_value(root, row_index, nfc(plan.column.name))
+    return None if is_null else value
 
 
 def _allocated_cell(
