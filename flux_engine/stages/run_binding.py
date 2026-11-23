@@ -154,17 +154,24 @@ def _entries(path: Union[str, "os.PathLike[str]"]) -> List[Tuple[str, bool]]:
         return []
 
 
+def _stray_in_emits(layout: RunLayout, exposes: AbstractSet[str]) -> Optional[str]:
+    for inner, inner_dir in _entries(layout.emits_dir):
+        if inner_dir:
+            return f"emits/{inner}/"
+        if not _stream_is_known(inner, exposes):
+            return f"emits/{inner}"
+    return None
+
+
 def _first_stray(layout: RunLayout, exposes: AbstractSet[str]) -> Optional[str]:
     for name, is_dir in _entries(layout.run_dir):
         if not is_dir:
             if not _name_is_known(name, exposes):
                 return name
         elif name == "emits":
-            for inner, inner_dir in _entries(layout.emits_dir):
-                if inner_dir:
-                    return f"emits/{inner}/"
-                if not _stream_is_known(inner, exposes):
-                    return f"emits/{inner}"
+            stray = _stray_in_emits(layout, exposes)
+            if stray is not None:
+                return stray
         elif name != _STAGE_DIRNAME:
             return f"{name}/"
     return None
@@ -183,6 +190,14 @@ def _share_problem(
     """
     receipt_emits = receipt.get("emits")
     emits: Mapping[str, Any] = receipt_emits if isinstance(receipt_emits, Mapping) else {}
+    return _manifest_share_problem(layout, emits, plan_document) or _stream_share_problem(
+        layout, emits
+    )
+
+
+def _manifest_share_problem(
+    layout: RunLayout, emits: Mapping[str, Any], plan_document: Mapping[str, Any]
+) -> Optional[Tuple[str, str]]:
     for name, is_dir in _entries(layout.run_dir):
         found = None if is_dir else _SHARD_MANIFEST.fullmatch(name)
         if found is not None:
@@ -191,6 +206,10 @@ def _share_problem(
             )
             if reason is not None:
                 return name, reason
+    return None
+
+
+def _stream_share_problem(layout: RunLayout, emits: Mapping[str, Any]) -> Optional[Tuple[str, str]]:
     for name, is_dir in _entries(layout.emits_dir):
         stream = None if is_dir else _STREAM.fullmatch(name)
         if stream is None or stream["index"] is None or name[: -len(".ndjson")] in emits:
@@ -223,6 +242,45 @@ def _same_rows(whole: Path, share: Path, start: int, stop: int) -> bool:
         return False
 
 
+def _manifest_header_problem(
+    document: Any, plan_document: Mapping[str, Any], index: int, count: int
+) -> Optional[str]:
+    if not isinstance(document, Mapping):
+        return "is not the JSON object `apply --shard` writes"
+    if document.get("shard") != {"index": index, "of": count}:
+        return "records another share than its name says"
+    for key in ("planDigest", "inputDigest"):
+        if document.get(key) != plan_document.get(key):
+            return f"records another {key} than the plan of this run"
+    return None
+
+
+def _manifest_entry_problem(
+    layout: RunLayout, emits: Mapping[str, Any], entry: Any, index: int, count: int
+) -> Optional[str]:
+    expose = entry.get("exposeId") if isinstance(entry, Mapping) else None
+    if not isinstance(expose, str) or expose not in emits:
+        return "lists an emit the receipt does not name"
+    held = emits[expose]
+    expected = _expected_range(held if isinstance(held, Mapping) else {}, index, count)
+    if expected is None:
+        return f"cannot be compared for {_shown(expose)}: the receipt records no row count"
+    if (entry.get("firstRow"), entry.get("endRow")) != (expected[0], expected[1]) and not (
+        "mapping" in held and (entry.get("firstRow"), entry.get("endRow")) == (0, expected[1])
+    ):
+        return f"records other rows for {_shown(expose)} than its share of the stream"
+    share = layout.emits_dir / f"{expose}.shard-{index}-of-{count}.ndjson"
+    if share.is_file():
+        data = share.read_bytes()
+        if (
+            entry.get("bytes") != len(data)
+            or entry.get("rows") != data.count(b"\n")
+            or entry.get("sha256") != digest_of_bytes(data, subject="shardFile").value
+        ):
+            return f"records another size or digest for {_shown(expose)} than the share has"
+    return None
+
+
 def _manifest_problem(
     layout: RunLayout,
     emits: Mapping[str, Any],
@@ -236,37 +294,16 @@ def _manifest_problem(
         document = json.loads(layout.shard_manifest_path(index, count).read_bytes())
     except (OSError, ValueError):
         return "cannot be read as the JSON `apply --shard` writes"
-    if not isinstance(document, Mapping):
-        return "is not the JSON object `apply --shard` writes"
-    if document.get("shard") != {"index": index, "of": count}:
-        return "records another share than its name says"
-    for key in ("planDigest", "inputDigest"):
-        if document.get(key) != plan_document.get(key):
-            return f"records another {key} than the plan of this run"
+    header = _manifest_header_problem(document, plan_document, index, count)
+    if header is not None:
+        return header
     entries = document.get("emits")
     if not isinstance(entries, list):
         return "lists no emits"
     for entry in entries:
-        expose = entry.get("exposeId") if isinstance(entry, Mapping) else None
-        if not isinstance(expose, str) or expose not in emits:
-            return "lists an emit the receipt does not name"
-        held = emits[expose]
-        expected = _expected_range(held if isinstance(held, Mapping) else {}, index, count)
-        if expected is None:
-            return f"cannot be compared for {_shown(expose)}: the receipt records no row count"
-        if (entry.get("firstRow"), entry.get("endRow")) != (expected[0], expected[1]) and not (
-            "mapping" in held and (entry.get("firstRow"), entry.get("endRow")) == (0, expected[1])
-        ):
-            return f"records other rows for {_shown(expose)} than its share of the stream"
-        share = layout.emits_dir / f"{expose}.shard-{index}-of-{count}.ndjson"
-        if share.is_file():
-            data = share.read_bytes()
-            if (
-                entry.get("bytes") != len(data)
-                or entry.get("rows") != data.count(b"\n")
-                or entry.get("sha256") != digest_of_bytes(data, subject="shardFile").value
-            ):
-                return f"records another size or digest for {_shown(expose)} than the share has"
+        reason = _manifest_entry_problem(layout, emits, entry, index, count)
+        if reason is not None:
+            return reason
     return None
 
 

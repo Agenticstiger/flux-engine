@@ -526,6 +526,11 @@ def _profile_grade(result: "_pipeline.PipelineResult", pinned: Optional[Any]) ->
     return grade
 
 
+def _period_note_fields(notes: Sequence[str]) -> Dict[str, Any]:
+    """The plan result's ``period_end_notes`` entry, empty when there are no notes."""
+    return {"period_end_notes": list(notes)} if notes else {}
+
+
 def plan_with_result(
     bundle_directory: Union[str, Path],
     *,
@@ -749,7 +754,7 @@ def plan_with_result(
                 **({"profile_digest": pinned.digest.value} if pinned is not None else {}),
                 **({"parameter_register": register.as_document()} if register is not None else {}),
                 **({"consumer_queries_checked": False} if unchecked else {}),
-                **({"period_end_notes": list(period_notes)} if period_notes else {}),
+                **_period_note_fields(period_notes),
             },
             stderr="\n".join(period_notes),
             stdout="\n".join(

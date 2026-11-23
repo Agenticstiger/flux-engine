@@ -663,30 +663,48 @@ def period_end_null_notes(resolved: Sequence[ResolvedEmit]) -> Tuple[str, ...]:
     held = {(str(emit.contract_path), emit.expose_id): emit for emit in resolved}
     notes: List[str] = []
     for emit in resolved:
-        own = lifetime_entries_of(emit.extension, emit.expose_id)[:1]
-        end = own[0].end if own else None
-        declared = _declared_null_fractions(emit).get(nfc(end)) if end is not None else None
-        if end is None or declared is None or _is_zero_share(declared):
+        nullable_end = _nullable_period_end(emit)
+        if nullable_end is None:
             continue
-        for entry in within_entries_of(emit.extension, emit.expose_id):
-            if not entry.lifetime:
-                continue
-            try:
-                parent_id = _targets_along(emit, entry.relationship)[-1]
-            except FluxError:  # pragma: no cover - the plan refused the relationship already
-                continue
-            parent = held.get((str(emit.contract_path), parent_id))
-            lifetime = lifetime_entries_of(parent.extension, parent.expose_id)[:1] if parent else ()
-            if not lifetime or lifetime[0].end is None:
-                continue
-            notes.append(
-                f"note: {emit.expose_id}.{end} declares nullFraction {declared}, and it is a period "
-                f"end within {parent_id}, which can close; an end is NULL only under a parent that "
-                "is open, because it is cut at a closed parent's end (ADR 0024 section 5), so the "
-                f"share generated can be lower than {declared}"
-            )
-            break
+        end, declared = nullable_end
+        parent_id = _closing_parent_of(emit, held)
+        if parent_id is None:
+            continue
+        notes.append(
+            f"note: {emit.expose_id}.{end} declares nullFraction {declared}, and it is a period "
+            f"end within {parent_id}, which can close; an end is NULL only under a parent that "
+            "is open, because it is cut at a closed parent's end (ADR 0024 section 5), so the "
+            f"share generated can be lower than {declared}"
+        )
     return tuple(notes)
+
+
+def _nullable_period_end(emit: ResolvedEmit) -> Optional[Tuple[str, Any]]:
+    """The end column of *emit*'s lifetime and its declared ``nullFraction``, when that is above zero."""
+    own = lifetime_entries_of(emit.extension, emit.expose_id)[:1]
+    end = own[0].end if own else None
+    declared = _declared_null_fractions(emit).get(nfc(end)) if end is not None else None
+    if end is None or declared is None or _is_zero_share(declared):
+        return None
+    return end, declared
+
+
+def _closing_parent_of(
+    emit: ResolvedEmit, held: Mapping[Tuple[str, str], ResolvedEmit]
+) -> Optional[str]:
+    """The parent of the first ``within`` lifetime of *emit* that has an end of its own, else ``None``."""
+    for entry in within_entries_of(emit.extension, emit.expose_id):
+        if not entry.lifetime:
+            continue
+        try:
+            parent_id = _targets_along(emit, entry.relationship)[-1]
+        except FluxError:  # pragma: no cover - the plan refused the relationship already
+            continue
+        parent = held.get((str(emit.contract_path), parent_id))
+        lifetime = lifetime_entries_of(parent.extension, parent.expose_id)[:1] if parent else ()
+        if lifetime and lifetime[0].end is not None:
+            return parent_id
+    return None
 
 
 def counted_relationships(
@@ -1551,7 +1569,6 @@ def refuse_determined_columns(
 def check_relations_declared(
     resolved_emits: Sequence[ResolvedEmit],
     simulation: Mapping[str, Any],
-    *,
     sim_id: str,
     strict: bool,
     plugins: Optional[Mapping[str, PluginExpose]] = None,

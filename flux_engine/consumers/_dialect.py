@@ -438,6 +438,49 @@ def _rewrite_length(node: exp.Length) -> None:
         node.set("this", exp.Cast(this=found, to=exp.DataType.build("TEXT")))
 
 
+def _translate_special(node: exp.Expr, label: str) -> bool:
+    """Rewrite the nodes that are the same in every dialect; whether *node* was one of them."""
+    if isinstance(node, exp.TsOrDsToDate):
+        replacement = _rewrite_to_date(node, label)
+        if replacement is not None:
+            node.replace(replacement)
+        return True
+    if type(node) is exp.TimeStrToTime:
+        replacement = _rewrite_time_str(node)
+        if replacement is not None:
+            node.replace(replacement)
+        return True
+    if type(node) is exp.Length:
+        _rewrite_length(node)
+        return True
+    return False
+
+
+def _translate_node(node: exp.Expr, dialect: str, mapper: Optional[_Mapper], label: str) -> None:
+    if _translate_special(node, label):
+        return
+    if dialect == "tsql" and isinstance(node, exp.Extract):
+        found = node.args.get("expression")
+        if isinstance(found, exp.Expr) and _is_number(found):
+            node.set("expression", _days_after_1900(found, describe_parent(None, node), label))
+    if dialect == "duckdb":
+        return
+    part = _part_of(node)
+    if part is None:
+        return
+    operand = _operand_of(node)
+    if mapper is None or operand is None:
+        raise _refusal(label, dialect, part, node)
+    found = mapper(node)
+    if found is None:
+        raise _refusal(label, dialect, part, node)
+    if found is not node:
+        # A rewrite repeats its operand, so the operand's size is capped; one more level of
+        # nesting than the cap allows is built before it is refused, which is bounded.
+        _check_size(operand, label)
+        node.replace(found)
+
+
 def translate(tree: exp.Expr, *, dialect: str, label: str) -> None:
     """Rewrite *tree* in place; see the module's docstring. Raises ``FLX-3622`` for what is refused.
 
@@ -447,36 +490,4 @@ def translate(tree: exp.Expr, *, dialect: str, label: str) -> None:
     mapper = _MAPPERS.get(dialect)
     pending: List[exp.Expr] = list(tree.walk())
     for node in reversed(pending):
-        if isinstance(node, exp.TsOrDsToDate):
-            replacement = _rewrite_to_date(node, label)
-            if replacement is not None:
-                node.replace(replacement)
-            continue
-        if type(node) is exp.TimeStrToTime:
-            replacement = _rewrite_time_str(node)
-            if replacement is not None:
-                node.replace(replacement)
-            continue
-        if type(node) is exp.Length:
-            _rewrite_length(node)
-            continue
-        if dialect == "tsql" and isinstance(node, exp.Extract):
-            found = node.args.get("expression")
-            if isinstance(found, exp.Expr) and _is_number(found):
-                node.set("expression", _days_after_1900(found, describe_parent(None, node), label))
-        if dialect == "duckdb":
-            continue
-        part = _part_of(node)
-        if part is None:
-            continue
-        operand = _operand_of(node)
-        if mapper is None or operand is None:
-            raise _refusal(label, dialect, part, node)
-        found = mapper(node)
-        if found is None:
-            raise _refusal(label, dialect, part, node)
-        if found is not node:
-            # A rewrite repeats its operand, so the operand's size is capped; one more level of
-            # nesting than the cap allows is built before it is refused, which is bounded.
-            _check_size(operand, label)
-            node.replace(found)
+        _translate_node(node, dialect, mapper, label)
