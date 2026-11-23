@@ -508,8 +508,18 @@ def test_a_pinned_run_whose_plan_records_p0_is_read_as_p1() -> None:
     assert recorded_grade({"privacyGrade": "P0"}, pinned=False) is Pattern.P0
 
 
+def test_a_pinned_run_records_only_what_a_pinned_run_can_be_graded() -> None:
+    from flux_engine.stages._grades import recorded_grade
+
+    for held in ("P1", "P3", "P5"):  # the profile's P1 or P3, or a generator's weaker P5
+        assert recorded_grade({"privacyGrade": held}, pinned=True) is Pattern(held)
+    for stronger in ("P0", "P4"):
+        assert recorded_grade({"privacyGrade": stronger}, pinned=True) is Pattern.P1
+
+
+@pytest.mark.parametrize("stronger", ["P0", "P4"])
 def test_a_hand_edited_plan_that_records_p0_does_not_pass_the_floor_of_a_pinned_run(
-    tmp_path: Path,
+    tmp_path: Path, stronger: str
 ) -> None:
     from flux_engine.core.digest import build_plan_digest
 
@@ -520,7 +530,7 @@ def test_a_hand_edited_plan_that_records_p0_does_not_pass_the_floor_of_a_pinned_
     path = state / "runs" / run_id / "plan.json"
     document = json.loads(path.read_text(encoding="utf-8"))
     document.pop("planDigest")
-    document["privacyGrade"] = "P0"
+    document["privacyGrade"] = stronger
     # the forger also rewrites the digest so that the plan agrees with itself
     document["planDigest"] = build_plan_digest(document).ref.value
     path.write_text(json.dumps(document), encoding="utf-8")

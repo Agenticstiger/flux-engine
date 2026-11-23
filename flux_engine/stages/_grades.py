@@ -60,6 +60,11 @@ __all__ = [
 GRADE_KEY = "privacyGrade"
 
 
+#: What a plan of a pinned run can record: ``grade_profile`` returns ``P1`` or ``P3``, and
+#: :func:`with_generators` only takes the weaker of that and a plugin's grade.
+_PINNED_GRADES = frozenset({Pattern.P1, Pattern.P3, Pattern.P5})
+
+
 def generator_grades(simulation: Mapping[str, Any], *, where: str) -> Tuple[Pattern, ...]:
     """The grade each generator plugin *simulation* declares states, in ``exposeId`` order."""
     return tuple(item.grade for item in declared_generators(simulation, where=where))
@@ -77,8 +82,9 @@ def recorded_grade(plan_document: Mapping[str, Any], *, pinned: bool) -> Pattern
     """The grade a recorded plan names: ``P0`` when the Simulation pins no profile, ``P1`` when it
     pins one and the plan names no grade (a plan from an engine that did not grade).
 
-    A pinned run is never ``P0``: a plan that records ``P0`` for one is read as ``P1``, so a plan
-    edited by hand cannot lower the grade of a run that pins a profile.
+    A pinned run records only ``P1`` or ``P3`` (what the profile grades) or ``P5`` (what a generator
+    plugin can weaken that to). A plan that records any other grade for one, ``P0`` or ``P4``, was
+    edited by hand and is read as ``P1``, so it cannot raise the grade of a run that pins a profile.
 
     ``pinned`` is read from the Simulation (``profile_reference``), never from the plan's own
     ``profileDigest``, which a plan written by hand could leave out. The plugins a bundle declares
@@ -91,7 +97,7 @@ def recorded_grade(plan_document: Mapping[str, Any], *, pinned: bool) -> Pattern
         grade = Pattern(recorded)
     except ValueError:
         return Pattern.P1
-    return Pattern.P1 if grade is Pattern.P0 else grade
+    return grade if grade in _PINNED_GRADES else Pattern.P1
 
 
 def require_recorded_minimum(
