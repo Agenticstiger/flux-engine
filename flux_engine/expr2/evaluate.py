@@ -86,6 +86,11 @@ class Session:
 def _number(value: Any) -> Optional[Fraction]:
     if value is None:
         return None
+    kind = type(value)
+    if kind is int:  # the exact types first; a bool or a subclass takes the checks below
+        return Fraction(value)
+    if kind is Decimal and value.is_finite():
+        return Fraction(value)
     if isinstance(value, bool):
         raise TypeError("a number column holds a number, not a bool")
     if isinstance(value, Fraction):

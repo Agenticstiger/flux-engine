@@ -84,6 +84,11 @@ from flux_engine.cli.commands.verify import _cmd_verify, check_sample_options
 
 __all__ = ["build_parser", "main"]
 
+#: The commands that generate rows, and so may start a worker pool when ``--jobs`` is above one.
+#: ``verify`` is left out: it reads a pool only when a receipt holds many rows (see
+#: ``flux_engine.stages.verify``), and that is known only once the receipt is read.
+_GENERATING_COMMANDS = frozenset({"plan", "apply", "run", "replay"})
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the full ``fluxsim`` argparse tree.
@@ -313,6 +318,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         _check_options(args, parser)
         if args.command == "describe" and not args.self_:
             _children(parser)["describe"].error("describe requires --self")
+        if args.command in _GENERATING_COMMANDS:
+            # Before the stage's own imports, load and compile, so that the forkserver's
+            # import of what a worker needs runs beside them (see stages._prewarm).
+            from flux_engine.stages._prewarm import start_forkserver_early
+
+            start_forkserver_early(getattr(args, "jobs", None))
         return _run_command(dispatch[args.command], args)
 
     if args.command == "accuracy":

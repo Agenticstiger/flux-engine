@@ -62,6 +62,12 @@ from flux_engine.generator.rows import GeneratorPlan, generate_row_slice, writte
 from flux_engine.generator.rules import new_tally
 from flux_engine.seam.contract import CompiledExpose
 from flux_engine.seam.emit import frame_rows
+from flux_engine.stages._prewarm import (
+    children_keep_the_working_directory_off_their_path,
+    children_without_the_working_directory,
+    cpu_jobs,
+    pool_context,
+)
 from flux_stats.integers import is_int_at_least
 
 __all__ = [
@@ -97,23 +103,6 @@ def require_jobs(jobs: int) -> int:
     return jobs
 
 
-def cpu_jobs() -> int:
-    """One job per CPU this process may run on.
-
-    ``os.process_cpu_count`` (Python 3.13) and, before it,
-    ``os.sched_getaffinity`` where the platform has it count the CPUs the
-    process's affinity allows; ``os.cpu_count`` is the machine's count. None
-    of them knows a container's CPU quota: under one, give ``--jobs`` a number.
-    """
-    if hasattr(os, "process_cpu_count"):
-        count = os.process_cpu_count()
-    elif hasattr(os, "sched_getaffinity"):
-        count = len(os.sched_getaffinity(0))
-    else:  # pragma: no cover - platforms with neither
-        count = os.cpu_count()
-    return max(1, count or 1)
-
-
 def _platform_max_workers() -> int:
     """The most workers one pool may have here."""
     return _WINDOWS_MAX_WORKERS if sys.platform == "win32" else sys.maxsize
@@ -132,15 +121,10 @@ def workers_for(rows: int, jobs: int) -> int:
     return max(1, min(cap, rows // MIN_ROWS_PER_JOB))
 
 
-def _children_keep_the_working_directory_off_their_path() -> bool:
-    """Whether a spawned worker honours ``PYTHONSAFEPATH``.
-
-    A child gets this interpreter's flags. Under ``-E`` it ignores the
-    environment, so the variable that keeps the current directory off its
-    path would be ignored too, unless ``-P`` (or ``-I``, which implies both)
-    keeps it off anyway. In that one case the rows are made in this process.
-    """
-    return bool(sys.flags.safe_path) or not sys.flags.ignore_environment
+_children_keep_the_working_directory_off_their_path = (
+    children_keep_the_working_directory_off_their_path
+)
+_children_without_the_working_directory = children_without_the_working_directory
 
 
 class _WorkerBudget:
@@ -275,42 +259,6 @@ def _exit_with_parent() -> None:
     threading.Thread(target=watch, name="flux-parent-watch", daemon=True).start()
 
 
-_SPAWN_LOCK = threading.Lock()
-
-
-@contextmanager
-def _children_without_the_working_directory() -> Iterator[None]:
-    """Start processes with the current directory off their import path.
-
-    A spawned worker starts as ``python -c ...``, and ``-c`` puts the current
-    directory first on ``sys.path``, where ``fluxsim`` itself never has it. A
-    ``multiprocessing`` or ``selectors`` package in the directory a run was
-    started from, a checked-out bundle for one, would then be imported in
-    place of the standard library's, in every worker. ``PYTHONSAFEPATH``
-    (Python 3.11) tells a new interpreter to leave that directory off. It is
-    set while the pool starts its processes, under a lock, and put back
-    afterwards, since ``os.environ`` belongs to the whole process.
-
-    Nothing is changed when the children start safe already: this
-    interpreter runs with ``-P`` (multiprocessing passes its flags on), or
-    the variable is set, as ``fluxsim`` sets it for its own process. Then no
-    other thread ever sees the environment change.
-    """
-    if sys.flags.safe_path or os.environ.get("PYTHONSAFEPATH"):
-        yield
-        return
-    with _SPAWN_LOCK:
-        previous = os.environ.get("PYTHONSAFEPATH")
-        os.environ["PYTHONSAFEPATH"] = "1"
-        try:
-            yield
-        finally:
-            if previous is None:
-                os.environ.pop("PYTHONSAFEPATH", None)
-            else:
-                os.environ["PYTHONSAFEPATH"] = previous
-
-
 def _run_slice(task: Tuple[str, int, int, bool]) -> _SliceOutcome:
     """Generate, render and frame rows ``start`` to ``stop - 1`` of one emit, in a worker."""
     expose_id, start, stop, keep_rows = task
@@ -335,22 +283,8 @@ def _run_slice(task: Tuple[str, int, int, bool]) -> _SliceOutcome:
 
 
 def _context() -> Any:
-    """The multiprocessing context workers start from: a forkserver with the engine loaded.
-
-    The server imports :mod:`flux_engine.stages._parallel`, and with it the
-    engine, once; each worker is then a fork of that interpreter, which starts
-    in milliseconds where a ``spawn`` imports the engine again. The preload
-    applies only to the server's first start in a process, and the server is
-    started inside :func:`_children_without_the_working_directory`, so it, and
-    every worker it forks, keeps the current directory off its import path.
-    """
-    import multiprocessing
-
-    if sys.platform != "win32" and "forkserver" in multiprocessing.get_all_start_methods():
-        context = multiprocessing.get_context("forkserver")
-        context.set_forkserver_preload([__name__])
-        return context
-    return multiprocessing.get_context("spawn")
+    """The multiprocessing context workers start from (see :func:`~flux_engine.stages._prewarm.pool_context`)."""
+    return pool_context()
 
 
 @dataclass(frozen=True)
@@ -405,7 +339,7 @@ class FramedPool:
 
         self._emits = dict(emits)
         self._workers = workers
-        with _children_without_the_working_directory():
+        with children_without_the_working_directory():
             # The pool starts its resource tracker when it is built; its workers start
             # as the first slices are submitted, and so does the forkserver, so
             # `submit` runs under the same guard.
@@ -434,7 +368,7 @@ class FramedPool:
             (first + start, first + stop)
             for start, stop in _slices(last - first, self._workers * _SLICES_PER_WORKER)
         ]
-        with _children_without_the_working_directory():
+        with children_without_the_working_directory():
             pending = self._pool.map(
                 _run_slice, [(expose_id, start, stop, keep_rows) for start, stop in slices]
             )
@@ -489,13 +423,13 @@ def map_in_pool(
     with reserve_workers(wanted) as workers:
         if workers <= 1:
             return [function(task) for task in tasks]
-        with _children_without_the_working_directory():
+        with children_without_the_working_directory():
             pool = ProcessPoolExecutor(
                 max_workers=workers, mp_context=_context(), initializer=initializer
             )
         failed = True
         try:
-            with _children_without_the_working_directory():
+            with children_without_the_working_directory():
                 results = list(pool.map(function, tasks))
             failed = False
             return results
