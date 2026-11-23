@@ -77,6 +77,9 @@ def recorded_grade(plan_document: Mapping[str, Any], *, pinned: bool) -> Pattern
     """The grade a recorded plan names: ``P0`` when the Simulation pins no profile, ``P1`` when it
     pins one and the plan names no grade (a plan from an engine that did not grade).
 
+    A pinned run is never ``P0``: a plan that records ``P0`` for one is read as ``P1``, so a plan
+    edited by hand cannot lower the grade of a run that pins a profile.
+
     ``pinned`` is read from the Simulation (``profile_reference``), never from the plan's own
     ``profileDigest``, which a plan written by hand could leave out. The plugins a bundle declares
     are not read here: :func:`with_generators` takes the weaker of this and theirs.
@@ -85,9 +88,10 @@ def recorded_grade(plan_document: Mapping[str, Any], *, pinned: bool) -> Pattern
         return Pattern.P0
     recorded = plan_document.get(GRADE_KEY)
     try:
-        return Pattern(recorded)
+        grade = Pattern(recorded)
     except ValueError:
         return Pattern.P1
+    return Pattern.P1 if grade is Pattern.P0 else grade
 
 
 def require_recorded_minimum(
