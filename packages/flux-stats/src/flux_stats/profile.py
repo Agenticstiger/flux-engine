@@ -84,6 +84,7 @@ from flux_stats.definitions import QUANTILE_BINNED, level_order
 from flux_stats.fixedpoint import MAX_FRACTIONAL_BITS
 from flux_stats.noise import (
     Accounting,
+    Follow,
     Noise,
     Spent,
     check_budget,
@@ -204,6 +205,9 @@ _FORMS_OF_1_4_0: Mapping[str, str] = MappingProxyType(
         "cliqueSelection": "a cliqueSelection",
         "groupByBins": "a groupByBins",
         "follows": "a privacyUnit.follows",
+        "relationshipGroupBy": "a groupBy or groupByBins on a relationship's statistic",
+        "relationshipNoise": "a noise block on a relationship's statistic",
+        "linkNoise": "a noise block on a statistic with groupByLink",
     }
 )
 
@@ -1006,6 +1010,19 @@ def _disclosure_rule(value: Any, where: str) -> DisclosureRule:
     )
 
 
+@dataclass(frozen=True)
+class _Charge:
+    """The sensitivity of a release of one statistic's cells, for one unit of privacy.
+
+    ``l1`` is the L1 sensitivity and ``l2_squared`` the squared L2 sensitivity of the noisy vector
+    under adding or removing one unit, the figures :func:`flux_stats.noise.read_noise` checks a share
+    against.
+    """
+
+    l1: Fraction
+    l2_squared: Fraction
+
+
 def _statistic_optional(
     noisy_in: Optional[str],
     grouped_by: Optional[Set[str]],
@@ -1013,14 +1030,15 @@ def _statistic_optional(
     plain_group: bool,
     query_group: bool = False,
     binned_by: Optional[Set[str]] = None,
+    relationship: bool = False,
 ) -> Tuple[str, ...]:
     """The keys a statistic may carry beyond the required four, as its section allows them."""
     optional: Tuple[str, ...] = ("bins", "levels", "level")
-    if noisy_in is not None:
+    if noisy_in is not None or relationship:
         optional += ("noise",)
     if grouped_by is not None:
         optional += ("groupBy",) if plain_group else ("groupBy", "groupByLink", "per")
-        if binned_by is not None and not plain_group:
+        if binned_by is not None and (relationship or not plain_group):
             optional += ("groupByBins",)
     if query_group:
         optional += ("groupBy",)
@@ -1115,6 +1133,8 @@ class _Reader:
         plain_group: bool = False,
         query_group: bool = False,
         binned_by: Optional[Set[str]] = None,
+        charge_of: Optional[Callable[[str], _Charge]] = None,
+        most_children: Optional[int] = None,
     ) -> StatisticEntry:
         """Read one statistic of a section that allows *kinds*.
 
@@ -1125,13 +1145,24 @@ class _Reader:
         no ``groupByLink`` and no ``per``. *query_group* lets a query's statistic carry a ``groupBy``
         (format ``1-3-0``). *binned_by* are the number and timestamp columns of the table other
         than the statistic's own, which a ``groupByBins`` may name (format ``1-4-0``).
+
+        A relationship's statistic passes *charge_of*, which gives the sensitivity of a noisy release
+        of it at the place it is read, or refuses (ADR 0037 decision 2), and *most_children*, the cap
+        of the followed relationship when the unit follows it: no bin of its histogram may start
+        above the cap. Both belong to format ``1-4-0``, as a ``groupBy`` of such a statistic does.
         """
         raw = _mapping(
             value,
             where,
             required=("definition", "sampleSize", "disclosure", "groups"),
             optional=_statistic_optional(
-                noisy_in, grouped_by, of, plain_group, query_group, binned_by
+                noisy_in,
+                grouped_by,
+                of,
+                plain_group,
+                query_group,
+                binned_by,
+                charge_of is not None,
             ),
         )
         entry = self._read_definition(raw, where, kinds, domain)
@@ -1142,6 +1173,8 @@ class _Reader:
             group_by, key_form = self._query_group_by(raw, where)
         else:
             group_by, key_form = self._group_by(raw, where, grouped_by, numeric_by)
+        if charge_of is not None and group_by is not None:
+            self.require_1_4_0("relationshipGroupBy", f"{where}.groupBy")
         link = self._group_by_link(raw, where, group_by)
         bin_grouping = self._group_by_bins(raw, where, group_by, link, binned_by)
         if bin_grouping is not None:
@@ -1149,8 +1182,6 @@ class _Reader:
         per = self._read_per(raw, where, group_by, link, bin_grouping, column_of)
         if per and "noise" in raw:
             raise refuse(f"{where}.noise", _MOVES_AN_ENTITY + " in a statistic with per")
-        if link is not None and "noise" in raw:
-            raise refuse(f"{where}.noise", _MOVES_AN_ENTITY + " in a statistic with groupByLink")
         measured = self._measured(raw, where, of)
         disclosure = raw["disclosure"]
         if not isinstance(disclosure, str) or disclosure not in self.rules:
@@ -1158,7 +1189,9 @@ class _Reader:
         cells = (
             (len(bins) - 1) if entry.kind == "marginalHistogram" or entry.binned else len(levels)
         )
-        noise = self._noise(raw, where, entry, noisy_in)
+        if most_children is not None:
+            self._below_the_cap(entry, bins, where, most_children)
+        noise = self._noise(raw, where, entry, noisy_in, link=link, charge_of=charge_of)
         groups = self._groups(
             raw["groups"],
             f"{where}.groups",
@@ -1422,27 +1455,81 @@ class _Reader:
         where: str,
         entry: StatisticDefinition,
         noisy_in: Optional[str],
+        *,
+        link: Optional[LinkGrouping] = None,
+        charge_of: Optional[Callable[[str], _Charge]] = None,
     ) -> Optional[Noise]:
-        """The statistic's ``noise`` block, read and entered in the budget, or ``None``."""
+        """The statistic's ``noise`` block, read and entered in the budget, or ``None``.
+
+        A count table of a column is charged its table's reach (ADR 0037 decision 2): one row lands
+        in one cell, so a unit that contributes ``m`` rows moves ``m`` cells by one each. A statistic
+        grouped by a link is charged the same, and only where the parent's rows never change or the
+        unit follows the link. A relationship's statistic is charged by *charge_of*.
+        """
         if "noise" not in raw:
             return None
+        at = f"{where}.noise"
         if entry.kind not in _NOISY_KINDS:
-            raise refuse(
-                f"{where}.noise", f"is carried by {sorted(_NOISY_KINDS)} statistics, as counts"
-            )
-        accounting = self._require_account(f"{where}.noise")
-        assert noisy_in is not None  # the key is optional only where a statistic may carry it
-        reach = self._reach(noisy_in, f"{where}.noise", accounting)
-        # a count table: one row lands in one cell, so a unit of reach m moves m cells by one each
-        noise = read_noise(
-            raw["noise"],
-            f"{where}.noise",
-            accounting,
-            l1=Fraction(reach),
-            l2_squared=Fraction(reach * reach),
-        )
+            raise refuse(at, f"is carried by {sorted(_NOISY_KINDS)} statistics, as counts")
+        accounting = self._require_account(at)
+        if charge_of is not None:
+            self.require_1_4_0("relationshipNoise", at)
+            charge = charge_of(at)
+        else:
+            assert noisy_in is not None  # the key is optional only where a statistic may carry it
+            reach = self._reach(noisy_in, at, accounting)
+            if link is not None:
+                self.require_1_4_0("linkNoise", at)
+                self._link_is_followed_or_fixed(noisy_in, link, at, accounting)
+            charge = _Charge(Fraction(reach), Fraction(reach * reach))
+        noise = read_noise(raw["noise"], at, accounting, l1=charge.l1, l2_squared=charge.l2_squared)
         self.parts.append((where, noise))
         return noise
+
+    @staticmethod
+    def _link_is_followed_or_fixed(
+        table: str, link: LinkGrouping, where: str, accounting: Accounting
+    ) -> None:
+        """A noisy statistic grouped by a link: the parent's rows never change, or the unit follows it.
+
+        A unit that removed a row of the parent without its rows of the statistic's table would move
+        them into the group that is never written. When the parent is not reached its rows are the
+        same in every neighbouring data set; when the link's relationship is listed in ``follows``
+        a removed parent takes its rows with it, and they are counted in the reach.
+        """
+        if accounting.reach(link.parent_table) == 0:
+            return
+        listed = any(
+            (entry.parent_table, entry.parent_columns, entry.child_table, entry.child_columns)
+            == (link.parent_table, link.parent_columns, table, link.child_columns)
+            for entry in accounting.follows
+        )
+        if not listed:
+            raise refuse(
+                where,
+                "a statistic grouped by a link carries noise only when the unit does not reach the "
+                "parent table, or follows the link's relationship: a parent row that moves alone "
+                "would move its rows into a group that is never written",
+            )
+
+    @staticmethod
+    def _below_the_cap(
+        entry: StatisticDefinition, bins: Tuple[Fraction, ...], where: str, cap: int
+    ) -> None:
+        """On a followed relationship no parent has more than ``cap`` children (ADR 0037).
+
+        A bin whose least count, the least whole number at or above its lower edge, is above the cap
+        holds no parent, whatever its count says, so a profile that states one is refused.
+        """
+        if not bins or not (entry.kind == "marginalHistogram" or entry.binned):
+            return
+        for position, edge in enumerate(bins[:-1]):
+            if max(0, -((-edge.numerator) // edge.denominator)) > cap:
+                raise refuse(
+                    f"{where}.bins[{position}]",
+                    "a bin of a followed relationship starts above the unit's cap on children "
+                    "per parent",
+                )
 
     def _require_account(self, where: str) -> Accounting:
         if self.accounting is None:
@@ -2319,17 +2406,86 @@ class _Reader:
         if len(ends[0][1]) != len(ends[1][1]):
             raise refuse(where, "a parent and a child key have the same number of columns")
         structural = self._structural(raw, where)
+        parent_table, child_table = ends[0][0], ends[1][0]
+        follow = self._followed(parent_table, ends[0][1], child_table, ends[1][1])
+        parent_columns = tables[parent_table].columns
         return RelationshipEntry(
             parent_table=ends[0][0],
             parent_columns=ends[0][1],
             child_table=ends[1][0],
             child_columns=ends[1][1],
             statistics=self.statistics(
-                raw["statistics"], f"{where}.statistics", kinds=_RELATIONSHIP_KINDS
+                raw["statistics"],
+                f"{where}.statistics",
+                kinds=_RELATIONSHIP_KINDS,
+                grouped_by={n for n, c in parent_columns.items() if c.domain == CATEGORY},
+                binned_by={n for n, c in parent_columns.items() if c.domain in _ORDERED_DOMAINS},
+                plain_group=True,
+                charge_of=lambda at: self._relationship_charge(
+                    parent_table, child_table, follow, at
+                ),
+                most_children=follow.max_children if follow is not None else None,
             ),
             structural=structural,
             dates=self._relationship_dates(raw, where, tables, ends[0][0], ends[1][0]),
             exposure=self._exposure(raw, where, tables, ends[0][0]),
+        )
+
+    def _followed(
+        self,
+        parent: str,
+        parent_columns: Tuple[str, ...],
+        child: str,
+        child_columns: Tuple[str, ...],
+    ) -> Optional[Follow]:
+        """The ``follows`` entry that names this relationship, or ``None`` when the unit does not follow it."""
+        if self.accounting is None:
+            return None
+        key = (parent, parent_columns, child, child_columns)
+        return next(
+            (
+                entry
+                for entry in self.accounting.follows
+                if (
+                    entry.parent_table,
+                    entry.parent_columns,
+                    entry.child_table,
+                    entry.child_columns,
+                )
+                == key
+            ),
+            None,
+        )
+
+    def _relationship_charge(
+        self, parent: str, child: str, follow: Optional[Follow], where: str
+    ) -> _Charge:
+        """The sensitivity of the children-per-parent histogram of a relationship (ADR 0037 decision 2).
+
+        Its records are the rows of the parent and its value a parent's number of children. Let
+        ``m_P`` and ``m_C`` be the reach of the two tables and ``m_C'`` the reach of the child less
+        this relationship's own share of it (``c * m_P`` when the unit follows it, else 0).
+
+        * ``m_P >= 1`` and ``m_C' = 0``: one unit adds or removes at most ``m_P`` records with their
+          children and changes no other record, so L1 and L2 are ``m_P``.
+        * ``m_P = 0`` and ``m_C >= 1``: each of the unit's ``m_C`` child rows moves one parent between
+          two count classes, so L1 is ``2 m_C``, L2 is ``sqrt(2) m_C`` and the squared L2 is
+          ``2 m_C^2``.
+        * Otherwise there is no bound the reader can state, and the noise is refused.
+        """
+        accounting = self._require_account(where)
+        m_parent = accounting.reach(parent)
+        m_child = accounting.reach(child)
+        others = m_child - (follow.max_children * m_parent if follow is not None else 0)
+        if m_parent >= 1 and others == 0:
+            return _Charge(Fraction(m_parent), Fraction(m_parent * m_parent))
+        if m_parent == 0 and m_child >= 1:
+            return _Charge(Fraction(2 * m_child), Fraction(2 * m_child * m_child))
+        raise refuse(
+            where,
+            "a relationship's histogram carries noise only where the unit reaches the parent table "
+            "and reaches the child table through this relationship alone, or reaches the child "
+            "table and not the parent table",
         )
 
     def _structural(self, raw: Mapping[str, Any], where: str) -> FrozenSet[str]:

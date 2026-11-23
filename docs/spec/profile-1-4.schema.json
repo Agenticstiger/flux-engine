@@ -876,6 +876,23 @@
               "$ref": "#/$defs/QuantileBinned"
             }
           ]
+        },
+        {
+          "properties": {
+            "groupBy": {
+              "description": "Format 1-4-0. A category column of the relationship's parent table: the parents are grouped by its value.",
+              "$ref": "#/$defs/Name"
+            },
+            "groupByBins": {
+              "description": "Format 1-4-0. A number or timestamp column of the relationship's parent table, grouped by these bins.",
+              "$ref": "#/$defs/BinGrouping"
+            },
+            "noise": {
+              "description": "Format 1-4-0, on a marginalHistogram/1 only (PROFILE-SPEC.md section 3a).",
+              "$ref": "#/$defs/Noise"
+            }
+          },
+          "required": []
         }
       ],
       "unevaluatedProperties": false

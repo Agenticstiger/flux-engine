@@ -280,16 +280,7 @@ def test_a_statistic_holds_at_most_one_of_group_by_group_by_link_group_by_bins_a
     _refused(_document(_histogram(per=["region"])), "per holds no groupBy")
 
 
-def test_a_period_a_query_a_relationship_and_a_history_statistic_take_no_grouping() -> None:
-    document = _document()
-    document["relationships"] = [
-        {
-            "parent": {"table": "t", "columns": ["age"]},
-            "child": {"table": "t", "columns": ["age"]},
-            "statistics": [_histogram()],
-        }
-    ]
-    _refused(document, "relationships[0].statistics[0]", "groupByBins")
+def test_a_query_statistic_takes_no_bin_grouping() -> None:
     document = _document()
     document["queries"] = [{"name": "q", "statistics": [_histogram()]}]
     _refused(document, "queries[0]")

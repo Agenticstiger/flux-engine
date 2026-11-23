@@ -158,6 +158,43 @@ def _everywhere() -> Dict[str, Any]:
     table["columnPairs"].append(
         {"columns": ["age", "usage"], "statistics": [_rank("kendallTau/1", "0.31")]}
     )
+    # a relationship's histogram of children per parent, from the unit's expose to a table it does
+    # not follow, and a statistic grouped by a link to a table the unit does not reach
+    columns["id"] = {"domain": "category"}
+    document["tables"]["usage_event"] = {"columns": {"sub_id": {"domain": "category"}}}
+    document["tables"]["plan_dim"] = {
+        "columns": {"id": {"domain": "category"}, "tier": {"domain": "category"}}
+    }
+    document["relationships"] = [
+        {
+            "parent": {"table": "subscriber", "columns": ["id"]},
+            "child": {"table": "usage_event", "columns": ["sub_id"]},
+            "statistics": [
+                {
+                    "definition": "marginalHistogram/1",
+                    "bins": ["0", "1", "5"],
+                    "sampleSize": {"min": 1000, "max": 9999},
+                    "disclosure": "noisy",
+                    "noise": copy.deepcopy(NOISE),
+                    "groups": [{"group": "", "status": "F", "noisyCounts": ["400", "600"]}],
+                }
+            ],
+        }
+    ]
+    columns["channel"]["statistics"] = [
+        _histogram(
+            ["a", "b"],
+            groupByLink={
+                "parent": {"table": "plan_dim", "columns": ["id"]},
+                "columns": ["plan"],
+                "column": "tier",
+            },
+            groups=[
+                {"group": tier, "status": "F", "noisyCounts": ["10", "20"]}
+                for tier in ("gold", "iron")
+            ],
+        )
+    ]
     return document
 
 
@@ -169,6 +206,9 @@ FIXTURES = {
     ),
     "the 1-4-0 example of cliques and a selection": lambda: _load(
         SPEC / "profile-1-4-cliques-example.json"
+    ),
+    "the 1-4-0 example of a unit that follows its children": lambda: _load(
+        SPEC / "profile-1-4-follows-example.json"
     ),
     "every place a noise block sits": _everywhere,
 }
@@ -197,11 +237,13 @@ def test_the_everywhere_profile_holds_a_part_in_every_kind_of_place() -> None:
         "cliqueSelection.selection",
         "cliqueSelection.domain",
         "calendar",
+        "columns.channel",
     ):
         assert any(f".{section}" in where for where in places), section
     assert sum(".columnPairs[" in where for where in places) == 3
     assert any(".datePairs[0]" in where for where in places)
-    assert len(places) == 12
+    assert sum(where.startswith("profile.relationships[0]") for where in places) == 1
+    assert len(places) == 14
 
 
 def test_the_spent_figure_adds_the_share_of_every_part_including_a_rank_correlation() -> None:
@@ -224,10 +266,11 @@ def test_a_profile_whose_only_noisy_statistics_are_rank_correlations_is_p3() -> 
 
 def test_the_spent_figure_of_every_place_adds_up() -> None:
     accounting = accounting_of(_everywhere())
-    assert accounting is not None and accounting.parts == 12
-    # the example's 0.1362, six blocks of 0.05 (two histograms, two cliques, a calendar, an order),
-    # the second pair's Kendall's 0.0162 and the selection's 0.01 and the domain's 0.02
-    assert accounting.spent == {"rho": "0.4824"}
+    assert accounting is not None and accounting.parts == 14
+    # the example's 0.1362, eight blocks of 0.05 (two histograms, two cliques, a calendar, an order,
+    # a relationship's histogram and a statistic grouped by a link), the second pair's Kendall's
+    # 0.0162 and the selection's 0.01 and the domain's 0.02
+    assert accounting.spent == {"rho": "0.5824"}
 
 
 def test_a_selection_share_alone_is_a_part_so_a_profile_of_shares_is_not_spent_by_nothing() -> None:

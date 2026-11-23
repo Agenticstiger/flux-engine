@@ -18,7 +18,7 @@ from typing import Any, Dict
 import pytest
 
 from flux_stats.errors import FluxError
-from flux_stats.profile import SCHEMA_URL_1_3_0, parse_profile
+from flux_stats.profile import SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0, parse_profile
 
 pytestmark = pytest.mark.unit
 
@@ -63,10 +63,12 @@ def test_a_noisy_statistic_with_per_is_refused() -> None:
     assert "between two cells" in message and "sensitivity of 1" in message
 
 
-def _linked(parent: Dict[str, Any], column: str, noisy: bool) -> Dict[str, Any]:
+def _linked(
+    parent: Dict[str, Any], column: str, noisy: bool, schema: str = SCHEMA_URL_1_3_0
+) -> Dict[str, Any]:
     """The noisy example, its first statistic grouped by a link of the given parent."""
     document = copy.deepcopy(PRIVATE)
-    document["_schemaURL"] = SCHEMA_URL_1_3_0
+    document["_schemaURL"] = schema
     table = document["tables"]["subscriber"]
     table["columns"]["id"] = {"domain": "category"}
     table["columns"]["referrer"] = {"domain": "category"}
@@ -90,16 +92,34 @@ SELF_LINK = {"table": "subscriber", "columns": ["id"]}
 PARENT_LINK = {"table": "plan", "columns": ["id"]}
 
 
+def _with_plan(document: Dict[str, Any]) -> Dict[str, Any]:
+    document["tables"]["plan"] = {
+        "columns": {"id": {"domain": "category"}, "channel": {"domain": "category"}}
+    }
+    return document
+
+
 @pytest.mark.parametrize("parent", [SELF_LINK, PARENT_LINK], ids=["self-link", "parent-link"])
-def test_a_noisy_statistic_with_group_by_link_is_refused(parent: Dict[str, Any]) -> None:
-    document = _linked(parent, "referrer", noisy=True)
-    if parent is PARENT_LINK:
-        document["tables"]["plan"] = {
-            "columns": {"id": {"domain": "category"}, "channel": {"domain": "category"}}
-        }
+def test_a_noisy_statistic_with_group_by_link_is_a_form_of_1_4_0(parent: Dict[str, Any]) -> None:
+    document = _with_plan(_linked(parent, "referrer", noisy=True))
     message = _refused(document)
     assert "tables.subscriber.columns.region.statistics[0].noise" in message
-    assert "groupByLink" in message and "sensitivity of 1" in message
+    assert "groupByLink" in message and "1-4-0" in message
+
+
+def test_a_noisy_statistic_grouped_by_a_link_to_a_parent_the_unit_reaches_is_refused() -> None:
+    # the link's parent is the unit's own expose: a parent row that moves alone would move its rows
+    # into a group that is never written
+    document = _linked(SELF_LINK, "referrer", noisy=True, schema=SCHEMA_URL_1_4_0)
+    message = _refused(document)
+    assert "tables.subscriber.columns.region.statistics[0].noise" in message
+    assert "grouped by a link" in message and "follows the link" in message
+
+
+def test_a_noisy_statistic_grouped_by_a_link_to_a_fixed_parent_reads_as_a_count_table() -> None:
+    document = _with_plan(_linked(PARENT_LINK, "referrer", noisy=True, schema=SCHEMA_URL_1_4_0))
+    profile = parse_profile(document)
+    assert len(profile.parts) == 3  # the grouped histogram and the example's two cliques
 
 
 def test_a_statistic_with_group_by_link_and_no_noise_still_reads() -> None:
