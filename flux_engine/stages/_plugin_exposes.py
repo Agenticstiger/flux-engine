@@ -25,13 +25,15 @@ expose in this release, and is refused (``FLX-3105``) rather than supported half
 
 from __future__ import annotations
 
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.core.errors import FluxError
+from flux_engine.expr2.errors import Expr2Error
 from flux_engine.generator.plugin import PluginExpose, plugin_expose
 from flux_engine.generator.relations import related_columns
-from flux_engine.generator.rules import FORM_DEPENDENCY, RulePlan
+from flux_engine.generator.rules import FORM_DEPENDENCY, RulePlan, parent_condition
 from flux_engine.generator.statistics import statistics_from_fidelity
+from flux_engine.seam.counts import count_entries_of
 from flux_engine.seam.coverage import printable
 from flux_engine.seam.generators import GeneratorDeclaration
 from flux_engine.seam.keys import compile_keys
@@ -125,6 +127,12 @@ def _refuse_own(
     for column in expose.columns:
         given = statistics[column.name]
         linked = [] if given.given_link is None else [given.given_link[1]]
+        if given.allocation is not None and column.name in names:
+            raise _refusal(
+                here,
+                f"column {column.name!r} declares allocation: exact, and the plugin generates "
+                "its values, so the engine has no levels to allot",
+            )
         parents = [*given.parents, *linked]
         if parents and (column.name in names or any(parent in names for parent in parents)):
             raise _refusal(here, f"column {column.name!r} is drawn given another column")
@@ -148,6 +156,40 @@ def _paths_of(
     return paths, weights
 
 
+def _refuse_parent_whens(
+    resolved: ResolvedEmit, keys: Any, plugins: Mapping[str, PluginExpose], here: str
+) -> None:
+    """Refuse a counts ``parentWhen`` of *resolved* that reads a column a plugin generates."""
+    for entry in count_entries_of(resolved.extension, resolved.expose_id):
+        if entry.parent_when is None:
+            continue
+        relationship = next(
+            (
+                item
+                for item in keys.expose(resolved.expose_id).relationships
+                if item.name == entry.relationship
+            ),
+            None,
+        )
+        target = None if relationship is None else plugins.get(relationship.target)
+        if relationship is None or target is None:
+            continue
+        try:
+            condition, _ = parent_condition(
+                resolved.contract_document, relationship.target, entry.parent_when
+            )
+        except Expr2Error:
+            continue  # the relation step refuses a text that does not check, naming its key
+        read = sorted(set(condition.reads) & set(target.names))
+        if read:
+            raise _refusal(
+                here,
+                f"counts[{resolved.expose_id}.{entry.relationship}].parentWhen reads "
+                f"{', '.join(repr(name) for name in read)} of {relationship.target!r}, an expose "
+                "a plugin generates, whose values are not there when the children are counted",
+            )
+
+
 def _refuse_reads(
     resolved: ResolvedEmit,
     rules: Optional[RulePlan],
@@ -160,6 +202,14 @@ def _refuse_reads(
         return
     paths, weights = _paths_of(resolved, rules)
     here = f"{printable(where)}: emit {resolved.expose_id!r}"
+    for rule in () if rules is None else rules.rules:
+        if rule.summary is not None and rule.summary[0] in plugins:
+            raise _refusal(
+                here,
+                f"rule {rule.id!r} is an aggregate over {rule.summary[0]!r}, an expose a plugin "
+                "generates, whose values are not there when the summary is made",
+            )
+    _refuse_parent_whens(resolved, keys, plugins, here)
     for path in paths:
         current = resolved.expose_id
         for name in path:

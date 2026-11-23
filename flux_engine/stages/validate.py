@@ -183,7 +183,9 @@ def validate(bundle_directory: Union[str, Path], *, tolerate_additive: bool = Tr
                     )
                 )
             # The counts and weights `plan` refuses when it lays the relationships out.
-            check_relations_declared(resolved, cast.simulation, sim_id=simulation_id, strict=strict)
+            check_relations_declared(
+                resolved, cast.simulation, sim_id=simulation_id, strict=strict, plugins=plugins
+            )
             # Consumer queries: every view and query is checked against the exposes' schema, as
             # `plan` checks them, so a text `verify` would refuse is refused before any apply.
             check_consumer_sql(cast.simulation, resolved, where=simulation_id)

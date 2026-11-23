@@ -1507,25 +1507,30 @@ def check_relations_declared(
     *,
     sim_id: str,
     strict: bool,
+    plugins: Optional[Mapping[str, PluginExpose]] = None,
 ) -> None:
     """Refuse the counts and weights ``plan`` refuses when it lays the relationships out, offline.
 
     One call into :func:`_relate_emits`, the relation step ``plan`` runs, over plans built as
     ``validate`` builds them, with the init pre-flight's placeholder digest. A bundle whose
     relation checks read what only a run knows is left to ``plan``: an emit that takes its rows
-    from the run (no declared ``rows``), a reference expose, and an emit whose plan cannot be
-    built. So it refuses nothing ``plan`` accepts.
+    from the run (no declared ``rows``) and a reference expose. An emit's plan is built as
+    ``plan`` builds it, so what the plan refuses (an allocation on a key, a ``nullFraction`` a
+    column cannot hold, no rows for a parent to reference) is refused here with ``plan``'s code.
+    So it refuses nothing ``plan`` accepts.
     """
     counter_based = _kernels.new_plan_is_counter_based()
     version = GENERATOR_VERSION_2 if counter_based else GENERATOR_VERSION
     planned: List[_PlannedEmit] = []
     for resolved in resolved_emits:
+        plugin = (plugins or {}).get(resolved.expose_id)
         if resolved.is_reference or (
-            resolved.fidelity is not None and not resolved.declared_row_count
+            (resolved.fidelity is not None or plugin is not None)
+            and resolved.declared_row_count is None
         ):
             return
         expose = resolved.compile()
-        if resolved.fidelity is None:
+        if resolved.fidelity is None and plugin is None:
             planned.append(
                 _PlannedEmit(
                     expose=expose,
@@ -1545,22 +1550,18 @@ def check_relations_declared(
             windowed=simulation.get("spec", {}).get("timeBounds") is not None,
             time_bounds=simulation.get("spec", {}).get("timeBounds"),
         )
-        try:
-            built = build_plan(
-                expose,
-                sim_id=sim_id,
-                seam_digest="sha256:" + "0" * 64,
-                rows=resolved.declared_row_count or 1,
-                fidelity=resolved.fidelity,
-                time_bounds=simulation.get("spec", {}).get("timeBounds"),
-                related=related_columns(resolved.keys),
-                rules=rules,
-                generator_version=version,
-            )
-        except Expr2Error:
-            raise
-        except FluxError:
-            return
+        built = build_plan(
+            resolved.compile_planned(),
+            sim_id=sim_id,
+            seam_digest="sha256:" + "0" * 64,
+            rows=resolved.declared_row_count or 0,
+            fidelity=resolved.fidelity,
+            time_bounds=simulation.get("spec", {}).get("timeBounds"),
+            related=_related_of(resolved),
+            rules=rules,
+            generator_version=version,
+            plugin=plugin,
+        )
         planned.append(
             _PlannedEmit(expose=expose, plan=built, mapping=None, coverage=coverage_of_plan(built))
         )
