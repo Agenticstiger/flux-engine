@@ -89,6 +89,7 @@ from typing import (
     Dict,
     FrozenSet,
     Hashable,
+    Iterator,
     List,
     Mapping,
     Optional,
@@ -4311,6 +4312,13 @@ class _ChildRows(Sequence[Any]):
             raise TypeError("the children of a row are read one at a time")
         return self._context.child(self._plan, self._run[index])
 
+    def __iter__(self) -> Iterator[Any]:
+        # The same rows as indexing yields, in order, without the per-row index check.
+        child = self._context.child
+        plan = self._plan
+        for row in self._run:
+            yield child(plan, row)
+
 
 class _Pass:
     """What one :func:`apply_rules` call needs for dependencies: the run root and a small memo."""
@@ -4338,6 +4346,12 @@ class _Pass:
         self._chunks: Dict[str, Tuple[int, Tuple[Tuple[Any, ...], ...]]] = {}
         #: The rows this pass has finished, by row, for the previous version of the next row.
         self.finished: Dict[int, Tuple[Any, ...]] = {}
+        #: The child rows each summary of the row last asked for reads, so that the rules of one
+        #: row that summarise the same children lay them out once (the layout is a function of
+        #: the row alone).
+        self._children_row = -1
+        self._children_held: Dict[Tuple[str, str], "_ChildRows"] = {}
+        self._child_plans: Optional[Dict[Tuple[str, str], "GeneratorPlan"]] = None
 
     def reader(self) -> Any:
         if self._reader is None:
@@ -4423,25 +4437,32 @@ class _Pass:
         The plan carries the plan of each child it summarises (``sums``); the layout is worked out
         through that plan's own foreign key, as the child's pass does (ADR 0016 section 5).
         """
-        child = next(
-            (
-                plan
-                for source, via, plan in self.plan.sums
-                if source == expose and via == relationship
-            ),
-            None,
-        )
+        if row != self._children_row:
+            self._children_row = row
+            self._children_held = {}
+        held = self._children_held.get((expose, relationship))
+        if held is not None:
+            return held
+        plans = self._child_plans
+        if plans is None:
+            plans = {}
+            for source, via, plan in self.plan.sums:
+                plans.setdefault((source, via), plan)  # the first plan that matches is the one read
+            self._child_plans = plans
+        child = plans.get((expose, relationship))
         if child is None:  # pragma: no cover - relate_plans attaches every plan a summary reads
             raise KeyError((expose, relationship))
-        return _ChildRows(self, child, self.reader().children_of(child, relationship, row))
+        held = _ChildRows(self, child, self.reader().children_of(child, relationship, row))
+        self._children_held[(expose, relationship)] = held
+        return held
 
     def child(self, plan: "GeneratorPlan", row: int) -> _Followed:
         """Row *row* of the child *plan*, as its own pass writes it, read a chunk of rows at a time."""
-        from flux_engine.generator import rows as _rows
-
         number, offset = divmod(row, _CHILD_CHUNK)
         held = self._chunks.get(plan.expose.expose_id)
         if held is None or held[0] != number:
+            from flux_engine.generator import rows as _rows
+
             start = number * _CHILD_CHUNK
             stop = min(start + _CHILD_CHUNK, plan.rows)
             held = (number, _rows.generate_row_slice(plan, start, stop, root=_run_root(self)))

@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from fractions import Fraction
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.expr2.errors import FLX_6112, Expr2Error
 from flux_stats.fidelity import split_type_params
@@ -293,6 +293,17 @@ def _nfc(text: str) -> str:
     return unicodedata.normalize("NFC", text) if isinstance(text, str) else text
 
 
+_POW10: List[int] = [10**power for power in range(64)]
+
+
+def _pow10(power: int) -> int:
+    return _POW10[power] if 0 <= power < 64 else 10**power
+
+
+def _where(column_name: str, row: Optional[int]) -> str:
+    return f"column {column_name!r}" + ("" if row is None else f", row {row}")
+
+
 def fit(
     value: object, column: ColumnType, *, column_name: str, row: Optional[int] = None
 ) -> object:
@@ -307,15 +318,19 @@ def fit(
     if value is None or column.kind is not Kind.NUMBER:
         return value
     assert isinstance(value, Fraction), "a number is a Fraction inside flux-expr/2"
-    where = f"column {column_name!r}" + ("" if row is None else f", row {row}")
     if column.scale is not None:
-        scaled = value * 10**column.scale
-        if scaled.denominator != 1:
+        # value * 10**scale, in integers: the product is whole when the value's denominator
+        # divides 10**scale, and then its numerator is the units.
+        factor = _pow10(column.scale)
+        denominator = value.denominator
+        if factor % denominator:
+            where = _where(column_name, row)
             raise Expr2Error(
                 FLX_6112, f"{where}: the value has more decimal places than scale {column.scale}"
             )
-        units = scaled.numerator
-        if column.precision is not None and abs(units) >= 10**column.precision:
+        units = value.numerator * (factor // denominator)
+        if column.precision is not None and abs(units) >= _pow10(column.precision):
+            where = _where(column_name, row)
             raise Expr2Error(
                 FLX_6112,
                 f"{where}: the value needs more than the {column.precision - column.scale} "
@@ -324,6 +339,7 @@ def fit(
         if column.integer_range is not None:
             low, high = column.integer_range
             if not low <= units <= high:
+                where = _where(column_name, row)
                 raise Expr2Error(
                     FLX_6112,
                     f"{where}: the value is outside the integer range of {column.declared!r}",
