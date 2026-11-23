@@ -80,6 +80,7 @@ from typing import (
     Callable,
     Dict,
     FrozenSet,
+    Iterator,
     List,
     Mapping,
     Optional,
@@ -1441,34 +1442,39 @@ class RelationReader:
         is ``FLX-3403``, and so is a final value of the given column that is no class of it.
         """
         names = [column_plan.column.name for column_plan in parent.columns]
-        classify = None
-        position = -1
-        if counted is not None and counted.given is not None:
-            classify = _given_classifier(parent, counted)
-            position = names.index(counted.given)
+        classify = (
+            None if counted is None or counted.given is None else _given_classifier(parent, counted)
+        )
+        position = -1 if classify is None or counted is None else names.index(str(counted.given))
         found: List[int] = []
         values: List[Fraction] = []
         classes: List[int] = []
-        for start in range(0, parent.rows, _WEIGHT_CHUNK):
-            stop = min(start + _WEIGHT_CHUNK, parent.rows)
-            chunk = _rows.generate_row_slice(parent, start, stop, root=self.root)
-            holds = condition.holds(names, chunk, start) if condition is not None else None
-            for offset, final_row in enumerate(chunk):
-                if holds is not None and not holds[offset]:
-                    continue
-                row = start + offset
-                found.append(row)
-                if classify is not None:
-                    classes.append(classify(final_row[position], row))
-                if hook is not None:
-                    values.append(
-                        _expected_of(hook.expected(parent, row, final_row, relationship), row)
-                    )
+        for row, final_row in self._eligible(parent, condition, names):
+            found.append(row)
+            if classify is not None:
+                classes.append(classify(final_row[position], row))
+            if hook is not None:
+                values.append(
+                    _expected_of(hook.expected(parent, row, final_row, relationship), row)
+                )
         return (
             None if condition is None else found,
             None if hook is None else values,
             None if classify is None else classes,
         )
+
+    def _eligible(
+        self,
+        parent: "_rows.GeneratorPlan",
+        condition: Optional[ParentCondition],
+        names: Sequence[str],
+    ) -> Iterator[Tuple[int, Tuple[Any, ...]]]:
+        """The rows of *parent* on which *condition* is TRUE on the final row, a chunk at a time."""
+        for start in range(0, parent.rows, _WEIGHT_CHUNK):
+            stop = min(start + _WEIGHT_CHUNK, parent.rows)
+            chunk = _rows.generate_row_slice(parent, start, stop, root=self.root)
+            holds = condition.holds(names, chunk, start) if condition is not None else None
+            yield from _eligible_rows(chunk, start, holds)
 
     def children_of(
         self, child_plan: "_rows.GeneratorPlan", relationship: str, parent_row: int
@@ -3699,6 +3705,27 @@ def _hooked(
     return found
 
 
+def _eligible_rows(
+    chunk: Sequence[Tuple[Any, ...]], start: int, holds: Optional[Sequence[bool]]
+) -> Iterator[Tuple[int, Tuple[Any, ...]]]:
+    """The rows of a chunk that begins at row *start* on which the condition holds, with their numbers."""
+    for offset, final_row in enumerate(chunk):
+        if holds is None or holds[offset]:
+            yield start + offset, final_row
+
+
+def _given_members(
+    entry: Optional[CountsEntry],
+    given: Optional[Tuple[Tuple[Tuple[str, Tuple[str, ...]], ...], Tuple[str, ...]]],
+) -> Dict[str, Any]:
+    """The ``given`` members of a counted layout: the column, every class's weights and the defaulted ones."""
+    return {
+        "given": None if entry is None else entry.given,
+        "children_given": None if given is None else given[0],
+        "given_default": () if given is None else given[1],
+    }
+
+
 def _check_counted(
     plans: Mapping[str, "_rows.GeneratorPlan"],
     counts: Mapping[str, Mapping[str, CountsEntry]],
@@ -4984,15 +5011,7 @@ class _Resolver:
             and history.parent is not None
             and relationship.name == history.parent.relationship
         ):
-            # The entities are the parent's children: the layout totals E, not the rows.
-            return CountedPick(
-                children=history.parent.children,
-                child_rows=history.pick.entities,
-                minimum=history.parent.min_children,
-                parent_when=shape.conditions.get(relationship.name),
-                expected_count=None if history.hook is None else history.hook[1],
-                hook=None if history.hook is None else history.hook[0],
-            )
+            return _Resolver._parent_pick(shape, history, relationship)
         entry = shape.counts.get(relationship.name)
         bound = shape.hooked.get(relationship.name)
         if entry is None and bound is None:
@@ -5006,9 +5025,23 @@ class _Resolver:
             expected_count=None if bound is None else bound[1],
             hook=None if bound is None else bound[0],
             one_to_one=relationship.cardinality == "one_to_one",
-            given=None if entry is None else entry.given,
-            children_given=None if given is None else given[0],
-            given_default=() if given is None else given[1],
+            **_given_members(entry, given),
+        )
+
+    @staticmethod
+    def _parent_pick(
+        shape: _Shape, history: _HistoryShape, relationship: Relationship
+    ) -> CountedPick:
+        """The layout of a history's parent relationship: the entities are the parent's children."""
+        assert history.parent is not None
+        # The layout totals E, not the rows.
+        return CountedPick(
+            children=history.parent.children,
+            child_rows=history.pick.entities,
+            minimum=history.parent.min_children,
+            parent_when=shape.conditions.get(relationship.name),
+            expected_count=None if history.hook is None else history.hook[1],
+            hook=None if history.hook is None else history.hook[0],
         )
 
     def composite(self, expose_id: str, key: Tuple[str, ...]) -> CompositeKey:

@@ -41,6 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal
 from fractions import Fraction
+from itertools import combinations
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple
 
 from flux_engine.author.basis import Label, assumed
@@ -293,24 +294,13 @@ def declare_copula(
 
     published = _read_pairs(table, expose.expose_id)
     result = CopulaPlan()
-    every = [tokens for pairs in published.values() for tokens in (item.tokens for item in pairs)]
     if not counter_based or whole is not None:
         why = _NO_KERNEL if not counter_based else f"no copula is written: {whole}"
-        result.passed += [(tokens, why) for tokens in every]
+        result.passed += [(item.tokens, why) for pairs in published.values() for item in pairs]
         result.notes.append(why)
         return result
-    parents = _given_parents(expose.columns)
     out = _Why()
-    candidates: List[ColumnPlan] = []
-    named = {name for pair in published for name in pair}
-    for plan in expose.columns:
-        if expose.kinds.get(plan.name) not in _NUMBER_KINDS or plan.name not in named:
-            continue
-        reason = _why_not(expose, plan, parents, by_dates) or _tie_reason(expose, plan)
-        if reason is not None:
-            out.add(plan.name, reason)
-        else:
-            candidates.append(plan)
+    candidates = _candidates(expose, published, by_dates, out)
     names = _settle(candidates, published, out)
     if len(names) < 2:
         _pass_all(result, published, out, None, names)
@@ -325,6 +315,27 @@ def declare_copula(
         for name, reason in out.by_column.items()
     ]
     return result
+
+
+def _candidates(
+    expose: Any,
+    published: Mapping[FrozenSet[str], List[_Pair]],
+    by_dates: Set[str],
+    out: _Why,
+) -> List[ColumnPlan]:
+    """The columns that could join: named by a published pair and not decided elsewhere, tied too often."""
+    parents = _given_parents(expose.columns)
+    named = {name for pair in published for name in pair}
+    candidates: List[ColumnPlan] = []
+    for plan in expose.columns:
+        if expose.kinds.get(plan.name) not in _NUMBER_KINDS or plan.name not in named:
+            continue
+        reason = _why_not(expose, plan, parents, by_dates) or _tie_reason(expose, plan)
+        if reason is not None:
+            out.add(plan.name, reason)
+        else:
+            candidates.append(plan)
+    return candidates
 
 
 def _settle(
@@ -375,11 +386,10 @@ def _measure_of(
 ) -> Optional[str]:
     """Kendall's when the profile publishes any pair of *names* in it, else Spearman's, else ``None``."""
     for measure in ("kendall", "spearman"):
-        for first in range(len(names)):
-            for second in range(first + 1, len(names)):
-                for item in published.get(frozenset((names[first], names[second])), ()):
-                    if item.measure == measure and item.value is not None:
-                        return measure
+        for first, second in combinations(names, 2):
+            for item in published.get(frozenset((first, second)), ()):
+                if item.measure == measure and item.value is not None:
+                    return measure
     return None
 
 

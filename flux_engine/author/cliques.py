@@ -170,14 +170,29 @@ def _check_column(
     plan = plans.get(name)
     if plan is None or name not in kinds:
         raise _refuse(f"{where} is not a column of the contract's expose")
-    numeric = kinds[name] in _NUMERIC
-    if not numeric and kinds[name] not in _CATEGORICAL:
+    numeric = _check_kind(where, kinds[name], clique.binned(name))
+    _check_plan(where, plan, name in determined, numeric)
+    if numeric:
+        _check_edges(where, kinds[name], clique, name, context)
+        return
+    _check_levels(where, plan, clique, name, kinds[name])
+
+
+def _check_kind(where: str, kind: LogicalKind, binned: bool) -> bool:
+    """Whether the column is a number or timestamp one; refuse a kind a clique cannot hold or list so."""
+    numeric = kind in _NUMERIC
+    if not numeric and kind not in _CATEGORICAL:
         raise _refuse(f"{where} is not a categorical, number or timestamp column")
-    if numeric and not clique.binned(name):
+    if numeric and not binned:
         raise _refuse(f"{where} is a number or timestamp column, and a clique lists its bins")
-    if not numeric and clique.binned(name):
+    if not numeric and binned:
         raise _refuse(f"{where} lists bins, and is not a number or timestamp column")
-    if name in determined:
+    return numeric
+
+
+def _check_plan(where: str, plan: ColumnPlan, determined: bool, numeric: bool) -> None:
+    """Refuse a column that a rule sets, that is never drawn given another, or that holds nulls."""
+    if determined:
         raise _refuse(f"{where} is set by a rule of the contract, so it is not drawn")
     if plan.fixed is not None:
         raise _refuse(f"{where} is {plan.fixed}, which is never drawn given another")
@@ -187,9 +202,12 @@ def _check_column(
         numeric and Decimal(str(plan.declaration["nullFraction"])) == 0
     ):
         raise _refuse(f"{where} holds nulls, and a clique column holds none (FLX-3402)")
-    if numeric:
-        _check_edges(where, kinds[name], clique, name, context)
-        return
+
+
+def _check_levels(
+    where: str, plan: ColumnPlan, clique: CliqueEntry, name: str, kind: LogicalKind
+) -> None:
+    """A categorical column lists the levels its contract declares, or takes them when it has none."""
     levels = clique.levels_of(name)
     if plan.level_names is not None:
         if set(plan.level_names) != set(levels):
@@ -197,7 +215,7 @@ def _check_column(
                 f"{where} lists levels that are not the levels the contract declares "
                 f"({', '.join(printable(level) for level in plan.level_names)})"
             )
-    elif kinds[name] is LogicalKind.STRING:
+    elif kind is LogicalKind.STRING:
         _adopt_levels(plan, clique, levels)
     else:
         raise _refuse(f"{where} is a boolean whose levels are not false and true")

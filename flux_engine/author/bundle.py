@@ -53,7 +53,12 @@ from flux_engine.author.catalogue import (
     reference_table,
 )
 from flux_engine.author.children import count_children, declare_counted, spread_children
-from flux_engine.author.children_given import GivenParent, given_children, with_summed_groups
+from flux_engine.author.children_given import (
+    Given,
+    GivenParent,
+    given_children,
+    with_summed_groups,
+)
 from flux_engine.author.cliques import draw_cliques
 from flux_engine.author.columns import (
     MOST_PLACES,
@@ -1598,6 +1603,24 @@ def _drop_zero_nulls(parent: AuthoredExpose, column: str) -> None:
             plan.labels = [label for label in plan.labels if label.tokens != ("nullFraction",)]
 
 
+def _take_given(
+    given: Given,
+    child_plan: ColumnPlan,
+    parent_expose: AuthoredExpose,
+    said: Tuple[List[Tuple[str, str]], str],
+) -> None:
+    """Record what a given column of a ``counts`` entry assumes, and the null share it drops."""
+    notes, name = said
+    for sentence in given.assumptions:
+        child_plan.assumptions.append(sentence)
+        notes.append((name, sentence))
+    if given.column is None:
+        return
+    if given.drop_null_fraction:
+        _drop_zero_nulls(parent_expose, given.column)
+    child_plan.how += f", its counts given {printable(given.column)} of the parent"
+
+
 def _lay_out_children(
     entry: Mapping[str, Any],
     tokens: Tuple[str, ...],
@@ -1650,13 +1673,7 @@ def _lay_out_children(
             counts.update(given.members)
             used += given.used
             unused += given.unused
-            for sentence in given.assumptions:
-                child_plan.assumptions.append(sentence)
-                notes.append((f"{child_table}.{declared.name}", sentence))
-            if given.drop_null_fraction and given.column is not None:
-                _drop_zero_nulls(parent_expose, given.column)
-            if given.column is not None:
-                child_plan.how += f", its counts given {printable(given.column)} of the parent"
+            _take_given(given, child_plan, parent_expose, (notes, f"{child_table}.{declared.name}"))
         return _Placed(used, unused, counts, notes, True, None)
     spread = spread_children(
         entry,
@@ -2190,6 +2207,23 @@ def _unused_block(ledger: Ledger) -> List[Dict[str, Any]]:
     return block
 
 
+def _expose_gaps(expose: AuthoredExpose) -> List[Gap]:
+    """The assumptions of one written expose that stand in for what the profile did not publish."""
+    base = ("extensions", EXTENSION_NAMESPACE, "emits", expose.expose_id)
+    choices = {plan.name: set(plan.choices) for plan in expose.columns}
+    found: List[Gap] = []
+    for subject, sentence in expose.assumptions:
+        if subject == "rows" and expose.projected is not None:
+            continue
+        if subject == "rows" and sentence == expose.rows_note:
+            found.append(Gap(render_pointer(base + ("rows",)), sentence))
+        elif subject == "copula":
+            found.append(Gap(render_pointer(base + ("fidelity", COPULA_KEY)), sentence))
+        elif sentence not in choices.get(subject, set()):
+            found.append(Gap(render_pointer(base + ("fidelity", "columns", subject)), sentence))
+    return found
+
+
 def _gaps(
     exposes: Sequence[AuthoredExpose], window_note: Optional[Tuple[str, str]]
 ) -> Tuple[Gap, ...]:
@@ -2200,22 +2234,10 @@ def _gaps(
     overrules it). Each is placed at the emit's ``rows`` or at the column's
     block in the Simulation, so one ``--allow`` can accept a column's gaps.
     """
-    namespace = ("extensions", EXTENSION_NAMESPACE, "emits")
     found: List[Gap] = []
     for expose in exposes:
-        if expose.skipped is not None:
-            continue
-        base = namespace + (expose.expose_id,)
-        choices = {plan.name: set(plan.choices) for plan in expose.columns}
-        for subject, sentence in expose.assumptions:
-            if subject == "rows" and expose.projected is not None:
-                continue
-            if subject == "rows" and sentence == expose.rows_note:
-                found.append(Gap(render_pointer(base + ("rows",)), sentence))
-            elif subject == "copula":
-                found.append(Gap(render_pointer(base + ("fidelity", COPULA_KEY)), sentence))
-            elif sentence not in choices.get(subject, set()):
-                found.append(Gap(render_pointer(base + ("fidelity", "columns", subject)), sentence))
+        if expose.skipped is None:
+            found.extend(_expose_gaps(expose))
     if window_note is not None:
         found.append(Gap(render_pointer(("spec", "timeBounds")), window_note[1]))
     return tuple(found)

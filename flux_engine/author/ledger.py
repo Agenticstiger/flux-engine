@@ -87,6 +87,15 @@ _GROUPED_REASON = (
 )
 
 
+def _pair_statistics(pairs: Any) -> Iterator[Tuple[Tuple[str, ...], Mapping[str, Any]]]:
+    """Each statistic of each ``columnPairs`` entry, with the tokens that point at it below the table."""
+    for index, item in enumerate(pairs if isinstance(pairs, list) else ()):
+        statistics = item.get("statistics") if isinstance(item, Mapping) else None
+        for position, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
+            if isinstance(statistic, Mapping):
+                yield ("columnPairs", str(index), "statistics", str(position)), statistic
+
+
 @dataclass
 class LedgerEntry:
     """One statistic or metric of the profile, and what the bundle made of it."""
@@ -296,20 +305,15 @@ class Ledger:
 
     def _rank_reasons(self, base: Tuple[str, ...], pairs: Any) -> None:
         """Give a rank correlation, and a Pearson correlation, of a column pair its own reason."""
-        for index, item in enumerate(pairs if isinstance(pairs, list) else ()):
-            statistics = item.get("statistics") if isinstance(item, Mapping) else None
-            for position, statistic in enumerate(
-                statistics if isinstance(statistics, list) else ()
-            ):
-                entry = self._entries.get(
-                    base + ("columnPairs", str(index), "statistics", str(position))
-                )
-                if entry is None or entry.state != UNUSED or not isinstance(statistic, Mapping):
-                    continue
-                if statistic.get("definition") in _RANK_DEFINITIONS:
-                    entry.note = _RANK_REASON
-                elif statistic.get("definition") == _CORRELATION:
-                    entry.note = _CORRELATION_REASON
+        for tokens, statistic in _pair_statistics(pairs):
+            entry = self._entries.get(base + tokens)
+            if entry is None or entry.state != UNUSED:
+                continue
+            definition = statistic.get("definition")
+            if definition in _RANK_DEFINITIONS:
+                entry.note = _RANK_REASON
+            elif definition == _CORRELATION:
+                entry.note = _CORRELATION_REASON
 
     def _history(self, base: Tuple[str, ...], history: Mapping[str, Any]) -> None:
         """The statistics of a table's ``history`` (profile format 1-3-0), each unused until read."""

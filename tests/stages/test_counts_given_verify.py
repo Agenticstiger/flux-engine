@@ -372,13 +372,8 @@ def _edge_ms(text: str) -> int:
     return parse_date_days(text) * MS_PER_DAY
 
 
-def test_a_relationship_given_a_binned_column_is_scored_per_bin_of_the_profiles_edges(
-    tmp_path: Path,
-) -> None:
-    lists = '{ "2026-07-01": ["1", "0", "0"], "2026-09-01": ["0", "0", "1"] }'
-    target = _binned_bundle(tmp_path, lists)
-    outcome = pipeline.execute(target, kernel=KERNEL_V2)
-    invoice, lines = outcome.emit("invoice"), outcome.emit("invoice_line")
+def _edge_spreads(invoice: Any, lines: Any) -> Dict[str, Dict[int, int]]:
+    """The run's invoices counted by their number of lines, for each bin of ``issued_on``."""
     names, line_names = list(invoice.expose.column_names), list(lines.expose.column_names)
     held: Dict[Any, int] = {}
     for row in lines.rows:
@@ -390,25 +385,29 @@ def test_a_relationship_given_a_binned_column_is_scored_per_bin_of_the_profiles_
         edge = EDGES[0] if issued < EDGES[1] else EDGES[1] if issued < EDGES[2] else EDGES[2]
         number = held.get(row[names.index("invoice_id")], 0)
         spreads[edge][number] = spreads[edge].get(number, 0) + 1
-    line_bins = ["1", "2", "4", "7"]
+    return spreads
 
-    def binned(spread: Dict[int, int]) -> List[int]:
-        found = [0, 0, 0]
-        for number, parents in spread.items():
-            found[0 if number < 2 else 1 if number < 4 else 2] += parents
-        return found
 
+def _edge_groups(spreads: Dict[str, Dict[int, int]]) -> List[Dict[str, Any]]:
+    """The profile's groups of the histogram of lines per invoice, one for each bin of ``issued_on``."""
     keys = [str(_edge_ms(edge)) for edge in EDGES]
     groups = []
     for index, edge in enumerate(EDGES[:-1]):
-        cells = binned(spreads[edge])
+        cells = [0, 0, 0]
+        for number, parents in spreads[edge].items():
+            cells[0 if number < 2 else 1 if number < 4 else 2] += parents
         groups.append(
             {"group": keys[index], "k": sum(cells), "binCounts": cells, "status": "F"}
             if sum(cells)
             else {"group": keys[index], "status": "S"}
         )
+    return groups
+
+
+def _binned_profile(groups: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """A profile whose lines per invoice are grouped by the bins of ``issued_on``."""
     column = {"domain": "category"}
-    profile = {
+    return {
         "_producer": "urn:example:test-profiler",
         "_schemaURL": SCHEMA_URL_1_4_0,
         "encoding": {"fractionalBits": 16, "rounding": "floor"},
@@ -424,7 +423,7 @@ def test_a_relationship_given_a_binned_column_is_scored_per_bin_of_the_profiles_
                 "statistics": [
                     {
                         "definition": "marginalHistogram/1",
-                        "bins": line_bins,
+                        "bins": ["1", "2", "4", "7"],
                         "groupByBins": {
                             "column": "issued_on",
                             "bins": [str(_edge_ms(e)) for e in EDGES],
@@ -437,6 +436,16 @@ def test_a_relationship_given_a_binned_column_is_scored_per_bin_of_the_profiles_
             }
         ],
     }
+
+
+def test_a_relationship_given_a_binned_column_is_scored_per_bin_of_the_profiles_edges(
+    tmp_path: Path,
+) -> None:
+    lists = '{ "2026-07-01": ["1", "0", "0"], "2026-09-01": ["0", "0", "1"] }'
+    target = _binned_bundle(tmp_path, lists)
+    outcome = pipeline.execute(target, kernel=KERNEL_V2)
+    invoice, lines = outcome.emit("invoice"), outcome.emit("invoice_line")
+    profile = _binned_profile(_edge_groups(_edge_spreads(invoice, lines)))
     document = _scorecard(tmp_path, profile, bundle=target)
     _valid_1_5(document)
     row = _row(document, "children:invoice_line.invoice")

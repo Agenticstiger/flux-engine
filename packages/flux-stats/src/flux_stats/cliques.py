@@ -245,27 +245,8 @@ def read_clique_2(
     most :data:`MOST_CELLS` cells. A clique with an ``estimate`` is refused: this format reads
     measured cliques only.
     """
-    if not isinstance(value, Mapping):
-        raise refuse(where, f"expected an object, got {type(value).__name__}")
-    if "estimate" in value:
-        raise refuse(f"{where}.estimate", _NOT_READ)
-    allowed = {"definition", "columns", "domains", "noisyCounts", "noise"}
-    unknown = sorted({str(key) for key in value} - allowed)
-    if unknown:
-        raise refuse(where, f"unknown key {unknown[0]!r}")
-    for key in ("definition", "columns", "domains", "noisyCounts", "noise"):
-        if key not in value:
-            raise refuse(where, f"missing key {key!r}")
-    if value["definition"] != CLIQUE_DEFINITION_2:
-        raise refuse(f"{where}.definition", f"a clique is {CLIQUE_DEFINITION_2}")
-    columns = tuple(read_texts(value["columns"], f"{where}.columns"))
-    if not 1 <= len(columns) <= MOST_CLIQUE_COLUMNS or len(set(columns)) != len(columns):
-        raise refuse(
-            f"{where}.columns",
-            f"a clique names 1 to {MOST_CLIQUE_COLUMNS} distinct columns",
-        )
-    if any(name not in domains for name in columns):
-        raise refuse(f"{where}.columns", "names a column that is no column of its table")
+    value = _clique_object(value, where)
+    columns = _clique_columns(value, where, domains)
     declared = value["domains"]
     if not isinstance(declared, list) or len(declared) != len(columns):
         raise refuse(f"{where}.domains", "one domain for each column of the clique")
@@ -273,26 +254,10 @@ def read_clique_2(
     edges: List[Tuple[Fraction, ...]] = []
     cells = 1
     for position, (name, one) in enumerate(zip(columns, declared, strict=True)):
-        at = f"{where}.domains[{position}]"
-        if not isinstance(one, Mapping) or len(one) != 1:
-            raise refuse(at, "a domain is an object with 'levels' or 'bins'")
-        key = next(iter(one))
-        if domains[name] == CATEGORY:
-            if key != "levels":
-                raise refuse(at, "a category column lists its levels")
-            names = tuple(read_texts(one["levels"], f"{at}.levels"))
-            if not names or names != level_order(set(names)):
-                raise refuse(f"{at}.levels", "levels are distinct and sorted, and at least one")
-            levels.append(names)
-            edges.append(())
-            cells *= len(names)
-        else:
-            if key != "bins":
-                raise refuse(at, "a number or timestamp column lists its bins")
-            cut = _decimal_edges(one["bins"], f"{at}.bins")
-            levels.append(tuple(edge_text(edge) for edge in cut[:-1]))
-            edges.append(cut)
-            cells *= len(cut) - 1
+        names, cut = _read_domain(one, domains[name] == CATEGORY, f"{where}.domains[{position}]")
+        levels.append(names)
+        edges.append(cut)
+        cells *= len(names)
         if cells > MOST_CELLS:
             raise refuse(f"{where}.domains", f"a clique holds at most {MOST_CELLS} cells")
     counts = value["noisyCounts"]
@@ -317,6 +282,57 @@ def read_clique_2(
         definition=CLIQUE_DEFINITION_2,
         edges=tuple(edges),
     )
+
+
+def _clique_object(value: Any, where: str) -> Mapping[str, Any]:
+    """The object of a ``cliqueMarginal/2``, with exactly its five keys and its definition."""
+    if not isinstance(value, Mapping):
+        raise refuse(where, f"expected an object, got {type(value).__name__}")
+    if "estimate" in value:
+        raise refuse(f"{where}.estimate", _NOT_READ)
+    allowed = {"definition", "columns", "domains", "noisyCounts", "noise"}
+    unknown = sorted({str(key) for key in value} - allowed)
+    if unknown:
+        raise refuse(where, f"unknown key {unknown[0]!r}")
+    for key in ("definition", "columns", "domains", "noisyCounts", "noise"):
+        if key not in value:
+            raise refuse(where, f"missing key {key!r}")
+    if value["definition"] != CLIQUE_DEFINITION_2:
+        raise refuse(f"{where}.definition", f"a clique is {CLIQUE_DEFINITION_2}")
+    return value
+
+
+def _clique_columns(
+    value: Mapping[str, Any], where: str, domains: Mapping[str, str]
+) -> Tuple[str, ...]:
+    """The distinct columns a clique names, each a column of its table."""
+    columns = tuple(read_texts(value["columns"], f"{where}.columns"))
+    if not 1 <= len(columns) <= MOST_CLIQUE_COLUMNS or len(set(columns)) != len(columns):
+        raise refuse(
+            f"{where}.columns",
+            f"a clique names 1 to {MOST_CLIQUE_COLUMNS} distinct columns",
+        )
+    if any(name not in domains for name in columns):
+        raise refuse(f"{where}.columns", "names a column that is no column of its table")
+    return columns
+
+
+def _read_domain(one: Any, category: bool, at: str) -> Tuple[Tuple[str, ...], Tuple[Fraction, ...]]:
+    """The levels a column of a clique counts over, and its edges (none for a category column)."""
+    if not isinstance(one, Mapping) or len(one) != 1:
+        raise refuse(at, "a domain is an object with 'levels' or 'bins'")
+    key = next(iter(one))
+    if category:
+        if key != "levels":
+            raise refuse(at, "a category column lists its levels")
+        names = tuple(read_texts(one["levels"], f"{at}.levels"))
+        if not names or names != level_order(set(names)):
+            raise refuse(f"{at}.levels", "levels are distinct and sorted, and at least one")
+        return names, ()
+    if key != "bins":
+        raise refuse(at, "a number or timestamp column lists its bins")
+    cut = _decimal_edges(one["bins"], f"{at}.bins")
+    return tuple(edge_text(edge) for edge in cut[:-1]), cut
 
 
 def check_table_limits(where: str, count: int, cells: int) -> None:

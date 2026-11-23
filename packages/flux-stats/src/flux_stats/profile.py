@@ -1074,6 +1074,14 @@ def _exposure_window(value: Any, where: str) -> Tuple[int, int]:
     return edges[0], edges[1]
 
 
+def _every_bin_published(groups: Sequence[Any], grouping: BinGrouping, where: str) -> None:
+    """Refuse (``FLX-5036``) a noisy statistic grouped by bins that leaves a bin without a group."""
+    if [group.key for group in groups] != list(grouping.keys):
+        raise refuse(
+            f"{where}.groups", "a noisy statistic grouped by bins publishes one group for every bin"
+        )
+
+
 class _Reader:
     """One profile's reading state: the rules a statistic may name."""
 
@@ -1169,16 +1177,9 @@ class _Reader:
         bins = self._bins(raw, where, entry)
         levels = self._levels(raw, where, entry)
         level = _quantile_level(raw, where, entry)
-        if query_group:
-            group_by, key_form = self._query_group_by(raw, where)
-        else:
-            group_by, key_form = self._group_by(raw, where, grouped_by, numeric_by)
-        if charge_of is not None and group_by is not None:
-            self.require_1_4_0("relationshipGroupBy", f"{where}.groupBy")
-        link = self._group_by_link(raw, where, group_by)
-        bin_grouping = self._group_by_bins(raw, where, group_by, link, binned_by)
-        if bin_grouping is not None:
-            key_form = bin_grouping.keys.__contains__
+        group_by, key_form, link, bin_grouping = self._read_grouping(
+            raw, where, (grouped_by, numeric_by, binned_by), (query_group, charge_of is not None)
+        )
         per = self._read_per(raw, where, group_by, link, bin_grouping, column_of)
         if per and "noise" in raw:
             raise refuse(f"{where}.noise", _MOVES_AN_ENTITY + " in a statistic with per")
@@ -1203,11 +1204,7 @@ class _Reader:
             key_form=key_form,
         )
         if noise is not None and bin_grouping is not None:
-            if [group.key for group in groups] != list(bin_grouping.keys):
-                raise refuse(
-                    f"{where}.groups",
-                    "a noisy statistic grouped by bins publishes one group for every bin",
-                )
+            _every_bin_published(groups, bin_grouping, where)
         found = StatisticEntry(
             definition=entry,
             sample_size=_sample_size(raw["sampleSize"], f"{where}.sampleSize"),
@@ -1228,6 +1225,38 @@ class _Reader:
             assert noisy_in is not None  # a link is read only in a column statistic
             self.links.append((where, noisy_in, found))
         return found
+
+    def _read_grouping(
+        self,
+        raw: Mapping[str, Any],
+        where: str,
+        columns: Tuple[Optional[Set[str]], Optional[Set[str]], Optional[Set[str]]],
+        form: Tuple[bool, bool],
+    ) -> Tuple[
+        Optional[str],
+        Optional[Callable[[str], bool]],
+        Optional[LinkGrouping],
+        Optional[BinGrouping],
+    ]:
+        """``groupBy``, the form of a group key, ``groupByLink`` and ``groupByBins`` of a statistic.
+
+        *columns* are the columns a ``groupBy`` of a categorical column, of a number column and a
+        ``groupByBins`` may name, and *form* says whether the statistic is a query's and whether it
+        is a relationship's.
+        """
+        grouped_by, numeric_by, binned_by = columns
+        query_group, relational = form
+        if query_group:
+            group_by, key_form = self._query_group_by(raw, where)
+        else:
+            group_by, key_form = self._group_by(raw, where, grouped_by, numeric_by)
+        if relational and group_by is not None:
+            self.require_1_4_0("relationshipGroupBy", f"{where}.groupBy")
+        link = self._group_by_link(raw, where, group_by)
+        bin_grouping = self._group_by_bins(raw, where, group_by, link, binned_by)
+        if bin_grouping is not None:
+            key_form = bin_grouping.keys.__contains__
+        return group_by, key_form, link, bin_grouping
 
     def _read_definition(
         self, raw: Mapping[str, Any], where: str, kinds: FrozenSet[str], domain: Optional[str]

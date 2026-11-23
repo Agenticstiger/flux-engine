@@ -39,30 +39,29 @@ def _load(path: Path) -> Dict[str, Any]:
     return document
 
 
-def _noise_blocks(node: Any) -> Iterator[Any]:
-    """Every value stored under a ``noise`` key, anywhere in a JSON document."""
+def _under(node: Any, name: str) -> Iterator[Any]:
+    """Every mapping stored under the key *name*, anywhere in a JSON document."""
     if isinstance(node, dict):
         for key, value in node.items():
-            if key == "noise" and isinstance(value, dict):
+            if key == name and isinstance(value, dict):
                 yield value
-            yield from _noise_blocks(value)
+            yield from _under(value, name)
     elif isinstance(node, list):
         for item in node:
-            yield from _noise_blocks(item)
+            yield from _under(item, name)
+
+
+def _noise_blocks(node: Any) -> Iterator[Any]:
+    """Every value stored under a ``noise`` key, anywhere in a JSON document."""
+    return _under(node, "noise")
 
 
 def _share_blocks(node: Any) -> Iterator[Any]:
     """Every ``selection`` and ``domain`` share of a ``cliqueSelection``, anywhere in a document."""
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key == "cliqueSelection" and isinstance(value, dict):
-                for name in ("selection", "domain"):
-                    if name in value:
-                        yield value[name]
-            yield from _share_blocks(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _share_blocks(item)
+    for block in _under(node, "cliqueSelection"):
+        for name in ("selection", "domain"):
+            if name in block:
+                yield block[name]
 
 
 def _histogram(levels: List[str], **more: Any) -> Dict[str, Any]:

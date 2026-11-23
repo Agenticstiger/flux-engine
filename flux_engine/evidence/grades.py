@@ -264,19 +264,11 @@ def _account(profile: Optional[Mapping[str, Any]]) -> Tuple[Optional[Accounting]
         return None, True
     assert profile is not None
     total = dict(block.get("privacyLoss") or {})
-    spent: Dict[str, Fraction] = {key: Fraction(0) for key in total}
     read = _read(profile)
     parts = read.parts if read is not None else None
-    for _, noise in parts or ():
-        for key in spent:
-            share = getattr(noise.loss, key, None)
-            if share is not None:
-                spent[key] += share
+    spent = _spent(total, parts or ())
     unit = block.get("privacyUnit")
-    stated = read.accounting if read is not None else None
-    reach: Tuple[Tuple[str, int], ...] = ()
-    if stated is not None:
-        reach = tuple(sorted({stated.unit: 1, **stated.reached}.items()))
+    follows, reach, fixed = _unit_reach(read)
     accounting = Accounting(
         measure=str(block.get("measure")),
         unit=str(unit.get("expose")) if isinstance(unit, Mapping) else "",
@@ -285,19 +277,38 @@ def _account(profile: Optional[Mapping[str, Any]]) -> Tuple[Optional[Accounting]
         spent={key: _decimal(value) for key, value in spent.items()},
         public_structure=block.get("publicStructure") is True,
         from_1_4=profile.get("_schemaURL") == SCHEMA_URL_1_4_0,
-        follows=(
-            tuple((f.parent_table, f.child_table, f.max_children) for f in stated.follows)
-            if stated is not None
-            else ()
-        ),
+        follows=follows,
         reached=reach,
-        fixed=(
-            tuple(sorted(name for name in read.tables if name not in dict(reach)))
-            if read is not None
-            else ()
-        ),
+        fixed=fixed,
     )
     return accounting, parts is not None
+
+
+def _spent(total: Mapping[str, Any], parts: Iterable[Any]) -> Dict[str, Fraction]:
+    """What the parts add up to, for each share of the stated total."""
+    spent: Dict[str, Fraction] = {key: Fraction(0) for key in total}
+    for _, noise in parts:
+        for key in spent:
+            share = getattr(noise.loss, key, None)
+            if share is not None:
+                spent[key] += share
+    return spent
+
+
+def _unit_reach(
+    read: Optional[Profile],
+) -> Tuple[Tuple[Tuple[str, str, int], ...], Tuple[Tuple[str, int], ...], Tuple[str, ...]]:
+    """The relationships the unit follows, the tables it reaches, and the tables it treats as fixed."""
+    if read is None:
+        return (), (), ()
+    stated = read.accounting
+    reach: Tuple[Tuple[str, int], ...] = ()
+    follows: Tuple[Tuple[str, str, int], ...] = ()
+    if stated is not None:
+        reach = tuple(sorted({stated.unit: 1, **stated.reached}.items()))
+        follows = tuple((f.parent_table, f.child_table, f.max_children) for f in stated.follows)
+    fixed = tuple(sorted(name for name in read.tables if name not in dict(reach)))
+    return follows, reach, fixed
 
 
 def accounting_of(profile: Optional[Mapping[str, Any]]) -> Optional[Accounting]:

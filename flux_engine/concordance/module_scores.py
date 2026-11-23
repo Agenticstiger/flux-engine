@@ -36,7 +36,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from decimal import Decimal
 from fractions import Fraction
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 from flux_engine.concordance.integrity import LinkIntegrity, ParentGroups
 from flux_engine.concordance.rule_shares import RuleShare
@@ -417,85 +417,17 @@ def grouped_children_row(
     edges = tuple(statistic.bins)
     run = _run_groups(parents, statistic, edges)
     allowed = tolerance if tolerance is not None else DEFAULT_CHILDREN_TOLERANCE
-    groups: List[Dict[str, Any]] = []
-    scores: List[Fraction] = []
-    distances: List[Fraction] = []
-    widenings: List[Fraction] = []
-    outside: List[int] = []
-    censored = 0
-    for ordinal, group in enumerate(statistic.groups):
-        held = group.statistic
-        published: Optional[Tuple[int, ...]] = (
-            held.bin_counts
-            if group.published and not group.suppressed_cells and held is not None and held.k > 0
-            else None
-        )
-        counts = run.get(group.key, (0,) * (len(edges) - 1))
-        run_parents = sum(counts)
-        reference_parents = sum(published) if published is not None else 0
-        distance: Optional[Fraction] = None
-        reach: Optional[Fraction] = None
-        outcome = CENSORED
-        if published is not None and run_parents > 0 and reference_parents > 0:
-            if statistic.cell_variance is not None:
-                reach = _group_reach(statistic, group)
-            if statistic.cell_variance is None or reach is not None:
-                distance = total_variation(counts, run_parents, published, reference_parents)
-                outcome = WITHIN if distance <= allowed + (reach or _ZERO) else OUTSIDE
-        if distance is not None:
-            scores.append(_ONE - distance)
-            distances.append(distance)
-            if reach is not None:
-                widenings.append(reach)
-            if outcome == OUTSIDE:
-                outside.append(ordinal)
-        else:
-            censored += 1
-        entry: Dict[str, Any] = {
-            "ordinal": ordinal,
-            "outcome": outcome,
-            "run": {"parents": run_parents, "binCounts": list(counts)},
-            "profile": (
-                None
-                if published is None
-                else {"parents": reference_parents, "binCounts": list(published)}
-            ),
-            "distance": None if distance is None else render_exact(distance),
-        }
-        if reach is not None and distance is not None:
-            entry["widening"] = render_exact(reach)
-        groups.append(entry)
+    scored = [
+        _score_group(statistic, group, ordinal, run.get(group.key), allowed)
+        for ordinal, group in enumerate(statistic.groups)
+    ]
+    distances = [item.distance for item in scored if item.distance is not None]
+    scores = [_ONE - distance for distance in distances]
+    outside = tuple(item.ordinal for item in scored if item.outcome == OUTSIDE)
     score = sum(scores, _ZERO) / len(scores) if scores else None
     outcome = CENSORED if not scores else (OUTSIDE if outside else WITHIN)
     name = f"{link.child}.{link.name}"
-    document: Dict[str, Any] = {
-        "propertyId": f"children:{name}",
-        "property": CHILDREN_PER_PARENT,
-        "relationship": link.name,
-        "child": link.child,
-        "parent": link.parent,
-        "dimension": "crossTable",
-        "outcome": outcome,
-        "score": None if score is None else render_exact(score),
-        "weight": "1",
-        "bins": [render_exact(edge) for edge in edges],
-        "groups": groups,
-        "tolerance": render_exact(allowed),
-        "distance": None if not distances else render_exact(max(distances)),
-    }
-    if statistic.group_by_bins is not None:
-        document["groupByBins"] = {
-            "column": statistic.group_by_bins.column,
-            "bins": [render_exact(edge) for edge in statistic.group_by_bins.bins],
-        }
-    else:
-        document["groupBy"] = statistic.group_by
-    if statistic.cell_variance is not None:
-        document["noise"] = {
-            "mechanism": statistic.noise.mechanism if statistic.noise is not None else "",
-            "cellVariance": render_exact(statistic.cell_variance),
-            "widening": render_exact(max(widenings, default=_ZERO)),
-        }
+    document = _grouped_document(link, statistic, scored, (outcome, score, allowed))
     return PropertyScore(
         expose_id=link.child,
         property_id=str(document["propertyId"]),
@@ -507,13 +439,130 @@ def grouped_children_row(
         outcome=outcome,
         score=score,
         groups_scored=len(scores),
-        groups_censored=censored,
-        groups_outside=tuple(outside),
+        groups_censored=len(scored) - len(scores),
+        groups_outside=outside,
         tolerance={"type": "absolute", "value": render_exact(allowed)},
         margin=None,
         document=document,
         label=f"children per parent of {name} by {given}",
     )
+
+
+class _ScoredGroup(NamedTuple):
+    """One group of a grouped children-per-parent row: its entry, its outcome, and what it measured."""
+
+    ordinal: int
+    outcome: str
+    distance: Optional[Fraction]
+    reach: Optional[Fraction]
+    entry: Dict[str, Any]
+
+
+def _score_group(
+    statistic: StatisticEntry,
+    group: ProfileGroup,
+    ordinal: int,
+    counts: Optional[Tuple[int, ...]],
+    allowed: Fraction,
+) -> _ScoredGroup:
+    """One group of the profile's statistic compared with the run's parents of it, by distance."""
+    published = _published_counts(group)
+    counts = counts if counts is not None else (0,) * (len(statistic.bins) - 1)
+    run_parents = sum(counts)
+    reference_parents = sum(published) if published is not None else 0
+    distance, reach, outcome = _compare_group(statistic, group, (counts, published), allowed)
+    profile = (
+        None if published is None else {"parents": reference_parents, "binCounts": list(published)}
+    )
+    entry: Dict[str, Any] = {
+        "ordinal": ordinal,
+        "outcome": outcome,
+        "run": {"parents": run_parents, "binCounts": list(counts)},
+        "profile": profile,
+        "distance": None if distance is None else render_exact(distance),
+    }
+    if reach is not None and distance is not None:
+        entry["widening"] = render_exact(reach)
+    return _ScoredGroup(ordinal, outcome, distance, reach, entry)
+
+
+def _compare_group(
+    statistic: StatisticEntry,
+    group: ProfileGroup,
+    sides: Tuple[Tuple[int, ...], Optional[Tuple[int, ...]]],
+    allowed: Fraction,
+) -> Tuple[Optional[Fraction], Optional[Fraction], str]:
+    """The distance of the run's counts from the group's published ones, the widening, the outcome.
+
+    Censored, with no distance, when the group was withheld, either side holds no parent, or a
+    noisy reference has no records to widen over.
+    """
+    counts, published = sides
+    run_parents = sum(counts)
+    if published is None or run_parents <= 0 or sum(published) <= 0:
+        return None, None, CENSORED
+    reach = _group_reach(statistic, group) if statistic.cell_variance is not None else None
+    if statistic.cell_variance is not None and reach is None:
+        return None, None, CENSORED
+    distance = total_variation(counts, run_parents, published, sum(published))
+    return distance, reach, WITHIN if distance <= allowed + (reach or _ZERO) else OUTSIDE
+
+
+def _published_counts(group: ProfileGroup) -> Optional[Tuple[int, ...]]:
+    """The counts a group publishes, or ``None`` when it was withheld or has a withheld cell."""
+    held = group.statistic
+    if group.published and not group.suppressed_cells and held is not None and held.k > 0:
+        return held.bin_counts
+    return None
+
+
+def _grouping_member(statistic: StatisticEntry) -> Dict[str, Any]:
+    """``groupByBins`` or ``groupBy``: how the profile's statistic groups the parents."""
+    if statistic.group_by_bins is None:
+        return {"groupBy": statistic.group_by}
+    return {
+        "groupByBins": {
+            "column": statistic.group_by_bins.column,
+            "bins": [render_exact(edge) for edge in statistic.group_by_bins.bins],
+        }
+    }
+
+
+def _grouped_document(
+    link: LinkIntegrity,
+    statistic: StatisticEntry,
+    scored: Sequence[_ScoredGroup],
+    row: Tuple[str, Optional[Fraction], Fraction],
+) -> Dict[str, Any]:
+    """The scorecard document of a grouped children-per-parent row: *row* is its outcome, score, tolerance."""
+    outcome, score, allowed = row
+    distances = [item.distance for item in scored if item.distance is not None]
+    widenings = [
+        item.reach for item in scored if item.reach is not None and item.distance is not None
+    ]
+    document: Dict[str, Any] = {
+        "propertyId": f"children:{link.child}.{link.name}",
+        "property": CHILDREN_PER_PARENT,
+        "relationship": link.name,
+        "child": link.child,
+        "parent": link.parent,
+        "dimension": "crossTable",
+        "outcome": outcome,
+        "score": None if score is None else render_exact(score),
+        "weight": "1",
+        "bins": [render_exact(edge) for edge in statistic.bins],
+        "groups": [item.entry for item in scored],
+        "tolerance": render_exact(allowed),
+        "distance": None if not distances else render_exact(max(distances)),
+    }
+    document.update(_grouping_member(statistic))
+    if statistic.cell_variance is not None:
+        document["noise"] = {
+            "mechanism": statistic.noise.mechanism if statistic.noise is not None else "",
+            "cellVariance": render_exact(statistic.cell_variance),
+            "widening": render_exact(max(widenings, default=_ZERO)),
+        }
+    return document
 
 
 def _counts_tolerance(counts: Sequence[CountsEntry], link: LinkIntegrity) -> Optional[Fraction]:

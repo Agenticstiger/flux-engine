@@ -292,7 +292,22 @@ def reach_of(unit: str, follows: Sequence[Follow], where: str) -> Mapping[str, i
     The relationships must form a tree rooted at *unit* (see the module text); an entry that breaks
     that is refused with ``FLX-5036`` at ``where[index]``, never quoting a value of the document.
     """
-    parent_of: Dict[str, Tuple[int, Follow]] = {}
+    parent_of = _children_by_table(unit, follows, where)
+    reach: Dict[str, int] = {unit: 1}
+    for index, entry in enumerate(follows):
+        if entry.child_table in reach:
+            continue
+        path = _path_into(entry, parent_of, reach, f"{where}[{index}]")
+        count = reach[path[-1].parent_table]
+        for step in reversed(path):
+            count *= step.max_children
+            reach[step.child_table] = count
+    return MappingProxyType(reach)
+
+
+def _children_by_table(unit: str, follows: Sequence[Follow], where: str) -> Dict[str, Follow]:
+    """Each followed relationship by its child table, refusing a table with two paths into it."""
+    parent_of: Dict[str, Follow] = {}
     for index, entry in enumerate(follows):
         at = f"{where}[{index}]"
         if entry.child_table == unit:
@@ -303,36 +318,33 @@ def reach_of(unit: str, follows: Sequence[Follow], where: str) -> Mapping[str, i
                 "a table is the child of one followed relationship only: a second path into it "
                 "would make the stated reach understate what one unit changes",
             )
-        parent_of[entry.child_table] = (index, entry)
-    reach: Dict[str, int] = {unit: 1}
-    for index, entry in enumerate(follows):
-        if entry.child_table in reach:
-            continue
-        at = f"{where}[{index}]"
-        path: List[Follow] = []
-        seen: Set[str] = set()
-        current = entry
-        while True:
-            if current.child_table in seen:
-                raise refuse(at, "followed relationships form no cycle")
-            seen.add(current.child_table)
-            path.append(current)
-            if current.parent_table in reach:
-                break
-            found = parent_of.get(current.parent_table)
-            if found is None:
-                raise refuse(
-                    at,
-                    "the parent of a followed relationship is the unit's expose or a table another "
-                    "followed relationship reaches: the rows of a parent the unit does not reach "
-                    "move with that parent, not with the unit",
-                )
-            current = found[1]
-        count = reach[current.parent_table]
-        for step in reversed(path):
-            count *= step.max_children
-            reach[step.child_table] = count
-    return MappingProxyType(reach)
+        parent_of[entry.child_table] = entry
+    return parent_of
+
+
+def _path_into(
+    entry: Follow, parent_of: Mapping[str, Follow], reach: Mapping[str, int], at: str
+) -> List[Follow]:
+    """The relationships from *entry* up to one whose parent is already reached, *entry* first."""
+    path: List[Follow] = []
+    seen: Set[str] = set()
+    current = entry
+    while True:
+        if current.child_table in seen:
+            raise refuse(at, "followed relationships form no cycle")
+        seen.add(current.child_table)
+        path.append(current)
+        if current.parent_table in reach:
+            return path
+        found = parent_of.get(current.parent_table)
+        if found is None:
+            raise refuse(
+                at,
+                "the parent of a followed relationship is the unit's expose or a table another "
+                "followed relationship reaches: the rows of a parent the unit does not reach "
+                "move with that parent, not with the unit",
+            )
+        current = found
 
 
 def read_accounting(value: Any, where: str) -> Accounting:

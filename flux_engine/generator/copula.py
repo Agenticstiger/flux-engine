@@ -174,7 +174,12 @@ def read_copula(fidelity: Any) -> Optional[CopulaDeclaration]:
     measure = ranks["measure"]
     if not isinstance(measure, str) or nfc(measure) not in MEASURES:
         raise _refuse("rankCorrelations.measure is kendall or spearman")
-    listed = ranks["pairs"]
+    pairs = _read_pair_list(ranks["pairs"], columns)
+    return CopulaDeclaration(columns=columns, measure=nfc(measure), pairs=pairs)
+
+
+def _read_pair_list(listed: Any, columns: Sequence[str]) -> Tuple[Tuple[str, str, Decimal], ...]:
+    """The ``pairs`` of a copula's rank correlations: two different columns of it each, listed once."""
     if not isinstance(listed, Sequence) or isinstance(listed, (str, bytes)):
         raise _refuse("rankCorrelations.pairs is a list")
     pairs: List[Tuple[str, str, Decimal]] = []
@@ -192,7 +197,7 @@ def read_copula(fidelity: Any) -> Optional[CopulaDeclaration]:
             raise _refuse(f"{where} lists a pair of columns that an earlier pair lists")
         seen.add(key)
         pairs.append((named[0], named[1], _value(entry["value"])))
-    return CopulaDeclaration(columns=columns, measure=nfc(measure), pairs=tuple(pairs))
+    return tuple(pairs)
 
 
 def check_copula(
@@ -370,11 +375,6 @@ class CopulaDraw:
 
     def __hash__(self) -> int:
         return hash(self._identity())
-
-    @property
-    def shrunk(self) -> bool:
-        """Whether the declared matrix was shrunk, so every latent correlation was scaled."""
-        return Decimal(self.alpha) > 0
 
     def as_document(self) -> Dict[str, str]:
         """The plan's ``copula`` member: ``{alpha, factor}``."""

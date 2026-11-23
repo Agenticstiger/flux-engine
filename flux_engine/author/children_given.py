@@ -165,20 +165,14 @@ def given_children(
     """
     found = _read_statistics(relationship, tokens)[0]
     shape = counted.members.get("children")
-    candidates = [
-        (index, item, grouping)
-        for index, item in enumerate(relationship.get("statistics") or ())
-        if isinstance(item, Mapping)
-        and item.get("definition") == _HISTOGRAM
-        and (grouping := _grouping(item)) is not None
-    ]
+    candidates = _candidates(relationship)
     if not candidates:
         return None
-    unused: List[_Note] = []
     if found is None or not isinstance(shape, Mapping) or "bins" not in shape:
         why = "the entry's children are not a histogram of whole counts, which a grouping weighs"
         return Given(
-            {}, unused=tuple((tokens + ("statistics", str(i)), why) for i, _, _ in candidates)
+            {},
+            unused=tuple((tokens + ("statistics", str(i)), why) for i, _, _ in candidates),
         )
     edges = _whole_edges(found[1].get("bins")) or []
     structural = relationship.get("structural")
@@ -190,18 +184,42 @@ def given_children(
         if isinstance(summed, int)
         else []
     )
+    chosen, unused = _pick_grouping(
+        candidates, tokens, edges, childless and none_class, parent, minimum_cell
+    )
+    if chosen is None:
+        return Given({}, used=tuple(base), unused=tuple(unused))
+    return replace(chosen, used=(*base, *chosen.used), unused=tuple(unused))
+
+
+def _candidates(
+    relationship: Mapping[str, Any],
+) -> List[Tuple[int, Mapping[str, Any], Tuple[str, bool]]]:
+    """The statistics of *relationship* that are a histogram grouped by a parent column, by index."""
+    found = []
+    for index, item in enumerate(relationship.get("statistics") or ()):
+        if isinstance(item, Mapping) and item.get("definition") == _HISTOGRAM:
+            grouping = _grouping(item)
+            if grouping is not None:
+                found.append((index, item, grouping))
+    return found
+
+
+def _pick_grouping(
+    candidates: Sequence[Tuple[int, Mapping[str, Any], Tuple[str, bool]]],
+    tokens: Tuple[str, ...],
+    edges: Sequence[int],
+    first_is_empty: bool,
+    parent: GivenParent,
+    minimum_cell: int,
+) -> Tuple[Optional[Given], List[_Note]]:
+    """The first grouping that can be the given column, and the reason for each that is passed over."""
+    unused: List[_Note] = []
     chosen: Optional[Given] = None
     for index, statistic, (column, binned) in candidates:
         pointer = tokens + ("statistics", str(index))
         outcome = _one(
-            statistic,
-            pointer,
-            column,
-            binned,
-            edges,
-            childless and none_class,
-            parent,
-            minimum_cell,
+            statistic, pointer, column, binned, edges, first_is_empty, parent, minimum_cell
         )
         if isinstance(outcome, str):
             unused.append((pointer, outcome))
@@ -215,59 +233,65 @@ def given_children(
             )
         else:
             chosen = outcome
-    if chosen is None:
-        return Given({}, used=tuple(base), unused=tuple(unused))
-    return replace(chosen, used=(*base, *chosen.used), unused=tuple(unused))
+    return chosen, unused
+
+
+_Classes = Tuple[Optional[Tuple[str, ...]], Optional[Dict[str, str]], Optional[str], bool]
+
+
+def _no_classes(why: str) -> _Classes:
+    return None, None, why, False
 
 
 def _classes(
     column: str, binned: bool, statistic: Mapping[str, Any], parent: GivenParent
-) -> Tuple[Optional[Tuple[str, ...]], Optional[Dict[str, str]], Optional[str], bool]:
+) -> _Classes:
     """The classes of the given column, how a group key names one, why not, and a null drop."""
     plan = parent.plans.get(column)
     kind = parent.kinds.get(column)
     if plan is None or kind is None:
-        return None, None, "the parent expose draws no column of this name", False
+        return _no_classes("the parent expose draws no column of this name")
     held = parent.held_back.get(column)
     if held is not None:
-        return None, None, f"{printable(column)} is {held}, which is no class to weigh by", False
+        return _no_classes(f"{printable(column)} is {held}, which is no class to weigh by")
+    nulls = plan.declaration.get("nullFraction")
+    drop = nulls is not None and kind in _NUMERIC and Decimal(str(nulls)) == 0
+    if nulls is not None and not drop:
+        return _no_classes(
+            f"{printable(column)} declares a nullFraction, and a null has no class to weigh "
+            "the children by"
+        )
+    found = (
+        _binned_classes(column, kind, plan.declaration, statistic)
+        if binned
+        else _level_classes(column, kind, plan)
+    )
+    return (*found[:3], drop) if found[2] is None else found
+
+
+def _level_classes(column: str, kind: LogicalKind, plan: ColumnPlan) -> _Classes:
+    """The classes of a category column: its declared levels, each its own key."""
+    if kind is not LogicalKind.STRING:
+        return _no_classes(
+            f"{printable(column)} is not a category column; a number column is grouped by its bins"
+        )
     declaration = plan.declaration
-    drop = False
-    nulls = declaration.get("nullFraction")
-    if nulls is not None:
-        if kind in _NUMERIC and Decimal(str(nulls)) == 0:
-            drop = True
-        else:
-            return (
-                None,
-                None,
-                (
-                    f"{printable(column)} declares a nullFraction, and a null has no class to weigh "
-                    "the children by"
-                ),
-                False,
-            )
-    if not binned:
-        if kind is not LogicalKind.STRING:
-            return (
-                None,
-                None,
-                (
-                    f"{printable(column)} is not a category column; a number column is grouped by "
-                    "its bins"
-                ),
-                False,
-            )
-        levels = declaration.get("levels")
-        names = tuple(str(level) for level in levels) if isinstance(levels, Mapping) else None
-        if names is None and "levelWeightsGiven" in declaration and plan.level_names is not None:
-            names = tuple(plan.level_names)
-        if not names:
-            return None, None, f"{printable(column)} draws no declared levels", False
-        return names, {name: name for name in names}, None, drop
+    levels = declaration.get("levels")
+    names = tuple(str(level) for level in levels) if isinstance(levels, Mapping) else None
+    if names is None and "levelWeightsGiven" in declaration and plan.level_names is not None:
+        names = tuple(plan.level_names)
+    if not names:
+        return _no_classes(f"{printable(column)} draws no declared levels")
+    return names, {name: name for name in names}, None, False
+
+
+def _binned_classes(
+    column: str, kind: LogicalKind, declaration: Mapping[str, Any], statistic: Mapping[str, Any]
+) -> _Classes:
+    """The classes of a column drawn from bins: its bins, keyed by the profile's lower edges."""
     declared = declaration.get("bins")
     if kind not in _NUMERIC or not isinstance(declared, list) or len(declared) < 2:
-        return None, None, f"{printable(column)} is not drawn from bins", False
+        return _no_classes(f"{printable(column)} is not drawn from bins")
     spelled = [str(edge) for edge in declared]
     grouping = statistic.get("groupByBins")
     cut = grouping.get("bins") if isinstance(grouping, Mapping) else None
@@ -276,21 +300,15 @@ def _classes(
     except ArithmeticError:
         theirs = []
     if theirs != spelled:
-        return (
-            None,
-            None,
-            (
-                f"its bins are not the bins {printable(column)} is drawn over, which a class is "
-                "keyed by"
-            ),
-            False,
+        return _no_classes(
+            f"its bins are not the bins {printable(column)} is drawn over, which a class is keyed by"
         )
     keys = {
         edge_key: spelled[position]
         for position, edge_key in enumerate(_edge_keys(grouping or {}))
         if position < len(spelled) - 1
     }
-    return tuple(spelled[:-1]), keys, None, drop
+    return tuple(spelled[:-1]), keys, None, False
 
 
 def _edge_keys(grouping: Mapping[str, Any]) -> List[str]:
@@ -299,6 +317,73 @@ def _edge_keys(grouping: Mapping[str, Any]) -> List[str]:
 
     bins = grouping.get("bins")
     return [edge_text(Fraction(Decimal(str(edge)))) for edge in (bins or ())][:-1]
+
+
+def _group_shares(
+    group: Mapping[str, Any],
+    pointer: Tuple[str, ...],
+    edges: Sequence[int],
+    first_is_empty: bool,
+    minimum_cell: int,
+) -> "Optional[List[str]] | str":
+    """The shares one published group gives its class, ``None`` when none rests on a count."""
+    cells = count_cells(group, "binCounts")
+    if len(cells) != len(edges) - 1:
+        return "a group of it does not count the classes of the entry's children"
+    if first_is_empty:
+        cells[0] = replace(cells[0], count=0)
+    weights, _ = cell_weights(
+        minimum_cell, cells, pointer, "binCounts", _HISTOGRAM, total=_whole(group.get("k"))
+    )
+    return share_texts(weights) if sum(weights, Fraction(0)) > 0 else None
+
+
+def _listed_groups(statistic: Mapping[str, Any]) -> List[Tuple[int, Mapping[str, Any]]]:
+    """The groups of *statistic* that are mappings, with their positions."""
+    listed = statistic.get("groups")
+    items = listed if isinstance(listed, list) else ()
+    return [(at, item) for at, item in enumerate(items) if isinstance(item, Mapping)]
+
+
+def _group_weights(
+    statistic: Mapping[str, Any],
+    pointer: Tuple[str, ...],
+    column: str,
+    binned: bool,
+    named: Tuple[Tuple[str, ...], Dict[str, str]],
+    edges: Sequence[int],
+    first_is_empty: bool,
+    minimum_cell: int,
+) -> "Dict[str, List[str]] | str":
+    """The weights each published group of *statistic* gives its class, or why it cannot be read."""
+    classes, keys = named
+    noun = "bins" if binned else "levels"
+    shown: Dict[str, List[str]] = {}
+    for position, group in _listed_groups(statistic):
+        key = keys.get(str(group.get("group")))
+        if key is None or key not in classes:
+            return f"a group of it is no class of {printable(column)}, whose classes are its {noun}"
+        if group.get("status") != _FREE:
+            continue
+        at = pointer + ("groups", str(position))
+        found = _group_shares(group, at, edges, first_is_empty, minimum_cell)
+        if isinstance(found, str):
+            return found
+        if found is not None:
+            shown[key] = found
+    return shown
+
+
+def _absent_note(column: str, absent: Sequence[str]) -> Tuple[str, ...]:
+    """The assumption a class with no usable group makes, or nothing when every class has one."""
+    if not absent:
+        return ()
+    return (
+        f"The profile publishes no usable group of {printable(column)} for "
+        f"{', '.join(printable(name) for name in absent)}, so the parents of "
+        f"{'that class' if len(absent) == 1 else 'those classes'} have the children shape's own "
+        "weights (the plan states them).",
+    )
 
 
 def _one(
@@ -317,48 +402,15 @@ def _one(
         return why or "the classes of the given column are unknown"
     if _whole_edges(statistic.get("bins")) != list(edges):
         return "its bins are not the bins of the entry's children, so its counts are no weights"
-    listed = statistic.get("groups")
-    shown: Dict[str, List[str]] = {}
-    absent: List[str] = []
-    for position, group in enumerate(listed if isinstance(listed, list) else ()):
-        if not isinstance(group, Mapping):
-            continue
-        key = keys.get(str(group.get("group")))
-        if key is None or key not in classes:
-            return (
-                f"a group of it is no class of {printable(column)}, whose classes are its "
-                f"{'bins' if binned else 'levels'}"
-            )
-        if group.get("status") != _FREE:
-            continue
-        cells = count_cells(group, "binCounts")
-        if len(cells) != len(edges) - 1:
-            return "a group of it does not count the classes of the entry's children"
-        if first_is_empty:
-            cells[0] = replace(cells[0], count=0)
-        weights, _ = cell_weights(
-            minimum_cell,
-            cells,
-            pointer + ("groups", str(position)),
-            "binCounts",
-            _HISTOGRAM,
-            total=_whole(group.get("k")),
-        )
-        if sum(weights, Fraction(0)) > 0:
-            shown[key] = share_texts(weights)
-    for name in classes:
-        if name not in shown:
-            absent.append(name)
+    shown = _group_weights(
+        statistic, pointer, column, binned, (classes, keys), edges, first_is_empty, minimum_cell
+    )
+    if isinstance(shown, str):
+        return shown
     if not shown:
         return "no group of it publishes a count the weights can rest on"
-    assumptions: List[str] = []
-    if absent:
-        assumptions.append(
-            f"The profile publishes no usable group of {printable(column)} for "
-            f"{', '.join(printable(name) for name in absent)}, so the parents of "
-            f"{'that class' if len(absent) == 1 else 'those classes'} have the children shape's own "
-            "weights (the plan states them)."
-        )
+    absent = [name for name in classes if name not in shown]
+    assumptions = _absent_note(column, absent)
     members = {
         "given": column,
         "childrenGiven": {name: shown[name] for name in classes if name in shown},
@@ -366,7 +418,7 @@ def _one(
     return Given(
         members,
         used=((pointer, f"the weights of each class of {printable(column)} the children follow"),),
-        assumptions=tuple(assumptions),
+        assumptions=assumptions,
         column=column,
         drop_null_fraction=drop,
     )

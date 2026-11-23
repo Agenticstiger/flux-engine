@@ -1402,32 +1402,32 @@ def _tolerance_magnitude(
     a distance is; every other absolute tolerance is written with ``value``.
     """
     if ranked:
-        if "max" not in mapping:
-            raise FluxError(FLX_5034, f"{subject} needs a max")
-        if "value" in mapping:
-            raise FluxError(FLX_5030, f"{subject}: a rank correlation's tolerance has no value")
-        magnitude = Fraction(_require_decimal(mapping["max"], f"{subject}.max"))
-        if magnitude <= 0:
-            raise FluxError(FLX_5030, f"{subject}.max must be positive")
-        return magnitude
+        why = "a rank correlation's tolerance has no value"
+        return _positive(_keyed(mapping, "max", "value", subject, why), subject, "max")
     if tolerance_kind in (ToleranceKind.ABSOLUTE, ToleranceKind.RELATIVE):
-        if "value" not in mapping:
-            raise FluxError(FLX_5034, f"{subject} needs a value")
-        if "max" in mapping:
-            raise FluxError(FLX_5030, f"{subject}: a {tolerance_kind.value} tolerance has no max")
-        magnitude = Fraction(_require_decimal(mapping["value"], f"{subject}.value"))
-        if magnitude <= 0:
-            raise FluxError(FLX_5030, f"{subject}.value must be positive")
-        return magnitude
-    if "max" not in mapping:
-        raise FluxError(FLX_5034, f"{subject} needs a max")
-    if "value" in mapping:
-        raise FluxError(FLX_5030, f"{subject}: a {tolerance_kind.value} tolerance has no value")
+        why = f"a {tolerance_kind.value} tolerance has no max"
+        return _positive(_keyed(mapping, "value", "max", subject, why), subject, "value")
+    why = f"a {tolerance_kind.value} tolerance has no value"
+    raw = _keyed(mapping, "max", "value", subject, why)
     if tolerance_kind is ToleranceKind.COUNT:
-        return Fraction(_require_int(mapping["max"], f"{subject}.max"))
-    magnitude = Fraction(_require_decimal(mapping["max"], f"{subject}.max"))
+        return Fraction(_require_int(raw, f"{subject}.max"))
+    return _positive(raw, subject, "max")
+
+
+def _keyed(mapping: Mapping[str, Any], need: str, forbid: str, subject: str, why: str) -> Any:
+    """The value of the key *need*, refused when it is missing (``FLX-5034``) or *forbid* is beside it."""
+    if need not in mapping:
+        raise FluxError(FLX_5034, f"{subject} needs a {need}")
+    if forbid in mapping:
+        raise FluxError(FLX_5030, f"{subject}: {why}")
+    return mapping[need]
+
+
+def _positive(raw: Any, subject: str, key: str) -> Fraction:
+    """*raw* as an exact decimal above zero, or ``FLX-5030`` naming the key."""
+    magnitude = Fraction(_require_decimal(raw, f"{subject}.{key}"))
     if magnitude <= 0:
-        raise FluxError(FLX_5030, f"{subject}.max must be positive")
+        raise FluxError(FLX_5030, f"{subject}.{key} must be positive")
     return magnitude
 
 
@@ -1509,30 +1509,30 @@ def _property_columns(raw: Mapping[str, Any], kind: PropertyKind, subject: str) 
     is refused rather than resolved, and a correlation that does not end
     up with exactly two distinct columns is ``FLX-5033``.
     """
+    names = _listed_columns(raw, subject)
+    if kind is PropertyKind.CORRELATION or kind is PropertyKind.RANK_CORRELATION:
+        noun = "a correlation" if kind is PropertyKind.CORRELATION else "a rank correlation"
+        if len(names) != 2:
+            raise FluxError(FLX_5033, f"{subject}: {noun} declares two columns, got {len(names)}")
+        if names[0] == names[1]:
+            raise FluxError(FLX_5033, f"{subject}: {noun} needs two distinct columns")
+    elif len(names) != 1:
+        raise FluxError(FLX_5030, f"{subject}: a {kind.value} property names one column")
+    return names
+
+
+def _listed_columns(raw: Mapping[str, Any], subject: str) -> Tuple[str, ...]:
+    """The names a property spells with ``column`` or ``columns``, NFC; both, or neither, is refused."""
     if "column" in raw and "columns" in raw:
         raise FluxError(FLX_5030, f"{subject} declares both column and columns")
     if "columns" in raw:
         listed = raw["columns"]
         if not isinstance(listed, Sequence) or isinstance(listed, (str, bytes)):
             raise FluxError(FLX_5030, f"{subject}.columns must be a list")
-        names = tuple(nfc(str(entry)) for entry in listed)
-    elif "column" in raw:
-        names = (nfc(str(raw["column"])),)
-    else:
-        raise FluxError(FLX_5034, f"{subject} names no column")
-
-    if kind is PropertyKind.CORRELATION or kind is PropertyKind.RANK_CORRELATION:
-        noun = "a correlation" if kind is PropertyKind.CORRELATION else "a rank correlation"
-        if len(names) != 2:
-            raise FluxError(
-                FLX_5033,
-                f"{subject}: {noun} declares two columns, got {len(names)}",
-            )
-        if names[0] == names[1]:
-            raise FluxError(FLX_5033, f"{subject}: {noun} needs two distinct columns")
-    elif len(names) != 1:
-        raise FluxError(FLX_5030, f"{subject}: a {kind.value} property names one column")
-    return names
+        return tuple(nfc(str(entry)) for entry in listed)
+    if "column" in raw:
+        return (nfc(str(raw["column"])),)
+    raise FluxError(FLX_5034, f"{subject} names no column")
 
 
 def _parse_bins(
@@ -1604,6 +1604,14 @@ def _parse_group_by_bins(
     if "column" not in raw or "bins" not in raw:
         raise FluxError(FLX_5034, f"{here} needs a column and bins")
     name = nfc(str(raw["column"]))
+    column = _group_column(name, columns, names, here)
+    return BinsGrouping(column=name, bins=_group_edges(raw["bins"], column, grid, here))
+
+
+def _group_column(
+    name: str, columns: Mapping[str, ColumnDeclaration], own: Tuple[str, ...], here: str
+) -> ColumnDeclaration:
+    """The range column a ``groupByBins`` names, which is not one of the property's own."""
     if name not in columns:
         raise FluxError(FLX_5034, f"{here}: column {name!r} has no declaration in fidelity.columns")
     column = columns[name]
@@ -1611,33 +1619,46 @@ def _parse_group_by_bins(
         raise FluxError(
             FLX_5030, f"{here}: groupByBins needs a range column, and {name!r} is a support"
         )
-    if name in names:
+    if name in own:
         raise FluxError(FLX_5030, f"{here}: groupByBins repeats the property's own column")
-    listed = raw["bins"]
+    return column
+
+
+def _group_edge(
+    value: Any, previous: Optional[Fraction], column: ColumnDeclaration, grid: Grid, where: str
+) -> Fraction:
+    """One edge of a ``groupByBins``: in the column's domain, above *previous*, and on the grid."""
+    edge, domain = _read_bound(value, where, date=column.domain is ValueDomain.DATE)
+    if domain is not column.domain:
+        raise FluxError(FLX_5032, f"{where} is not in the same domain as the column's range")
+    if previous is not None and edge <= previous:
+        raise FluxError(FLX_5032, f"{where} does not increase")
+    if not grid.is_on_grid(edge):
+        raise FluxError(FLX_5032, f"{where} does not land on the declared grid")
+    return edge
+
+
+def _group_edges(
+    listed: Any, column: ColumnDeclaration, grid: Grid, here: str
+) -> Tuple[Fraction, ...]:
+    """The edges of a ``groupByBins``: increasing, on the grid, and covering the column's range."""
     if not isinstance(listed, Sequence) or isinstance(listed, (str, bytes)):
         raise FluxError(FLX_5030, f"{here}.bins must be a list")
     if len(listed) < 2:
         raise FluxError(FLX_5032, f"{here}.bins needs at least two edges")
     edges: List[Fraction] = []
     for position, value in enumerate(listed):
-        edge, domain = _read_bound(
-            value, f"{here}.bins[{position}]", date=column.domain is ValueDomain.DATE
-        )
-        if domain is not column.domain:
-            raise FluxError(
-                FLX_5032, f"{here}.bins[{position}] is not in the same domain as the column's range"
+        edges.append(
+            _group_edge(
+                value, (edges[-1] if edges else None), column, grid, f"{here}.bins[{position}]"
             )
-        if edges and edge <= edges[-1]:
-            raise FluxError(FLX_5032, f"{here}.bins[{position}] does not increase")
-        if not grid.is_on_grid(edge):
-            raise FluxError(FLX_5032, f"{here}.bins[{position}] does not land on the declared grid")
-        edges.append(edge)
+        )
     interval = column.interval
     if edges[0] > interval.lo or edges[-1] < interval.hi:
         raise FluxError(
             FLX_5032, f"{here}.bins do not cover the column's declared minimum and maximum"
         )
-    return BinsGrouping(column=name, bins=tuple(edges))
+    return tuple(edges)
 
 
 def bin_group_keys(
