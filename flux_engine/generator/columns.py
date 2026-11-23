@@ -294,6 +294,24 @@ def _set_conditioned(
     decided = conditions.column_levels(
         column.name, rows, u53, lambda name: _levels_of(plan, name, streams, rows, levels)
     )
+    if _rows.is_binned(column_plan):
+        # The group chose each row's bin; the place inside it is the histogram's own draw at
+        # index 1, the bin's pick at index 0 left unread (ADR 0036 decision 5).
+        names = _rows.class_names(column_plan)
+        positions = sorted(decided)
+        if not positions:
+            return
+        drawn = _histogram(
+            column_plan,
+            key,
+            rows[positions],
+            0,
+            None,
+            [names.index(decided[position]) for position in positions],
+        )
+        for position, value in zip(positions, drawn or [], strict=True):
+            values[position] = value
+        return
     for position, level in decided.items():
         values[position] = _rows._level_to_value(level, column)
 

@@ -2163,13 +2163,21 @@ def _conditioned_cell(
     else:
         from flux_engine.generator.conditions import level_at
 
-        if isinstance(source, CellStreams):
-            stream = source.stream_at(row_index, name)
-        else:
-            stream = source.stream(
+        def own_stream() -> DrawStream:
+            if isinstance(source, CellStreams):
+                return source.stream_at(row_index, name)
+            return source.stream(
                 generator_column_path(plan.sim_id, plan.expose.expose_id, row_index, name)
             )
-        level = level_at(decided, uniform53(stream))
+
+        level = level_at(decided, uniform53(own_stream()))
+        if is_binned(column_plan):
+            # The group chose the bin; the place inside it is the histogram's own draw at the
+            # index it always has, the bin's pick left unread (ADR 0036 decision 5).
+            index = class_names(column_plan).index(level)
+            given_level = _level_given(column_plan.statistics, levels)
+            with localcontext(_KERNEL_CONTEXT):
+                return _draw_value(column_plan, own_stream(), given_level, index), level
     with localcontext(_KERNEL_CONTEXT):
         return _level_to_value(level, column_plan.column), level
 
