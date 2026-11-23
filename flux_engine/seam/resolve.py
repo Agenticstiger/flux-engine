@@ -67,14 +67,18 @@ import io
 import json
 import re
 import stat
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     AbstractSet,
     Any,
     Callable,
     Dict,
     FrozenSet,
+    Iterator,
     List,
     Mapping,
     Optional,
@@ -84,7 +88,6 @@ from typing import (
 )
 
 import yaml
-from jsonschema import Draft202012Validator, FormatChecker
 
 from flux_engine.core.canonical import nfc
 from flux_engine.core.digest import DigestRef, digest_of_bytes, digest_of_document
@@ -231,6 +234,9 @@ from flux_stats.exact_yaml import (
     load_documents,
 )
 
+if TYPE_CHECKING:
+    from jsonschema import Draft202012Validator
+
 __all__ = [
     "ADDITIVE_SEAM_FIELDS",
     "BUNDLE_PACK_PRODUCTS",
@@ -264,6 +270,7 @@ __all__ = [
     "exposure_rule_ids",
     "extension_block",
     "flux_schema_validator",
+    "bundle_load_scope",
     "load_bundle",
     "declared_overlay",
     "parameter_entries",
@@ -706,6 +713,10 @@ def flux_schema_validator() -> Draft202012Validator:
     so it is read from that module rather than from a path this repository
     would have to keep in step.
     """
+    # Imported here: jsonschema costs about 0.2 s to import, and a worker process, which
+    # never reads a bundle, loads this module without it.
+    from jsonschema import Draft202012Validator, FormatChecker
+
     provider = importlib.import_module(Bundle.__module__)
     schema_path = Path(provider.FLUX_SCHEMA_PATH)
     schema = json.loads(schema_path.read_text())
@@ -1016,7 +1027,74 @@ class LoadedBundle:
         )
 
 
+#: The loads of the innermost open :func:`bundle_load_scope`, or ``None`` outside one.
+_BUNDLE_LOADS: ContextVar[
+    Optional[Dict[Tuple[Path, bool], Tuple[Tuple[Any, ...], "LoadedBundle"]]]
+] = ContextVar("flux_bundle_loads", default=None)
+
+
+def _bundle_fingerprint(root: Path) -> Tuple[Any, ...]:
+    """What a reload would read, by stat: each regular file's name, size, mtime and inode.
+
+    The entries are those :func:`_load_bundle_once` reads (``is_file`` semantics, links followed),
+    so an entry whose stat fails, such as a dangling link, a link loop or a file that vanished
+    since the listing, is skipped rather than raised.
+    """
+    found = []
+    for path in sorted(root.iterdir()):
+        try:
+            info = path.stat()
+        except (OSError, ValueError):
+            continue
+        if stat.S_ISREG(info.st_mode):
+            found.append((path.name, info.st_size, info.st_mtime_ns, info.st_ino))
+    return tuple(found)
+
+
+@contextmanager
+def bundle_load_scope() -> Iterator[None]:
+    """Within the block, :func:`load_bundle` parses each bundle directory once.
+
+    A stage that reads the same bundle at several steps (``verify`` does, for the input digest,
+    the queries, the module checks and the exposure checks) would otherwise validate and parse
+    every document each time. A second load of the same directory returns the first result
+    while no file's name, size, modification time or inode has changed; any change reloads, so a
+    caller never sees a stale bundle. The memo belongs to the block (a context variable, reset
+    on exit), so nothing outlives the call and nothing leaks between runs. Failures are not
+    remembered. The loaded bundle is immutable, which is what makes sharing it safe.
+    Nested scopes share the outer one.
+    """
+    if _BUNDLE_LOADS.get() is not None:
+        yield
+        return
+    token = _BUNDLE_LOADS.set({})
+    try:
+        yield
+    finally:
+        _BUNDLE_LOADS.reset(token)
+
+
 def load_bundle(directory: Path, *, tolerate_additive: bool = True) -> LoadedBundle:
+    """Validate the bundle at *directory* and return its resolved documents.
+
+    Inside :func:`bundle_load_scope` a directory already loaded unchanged is not loaded again;
+    the contract of :func:`_load_bundle_once`, which does the work, is otherwise unchanged.
+    """
+    memo = _BUNDLE_LOADS.get()
+    root = Path(directory)
+    if memo is None or not root.is_dir():
+        return _load_bundle_once(directory, tolerate_additive=tolerate_additive)
+    key = (root.resolve(), tolerate_additive)
+    fingerprint = _bundle_fingerprint(root)
+    held = memo.get(key)
+    if held is not None and held[0] == fingerprint:
+        return held[1]
+    loaded = _load_bundle_once(directory, tolerate_additive=tolerate_additive)
+    memo[key] = (fingerprint, loaded)
+    return loaded
+
+
+def _load_bundle_once(directory: Path, *, tolerate_additive: bool = True) -> LoadedBundle:
     """Validate the bundle at *directory* and return its resolved documents.
 
     Two reads, for the two consumers :class:`ExactLoader` describes: the
