@@ -537,6 +537,30 @@ def render_columns(rows: Sequence[Row], expose: CompiledExpose) -> List[str]:
     return lines
 
 
+def _table_tokens(
+    values: Sequence[Any],
+    classes: set,
+    allowed: frozenset,
+    has_null: bool,
+    logical_type: LogicalType,
+) -> List[str]:
+    """The columns whose value classes are a small closed set: a fast path or one token per value."""
+    kind = logical_type.kind
+    if not classes <= allowed:
+        raise ValueError("a value class the row renderer decides")
+    if kind is LogicalKind.BOOL:
+        return ["null" if v is None else "true" if v else "false" for v in values]
+    if kind is LogicalKind.TIMESTAMP and classes <= {int, _NONE}:
+        if _instants_in_range(values, has_null):
+            return _instant_tokens(values)
+    elif kind is LogicalKind.STRING:
+        return _string_tokens(values)
+    table: Dict[Any, str] = {}
+    for value in set(values):
+        table[value] = _NULL if value is None else _scalar_token(render_cell(value, logical_type))
+    return [table[value] for value in values]
+
+
 def _column_tokens(values: Sequence[Any], column: CompiledColumn) -> List[str]:
     """Each value of one column as its JSON text, as :func:`render_cell` then JCS writes it."""
     classes = set(map(type, values))
@@ -547,21 +571,7 @@ def _column_tokens(values: Sequence[Any], column: CompiledColumn) -> List[str]:
     kind = logical_type.kind
     allowed = _TABLE_CLASSES.get(kind)
     if allowed is not None:
-        if not classes <= allowed:
-            raise ValueError("a value class the row renderer decides")
-        if kind is LogicalKind.BOOL:
-            return ["null" if v is None else "true" if v else "false" for v in values]
-        if kind is LogicalKind.TIMESTAMP and classes <= {int, _NONE}:
-            if _instants_in_range(values, has_null):
-                return _instant_tokens(values)
-        elif kind is LogicalKind.STRING:
-            return _string_tokens(values)
-        table: Dict[Any, str] = {}
-        for value in set(values):
-            table[value] = (
-                _NULL if value is None else _scalar_token(render_cell(value, logical_type))
-            )
-        return [table[value] for value in values]
+        return _table_tokens(values, classes, allowed, has_null, logical_type)
     if kind is LogicalKind.INT:
         if not classes <= {int, _NONE}:
             raise ValueError("a value class the row renderer decides")
