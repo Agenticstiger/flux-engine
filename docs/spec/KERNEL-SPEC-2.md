@@ -334,6 +334,8 @@ A relationship that a `counts` entry of the Simulation names, or that an expecte
 (ADR 0016), does not pick a parent per child row. Its child rows take their parents from a layout that gives each
 eligible parent a whole number of children. The layout is a pure function of its inputs and draws no value.
 
+A plan that uses a counted layout replays only on engine 0.10.0 and later. Kernel `0.2.0` did not change: the layout is read only for a bundle that declares a `counts` entry or an expected-count hook, in a key the earlier engines did not read, so every other bundle draws what it drew before (section 12).
+
 **Inputs.** `N` is the child's rows and `P` the parent's rows, both after `--scale`. `E` is the eligible parents,
 the parent rows on which `parentWhen` is TRUE on the parent's final row, or every parent row when the entry has no
 condition, in row order. The rank `r` of an eligible parent is its position in `E`, and `e = |E|`. `m` is
@@ -436,6 +438,8 @@ is added.
 A column whose fidelity declaration holds `allocation: exact` (SEAM-FIDELITY-SPEC section 2) gives each of its classes
 exactly its share of the expose's rows, in place of a share each row draws for itself. The layout is a pure function of
 the rows `N`, the column's declaration and the key, and it draws no value. `N` is the expose's rows after `--scale`.
+
+A plan that uses an exact allocation replays only on engine 0.10.0 and later. Kernel `0.2.0` did not change: the allocation is read only for a column that declares `allocation: exact`, in a key the earlier engines did not read, so every other bundle draws what it drew before (section 12).
 
 **The column.** It is drawn from `levels`, with `levelWeights` or, where the column declares none (a categorical column declared by a `support` only), the equal weights of
 its declared support levels; from `bins` with `binWeights`; or from `levelWeightsGiven` or `binWeightsGiven` given a column

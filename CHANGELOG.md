@@ -67,6 +67,10 @@ new keeps its format: profile `1-3-0` (flux-stats), profile request `1-1-0`, sco
 - Refusals read "1 child" and "1 bin" in the singular, `FLX-3403` names key and bridge columns as plain text, a links `when` error names its `links[...].when` key, `fluxsim verify --help` names the `counts:` rule lines and the `childrenPerParent` row, and SEAM-FIDELITY-SPEC lists every namespace key the engine reads.
 - Under a `parentWhen`, the `FLX-3403` note below `--scale 1` is decided from the eligible parents, and is given only when scale 1 would not fall short the same way.
 
+### Changed
+
+- KERNEL-SPEC-2 sections 8.1 and 8.3 say that a plan using a counted layout or an exact allocation replays only on engine 0.10.0 and later, and why the kernel version did not move.
+
 ## Unreleased
 
 ### Added
