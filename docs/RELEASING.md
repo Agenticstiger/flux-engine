@@ -123,8 +123,7 @@ the day of a release.
   `.github/release/sbom-tool.txt`. Both are installed with
   `pip install --require-hashes`. Each is generated from the `.in` file beside
   it; the command is in that file's header. Regenerate them when you want a newer
-  toolchain, review the diff, and commit them like any other change. Dependabot
-  proposes the update weekly.
+  toolchain, review the diff, and commit them like any other change.
 - The engine's runtime dependencies come from `uv.lock`. The job exports them
   with `uv export --locked`, which fails if the lock is out of step with
   `pyproject.toml`, and installs the export with `--require-hashes --no-deps`.
