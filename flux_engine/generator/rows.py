@@ -68,7 +68,7 @@ from typing import (
 import numpy as np
 
 from flux_engine.core import kernel2
-from flux_engine.core.canonical import sha256_hex
+from flux_engine.core.canonical import nfc, sha256_hex
 from flux_engine.core.clock import parse_rfc3339_ms
 from flux_engine.core.digest import DigestRef, digest_of_document
 from flux_engine.core.errors import FluxError
@@ -94,6 +94,7 @@ from flux_engine.core.seedtree import (
     path_label,
 )
 from flux_engine.generator.allocation import allocated_given, allocated_levels
+from flux_engine.generator.copula import check_copula, declares_copula, read_copula
 from flux_engine.generator.families import (
     FLX_3401,
     ColumnType,
@@ -649,6 +650,7 @@ def build_plan(
     _require_conditionals(plans)
     _require_allocatable(plans, generator_version, related, rules)
     plans = _with_allocation_parents(plans)
+    _require_copula(fidelity, plans, generator_version, related, rules)
     if generator_version != GENERATOR_VERSION_2:
         for column_plan in plans:
             if column_plan.statistics.given_link is not None:
@@ -668,6 +670,55 @@ def build_plan(
         generator_version=generator_version,
         plugin=plugin,
     )
+
+
+def _require_copula(
+    fidelity: Optional[Mapping[str, Any]],
+    plans: Sequence[ColumnPlan],
+    generator_version: str,
+    related: FrozenSet[str],
+    rules: Optional["RulePlan"],
+) -> None:
+    """Refuse a copula the emit cannot draw (ADR 0035 decision 4).
+
+    Kernel 0.1.0 has no copula path, so the key is ``FLX-3105`` there, naming the kernel. Anything
+    else the declaration or the emit's columns get wrong is ``FLX-3402``
+    (:func:`flux_engine.generator.copula.check_copula`).
+    """
+    if not declares_copula(fidelity):
+        return
+    if generator_version != GENERATOR_VERSION_2:
+        from flux_engine.seam.resolve import FLX_3105
+
+        raise FluxError(
+            FLX_3105,
+            "fidelity.copula needs kernel 0.2.0, and this run is on kernel 0.1.0",
+        )
+    declaration = read_copula(fidelity)
+    assert declaration is not None  # declares_copula
+    check_copula(declaration, plans, set_elsewhere=_set_elsewhere(plans, related, rules))
+
+
+def _set_elsewhere(
+    plans: Sequence[ColumnPlan], related: FrozenSet[str], rules: Optional["RulePlan"]
+) -> Dict[str, str]:
+    """Each column something other than its own draw sets, by name, with what sets it.
+
+    A key or a foreign key, a column a rule, a ``lifetimes``, ``within`` or ``rates`` entry or a
+    copy sets, and a hidden column.
+    """
+    found: Dict[str, str] = {}
+    for plan in plans:
+        if plan.column.hidden:
+            found[nfc(plan.column.name)] = "a hidden column"
+    if rules is not None:
+        for name in rules.determined | {c for rule in rules.rules for c in rule.to_columns}:
+            found[nfc(name)] = "set by a rule, a lifetimes, within or copy declaration"
+        for rate in rules.rates:
+            found[nfc(rate.column)] = "a date with seasonal rates"
+    for name in related:
+        found[nfc(name)] = "a key or a column of a relationship"
+    return found
 
 
 def _with_allocation_parents(plans: List[ColumnPlan]) -> List[ColumnPlan]:

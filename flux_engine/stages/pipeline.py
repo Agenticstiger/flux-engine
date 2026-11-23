@@ -91,6 +91,7 @@ from flux_engine.generator import GeneratorPlan, build_plan, generate_rows
 # count (ADR 0025 section 4), and must be registered before any plan is related.
 from flux_engine.generator import exposure as _exposure  # noqa: F401
 from flux_engine.generator.conditions import with_conditions
+from flux_engine.generator.copula import declares_copula
 from flux_engine.generator.counts import TooFewChildRows, TooManyChildRows
 from flux_engine.generator.coverage import coverage_of_plan
 from flux_engine.generator.dates import (
@@ -144,7 +145,7 @@ from flux_engine.generator.rules import (
     new_tally,
     plan_rules,
 )
-from flux_engine.generator.statistics import statistics_from_fidelity
+from flux_engine.generator.statistics import FLX_3402, statistics_from_fidelity
 from flux_engine.generators.errors import FLX_3122
 from flux_engine.generators.loading import (
     LoadedGenerator,
@@ -2924,6 +2925,61 @@ def check_emit_conditions(
     refuse_conditions(resolved, plan, rules, simulation, where=sim_id)
 
 
+def refuse_copula_combinations(resolved: ResolvedEmit, *, where: str) -> None:
+    """Refuse (``FLX-3402``) a ``fidelity.copula`` on an emit whose rows something else lays out.
+
+    A history lays its tracked columns out from the entity's chain, a projected emit derives its rows
+    from a history, and a hidden table is generated and not written, so the joint draw a copula
+    makes for each row is not the row such an emit holds (ADR 0035 decision 4).
+    """
+    if not declares_copula(resolved.fidelity):
+        return
+    extension = resolved.extension or {}
+    if HISTORY_KEY in extension or projection_keys_of(extension) or PROJECTS_KEY in extension:
+        raise FluxError(
+            FLX_3402,
+            f"{where}: fidelity.copula is declared for {resolved.expose_id!r}, which declares a "
+            "history or is projected from one; a history lays its rows out, so the copula would "
+            "not hold. Remove the copula from this emit",
+        )
+    if resolved.is_hidden_table:
+        raise FluxError(
+            FLX_3402,
+            f"{where}: fidelity.copula is declared for {resolved.expose_id!r}, a hidden table, "
+            "which is generated and never written. Remove the copula from this emit",
+        )
+
+
+def check_emit_copula(
+    resolved: ResolvedEmit,
+    rules: Optional[RulePlan],
+    *,
+    sim_id: str,
+    simulation: Mapping[str, Any],
+    counter_based: bool,
+) -> None:
+    """What `plan` refuses of ``fidelity.copula``, for ``validate``, which has no plan.
+
+    A plan is built with the placeholder digest and row count of :func:`check_emit_conditions`, at
+    the kernel a new plan takes, so a copula that kernel cannot draw (``FLX-3105``) or that the
+    emit's columns cannot hold (``FLX-3402``) is refused here as `plan` refuses it.
+    """
+    if resolved.is_reference or not declares_copula(resolved.fidelity):
+        return
+    build_plan(
+        resolved.compile_planned(),
+        sim_id=sim_id,
+        seam_digest="sha256:" + "0" * 64,
+        rows=resolved.declared_row_count or 1,
+        fidelity=resolved.fidelity,
+        time_bounds=simulation.get("spec", {}).get("timeBounds"),
+        related=related_columns(resolved.keys),
+        rules=rules,
+        generator_version=GENERATOR_VERSION_2 if counter_based else GENERATOR_VERSION,
+    )
+    refuse_copula_combinations(resolved, where=sim_id)
+
+
 def _published_rows(
     resolved_emits: Sequence[ResolvedEmit],
     simulation: Mapping[str, Any],
@@ -3069,6 +3125,7 @@ def _plan_emit(
             plugin=plugin,
         )
         refuse_conditions(resolved, plan, rules, simulation, where=cast.simulation_id)
+        refuse_copula_combinations(resolved, where=cast.simulation_id)
         if groups:
             plan = with_conditions(plan, groups, where=cast.simulation_id)
         return _PlannedEmit(

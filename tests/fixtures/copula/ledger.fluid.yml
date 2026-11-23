@@ -1,0 +1,23 @@
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: retail.ledger
+name: Ledger
+metadata:
+  owner:
+    team: finance
+exposes:
+  - exposeId: accounts
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: retail, table: accounts, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: acct_id, type: STRING, required: true, tags: [identifier] }
+        - { name: amount, type: "DECIMAL(12,2)", required: false }
+        - { name: balance, type: INT, required: false }
+        - { name: opened_at, type: TIMESTAMP, required: false }
+        - { name: closed_on, type: DATE, required: false }
+        - { name: region, type: STRING, required: false }
+        - { name: limit_raised, type: INT, required: false }

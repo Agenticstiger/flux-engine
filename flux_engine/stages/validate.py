@@ -62,6 +62,7 @@ from flux_engine.stages.pipeline import (
     check_conditions_declared,
     check_copies_declared,
     check_emit_conditions,
+    check_emit_copula,
     check_flux_side_rule_ids,
     check_generators_declared,
     check_hidden_declared,
@@ -111,6 +112,13 @@ def _check_emit(
     # What a generator plugin's expose cannot combine with (ADR 0032 section 5).
     refuse_plugin_combinations(entry, rules, plugins, where=simulation_id)
     check_emit_conditions(entry, rules, sim_id=simulation_id, simulation=simulation)
+    check_emit_copula(
+        entry,
+        rules,
+        sim_id=simulation_id,
+        simulation=simulation,
+        counter_based=new_plan_is_counter_based(),
+    )
     if entry.fidelity is None:
         return []
     # A bin outside its range, or a range outside its integer width, is
