@@ -274,6 +274,7 @@ from flux_engine.stages._parallel import (
     workers_for,
 )
 from flux_engine.stages._plugin_exposes import plugin_exposes, refuse_plugin_combinations
+from flux_engine.stages._prewarm import start_forkserver_early
 from flux_engine.stages.scaling import (
     FLX_3404,
     FLX_3405,
@@ -1765,6 +1766,10 @@ def execute(
     many bundles keeps none of it past the run.
     """
     require_jobs(jobs)
+    # The forkserver's import of what a worker needs takes about 0.3 s; started here it runs
+    # beside the load, the compile and the simulation below instead of after them. Nothing
+    # starts at one job, and no worker is reserved: the pool is built later, as always.
+    start_forkserver_early(jobs)
     run_kernel = _kernels.DEFAULT_KERNEL if kernel is None else kernel
     if run_kernel.seed_tree_version != kernel2.SEED_TREE_VERSION:
         # New generation features run on kernel 0.2.0 only: 0.1.0's draws are frozen.

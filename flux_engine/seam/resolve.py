@@ -72,6 +72,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     AbstractSet,
     Any,
     Callable,
@@ -87,7 +88,6 @@ from typing import (
 )
 
 import yaml
-from jsonschema import Draft202012Validator, FormatChecker
 
 from flux_engine.core.canonical import nfc
 from flux_engine.core.digest import DigestRef, digest_of_bytes, digest_of_document
@@ -233,6 +233,9 @@ from flux_stats.exact_yaml import (
     check_documents,
     load_documents,
 )
+
+if TYPE_CHECKING:
+    from jsonschema import Draft202012Validator
 
 __all__ = [
     "ADDITIVE_SEAM_FIELDS",
@@ -710,6 +713,10 @@ def flux_schema_validator() -> Draft202012Validator:
     so it is read from that module rather than from a path this repository
     would have to keep in step.
     """
+    # Imported here: jsonschema costs about 0.2 s to import, and a worker process, which
+    # never reads a bundle, loads this module without it.
+    from jsonschema import Draft202012Validator, FormatChecker
+
     provider = importlib.import_module(Bundle.__module__)
     schema_path = Path(provider.FLUX_SCHEMA_PATH)
     schema = json.loads(schema_path.read_text())
