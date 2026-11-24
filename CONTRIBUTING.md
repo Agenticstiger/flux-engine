@@ -62,8 +62,8 @@ make check
 ```
 
 That runs the static checks (ruff, black, mypy, import-linter, the
-vocabulary lint, the naming guardrail, the licence-header check and the
-proof-material guard) and the fast tests. CI runs more:
+vocabulary lint, the naming guardrail, the licence-header check, the
+skills drift check and the proof-material guard) and the fast tests. CI runs more:
 the slow shards, and a matrix of operating systems and Python versions.
 `make ci-local` mirrors all of it and takes about half an hour. It also runs
 the lineage tests against the real OpenLineage client, so install that extra
@@ -86,7 +86,7 @@ history in `history.jsonl`.
 - **Tests with the code.** New behaviour comes with a test. A fix comes with
   a test that failed before it.
 - **Determinism is the product.** The kernel packages (`core`, `world`,
-  `runtime`, `expr`, `seam`) and `flux_stats` may not read the wall clock,
+  `runtime`, `expr`, `expr2`, `seam`) and `flux_stats` may not read the wall clock,
   draw random numbers or use process identity; the seed tree supplies every draw, and
   `make imports` enforces the rule. If a change moves a pinned digest under
   `tests/golden/`, that is a deliberate "golden move": regenerate the files
@@ -104,14 +104,14 @@ history in `history.jsonl`.
 - **No proof-system backends here.** The engine ships the `ProofSystem` port
   and `NoProofSystem`, the no-op that fills it. Real proof-system backends are
   out of scope for this repository and live in a separate commercial plugin,
-  so we can't take a pull request that adds one, however good it is.
+  so the maintainers can't take a pull request that adds one, however good it is.
   `make proof-guard` (part of `make check`, and one of the jobs the required
   `CI gate` waits for) fails on the backend material it recognises, so you
   find out before a reviewer has to say it.
 
 ## Sign your commits (DCO)
 
-We use the [Developer Certificate of Origin](https://developercertificate.org/)
+The project uses the [Developer Certificate of Origin](https://developercertificate.org/)
 instead of a CLA. If you contribute from outside the organisation that
 maintains this project, sign off every commit:
 
@@ -141,7 +141,7 @@ add their login to `.github/workflows/dco.yml`.
 - Start the pull request title and each commit title with a Conventional
   Commits type (`feat:`, `fix:`, `docs:`, `chore:`), like the existing history.
 - Keep a pull request to one logical change.
-- We merge pull requests by rebase, so every commit of a pull request lands on `main` as it is. Make each commit one task: one change, one Conventional Commits title, and its own sign-off (`git commit -s`). Fix a mistake in the commit it belongs to rather than adding a commit that mends it.
+- The maintainers merge pull requests by rebase, so every commit of a pull request lands on `main` as it is. Make each commit one task: one change, one Conventional Commits title, and its own sign-off (`git commit -s`). Fix a mistake in the commit it belongs to rather than adding a commit that mends it.
 - CI must be green. The required check is `CI gate`.
 
 ## Licensing
@@ -177,7 +177,7 @@ or show on a rendered page. Add a path of that kind to `REUSE.toml`.
 
 ## Bugs and security problems
 
-Open an issue for bugs and ideas; the templates ask for what we need. If you
+Open an issue for bugs and ideas; the templates ask for what the maintainers need. If you
 think you found a security problem, do not open an issue: follow
 [SECURITY.md](SECURITY.md).
 
