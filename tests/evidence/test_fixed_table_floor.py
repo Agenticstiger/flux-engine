@@ -269,6 +269,82 @@ def test_a_statistic_grouped_by_a_link_is_noisy_only_when_it_carries_noise() -> 
     assert any("a statistic released without noise" in reason for reason in graded.reasons)
 
 
+def _exact_band(statistic: Dict[str, Any]) -> None:
+    statistic["sampleSize"] = {"min": 4321, "max": 4321}
+
+
+def test_a_noisy_rank_correlation_with_an_exact_band_is_p1_and_a_real_band_keeps_p3() -> None:
+    document = _load("profile-1-4-example.json")
+    statistic = document["tables"]["subscriber"]["columnPairs"][0]["statistics"][0]
+    assert statistic["definition"] == "kendallTau/1" and "noise" in statistic
+    assert grade_profile(document, pinned=True).pattern is Pattern.P3
+    statistic["sampleSize"] = {"min": 4321, "max": 4322}
+    assert grade_profile(document, pinned=True).pattern is Pattern.P3
+    _exact_band(statistic)
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("min equals its max" in reason for reason in graded.reasons), graded.reasons
+    assert "4321" not in "\n".join(graded.reasons)
+
+
+def test_a_noisy_relationship_histogram_with_an_exact_band_is_p1_and_a_real_band_keeps_p3() -> None:
+    relationship = _relationship()
+    graded = grade_profile(_with_relationship(relationship), pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
+    _exact_band(relationship["statistics"][0])
+    graded = grade_profile(_with_relationship(relationship), pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("min equals its max" in reason for reason in graded.reasons), graded.reasons
+
+
+def test_a_noisy_relationship_histogram_grouped_by_a_non_category_parent_column_is_p1() -> None:
+    relationship = _relationship()
+    relationship["statistics"][0]["groupBy"] = "id"
+    relationship["statistics"][0]["groups"] = [
+        {"group": key, "status": "F", "noisyCounts": ["400", "600"]} for key in ("a", "b")
+    ]
+    assert grade_profile(_with_relationship(relationship), pinned=True).pattern is Pattern.P3
+    document = _with_relationship(relationship)
+    document["tables"]["subscriber"]["columns"]["id"] = {"domain": "number"}
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("keys are data values" in reason for reason in graded.reasons), graded.reasons
+
+
+def _linked_by(column: str) -> Dict[str, Any]:
+    """The follows example, with a noisy histogram of invoices grouped by *column* of its account."""
+    document = _load("profile-1-4-follows-example.json")
+    document["privacy"]["privacyLoss"] = {"rho": "1"}
+    document["tables"]["account"]["columns"]["balance"] = {"domain": "number"}
+    statistic = document["tables"]["invoice"]["columns"]["status"]["statistics"][0]
+    statistic["groupByLink"] = {
+        "parent": {"table": "account", "columns": ["id"]},
+        "columns": ["account_id"],
+        "column": column,
+    }
+    statistic["groups"] = [
+        {"group": key, "status": "F", "noisyCounts": ["10", "20"]}
+        for key in (("business", "personal") if column == "segment" else ("1234.56", "98765.43"))
+    ]
+    return document
+
+
+def test_a_link_to_a_category_column_of_the_parent_keeps_a_1_4_0_profile_p3() -> None:
+    graded = grade_profile(_linked_by("segment"), pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
+
+
+def test_a_link_to_a_number_column_of_the_parent_is_p1_in_1_4_0_and_names_no_value() -> None:
+    graded = grade_profile(_linked_by("balance"), pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("not a category column" in reason for reason in graded.reasons), graded.reasons
+    assert not any("1234.56" in reason or "balance" in reason for reason in graded.reasons)
+
+
+def test_a_link_to_a_column_the_profile_does_not_describe_is_p1_in_1_4_0() -> None:
+    assert grade_profile(_linked_by("nowhere"), pinned=True).pattern is Pattern.P1
+
+
 # ---------------------------------------------------------------------------
 # What the declaration covers
 # ---------------------------------------------------------------------------

@@ -73,8 +73,10 @@ criteria say what a risk assessment tests. None says what stands behind a number
      and no pair, period, relationship, query or fact statistic, none of which can be released with
      noise in format 1-2-0.
      A noisy statistic that states data is P1 as well: one grouped by a column that is not
-     categorical (its group keys are data values), one grouped through a link, and one whose
-     `sampleSize` band has `min` equal to `max`.
+     categorical (its group keys are data values), one grouped through a link (in format 1-4-0
+     only a link to a category column of a profile table is exempt), and one whose `sampleSize`
+     band has `min` equal to `max`. The check covers column, date pair, column pair and
+     relationship statistics.
    - Otherwise **P1**, and `EVIDENCE.md` lists why the profile is not P3.
 
    The bundle's register, its labels and its assumptions do not enter the grade. A pinned profile

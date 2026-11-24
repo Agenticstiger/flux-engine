@@ -352,6 +352,10 @@ _LINK_GROUP_REASON = (
     "the profile holds a statistic grouped through a link to a column of another table, whose "
     "keys are values of that table's data and are released without noise"
 )
+_LINK_COLUMN_REASON = (
+    "the profile holds a statistic grouped through a link to a column that is not a category "
+    "column of a table it describes, whose keys are data values released without noise"
+)
 _EXACT_BAND_REASON = (
     "the profile holds a statistic with a sampleSize band whose min equals its max, an exact "
     "size released without noise"
@@ -359,7 +363,12 @@ _EXACT_BAND_REASON = (
 
 
 def _structure_reasons(
-    statistics: Any, columns: Mapping[str, Any], found: Set[str], *, links: bool
+    statistics: Any,
+    columns: Mapping[str, Any],
+    found: Set[str],
+    *,
+    links: bool,
+    tables: Any = None,
 ) -> None:
     """Add to *found* the reasons a noisy statistic of a table still states data (ADR 0020).
 
@@ -368,22 +377,45 @@ def _structure_reasons(
     Under ``publicStructure`` a categorical level and a band are declared chosen without the data;
     these are not, whatever the declaration says. Anything the check cannot read counts as data.
 
-    *links* is false for a profile of format ``1-4-0``, whose declaration covers the values of the
-    parent column of a ``groupByLink`` as group keys of a noisy statistic; a non-categorical
-    ``groupBy`` and an exact band count as data in every format.
+    *links* is false for a profile of format ``1-4-0``, whose declaration covers the values of a
+    category column of the parent table of a ``groupByLink`` as group keys of a noisy statistic; a
+    link to any other column (a number or timestamp column, or one the profile does not describe,
+    looked up in *tables*, the profile's tables) is data in every format, as are a non-categorical
+    ``groupBy`` and an exact band.
     """
     for statistic in statistics if isinstance(statistics, (list, tuple)) else ():
         if isinstance(statistic, Mapping):
-            found.update(_statistic_reasons(statistic, columns, links=links))
+            found.update(_statistic_reasons(statistic, columns, links=links, tables=tables))
+
+
+def _link_column_is_category(link: Any, tables: Any) -> bool:
+    """Whether a ``groupByLink`` names a category column of a table the profile describes."""
+    parent = link.get("parent") if isinstance(link, Mapping) else None
+    table = (
+        tables.get(parent.get("table"))
+        if isinstance(tables, Mapping)
+        and isinstance(parent, Mapping)
+        and isinstance(parent.get("table"), str)
+        else None
+    )
+    described = table.get("columns") if isinstance(table, Mapping) else None
+    name = link.get("column") if isinstance(link, Mapping) else None
+    target = (
+        described.get(name) if isinstance(described, Mapping) and isinstance(name, str) else None
+    )
+    return isinstance(target, Mapping) and target.get("domain") == "category"
 
 
 def _statistic_reasons(
-    statistic: Mapping[str, Any], columns: Mapping[str, Any], *, links: bool
+    statistic: Mapping[str, Any], columns: Mapping[str, Any], *, links: bool, tables: Any = None
 ) -> Set[str]:
     """The reasons one noisy statistic still states data (see :func:`_structure_reasons`)."""
     found: Set[str] = set()
-    if links and "groupByLink" in statistic:
-        found.add(_LINK_GROUP_REASON)
+    if "groupByLink" in statistic:
+        if links:
+            found.add(_LINK_GROUP_REASON)
+        elif not _link_column_is_category(statistic["groupByLink"], tables):
+            found.add(_LINK_COLUMN_REASON)
     if "groupBy" in statistic:
         target = (
             columns.get(statistic["groupBy"]) if isinstance(statistic["groupBy"], str) else None
@@ -396,16 +428,24 @@ def _statistic_reasons(
     return found
 
 
-def _table_structure_reasons(table: Mapping[str, Any], found: Set[str], *, links: bool) -> None:
-    """Add to *found* the reasons the statistics of a table's columns and date pairs state data."""
+def _table_structure_reasons(
+    table: Mapping[str, Any], found: Set[str], *, links: bool, tables: Any = None
+) -> None:
+    """Add to *found* the reasons the statistics of a table's columns, date pairs and column pairs
+    state data."""
     columns = table.get("columns")
     table_columns = columns if isinstance(columns, Mapping) else {}
-    for pair in table.get("datePairs") or ():
-        if isinstance(pair, Mapping):
-            _structure_reasons(pair.get("statistics"), table_columns, found, links=links)
+    for key in ("datePairs", "columnPairs"):
+        for pair in table.get(key) or ():
+            if isinstance(pair, Mapping):
+                _structure_reasons(
+                    pair.get("statistics"), table_columns, found, links=links, tables=tables
+                )
     for column in (table.get("columns") or {}).values():
         if isinstance(column, Mapping):
-            _structure_reasons(column.get("statistics"), table_columns, found, links=links)
+            _structure_reasons(
+                column.get("statistics"), table_columns, found, links=links, tables=tables
+            )
 
 
 def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> ProfileGrade:
@@ -489,7 +529,10 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
         ):
             sections.append(f"{at}.calendar")
         _table_structure_reasons(
-            table, data_stated, links=accounting is None or not accounting.from_1_4
+            table,
+            data_stated,
+            links=accounting is None or not accounting.from_1_4,
+            tables=tables,
         )
         for name, column in (table.get("columns") or {}).items():
             if not isinstance(column, Mapping):
@@ -515,6 +558,22 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             for s in relationship.get("statistics") or ()
         ):
             sections.append(at)
+        parent = relationship.get("parent")
+        parent_table = (
+            tables.get(parent.get("table"))
+            if isinstance(tables, Mapping)
+            and isinstance(parent, Mapping)
+            and isinstance(parent.get("table"), str)
+            else None
+        )
+        parent_columns = parent_table.get("columns") if isinstance(parent_table, Mapping) else None
+        _structure_reasons(
+            relationship.get("statistics"),
+            parent_columns if isinstance(parent_columns, Mapping) else {},
+            data_stated,
+            links=accounting is None or not accounting.from_1_4,
+            tables=tables,
+        )
         unknown += [
             f"{at}.{_named(key)}"
             for key in relationship
