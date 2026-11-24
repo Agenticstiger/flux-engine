@@ -1870,6 +1870,40 @@ def _resolve(
     return None, declared, tables, columns
 
 
+def _statistic_tokens(entry: Mapping[str, Any], tokens: Tuple[str, ...]) -> List[Tuple[str, ...]]:
+    """The profile pointer of each statistic of a ``relationships`` entry, as tokens below *tokens*."""
+    statistics = entry.get("statistics")
+    return [
+        tokens + ("statistics", str(position))
+        for position, _ in enumerate(statistics if isinstance(statistics, list) else ())
+    ]
+
+
+def _structural_classes(entry: Mapping[str, Any]) -> List[str]:
+    """The classes of children per parent a ``relationships`` entry marks structural."""
+    structural = entry.get("structural")
+    return [str(name) for name in structural] if isinstance(structural, list) else []
+
+
+def _columns_of(tables: Mapping[str, Any], table: str) -> Optional[Any]:
+    """The ``columns`` entries the profile holds for *table*, or ``None``."""
+    found = tables.get(table)
+    return found.get("columns") if isinstance(found, Mapping) else None
+
+
+def _resolved(
+    entry: Mapping[str, Any],
+    keys: Optional[ContractKeys],
+    planned: Mapping[str, AuthoredExpose],
+    held_back: Optional[Callable[[str, str], Optional[str]]],
+) -> Tuple[Optional[str], Optional[Any], Tuple[str, str], Tuple[List[str], List[str]]]:
+    """:func:`_resolve`, with the reason *held_back* gives for a relationship the contract declares."""
+    why, declared, tables, columns = _resolve(entry, keys, planned)
+    if why is None and declared is not None and held_back is not None:
+        why = held_back(tables[1], declared.name)
+    return why, declared, tables, columns
+
+
 def _spread_relationships(
     exposes: Sequence[AuthoredExpose],
     keys: Optional[ContractKeys],
@@ -1904,31 +1938,17 @@ def _spread_relationships(
         if not isinstance(entry, Mapping):
             continue
         tokens = ("relationships", str(index))
-        statistics = entry.get("statistics")
-        every = [
-            tokens + ("statistics", str(position))
-            for position, _ in enumerate(statistics if isinstance(statistics, list) else ())
-        ]
-        structural = entry.get("structural")
-        classes = [str(name) for name in structural] if isinstance(structural, list) else []
-        why, declared, (parent_table, child_table), (parent_columns, child_columns) = _resolve(
-            entry, keys, planned
+        every = _statistic_tokens(entry, tokens)
+        why, declared, (parent_table, child_table), (parent_columns, child_columns) = _resolved(
+            entry, keys, planned, held_back
         )
         if why is not None or declared is None:
             unused += [(pointer, why or "") for pointer in every]
             continue
-        held = held_back(child_table, declared.name) if held_back is not None else None
-        if held is not None:
-            unused += [(pointer, held) for pointer in every]
-            continue
         child_expose, parent_expose = planned[child_table], planned[parent_table]
         child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
         parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
-        child_entries = (
-            tables.get(child_table, {}).get("columns")
-            if isinstance(tables.get(child_table), Mapping)
-            else None
-        )
+        child_entries = _columns_of(tables, child_table)
         placed = _lay_out_children(
             entry,
             tokens,
@@ -1948,9 +1968,9 @@ def _spread_relationships(
         if placed.entry is not None:
             entries.append(placed.entry)
             cited += [(placed.entry, item) for item in placed.cited]
-        counted, laid = placed.counted, placed.laid
+        classes = _structural_classes(entry)
         if classes:
-            recorded, sentence = _structural_note(classes, counted, laid)
+            recorded, sentence = _structural_note(classes, placed.counted, placed.laid)
             if recorded:
                 records.append((tokens + ("structural",), sentence))
             else:

@@ -1080,18 +1080,8 @@ class ParameterRegister:
 
     @property
     def uses_1_4_additions(self) -> bool:
-        """Whether the register uses anything format 1-4-0 adds, and so is recorded as 1-4-0.
-
-        It counts a number at a position the format added, or an entry (or an unused statistic)
-        names a definition the format added.
-        """
-        citations = [entry.citation for entry in self.entries]
-        citations.extend(entry.replaced_by for entry in self.entries)
-        citations.extend(item.citation for item in self.unused or ())
-        return any(registered.number.added_1_4 for registered in self.numbers) or any(
-            citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
-            for citation in citations
-        )
+        """Whether the register uses anything format 1-4-0 adds, and so is recorded as 1-4-0."""
+        return _adds_1_4(self)
 
     @property
     def lists_unused(self) -> bool:
@@ -1122,6 +1112,17 @@ class ParameterRegister:
         for registered in self.numbers:
             counts[registered.source.value] += 1
         return counts
+
+
+def _adds_1_4(register: ParameterRegister) -> bool:
+    """Whether *register* counts a number at a position format 1-4-0 added, or cites a definition it added."""
+    citations = [entry.citation for entry in register.entries]
+    citations.extend(entry.replaced_by for entry in register.entries)
+    citations.extend(item.citation for item in register.unused or ())
+    return any(registered.number.added_1_4 for registered in register.numbers) or any(
+        citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
+        for citation in citations
+    )
 
 
 def _within(prefix: Tuple[str, ...], path: Tuple[str, ...]) -> bool:
