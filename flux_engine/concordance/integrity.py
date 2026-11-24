@@ -43,6 +43,7 @@ from flux_stats.reading import ValueDomain
 
 __all__ = [
     "CHECKS",
+    "CHECK_WORDING",
     "KeyColumns",
     "LinkIntegrity",
     "ParentGroups",
@@ -54,6 +55,11 @@ __all__ = [
 
 #: The four checks, in the order a relationship reports them.
 CHECKS: Tuple[str, ...] = ("found", "unique", "nulls", "oneToOne")
+
+#: How a check is worded in a line a person reads, where it differs from its key. The ``nulls`` share
+#: counts the child rows whose key holds NO null, so the line says ``non-null`` and the 100 % it shows
+#: reads as the good result it is. The keys of the documents (``checks.nulls``) are unchanged.
+CHECK_WORDING: Mapping[str, str] = {"nulls": "non-null"}
 
 
 @dataclass(frozen=True)
@@ -133,7 +139,9 @@ class LinkIntegrity:
 
     def line(self) -> str:
         """``store_sales.item (child store_sales, parent item): found 4000 of 4000 (100.00%); ...``."""
-        parts = "; ".join(f"{name} {holds.text()}" for name, holds in self.checks)
+        parts = "; ".join(
+            f"{CHECK_WORDING.get(name, name)} {holds.text()}" for name, holds in self.checks
+        )
         return f"{self.child}.{self.name} -> {self.parent}: {parts}"
 
 

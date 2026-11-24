@@ -43,6 +43,7 @@ from typing import (
 
 from flux_engine.concordance.date_facts import date_shares
 from flux_engine.concordance.integrity import (
+    CHECK_WORDING,
     KeyColumns,
     LinkIntegrity,
     grouped_spread,
@@ -139,7 +140,9 @@ class ModuleChecks:
                 link.child,
                 f"integrity {link.child}.{link.name} -> {link.parent}: "
                 + "; ".join(
-                    f"{name} {holds.text()}" for name, holds in link.checks if not holds.whole
+                    f"{CHECK_WORDING.get(name, name)} {holds.text()}"
+                    for name, holds in link.checks
+                    if not holds.whole
                 ),
             )
             for link in self.links

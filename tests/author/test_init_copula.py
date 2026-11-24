@@ -499,3 +499,16 @@ def test_a_table_with_no_rank_correlation_is_not_read_at_all() -> None:
 
     assert declare_copula(_stub(), None, by_dates=set(), whole=None, counter_based=True) is None
     assert has_rank_statistics(None) is False
+
+
+def test_the_copula_note_is_short_sentences_not_one_long_one(
+    tmp_path: Path, data: List[rp.Row]
+) -> None:
+    result = _init(tmp_path, rp.profile(data, rows=ROWS))
+    assert result.exit_code == 0, result.stderr
+    (line,) = [each for each in result.stdout.splitlines() if "Gaussian copula" in each]
+    note = line.split("copula: ", 1)[1]
+    assert ";" not in note
+    sentences = [each for each in note.split(". ") if each]
+    assert len(sentences) >= 4
+    assert max(len(each) for each in sentences) <= 100

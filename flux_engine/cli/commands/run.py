@@ -70,7 +70,15 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "of every stage that did run are still returned under that stage's own key. "
             "When the run is already committed and its bundle declares generator plugins, the "
             "run is kept as it stands, the plugin is not asked again, and the rest of what "
-            "was asked is done against it; a new sample needs a new run, for example another seed."
+            "was asked is done against it; a new sample needs a new run, for example another seed. "
+            "With --verify and --profile the run is also scored against the pinned profile: each "
+            "property the fidelity block declares, among them rankCorrelation and any property "
+            "grouped by the bins of another column (groupByBins), is compared with it. Each counts "
+            "entry of the bundle adds the rule lines counts:<relationship>.minChildren and "
+            "counts:<relationship>.parentWhen to the child's rules, both enforced, and a profile "
+            "that publishes the children per parent of a relationship adds a childrenPerParent row "
+            "to the scorecard; a row of a relationship that has a counts entry fails the run when "
+            "it is outside the entry's tolerance."
         ),
     )
     run_p.add_argument("bundle", help=_BUNDLE_HELP)

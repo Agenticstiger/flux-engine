@@ -501,10 +501,10 @@ def _notes(
 ) -> None:
     result.notes.append(
         f"{_spelled(names)} are drawn together through one Gaussian copula of their "
-        f"{_NAMES[measure]}, each pair's value the profile's, rounded to {_FIRST_PLACES} places; "
-        "the plan may shrink the matrix towards the identity to make it a correlation matrix, "
-        "which multiplies every correlation by 1 - alpha on the latent scale, and the evidence "
-        "states alpha"
+        f"{_NAMES[measure]}. Each pair's value is the profile's, rounded to {_FIRST_PLACES} "
+        "places. The plan may shrink the matrix towards the identity, so that it is a "
+        "correlation matrix. That multiplies every correlation by 1 - alpha on the latent "
+        "scale. The evidence states alpha."
     )
     if held:
         shown = "; ".join(_spelled(pair) for pair in held[:_SHOWN])
