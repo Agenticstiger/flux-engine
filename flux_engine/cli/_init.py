@@ -115,11 +115,6 @@ def _cd(directory: str) -> str:
     return f"cd -- {quoted}" if directory.startswith("-") else f"cd {quoted}"
 
 
-def _usage(text: str) -> StageResult:
-    """The refusal (exit ``2``) of an invocation that is not well formed, with *text* for the message."""
-    return StageResult(stage="init", exit_code=2, stderr=text)
-
-
 def _needs_contract(
     profile: Optional[str], consumers: Optional[str], contract: Optional[str]
 ) -> Optional[StageResult]:
@@ -127,15 +122,23 @@ def _needs_contract(
     if contract is not None:
         return None
     if profile is not None:
-        return _usage(
-            "init: --profile needs --contract: a bundle for your data is written from its "
-            "FLUID contract and its profile together, for example `fluxsim init bundle "
-            "--contract contract.orders.fluid.yaml --profile orders.profile.json`"
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --profile needs --contract: a bundle for your data is written from its "
+                "FLUID contract and its profile together, for example `fluxsim init bundle "
+                "--contract contract.orders.fluid.yaml --profile orders.profile.json`"
+            ),
         )
     if consumers is not None:
-        return _usage(
-            "init: --consumers needs --contract: the consumers' questions are read against "
-            "the contract's exposes"
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --consumers needs --contract: the consumers' questions are read against "
+                "the contract's exposes"
+            ),
         )
     return None
 
@@ -204,12 +207,20 @@ def _request_refused(
 ) -> Optional[StageResult]:
     """The refusal (exit ``2``) of ``--request`` without ``--contract`` or beside ``--profile``."""
     if request is not None and profile is not None:
-        return _usage(
-            "init: --request names where the profile request is written, and none is "
-            "written once a profile is given; drop --request or --profile"
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --request names where the profile request is written, and none is "
+                "written once a profile is given; drop --request or --profile"
+            ),
         )
     if request is not None and contract is None:
-        return _usage("init: --request needs --contract, which the profile request is made from")
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=("init: --request needs --contract, which the profile request is made from"),
+        )
     return None
 
 
@@ -221,19 +232,31 @@ def _flags_refused(
         return None
     flag = "--strict" if strict else "--allow"
     if contract is None:
-        return _usage(
-            f"init: {flag} checks a bundle written from --contract and --profile; the "
-            "starter project has no profile to check"
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                f"init: {flag} checks a bundle written from --contract and --profile; the "
+                "starter project has no profile to check"
+            ),
         )
     if profile is None:
-        return _usage(
-            f"init: {flag} checks a bundle written from --contract and --profile; "
-            "with no profile, init writes the profile request, and there is no bundle to check"
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                f"init: {flag} checks a bundle written from --contract and --profile; "
+                "with no profile, init writes the profile request, and there is no bundle to check"
+            ),
         )
     if not strict:
-        return _usage(
-            "init: --allow accepts what --strict would refuse; pass --strict too, or drop "
-            "--allow"
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --allow accepts what --strict would refuse; pass --strict too, or drop "
+                "--allow"
+            ),
         )
     return None
 
