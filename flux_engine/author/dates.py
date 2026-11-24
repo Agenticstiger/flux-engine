@@ -306,6 +306,27 @@ def _duration(
     return _histogram_member(kept_edges, kept_weights, upper=False)
 
 
+def _lifetime_duration(
+    plain: Optional[Dict[str, Any]], family: Optional["_Family"]
+) -> Optional[Dict[str, Any]]:
+    """The ``duration`` of a lifetime: its dwell family over the *plain* histogram, or just that histogram."""
+    if family is None:
+        return plain
+    duration: Dict[str, Any] = {"given": family.given, "states": family.states}
+    if plain is not None:
+        duration["otherwise"] = plain
+    return duration
+
+
+def _plain_how(plain: Optional[Dict[str, Any]], family: Optional["_Family"]) -> Optional[str]:
+    """How the *plain* histogram of a lifetime is read, or ``None`` when it gives no duration."""
+    if plain is None:
+        return None
+    if family is not None:
+        return "the dwell of a row whose state is not listed, cut at day 0"
+    return "the duration of the lifetime, cut at day 0"
+
+
 def _cut(histogram: _Histogram, reversed_pair: bool) -> Optional[Dict[str, Any]]:
     """A histogram of a pair's days as a duration, oriented as the lifetime reads it and cut at day 0."""
     if reversed_pair:
@@ -525,15 +546,9 @@ class _Declarer:
         order = pair.order
         assert order is not None
         entry: Dict[str, Any] = {"emit": expose, "start": start, "end": end}
-        plain: Optional[Dict[str, Any]] = None
-        if pair.histogram is not None:
-            plain = _cut(pair.histogram, reversed_pair)
+        plain = _cut(pair.histogram, reversed_pair) if pair.histogram is not None else None
         family, family_unused = self._family(expose, pair, start, end, reversed_pair)
-        duration: Optional[Dict[str, Any]] = plain
-        if family is not None:
-            duration = {"given": family.given, "states": family.states}
-            if plain is not None:
-                duration["otherwise"] = plain
+        duration = _lifetime_duration(plain, family)
         if duration is None:
             # An end drawn from its own statistics is ordered after its start only by chance, so
             # the lifetime keeps its start, which children can still be dated after.
@@ -554,18 +569,11 @@ class _Declarer:
             else f"{start!r} starts the lifetime"
         )
         used_how: Dict[int, str] = {}
-        unused_why: Dict[int, str] = {}
+        unused_why: Dict[int, str] = dict(family_unused)
         if family is not None:
             used_how[family.index] = family.note
-        unused_why.update(family_unused)
-        how_plain: Optional[str] = None
-        if plain is not None:
-            how_plain = (
-                "the dwell of a row whose state is not listed, cut at day 0"
-                if family is not None
-                else "the duration of the lifetime, cut at day 0"
-            )
-        elif pair.histogram is not None:
+        how_plain = _plain_how(plain, family)
+        if plain is None and pair.histogram is not None:
             unused_why[pair.histogram.index] = (
                 "the histogram holds no days from 0 up, so no duration is drawn from it"
             )
@@ -573,16 +581,28 @@ class _Declarer:
             f"{orientation}, and the share of rows that break its order is the target "
             f"({target or '0'}%)"
         )
-        if target is not None:
+        self._cite_lifetime(entry, pair, family, how_plain, order_how)
+        self.keep(pair, order_how, how_plain, used_how, unused_why)
+
+    def _cite_lifetime(
+        self,
+        entry: Dict[str, Any],
+        pair: _Pair,
+        family: Optional["_Family"],
+        how_plain: Optional[str],
+        order_how: str,
+    ) -> None:
+        """Record what each number of a lifetime entry rests on: its target, its duration, its states."""
+        histogram = pair.histogram
+        if "target" in entry:
             self.cited.append((entry, ("target",), pair.tokens + ("order",), order_how))
-        if plain is not None and pair.histogram is not None and how_plain is not None:
+        if histogram is not None and how_plain is not None:
             member = ("duration", "otherwise") if family is not None else ("duration",)
-            tokens = pair.tokens + ("statistics", str(pair.histogram.index))
+            tokens = pair.tokens + ("statistics", str(histogram.index))
             self.cited.append((entry, member, tokens, how_plain))
         if family is not None:
             tokens = pair.tokens + ("statistics", str(family.index))
             self.cited.append((entry, ("duration", "states"), tokens, family.note))
-        self.keep(pair, order_how, how_plain, used_how, unused_why)
 
     def _family(
         self, expose: str, pair: _Pair, start: str, end: str, reversed_pair: bool
