@@ -31,9 +31,9 @@ from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
 from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
-from flux_engine.stages.plan import build_plan_document
 from flux_engine.stages.verify import verify
 
+from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
 from .test_projection_plan_run import (
     HISTORY,
     NAMESPACE,
@@ -41,7 +41,6 @@ from .test_projection_plan_run import (
     _plan_document,
     _rows,
     _run,
-    apply_module,
     plan_module,
 )
 
@@ -172,26 +171,13 @@ def test_the_shares_of_a_lagged_run_joined_are_the_bytes_of_one_run(
     bundle = _bundle(tmp_path, end=CLOSE)
     _declare(bundle, lag=LAG)
     whole = _run(bundle, tmp_path / "whole")
-    state = tmp_path / "shards"
-    planned = plan_module.plan(bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False)
-    run_id = planned.artifacts["run_id"]
-    for index in range(1, count + 1):
-        part = apply_module.apply(bundle, run_id=run_id, state_dir=state, shard=(index, count))
-        assert part.success, part.stderr
-    shards = RunLayout.for_state_dir(state, run_id)
-    joined = b"".join(
-        shards.shard_emit_path(EVENTS, index, count).read_bytes() for index in range(1, count + 1)
-    )
-    assert joined == whole.emit_path(EVENTS).read_bytes()
+    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (EVENTS,))
 
 
 def test_two_jobs_are_not_one_job_apart_with_a_lag(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path, end=CLOSE)
     _declare(bundle, lag=LAG)
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_run_at_one_and_four_jobs(bundle, plan=False, kernel=KERNEL_V2)
 
 
 # --- the derived count ------------------------------------------------------------------------
@@ -234,12 +220,7 @@ def test_four_jobs_make_the_run_one_job_makes(tmp_path: Path) -> None:
     versions = 3 * parallel.MIN_ROWS_PER_JOB + 11
     entities = 2 * parallel.MIN_ROWS_PER_JOB + 50
     bundle = _bundle(tmp_path, versions=versions, entities=entities, customers=1200, end=CLOSE)
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.result == theirs.result
-        assert mine.writer.lines() == theirs.writer.lines()
+    _, four = assert_same_run_at_one_and_four_jobs(bundle, result=True, kernel=KERNEL_V2)
     events = next(e for e in four.emits if e.resolved.expose_id == EVENTS)
     assert events.plan is not None and events.plan.rows > versions
     assert events.processes > 1
@@ -247,11 +228,7 @@ def test_four_jobs_make_the_run_one_job_makes(tmp_path: Path) -> None:
 
 def test_two_jobs_are_not_one_job_apart_on_a_small_run(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path, end=CLOSE)
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_run_at_one_and_four_jobs(bundle, kernel=KERNEL_V2)
 
 
 @pytest.mark.parametrize(("scale", "versions"), [("0.5", 100), ("0.25", 50)])
@@ -274,18 +251,7 @@ def test_a_scale_above_one_follows_the_scaled_history(tmp_path: Path) -> None:
 def test_the_shares_joined_in_order_are_the_bytes_of_one_run(tmp_path: Path, count: int) -> None:
     bundle = _bundle(tmp_path, end=CLOSE)
     whole = _run(bundle, tmp_path / "whole")
-    state = tmp_path / "shards"
-    planned = plan_module.plan(bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False)
-    run_id = planned.artifacts["run_id"]
-    assert run_id == whole.run_id
-    for index in range(1, count + 1):
-        part = apply_module.apply(bundle, run_id=run_id, state_dir=state, shard=(index, count))
-        assert part.success, part.stderr
-    shards = RunLayout.for_state_dir(state, run_id)
-    joined = b"".join(
-        shards.shard_emit_path(EVENTS, index, count).read_bytes() for index in range(1, count + 1)
-    )
-    assert joined == whole.emit_path(EVENTS).read_bytes()
+    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (EVENTS,))
 
 
 # --- the window -------------------------------------------------------------------------------

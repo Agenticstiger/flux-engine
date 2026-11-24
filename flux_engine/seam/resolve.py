@@ -3102,7 +3102,13 @@ def _with_projection(
         refusal=_history_refusal(),
     )
     projected = _history_emit(loaded, simulation, simulation_id, entry.of)
-    target = projection_target(expose, projected.expose, projected.contract_document, history)
+    target = projection_target(
+        expose,
+        projected.expose,
+        projected.contract_document,
+        history,
+        time_bounds=simulation.get("spec", {}).get("timeBounds"),
+    )
     entry = _checked_projection(key, entry, target)
     return {
         **(extension or {}),

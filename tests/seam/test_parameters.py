@@ -576,7 +576,11 @@ _KEY_SETS = [
     ),
     (history._HISTOGRAM_KEYS, ("events", "#", "lag"), {"closed"}),
     (projections._SNAPSHOT_KEYS, ("snapshots", "#"), set(projections._SNAPSHOT_KEYS)),
-    (projections._PERIODS_KEYS, ("periods", "#"), {"emit", "of", "column", "grain", "match"}),
+    (
+        projections._PERIODS_KEYS,
+        ("periods", "#"),
+        {"emit", "of", "column", "grain", "match", "from", "through"},
+    ),
     (projections._KIND_KEYS, ("periods", "#", "kinds", "#"), {"when", "overrides"}),
     (projections._LEVEL_KEYS, ("periods", "#", "kinds", "#", "count"), set()),
     (dates._LIFETIME_KEYS, ("lifetimes", "#"), {"emit", "start", "end", "endPastWindow"}),

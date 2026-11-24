@@ -39,9 +39,9 @@ from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
-from flux_engine.stages.plan import build_plan_document
 from flux_engine.stages.verify import verify
 
+from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
 from .test_projection_plan_run import (
     HISTORY,
     NAMESPACE,
@@ -49,7 +49,6 @@ from .test_projection_plan_run import (
     _plan_document,
     _rows,
     _run,
-    apply_module,
     plan_module,
 )
 
@@ -184,6 +183,82 @@ def test_verify_holds_the_period_lines_with_kinds_and_a_quarterly_grain(tmp_path
     assert "period:within_validity" in verified.stdout + verified.stderr
 
 
+# --- from and through -------------------------------------------------------------------------
+
+
+def _ranged(tmp_path: Path, name: str, **keys: str) -> Path:
+    """The fixture with *keys* (``from``, ``through``) added to its periods entry."""
+    bundle = _periodic(tmp_path, name)
+    path = bundle / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    document["extensions"][NAMESPACE]["periods"][0].update(keys)
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    return bundle
+
+
+def test_a_range_equal_to_the_window_leaves_the_rows_unchanged(tmp_path: Path) -> None:
+    plain = _run(_periodic(tmp_path, "plain"), tmp_path / "a")
+    ranged = _run(
+        _ranged(tmp_path, "ranged", **{"from": "2023-01-01", "through": "2025-12-01"}),
+        tmp_path / "b",
+    )
+    # The entry is part of the bundle's digest, so the run's seeds differ and the cells with them;
+    # the periods the rows lie on do not.
+    assert {r["month"] for r in _rows(plain, PERIODIC)} == {
+        r["month"] for r in _rows(ranged, PERIODIC)
+    }
+
+
+def test_a_narrower_through_cuts_the_rows_and_verify_passes(tmp_path: Path) -> None:
+    bundle = _ranged(tmp_path, "cut", **{"from": "2023-04-01", "through": "2024-06-01"})
+    layout = _run(bundle, tmp_path / "state")
+    rows = _rows(layout, PERIODIC)
+    months = {row["month"] for row in rows}
+    assert months and min(months) >= "2023-04-01" and max(months) <= "2024-06-01"
+    whole = _held(_run(_periodic(tmp_path, "whole"), tmp_path / "w"))
+    assert 0 < len(rows) < whole
+    assert _plan_document(layout)["emits"][PERIODIC]["rows"] == len(rows)
+    verified = verify(bundle, run_id=layout.run_id, state_dir=tmp_path / "state")
+    assert verified.success, verified.stderr
+    assert "period:within_validity" in verified.stdout + verified.stderr
+
+
+def test_a_longer_window_appends_no_period_past_through(tmp_path: Path) -> None:
+    keys = {"through": "2025-06-01"}
+    narrow = _run(_ranged(tmp_path, "n", **keys), tmp_path / "a")
+    wide_bundle = _ranged(tmp_path, "w", **keys)
+    path = wide_bundle / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    document["spec"]["timeBounds"]["end"] = "2027-06-30T00:00:00Z"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    wide = _run(wide_bundle, tmp_path / "b")
+    assert max(row["month"] for row in _rows(wide, PERIODIC)) <= "2025-06-01"
+    assert _held(wide) == _held(narrow)
+
+
+@pytest.mark.parametrize(
+    ("keys", "needle"),
+    [
+        ({"from": "2022-12-31"}, "before timeBounds.start"),
+        ({"from": "2026-01-01"}, "not before timeBounds.end"),
+        ({"through": "2026-01-01"}, "not before timeBounds.end"),
+        ({"from": "2024-01-01", "through": "2023-06-01"}, "before its from"),
+        ({"from": "2024-1-1"}, "YYYY-MM-DD"),
+    ],
+)
+def test_a_range_outside_the_window_is_refused_at_plan(
+    tmp_path: Path, keys: Dict[str, str], needle: str
+) -> None:
+    planned = plan_module.plan(
+        _ranged(tmp_path, "bad", **keys),
+        state_dir=tmp_path / "state",
+        kernel=KERNEL_V2.version,
+        stage=False,
+    )
+    assert not planned.success and planned.error_code == "FLX-3403"
+    assert needle in planned.stderr and PERIODIC in planned.stderr
+
+
 # --- the kinds --------------------------------------------------------------------------------
 
 
@@ -201,27 +276,12 @@ def test_the_shares_of_a_run_with_kinds_joined_are_the_bytes_of_one_run(
 ) -> None:
     bundle = _with_kinds(_periodic(tmp_path, end=CLOSE))
     whole = _run(bundle, tmp_path / "whole")
-    state = tmp_path / "shards"
-    planned = plan_module.plan(bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False)
-    run_id = planned.artifacts["run_id"]
-    for index in range(1, count + 1):
-        assert apply_module.apply(
-            bundle, run_id=run_id, state_dir=state, shard=(index, count)
-        ).success
-    shards = RunLayout.for_state_dir(state, run_id)
-    joined = b"".join(
-        shards.shard_emit_path(PERIODIC, index, count).read_bytes() for index in range(1, count + 1)
-    )
-    assert joined == whole.emit_path(PERIODIC).read_bytes()
+    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (PERIODIC,))
 
 
 def test_one_job_and_four_jobs_make_the_same_run_with_kinds(tmp_path: Path) -> None:
     bundle = _with_kinds(_periodic(tmp_path))
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_run_at_one_and_four_jobs(bundle, kernel=KERNEL_V2)
 
 
 # --- jobs, scale, shard -----------------------------------------------------------------------
@@ -229,11 +289,7 @@ def test_one_job_and_four_jobs_make_the_same_run_with_kinds(tmp_path: Path) -> N
 
 def test_one_job_and_four_jobs_make_the_same_run(tmp_path: Path) -> None:
     bundle = _periodic(tmp_path, end=CLOSE)
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_run_at_one_and_four_jobs(bundle, kernel=KERNEL_V2)
 
 
 @pytest.mark.parametrize(("scale", "versions"), [("0.5", 100), ("0.25", 50)])
@@ -252,18 +308,7 @@ def test_a_scale_below_one_follows_the_scaled_history(
 def test_the_shares_joined_in_order_are_the_bytes_of_one_run(tmp_path: Path, count: int) -> None:
     bundle = _periodic(tmp_path, end=CLOSE)
     whole = _run(bundle, tmp_path / "whole")
-    state = tmp_path / "shards"
-    planned = plan_module.plan(bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False)
-    run_id = planned.artifacts["run_id"]
-    assert run_id == whole.run_id
-    for index in range(1, count + 1):
-        part = apply_module.apply(bundle, run_id=run_id, state_dir=state, shard=(index, count))
-        assert part.success, part.stderr
-    shards = RunLayout.for_state_dir(state, run_id)
-    joined = b"".join(
-        shards.shard_emit_path(PERIODIC, index, count).read_bytes() for index in range(1, count + 1)
-    )
-    assert joined == whole.emit_path(PERIODIC).read_bytes()
+    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (PERIODIC,))
 
 
 # --- the window -------------------------------------------------------------------------------

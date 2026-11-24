@@ -4,10 +4,11 @@
 
 """Periodic rows of a history: one row per held version and period (ADR 0027 section 5).
 
-The periods run from the day of ``timeBounds.start`` by the grain, each counted from that anchor
-and never from the period before (a month added to a day the month lacks lands on the month's
-last day, as ``ADD_MONTHS`` does), while they start before ``timeBounds.end``, which is excluded.
-Period ``p`` is ``[b_p, e_p)`` with ``e_p`` the next period's start or the window's end. The
+The periods run from the day of ``timeBounds.start`` (or the entry's ``from``) by the grain, each
+counted from that anchor and never from the period before (a month added to a day the month lacks
+lands on the month's last day, as ``ADD_MONTHS`` does), while they start before
+``timeBounds.end``, which is excluded, and on or before the entry's ``through``, which is
+included. Period ``p`` is ``[b_p, e_p)`` with ``e_p`` the next period's start or the window's end. The
 period column holds the period's first day; each column that names a column of the history's emit
 holds the final value of the pair's version, so a periodic row carries the version valid in its
 period; the other columns are the emit's own cells at its row.
@@ -23,7 +24,7 @@ whose run holds it, in version-row order. The count follows from one pass over t
 giving its first and last period, and a process that writes a slice finds its first period by
 bisection over the periods' cumulative counts and walks only the periods the slice covers.
 Periods after the old window's end are new rows appended after the rows already made, and
-nothing before them moves (ADR 0027 section 7).
+nothing before them moves (ADR 0027 section 7); none comes after ``through``.
 
 :data:`KIND` is the dispatch entry of :mod:`flux_engine.generator.projections`.
 """
@@ -113,10 +114,35 @@ def _begins_before(anchor: date, grain: str, position: int, stop: int) -> bool:
     return (begins.toordinal() - _EPOCH_ORDINAL) * DAY_MS < stop
 
 
-def period_count(grain: str, window: Tuple[int, int]) -> int:
-    """The number of periods :func:`period_grid` lists, found by bisection without listing them."""
+def _day_of(text: str) -> date:
+    return date.fromisoformat(text)
+
+
+def _span(
+    window: Tuple[int, int], from_day: Optional[str], through_day: Optional[str]
+) -> Tuple[date, int]:
+    """The day period 0 starts on, and the instant before which every period starts.
+
+    A period's first day is at most *through_day*, so the bound is the day after it; with no
+    ``through`` it is the window's end, which is excluded.
+    """
     start, stop = window
     anchor = date.fromordinal(start // DAY_MS + _EPOCH_ORDINAL)
+    if from_day is not None:
+        anchor = _day_of(from_day)
+    if through_day is not None:
+        stop = min(stop, (_day_of(through_day).toordinal() + 1 - _EPOCH_ORDINAL) * DAY_MS)
+    return anchor, stop
+
+
+def period_count(
+    grain: str,
+    window: Tuple[int, int],
+    from_day: Optional[str] = None,
+    through_day: Optional[str] = None,
+) -> int:
+    """The number of periods :func:`period_grid` lists, found by bisection without listing them."""
+    anchor, stop = _span(window, from_day, through_day)
     if not _begins_before(anchor, grain, 0, stop):
         return 0
     low, high = 0, 1
@@ -132,33 +158,42 @@ def period_count(grain: str, window: Tuple[int, int]) -> int:
 
 
 def _refuse_many_periods(entry: PeriodsEntry, grain: str, window: Tuple[int, int]) -> None:
-    """Refuse (``FLX-3403``) an entry whose window holds more than :data:`MOST_PERIODS` periods."""
-    number = period_count(grain, window)
+    """Refuse (``FLX-3403``) an entry whose range holds more than :data:`MOST_PERIODS` periods."""
+    number = period_count(grain, window, entry.from_day, entry.through_day)
     if number > MOST_PERIODS:
         raise _refuse(
-            f"periods ({entry.emit}): grain {grain} over the window makes {number} periods; "
+            f"periods ({entry.emit}): grain {grain} over the range makes {number} periods; "
             f"at most {MOST_PERIODS}"
         )
 
 
 def period_grid(
-    grain: str, window: Tuple[int, int]
+    grain: str,
+    window: Tuple[int, int],
+    from_day: Optional[str] = None,
+    through_day: Optional[str] = None,
 ) -> Tuple[Tuple[date, ...], "np.ndarray", "np.ndarray"]:
     """Each period's first day, and its first instant and its end in milliseconds.
 
-    The periods start from the day of the window's start while they start before its end; the
-    last one's end is the window's end.
+    The periods start from *from_day* (the day of the window's start when none) while they
+    start before the window's end and on or before *through_day*; a period's end is the next
+    period's start, and the window's end cuts it.
     """
-    start, stop = window
-    anchor = date.fromordinal(start // DAY_MS + _EPOCH_ORDINAL)
+    anchor, bound = _span(window, from_day, through_day)
+    stop = window[1]
     days: List[date] = []
-    while True:
-        begins = _period_start(anchor, grain, len(days))
-        if (begins.toordinal() - _EPOCH_ORDINAL) * DAY_MS >= stop:
-            break
-        days.append(begins)
+    # A period past the calendar (year 9999) starts after any bound, so it ends the list.
+    while _begins_before(anchor, grain, len(days), bound):
+        days.append(_period_start(anchor, grain, len(days)))
     begin = np.array([(day.toordinal() - _EPOCH_ORDINAL) * DAY_MS for day in days], dtype=np.int64)
-    following = np.append(begin[1:], np.int64(stop)) if days else begin
+    if not days:
+        return (), begin, begin
+    try:
+        after = _period_start(anchor, grain, len(days))
+        last_end = (after.toordinal() - _EPOCH_ORDINAL) * DAY_MS
+    except (ValueError, OverflowError):
+        last_end = stop
+    following = np.append(begin[1:], np.int64(last_end))
     return tuple(days), begin, np.minimum(following, stop).astype(np.int64)
 
 
@@ -342,7 +377,9 @@ def _build(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
     assert projection.root is not None and projection.window is not None
     view = view_of(projection.history, chain, projection.root)
     _refuse_many_periods(entry, str(entry.grain), projection.window)
-    days, begins, ends = period_grid(str(entry.grain), projection.window)
+    days, begins, ends = period_grid(
+        str(entry.grain), projection.window, entry.from_day, entry.through_day
+    )
     valid_from, valid_to = view.valid_ms(projection.window[1])
     first, last = _runs(entry.match, begins, ends, valid_from, valid_to)
     where = f"periods ({entry.emit})"

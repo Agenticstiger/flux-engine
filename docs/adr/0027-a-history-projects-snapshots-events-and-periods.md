@@ -327,3 +327,22 @@ was one of the others, so a kind could not leave out the ending versions by name
   the kind (or the events entry) and the column and saying that the result depends on a drawn value.
 - **Opt-in.** A `when` that does not name the end column is as section 4 and 5 say, and keeps its bytes.
 
+## Amendment of 2026-11-24: from and through on a periods entry
+
+Section 5 lays a periods entry's periods from `timeBounds.start`'s day while they start before `timeBounds.end`, so
+an entry could not hold fewer periods than its window. Two optional keys, kernel 0.2.0 only, both DATE texts
+`YYYY-MM-DD`, bound the range:
+
+- **`from`.** The first period starts on this day: the anchor every period is counted from, as `timeBounds.start`'s
+  day is without it. Refused (`FLX-3403`, naming the entry and the key) before `timeBounds.start`'s day or not
+  before `timeBounds.end`.
+- **`through`.** The last period is the last one that starts on or before this day. It is inclusive on purpose, as
+  the word reads; the window's end stays excluded. Without it, every period that starts before `timeBounds.end`.
+  Refused before `from` (or before `timeBounds.start`'s day without one) or not before `timeBounds.end`.
+- **Ends.** A period's end is the next period's start, or the window's end for the last period of the window,
+  unchanged: a `through` inside a period leaves that period whole.
+- **What follows.** A version holds no period outside the range, so the count, the layout, the slices and the kinds
+  follow, and the period column's values lie in `[from, through]`.
+- **Section 7.** With `through` declared, a longer window appends no period past `through`; without it, as before.
+- **What moves.** An entry that declares either key is a different entry for `H` and the plan. An entry that
+  declares neither writes the member it wrote, so every other bundle keeps its bytes.

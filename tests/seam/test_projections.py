@@ -939,6 +939,37 @@ def test_a_refused_periods_entry_is_flx_3403_naming_the_entry_and_the_key(
     assert "periods" in text
 
 
+@pytest.mark.parametrize(
+    ("name", "changes", "needle"),
+    [
+        ("fromtext", {"from": 20260701}, ".from is a DATE text"),
+        ("fromform", {"from": "2026-7-1"}, "YYYY-MM-DD"),
+        ("fromstamp", {"from": "2026-07-01T00:00:00Z"}, "YYYY-MM-DD"),
+        ("throughday", {"through": "2026-02-30"}, "through"),
+        ("backwards", {"from": "2026-08-01", "through": "2026-07-15"}, "before its from"),
+        ("beforestart", {"from": "2026-06-30"}, "before timeBounds.start"),
+        ("fromend", {"from": "2026-10-01"}, "not before timeBounds.end"),
+        ("throughend", {"through": "2026-10-01"}, "through"),
+        ("throughbefore", {"through": "2026-06-30"}, "through"),
+    ],
+)
+def test_a_range_outside_the_window_or_not_a_date_is_flx_3403_naming_the_entry_and_the_key(
+    tmp_path: Path, name: str, changes: Dict[str, Any], needle: str
+) -> None:
+    text = refused(bundle(tmp_path, name, periods=[period_with(**changes)]), "FLX-3403")
+    assert needle in text and PERIOD["emit"] in text
+
+
+def test_a_range_is_written_into_the_member_only_when_declared(tmp_path: Path) -> None:
+    assert "from" not in periods_member(tmp_path, "plain", PERIOD)
+    member = periods_member(
+        tmp_path, "ranged", period_with(**{"from": "2026-07-01", "through": "2026-08-01"})
+    )
+    assert member["from"] == "2026-07-01" and member["through"] == "2026-08-01"
+    only = periods_member(tmp_path, "through", period_with(through="2026-09-29"))
+    assert only["through"] == "2026-09-29" and "from" not in only
+
+
 def test_a_kind_when_that_does_not_parse_is_refused_as_any_rule_is(tmp_path: Path) -> None:
     with pytest.raises(FluxError) as caught:
         resolved(bundle(tmp_path, "parse", periods=[period_with(kinds=[{"when": "plan <>"}])]))

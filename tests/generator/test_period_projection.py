@@ -24,6 +24,9 @@ pipeline builds them. What is pinned, on kernel 0.2.0:
   read as the column's type; no period's allotment reads another period.
 * **The version.** A column that names a column of the history's emit holds the pair's version's
   final value, so a periodic row carries the version valid in its period.
+* **A range.** ``from`` is the anchor the periods are counted from and ``through`` the last day a
+  period may start on, inclusive; the count, the layout, the slices and the kinds follow, and a
+  longer window appends no period past ``through``.
 * **A longer window** with the same ``until`` begins with the shorter window's rows, byte for byte.
 """
 
@@ -369,6 +372,141 @@ def test_the_dispatch_has_the_periods_kind() -> None:
     assert "periods" in KINDS and KINDS["periods"].rows is not None
 
 
+# -- from and through -----------------------------------------------------------------------------
+
+
+def span_of(grain: str, from_day: Optional[str], through_day: Optional[str]) -> List[date]:
+    window = (parse_rfc3339_ms(BOUNDS["start"]), parse_rfc3339_ms(BOUNDS["end"]))
+    return list(period_grid(grain, window, from_day, through_day)[0])
+
+
+def test_from_is_the_anchor_every_period_is_counted_from() -> None:
+    days = span_of("month", "2023-03-31", None)
+    assert days[:4] == [date(2023, 3, 31), date(2023, 4, 30), date(2023, 5, 31), date(2023, 6, 30)]
+    assert days[-1] < date(2026, 1, 1) <= add_months(days[-1], 1)
+
+
+def test_through_is_inclusive_and_cuts_a_period_it_falls_inside() -> None:
+    assert span_of("month", "2023-03-01", "2023-06-01")[-1] == date(2023, 6, 1)
+    assert span_of("month", "2023-03-01", "2023-05-31")[-1] == date(2023, 5, 1)
+    assert span_of("month", "2023-03-01", "2023-06-15")[-1] == date(2023, 6, 1)
+    assert span_of("day", None, "2023-01-03") == [date(2023, 1, d) for d in (1, 2, 3)]
+
+
+def test_the_last_period_ends_where_the_next_would_start_and_the_window_cuts_it() -> None:
+    window = (parse_rfc3339_ms(BOUNDS["start"]), parse_rfc3339_ms(BOUNDS["end"]))
+    _, begins, ends = period_grid("month", window, "2023-03-01", "2023-06-01")
+    assert ends[:-1].tolist() == begins[1:].tolist()
+    assert int(ends[-1]) == (date(2023, 7, 1).toordinal() - EPOCH) * DAY
+    _, _, last = period_grid("month", window, "2025-11-01", "2025-12-01")
+    assert int(last[-1]) == window[1]
+    _, _, wide = period_grid("month", window, "2025-12-01", "2030-01-01")
+    assert int(wide[-1]) == window[1] and len(wide) == 1
+
+
+def test_the_count_is_the_grids_length_over_any_range() -> None:
+    from flux_engine.generator.periods import period_count
+
+    window = (parse_rfc3339_ms(BOUNDS["start"]), parse_rfc3339_ms(BOUNDS["end"]))
+    for grain in ("day", "week", "month", "quarter", "year"):
+        for from_day, through_day in (
+            (None, None),
+            ("2023-02-10", None),
+            ("2023-02-10", "2025-01-20"),
+        ):
+            assert period_count(grain, window, from_day, through_day) == len(
+                period_grid(grain, window, from_day, through_day)[0]
+            )
+
+
+RANGE = {"from_day": "2023-04-01", "through_day": "2025-08-01"}
+
+
+@pytest.mark.parametrize("match", ["overlap", "start", "end"])
+@pytest.mark.parametrize("end", [None, CLOSE_WITH])
+def test_a_ranged_entry_holds_the_pairs_of_the_periods_in_its_range(
+    end: Optional[HistoryEnd], match: str
+) -> None:
+    plans = held(end)
+    whole = expected_pairs(plans, "month", match, BOUNDS)
+    plan = periods_plan(plans, grain="month", match=match, **RANGE)
+    layout = sources_of(plan, root_for())
+    # Period 3 of the window is April 2023; August 2025 is period 31.
+    assert layout.days[0] == date(2023, 4, 1) and layout.days[-1] == date(2025, 8, 1)
+    assert [layout.pairs(p).tolist() for p in range(len(layout.days))] == whole[3:32]
+    rows = period_rows(plan)
+    assert plan.rows == len(rows) == sum(len(pairs) for pairs in whole[3:32])
+    assert all(date(2023, 4, 1) <= row["month"] <= date(2025, 8, 1) for row in rows)
+
+
+def _every_slice_is_the_whole(plan: Any, *, every: int, wide: bool) -> Any:
+    """The plan's rows, once every slice of them has been checked against them.
+
+    The slices are the ends of the plan, and those that begin and end on a period's edge every
+    ``every`` periods, and one row either side of it; ``wide`` adds an empty one and those that
+    end on the edge.
+    """
+    whole = generate_rows(plan, root=root_for())
+    offsets = sources_of(plan, root_for()).offsets.tolist()
+    cuts = [(0, 1), (3, 9), (plan.rows - 1, plan.rows), (0, plan.rows)]
+    cuts += [(5, 5)] if wide else []
+    for edge in offsets[1:-1:every]:
+        cuts += [(edge, edge + 4), (edge - 1, edge + 1)]
+        cuts += [(max(edge - 4, 0), edge)] if wide else []
+    for start, stop in cuts:
+        assert generate_row_slice(plan, start, stop, root=root_for()) == whole[start:stop]
+    return whole
+
+
+def test_a_ranged_entry_keeps_every_slice_and_both_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    plan = periods_plan(held(CLOSE_WITH), **RANGE)
+    whole = _every_slice_is_the_whole(plan, every=4, wide=False)
+    by_columns, by_rows, taken = _by_both_paths(
+        monkeypatch, lambda: generate_row_slice(plan, 0, plan.rows, root=root_for())
+    )
+    assert taken and all(taken) and by_columns == by_rows == whole
+
+
+def test_a_ranged_entry_with_kinds_counts_its_kinds_over_the_range() -> None:
+    plan = periods_plan(held(CLOSE_WITH), kinds=(PeriodKind(count=2), PeriodKind(count=1)), **RANGE)
+    layout = sources_of(plan, root_for())
+    pairs = sum(len(layout.pairs(p)) for p in range(len(layout.days)))
+    assert plan.rows == 3 * pairs == len(period_rows(plan))
+
+
+def test_a_range_moves_the_plan_and_an_entry_without_one_keeps_its_member() -> None:
+    plans = held(None)
+    assert "from" not in periods_plan(plans).as_document()["projection"]["entry"]
+    ranged = periods_plan(plans, **RANGE)
+    entry = ranged.as_document()["projection"]["entry"]
+    assert entry["from"] == "2023-04-01" and entry["through"] == "2025-08-01"
+    assert ranged.digest() != periods_plan(plans).digest()
+    assert periods_plan(plans, from_day="2023-01-01").digest() != periods_plan(plans).digest()
+
+
+def test_an_entry_without_a_range_writes_the_rows_it_wrote_before() -> None:
+    plans = held(CLOSE_WITH)
+    plain = periods_plan(plans)
+    wide = periods_plan(plans, from_day="2023-01-01", through_day="2025-12-31")
+    assert generate_rows(plain, root=root_for()) == generate_rows(wide, root=root_for())
+    assert PeriodsEntry(emit="e", of="o", column="c").as_member() == {
+        "of": "o",
+        "column": "c",
+        "match": "overlap",
+    }
+
+
+def test_a_longer_window_appends_no_period_past_through() -> None:
+    plans = held(CLOSE_WITH)
+    through = {"through_day": "2025-06-01"}
+    short = periods_plan(plans, bounds=BOUNDS, **through)
+    long = periods_plan(plans, bounds=LONGER, **through)
+    assert long.rows == short.rows
+    assert generate_rows(long, root=root_for()) == generate_rows(short, root=root_for())
+    open_ended = periods_plan(plans, bounds=LONGER)
+    assert open_ended.rows > short.rows
+
+
 # -- the slices -----------------------------------------------------------------------------------
 
 
@@ -393,14 +531,7 @@ def test_a_slice_is_the_slice_of_the_whole_across_period_boundaries(
     end: Optional[HistoryEnd], match: str
 ) -> None:
     plan = periods_plan(held(end), grain="month", match=match)
-    whole = generate_rows(plan, root=root_for())
-    offsets = sources_of(plan, root_for()).offsets.tolist()
-    cuts = [(0, 1), (3, 9), (plan.rows - 1, plan.rows), (5, 5), (0, plan.rows)]
-    # Slices that begin and end on a period's edge, and one row either side of it.
-    for edge in offsets[1:-1:3]:
-        cuts += [(edge, edge + 4), (max(edge - 4, 0), edge), (edge - 1, edge + 1)]
-    for start, stop in cuts:
-        assert generate_row_slice(plan, start, stop, root=root_for()) == whole[start:stop]
+    whole = _every_slice_is_the_whole(plan, every=3, wide=True)
     # And every share of seven, as `--shard` takes them.
     step = -(-plan.rows // 7)
     joined: List[Any] = []
@@ -717,3 +848,26 @@ def test_a_longer_window_keeps_the_versions_of_the_old_rows() -> None:
     assert generate_rows(long, root=root_for())[: short.rows] == generate_rows(
         short, root=root_for()
     )
+
+
+# -- the end of the calendar -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("grain", ["day", "week", "month", "quarter", "year"])
+@pytest.mark.parametrize("through", [None, "9999-12-31", "9999-06-01"])
+def test_a_window_or_a_through_near_year_9999_ends_the_periods_at_the_calendar(
+    grain: str, through: Optional[str]
+) -> None:
+    from flux_engine.concordance.projection_checks import _periods as verify_periods
+    from flux_engine.generator.periods import period_count
+
+    window = (parse_rfc3339_ms("9998-06-01T00:00:00Z"), parse_rfc3339_ms("9999-12-31T23:59:59Z"))
+    days, _, _ = period_grid(grain, window, None, through)
+    assert len(days) == period_count(grain, window, None, through) > 0
+    # verify's grid lists the same periods, each starting on the day the generator's does.
+    from datetime import datetime
+
+    found = verify_periods(
+        grain, (datetime(9998, 6, 1), datetime(9999, 12, 31, 23, 59, 59)), None, through
+    )
+    assert [begins.date() for begins in found] == list(days)

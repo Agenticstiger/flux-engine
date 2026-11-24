@@ -227,7 +227,9 @@ FLX_3403 = register(
     "its events carry, when a before or after column maps a column the contract requires "
     "that the kept ops would leave NULL, when a when reads a column the version does not "
     "hold, or when a periods entry has no grain, no timeBounds, or more periods than a run "
-    "holds. A DATE or TIMESTAMP column of a history's emit is refused when it declares no "
+    "holds, or a `from` before `timeBounds.start`'s day, or a `from` or `through` that is not "
+    "before `timeBounds.end` or not a `YYYY-MM-DD` text, or a `through` before the `from`. A "
+    "DATE or TIMESTAMP column of a history's emit is refused when it declares no "
     "range or bins, or a range or bins outside timeBounds, and so is a relationship whose "
     "parent is a periodic emit, whose rows grow with the window.",
 )

@@ -28,9 +28,7 @@ import pytest
 import yaml
 
 from flux_engine.core.kernels import KERNEL_V2
-from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
-from flux_engine.stages.plan import build_plan_document
 from flux_engine.stages.verify import verify
 
 from ._fleet import (
@@ -46,6 +44,7 @@ from ._fleet import (
     run_bundle,
 )
 from ._fleet import rows as read_rows
+from ._same_run import assert_same_run_at_one_and_four_jobs
 
 pytestmark = pytest.mark.integration
 
@@ -198,11 +197,7 @@ def test_verify_holds_every_rule_line_of_the_projected_emits(
 
 def test_one_job_and_four_jobs_write_the_same_derived_rows(tmp_path: Path) -> None:
     target = _derived(tmp_path, kinds=KINDS, end=FINAL)
-    one = pipeline.execute(target, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(target, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_run_at_one_and_four_jobs(target, kernel=KERNEL_V2)
 
 
 # --- one source per column -----------------------------------------------------------------------

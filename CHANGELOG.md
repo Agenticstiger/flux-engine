@@ -59,6 +59,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   depot's row. The copied column must be the source's own foreign key to the same keys, which keeps the
   value a key of the target; what cannot hold is refused before a row is drawn (ADR 0022, the amendment of
   2026-11-24). A bundle without `copies: true` keeps every byte.
+- `from` and `through` on a `periods` entry (kernel 0.2.0). Both are `YYYY-MM-DD` texts: `from` is the day the first
+  period starts on, the anchor every period is counted from; `through` is the last day a period may start on,
+  inclusive. The count, the layout, the slices and the kinds follow, a longer window appends no period past
+  `through`, and a range outside `timeBounds` is `FLX-3403` at `validate` and `plan` (ADR 0027, the amendment of
+  2026-11-24). An entry without the keys keeps its bytes. A period that would start past the calendar (a window or
+  a `through` at the end of year 9999) ends the list, in `plan` and in `verify`, where it raised a raw error.
 
 ### Changed
 

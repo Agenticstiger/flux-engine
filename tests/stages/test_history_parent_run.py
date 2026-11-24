@@ -28,13 +28,13 @@ from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
-from flux_engine.stages.plan import build_plan_document
 from flux_engine.stages.verify import verify
 
 from ._fleet import DEPOT, NAMESPACE, UNTIL, apply_module, by_vehicle, plan_module, run_bundle
 from ._fleet import HISTORY as EMIT
 from ._fleet import bundle as fleet_bundle
 from ._fleet import rows as read_rows
+from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
 
 pytestmark = pytest.mark.integration
 
@@ -137,15 +137,7 @@ def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
 def test_the_shares_joined_are_the_bytes_of_onerun_bundle(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path, end={"mode": "closeLast", "share": "0.1"})
     whole = run_bundle(bundle, tmp_path / "whole")
-    state = tmp_path / "shards"
-    planned = plan_module.plan(bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False)
-    run_id = planned.artifacts["run_id"]
-    for index in range(1, 4):
-        part = apply_module.apply(bundle, run_id=run_id, state_dir=state, shard=(index, 3))
-        assert part.success, part.stderr
-    shards = RunLayout.for_state_dir(state, run_id)
-    joined = b"".join(shards.shard_emit_path(EMIT, index, 3).read_bytes() for index in range(1, 4))
-    assert joined == whole.emit_path(EMIT).read_bytes()
+    assert_shares_join_to_the_run(bundle, tmp_path, whole, 3, (EMIT,))
 
 
 @pytest.mark.slow
@@ -159,12 +151,7 @@ def test_four_jobs_make_the_run_one_job_makes(tmp_path: Path) -> None:
         depots=1200,
         end={"mode": "finalVersion", "share": "0.1", "column": "status", "value": "retired"},
     )
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.result == theirs.result
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_run_at_one_and_four_jobs(bundle, result=True, kernel=KERNEL_V2)
 
 
 def test_a_smaller_scale_keeps_the_bound(tmp_path: Path) -> None:
