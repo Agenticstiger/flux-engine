@@ -19,6 +19,8 @@ import shutil
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, Tuple, Union
 
+import yaml
+
 from flux_engine.core.digest import digest_of_document
 from flux_engine.seam.resolve import load_documents_exact
 
@@ -57,16 +59,30 @@ def _rewritten(
     return target
 
 
-def init_from_texts(root: Path, contract_text: str, profile: Mapping[str, Any]) -> Any:
-    """Write a contract and a profile under *root*, run ``init`` on them into *root*/``bundle``, return its result."""
+def edit_simulation(
+    bundle: Path, change: Callable[[Any], None], file_name: str = _SIMULATION
+) -> Path:
+    """Read the document *file_name* of *bundle*, apply *change* to it, write it back, return *bundle*."""
+    path = bundle / file_name
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    change(document)
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return bundle
+
+
+def init_from_texts(
+    root: Path,
+    contract_text: str,
+    profile: Mapping[str, Any],
+    names: Tuple[str, str] = ("c.fluid.yaml", "p.profile.json"),
+) -> Any:
+    """Write a contract and a profile under *root* as *names*, run ``init`` into *root*/``bundle``, return its result."""
     from flux_engine.cli._init import run_init
 
-    (root / "c.fluid.yaml").write_text(contract_text, encoding="utf-8")
-    (root / "p.profile.json").write_text(json.dumps(profile), encoding="utf-8")
+    (root / names[0]).write_text(contract_text, encoding="utf-8")
+    (root / names[1]).write_text(json.dumps(profile), encoding="utf-8")
     return run_init(
-        str(root / "bundle"),
-        contract=str(root / "c.fluid.yaml"),
-        profile=str(root / "p.profile.json"),
+        str(root / "bundle"), contract=str(root / names[0]), profile=str(root / names[1])
     )
 
 

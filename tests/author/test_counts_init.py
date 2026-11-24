@@ -38,6 +38,7 @@ from flux_engine.stages.apply import apply
 from flux_engine.stages.plan import plan
 from flux_engine.stages.run import run
 from flux_engine.stages.verify import verify
+from tests.bundles import init_from_texts
 
 from .test_children import (
     BINS,
@@ -317,13 +318,7 @@ def _one_to_one(profile: Dict[str, Any]) -> Dict[str, Any]:
 def _init_one_to_one(tmp_path: Path, profile: Dict[str, Any]) -> Any:
     """Init over a contract whose ``orders.customer_id`` is ``one_to_one``."""
     contract = CONTRACT.replace("cardinality: many_to_one", "cardinality: one_to_one")
-    (tmp_path / SHOP[0]).write_text(contract, encoding="utf-8")
-    (tmp_path / SHOP[1]).write_text(json.dumps(profile), encoding="utf-8")
-    result = run_init(
-        str(tmp_path / "bundle"),
-        contract=str(tmp_path / SHOP[0]),
-        profile=str(tmp_path / SHOP[1]),
-    )
+    result = init_from_texts(tmp_path, contract, profile, SHOP)
     assert result.exit_code == 0, result.stderr
     return result
 

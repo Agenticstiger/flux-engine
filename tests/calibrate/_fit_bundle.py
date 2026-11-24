@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Dict
 
-import yaml
+from tests.bundles import edit_simulation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "consumers"
@@ -47,15 +47,6 @@ def _assume_nulls(namespace: Dict[str, Any], simulation_id: str) -> None:
     namespace["consumers"]["calibration"]["parameters"] = [
         {"document": SIMULATION, "pointer": NULLS, "min": "0", "max": "0.5", "step": "0.01"}
     ]
-
-
-def edit_simulation(bundle: Path, change: Callable[[Dict[str, Any]], None]) -> Path:
-    """Apply *change* to the Simulation document of *bundle*, write it back, and return *bundle*."""
-    path = bundle / SIMULATION
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    change(document)
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    return bundle
 
 
 def copy_fit_bundle(root: Path) -> Path:

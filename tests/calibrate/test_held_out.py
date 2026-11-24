@@ -39,11 +39,11 @@ from flux_engine.cli import main  # noqa: E402
 from flux_engine.core.errors import FluxError  # noqa: E402
 from flux_engine.evidence.grades import grade_profile  # noqa: E402
 from flux_engine.seam.profile import load_profile  # noqa: E402
+from tests.bundles import edit_simulation  # noqa: E402
 from tests.calibrate._fit_bundle import (  # noqa: E402
     NAMESPACE,
     SIMULATION,
     copy_fit_bundle,
-    edit_simulation,
 )
 
 pytestmark = pytest.mark.integration

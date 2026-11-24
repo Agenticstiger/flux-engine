@@ -23,6 +23,7 @@ import yaml
 
 from flux_engine.cli._init import run_init
 from flux_engine.stages.run import run
+from tests.bundles import init_from_texts
 
 pytestmark = pytest.mark.integration
 
@@ -221,12 +222,8 @@ def _triple() -> Dict[str, Any]:
 
 
 def _init_triple(tmp_path: Path) -> Any:
-    (tmp_path / "telco.fluid.yaml").write_text(TRIPLE_CONTRACT, encoding="utf-8")
-    (tmp_path / "telco.profile.json").write_text(json.dumps(_triple()), encoding="utf-8")
-    return run_init(
-        str(tmp_path / "bundle"),
-        contract=str(tmp_path / "telco.fluid.yaml"),
-        profile=str(tmp_path / "telco.profile.json"),
+    return init_from_texts(
+        tmp_path, TRIPLE_CONTRACT, _triple(), ("telco.fluid.yaml", "telco.profile.json")
     )
 
 

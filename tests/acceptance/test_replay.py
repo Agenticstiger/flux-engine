@@ -45,6 +45,8 @@ from typing import Dict, List
 import pytest
 import yaml
 
+from tests.bundles import edit_simulation
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SMALL_FIXTURE_BUNDLE = REPO_ROOT / "tests" / "fixtures" / "telco-fidelity-small"
 
@@ -203,11 +205,7 @@ def _seeded_bundle_copy(root: Path, seed: int) -> Path:
     """
     bundle = root / f"seed-{seed}"
     shutil.copytree(SMALL_FIXTURE_BUNDLE, bundle)
-    sim_path = bundle / "simulation.flux.yml"
-    document = yaml.safe_load(sim_path.read_text(encoding="utf-8"))
-    document["spec"]["seed"] = seed
-    sim_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    return bundle
+    return edit_simulation(bundle, lambda document: document["spec"].update(seed=seed))
 
 
 def test_fifty_seed_fuzz_all_replay_and_distinct_seeds_diverge(tmp_path: Path) -> None:

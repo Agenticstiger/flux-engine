@@ -23,11 +23,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-import yaml
-
 from flux_engine.core.seedtree import SeedTreeRoot, derive_root, digest_bytes
 from flux_engine.generator.rows import GeneratorPlan, build_plan
 from flux_engine.seam.contract import CompiledExpose, compile_expose
+from tests.bundles import edit_simulation
 
 
 class HarnessError(RuntimeError):
@@ -295,10 +294,11 @@ def copy_bundle(destination: Path) -> Path:
 
 def add_persona_trait(bundle: Path, name: str, declaration: Any) -> None:
     """Add one trait to the bundle's Persona document."""
-    path = bundle / "persona.flux.yml"
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    document["spec"]["traits"][name] = deepcopy(declaration)
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    edit_simulation(
+        bundle,
+        lambda document: document["spec"]["traits"].update({name: deepcopy(declaration)}),
+        "persona.flux.yml",
+    )
 
 
 # ---------------------------------------------------------------------------

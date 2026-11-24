@@ -31,10 +31,10 @@ pytest.importorskip("cma")
 
 from flux_engine.calibrate.fit import FitRequest, run_fit  # noqa: E402
 from flux_engine.stages.run import run, run_on_common_draws  # noqa: E402
+from tests.bundles import edit_simulation  # noqa: E402
 from tests.calibrate._fit_bundle import (  # noqa: E402
     NAMESPACE,
     copy_fit_bundle,
-    edit_simulation,
 )
 
 pytestmark = pytest.mark.integration
