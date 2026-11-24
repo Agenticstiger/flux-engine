@@ -1,0 +1,9 @@
+fluxVersion: "0.5.0"
+kind: Persona
+id: persona-ledger
+name: Persona for Ledger
+metadata:
+  owner:
+    team: finance
+spec:
+  traits: { digitalFluency: 0.5 }

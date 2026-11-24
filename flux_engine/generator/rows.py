@@ -42,6 +42,7 @@ digesting stay where KERNEL-SPEC §8 and §9 put them.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, localcontext
@@ -68,7 +69,7 @@ from typing import (
 import numpy as np
 
 from flux_engine.core import kernel2
-from flux_engine.core.canonical import sha256_hex
+from flux_engine.core.canonical import nfc, sha256_hex
 from flux_engine.core.clock import parse_rfc3339_ms
 from flux_engine.core.digest import DigestRef, digest_of_document
 from flux_engine.core.errors import FluxError
@@ -94,6 +95,13 @@ from flux_engine.core.seedtree import (
     path_label,
 )
 from flux_engine.generator.allocation import allocated_given, allocated_levels
+from flux_engine.generator.copula import (
+    CopulaDraw,
+    check_copula,
+    declares_copula,
+    plan_copula_draw,
+    read_copula,
+)
 from flux_engine.generator.families import (
     FLX_3401,
     ColumnType,
@@ -376,6 +384,10 @@ class ColumnPlan:
     #: 8.3), ``None`` for any other. Like ``allocated_rows`` it is read from the plan's own
     #: statistics, so it is not part of the plan's document.
     allocated_given: Optional[ColumnStatistics] = None
+    #: The emit's copula when this column is one of its columns (ADR 0035 decision 6): its value
+    #: is drawn through the copula, and its own cell path draws only its NULL draw. Like
+    #: ``allocated_rows`` it is not part of the plan's document, which holds the copula once.
+    copula: Optional[CopulaDraw] = None
 
     def as_document(self) -> Dict[str, Any]:
         """The plan for this column, as canonical-ready JSON."""
@@ -451,6 +463,9 @@ class GeneratorPlan:
     #: ``rows`` is then the count worked out from that history. ``None`` for every other emit,
     #: whose document has no ``projection`` entry.
     projection: Optional[Any] = None
+    #: The emit's copula, planned (ADR 0035 decision 5), or ``None`` for an emit that declares none;
+    #: the document then has no ``copula`` entry.
+    copula: Optional[CopulaDraw] = None
 
     @property
     def counter_based(self) -> bool:
@@ -487,6 +502,8 @@ class GeneratorPlan:
             }
         if self.projection is not None:
             document["projection"] = self.projection.as_document()
+        if self.copula is not None:
+            document["copula"] = self.copula.as_document()
         if self.sums:
             document["sums"] = [
                 {
@@ -646,9 +663,18 @@ def build_plan(
         )
     if rules is not None:
         rules.refuse_given_on_determined(plans)
+    _require_binned_parents(plans, generator_version, related, rules)
     _require_conditionals(plans)
     _require_allocatable(plans, generator_version, related, rules)
     plans = _with_allocation_parents(plans)
+    copula = _require_copula(
+        fidelity, plans, generator_version, related, rules, sim_id, expose.expose_id
+    )
+    if copula is not None:
+        plans = [
+            replace(item, copula=copula) if nfc(item.column.name) in copula.columns else item
+            for item in plans
+        ]
     if generator_version != GENERATOR_VERSION_2:
         for column_plan in plans:
             if column_plan.statistics.given_link is not None:
@@ -667,7 +693,60 @@ def build_plan(
         rules=rules,
         generator_version=generator_version,
         plugin=plugin,
+        copula=copula,
     )
+
+
+def _require_copula(
+    fidelity: Optional[Mapping[str, Any]],
+    plans: Sequence[ColumnPlan],
+    generator_version: str,
+    related: FrozenSet[str],
+    rules: Optional["RulePlan"],
+    sim_id: str,
+    expose_id: str,
+) -> Optional[CopulaDraw]:
+    """Refuse a copula the emit cannot draw (ADR 0035 decision 4), or plan it (decision 5).
+
+    Kernel 0.1.0 has no copula path, so the key is ``FLX-3105`` there, naming the kernel. Anything
+    else the declaration or the emit's columns get wrong is ``FLX-3402``
+    (:func:`flux_engine.generator.copula.check_copula`). ``None`` when the emit declares none.
+    """
+    if not declares_copula(fidelity):
+        return None
+    if generator_version != GENERATOR_VERSION_2:
+        from flux_engine.seam.resolve import FLX_3105
+
+        raise FluxError(
+            FLX_3105,
+            "fidelity.copula needs kernel 0.2.0, and this run is on kernel 0.1.0",
+        )
+    declaration = read_copula(fidelity)
+    assert declaration is not None  # declares_copula
+    check_copula(declaration, plans, set_elsewhere=_set_elsewhere(plans, related, rules))
+    return plan_copula_draw(declaration, plans, sim_id=sim_id, expose_id=expose_id)
+
+
+def _set_elsewhere(
+    plans: Sequence[ColumnPlan], related: FrozenSet[str], rules: Optional["RulePlan"]
+) -> Dict[str, str]:
+    """Each column something other than its own draw sets, by name, with what sets it.
+
+    A key or a foreign key, a column a rule, a ``lifetimes``, ``within`` or ``rates`` entry or a
+    copy sets, and a hidden column.
+    """
+    found: Dict[str, str] = {}
+    for plan in plans:
+        if plan.column.hidden:
+            found[nfc(plan.column.name)] = "a hidden column"
+    if rules is not None:
+        for name in rules.determined | {c for rule in rules.rules for c in rule.to_columns}:
+            found[nfc(name)] = "set by a rule, a lifetimes, within or copy declaration"
+        for rate in rules.rates:
+            found[nfc(rate.column)] = "a date with seasonal rates"
+    for name in related:
+        found[nfc(name)] = "a key or a column of a relationship"
+    return found
 
 
 def _with_allocation_parents(plans: List[ColumnPlan]) -> List[ColumnPlan]:
@@ -752,6 +831,12 @@ def _require_allocatable_column(
         )
     for given in statistics.parents:
         parent = by_name[given]
+        if is_binned(parent):
+            raise FluxError(
+                FLX_3402,
+                f"{name}: allocation exact is read given a categorical column, and {given!r} is "
+                "drawn from bins",
+            )
         if parent.statistics.allocation is None:
             raise FluxError(
                 FLX_3402,
@@ -1008,13 +1093,13 @@ def _require_conditionals(plans: Sequence[ColumnPlan]) -> None:
     ``binWeightsGiven`` (P(bin | level), from a grouped histogram's
     (group, bin) counts), or a categorical column with ``levelWeightsGiven``
     (P(level | level), from a two-way count table). The column it is given
-    is a categorical with no declared nulls, so each row has exactly one
-    level to look up, and the weight table names exactly the levels that
-    column can draw.
+    is a categorical with no declared nulls, or a column drawn from ``bins`` with none
+    (ADR 0036 decision 3: its classes are its bins, keyed by the text of each lower edge), so
+    each row has exactly one class to look up, and the weight table names exactly the classes
+    that column can draw.
 
     A given column may itself be drawn given another, so the columns form a
-    forest: each column has at most one parent, a cycle is refused, and a
-    histogram column is always a leaf, because a bin is not a level. That is
+    forest: each column has at most one parent, and a cycle is refused. That is
     the shape of a Chow-Liu tree (Chow and Liu, 1968), the structure MST
     (McKenna, Miklau and Sheldon, 2021) selects, without its privacy noise.
     """
@@ -1060,11 +1145,11 @@ def _require_conditionals(plans: Sequence[ColumnPlan]) -> None:
         drawn_by_parent: List[Tuple[str, ...]] = []
         for given in parents:
             parent = by_name[given]
-            if parent.family is not Family.CATEGORICAL:
+            if parent.family is not Family.CATEGORICAL and not is_binned(parent):
                 raise FluxError(
                     FLX_3402,
                     f"{name}: given column {given!r} is not categorical, so it has no level "
-                    "to condition on",
+                    "to condition on (nor is it drawn from bins, which would give it a bin)",
                 )
             if parent.statistics.null_fraction is not None:
                 raise FluxError(
@@ -1072,7 +1157,7 @@ def _require_conditionals(plans: Sequence[ColumnPlan]) -> None:
                     f"{name}: given column {given!r} declares a nullFraction, and a null "
                     "has no level to condition on",
                 )
-            drawn_by_parent.append(tuple(sorted(_level_names(parent.statistics))))
+            drawn_by_parent.append(tuple(sorted(class_names(parent))))
         if len(parents) == 1:
             drawn = list(drawn_by_parent[0])
         else:
@@ -1125,6 +1210,87 @@ def _level_names(statistics: ColumnStatistics) -> Tuple[str, ...]:
     if statistics.levels is not None:
         return tuple(statistics.levels)
     return tuple(statistics.support or ())
+
+
+def is_binned(plan: ColumnPlan) -> bool:
+    """Whether *plan*'s column is drawn from ``bins``: a histogram, whose classes are its bins."""
+    return plan.family is Family.UNIFORM_EMPIRICAL and plan.statistics.bins is not None
+
+
+def class_names(plan: ColumnPlan) -> Tuple[str, ...]:
+    """The classes a column drawn given can be keyed by: its levels, or the lower edge of each bin.
+
+    A bin is named by the text of its lower edge exactly as the column's ``bins`` write it
+    (ADR 0036 decision 3).
+    """
+    if not is_binned(plan):
+        return _level_names(plan.statistics)
+    statistics = plan.statistics
+    assert statistics.bins is not None
+    texts = statistics.bin_texts or tuple(str(edge) for edge in statistics.bins)
+    return tuple(nfc(text) for text in texts[:-1])
+
+
+def bin_class(plan: ColumnPlan, value: Any) -> str:
+    """The class of a drawn *value* of a column drawn from bins: its bin's name.
+
+    The value is floored onto the grid the histogram draws on and placed in the bin that holds
+    it, the last bin closed above, which is the bin the draw chose.
+    """
+    statistics = plan.statistics
+    edges = statistics.bins
+    assert edges is not None
+    if isinstance(value, date):
+        grid = Decimal(value.toordinal() - DATE_EPOCH_ORDINAL)
+    elif isinstance(value, (int, Decimal)) and not isinstance(value, bool):
+        grid = Decimal(value)
+    else:
+        raise FluxError(FLX_3402, f"{plan.column.name}: a value of this column has no bin")
+    index = min(max(bisect_right(edges, grid) - 1, 0), len(edges) - 2)
+    return class_names(plan)[index]
+
+
+def _require_binned_parents(
+    plans: Sequence[ColumnPlan],
+    generator_version: str,
+    related: FrozenSet[str],
+    rules: Optional["RulePlan"],
+) -> None:
+    """Refuse a ``given`` that names a column drawn from bins where this plan cannot draw it.
+
+    Kernel 0.1.0 has no such parent, so it is ``FLX-3105``, naming the kernel. A key, a foreign
+    key, or a column a rule, a ``lifetimes``, ``within``, ``rates`` or copy entry sets has no
+    draw of its own to read a bin from, and is ``FLX-3402``. What else a parent must be is
+    checked with every other ``given`` (:func:`_require_conditionals`).
+    """
+    by_name = {plan.column.name: plan for plan in plans}
+    binned = {
+        (parent, plan.column.name)
+        for plan in plans
+        for parent in plan.statistics.parents
+        if parent in by_name and is_binned(by_name[parent])
+    }
+    if not binned:
+        return
+    parent, child = min(binned)
+    if generator_version != GENERATOR_VERSION_2:
+        from flux_engine.seam.resolve import FLX_3105
+
+        raise FluxError(
+            FLX_3105,
+            f"{child}: given {parent!r}, a column drawn from bins, is generated on kernel 0.2.0 "
+            "only, and this run is on kernel 0.1.0",
+        )
+    elsewhere = _set_elsewhere(plans, related, rules)
+    for parent, child in sorted(binned):
+        if by_name[parent].column.hidden:
+            continue
+        reason = elsewhere.get(nfc(parent))
+        if reason is not None:
+            raise FluxError(
+                FLX_3402,
+                f"{child}: given {parent!r}, which is {reason}, so it has no bin of its own draw",
+            )
 
 
 def _bin_top(edges: Sequence[Decimal], index: int, step: Decimal) -> Decimal:
@@ -1725,9 +1891,28 @@ def _cell_in_context(
         stream = source.stream_at(row_index, column.name)
     else:
         stream = source.stream(generator_column_path(sim_id, expose_id, row_index, column.name))
+    if plan.copula is not None:
+        return _copula_cell(plan, stream, source, row_index)
     if plan.allocated_rows is None:
         return _draw_cell(plan, stream, given_level)
     return _allocated_cell(plan, stream, source, sim_id, expose_id, row_index, given_level)
+
+
+def _copula_cell(plan: ColumnPlan, stream: DrawStream, source: _Source, row_index: int) -> Any:
+    """One cell of a copula column: its value from the row's copula draws, or null.
+
+    The cell's own stream draws only the NULL draw, at index 0, when the column declares a
+    ``nullFraction``; the copula draws its value whether or not the cell is NULL.
+    """
+    assert plan.copula is not None
+    root = getattr(source, "root", None)
+    if not isinstance(root, SeedTreeRoot):
+        raise FluxError(FLX_2202, f"{plan.column.name}: a copula is drawn over the run's root")
+    is_null = plan.statistics.null_fraction is not None and bernoulli(
+        stream, plan.statistics.null_fraction
+    )
+    value = plan.copula.row_value(root, row_index, nfc(plan.column.name))
+    return None if is_null else value
 
 
 def _allocated_cell(
@@ -1848,6 +2033,12 @@ def _given_cell(
     as ``"1.50"`` and the value it renders to are different keys.
     """
     column = plan.column
+    if is_binned(plan):
+        # A column drawn from bins is given by the bin its own cell draws, on its own stream at
+        # the indices a histogram cell draws at: the cell is what _cell makes, its class its bin.
+        # (The seam digest only keys an identifier cell, which a column drawn from bins is not.)
+        value = _cell(plan, source, sim_id, expose_id, row_index, "", given_level)
+        return value, bin_class(plan, value)
     with localcontext(_KERNEL_CONTEXT):
         if isinstance(source, CellStreams):
             stream = source.stream_at(row_index, column.name)
@@ -1985,13 +2176,21 @@ def _conditioned_cell(
     else:
         from flux_engine.generator.conditions import level_at
 
-        if isinstance(source, CellStreams):
-            stream = source.stream_at(row_index, name)
-        else:
-            stream = source.stream(
+        def own_stream() -> DrawStream:
+            if isinstance(source, CellStreams):
+                return source.stream_at(row_index, name)
+            return source.stream(
                 generator_column_path(plan.sim_id, plan.expose.expose_id, row_index, name)
             )
-        level = level_at(decided, uniform53(stream))
+
+        level = level_at(decided, uniform53(own_stream()))
+        if is_binned(column_plan):
+            # The group chose the bin; the place inside it is the histogram's own draw at the
+            # index it always has, the bin's pick left unread (ADR 0036 decision 5).
+            index = class_names(column_plan).index(level)
+            given_level = _level_given(column_plan.statistics, levels)
+            with localcontext(_KERNEL_CONTEXT):
+                return _draw_value(column_plan, own_stream(), given_level, index), level
     with localcontext(_KERNEL_CONTEXT):
         return _level_to_value(level, column_plan.column), level
 

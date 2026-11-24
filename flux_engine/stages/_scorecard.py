@@ -47,6 +47,7 @@ __all__ = [
     "LineFailure",
     "build_run_scorecard",
     "contract_shape",
+    "copula_alphas",
     "line_failures",
     "refused_evaluation",
     "evaluate_against_profile",
@@ -117,6 +118,22 @@ def plan_pin(plan_document: Mapping[str, Any]) -> Optional[str]:
 def plan_overlay(plan_document: Mapping[str, Any]) -> Optional[Overlay]:
     """The profile overlay the run's plan records (ADR 0030 section 7), or ``None``."""
     return overlay_from_plan(plan_document.get(OVERLAY_PLAN_KEY), code=FLX_3105)
+
+
+def copula_alphas(plan_document: Mapping[str, Any]) -> Dict[str, str]:
+    """The shrinkage ``alpha`` of each emit whose plan holds a copula, by ``exposeId``.
+
+    The plan states ``copula: {alpha, factor}`` for such an emit only (ADR 0035 decision 5); an
+    entry that is not that shape is left out.
+    """
+    emits = plan_document.get("emits")
+    found: Dict[str, str] = {}
+    for expose_id, entry in (emits.items() if isinstance(emits, Mapping) else ()):
+        copula = entry.get("copula") if isinstance(entry, Mapping) else None
+        alpha = copula.get("alpha") if isinstance(copula, Mapping) else None
+        if isinstance(alpha, str):
+            found[str(expose_id)] = alpha
+    return found
 
 
 def plan_declaration(plan_document: Mapping[str, Any]) -> Optional[ScorecardDeclaration]:
@@ -367,6 +384,7 @@ def build_run_scorecard(
             rows.setdefault(expose_id, []).extend(found)
 
     return build_scorecard(
+        copula_alphas=copula_alphas(plan_document),
         run_id=run_id,
         plan_digest=str(plan_document.get("planDigest")),
         run_digest=run_digest,

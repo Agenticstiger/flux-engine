@@ -1,4 +1,4 @@
-# Profile request: normative specification (formats 1-0-0 and 1-1-0)
+# Profile request: normative specification (formats 1-0-0, 1-1-0 and 1-2-0)
 
 A profile request lists what a profiler must measure for a bundle. `fluxsim init`, given a
 FLUID contract and no profile, writes one (ADR 0018). A profiler reads it, measures exactly
@@ -28,7 +28,7 @@ the document and opens no file: reading a file, and holding it to a size, is the
 
 | Key | Required | Holds |
 |---|---|---|
-| `_schemaURL` | yes | `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-0-0/FluxProfileRequest.json`, or, for a request that asks for date pairs, a calendar or an exposure (sections 2 and 3) or uses an addition of section 6, `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-1-0/FluxProfileRequest.json`. Any other string is refused. It names the format and its version, as a profile's names its own; the reader compares the string, and no JSON Schema document is published for the request format. |
+| `_schemaURL` | yes | `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-0-0/FluxProfileRequest.json`, or, for a request that asks for date pairs, a calendar or an exposure (sections 2 and 3) or uses an addition of section 6, `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-1-0/FluxProfileRequest.json`, or, for a request that uses an addition of section 7, `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-2-0/FluxProfileRequest.json`. Any other string is refused. It names the format and its version, as a profile's names its own; the reader compares the string, and no JSON Schema document is published for the request format. |
 | `contract` | no | `{ digest }`: the `jcs-document` digest of the contract the request was made from, so a profiler and `init` can tell that a request and a contract belong together. |
 | `encoding` | no | `{ fractionalBits, rounding }`: the grid the profile's encoded quantities are formed on (PROFILE-SPEC.md section 2). `rounding` is `floor`. Absent means 16 fractional bits. |
 | `tables` | yes | One entry per table, keyed by the FLUID `exposeId` (section 2). |
@@ -101,7 +101,7 @@ and `workload` additions of section 6, all optional, and changes nothing 1-0-0 s
 asks for none of them is written as 1-0-0, byte for byte as before, so a profiler that reads only
 1-0-0 reads every request that asks for none. A document that names 1-0-0 and holds an addition of
 1-1-0 is refused with `FLX-5038`, naming the addition, since a reader of 1-0-0 would otherwise
-ignore what it does not know. This reader reads formats 1-0-0 and 1-1-0 and refuses any other URL.
+ignore what it does not know. A request that names 1-0-0 or 1-1-0 and holds an addition of 1-2-0 is refused with `FLX-5038`, naming the addition and the format to name. A request that asks for none of the additions of 1-2-0 keeps the format it named before and its bytes. This reader reads formats 1-0-0, 1-1-0 and 1-2-0 and refuses any other URL.
 
 ## 6. Format 1-1-0: consumer queries and a column workload
 
@@ -150,3 +150,46 @@ number of rows the query returns. Each entry is untrusted text. The profiler che
 under ADR 0028 section 2, and runs it under the locks of section 3 or stronger ones. Its
 disclosure checks look at the queries as a set and not one at a time, because two queries that
 differ by one literal can reveal one record by differencing.
+
+## 7. Format 1-2-0: rank correlations, clique columns and grouped relationships
+
+Format 1-2-0 holds everything 1-1-0 does and adds four optional keys, which ask for the statistics of profile
+format 1-4-0 (PROFILE-SPEC.md). A request that uses any of them names
+`https://agenticstiger.github.io/flux/engine/spec/profile-request/1-2-0/FluxProfileRequest.json`. The request
+still holds names and registered identifiers only, and no budget: how much noise to add, and where, is the data
+owner's choice, stated in the profile.
+
+- `tables.<exposeId>.rankCorrelations`: a list of `{ "definition", "columns" }`. `definition` is `kendallTau/1`
+  or `spearmanRho/1`, each at most once per table. `columns` names 2 to 64 distinct columns of the table, each
+  listed in the request with the domain `number` or `timestamp`. The profile states the statistic over every
+  pair of them (PROFILE-SPEC.md section 5).
+- `tables.<exposeId>.cliqueColumns`: a list of the columns of the table that a profiler may join into cliques,
+  `category`, `number` or `timestamp`, each named once, at most 1 024. The profiler chooses the cliques, their
+  method and the bins of a number column, and states them (PROFILE-SPEC.md section 5a).
+- `relationships[].groupBy`: a list of columns of the relationship's parent table, each named once, at most 64.
+  The profile states the relationship's statistics grouped by each (PROFILE-SPEC.md section 5): by its levels for
+  a `category` column, and by bins the profiler chooses for a `number` or `timestamp` column.
+- `relationships[].linked`: a list of `{ "column", "parentColumn" }`, a column of the child table and one of the
+  parent table, each pair named once, at most 1 024. The profile states the child column's statistics grouped by
+  the parent column through this relationship (`groupByLink`, PROFILE-SPEC.md section 3).
+
+A name that no column of its table holds is refused with `FLX-5038`, naming where.
+
+**What `fluxsim init` asks for.** Given a contract and no profile, `fluxsim init` writes a request of format 1-2-0
+only when it asks for one of the keys above, and a request with none of them keeps its bytes and the format it
+named before. For each table it asks for `kendallTau/1` over the number and timestamp columns it would draw from
+histograms (at most 64, and none when the table has fewer than two), and names as `cliqueColumns` the columns a
+clique could hold (at most 1 024, and none when the table has fewer than two). For each relationship it could lay
+out on the counted layout, one column on each side and to another table, whose foreign key no key, other
+relationship or rule of the contract sets, it asks to be grouped by every column its parent draws (at most 64) and
+lists as `linked` the pairs of a child column and a `category` column of the parent (at most 1 024). A column that a
+key, a relationship, a rule or a hidden or identifier column of the contract sets is asked for none of these. The
+request holds candidates: which of them a profile answers, and so which `init` draws that way, is the profile's.
+
+When the profile answers, `init` reads its rank correlations into one copula for each table and its grouped
+histograms of children per parent into the `given` of a `counts` entry. A column is left out of the copula when
+two independent draws of it are equal with probability at least 1/20, the sum over its bins of the squared share of
+a bin divided by the number of grid values in it, since the statistics carry no tie correction. The copula's
+measure is Kendall's when the profile publishes it for any pair of the copula's columns, and Spearman's
+otherwise. The ledger of `init` says why each statistic was used or left unused (the how-to
+[Write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md)).

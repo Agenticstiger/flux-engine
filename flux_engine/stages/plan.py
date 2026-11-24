@@ -72,6 +72,7 @@ from flux_engine.evidence.register import (
     render_register,
     render_register_line,
 )
+from flux_engine.generator.relations import ForeignKey
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.generators import environment as _environment
 from flux_engine.lineage.emitter import dataset_for_expose
@@ -144,6 +145,40 @@ def _fidelity_summary(
         # Drawn and never written (ADR 0024 section 2): listed apart, so `columns` is what is written.
         summary["hiddenColumns"] = hidden
     return summary
+
+
+def _copula_entry(
+    outcome: Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"],
+) -> Dict[str, Any]:
+    """``copula: {alpha, factor}`` for an emit whose plan holds a copula, else nothing."""
+    copula = None if outcome.plan is None else getattr(outcome.plan, "copula", None)
+    return {} if copula is None else {"copula": copula.as_document()}
+
+
+def _counts_given_entry(
+    outcome: Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"],
+) -> Dict[str, Any]:
+    """``countsGiven`` for an emit with a counted relationship given a parent column, else nothing.
+
+    One member per such relationship, in relationship order: the column, the weights of every
+    class of it over the classes of ``children``, and the classes that took ``children``'s own
+    weights because the entry gave them no list (ADR 0037 decision 4). Any other emit has no key,
+    so its plan keeps its bytes.
+    """
+    plan = outcome.plan
+    relations = None if plan is None else plan.relations
+    if relations is None:
+        return {}
+    found = [
+        {"relationship": driver.relationship, **driver.counted.as_document_given()}
+        for _, driver in relations.drivers
+        if isinstance(driver, ForeignKey)
+        and driver.counted is not None
+        and driver.counted.given is not None
+    ]
+    return (
+        {"countsGiven": sorted(found, key=lambda item: str(item["relationship"]))} if found else {}
+    )
 
 
 def _derived_rows_entry(
@@ -370,6 +405,12 @@ def _plan_emits(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
             "declaresFidelity": outcome.resolved.fidelity is not None,
             "generator": _fidelity_summary(outcome),
             **_derived_rows_entry(outcome),
+            # An emit that declares a copula records its shrinkage and its factor's digest (ADR
+            # 0035 decision 5); any other emit has no key, so its plan keeps its bytes.
+            **_copula_entry(outcome),
+            # An emit with a counted relationship given a parent column states the weights each
+            # class took, those it took from the shape included (ADR 0037 decision 4).
+            **_counts_given_entry(outcome),
             # SEAM-FIDELITY-SPEC §3: "every ε" is written to plan.json.
             # The key is the one the block is declared under, and an
             # emit that declares none gets no key, so its plan keeps
@@ -509,11 +550,12 @@ def _profile_grade(result: "_pipeline.PipelineResult", pinned: Optional[Any]) ->
     from flux_engine.evidence.grades import grade_profile
     from flux_engine.stages._grades import generator_grades, require_minimum_grade
 
+    graded = grade_profile(
+        pinned.document if pinned is not None else None, pinned=pinned is not None
+    )
     grade = weakest(
         [
-            grade_profile(
-                pinned.document if pinned is not None else None, pinned=pinned is not None
-            ).pattern,
+            graded.pattern,
             *generator_grades(result.cast.simulation, where=result.cast.simulation_id),
         ]
     )
@@ -522,6 +564,7 @@ def _profile_grade(result: "_pipeline.PipelineResult", pinned: Optional[Any]) ->
         [outcome.resolved for outcome in result.emits],
         result.cast.simulation,
         where=result.cast.simulation_id,
+        accounting=graded.accounting,
     )
     return grade
 

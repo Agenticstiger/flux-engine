@@ -453,7 +453,7 @@ _BACK = {"DE": {"store": "1", "web": "1"}, "FR": {"store": "1", "web": "1"}}
                     "given": "amount",
                     "levelWeightsGiven": {"0": {"DE": "1"}, "1": {"DE": "1"}},
                 },
-                "amount": {"bins": ["0", "10", "20"], "binWeights": ["1", "1"]},
+                "amount": {"range": {"min": "0", "max": "20"}},
             },
             "not categorical",
         ),

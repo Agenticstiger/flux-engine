@@ -140,7 +140,12 @@ from flux_engine.evidence.register import (
     render_register_line,
     render_register_note,
 )
-from flux_engine.evidence.report import ConditionedEmit, StoredGenerator, render_evidence_report
+from flux_engine.evidence.report import (
+    ConditionedEmit,
+    CopulaEmit,
+    StoredGenerator,
+    render_evidence_report,
+)
 from flux_engine.safeio import (
     is_regular_file,
     json_lines,
@@ -885,6 +890,26 @@ def _children_groups(entry: "PropertyScore") -> Tuple[PopulationGroup, ...]:
     """The cells a children-per-parent row was scored over: its bins, the profile's parents and the run's."""
     document = entry.document or {}
     bins = document.get("bins") or []
+    if "groups" in document:
+        # Grouped by a parent column: one group of cells for each class, named by its ordinal.
+        found = []
+        for held in document["groups"]:
+            profile = (held.get("profile") or {}).get("binCounts")
+            run = (held.get("run") or {}).get("binCounts")
+            if profile is None or run is None or not (len(bins) - 1 == len(profile) == len(run)):
+                continue
+            found.append(
+                PopulationGroup(
+                    label=f"g{held['ordinal']}",
+                    cells=tuple(
+                        PopulationCell(
+                            f"{bins[index]} to {bins[index + 1]}", profile[index], run[index]
+                        )
+                        for index in range(len(run))
+                    ),
+                )
+            )
+        return tuple(found)
     profile = (document.get("profile") or {}).get("binCounts")
     run = (document.get("run") or {}).get("binCounts")
     if profile is None or run is None or not (len(bins) - 1 == len(profile) == len(run)):
@@ -898,7 +923,7 @@ def _children_groups(entry: "PropertyScore") -> Tuple[PopulationGroup, ...]:
 
 def _histogram_groups(entry: "PropertyScore", outcome: Any) -> Tuple[PopulationGroup, ...]:
     """The cells of a histogram row, one group per level of its ``group_by`` (none for a censored level)."""
-    grouped = entry.group_by is not None
+    grouped = entry.group_by is not None or entry.group_by_bins is not None
     return tuple(
         PopulationGroup(
             label=f"g{ordinal}" if grouped else "",
@@ -1579,7 +1604,14 @@ def _hold_to_minimum(
     loaded = load_bundle(directory)
     emits = resolve_all_emits(loaded, simulation_id=simulation_id)
     simulation = resolve_cast(loaded.flux_documents, simulation_id=simulation_id).simulation
-    require_minimum_grade(floor, emits, simulation, where=simulation_id, grade_of=grade_of)
+    require_minimum_grade(
+        floor,
+        emits,
+        simulation,
+        where=simulation_id,
+        grade_of=grade_of,
+        accounting=privacy.profile.accounting,
+    )
 
 
 def _forecast_accuracy(
@@ -1699,6 +1731,37 @@ def _declared_conditions(
     return tuple(found)
 
 
+def _declared_copulas(
+    directory: Path, simulation_id: str, plan_document: Mapping[str, Any]
+) -> Tuple[CopulaEmit, ...]:
+    """Each emit of the run whose plan holds a copula: its columns and measure, and the plan's ``alpha``.
+
+    The columns and the measure come from the bundle the plan binds; the shrinkage is the plan's
+    own. A plan with no ``copula`` member gives ``()``.
+    """
+    from flux_engine.generator.copula import read_copula
+    from flux_engine.seam.resolve import load_bundle, resolve_all_emits
+
+    planned = plan_document.get("emits") or {}
+    if not any(isinstance(entry, Mapping) and "copula" in entry for entry in planned.values()):
+        return ()
+    found = []
+    for resolved in resolve_all_emits(load_bundle(directory), simulation_id=simulation_id):
+        entry = planned.get(resolved.expose_id)
+        declaration = read_copula(resolved.fidelity)
+        if declaration is None or not isinstance(entry, Mapping) or "copula" not in entry:
+            continue
+        found.append(
+            (
+                resolved.expose_id,
+                declaration.columns,
+                declaration.measure,
+                str(entry["copula"].get("alpha")),
+            )
+        )
+    return tuple(found)
+
+
 def _write_evidence_report(
     layout: RunLayout,
     *,
@@ -1720,6 +1783,7 @@ def _write_evidence_report(
     conditioned: Sequence[ConditionedEmit] = (),
     forecast_accuracy: Optional[ForecastAccuracy] = None,
     held_out_grade: Optional[Pattern] = None,
+    copulas: Sequence[CopulaEmit] = (),
 ) -> None:
     """Write ``EVIDENCE.md`` into the run directory, ahead of packing.
 
@@ -1780,6 +1844,7 @@ def _write_evidence_report(
         conditioned=conditioned,
         forecast_accuracy=forecast_accuracy,
         held_out_grade=held_out_grade,
+        copulas=copulas,
     )
     write_text_atomic(layout.run_dir / "EVIDENCE.md", report)
 
@@ -2189,6 +2254,7 @@ def ship(
             conditioned=_declared_conditions(directory, simulation_id, plan_document.get("scale")),
             forecast_accuracy=accuracy,
             held_out_grade=held_out_grade,
+            copulas=_declared_copulas(directory, simulation_id, plan_document),
         )
     except FluxError as error:
         return StageResult(

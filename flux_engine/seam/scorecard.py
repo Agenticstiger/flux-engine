@@ -132,6 +132,9 @@ _OTHER_ODCS_OPERATORS: FrozenSet[str] = frozenset(
     }
 )
 
+#: The kinds that relate two columns of a table.
+_JOINT_KINDS: FrozenSet[str] = frozenset({"correlation", "rankCorrelation"})
+
 _KINDS_BY_COLUMN: FrozenSet[str] = frozenset(
     {"mean", "quantile", "marginalHistogram", "levelHistogram"}
 )
@@ -148,14 +151,14 @@ def dimension_of(kind: str, grouped: bool) -> str:
 
     ``support`` asks whether every synthetic value is one the reference
     holds, which is the structure of the column rather than its shape, so it
-    is scored in ``structure`` with or without ``groupBy``. A ``correlation``
-    relates two columns, and so does any property grouped by a second column
-    of its table: both are ``joint``. Every other kind describes one column
+    is scored in ``structure`` with or without ``groupBy``. A ``correlation`` and a
+    ``rankCorrelation`` relate two columns, and so does any property grouped by a second column
+    of its table: all are ``joint``. Every other kind describes one column
     and is a marginal.
     """
     if kind == "support":
         return "structure"
-    if kind == "correlation" or (grouped and kind in _KINDS_BY_COLUMN):
+    if kind in _JOINT_KINDS or (grouped and kind in _KINDS_BY_COLUMN):
         return "joint"
     if kind in _KINDS_BY_COLUMN:
         return "marginals"

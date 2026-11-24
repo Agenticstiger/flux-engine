@@ -883,6 +883,8 @@ def _described(
             f"  {name:<{column_width}}  {column.how}".rstrip()
             for name, column in zip(shown, expose.columns, strict=True)
         ]
+        if expose.copula is not None:
+            lines += [f"  copula: {printable(sentence)}" for sentence in expose.copula.notes]
         assumptions += expose.assumptions
         if not expose.properties:
             (carried if expose.carries else nothing_to_verify).append(printable(expose.expose_id))
@@ -903,6 +905,17 @@ def _described(
                     {"subject": subject, "assumption": sentence}
                     for subject, sentence in expose.assumptions
                 ],
+                **(
+                    {
+                        "copula": {
+                            "columns": list(expose.copula.columns),
+                            "measure": expose.copula.measure or None,
+                            "notes": list(expose.copula.notes),
+                        }
+                    }
+                    if expose.copula is not None
+                    else {}
+                ),
             }
         )
     assumptions += list(bundle.notes)

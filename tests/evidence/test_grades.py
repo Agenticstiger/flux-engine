@@ -125,11 +125,15 @@ def test_the_example_profile_of_the_spec_is_p3_too() -> None:
             lambda d: d["tables"]["subscriber"].update(
                 columnPairs=[{"columns": [], "statistics": []}]
             ),
-            "pair, period",
+            "released without noise in tables.`subscriber`.columnPairs[0]",
         ),
         (
-            lambda d: d.update(relationships=[{"parent": {}, "child": {}, "statistics": []}]),
-            "relationship",
+            lambda d: d.update(
+                relationships=[
+                    {"parent": {}, "child": {}, "statistics": [{"definition": "mean/1"}]}
+                ]
+            ),
+            "released without noise in relationships[0]",
         ),
         (lambda d: d.update(queries=[{"name": "q", "statistics": []}]), "query"),
         (lambda d: d.update(invariants=[{"name": "f", "statistics": []}]), "fact"),
@@ -311,7 +315,10 @@ def test_a_noisy_profile_that_holds_an_exact_history_is_p1_and_names_the_history
     table = history["tables"]["plan_version"]["history"]
 
     def add(document: Dict[str, Any]) -> None:
-        document["tables"]["subscriber"]["history"] = table
+        document["_schemaURL"] = history["_schemaURL"]
+        document["disclosureRules"].update(history["disclosureRules"])
+        document["tables"]["plan_version"] = {"columns": {}, "history": table}
+        document["tables"]["plan_version"]["columns"] = history["tables"]["plan_version"]["columns"]
 
     graded = _graded(add)
     assert graded.pattern is Pattern.P1
@@ -474,9 +481,17 @@ _STRUCTURAL_ALLOWLIST = {
 
 
 def test_every_schema_member_of_a_table_column_or_relationship_is_graded_or_allowed() -> None:
+    for name, later in (("profile-1-3.schema.json", True), ("profile-1-4.schema.json", False)):
+        _check_members(json.loads((SPEC / name).read_text(encoding="utf-8")), earlier=later)
+
+
+#: The members of a table that only format 1-4-0 holds, so the 1-3-0 schema does not list them.
+_ADDED_IN_1_4_0 = {"Table": frozenset({"cliqueSelection"})}
+
+
+def _check_members(schema: Dict[str, Any], *, earlier: bool = False) -> None:
     from flux_engine.evidence import grades
 
-    schema = json.loads((SPEC / "profile-1-3.schema.json").read_text(encoding="utf-8"))
     graded = {
         "Table": grades.GRADED_TABLE_MEMBERS,
         "Column": grades.GRADED_COLUMN_MEMBERS,
@@ -487,6 +502,10 @@ def test_every_schema_member_of_a_table_column_or_relationship_is_graded_or_allo
         "Column": grades.STRUCTURAL_COLUMN_MEMBERS,
         "Relationship": grades.STRUCTURAL_RELATIONSHIP_MEMBERS,
     }
+    top = set(schema["properties"])
+    assert top == grades.GRADED_TOP_LEVEL_MEMBERS | grades.STRUCTURAL_TOP_LEVEL_MEMBERS
+    privacy = set(schema["$defs"]["Privacy"]["properties"])
+    assert privacy == grades.STRUCTURAL_PRIVACY_MEMBERS
     for definition, members in graded.items():
         found = set(schema["$defs"][definition]["properties"])
         for member in sorted(found):
@@ -494,7 +513,10 @@ def test_every_schema_member_of_a_table_column_or_relationship_is_graded_or_allo
             assert member in members or allowed, f"{definition}.{member} is not graded"
             if allowed:
                 assert member in structural[definition], f"{definition}.{member} is flagged"
-        assert members <= found, f"the grade reads {sorted(members - found)} the schema lacks"
+        later = _ADDED_IN_1_4_0.get(definition, frozenset()) if earlier else frozenset()
+        assert (
+            members - later <= found
+        ), f"the grade reads {sorted(members - later - found)} the schema lacks"
     assert {key for key, _ in _STRUCTURAL_ALLOWLIST} <= set(graded)
 
 
@@ -530,6 +552,173 @@ def test_a_name_from_the_profile_cannot_forge_a_heading_a_row_or_a_comment_in_a_
         text = render_privacy_section(RunGrade(graded, ()))
         _assert_nothing_forged(text)
         assert text.count("\n## ") == 0
+
+
+# ---------------------------------------------------------------------------
+# Column pairs, and the members at the top of a profile and in its privacy block
+# ---------------------------------------------------------------------------
+
+
+def _pairs_profile() -> Dict[str, Any]:
+    """The 1-4-0 example: one pair holding a noisy Kendall's and a noisy Spearman's, nothing exact."""
+    document: Dict[str, Any] = json.loads(
+        (SPEC / "profile-1-4-example.json").read_text(encoding="utf-8")
+    )
+    return document
+
+
+def _exact_correlation() -> Dict[str, Any]:
+    return {
+        "definition": "correlation/1",
+        "sampleSize": {"min": 1000},
+        "disclosure": "noisy",
+        "groups": [
+            {
+                "group": "",
+                "k": 3,
+                "status": "F",
+                "Sx": "1",
+                "Sy": "1",
+                "Sxx": "1",
+                "Sxy": "1",
+                "Syy": "1",
+            }
+        ],
+    }
+
+
+def test_a_pair_whose_statistics_are_all_noisy_keeps_the_profile_p3() -> None:
+    graded = grade_profile(_pairs_profile(), pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
+    assert graded.accounting is not None and graded.accounting.parts == 3
+
+
+def test_a_pair_with_a_correlation_is_p1_and_the_reason_names_the_pair() -> None:
+    document = _pairs_profile()
+    document["tables"]["subscriber"]["columns"]["usage"] = {"domain": "number"}
+    document["tables"]["subscriber"]["columnPairs"].append(
+        {"columns": ["age", "usage"], "statistics": [_exact_correlation()]}
+    )
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert graded.reasons == (
+        "the profile holds a statistic released without noise in "
+        "tables.`subscriber`.columnPairs[`age`, `usage`]",
+    )
+
+
+def test_a_pair_that_mixes_a_noisy_and_an_exact_statistic_is_p1_and_named() -> None:
+    document = _pairs_profile()
+    statistics = document["tables"]["subscriber"]["columnPairs"][0]["statistics"]
+    del statistics[1]["noise"]
+    statistics[1]["groups"] = [{"group": "", "k": 10, "status": "F", "A4": "100"}]
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("columnPairs[`age`, `tenure`]" in reason for reason in graded.reasons)
+    assert graded.accounting is not None and graded.accounting.parts == 2
+
+
+def test_a_pair_with_no_statistic_is_not_noisy() -> None:
+    document = _pairs_profile()
+    document["tables"]["subscriber"]["columnPairs"][0]["statistics"] = []
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("columnPairs[`age`, `tenure`]" in reason for reason in graded.reasons)
+
+
+def test_a_pair_name_that_would_forge_a_row_or_a_section_is_withheld() -> None:
+    document = _pairs_profile()
+    document["tables"]["subscriber"]["columnPairs"][0]["columns"] = [_HOSTILE, "tenure"]
+    document["tables"]["subscriber"]["columnPairs"][0]["statistics"].append(_exact_correlation())
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1 and any("withheld" in r for r in graded.reasons)
+    assert "\n".join(graded.reasons).count(_HOSTILE) == 0
+    _assert_nothing_forged(render_privacy_section(RunGrade(graded, ())))
+
+
+def test_an_unknown_top_level_or_privacy_member_counts_as_released_without_noise() -> None:
+    top = _graded(lambda d: d.update(extras=[1]))
+    assert top.pattern is Pattern.P1
+    assert any(
+        "`extras`" in reason and "does not know" in reason and "released without noise" in reason
+        for reason in top.reasons
+    ), top.reasons
+    inside = _graded(lambda d: d["privacy"].update(extras=1))
+    assert inside.pattern is Pattern.P1
+    assert any("privacy.`extras`" in reason for reason in inside.reasons), inside.reasons
+
+
+def test_the_members_the_grade_knows_at_the_top_and_in_privacy_are_not_flagged() -> None:
+    graded = grade_profile(_private(), pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
+
+
+def test_a_hostile_top_level_or_privacy_name_cannot_forge_a_heading_a_row_or_a_comment() -> None:
+    for change in (
+        lambda d: d.update({_HOSTILE: 1}),
+        lambda d: d["privacy"].update({_HOSTILE: 1}),
+    ):
+        graded = _graded(change)
+        assert graded.pattern is Pattern.P1
+        assert any("withheld" in reason for reason in graded.reasons)
+        assert "\n".join(graded.reasons).count(_HOSTILE) == 0
+        _assert_nothing_forged(render_privacy_section(RunGrade(graded, ())))
+
+
+# ---------------------------------------------------------------------------
+# A statistic grouped by bins, and a table's clique selection (profile format 1-4-0)
+# ---------------------------------------------------------------------------
+
+
+def _binned(*, noisy: bool) -> Dict[str, Any]:
+    statistic: Dict[str, Any] = {
+        "definition": "marginalHistogram/1",
+        "bins": ["0", "10", "20"],
+        "sampleSize": {"min": 1000, "max": 9999},
+        "disclosure": "noisy",
+        "groupByBins": {"column": "age", "bins": ["0", "30", "60"]},
+        "groups": [{"group": key, "status": "F", "noisyCounts": ["5", "6"]} for key in ("0", "30")],
+    }
+    if noisy:
+        statistic["noise"] = {
+            "mechanism": "gaussian",
+            "scale": "5",
+            "privacyLoss": {"rho": "0.02"},
+        }
+    else:
+        statistic["groups"] = [
+            {"group": key, "status": "F", "k": 11, "binCounts": [5, 6]} for key in ("0", "30")
+        ]
+    return statistic
+
+
+def _with_binned(noisy: bool) -> Dict[str, Any]:
+    document: Dict[str, Any] = json.loads(
+        (SPEC / "profile-1-4-example.json").read_text(encoding="utf-8")
+    )
+    document["privacy"]["privacyLoss"] = {"rho": "1"}
+    document["tables"]["subscriber"]["columns"]["tenure"]["statistics"] = [_binned(noisy=noisy)]
+    return document
+
+
+def test_a_statistic_grouped_by_bins_is_noisy_only_when_it_carries_noise() -> None:
+    noisy = grade_profile(_with_binned(True), pinned=True)
+    assert noisy.pattern is Pattern.P3 and noisy.reasons == ()
+    exact = grade_profile(_with_binned(False), pinned=True)
+    assert exact.pattern is Pattern.P1
+    assert any("a statistic released without noise" in reason for reason in exact.reasons)
+
+
+def test_a_clique_selection_is_accounting_and_never_makes_a_profile_not_p3() -> None:
+    document: Dict[str, Any] = json.loads(
+        (SPEC / "profile-1-4-cliques-example.json").read_text(encoding="utf-8")
+    )
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
+    assert graded.accounting is not None and graded.accounting.parts == 4
+    # an unknown member beside it is still not graded as noisy
+    document["tables"]["subscriber"]["cliqueSelectionX"] = {}
+    assert grade_profile(document, pinned=True).pattern is Pattern.P1
 
 
 def _noisy_stat_on(
@@ -595,9 +784,33 @@ def test_a_noisy_statistic_with_an_exact_sample_size_band_is_p1() -> None:
 
 def test_an_enumerated_group_and_a_real_sample_size_band_keep_p3() -> None:
     def keep(document: Dict[str, Any]) -> None:
-        _noisy_stat_on(document, "plan", lambda s: s.update(groupBy="plan"))
+        def grouped(statistic: Dict[str, Any]) -> None:
+            statistic["groupBy"] = "plan"
+            statistic["groups"][0]["group"] = "basic"
+
+        _noisy_stat_on(document, "plan", grouped)
         document["tables"]["subscriber"]["columns"]["plan"] = {"domain": "category"}
 
     graded = _graded(keep)
     assert graded.pattern is Pattern.P3 and graded.reasons == ()
     assert _graded(lambda d: _noisy_stat_on(d, "plan", lambda s: None)).pattern is Pattern.P3
+
+
+def test_an_exact_sample_size_band_is_p1_in_format_1_4_0_too() -> None:
+    """The 1-4-0 declaration covers bands chosen without the data; a band of one size is not one."""
+    document = _pairs_profile()
+    statistic = document["tables"]["subscriber"]["columns"]["region"]["statistics"][0]
+    statistic["sampleSize"] = {"min": 14000, "max": 14000}
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("min equals its max" in reason for reason in graded.reasons)
+
+
+def test_a_group_by_on_a_column_the_profile_does_not_describe_is_p1_in_format_1_4_0_too() -> None:
+    """Its group keys are data values, which no declaration makes public."""
+    document = _pairs_profile()
+    statistic = document["tables"]["subscriber"]["columns"]["region"]["statistics"][0]
+    statistic["groupBy"] = "undescribed"
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("keys are data values" in reason for reason in graded.reasons)

@@ -49,11 +49,14 @@ def test_each_identifier_is_spelled_once_across_the_engine_and_flux_stats() -> N
 def test_each_property_kind_has_exactly_one_statistic_for_each_of_its_forms() -> None:
     """A kind has one statistic, and a quantile that declares bins has a second (ADR 0012)."""
     plain = [entry.kind for entry in definitions() if not entry.binned]
-    assert sorted(plain) == sorted(kind.value for kind in PropertyKind)
+    # A rank correlation is the one kind with two statistics, picked by the property's measure and
+    # kept beside their reader in ``flux_stats.rank_correlation``, not in the registry's table.
+    registered = [kind for kind in PropertyKind if kind is not PropertyKind.RANK_CORRELATION]
+    assert sorted(plain) == sorted(kind.value for kind in registered)
     assert [(entry.kind, entry.identifier) for entry in definitions() if entry.binned] == [
         (PropertyKind.QUANTILE.value, "quantile/2")
     ]
-    for kind in PropertyKind:
+    for kind in registered:
         assert definition_for_kind(kind) is definition_for_kind(kind.value)
         assert definition_for_kind(kind).identifier == f"{kind.value}/1"
     assert definition_for_kind(PropertyKind.QUANTILE, binned=True).identifier == "quantile/2"

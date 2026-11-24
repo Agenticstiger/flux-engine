@@ -25,6 +25,7 @@ from flux_engine.seam.profile_request import workload_of  # noqa: E402
 from flux_stats.request import (  # noqa: E402
     REQUEST_SCHEMA_URL,
     REQUEST_SCHEMA_URL_1_1_0,
+    REQUEST_SCHEMA_URL_1_2_0,
     RequestWorkload,
     load_request_text,
 )
@@ -101,10 +102,15 @@ def test_the_pinned_requests_read_and_say_what_the_spec_says() -> None:
     assert held_out.contract_digest == request.contract_digest
 
 
-def test_both_requests_name_format_1_1_0(tmp_path: Path) -> None:
+def test_the_held_out_request_names_format_1_1_0_and_the_profile_request_1_2_0(
+    tmp_path: Path,
+) -> None:
+    """The profile request also asks for correlations (format 1-2-0, which holds every 1-1-0 key)."""
     _ask(tmp_path, CONSUMERS)
-    for name in ("b.profile-request.yml", "b.held-out-request.yml"):
-        assert REQUEST_SCHEMA_URL_1_1_0 in (tmp_path / name).read_text(encoding="utf-8")
+    held_out = (tmp_path / "b.held-out-request.yml").read_text(encoding="utf-8")
+    assert REQUEST_SCHEMA_URL_1_1_0 in held_out
+    asked = (tmp_path / "b.profile-request.yml").read_text(encoding="utf-8")
+    assert REQUEST_SCHEMA_URL_1_2_0 in asked and '"queries":' in asked
 
 
 def test_the_report_names_both_requests_and_the_command_that_follows(tmp_path: Path) -> None:
@@ -209,7 +215,7 @@ def test_a_query_without_a_unit_adds_to_the_workload_but_asks_for_no_rate(tmp_pa
     assert _workload(request) == {("plan",): 1}
     assert result.artifacts["queries"] == 0
     assert not (tmp_path / "b.held-out-request.yml").exists()
-    assert REQUEST_SCHEMA_URL_1_1_0 in (tmp_path / "b.profile-request.yml").read_text(
+    assert REQUEST_SCHEMA_URL_1_2_0 in (tmp_path / "b.profile-request.yml").read_text(
         encoding="utf-8"
     )
 
@@ -255,20 +261,20 @@ def test_workload_of_drops_sets_past_eight_columns_and_counts_the_rest() -> None
 
 
 def _contract_without_dates(tmp_path: Path) -> Path:
-    """The fixture contract with its one date column dropped: nothing asks a calendar or an exposure."""
+    """The fixture contract cut to its one key column: nothing asks a calendar, a correlation or a clique."""
     document = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))
     schema = document["exposes"][0]["contract"]["schema"]
-    schema[:] = [column for column in schema if column["type"] != "DATE"]
+    schema[:] = schema[:1]
     path = tmp_path / "no-dates.fluid.yaml"
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     return path
 
 
-def test_a_request_with_a_date_column_asks_its_calendar_in_format_1_1_0(tmp_path: Path) -> None:
+def test_a_request_with_a_date_column_asks_its_calendar(tmp_path: Path) -> None:
     result = run_init(str(tmp_path / "b"), contract=str(CONTRACT))
     assert result.exit_code == 0, result.stderr
     text = (tmp_path / "b.profile-request.yml").read_text(encoding="utf-8")
-    assert REQUEST_SCHEMA_URL_1_1_0 in text and REQUEST_SCHEMA_URL not in text
+    assert REQUEST_SCHEMA_URL_1_2_0 in text and REQUEST_SCHEMA_URL not in text
     assert '"calendar":' in text and '"renewed_at"' in text
     assert "queries" not in text and "workload" not in text
 

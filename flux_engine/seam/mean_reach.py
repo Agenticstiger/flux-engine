@@ -100,6 +100,7 @@ def mean_bounds(column: Any) -> Tuple[Optional[Fraction], Optional[Fraction]]:
         if (
             statistic.identifier == _HISTOGRAM
             and statistic.group_by is None
+            and statistic.group_by_bins is None
             and statistic.groups
             and len(statistic.groups) == 1
             and statistic.groups[0].published
@@ -122,6 +123,7 @@ def _stated_mean(profile: Any, column: Any) -> Optional[Fraction]:
         if (
             statistic.identifier != _MEAN
             or statistic.group_by is not None
+            or statistic.group_by_bins is not None
             or len(statistic.groups) != 1
         ):
             continue

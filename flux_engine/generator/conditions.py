@@ -16,6 +16,12 @@ with separator ``S`` and new columns ``n_1 .. n_m``, ``n_j`` is drawn given ``S`
 ``n_1 .. n_(j-1)``, and the Chow-Liu forest of ADR 0014 is the same with each pair a clique). The
 product of the conditionals is the joint.
 
+**Bins.** A column drawn from ``bins`` with no null fraction is a variable too, its states its bins
+named by the text of each lower edge (ADR 0036 decision 5), so a group that fixes a column drawn
+given its bin changes the weights of the bins. A group still fixes categorical columns only. The
+cell's first word chooses the bin from the group's table, and the place inside it is the
+histogram's own draw at the index it always has, with the bin's pick left unread.
+
 **The weights.** The columns are drawn in the plan's order. The weight of a value ``v`` of column
 ``c`` is its conditional given its parents times the sum, over the columns drawn after ``c`` that
 descend from it, of the product of their conditionals, each fixed column held at its fixed value.
@@ -292,12 +298,10 @@ class ConditionPlan:
     def _model(self) -> Tuple[Dict[str, "ColumnPlan"], Dict[str, Tuple[str, ...]], Dict[str, int]]:
         found = self._cache.get("model")
         if found is None:
-            from flux_engine.generator.rows import _level_names
+            from flux_engine.generator.rows import class_names
 
             by_name = {plan.column.name: plan for plan in self.variables}
-            domains = {
-                name: tuple(sorted(_level_names(plan.statistics))) for name, plan in by_name.items()
-            }
+            domains = {name: tuple(sorted(class_names(plan))) for name, plan in by_name.items()}
             position = {name: index for index, name in enumerate(self.order)}
             found = (by_name, domains, position)
             self._cache["model"] = found
@@ -311,11 +315,12 @@ class ConditionPlan:
         by_name, domains, _ = self._model()
         statistics = by_name[name].statistics
         parents = statistics.parents
-        table = (
-            _given_table(statistics, domains)
-            if statistics.level_weights_given is not None
-            else _own_table(statistics)
-        )
+        if is_binned(by_name[name]):
+            table = _bin_table(by_name[name], domains)
+        elif statistics.level_weights_given is not None:
+            table = _given_table(statistics, domains)
+        else:
+            table = _own_table(statistics)
         factor: _Factor = ((*parents, name), table)
         self._cache[("base", name)] = factor
         return factor
@@ -473,6 +478,41 @@ def _own_table(statistics: Any) -> Dict[Tuple[str, ...], Fraction]:
     return {(level,): Fraction(weight) / total for level, weight in weights.items() if weight > 0}
 
 
+def is_binned(plan: "ColumnPlan") -> bool:
+    """Whether the column is drawn from bins (:func:`flux_engine.generator.rows.is_binned`)."""
+    from flux_engine.generator.rows import is_binned as _is_binned
+
+    return _is_binned(plan)
+
+
+def _bin_table(
+    plan: "ColumnPlan", domains: Mapping[str, Tuple[str, ...]]
+) -> Dict[Tuple[str, ...], Fraction]:
+    """A column drawn from bins as a table over its parents' classes then its own bin's class.
+
+    The weights are its ``binWeights``, or the list of ``binWeightsGiven`` its parents' classes
+    pick, one weight per bin; a bin is named by the text of its lower edge (ADR 0036 decision 3).
+    """
+    from flux_engine.generator.rows import class_names
+
+    statistics = plan.statistics
+    names = class_names(plan)
+    table: Dict[Tuple[str, ...], Fraction] = {}
+    if statistics.bin_weights_given is None:
+        rows: List[Tuple[Tuple[str, ...], Sequence[Any]]] = [((), statistics.bin_weights or ())]
+    else:
+        rows = []
+        for combo in product(*(domains[parent] for parent in statistics.parents)):
+            key = combo[0] if len(combo) == 1 else joint_level(combo)
+            rows.append((combo, statistics.bin_weights_given[key]))
+    for combo, weights in rows:
+        total = sum((Fraction(weight) for weight in weights), Fraction(0))
+        for name, weight in zip(names, weights, strict=True):
+            if weight > 0:
+                table[(*combo, name)] = Fraction(weight) / total
+    return table
+
+
 def _given_table(
     statistics: Any, domains: Mapping[str, Tuple[str, ...]]
 ) -> Dict[Tuple[str, ...], Fraction]:
@@ -516,7 +556,8 @@ def with_conditions(
     variables = tuple(
         column_plan
         for column_plan in plan.columns
-        if column_plan.family is Family.CATEGORICAL and column_plan.statistics.null_fraction is None
+        if (column_plan.family is Family.CATEGORICAL or is_binned(column_plan))
+        and column_plan.statistics.null_fraction is None
     )
     _check_group_values(counted, variables, prefix)
     from flux_engine.generator.rows import _draw_order
@@ -562,7 +603,11 @@ def _check_group_values(
     """Refuse a fixed column that is not one of *variables* and a value that is not its level."""
     from flux_engine.generator.rows import _level_names
 
-    by_name = {column_plan.column.name: column_plan for column_plan in variables}
+    by_name = {
+        column_plan.column.name: column_plan
+        for column_plan in variables
+        if column_plan.family is Family.CATEGORICAL
+    }
     for index, group in enumerate(counted):
         for column, level in group.values:
             plan_of = by_name.get(nfc(column))

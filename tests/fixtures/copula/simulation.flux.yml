@@ -1,0 +1,57 @@
+# One table of accounts with four number or timestamp columns, each a histogram, and a region.
+# tests/golden is not pinned to it; the tests add `copula` under the fidelity block.
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-ledger
+name: Ledger
+metadata:
+  owner:
+    team: finance
+spec:
+  worldRef: world-ledger
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2026-07-01T00:00:00Z"
+    end: "2026-09-30T23:59:59Z"
+  personaRefs: [persona-ledger]
+  emits:
+    - productRef: retail.ledger
+      exposeId: accounts
+      fluidVersion: "0.7.7"
+extensions:
+  com.agentics.flux/1:
+    emits:
+      accounts:
+        rows: 400
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            amount:
+              range: { min: '0', max: '1000' }
+              bins: ['0', '100', '400', '1000']
+              binWeights: ['0.5', '0.3', '0.2']
+            balance:
+              range: { min: '0', max: '500' }
+              bins: ['0', '50', '200', '500']
+              binWeights: ['0.2', '0.5', '0.3']
+            opened_at:
+              range: { min: '2026-07-01T00:00:00Z', max: '2026-09-30T00:00:00Z' }
+              bins: ['2026-07-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-09-30T00:00:00Z']
+              binWeights: ['0.4', '0.6']
+            closed_on:
+              range: { min: '2026-10-01', max: '2026-12-31' }
+              bins: ['2026-10-01', '2026-11-01', '2026-12-31']
+              binWeights: ['0.5', '0.5']
+            region: { levels: { north: '0.5', south: '0.5' } }
+            limit_raised:
+              range: { min: '0', max: '9' }
+              bins: ['0', '3', '9']
+              binWeights: ['0.7', '0.3']
+          properties:
+            - property: mean
+              column: amount
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle

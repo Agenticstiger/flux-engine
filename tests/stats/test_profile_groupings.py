@@ -168,7 +168,7 @@ def test_a_broken_grouping_is_refused_where_it_breaks(
         (lambda s: s.update(per=["nope"]), "columns of its table"),
         (lambda s: s.update(per="subscriber_id"), "per"),
         (lambda s: s.update(per=["c%d" % n for n in range(9)]), "1 to 8"),
-        (lambda s: s.update(groupBy="plan_id"), "no groupBy and no groupByLink"),
+        (lambda s: s.update(groupBy="plan_id"), "holds no groupBy, groupByLink or groupByBins"),
         (
             lambda s: s.update(
                 groupByLink={
@@ -177,7 +177,7 @@ def test_a_broken_grouping_is_refused_where_it_breaks(
                     "column": "tier",
                 }
             ),
-            "no groupBy and no groupByLink",
+            "holds no groupBy, groupByLink or groupByBins",
         ),
     ],
 )

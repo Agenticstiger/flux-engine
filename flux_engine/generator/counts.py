@@ -29,6 +29,11 @@ The steps, all on exact integers (the rationals scaled to one denominator):
    ``one_to_one`` relationship no parent has more than one child: where the allotment would give a
    parent a second, the spare children go one each to the parents that have none, those with the
    largest ``y`` first, ties to the lower rank (:func:`_capped`).
+   With ``given`` (KERNEL-SPEC-2 section 8.1, extended) the eligible parents are split by the class
+   of a column of their final rows, keeping their order: class ``l`` has its own weights over the
+   shape's classes, ``n_(l,k) = LRM(|E_l|, weights_l)`` parents in count class ``k``, and the
+   parents of ``E_l`` in ascending order of ``sigma`` (taken over the whole of ``E``) take its slots
+   in order (:func:`_grouped_slots`); a hook's rank coupling applies within each class.
 5. **The rows.** Parent ``p``'s children are the rows from the sum of the counts before it, and
    :meth:`CountedLayout.parent_of` finds a child row's parent by bisection.
 
@@ -178,6 +183,13 @@ class CountedPick:
     #: The relationship is ``one_to_one``: no parent has more than one child (not in the document,
     #: which the contract's cardinality already binds).
     one_to_one: bool = False
+    #: ``given``: the column of the parent whose class on each parent's final row sets the weights
+    #: of the shape, and ``children_given``, the weights of every class of it over the shape's
+    #: classes (a class the entry gave no list holds the shape's own), sorted by class; the
+    #: classes that took the shape's weights are ``given_default``.
+    given: Optional[str] = None
+    children_given: Optional[Tuple[Tuple[str, Tuple[str, ...]], ...]] = None
+    given_default: Tuple[str, ...] = ()
     #: The hook that returned :attr:`expected_count`; the layout asks it for each parent's
     #: expected count. It is no part of the pick's identity or document.
     hook: Optional["ExpectedCountHook"] = field(default=None, compare=False, hash=False, repr=False)
@@ -191,8 +203,21 @@ class CountedPick:
             document["parentWhen"] = self.parent_when.when
         if self.children is not None:
             document["children"] = self.children.as_member()
+        document.update(self.as_document_given())
         if self.expected_count is not None:
             document["expectedCount"] = dict(self.expected_count)
+        return document
+
+    def as_document_given(self) -> Dict[str, Any]:
+        """The ``given`` members of the document: the column, every class's weights, the defaulted classes."""
+        if self.given is None or self.children_given is None:
+            return {}
+        document: Dict[str, Any] = {
+            "given": self.given,
+            "childrenGiven": {key: list(weights) for key, weights in self.children_given},
+        }
+        if self.given_default:
+            document["childrenGivenDefault"] = list(self.given_default)
         return document
 
     def shape(self) -> Optional[Mapping[str, Sequence[str]]]:
@@ -476,14 +501,18 @@ def _expected_counts(
     ranks: int,
     classes: Optional[Sequence[CountClass]],
     expected: Optional[Sequence[Fraction]],
+    grouped: Optional[Tuple[Sequence[Sequence[CountClass]], "np.ndarray"]] = None,
 ) -> Tuple["np.ndarray", int]:
     """Each rank's expected count as integers over a common denominator, and the denominator.
 
     A shape alone: the slot value of the rank's ``sigma``. A hook alone: its value. Both, the
     rank coupling: ranks ordered by ``(hook, sigma)`` ascending take the slots in order. Neither:
-    ``1``.
+    ``1``. With *grouped* (the classes of each given class and every rank's given class), the
+    slots are each given class's own, taken within it (:func:`_grouped_slots`).
     """
     scaled, scale = _scaled(expected) if expected is not None else ([], 1)
+    if grouped is not None:
+        return _grouped_slots(key, ranks, grouped, scaled if expected is not None else None), 1
     if classes is None:
         if expected is None:
             return np.ones(ranks, dtype=np.int64), 1
@@ -497,6 +526,42 @@ def _expected_counts(
     coupled = np.empty_like(slots)
     coupled[np.array(order, dtype=np.int64)] = slots
     return coupled, 1
+
+
+def _grouped_slots(
+    key: bytes,
+    ranks: int,
+    grouped: Tuple[Sequence[Sequence[CountClass]], "np.ndarray"],
+    scaled: Optional[Sequence[int]],
+) -> "np.ndarray":
+    """Each rank's slot value when the eligible parents are split by a given class.
+
+    *grouped* holds the count classes of each given class ``l`` (its own weights) and the given
+    class of every rank. The ranks of class ``l`` keep their order; ``sigma`` is taken over every
+    rank (:func:`sigma_of`), and the ranks of the class in ascending order of ``sigma`` take its
+    slots ``v_(l,0), v_(l,1), ...`` in order. With a hook (*scaled*, over a common denominator) the
+    ranks of the class are ordered by ``(hook, sigma)`` instead, as the rank coupling orders them.
+    A class with no rank has no slot.
+    """
+    per_class, groups = grouped
+    sigma = np.array(sigma_of(key, ranks), dtype=np.int64)
+    pieces: List[Tuple["np.ndarray", "np.ndarray"]] = []
+    for level, classes in enumerate(per_class):
+        members = np.flatnonzero(groups == level)
+        if members.shape[0] == 0:
+            continue
+        slots = slot_values(int(members.shape[0]), classes)
+        if scaled is None:
+            order = np.argsort(sigma[members], kind="stable")
+        else:
+            held = sorted(members.tolist(), key=lambda rank: (scaled[rank], int(sigma[rank])))
+            order = np.searchsorted(members, np.array(held, dtype=np.int64))
+        pieces.append((members[order], slots))
+    wide = any(slots.dtype == object for _, slots in pieces)
+    found = np.zeros(ranks, dtype=object if wide else np.int64)
+    for rows, slots in pieces:
+        found[rows] = slots
+    return found
 
 
 def _weights_of(expected: "np.ndarray", floor: int, spare: int) -> "np.ndarray":
@@ -578,6 +643,8 @@ def counted_layout(
     expected: Optional[Sequence[Fraction]] = None,
     one_to_one: bool = False,
     where: str = "",
+    class_shapes: Optional[Sequence[Mapping[str, Sequence[str]]]] = None,
+    groups: Optional[Sequence[int]] = None,
 ) -> CountedLayout:
     """The counted layout of *children* child rows over *parents* parent rows (KERNEL-SPEC-2 section 8.1).
 
@@ -587,16 +654,33 @@ def counted_layout(
     exact expected count of each eligible parent in rank order (``None``: no hook);
     *where* names the child expose, relationship and ``parentWhen`` in a refusal; *one_to_one* caps every parent at one child (:func:`_capped`): a layout whose allotment would
     give a parent more is the same layout with the spare children moved to parents with none, and
-    more child rows than eligible parents, or a *minimum* above one, is refused. A pure function:
+    more child rows than eligible parents, or a *minimum* above one, is refused. With *class_shapes*,
+    one ``children`` mapping per class of a given column (the same classes, each its own weights),
+    and *groups*, the class index of each eligible parent in rank order, the layout is the one
+    that splits the eligible parents by class (:func:`_grouped_slots`); *shape* is then not
+    read. A pure function:
     it draws no value, and the same inputs give the same layout. Every refusal is ``FLX-3403``.
     """
     classes = classes_of(shape) if shape is not None else None
     rows = _eligible_rows(parents, eligible)
     ranks = int(rows.shape[0])
     _check_layout(children, ranks, minimum, expected, one_to_one, where)
+    grouped: Optional[Tuple[Sequence[Sequence[CountClass]], "np.ndarray"]] = None
+    if class_shapes is not None:
+        if groups is None or len(groups) != ranks:
+            raise _refuse("a layout given a column has the class of each eligible parent")
+        grouped = (
+            [
+                classes_of(each, f"{where} children class {index}")
+                for index, each in enumerate(class_shapes)
+            ],
+            np.asarray(groups, dtype=np.int64),
+        )
+        if ranks and (int(grouped[1].min()) < 0 or int(grouped[1].max()) >= len(class_shapes)):
+            raise _refuse("a parent has a class the given column does not have")
     per_rank = np.zeros(0, dtype=np.int64)
     if ranks:
-        per_rank = _per_rank(key, children, ranks, classes, minimum, expected, one_to_one)
+        per_rank = _per_rank(key, children, ranks, classes, minimum, expected, one_to_one, grouped)
     counts = np.zeros(parents, dtype=np.int64)
     counts[rows] = per_rank
     return CountedLayout(counts=counts, offsets=np.cumsum(counts) - counts, children=children)
@@ -636,10 +720,11 @@ def _per_rank(
     minimum: int,
     expected: Optional[Sequence[Fraction]],
     one_to_one: bool,
+    grouped: Optional[Tuple[Sequence[Sequence[CountClass]], "np.ndarray"]] = None,
 ) -> np.ndarray:
     """The child count of each of *ranks* eligible parents, in rank order."""
     spare = children - minimum * ranks
-    x, scale = _expected_counts(key, ranks, classes, expected)
+    x, scale = _expected_counts(key, ranks, classes, expected, grouped)
     weights = _weights_of(x, minimum * scale, spare)
     per_rank = minimum + _allot(spare, weights)
     return _capped(per_rank, weights) if one_to_one else per_rank

@@ -320,6 +320,28 @@ These rules shape the assumptions:
   Its foreign key spreads each class of parents over the parent's keys, a parent of a class whose
   mean is `m` receives a Poisson-like number of children, so about `e^-m` of them receive none, and
   the run's share of parents with no child comes out that much larger than published.
+- A relationship's histogram of children per parent grouped by a `category` column of the parent, or by the
+  bins of a `number` or `timestamp` one (profile format `1-4-0`), becomes the `given` and `childrenGiven` of its
+  `counts` entry, beside the `children` of the ungrouped histogram or, failing that, of the sum of the groups. The
+  classes are the column's declared levels, or its bins keyed by the text of their lower edges, and the
+  statistic's bins must be the entry's. A class the profile has no group for takes the shape's own weights, and
+  the bundle says so. A column with a null fraction, one a summary over the children sets, a key, a column of a
+  rule, or one drawn given a linked row cannot be given: the ledger says why and the entry has no `given`.
+  A relationship's noisy histogram is read as its point estimate, as a column's is, with its noise in the ledger.
+- A table whose profile publishes `kendallTau/1`, or `spearmanRho/1` when no Kendall value is published for
+  any pair, gets one `fidelity.copula` over the number and timestamp columns that `init` draws from bins and
+  weights, with no `given` and no `allocation`, and that no clique, rule, key, relationship, history or date
+  entry decides (see [Draw number columns together](./draw-number-columns-together.md)). A column has one
+  joint, so what the cliques draw stays theirs. A noisy value is written as the released number clamped to
+  `[-1, 1]`, a pair the profile did not publish is held at 0 and said so as an assumption, and each pair is
+  scored by a `rankCorrelation` property. A column is left to the cliques when it ties often: it is
+  tie-heavy when the sum over its bins of the squared share of the bin divided by the number of grid values in
+  it is at least 1/20, because the statistics carry no tie correction. The rule reads the declared bins and the
+  grid only, and the report names each column left out. Under kernel 0.1.0 no copula is written.
+- A column of a `cliqueMarginal/2` clique that holds numbers or timestamps is drawn from `bins` and `binWeights`,
+  or `binWeightsGiven` its separator, over the clique's edges, which win over the column's own histogram and
+  make its range the span of the edges. A clique whose edges do not cover the range the contract declares, or
+  that holds a column with nulls, is refused with [FLX-3402](../reference/errors/FLX-3402.md).
 - Every distance tolerance `init` writes declares `sampling: true`, so the check widens its
   margin by the sampling error of the run's rows and a small table is not judged by a margin only
   a large one can meet. A table is small when that widening at its rows, for any property `init`

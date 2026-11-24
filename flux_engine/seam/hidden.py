@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from flux_engine.core.canonical import nfc
 from flux_engine.core.errors import ErrorCode, FluxError
 from flux_engine.seam.contract import CompiledColumn, CompiledExpose, parse_logical_type
+from flux_engine.seam.copula import fidelity_without_copula
 
 __all__ = [
     "HIDDEN_COLUMNS_KEY",
@@ -151,8 +152,11 @@ def fidelity_without_hidden(block: Any, extension: Optional[Mapping[str, Any]]) 
     """The fidelity *block* without the ``columns`` entries of the hidden columns *extension* declares.
 
     What a check of the run's rows reads: the rows hold no hidden column, so there is nothing to
-    compare its statistics to. A block of an emit that declares none is returned as it is.
+    compare its statistics to. The ``copula`` key is left off as well, which the generator alone
+    reads (:mod:`flux_engine.seam.copula`). A block of an emit that declares none of either is
+    returned as it is.
     """
+    block = fidelity_without_copula(block)
     hidden = {column.name for column in hidden_columns_of(extension)}
     columns = block.get("columns") if isinstance(block, Mapping) else None
     if not hidden or not isinstance(columns, Mapping):

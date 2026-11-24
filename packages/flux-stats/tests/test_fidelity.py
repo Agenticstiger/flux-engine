@@ -95,6 +95,7 @@ BLOCK: Dict[str, Any] = {
             "column": "tier",
             "tolerance": {"type": "distance", "measure": "totalVariation", "max": "0.2"},
         },
+        {"property": "rankCorrelation", "columns": ["amount", "attempts"], "measure": "kendall"},
     ],
     "budget": {"maxChecksPerState": 3, "maxStateAge": "P30D"},
     "failureAction": "withholdBundle",

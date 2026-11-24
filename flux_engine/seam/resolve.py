@@ -1642,7 +1642,10 @@ def _declared_fidelity_properties(
             else []
         )
         found[expose_id] = tuple(
-            DeclaredProperty(kind=nfc(item["property"]), grouped=item.get("groupBy") is not None)
+            DeclaredProperty(
+                kind=nfc(item["property"]),
+                grouped=item.get("groupBy") is not None or item.get("groupByBins") is not None,
+            )
             for item in listed
             if isinstance(item, Mapping) and isinstance(item.get("property"), str)
         )

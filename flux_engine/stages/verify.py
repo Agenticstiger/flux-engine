@@ -1757,7 +1757,6 @@ def _run_fidelity_check(layout: RunLayout, expose_id: str, slice_uri: str) -> Di
     from flux_engine.concordance.compiler import compile_fidelity
     from flux_engine.concordance.predicate import expose_from_contract
     from flux_engine.concordance.verifier import ClearStatistic
-    from flux_engine.stages._scorecard import NOT_SCORED_DETAIL
 
     attestation = _read_json(layout.seam_attestation_path(expose_id))
     fidelity_input_path = layout.fidelity_input_path(expose_id)
@@ -1815,8 +1814,26 @@ def _run_fidelity_check(layout: RunLayout, expose_id: str, slice_uri: str) -> Di
             _outside_document(outcome, refused=outcome.property_id in refused)
             for outcome in evaluation.outside
         ],
-        **({"detail": NOT_SCORED_DETAIL} if evaluation.unscored else {}),
+        **_slice_detail(evaluation),
     }
+
+
+def _slice_detail(evaluation: "FidelityEvaluation") -> Dict[str, Any]:
+    """What a committed slice's leg says beyond its status: a block with no property, or the
+    properties it named and did not compare (a rank correlation, whose ``S`` and ``A4`` do not add
+    up across blocks, ADR 0035 decision 7)."""
+    from flux_engine.stages._scorecard import NOT_SCORED_DETAIL
+
+    found: Dict[str, Any] = {}
+    if evaluation.not_compared:
+        found["notCompared"] = list(evaluation.not_compared)
+        if evaluation.unscored:
+            found["detail"] = "not compared with a committed slice: " + ", ".join(
+                evaluation.not_compared
+            )
+    elif evaluation.unscored:
+        found["detail"] = NOT_SCORED_DETAIL
+    return found
 
 
 def _fidelity_status(evaluation: "FidelityEvaluation") -> str:

@@ -76,7 +76,20 @@ from math import lcm
 from operator import itemgetter
 from threading import local
 from types import MappingProxyType
-from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 from weakref import WeakKeyDictionary
 
 import numpy as np
@@ -1291,7 +1304,12 @@ class RelationReader:
         shape = driver.counted.shape()
         condition = driver.counted.parent_when
         hook = driver.counted.hook
-        parent = None if condition is None and hook is None else self._parent_plan(owner, driver)
+        given = driver.counted.given
+        parent = (
+            None
+            if condition is None and hook is None and given is None
+            else self._parent_plan(owner, driver)
+        )
         held = (
             root.digest,
             root.seed_tree_version,
@@ -1311,8 +1329,11 @@ class RelationReader:
         if found is None:
             eligible: Optional[List[int]] = None
             expected: Optional[List[Fraction]] = None
+            groups: Optional[List[int]] = None
             if parent is not None:
-                eligible, expected = self._read_parent(parent, condition, hook, driver.relationship)
+                eligible, expected, groups = self._read_parent(
+                    parent, condition, hook, driver.relationship, driver.counted
+                )
             try:
                 found = counted_layout(
                     count_key(root, owner.sim_id, owner.expose_id, driver.relationship),
@@ -1327,6 +1348,8 @@ class RelationReader:
                         f"expose {owner.expose_id!r} relationship {driver.relationship!r}"
                         + ("" if condition is None else f" with parentWhen {condition.when!r}")
                     ),
+                    class_shapes=_class_shapes(driver.counted),
+                    groups=groups,
                 )
             except TooFewChildRows as short:
                 short.child, short.parent = owner.expose_id, driver.parent.expose_id
@@ -1376,7 +1399,7 @@ class RelationReader:
         eligible: Optional[List[int]] = None
         expected: Optional[List[Fraction]] = None
         if parent is not None:
-            eligible, expected = self._read_parent(parent, condition, hook, driver.relationship)
+            eligible, expected, _ = self._read_parent(parent, condition, hook, driver.relationship)
         found = plan_history(
             self.root,
             owner.sim_id,
@@ -1539,33 +1562,53 @@ class RelationReader:
         condition: Optional[ParentCondition],
         hook: Optional[ExpectedCountHook],
         relationship: str,
-    ) -> Tuple[Optional[List[int]], Optional[List[Fraction]]]:
-        """The eligible rows of *parent* and the hook's expected count of each, in one pass.
+        counted: Optional[CountedPick] = None,
+    ) -> Tuple[Optional[List[int]], Optional[List[Fraction]], Optional[List[int]]]:
+        """The eligible rows of *parent*, the hook's expected count of each, and their classes, in one pass.
 
         The rows on which *condition* is TRUE on the final row, ascending (``None`` without a
-        condition: every row), and, with a *hook*, ``expected`` of each of them in rank order
-        (``None`` without one). Worked out over every parent row, a chunk at a time, from the
+        condition: every row), with a *hook*, ``expected`` of each of them in rank order
+        (``None`` without one), and, when *counted* has a ``given`` column, the index of the class
+        of that column on each eligible row's final row, in rank order (``None`` without one).
+        Worked out over every parent row, a chunk at a time, from the
         cells the parent's own pass writes (:func:`generate_row_slice`), as a weighted pick reads
         the parent's weights. A value that is not an exact, non-negative ``Fraction`` or ``int``
-        is ``FLX-3403``.
+        is ``FLX-3403``, and so is a final value of the given column that is no class of it.
         """
         names = [column_plan.column.name for column_plan in parent.columns]
+        classify = (
+            None if counted is None or counted.given is None else _given_classifier(parent, counted)
+        )
+        position = -1 if classify is None or counted is None else names.index(str(counted.given))
         found: List[int] = []
         values: List[Fraction] = []
+        classes: List[int] = []
+        for row, final_row in self._eligible(parent, condition, names):
+            found.append(row)
+            if classify is not None:
+                classes.append(classify(final_row[position], row))
+            if hook is not None:
+                values.append(
+                    _expected_of(hook.expected(parent, row, final_row, relationship), row)
+                )
+        return (
+            None if condition is None else found,
+            None if hook is None else values,
+            None if classify is None else classes,
+        )
+
+    def _eligible(
+        self,
+        parent: "_rows.GeneratorPlan",
+        condition: Optional[ParentCondition],
+        names: Sequence[str],
+    ) -> Iterator[Tuple[int, Tuple[Any, ...]]]:
+        """The rows of *parent* on which *condition* is TRUE on the final row, a chunk at a time."""
         for start in range(0, parent.rows, _WEIGHT_CHUNK):
             stop = min(start + _WEIGHT_CHUNK, parent.rows)
             chunk = _rows.generate_row_slice(parent, start, stop, root=self.root)
             holds = condition.holds(names, chunk, start) if condition is not None else None
-            for offset, final_row in enumerate(chunk):
-                if holds is not None and not holds[offset]:
-                    continue
-                row = start + offset
-                found.append(row)
-                if hook is not None:
-                    values.append(
-                        _expected_of(hook.expected(parent, row, final_row, relationship), row)
-                    )
-        return (None if condition is None else found), (None if hook is None else values)
+            yield from _eligible_rows(chunk, start, holds)
 
     def children_of(
         self, child_plan: "_rows.GeneratorPlan", relationship: str, parent_row: int
@@ -2804,14 +2847,18 @@ def _paths_of(plan: "_rows.GeneratorPlan") -> List[Tuple[str, ...]]:
             and driver.pick == "weighted"
             and driver.weight_values is None
         )
-        # A parentWhen, and an expected-count hook, read the parent's final rows, and the child's
+        # A parentWhen, a given column and an expected-count hook read the parent's final rows, and the child's
         # digest holds the parent's.
         paths.update(
             (driver.relationship,)
             for _, driver in plan.relations.drivers
             if isinstance(driver, ForeignKey)
             and driver.counted is not None
-            and (driver.counted.parent_when is not None or driver.counted.hook is not None)
+            and (
+                driver.counted.parent_when is not None
+                or driver.counted.hook is not None
+                or driver.counted.given is not None
+            )
         )
     return sorted(paths)
 
@@ -3896,6 +3943,27 @@ def _hooked(
     return found
 
 
+def _eligible_rows(
+    chunk: Sequence[Tuple[Any, ...]], start: int, holds: Optional[Sequence[bool]]
+) -> Iterator[Tuple[int, Tuple[Any, ...]]]:
+    """The rows of a chunk that begins at row *start* on which the condition holds, with their numbers."""
+    for offset, final_row in enumerate(chunk):
+        if holds is None or holds[offset]:
+            yield start + offset, final_row
+
+
+def _given_members(
+    entry: Optional[CountsEntry],
+    given: Optional[Tuple[Tuple[Tuple[str, Tuple[str, ...]], ...], Tuple[str, ...]]],
+) -> Dict[str, Any]:
+    """The ``given`` members of a counted layout: the column, every class's weights and the defaulted ones."""
+    return {
+        "given": None if entry is None else entry.given,
+        "children_given": None if given is None else given[0],
+        "given_default": () if given is None else given[1],
+    }
+
+
 def _check_counted(
     plans: Mapping[str, "_rows.GeneratorPlan"],
     counts: Mapping[str, Mapping[str, CountsEntry]],
@@ -3990,6 +4058,7 @@ def _check_counts(
         entry = counts.get(name) or CountsEntry(emit=expose_id, relationship=name)
         if entry.parent_when is not None:
             conditions[name] = _check_parent_when(plan, relationship, entry, parent, contract)
+        _check_given(plan, relationship, entry, parent)
         if relationship.cardinality == "one_to_one":
             _check_one_to_one(plan, relationship, entry)
         _check_minimum(plan, relationship, entry, parent.rows)
@@ -4035,6 +4104,186 @@ def _check_parent_when(
             "wait on the condition"
         )
     return condition
+
+
+def _given_classes(parent: "_rows.GeneratorPlan", column: str) -> Tuple[str, ...]:
+    """The classes of the parent's column a ``given`` names: its levels sorted, or its bins in order.
+
+    A bin is named by the text of its lower edge as the column's ``bins`` write it
+    (ADR 0036 decision 3).
+    """
+    held = parent.column_plan(column)
+    names = _rows.class_names(held)
+    return names if _rows.is_binned(held) else tuple(sorted(names))
+
+
+def _check_given(
+    plan: "_rows.GeneratorPlan",
+    relationship: Relationship,
+    entry: CountsEntry,
+    parent: "_rows.GeneratorPlan",
+) -> None:
+    """Refuse a ``given`` and ``childrenGiven`` the layout cannot read (``FLX-3403``, ADR 0037 decision 4).
+
+    ``given`` is a ``category`` column of the parent with declared levels and no ``nullFraction``,
+    or a column drawn from bins with none; ``children`` comes with it; each key of
+    ``childrenGiven`` is a class of the column and each list holds one weight for each class of
+    ``children`` and sums to 1. As for a ``parentWhen``, the column may not read a link, a previous
+    version, children or siblings, nor be set by a summary over the parent's children, since the
+    children wait on the parent's final rows.
+    """
+    where = f"expose {plan.expose.expose_id!r} relationship {relationship.name!r}"
+    if entry.given is None:
+        if entry.children_given is not None:
+            raise _refuse(f"{where} has childrenGiven and no given column to read it by")
+        return
+    if entry.children is None:
+        raise _refuse(f"{where} has a given column and no children shape for its classes to weigh")
+    column = entry.given
+    names = {item.column.name: item for item in parent.columns}
+    held = names.get(column)
+    if held is None:
+        raise _refuse(
+            f"{where} is given {column!r}, which {relationship.target!r} does not have as a column"
+        )
+    _check_given_column(where, relationship.target, parent, held)
+    classes = _given_classes(parent, column)
+    shape = entry.children.as_member()
+    base = classes_of(shape, f"{where} children")
+    keyed = dict(entry.children_given or ())
+    for key in keyed:
+        if key not in classes:
+            raise _refuse(
+                f"{where} childrenGiven names the class {key!r}, which {column!r} of "
+                f"{relationship.target!r} does not have (its classes: {list(classes)})"
+            )
+    names_key = "binWeights" if entry.children.kind == "bins" else "levelWeights"
+    for key, weights in sorted(keyed.items()):
+        if not weights:
+            raise _refuse(f"{where} childrenGiven[{key}] has no weight")
+        if len(weights) != len(base):
+            raise _refuse(
+                f"{where} childrenGiven[{key}] has {len(weights)} weights; children has "
+                f"{len(base)} classes"
+            )
+        classes_of({**shape, names_key: list(weights)}, f"{where} childrenGiven[{key}]")
+
+
+def _check_given_column(
+    where: str, target: str, parent: "_rows.GeneratorPlan", held: "_rows.ColumnPlan"
+) -> None:
+    """Refuse a given column that is not a class to read from a final row of *parent* (``FLX-3403``)."""
+    column = held.column.name
+    binned = _rows.is_binned(held)
+    if not binned and (held.family is not Family.CATEGORICAL or not _rows.class_names(held)):
+        raise _refuse(
+            f"{where} is given {column!r}, which is no category column with declared levels "
+            f"nor a column drawn from bins in {target!r}"
+        )
+    if held.statistics.null_fraction is not None:
+        raise _refuse(
+            f"{where} is given {column!r}, which declares a nullFraction, and a null has no "
+            "class to weigh the children by"
+        )
+    rules = parent.rules
+    if held.statistics.given_link is not None:
+        raise _refuse(
+            f"{where} is given {column!r}, which is drawn given a column of a linked row; a "
+            "given column reads the parent's own row"
+        )
+    if rules is None:
+        return
+    if column in rules.summarised:
+        raise _refuse(
+            f"{where} is given {column!r}, which a summary over the children of {target!r} "
+            "sets, and the children wait on the given column"
+        )
+    for rule in rules.rules:
+        if column not in rule.determines:
+            continue
+        if binned:
+            raise _refuse(
+                f"{where} is given {column!r}, which a rule sets; a column drawn from bins is "
+                "given as it is drawn"
+            )
+        if rule.paths or rule.previous or rule.windowed or rule.summary is not None:
+            raise _refuse(
+                f"{where} is given {column!r}, which a rule sets from a link, a previous "
+                "version, children or siblings; a given column reads the parent's own row"
+            )
+
+
+def _class_shapes(counted: CountedPick) -> Optional[List[Dict[str, Sequence[str]]]]:
+    """The ``children`` mapping of each class of the given column, each with its own weights."""
+    if counted.given is None or counted.children is None or counted.children_given is None:
+        return None
+    names = (
+        ("levels", "levelWeights") if counted.children.kind == "levels" else ("bins", "binWeights")
+    )
+    return [
+        {names[0]: list(counted.children.values), names[1]: list(weights)}
+        for _, weights in counted.children_given
+    ]
+
+
+def _given_classifier(
+    parent: "_rows.GeneratorPlan", counted: CountedPick
+) -> Callable[[Any, int], int]:
+    """A function from the given column's final value on a parent row to its class's index.
+
+    The index is the position of the class in ``counted.children_given``. A column drawn from bins
+    gives the bin its value falls in; a category column gives the level that renders to the value
+    (a level ``"1.50"`` and the value it renders to are different keys). A value that is no
+    class, a NULL included, is ``FLX-3403``.
+    """
+    assert counted.given is not None and counted.children_given is not None
+    held = parent.column_plan(counted.given)
+    index = {name: position for position, (name, _) in enumerate(counted.children_given)}
+    where = f"parent {parent.expose.expose_id!r} column {counted.given!r}"
+    if _rows.is_binned(held):
+
+        def binned(value: Any, row: int) -> int:
+            try:
+                return index[_rows.bin_class(held, value)]
+            except (FluxError, KeyError):
+                raise _refuse(f"{where} has a value on row {row} that falls in no bin") from None
+
+        return binned
+    rendered = {
+        _hashable(_rows._level_to_value(name, held.column)): position
+        for name, position in index.items()
+    }
+
+    def leveled(value: Any, row: int) -> int:
+        found = rendered.get(_hashable(value))
+        if found is None:
+            raise _refuse(f"{where} has a value on row {row} that is none of its levels")
+        return found
+
+    return leveled
+
+
+def _hashable(value: Any) -> Any:
+    """*value* as a key that tells a BOOL from an INT (``True == 1`` would not)."""
+    return (type(value).__name__, value)
+
+
+def given_children(
+    entry: CountsEntry, parent: "_rows.GeneratorPlan"
+) -> Tuple[Tuple[Tuple[str, Tuple[str, ...]], ...], Tuple[str, ...]]:
+    """The weights of every class of the given column, and the classes that took the shape's own.
+
+    Sorted by class as :func:`_given_classes` gives them: a class the entry gave no list holds
+    ``children``'s weights, which the plan states (ADR 0037 decision 4).
+    """
+    assert entry.given is not None and entry.children is not None
+    held = dict(entry.children_given or ())
+    classes = _given_classes(parent, entry.given)
+    fallback = entry.children.weights
+    return (
+        tuple((name, tuple(held.get(name, fallback))) for name in classes),
+        tuple(name for name in classes if name not in held),
+    )
 
 
 def _check_minimum(
@@ -4913,7 +5162,7 @@ class _Resolver:
         first = plan.column_plan(relationship.from_columns[0])
         weight = shape.weights.get(relationship.name)
         pick, key, grid = self._first_pick(shape, relationship, parent, first)
-        counted = self._counted(shape, relationship)
+        counted = self._counted(shape, relationship, self.shapes[relationship.target].plan)
         history: Optional[HistoryPick] = None
         if counted is not None:
             pick, grid = "counted", None
@@ -4990,7 +5239,9 @@ class _Resolver:
         return found
 
     @staticmethod
-    def _counted(shape: _Shape, relationship: Relationship) -> Optional[CountedPick]:
+    def _counted(
+        shape: _Shape, relationship: Relationship, parent: "_rows.GeneratorPlan"
+    ) -> Optional[CountedPick]:
         """The counted layout of *relationship*, when its Simulation declares one (ADR 0016)."""
         history = shape.history
         if (
@@ -4998,19 +5249,12 @@ class _Resolver:
             and history.parent is not None
             and relationship.name == history.parent.relationship
         ):
-            # The entities are the parent's children: the layout totals E, not the rows.
-            return CountedPick(
-                children=history.parent.children,
-                child_rows=history.pick.entities,
-                minimum=history.parent.min_children,
-                parent_when=shape.conditions.get(relationship.name),
-                expected_count=None if history.hook is None else history.hook[1],
-                hook=None if history.hook is None else history.hook[0],
-            )
+            return _Resolver._parent_pick(shape, history, relationship)
         entry = shape.counts.get(relationship.name)
         bound = shape.hooked.get(relationship.name)
         if entry is None and bound is None:
             return None
+        given = None if entry is None or entry.given is None else given_children(entry, parent)
         return CountedPick(
             children=None if entry is None else entry.children,
             child_rows=shape.plan.rows,
@@ -5019,6 +5263,23 @@ class _Resolver:
             expected_count=None if bound is None else bound[1],
             hook=None if bound is None else bound[0],
             one_to_one=relationship.cardinality == "one_to_one",
+            **_given_members(entry, given),
+        )
+
+    @staticmethod
+    def _parent_pick(
+        shape: _Shape, history: _HistoryShape, relationship: Relationship
+    ) -> CountedPick:
+        """The layout of a history's parent relationship: the entities are the parent's children."""
+        assert history.parent is not None
+        # The layout totals E, not the rows.
+        return CountedPick(
+            children=history.parent.children,
+            child_rows=history.pick.entities,
+            minimum=history.parent.min_children,
+            parent_when=shape.conditions.get(relationship.name),
+            expected_count=None if history.hook is None else history.hook[1],
+            hook=None if history.hook is None else history.hook[0],
         )
 
     def composite(self, expose_id: str, key: Tuple[str, ...]) -> CompositeKey:

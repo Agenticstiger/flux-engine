@@ -88,6 +88,7 @@ _WORD_MASK = (1 << 64) - 1
 __all__ = [
     "ALLOCATE_PATH_SHAPE",
     "CHANGE_PATH_SHAPE",
+    "COPULA_PATH_SHAPE",
     "COUNT_PATH_SHAPE",
     "DEPENDENCY_PATH_SHAPE",
     "DEPENDENCY_ROW_PATH_SHAPE",
@@ -105,6 +106,7 @@ __all__ = [
     "StreamSource",
     "allocate_path",
     "change_path",
+    "copula_path",
     "count_path",
     "dependency_path",
     "dependency_row_path",
@@ -329,6 +331,26 @@ REASON_PATH_SHAPE = PathShape(
     consumer="which change moves which tracked column",
     pattern=("sim", PathKind.NAME, "gen", PathKind.NAME, "reason"),
 )
+
+
+#: ADR 0035 decision 6's path of one row of an emit's copula: ``("sim", sim_id, "gen", exposeId,
+#: "copula", row)``, one ordinal, the row, which kernel ``0.2.0`` keeps in the counter. Draw ``d``
+#: of the row is the copula's column at position ``d``. ``copula`` is a literal no other shape has
+#: after ``exposeId``, so its addresses are new and a bundle with no ``fidelity.copula`` reads none.
+COPULA_PATH_SHAPE = PathShape(
+    name="sim.copula",
+    consumer="the correlated normals of one row of an emit's copula",
+    pattern=("sim", PathKind.NAME, "gen", PathKind.NAME, "copula", PathKind.ORDINAL),
+)
+
+
+def copula_path(sim_id: str, expose_id: str, row_index: int) -> SeedPath:
+    """The copula's path: ``("sim", sim_id, "gen", exposeId, "copula", row)``."""
+    return (
+        *_history_head(sim_id, expose_id),
+        "copula",
+        _require_ordinal(row_index, "rowIndex"),
+    )
 
 
 def _history_head(sim_id: str, expose_id: str) -> Tuple[str, str, str, str]:

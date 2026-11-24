@@ -1,0 +1,139 @@
+{
+  "_producer": "https://github.com/Agenticstiger/flux-engine",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json",
+  "encoding": {
+    "fractionalBits": 16,
+    "rounding": "floor"
+  },
+  "disclosureRules": {
+    "noisy": {}
+  },
+  "privacy": {
+    "measure": "zeroConcentratedDP",
+    "privacyLoss": {
+      "rho": "0.25"
+    },
+    "privacyUnit": {
+      "expose": "account",
+      "follows": [
+        {
+          "parent": {
+            "table": "account",
+            "columns": [
+              "id"
+            ]
+          },
+          "child": {
+            "table": "invoice",
+            "columns": [
+              "account_id"
+            ]
+          },
+          "maxChildren": 3
+        }
+      ]
+    },
+    "publicStructure": true
+  },
+  "tables": {
+    "account": {
+      "columns": {
+        "id": {
+          "domain": "category"
+        },
+        "segment": {
+          "domain": "category",
+          "statistics": [
+            {
+              "definition": "levelHistogram/1",
+              "levels": [
+                "business",
+                "personal"
+              ],
+              "sampleSize": {
+                "min": 5000,
+                "max": 9999
+              },
+              "disclosure": "noisy",
+              "noise": {
+                "mechanism": "gaussian",
+                "scale": "2",
+                "privacyLoss": {
+                  "rho": "0.125"
+                }
+              },
+              "groups": [
+                {
+                  "group": "",
+                  "status": "F",
+                  "noisyCounts": [
+                    "3011.5",
+                    "1987"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "invoice": {
+      "columns": {
+        "account_id": {
+          "domain": "category"
+        },
+        "status": {
+          "domain": "category",
+          "statistics": [
+            {
+              "definition": "levelHistogram/1",
+              "levels": [
+                "open",
+                "paid"
+              ],
+              "sampleSize": {
+                "min": 5000,
+                "max": 9999
+              },
+              "disclosure": "noisy",
+              "noise": {
+                "mechanism": "gaussian",
+                "scale": "6",
+                "privacyLoss": {
+                  "rho": "0.125"
+                }
+              },
+              "groups": [
+                {
+                  "group": "",
+                  "status": "F",
+                  "noisyCounts": [
+                    "2490",
+                    "6512.5"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "relationships": [
+    {
+      "parent": {
+        "table": "account",
+        "columns": [
+          "id"
+        ]
+      },
+      "child": {
+        "table": "invoice",
+        "columns": [
+          "account_id"
+        ]
+      },
+      "statistics": []
+    }
+  ]
+}

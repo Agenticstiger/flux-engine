@@ -273,6 +273,11 @@ the record, so a calibration cannot name it (`FLX-3706`). Counting one would cha
 `parameterRegisterDigest`, of every run whose Simulation declares the key, so a position
 joins the table above only in a new format.
 
+The numbers of the fidelity block's `copula` (`rankCorrelations.pairs[].value`,
+SEAM-FIDELITY-SPEC.md section 2), which sits beside the positions above and joins none of them, are not counted either, and a citation may
+not name the definitions `kendallTau/1` and `spearmanRho/1` or `cliqueMarginal/2`. Counting the copula's values,
+with the rank correlation each rests on, would be a new register format. The register stays at format `1-3-0`.
+
 The record lists the numbers by document, documents in NFC order of their ids,
 and within a document in key order (Unicode code points, mapping by mapping;
 lists by index), `spec` first and then the namespace.

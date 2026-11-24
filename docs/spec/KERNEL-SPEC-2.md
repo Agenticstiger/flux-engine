@@ -378,6 +378,21 @@ so slot values never decrease with the slot.
   that order takes the value of slot `i`. When every `e_r` is equal this is exactly `v_sigma(r)`;
 - neither: `x_r = 1`.
 
+**Given a class** (a `counts` entry with `given`, ADR 0037 decision 4; kernel `0.2.0` only). The entry names a column
+of the parent and a weight list for each of its classes over the shape's classes (SEAM-FIDELITY-SPEC section 3), a class
+with no list taking the shape's own weights. The classes of the column are its declared levels in NFC order, or its
+bins in order, and a parent's class is that of its value on its final row (the bin the value falls in, for a column
+drawn from bins). `E` is split into `E_l`, one for each class `l`, keeping `E`'s order. Class `l` has its own count
+classes `n_(l,k) = LRM(|E_l|, weights_l)`, keyed as above by `k`, and the slots `v_(l,i)` of the formula above over
+`|E_l|`, from `i = 0`. `sigma` is `permute/2(K, e, r)` as before, taken over the whole of `E`. The ranks of `E_l`
+in ascending order of `sigma` take `v_(l,0), v_(l,1), ...` as their expected counts. With a hook, the ranks of
+`E_l` are ordered by `(e_r, sigma(r))` ascending instead, and the `i`-th takes `v_(l,i)`: the rank coupling applies
+within each class. A class with no eligible parent has no slot, and a value of the column that is no class of it is
+`FLX-3403`. The minimum, the allotment and the rows below are unchanged. No seed path is added: `K` is the key of the
+`count` path, so the declaration meets the four conditions of section 12 as a declaration that adds no path does,
+and a `counts` entry with no `given` lays out exactly as before. The vector file `tests/vectors/kernel2-counted-given-vectors.json`
+pins layouts with given classes (section 11), and the `countedLayouts` of the streams vectors keep their bytes.
+
 **The minimum.** `S = N - m * e`, and `S < 0` is `FLX-3403`, as is `e = 0` with `N > 0`. Then `y_r = max(x_r - m, 0)`
 and `Y` is the sum of the `y_r`. If `Y = 0` and `S > 0`, every `y_r` is `1`.
 
@@ -708,6 +723,85 @@ A lifetime, a date within a linked row's lifetime, a hidden column and a hidden 
 an emit's `hiddenColumns` and `hidden`; SEAM-FIDELITY-SPEC §2) are generated under `0.2.0` only; kernel `0.1.0` refuses
 each key with `FLX-3105`, naming the kernel.
 
+### 8.6 The copula (ADR 0035)
+
+A bundle that declares `fidelity.copula` (SEAM-FIDELITY-SPEC.md section 2) draws its columns together. The
+declaration is read under kernel `0.2.0` only. The plan builds the matrix once, in `decimal`, and every row draws
+its `q` columns from one stream.
+
+**The path.**
+
+```text
+("sim", sim_id, "gen", exposeId, "copula", row)
+```
+
+It is a stream with one ordinal, the row: its key label leaves the row out, and the counter is `(row, 0, d, 0)`
+(section 2). Draw `d`, for `d` from `0` to `q - 1`, is the column at position `d` of the declaration's `columns`,
+and takes one word. Like the cell path, the path stays out of the seed-path ledger.
+
+**The plan, in `decimal` at 50 digits, rounding half to even.** Each step runs in a local context, so no setting
+of the caller moves a digit.
+
+1. The latent correlation of a declared value is `r = sin(pi * tau / 2)` for `kendall` and
+   `r = 2 * sin(pi * rho / 6)` for `spearman`. `pi` is `rng._pi` at 60 digits. The sine is its Taylor series
+   summed at 60 digits, then rounded to 50: the first term, the argument, is always added; a later term is
+   added only when its magnitude is at least `10^-55`, and the series stops at the first term below that, which
+   is not added. The argument lies in `[-pi/2, pi/2]`, so no reduction is needed.
+2. `R` has a unit diagonal and `r` off it, in the order of `columns`. A pair that is not listed has `r = 0`.
+3. `R` passes when every pivot of its LDLᵀ factorisation, without pivoting and in the order of `columns`, is at
+   least `10^-6`.
+4. `alpha` is `0` when `R` passes. Otherwise `R` is shrunk towards the identity, `R(alpha) = (1 - alpha) R +
+   alpha I`, with `alpha` from 40 steps of bisection on `[0, 1]`: `lo = 0`, `hi = 1`; the midpoint becomes `hi`
+   when `R(mid)` passes and `lo` when it does not; `alpha = hi`. Each pivot of `R(alpha)` is concave in `alpha`
+   and is 1 at `alpha = 1`, so the values of `alpha` that pass form an interval that ends at 1, and the
+   bisection finds its start. The identity passes, so the repair never refuses.
+5. `L` is the Cholesky factor of `R(alpha)`: each entry is the unit LDLᵀ factor's entry times the square root of
+   its column's pivot, at 50 digits, then rounded once to binary64. An entry whose rounded binary64 magnitude is
+   below `2^-900` is zero, so that no product of the draw below is subnormal (section 5.1).
+
+The emit's entry of the plan document gains `copula: { "alpha", "factor" }`, only when the emit declares a
+copula, so it enters `planDigest` there and nowhere else. `alpha` is canonical decimal text. `factor` is the
+sha256 of the binary64 words of the lower triangle of `L`, diagonal included, in row-major order (row `i` holds
+entries `0 .. i`), each word as the big-endian IEEE 754 bytes of the entry.
+
+**The draw, in binary64** (section 5.1's arithmetic: one IEEE operation per step, no fused multiply-add, no
+reassociation).
+
+```text
+u_d = (2 * (w0 >> 12) + 1) * 2^-53         w0 of the block of draw d at attempt 0; exact, strictly inside (0, 1)
+z_d = Φ⁻¹(u_d)                             section 5.2
+x_i = ((L[i][0] * z_0 + L[i][1] * z_1) + ...) + L[i][i] * z_i     left to right
+```
+
+For column `i`, with bins `b = 1 .. B`, shares `p_b` (its `binWeights`, normalised) and cumulative shares
+`c_b = p_1 + ... + p_b` (`c_0 = 0`), all exact, and `w_b` grid values in bin `b`, numbered `0 .. w_b - 1` in the
+order the histogram's own draw counts them: `F(b, j) = c_(b-1) + p_b * j / w_b`, an exact fraction;
+`binary64(F)` rounds the fraction once to the nearest binary64, ties to even;
+`t(F) = Φ⁻¹(binary64(F))` for `F <= 1/2` and `t(F) = -Φ⁻¹(binary64(1 - F))` for `F > 1/2`, so an upper tail keeps
+its digits; a binary64 argument below `2^-1022` gives `-∞` or `+∞` of the sign of the tail. With `x = x_i`:
+
+```text
+lo = 0, hi = Bp                           Bp the last bin of positive weight
+while hi - lo > 1:  mid = (lo + hi) // 2;  if t(c_mid) <= x: lo = mid  else: hi = mid
+b = lo + 1                                the bin, of 1 .. B
+lo = 0, hi = w_b
+while hi - lo > 1:  mid = (lo + hi) // 2;  if t(F(b, mid)) <= x: lo = mid  else: hi = mid
+the value is grid value lo of bin b       of 0 .. w_b - 1
+```
+
+Starting `hi` at the last bin of positive weight, and not at `B`, makes a bin of weight zero never chosen: for
+every finite `x` the thresholds beyond it are `+∞` and give the same result as a bisection from `B`, and
+`x = +∞` cannot select a trailing bin of weight zero. The value is uniform over its bin's grid values given its
+bin, its margin is its histogram's, and the copula holds across bins and inside them. The path draws nothing
+else. A copula column's own cell path draws only its NULL draw, at index 0, when it declares a `nullFraction`.
+An implementation may tabulate thresholds; the bisections define the result.
+
+**The column path.** Kernel `0.2.0`'s column path makes the same operations one array at a time: one
+multiplication and one addition per term, looping over the terms, with no matrix product and no reduction that
+could reorder a sum, and the same probes per row, so it equals the per-row path bit for bit, thresholds that tie
+or are infinite included. A row's values depend on its ordinal alone, so `--jobs 1` and `--jobs 4` give the same
+digests, the shards of `--shard I/N` concatenate to the whole run, and `--scale` changes only the number of rows.
+
 ## 9. What stays as KERNEL-SPEC states it
 
 Canonicalisation and digests (§2), the path table and `seedTreeDigest` (§3), the Largest Remainder Method (§5),
@@ -731,6 +825,9 @@ of a column a key of its own.
 | `tests/vectors/kernel2-streams-vectors.json`, `exactAllocations` | Section 8.3's exact allocations: the path's key label and key, the class weights as exact fractions, the counts and first slots per class, and the slot and class of rows; four levels over 26 rows, the same with a `nullFraction` (a NULL class), four bins over 1000 rows (chosen rows only), and a column given the first one, with the parent class and child class of every row, the group sizes and the count of every pair of a parent class and a child class. |
 | `tests/vectors/kernel2-history-vectors.json` | Section 8.4's and 8.5's paths: each path's key label, key, counters and blocks; the layouts, chains, fits, ended entities and reasons of chosen entries, and the derived counts and allotments of chosen projections. |
 | `tests/vectors/kernel2-transforms-vectors.json` | The logarithm's and AS241's constants by bit pattern; `log` and Φ⁻¹ at their region edges; per declaration, the binary64 constants of section 5.3 and the `z` bits and units of each probed `uniform53`, a declaration whose tails are taken as zero among them; the exponential's units. |
+| `tests/vectors/kernel2-copula-vectors.json` | Section 8.6's copula path: the key label, key, counters and blocks of chosen rows, and for each `u`, `z`, `x`, the bin thresholds, the bin and grid index and the value, and the plan's `alpha`, factor and its digest, for three small copulas: one whose matrix passes, one that is shrunk, and one with a bin of weight zero. |
+| `tests/vectors/kernel2-counted-given-vectors.json` | Section 8.1's counted layouts given a class of a parent column: the path's key label and key, `e`, the classes of the column with each one's weights, the class of each eligible parent, `sigma`, the slot values, the expected counts as exact fractions, the counts per parent row and their offsets, with and without a hook. |
+| `tests/vectors/kernel2-binned-given-vectors.json` | A column drawn given a column drawn from bins (SEAM-FIDELITY-SPEC.md section 2): for chosen rows, the key, counters and blocks of each column's own cell path, the bin and class the parent drew, the place inside the bin and the value, the class named by the text of its lower edge. |
 | `tests/vectors/kernel2-dates-vectors.json` | The dates stream of EXPR-SPEC-2 section 7: its key label, key, counters and blocks at positions 0, 1 and 257 for a DATE column and for a TIMESTAMP column, and the cell path of a hidden column; the thinning positions 2, 3 and 256 and a thinning run over a fixed intensity. |
 
 Words, keys and binary64 values are written as hex digits. Integers that can exceed `2^53` (uniforms, bounds,
@@ -780,10 +877,20 @@ for `H`: a plan document holds the window, and the seed tree's root folds in eve
 are the same under a window that grows, and a history's emit is the same byte for byte under two windows with the
 same `until`. The `lag` and `kind` paths of section 8.5 meet them the same way. So a history and its projections are additive: a kernel `0.2.0` plan written before them replays to the digests it had.
 
+The copula path of section 8.6 meets all four. (1) Only a bundle that declares `fidelity.copula` reads it, in a key
+of the fidelity block that the engine did not read before. (2) The literal `copula` stands at the place after
+`exposeId` where no other shape has it, which the shape table of `tests/kernel2` checks for every shape. (3) Nothing that exists moves, and a
+copula column's own cell path keeps its null draw at the index it always had. (4)
+`tests/vectors/kernel2-copula-vectors.json` holds the key label, the key, the counters and the blocks.
+
 An example of a declaration that adds no path at all: a column drawn given several columns (`given` a list,
 SEAM-FIDELITY-SPEC section 2). It draws on its own column's path at the index every categorical column draws at,
 and the combination of its parents' levels only chooses the table of weights the uniform is searched in. It
 satisfies 1 to 4 trivially, so a kernel `0.2.0` plan that declares it replays on any engine that reads the list. So does a column drawn given
 a column of a linked row (`given: <relationship>.<column>`): the level of the parent's final value picks the same
 kind of table, the cell is drawn on its own path at the same index, and the draws of every other cell are the bytes
-they were.
+they were. So does a column drawn given the bin of another number column (SEAM-FIDELITY-SPEC.md section 2): the
+parent's own draw chose the bin, the bin picks the table the child's uniform is searched in, the child's cell is
+drawn on its own path at the index every histogram or categorical column draws at, and
+`tests/vectors/kernel2-binned-given-vectors.json` pins the cells. The same holds for a `conditions` group that
+fixes a categorical column drawn given a bin (CONSUMER-QUERIES-SPEC.md section 10).

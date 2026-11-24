@@ -56,7 +56,7 @@ from flux_stats import (
     bin_index,
     definition_for_kind,
 )
-from flux_stats.fidelity import definition_for_property, measure_group
+from flux_stats.fidelity import bin_group_keys, definition_for_property, measure_group
 from flux_stats.fixedpoint import (
     FLX_5005,
     require_sample,
@@ -189,12 +189,21 @@ def compute_property_statistic(
     to guess whether the rest would also have refused.
     """
     declaration = compiled.declaration
-    grouped = declaration.group_by is not None
+    grouped = declaration.grouped
     grouping = block.columns[declaration.group_by] if declaration.group_by is not None else None
     # A level histogram's groups, like its levels, are declared cells.
     declared_only = declaration.kind is PropertyKind.LEVEL_HISTOGRAM
     keys: Optional[Sequence[Tuple[str, Sequence[int]]]] = None
-    if isinstance(rows, DecodedRows):
+    if declaration.group_by_bins is not None:
+        # The groups are the bins of another column, named by their lower edges and kept in the order
+        # of the bins (docs/spec/PROFILE-SPEC.md section 5).
+        keys = bin_group_keys(
+            rows,
+            declaration.group_by_bins,
+            block.columns[declaration.group_by_bins.column],
+            block.grid,
+        )
+    elif isinstance(rows, DecodedRows):
         # Columns decoded once (flux_engine.concordance.decoded); anything it cannot read is
         # read from the rows below, which is the reader that refuses and says why.
         keys = group_keys_decoded(rows, grouping, declared_only=declared_only)
@@ -260,6 +269,9 @@ def compute_statistic(
     statistics: Dict[str, PropertyStatistic] = {
         entry.property_id: compute_property_statistic(rows, entry, block, subject=subject)
         for entry in compiled.properties
+        # A rank correlation's ``S`` and ``A4`` do not add up across blocks, so a committed state
+        # does not hold the kind (ADR 0035 decision 7).
+        if entry.declaration.kind is not PropertyKind.RANK_CORRELATION
     }
     return DerivedStatistic(
         expose_id=block.expose_id,
