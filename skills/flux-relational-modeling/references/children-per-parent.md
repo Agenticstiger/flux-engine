@@ -49,6 +49,8 @@ Every refusal comes before a row exists.
 
 A relationship that carries a `when` or a `weight` and a `counts` entry is a conflict: remove the condition or the weight, or drop the entry, and ask the user which they want. Do not work round the refusal.
 
+In a bundle `init` wrote, each number of a `counts` or `history` entry has an entry in the parameter register. If you drop or edit the `counts` or `history` entry, drop or edit its register entries with it: `plan` refuses a register entry that reaches nothing (`FLX-3105`).
+
 ## `--scale` and `--shard`
 
 Under `--scale` the child rows and the parent rows are scaled alike but each is rounded on its own. When a run planned at scale 1 leaves too few child rows at another scale, the refusal says so and names `--scale`: raise the scale, lower `minChildren` or declare more child rows; ask the user which. The `flux-scale-and-ship` skill covers `--scale` and `--shard`.

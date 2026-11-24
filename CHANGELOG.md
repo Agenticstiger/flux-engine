@@ -33,10 +33,20 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `init` says so, names the file, and writes nothing. The numbers of such a history are assumed, for the reason
   "declared by --history", and cite nothing of the profile's history. Without the flag, `init` writes a history from
   the profile as before.
-- `validate --profile FILE` checks the bundle against a profile the way `plan` does, and refuses a profile that lacks a
-  table or a column the contract has (`FLX-3113`).
-- Register format `1-4-0`. A register that counts a new position, or cites a rank correlation or a clique marginal,
-  names `1-4-0`; any other register keeps `1-3-0` and every digest it had. See `PARAMETER-REGISTER-SPEC.md`.
+- `validate --profile FILE` reads the profile a Simulation pins and refuses what `plan` refuses about it: a profile that
+  is not the pinned one or cannot be read (`FLX-3109`, `FLX-3110`), an overlay that names a table or column the profile
+  lacks (`FLX-3105`), and a profile that lacks a table or column the bundle's register cites (`FLX-3113`). A profile
+  given to a Simulation that pins none, and the grade floor (`FLX-4005`), are left to `plan`.
+- Register format `1-4-0`. A register that counts a new position, or cites a rank correlation or the
+  `cliqueMarginal/2` clique definition, names `1-4-0`; any other register keeps the format it had, from `1-0-0` to
+  `1-3-0`, and every digest it had. See `PARAMETER-REGISTER-SPEC.md`.
+
+### Changed
+
+- `flux_engine.author.author_bundle` takes one `AuthorInputs` instead of separate arguments.
+- `init --window` refuses a window that does not hold the range of a date column, whether the profile publishes it or
+  the contract declares it. The message names each column, its range and the window. A range is not cut, since the
+  bins of a property partition it.
 
 ### Fixed
 

@@ -45,7 +45,7 @@ When it refuses:
 ## What to do with the output
 
 1. Run `fluxsim validate bundle` (checkpoint 1).
-2. Read the assumed numbers. Where the user knows better (the time window the data covers, the names of the levels, the margin a property accepts), edit the Simulation inside the bundle and change that number's register entry with it: give it the user's own reason.
+2. Read the assumed numbers. Where the user knows better (the time window the data covers, the names of the levels, the margin a property accepts), edit the Simulation inside the bundle and change that number's register entry with it: give it the user's own reason. The same holds when you drop or edit a `counts` or `history` entry of the Simulation: drop or edit its register entries with it, since `plan` refuses an entry that reaches nothing (`FLX-3105`).
 3. Do not change the contract copied into the bundle. If it is wrong, the owner changes it, and you start from the new one.
 4. Hand over to the `flux-run-and-verify` skill for `plan`, `apply` and `verify`.
 
