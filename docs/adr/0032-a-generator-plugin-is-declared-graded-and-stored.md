@@ -6,6 +6,8 @@ Proposed 2026-11-22, for review. Amends [ADR 0020](./0020-privacy-grades.md): `P
 reserved, and `P5` is added. Kernel 0.2.0 only, and opt-in: a bundle that declares no plugin keeps
 every byte and every digest.
 
+**Amended 2026-11-24:** shipped in 0.10.0, and now Accepted.
+
 ## Context
 
 The engine draws every row of a run itself, from its kernel's streams, so a run replays to the same

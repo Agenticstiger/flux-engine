@@ -12,6 +12,8 @@ its own, so none is bumped.
 **Amended 2026-11-23:** a label keeps the letters and numbers of any script, as the
 [amendment](#amendment-of-2026-11-23-labels-in-any-script) at the end sets out.
 
+**Amended 2026-11-24:** shipped in 0.10.0, and now Accepted.
+
 ## Context
 
 `EVIDENCE.md` (`flux_engine/evidence/report.py`) already states what a run is, its conformance,

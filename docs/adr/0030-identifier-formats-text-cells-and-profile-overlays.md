@@ -6,8 +6,12 @@ Proposed 2026-11-22, for review. Kernel 0.2.0 only. Every part is opt-in: a bund
 none of the new keys `identifiers`, `text` and `overlay` keeps every byte and every digest it had,
 under both kernels. Sections 1 to 6, the identifiers and the text cells, change the generator, so
 they are built once the release's other changes to the generator (temporal integrity, exact counts
-and versioned entities) have merged, on the generator as it then stands. Sections 7 and 8 do not
+and versioned entities) have merged, on the generator as it then stands. Sections 7 and 8 did not
 wait.
+
+**Amended 2026-11-24:** the status splits. Sections 7 and 8, the profile overlays, shipped in
+0.10.0 and are Accepted. Sections 1 to 6, the identifiers and the text cells, are not built and
+stay Proposed.
 
 ## Context
 

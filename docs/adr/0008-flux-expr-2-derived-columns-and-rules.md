@@ -3,7 +3,9 @@
 ## Status
 
 Accepted (2026-11-16). The engine implements the language (`flux_engine.expr2`); generating from rules and
-checking runs against them come next. The specification is
+checking runs against them have shipped (see the amendments of
+[ADR 0011](./0011-rows-follow-their-key-entity-and-parent.md) and
+[ADR 0013](./0013-flux-expr-3-date-parts-date-arithmetic-and-concatenation.md)). The specification is
 [EXPR-SPEC-2](../spec/EXPR-SPEC-2.md). Its core is FLUID SQL/1, defined by the FLUID RFC `RFC-data-rules.md` in the
 forge-cli repository (Agenticstiger/forge-cli#896, Proposed). **Amended 2026-11-18:** flux-expr/3 adds three
 extensions, so the four of decision 3 are the first four of seven (see the amendment below).
