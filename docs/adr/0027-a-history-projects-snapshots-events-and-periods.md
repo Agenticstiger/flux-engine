@@ -346,3 +346,21 @@ an entry could not hold fewer periods than its window. Two optional keys, kernel
 - **Section 7.** With `through` declared, a longer window appends no period past `through`; without it, as before.
 - **What moves.** An entry that declares either key is a different entry for `H` and the plan. An entry that
   declares neither writes the member it wrote, so every other bundle keeps its bytes.
+
+## Amendment of 2026-11-24: `init` projects a table that is also a counted child
+
+Section 9 left an expose that a `counts` entry lays out as a counted child unprojected, since a `counts` entry over
+a relationship of a projected emit is `FLX-3403`. The table then kept its own rows, and a snapshot of the history
+had a different number of rows per parent than the history had entities. `init` now writes the projection:
+
+- **The projection.** An expose that meets a rule whole is projected whether or not the profile counts its children
+  per parent. For a snapshot, an events or a periodic emit, a foreign key that a `counts` entry would have set must
+  be a column of the history, from which the emit takes it, and the history must write a `parent` under the same
+  parent expose, so that the column holds that parent's keys on every version. A history with no `parent` holds
+  drawn values in the column, which are no keys of the parent, so a table that would copy them stays unprojected,
+  with that as the part of the rule it misses, and keeps its own rows and its own `counts` entry.
+- **The statistic.** The emit's own `counts` entry is not written. When the history has a `parent` under the same
+  parent expose and no `children` of its own, the entry's `children` become the parent's, and so does its
+  `minChildren` when the parent has none. Otherwise (the history has children of its own) the statistic is unused,
+  with that reason. The ledger says which statistic moved where and why.
+- **What moves.** A bundle for a contract with such an expose. Every other bundle keeps its bytes.

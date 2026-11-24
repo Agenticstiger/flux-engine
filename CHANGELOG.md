@@ -95,6 +95,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   that foreign-key column move** and a rule that reads through the relationship reads the copied row, or the plan is
   refused (`FLX-3403` or `FLX-6210`, naming the column and the relationship) where the copy cannot be carried out
   (ADR 0022, the amendment of 2026-11-24). A bundle without `copies: true`, and kernel 0.1.0, keep their bytes.
+- `fluxsim init` projects a snapshot, events or periodic table that is also a counted child of a parent: the table's own
+  `counts` entry is dropped, and its children per parent go to the history's `parent` when the history has none of its
+  own (ADR 0027, the amendment of 2026-11-24). The ledger names where each statistic went. A table whose foreign
+  key the history holds without writing a `parent` over the same parent stays unprojected, with the reason in the
+  ledger, since it would copy values that are no keys of the parent.
 
 ### Fixed
 

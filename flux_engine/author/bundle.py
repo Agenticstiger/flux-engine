@@ -127,6 +127,7 @@ from flux_engine.author.projection import (
     Projected,
     ProjectionSource,
     project,
+    release_counts,
     span_primary_key,
 )
 from flux_engine.author.ranges import column_range
@@ -2131,6 +2132,7 @@ def _projections(
     histories: _Histories,
     spread: _Spreads,
     declined: Optional[str],
+    published: Any = None,
 ) -> Projected:
     """The ``snapshots``, ``events`` and ``periods`` entries of the written exposes (ADR 0027 section 9).
 
@@ -2146,20 +2148,29 @@ def _projections(
         history = index[str(entry["emit"])]
         held = keys.expose(history.expose_id)
         columns = compile_expose(contract["exposes"][history.index]).columns
+        declared = entry.get("parent")
+        parent = next(
+            (
+                item.target
+                for item in held.relationships
+                if isinstance(declared, dict) and item.name == declared.get("relationship")
+            ),
+            None,
+        )
         targets.append(
             HistoryTarget(
                 history.expose_id,
                 tuple(item.column for item in held.entities if item.kind == "natural"),
                 {column.name: column for column in columns},
+                parent,
             )
         )
-    counted = {str(entry["emit"]) for entry in spread.entries}
     sources = [
         ProjectionSource(
             expose.expose_id,
             contract["exposes"][expose.index],
             keys.expose(expose.expose_id),
-            counted=expose.expose_id in counted,
+            counts=tuple(entry for entry in spread.entries if entry["emit"] == expose.expose_id),
         )
         for expose in exposes
         if not expose.reference
@@ -2172,10 +2183,20 @@ def _projections(
             f"the bundle written with these projections is refused, so none is written: {declined}"
         )
         return Projected(notes=[(f"{emit}: projection", why) for emit in sorted(found.emits)])
+    freed = release_counts(
+        found,
+        histories.entries,
+        keys.expose,
+        published,
+        (spread.entries, spread.used, spread.unused, spread.records, spread.notes),
+    )
     for emit, reason in found.emits.items():
         index[emit].projected = reason
         if emit in found.carried:
             _release_carried(index[emit], *found.carried[emit])
+    for emit, column in freed:
+        _release_counted_key(index[emit], column, found.carried[emit][0])
+        _restate(index[emit])
     for entry in (*found.events, *found.periods):
         emit = str(entry["emit"])
         span_primary_key(index[emit].columns, keys.expose(emit))
@@ -2192,6 +2213,22 @@ def _restate(expose: AuthoredExpose) -> None:
     expose.assumptions = [item for item in expose.assumptions if item[0] not in names] + [
         (plan.name, sentence) for plan in expose.columns for sentence in plan.assumptions
     ]
+
+
+_FOLLOWS = (
+    "The emit is projected from {history}, so its rows follow from the history and the column "
+    "holds the value of a version, not a parent the counted layout sets."
+)
+
+
+def _release_counted_key(expose: AuthoredExpose, column: str, history: str) -> None:
+    """Say that a projected emit's foreign key follows its history, not a ``counts`` entry."""
+    sentence = _FOLLOWS.format(history=history)
+    for plan in expose.columns:
+        if plan.name == column:
+            plan.assumptions = [sentence]
+            plan.choices = [sentence]
+            plan.how = "a column of the history the emit is projected from"
 
 
 #: The keys of a column's declaration that ``verify`` holds the rows to, as against the ones the draw reads.
@@ -3751,7 +3788,15 @@ def _histories_and_projections(
         relationships=planned.reading.profile.get("relationships"),
         spread=planned.spread,
     )
-    projections = _projections(authored, keys, contract, histories, planned.spread, declined[1])
+    projections = _projections(
+        authored,
+        keys,
+        contract,
+        histories,
+        planned.spread,
+        declined[1],
+        planned.reading.profile.get("relationships"),
+    )
     return histories, projections
 
 

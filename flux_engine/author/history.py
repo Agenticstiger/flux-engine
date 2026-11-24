@@ -54,7 +54,9 @@ __all__ = [
     "declare_date_ranges",
     "decline_history",
     "parent_candidates",
+    "profile_relationship",
     "release_relationship",
+    "structural_record",
     "write_history",
 ]
 
@@ -705,7 +707,12 @@ def _as_entities(entry: Mapping[str, Any]) -> Mapping[str, Any]:
     return {**entry, "statistics": statistics}
 
 
-def _structural_record(entry: Mapping[str, Any], minimum: bool) -> str:
+def structural_record(entry: Mapping[str, Any], minimum: bool, otherwise: str) -> str:
+    """What the bundle does with a relationship's ``orphan`` and ``childless`` classes, one sentence.
+
+    A ``childless`` class is written as ``minChildren 1`` on the history's parent when *minimum*,
+    and otherwise not written, for the reason *otherwise*.
+    """
     structural = entry.get("structural")
     classes = structural if isinstance(structural, list) else []
     parts: List[str] = []
@@ -717,7 +724,7 @@ def _structural_record(entry: Mapping[str, Any], minimum: bool) -> str:
         parts.append(
             "childless: written as minChildren 1 on the history's parent"
             if minimum
-            else "childless: not written, because the children per parent are not laid out"
+            else f"childless: not written, because {otherwise}"
         )
     return "; ".join(parts)
 
@@ -767,7 +774,9 @@ def _parent(
     written.notes.append((subject, _PARENT_ROWS))
     if counted.assumption:
         written.notes.append((subject, counted.assumption))
-    record = _structural_record(entry, "minChildren" in parent)
+    record = structural_record(
+        entry, "minChildren" in parent, "the children per parent are not laid out"
+    )
     if record:
         written.records.append((tokens + ("structural",), record))
     return parent
@@ -825,11 +834,7 @@ def parent_candidates(
             or frozenset(relationship.from_columns) in key_sets
         ):
             continue
-        entry, tokens = None, None
-        for index, item in enumerate(published):
-            if _is_relationship(item, expose_id, relationship):
-                entry, tokens = item, ("relationships", str(index))
-                break
+        entry, tokens = profile_relationship(published, expose_id, relationship)
         found.append(
             ParentCandidate(
                 relationship.name,
@@ -841,6 +846,16 @@ def parent_candidates(
             )
         )
     return tuple(found)
+
+
+def profile_relationship(
+    published: Sequence[Any], child: str, declared: Any
+) -> Tuple[Optional[Mapping[str, Any]], Optional[Tuple[str, ...]]]:
+    """The profile's ``relationships`` entry for the relationship *declared* of *child*, with its pointer."""
+    for index, item in enumerate(published):
+        if _is_relationship(item, child, declared):
+            return item, ("relationships", str(index))
+    return None, None
 
 
 def _is_relationship(item: Any, child: str, declared: Any) -> bool:
