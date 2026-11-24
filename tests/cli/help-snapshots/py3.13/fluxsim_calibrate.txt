@@ -10,7 +10,8 @@ Read a Playback's declared scorecard and report the credibility and grade it
 carries; no fitting is performed. With --fit, fit the parameters a bundle's
 consumers calibration block declares to the rates of its calibration queries
 (CMA-ES, from the [calibrate] extra), and write the result as a calibration
-patch, DIR.patch.json, beside the output.
+patch, DIR.patch.json, beside the output. A bundle that declares no held-out
+query is fitted without a held-out check, and the output says so.
 
 examples:
   # print the declared scorecard; nothing is written
@@ -36,7 +37,8 @@ options:
   --run-id RUN_ID       required without --dry-run
   --fit BUNDLE          fit the declared parameters of this bundle to its
                         calibration queries instead of reading a declared
-                        scorecard; needs --profile, --held-out and --out
+                        scorecard; needs --profile and --out, and --held-out
+                        when the bundle declares a held-out query
   --profile PATH        with --fit: the profile the Simulation pins, whose
                         queries section holds the targets the fit reads;
                         refused when its digest is not the pinned one

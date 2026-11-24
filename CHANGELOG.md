@@ -20,6 +20,42 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+### Added
+
+- `init --window START END` sets the run's time window yourself. The dates are `YYYY-MM-DD` (midnight UTC) or RFC 3339
+  timestamps, with START before END, and the output names the window under "time window".
+- `init --history FILE` merges a declared history into the bundle: the file's histories, snapshots, events and
+  periods, its `asOf` and, optionally, its time bounds. `init` writes the bundle to fit it: no counts entry over a
+  projected emit or over the history's parent relationship, no exact allotment on the history's or a projected
+  emit's columns, and no weight for the ended status on a carried end column. When `plan` still refuses the bundle,
+  `init` says so, names the file, and writes nothing. The numbers of such a history are assumed, for the reason
+  "declared by --history", and cite nothing of the profile's history. Without the flag, `init` writes a history from
+  the profile as before.
+- `validate --profile FILE` checks the bundle against a profile the way `plan` does, and refuses a profile that lacks a
+  table or a column the contract has (`FLX-3113`).
+- Register format `1-4-0`. A register that counts a new position, or cites a rank correlation or a clique marginal,
+  names `1-4-0`; any other register keeps `1-3-0` and every digest it had. See `PARAMETER-REGISTER-SPEC.md`.
+
+### Fixed
+
+- The run's window now covers the whole range of every date column, the date range the contract declares, and the
+  bins the column is drawn from, so `init` no longer cuts a column at a window that other columns imply. A column's
+  bins are cut only at a window you pass with `--window`.
+- The parameter register counts the numbers under the namespace keys beside `emits` (`counts`, `history`, `events`,
+  `periods`, `lifetimes`, `within`, `rates`, `conditions`) and of the copula, and `init` gives each one a source. A
+  copula's values cite the rank correlation of their pair, and a binned clique's numbers cite the clique marginal.
+  A bundle that declares none of these keys keeps its register and its digests. A register entry names its number by
+  position, so a hand edit that removes such an entry (a `rates` entry, say) removes the register entries that point
+  into it too; `plan` refuses an entry that reaches nothing (`FLX-3105`).
+- `calibrate --fit` on a bundle that declares no held-out query runs, says that no held-out check was made, and exits
+  1 with `FLX-3712`, since such a fit is never called calibrated. The JSON report carries the note as `heldOutNote`.
+- `init` writes the assumptions request inside the bundle directory, as `requests/assumptions.profile-request.yml`,
+  so it is created and removed with the bundle. The loader and `inputDigest` do not read it, and `ship` packs it.
+- The ledger records a published end that a window or a range cut relies on (the last edge of a quantile ladder, for
+  example) as read, not as unused.
+
 ## 0.11.1 - 2026-11-24
 
 Fixes for the findings of the 0.11.0 inspection. No digest moves, except for a bundle that hit the copula overflow
