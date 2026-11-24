@@ -586,3 +586,27 @@ who writes a `share` means that share of the histories, so the share is now a sh
 - With `closeLast` and no `column` every entity is eligible, so `E' = E` and the count is the one section 5 gave.
   Every other `end` ends a different set of entities when the eligible ones are fewer than `E`, so **the bytes of
   such a history and of every projection of it move**. A history without an `end` keeps its bytes.
+
+## Amendment of 2026-11-24: `init` writes the history's parent
+
+Section 13 said `init` writes no `parent`. A foreign key left as a carried column is drawn once, on the entity's
+first version, from its own statistics, so the entities were not grouped under a parent and a projection that
+copies the parent's key (ADR 0027) rarely agreed with the history. `init` now writes it:
+
+- **The relationship.** The candidates are the history's emit's many-to-one relationships of one column into
+  another written expose, that are no key of the emit, whose column no rule, copy or dependency sets and that
+  declares no `nullFraction` and is drawn given no column. With one candidate it is the parent, whether or not the
+  profile publishes children per parent for it. With several, the parent is the one the profile publishes a
+  histogram of children per parent for, when exactly one is; otherwise `init` writes no parent and the notes name
+  the candidates, since choosing would be a guess.
+- **The children.** A profile counts children per parent in rows, which are versions here, and publishes no count
+  of entities. `init` keeps the shape of the published classes as the shape of entities per parent and takes the
+  total from the entities (`entities`, not the version rows), so a mean of version rows per parent is unused, with
+  that reason. The classes, `minChildren` (1 with the `childless` structural class) and the withheld-class
+  assumption are read as for a `counts` entry. A histogram the layout cannot read leaves the parent without
+  `children`, and the statistic is unused with the reason.
+- **One layout per relationship.** The foreign key declares no draw of its own, and no `counts` entry or spread
+  lays the same relationship out: the ledger entries `init` made for it under the counted layout are replaced by
+  the parent's.
+- **What moves.** A bundle `init` writes for a contract whose versioned expose has such a relationship. A contract
+  without one, and every bundle of a profile without a history, keeps its bytes.

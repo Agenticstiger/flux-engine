@@ -65,6 +65,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `through`, and a range outside `timeBounds` is `FLX-3403` at `validate` and `plan` (ADR 0027, the amendment of
   2026-11-24). An entry without the keys keeps its bytes. A period that would start past the calendar (a window or
   a `through` at the end of year 9999) ends the list, in `plan` and in `verify`, where it raised a raw error.
+- `fluxsim init` writes a history's `parent` from the history's many-to-one relationship: the relationship, `minChildren`
+  and the `children` classes, read from the version rows per parent the profile counts and kept as the shape of
+  entities per parent (ADR 0017, the amendment of 2026-11-24). The entities are then grouped under their parent, so
+  a projection copies the parent's key consistently. A bundle for a contract without such a relationship is unchanged.
 
 ### Changed
 

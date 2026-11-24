@@ -250,6 +250,7 @@ def test_the_entry_is_written_from_the_published_history(tmp_path: Path) -> None
             },
             "until": "2025-10-01",
             "chain": "nextStart",
+            "parent": {"relationship": "account"},
             "tracked": [
                 {
                     "column": "tier",
@@ -490,17 +491,13 @@ def _source(contract: str, table: Dict[str, Any]) -> HistorySource:
 
 def test_no_parent_is_written_when_a_relationship_is_on_the_natural_entity() -> None:
     # A to-one relationship whose fromColumns are the natural entity's column would make the natural
-    # key a foreign key, which the generator refuses, so init writes no parent, ever.
+    # key a foreign key, which the generator refuses, so init writes no parent for it.
     contract = CONTRACT.read_text(encoding="utf-8").replace("expr: plan_id }", "expr: account_id }")
     table = _profile()["tables"]["plan_version"]
     table["history"]["entity"] = ["account_id"]
     written = write_history(_source(contract, table))
     assert written.entry is not None
     assert "parent" not in written.entry
-    plain = write_history(
-        _source(CONTRACT.read_text(encoding="utf-8"), _profile()["tables"]["plan_version"])
-    )
-    assert plain.entry is not None and "parent" not in plain.entry
 
 
 def test_a_history_the_plan_refuses_is_not_written(tmp_path: Path) -> None:

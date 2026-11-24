@@ -115,6 +115,8 @@ from flux_engine.author.history import (
     HistorySource,
     declare_date_ranges,
     decline_history,
+    parent_candidates,
+    release_relationship,
     write_history,
 )
 from flux_engine.author.history import _pointers as declared_pointers
@@ -2180,6 +2182,18 @@ def _projections(
     return found
 
 
+def _restate(expose: AuthoredExpose) -> None:
+    """Take the assumptions of the expose's columns from what their plans say now.
+
+    A history changes how some columns are drawn after the exposes were planned, so the sentences
+    a column's earlier plan assumed are replaced by the ones its plan assumes now.
+    """
+    names = {plan.name for plan in expose.columns}
+    expose.assumptions = [item for item in expose.assumptions if item[0] not in names] + [
+        (plan.name, sentence) for plan in expose.columns for sentence in plan.assumptions
+    ]
+
+
 #: The keys of a column's declaration that ``verify`` holds the rows to, as against the ones the draw reads.
 _CHECKED_DECLARATION = ("range", "support", "maxCardinality")
 
@@ -2224,6 +2238,8 @@ def _histories(
     minimum_cell: int,
     fractional_bits: int,
     declined: Optional[str] = None,
+    relationships: Any = None,
+    spread: Optional[_Spreads] = None,
 ) -> _Histories:
     """Write the ``history`` entry of each written expose whose profile table publishes one.
 
@@ -2234,11 +2250,13 @@ def _histories(
     unused for that reason.
     """
     result = _Histories([], [], [], [])
+    rows_of = {item.expose_id: item.rows for item in exposes if item.skipped is None}
     for expose in exposes:
         table = tables.get(expose.expose_id)
         if expose.reference or not isinstance(table, Mapping) or "history" not in table:
             continue
         plans = {plan.name: plan for plan in expose.columns}
+        held = keys.expose(expose.expose_id) if keys is not None else None
         source = HistorySource(
             expose_id=expose.expose_id,
             table=table,
@@ -2246,15 +2264,28 @@ def _histories(
             plans=plans,
             kinds=expose.kinds,
             contract_expose=contract["exposes"][expose.index],
-            keys=keys.expose(expose.expose_id) if keys is not None else None,
+            keys=held,
             window=window,
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
             set_by_rules=frozenset(expose.derives) | frozenset(expose.copies) | expose.dependents,
+            parents=(
+                parent_candidates(expose.expose_id, held, rows_of, relationships)
+                if held is not None
+                else ()
+            ),
         )
         written = write_history(source) if declined is None else decline_history(source, declined)
         if written.entry is not None:
             result.entries.append(written.entry)
+            _restate(expose)
+            if written.parent_of is not None and spread is not None:
+                release_relationship(
+                    (spread.entries, spread.used, spread.unused, spread.records, spread.notes),
+                    expose.expose_id,
+                    *written.parent_of,
+                )
+                spread.records.extend(written.records)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)
         result.used.extend(written.used)
         result.unused.extend(written.unused)
@@ -3717,6 +3748,8 @@ def _histories_and_projections(
         minimum_cell=planned.reading.minimum_cell,
         fractional_bits=planned.reading.fractional_bits,
         declined=declined[0],
+        relationships=planned.reading.profile.get("relationships"),
+        spread=planned.spread,
     )
     projections = _projections(authored, keys, contract, histories, planned.spread, declined[1])
     return histories, projections
