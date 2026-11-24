@@ -794,3 +794,23 @@ def test_an_enumerated_group_and_a_real_sample_size_band_keep_p3() -> None:
     graded = _graded(keep)
     assert graded.pattern is Pattern.P3 and graded.reasons == ()
     assert _graded(lambda d: _noisy_stat_on(d, "plan", lambda s: None)).pattern is Pattern.P3
+
+
+def test_an_exact_sample_size_band_is_p1_in_format_1_4_0_too() -> None:
+    """The 1-4-0 declaration covers bands chosen without the data; a band of one size is not one."""
+    document = _pairs_profile()
+    statistic = document["tables"]["subscriber"]["columns"]["region"]["statistics"][0]
+    statistic["sampleSize"] = {"min": 14000, "max": 14000}
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("min equals its max" in reason for reason in graded.reasons)
+
+
+def test_a_group_by_on_a_column_the_profile_does_not_describe_is_p1_in_format_1_4_0_too() -> None:
+    """Its group keys are data values, which no declaration makes public."""
+    document = _pairs_profile()
+    statistic = document["tables"]["subscriber"]["columns"]["region"]["statistics"][0]
+    statistic["groupBy"] = "undescribed"
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("keys are data values" in reason for reason in graded.reasons)

@@ -358,23 +358,31 @@ _EXACT_BAND_REASON = (
 )
 
 
-def _structure_reasons(statistics: Any, columns: Mapping[str, Any], found: Set[str]) -> None:
+def _structure_reasons(
+    statistics: Any, columns: Mapping[str, Any], found: Set[str], *, links: bool
+) -> None:
     """Add to *found* the reasons a noisy statistic of a table still states data (ADR 0020).
 
     A group key of a ``groupBy`` on a column that is not categorical is a data value, and so is the
     key of a ``groupByLink``. A ``sampleSize`` band with ``min`` equal to ``max`` is an exact size.
     Under ``publicStructure`` a categorical level and a band are declared chosen without the data;
     these are not, whatever the declaration says. Anything the check cannot read counts as data.
+
+    *links* is false for a profile of format ``1-4-0``, whose declaration covers the values of the
+    parent column of a ``groupByLink`` as group keys of a noisy statistic; a non-categorical
+    ``groupBy`` and an exact band count as data in every format.
     """
     for statistic in statistics if isinstance(statistics, (list, tuple)) else ():
         if isinstance(statistic, Mapping):
-            found.update(_statistic_reasons(statistic, columns))
+            found.update(_statistic_reasons(statistic, columns, links=links))
 
 
-def _statistic_reasons(statistic: Mapping[str, Any], columns: Mapping[str, Any]) -> Set[str]:
+def _statistic_reasons(
+    statistic: Mapping[str, Any], columns: Mapping[str, Any], *, links: bool
+) -> Set[str]:
     """The reasons one noisy statistic still states data (see :func:`_structure_reasons`)."""
     found: Set[str] = set()
-    if "groupByLink" in statistic:
+    if links and "groupByLink" in statistic:
         found.add(_LINK_GROUP_REASON)
     if "groupBy" in statistic:
         target = (
@@ -388,16 +396,16 @@ def _statistic_reasons(statistic: Mapping[str, Any], columns: Mapping[str, Any])
     return found
 
 
-def _table_structure_reasons(table: Mapping[str, Any], found: Set[str]) -> None:
+def _table_structure_reasons(table: Mapping[str, Any], found: Set[str], *, links: bool) -> None:
     """Add to *found* the reasons the statistics of a table's columns and date pairs state data."""
     columns = table.get("columns")
     table_columns = columns if isinstance(columns, Mapping) else {}
     for pair in table.get("datePairs") or ():
         if isinstance(pair, Mapping):
-            _structure_reasons(pair.get("statistics"), table_columns, found)
+            _structure_reasons(pair.get("statistics"), table_columns, found, links=links)
     for column in (table.get("columns") or {}).values():
         if isinstance(column, Mapping):
-            _structure_reasons(column.get("statistics"), table_columns, found)
+            _structure_reasons(column.get("statistics"), table_columns, found, links=links)
 
 
 def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> ProfileGrade:
@@ -480,8 +488,9 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             for entry in table.get("calendar") or ()
         ):
             sections.append(f"{at}.calendar")
-        if accounting is None or not accounting.from_1_4:
-            _table_structure_reasons(table, data_stated)
+        _table_structure_reasons(
+            table, data_stated, links=accounting is None or not accounting.from_1_4
+        )
         for name, column in (table.get("columns") or {}).items():
             if not isinstance(column, Mapping):
                 continue
