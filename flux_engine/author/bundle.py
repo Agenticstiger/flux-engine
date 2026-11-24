@@ -2051,11 +2051,14 @@ def _check_histories(
     declined: Optional[str],
     overlay: Optional[Tuple[str, Mapping[str, Any]]] = None,
     declared: Optional[DeclaredHistory] = None,
+    windowed: bool = False,
 ) -> None:
     """Check the files as :func:`_check` does; a bundle refused with projections or histories is written again without.
 
     A bundle written with a history file is never written again without it: its refusal is
-    :class:`_DeclaredRefused`, which names the file and keeps the refusal's code.
+    :class:`_DeclaredRefused`, which names the file and keeps the refusal's code. A bundle written
+    with a ``--window`` is the same when it holds histories or projections: the window decides the
+    rows they are laid over, so its refusal is reported, naming the window.
 
     The plan refuses a history the layout cannot place (a natural entity that is also a foreign key,
     say), which no statistic of the profile shows, and a projection its history cannot feed. The
@@ -2070,6 +2073,13 @@ def _check_histories(
             code = cause.code.code if isinstance(cause, FluxError) else None
             raise _DeclaredRefused(
                 f"the bundle written with the history of {declared.name} is refused: {error}",
+                code,
+            ) from error
+        if windowed and (projections.emits or (declined is None and histories.entries)):
+            cause = error.__cause__
+            code = cause.code.code if isinstance(cause, FluxError) else None
+            raise _DeclaredRefused(
+                f"the bundle written with the window given with --window is refused: {error}",
                 code,
             ) from error
         if projections.emits:
@@ -2833,8 +2843,9 @@ def _widen_to_hold(
 
 def _author_with_fallbacks(inputs: AuthorInputs, fallbacks: _Fallbacks) -> AuthoredBundle:
     """:func:`author_bundle` once, writing without the projections or the history the plan refuses."""
-    if inputs.history is not None:
-        # The history file is the person's: a refusal is theirs to read, not a reason to drop it.
+    if inputs.history is not None or inputs.window is not None:
+        # The history file and the window are the person's: a refusal is theirs to read, not a
+        # reason to drop the layers.
         return _author_bundle(inputs, fallbacks)
     try:
         return _author_bundle(inputs, fallbacks)
@@ -3428,6 +3439,7 @@ def _author_bundle(
         declined_history,
         planned.scoped.citing,
         declared,
+        inputs.window is not None,
     )
     _refuse_unless_reproduced(
         files, dated.within, dated.rates, planned.keys, Path(inputs.profile_path)

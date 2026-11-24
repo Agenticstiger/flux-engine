@@ -17,6 +17,7 @@ Pinned here, through ``fluxsim init`` and the seam:
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -317,3 +318,38 @@ def test_a_projection_the_plan_refuses_is_not_written_and_the_history_stays(
     assert "history" in namespace
     notes = "\n".join(_bundle_notes(tmp_path, "plan_current"))
     assert "plan_current: projection" in notes and "FLX-3403: a projection is refused" in notes
+
+
+@pytest.mark.parametrize("marker", [b"\n    snapshots:", b"\n    history:"])
+def test_a_refusal_with_a_given_window_is_reported_not_retried_away(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, marker: bytes
+) -> None:
+    from flux_engine.author import bundle as authoring
+    from flux_engine.cli._init import run_init
+
+    real = authoring._check
+
+    def refuse_layers(
+        files: Any, profile: Any, references: Any = None, overlay: Any = None
+    ) -> None:
+        if any(marker in entry.data for entry in files):
+            raise authoring.AuthorError("FLX-3403: the layers are refused")
+        real(files, profile, references, overlay=overlay)
+
+    monkeypatch.setattr(authoring, "_check", refuse_layers)
+    (tmp_path / "plans.fluid.yml").write_text(
+        CONTRACT.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (tmp_path / "plans.profile.json").write_text(
+        json.dumps(_profile_with("plan_current")), encoding="utf-8"
+    )
+    result = run_init(
+        str(tmp_path / "bundle"),
+        contract=str(tmp_path / "plans.fluid.yml"),
+        profile=str(tmp_path / "plans.profile.json"),
+        window=("2000-01-01", "2030-01-01"),
+    )
+    assert result.exit_code == 1, result.stdout
+    assert "FLX-3403: the layers are refused" in (result.stderr or "")
+    assert "window given with --window" in (result.stderr or "")
+    assert not (tmp_path / "bundle").exists()
