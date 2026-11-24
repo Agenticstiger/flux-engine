@@ -378,6 +378,28 @@ for edit in edits:
         holder.append(json.loads(value))
     else:
         holder[last] = json.loads(value)
+
+
+def reaches(node, tokens):
+    for token in tokens:
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, list) and token.isdigit() and int(token) < len(node):
+            node = node[int(token)]
+        elif isinstance(node, dict) and token in node:
+            node = node[token]
+        else:
+            return False
+    return True
+
+
+# A register entry names its number by position, so an entry whose number the edits removed goes too.
+prefix = "/extensions/"
+block["parameters"] = [
+    entry
+    for entry in block["parameters"]
+    if not entry["pointer"].startswith(prefix)
+    or reaches(document, entry["pointer"][1:].split("/"))
+]
 with open(path, "w", encoding="utf-8") as handle:
     yaml.safe_dump(document, handle, sort_keys=False)
 """

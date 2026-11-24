@@ -3166,6 +3166,10 @@ def _basis_of(profile: Mapping[str, Any], tokens: Optional[Tuple[str, ...]], how
     return from_profile(tokens, definition)
 
 
+#: Why a number of a history the ``--history`` file declares is assumed: no statistic of the profile gave it.
+_DECLARED_BY_HISTORY = "declared by --history"
+
+
 def _history_cited(entry: Mapping[str, Any]) -> List[_Cited]:
     """What each number of a ``history`` entry rests on: the history statistic it was read from."""
     base = ("tables", str(entry["emit"]), "history")
@@ -3200,6 +3204,7 @@ def _namespace_labels(
     spread: _Spreads,
     dated: Any,
     profile: Mapping[str, Any],
+    declared: bool = False,
 ) -> List[Tuple[Tuple[str, ...], Basis]]:
     """The source of the numbers written under the namespace's keys beside ``emits``.
 
@@ -3221,7 +3226,11 @@ def _namespace_labels(
     for entry, cite in spread.cited:
         place(COUNTS_KEY, entry, (cite,))
     for entry in namespace.get(HISTORY_KEY) or ():
-        place(HISTORY_KEY, entry, _history_cited(entry))
+        cites = _history_cited(entry)
+        if declared:
+            # The numbers are the --history file's, not statistics of the profile's history.
+            cites = [(member, None, _DECLARED_BY_HISTORY) for member, _, _ in cites]
+        place(HISTORY_KEY, entry, cites)
     for key, entry, member, tokens, how in _dated_cited(dated):
         place(key, entry, ((member, tokens, how),))
     for entry in namespace.get(PERIODS_KEY) or ():
@@ -3232,8 +3241,12 @@ def _namespace_labels(
                 (
                     ("kinds", str(position), "count"),
                     None,
-                    "fluxsim init writes one periodic row for each period a version overlaps, "
-                    "so each kind's count is 1 (ADR 0027).",
+                    (
+                        _DECLARED_BY_HISTORY
+                        if declared
+                        else "fluxsim init writes one periodic row for each period a version "
+                        "overlaps, so each kind's count is 1 (ADR 0027)."
+                    ),
                 )
                 for position in range(len(entry.get("kinds", ())))
             ],
@@ -3498,7 +3511,7 @@ def _author_bundle(
         simulation_id,
         authored,
         noisy,
-        _namespace_labels(namespace, spread, dated, profile),
+        _namespace_labels(namespace, spread, dated, profile, declared is not None),
     )
     # The register counts numbers as the engine reads the files back (a YAML
     # float is an exact decimal there), so it is built from that reading.

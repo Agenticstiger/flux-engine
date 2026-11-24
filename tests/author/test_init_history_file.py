@@ -323,6 +323,31 @@ def test_every_register_entry_points_at_a_counted_number(tmp_path: Path) -> None
         assert (entry["document"], parse_pointer(entry["pointer"])) in under, entry["pointer"]
 
 
+def test_a_declared_history_cites_no_statistic_of_the_profiles_history(tmp_path: Path) -> None:
+    _declared(tmp_path)
+    planned = plan(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "plans.profile.json",
+        kernel=KERNEL_V2.version,
+        stage=False,
+    )
+    assert planned.success, planned.stderr
+    namespace = _simulation(tmp_path)["extensions"][NAMESPACE]
+    written = namespace[HISTORY_KEY]
+    assert written
+    register = namespace["parameters"]
+    history_entries = [entry for entry in register if f"/{HISTORY_KEY}/" in entry["pointer"]]
+    assert history_entries
+    for entry in register:
+        statistic = entry.get("statistic")
+        if statistic is not None:
+            assert "/history/" not in statistic["pointer"], entry
+    for entry in history_entries:
+        assert entry["source"] == "assumption"
+        assert "declared by --history" in entry["reason"]
+
+
 # --- what init refuses ----------------------------------------------------------------------
 
 
