@@ -46,6 +46,13 @@ described first under Fixed, whose outputs were wrong before.
 - A relationship's `structural` member counts as structure for the privacy grade only from profile format `1-4-0`. A
   profile of an earlier format with `statistics: []` and `structural: ["childless"]` grades P1 again, as it did in
   0.10.0.
+- A scorecard whose only `1-5-0` row is a censored or a refused `rankCorrelation` row names `1-5-0` and validates
+  against its schema. It named `1-4-0` and failed that schema, because the format was decided by whether a rank had
+  been measured and not by the row's kind.
+- The groups of a children-per-parent row grouped by `groupByBins` are numbered in the order of the bins, as
+  SCORECARD-SPEC.md states and every property row does, and no longer in the text order of the profile's keys (`0`,
+  `200`, `50`). **The group order of such a scorecard changes** to the order the specification states, and with it
+  each group's `ordinal` and the `outside` list; a grouping by a column keeps its order.
 - `init` no longer widens a clique column's range beyond the contract's. Bin edges that reach past a bound the contract
   declares are refused with `FLX-3402`, naming the edge and the bound, where they used to become the column's range and
   let a run emit values the contract forbids. A date or timestamp column is held to a numeric range rule in the units
