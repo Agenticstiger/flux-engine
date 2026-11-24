@@ -4,15 +4,16 @@ A profile request lists what a profiler must measure for a bundle. `fluxsim init
 FLUID contract and no profile, writes one (ADR 0018). A profiler reads it, measures exactly
 the statistics, column metrics and fact shares it lists where the data lives, and writes a
 profile (PROFILE-SPEC.md). `fluxsim init` then runs a second time, with `--contract` and
-`--profile`, and writes the bundle. That second run also writes a request of its own, beside the
-bundle and named `<name>.assumptions.profile-request.yml`, for exactly the statistics that would
+`--profile`, and writes the bundle. That second run also writes a request of its own, inside the
+bundle directory as `requests/assumptions.profile-request.yml`, for exactly the statistics that would
 replace the numbers it had to assume (PARAMETER-REGISTER-SPEC.md section 1.3): the same format,
 with a table's `rowCount` and the metrics and statistics of the columns it names, and no
 relationship and no fact.
 
 A request holds names and registered identifiers and nothing else. It carries no record, no
-value of the data and no answer: it is the list of questions. It stays outside the bundle, as
-a profile does, so it is not an input of `inputDigest` (ADR 0006).
+value of the data and no answer: it is the list of questions. It is not one of the bundle's
+documents, as a profile is not, so it is not an input of `inputDigest` (ADR 0006): the one `init`
+writes with a bundle sits in the `requests/` subdirectory, which the loader does not read.
 
 The reader is `flux_stats.request` in the flux-stats distribution, which a profiler imports
 without the engine. Its refusal is `FLX-5038`.

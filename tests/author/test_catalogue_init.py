@@ -229,6 +229,8 @@ class Authored:
             bundle = self.root / f"bundle-{seed}"
             bundle.mkdir(exist_ok=True)
             for source in self.bundle.iterdir():
+                if source.is_dir():
+                    continue
                 (bundle / source.name).write_text(source.read_text("utf-8"), "utf-8")
             text = (bundle / "simulation.flux.yml").read_text("utf-8")
             assert "seed: 42" in text

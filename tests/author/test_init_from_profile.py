@@ -114,6 +114,7 @@ def test_the_bundle_holds_the_contract_unchanged_and_three_documents(orders: Aut
     assert names == [
         "orders.fluid.yaml",
         "persona.flux.yml",
+        "requests",
         "simulation.flux.yml",
         "world.flux.yml",
     ]
@@ -282,6 +283,8 @@ def test_the_same_inputs_write_the_same_bytes(tmp_path: Path, orders: Authored) 
     again = tmp_path / "again"
     assert _init(again, ORDERS_CONTRACT, ORDERS_PROFILE).exit_code == 0
     for path in orders.bundle.iterdir():
+        if path.is_dir():
+            continue
         assert (again / path.name).read_bytes() == path.read_bytes(), path.name
 
 

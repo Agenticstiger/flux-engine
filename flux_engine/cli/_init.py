@@ -716,43 +716,32 @@ def run_author(
     if isinstance(bundle, StageResult):
         return bundle
     asked = _request_path(directory, bundle)
-    if isinstance(asked, StageResult):
-        return asked
     try:
         names = write_project(Path(directory), lambda: bundle.files)
     except ScaffoldError as error:
         return StageResult(stage="init", exit_code=1, stderr=f"init: {error}")
     written = _write_request(asked, bundle)
     if isinstance(written, StageResult):
-        _remove(Path(directory), names)
+        _remove(Path(directory), names, asked)
         return written
     return _described(directory, bundle, names, contract, profile, written)
 
 
-def _request_path(directory: str, bundle: Any) -> Any:
-    """Where the profile request for the bundle's assumptions goes, or the refusal when it is taken.
+def _request_path(directory: str, bundle: Any) -> Optional[Path]:
+    """Where the profile request for the bundle's assumptions goes: inside *directory*, or ``None``.
 
-    Beside *directory*, named after it, with the suffix ``.assumptions.profile-request.yml`` (ADR
-    0030 section 8): ``None`` when no assumption has a statistic to replace it. A file that exists
-    is never overwritten, so it is refused before the bundle is written.
+    ``None`` when no assumption has a statistic to replace it. The file is
+    ``requests/assumptions.profile-request.yml`` under the bundle directory (ADR 0030 section 8,
+    amended 2026-11-24), so it is created and removed with the bundle: ``write_project`` refuses a
+    directory that holds anything, so nothing here is ever overwritten. It is in a subdirectory
+    because the loader refuses any other file at the top of a bundle directory (``FLX-3108``,
+    ADR 0006) and reads no deeper, so ``inputDigest`` does not cover it.
     """
-    from flux_engine.author.replace import ASSUMPTIONS_REQUEST_SUFFIX
-    from flux_engine.cli._request import default_request_path
-    from flux_engine.seam.coverage import printable
+    from flux_engine.author.replace import ASSUMPTIONS_REQUEST_PATH
 
     if bundle.assumptions_request is None:
         return None
-    target = default_request_path(directory, ASSUMPTIONS_REQUEST_SUFFIX)
-    if target.exists() or target.is_symlink():
-        return StageResult(
-            stage="init",
-            exit_code=1,
-            stderr=(
-                f"init: {printable(str(target))} exists, and init never overwrites; move it away "
-                "or write the bundle elsewhere"
-            ),
-        )
-    return target
+    return Path(directory) / ASSUMPTIONS_REQUEST_PATH
 
 
 def _write_request(target: Optional[Path], bundle: Any) -> Any:
@@ -764,6 +753,7 @@ def _write_request(target: Optional[Path], bundle: Any) -> Any:
     if target is None:
         return None
     try:
+        target.parent.mkdir(exist_ok=True)
         _write_new(target, render_request(bundle.assumptions_request).encode("utf-8"))
     except OSError as error:
         return StageResult(
@@ -774,10 +764,16 @@ def _write_request(target: Optional[Path], bundle: Any) -> Any:
     return target
 
 
-def _remove(directory: Path, names: Tuple[str, ...]) -> None:
-    """Remove the files *names* ``init`` wrote into *directory*, and the directory when it is empty."""
+def _remove(directory: Path, names: Tuple[str, ...], request: Optional[Path] = None) -> None:
+    """Remove the files *names* ``init`` wrote into *directory* and its *request*, and the directory when it is empty."""
     for name in names:
         (directory / name).unlink(missing_ok=True)
+    if request is not None:
+        request.unlink(missing_ok=True)
+        try:
+            request.parent.rmdir()
+        except OSError:
+            pass
     try:
         directory.rmdir()
     except OSError:
@@ -859,15 +855,12 @@ def _authored_each(
 def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -> StageResult:
     """Write each bundle into *root*, named after its overlay, with the request for its assumptions.
 
-    Every request path is checked before the first bundle is written, and when a directory or a
+    When a directory or a
     file cannot be written, everything this call wrote is removed.
     """
     from flux_engine.starter import ScaffoldError, write_project
 
     asked = [_request_path(str(root / bundle.overlay.name), bundle) for bundle in bundles]
-    for refused in asked:
-        if isinstance(refused, StageResult):
-            return refused
     written: List[Tuple[Path, bool, Tuple[str, ...], Optional[Path]]] = []
     results: List[StageResult] = []
 
@@ -879,6 +872,10 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
                 shutil.rmtree(path, ignore_errors=True)
             if request is not None:
                 request.unlink(missing_ok=True)
+                try:
+                    request.parent.rmdir()
+                except OSError:
+                    pass
 
     for bundle, request in zip(bundles, asked, strict=True):
         target = root / bundle.overlay.name
@@ -889,7 +886,7 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
             undo()
             return StageResult(stage="init", exit_code=1, stderr=f"init: {error}")
         placed = _write_request(request, bundle)
-        written.append((target, existed, names, placed if isinstance(placed, Path) else None))
+        written.append((target, existed, names, request))
         if isinstance(placed, StageResult):
             undo()
             return placed

@@ -37,7 +37,7 @@ from tests.overlays import ORDERS_CONTRACT, ORDERS_MEAN_PROFILE, ORDERS_PROFILE
 pytestmark = pytest.mark.integration
 
 NAMESPACE = "com.agentics.flux/1"
-REQUEST = ".assumptions.profile-request.yml"
+REQUEST = "requests/assumptions.profile-request.yml"
 
 
 def _entries(bundle: Path) -> List[Dict[str, Any]]:
@@ -48,7 +48,7 @@ def _entries(bundle: Path) -> List[Dict[str, Any]]:
 
 
 def _request(root: Path, name: str = "bundle") -> Any:
-    return load_request_text((root / f"{name}{REQUEST}").read_text(encoding="utf-8"))
+    return load_request_text((root / name / REQUEST).read_text(encoding="utf-8"))
 
 
 def _write_profile(root: Path, change: Any) -> Path:
@@ -172,12 +172,12 @@ def test_the_ledger_lists_the_statistics_that_would_replace_assumptions(
     assert listed[("/tables/orders/columns/country/statistics/0", "levelHistogram/1")] == 1
     assert listed[("/tables/orders/columns/amount/statistics/0", "marginalHistogram/1")] == 8
     assert "a profile of the contract would replace assumptions" in result.stdout
-    assert f"{root / ('bundle' + REQUEST)} asks a profiler for them" in result.stdout
+    assert f"{root / 'bundle' / REQUEST} asks a profiler for them" in result.stdout
     assert (
         "  - /tables/orders/columns/country/statistics/0 (levelHistogram/1): 1 assumed number"
         in (result.stdout)
     )
-    assert result.artifacts["assumptionsRequest"] == str(root / ("bundle" + REQUEST))
+    assert result.artifacts["assumptionsRequest"] == str(root / "bundle" / REQUEST)
 
 
 def test_the_request_asks_for_exactly_the_statistics_replacedBy_names(
@@ -185,11 +185,12 @@ def test_the_request_asks_for_exactly_the_statistics_replacedBy_names(
 ) -> None:
     root, result = written
     asked = _request(root)
-    # Read by the request reader (format 1-0-0), beside the bundle and never inside it.
-    assert not (root / "bundle" / ("bundle" + REQUEST)).exists()
+    # Read by the request reader (format 1-0-0); it sits inside the bundle directory, in a
+    # subdirectory, beside the bundle's documents.
     assert sorted(path.name for path in (root / "bundle").iterdir()) == [
         "orders.fluid.yaml",
         "persona.flux.yml",
+        "requests",
         "simulation.flux.yml",
         "world.flux.yml",
     ]
@@ -222,7 +223,7 @@ def test_the_request_asks_for_exactly_the_statistics_replacedBy_names(
 
 def test_the_request_is_the_format_main_reads_and_names_no_value(written: Tuple[Path, Any]) -> None:
     root, _ = written
-    text = (root / ("bundle" + REQUEST)).read_text(encoding="utf-8")
+    text = (root / "bundle" / REQUEST).read_text(encoding="utf-8")
     assert "profile-request/1-0-0/FluxProfileRequest.json" in text
     asked = _request(root)  # the reader of format 1-0-0 takes it
     assert [table.expose_id for table in asked.tables] == ["orders"]
@@ -355,19 +356,64 @@ def test_init_plan_apply_verify_and_ship_with_the_replacements(
 # ---------------------------------------------------------------------------
 
 
-def test_a_request_file_that_exists_is_never_overwritten_and_nothing_is_written(
-    tmp_path: Path,
-) -> None:
-    (tmp_path / ("bundle" + REQUEST)).write_text("mine", encoding="utf-8")
+def test_init_again_after_the_bundle_was_moved_away_succeeds(tmp_path: Path) -> None:
+    first = run_init(
+        str(tmp_path / "bundle"), contract=str(ORDERS_CONTRACT), profile=str(ORDERS_PROFILE)
+    )
+    assert first.exit_code == 0, first.stderr
+    assert (tmp_path / "bundle" / REQUEST).is_file()
+    (tmp_path / "bundle").rename(tmp_path / "kept")
+    # Nothing is left beside the directory to refuse the second run.
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["kept"]
+    second = run_init(
+        str(tmp_path / "bundle"), contract=str(ORDERS_CONTRACT), profile=str(ORDERS_PROFILE)
+    )
+    assert second.exit_code == 0, second.stderr
+    assert (tmp_path / "bundle" / REQUEST).is_file()
+
+
+def test_a_directory_that_holds_a_request_is_never_written_over(tmp_path: Path) -> None:
+    (tmp_path / "bundle" / "requests").mkdir(parents=True)
+    (tmp_path / "bundle" / REQUEST).write_text("mine", encoding="utf-8")
     result = run_init(
         str(tmp_path / "bundle"), contract=str(ORDERS_CONTRACT), profile=str(ORDERS_PROFILE)
     )
-    assert result.exit_code == 1 and "exists, and init never overwrites" in result.stderr
-    assert not (tmp_path / "bundle").exists()
-    assert (tmp_path / ("bundle" + REQUEST)).read_text(encoding="utf-8") == "mine"
+    assert result.exit_code == 1 and "never overwrites" in result.stderr
+    assert (tmp_path / "bundle" / REQUEST).read_text(encoding="utf-8") == "mine"
 
 
-def test_each_overlay_bundle_gets_its_own_request_beside_it(tmp_path: Path) -> None:
+def test_the_request_is_not_read_as_a_bundle_document_nor_hashed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import shutil
+
+    bundle = tmp_path / "bundle"
+    result = run_init(str(bundle), contract=str(ORDERS_CONTRACT), profile=str(ORDERS_MEAN_PROFILE))
+    assert result.exit_code == 0, result.stderr
+    assert (bundle / REQUEST).is_file()
+    bare = tmp_path / "bare"
+    shutil.copytree(bundle, bare)
+    shutil.rmtree(bare / "requests")
+    digests = []
+    for directory in (bundle, bare):
+        assert _cli(capsys, "validate", str(directory))[0] == 0
+        code, out = _cli(
+            capsys,
+            "plan",
+            str(directory),
+            "--profile",
+            str(ORDERS_MEAN_PROFILE),
+            "--state-dir",
+            str(tmp_path / f"state-{directory.name}"),
+            "--json",
+        )
+        assert code == 0, out
+        artifacts = json.loads(out)["artifacts"]
+        digests.append({key: value for key, value in artifacts.items() if "digest" in key.lower()})
+    assert digests[0] and digests[0] == digests[1]
+
+
+def test_each_overlay_bundle_gets_its_own_request_inside_it(tmp_path: Path) -> None:
     overlay = tmp_path / "double.yml"
     overlay.write_text(
         "name: double\npatch:\n  tables:\n    orders:\n      rowCount: 1200\n", encoding="utf-8"
@@ -379,18 +425,18 @@ def test_each_overlay_bundle_gets_its_own_request_beside_it(tmp_path: Path) -> N
         overlays=(str(overlay),),
     )
     assert result.exit_code == 0, result.stderr
-    assert (tmp_path / "bundles" / ("double" + REQUEST)).is_file()
-    assert [path.name for path in (tmp_path / "bundles").iterdir() if path.is_dir()] == ["double"]
+    assert (tmp_path / "bundles" / "double" / REQUEST).is_file()
+    assert [path.name for path in (tmp_path / "bundles").iterdir()] == ["double"]
     taken = tmp_path / "more"
-    taken.mkdir()
-    (taken / ("double" + REQUEST)).write_text("mine", encoding="utf-8")
+    (taken / "double").mkdir(parents=True)
+    (taken / "double" / "mine.txt").write_text("mine", encoding="utf-8")
     refused = run_init(
         str(taken),
         contract=str(ORDERS_CONTRACT),
         profile=str(ORDERS_PROFILE),
         overlays=(str(overlay),),
     )
-    assert refused.exit_code == 1 and not (taken / "double").exists()
+    assert refused.exit_code == 1 and not (taken / "double" / "requests").exists()
 
 
 def test_no_request_is_written_when_no_assumption_has_a_statistic(tmp_path: Path) -> None:
@@ -403,5 +449,5 @@ def test_no_request_is_written_when_no_assumption_has_a_statistic(tmp_path: Path
     assert result.exit_code == 0, result.stderr
     replaced = result.artifacts["ledger"]["replacedBy"]
     assert replaced  # this profile leaves numbers a statistic would answer
-    assert (tmp_path / ("bundle" + REQUEST)).is_file()
+    assert (tmp_path / "bundle" / REQUEST).is_file()
     assert "assumptionsRequest" in result.artifacts

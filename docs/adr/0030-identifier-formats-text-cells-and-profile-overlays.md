@@ -305,8 +305,11 @@ Parameter register format 1-3-0 adds:
   overlaid profile in the form a `profile` citation takes.
 - **`replacedBy`** on an `assumption` or `default` entry: `{pointer, definition}`, the statistic a
   profile of the contract would publish for that number. `fluxsim init` writes it for every number
-  it assumes. The ledger lists them, and `init` writes `<name>.assumptions.profile-request.yml`
-  beside the bundle, a profile request (PROFILE-REQUEST-SPEC, in its current format) for exactly
+  it assumes. The ledger lists them, and `init` writes `requests/assumptions.profile-request.yml`
+  inside the bundle directory (amended 2026-11-24: it was written beside the directory as
+  `<name>.assumptions.profile-request.yml`, which made a second `init` fail after the directory
+  was moved away; a subdirectory because the loader refuses any other top-level file, ADR 0006),
+  a profile request (PROFILE-REQUEST-SPEC, in its current format) for exactly
   those statistics. Running `init` again with a profile that answers it turns each of those
   assumptions into a profile citation.
 - Format 1-3-0 is shared with the consumer questions' change of the same release, which adds

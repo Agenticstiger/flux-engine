@@ -215,7 +215,7 @@ A number that is a setting and not a statistic has none: a tolerance, the bounds
 committed state, a check's budget and a template default. The index `<i>` of a statistic is its
 place in the request `init` writes for the same assumptions, whose statistics are in identifier
 order, so a profiler that writes the profile from the request lists them there. `init` writes the
-request beside the bundle as `<name>.assumptions.profile-request.yml`, a profile request
+request inside the bundle directory as `requests/assumptions.profile-request.yml`, a profile request
 (PROFILE-REQUEST-SPEC.md, format 1-0-0) for exactly the statistics the entries name. Running `init`
 again with a profile that publishes them turns each of those assumptions into a `profile` citation.
 
