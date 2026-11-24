@@ -23,7 +23,7 @@ contract writes is never used.
 
 **Keys.** A history's records and those of its projections are keyed by the history's natural
 entity, any other stream by its primary entity; ``key.EXPOSE=COLUMN[,COLUMN]`` names the columns
-and ``key-format=json`` writes them as a canonical JSON object. The partitioner is
+and ``key-format=json`` writes them as a compact JSON object, in the order named. The partitioner is
 ``murmur2_random``, Java's, so a record lands where a Java producer would put it.
 
 **Time.** The record timestamp is the event's time in milliseconds (``timestamp.EXPOSE=COLUMN``
@@ -35,7 +35,8 @@ a timestamp to fit.
 followed by a tombstone; every other stream is written as its rows. With ``registry`` the values
 go through the registry's Avro (or, with ``value-format=json``, JSON Schema) serializers: against
 the contract's subject when it names one, otherwise a schema derived from the columns and
-registered under the topic's ``-value`` subject. Without it a value is canonical JSON.
+registered under the topic's ``-value`` subject. Without it a value is compact JSON in the
+stream's column order.
 
 **Exactly once.** One idempotent transactional producer per stream and run, under a stable
 ``transactional.id``. An unpaced stream is one transaction; each transaction also commits the
@@ -72,6 +73,8 @@ from flux_engine.core.errors import FluxError
 from flux_engine.core.grades import Pattern
 from flux_engine.seam.emit import FLX_3301
 from flux_engine.sinks._kafka_broker import (
+    COMPRESSIONS,
+    DEFAULT_COMPRESSION,
     Broker,
     ClientSettings,
     ConfluentBroker,
@@ -118,6 +121,7 @@ __all__ = [
 OPTIONS: Tuple[str, ...] = (
     "audience",
     "commit-every",
+    "compression",
     "key-format",
     "pace",
     "partitions",
@@ -135,6 +139,9 @@ OPTIONS: Tuple[str, ...] = (
     "value-format",
 )
 FAMILIES: Tuple[str, ...] = ("topic.", "key.", "timestamp.")
+
+#: How many unpaced records are sent for each read of the wall clock for the timestamp limits.
+_CLOCK_EVERY = 1024
 
 SECURITY_PROTOCOLS: Tuple[str, ...] = ("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
 SASL_MECHANISMS: Tuple[str, ...] = ("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512")
@@ -267,6 +274,7 @@ class KafkaSettings:
     value_format: str = "avro"
     pace: Pace = field(default_factory=lambda: parse_pace(None))
     commit_every: float = 1.0
+    compression: str = DEFAULT_COMPRESSION
     partitions: Optional[int] = None
     replication_factor: Optional[int] = None
     timeout: float = 30.0
@@ -350,6 +358,13 @@ class KafkaSettings:
                 f"the option value-format takes one of {', '.join(VALUE_FORMATS)}, "
                 f"not {value_format!r}",
             )
+        compression = text_option(fixed, "compression", DEFAULT_COMPRESSION) or ""
+        if compression not in COMPRESSIONS:
+            raise FluxError(
+                FLX_3504,
+                f"the option compression takes one of {', '.join(COMPRESSIONS)}, "
+                f"not {compression!r}",
+            )
         user_env = text_option(fixed, "sasl-username-env")
         password_env = text_option(fixed, "sasl-password-env")
         if (user_env is None) != (password_env is None):
@@ -403,6 +418,7 @@ class KafkaSettings:
             value_format=value_format or "avro",
             pace=parse_pace(text_option(fixed, "pace")),
             commit_every=_seconds(fixed, "commit-every", 1.0),
+            compression=compression,
             partitions=int_option(fixed, "partitions", None),
             replication_factor=int_option(fixed, "replication-factor", None),
             timeout=_seconds(fixed, "timeout", 30.0),
@@ -611,6 +627,9 @@ class KafkaSink:
         self._txn_open = False
         self._txn_since = 0.0
         self._info: Optional[TopicInfo] = None
+        self._limits: Tuple[Tuple[str, int, bool], ...] = ()
+        self._now = 0
+        self._since_clock = 0
         self._serialize: Optional[ValueSerializer] = None
         self._producer: Optional[TxnProducer] = None
         self._builder: Optional[RecordBuilder] = None
@@ -657,6 +676,7 @@ class KafkaSink:
         )
         broker = self._owner.broker
         self._info = self._topic(broker)
+        self._limits = self._limits_of(self._info)
         self._serialize = self._serializer()
         found = _read_progress(
             broker.progress(self.transactional_id, shape.topic), self.context.digest_hex
@@ -674,7 +694,10 @@ class KafkaSink:
                 self._skipped = found.records
         if not self._complete:
             self._producer = broker.transactional_producer(
-                self.transactional_id, self.transactional_id
+                self.transactional_id,
+                self.transactional_id,
+                compression=self._settings.compression,
+                paced=self._paced,
             )
 
     def write(self, row: Sequence[object]) -> None:
@@ -689,8 +712,11 @@ class KafkaSink:
             return
         try:
             records = self._builder.records(row, index, last=index == self.context.rows - 1)
+            serialize, topic = self._serialize, self.shape.topic
+            assert serialize is not None
             for record in records:
-                value = self._bytes(record)
+                body = record.value
+                value = None if body is None else serialize(body, topic=topic)
                 if self._paced:
                     self._buffer.append((record, value))
                     continue
@@ -768,40 +794,45 @@ class KafkaSink:
             self.shape, value_format=settings.value_format, registry=access
         )
 
-    def _bytes(self, record: KafkaRecord) -> Optional[bytes]:
-        if record.value is None:
-            return None
-        assert self._serialize is not None
-        return self._serialize(record.value, topic=self.shape.topic)
-
     # -- sending -----------------------------------------------------------------
 
-    def _check_time(self, record: KafkaRecord) -> None:
-        topic, info = self.shape.topic, self._info
-        stamp = record.timestamp_ms
-        if stamp < 0:
-            raise FluxError(
-                FLX_3514,
-                f"topic {topic!r}: the record of row {record.row} is before 1970 and brokers "
-                "refuse a negative timestamp; run a window that starts in 1970 or later",
-            )
-        if info is None:
-            return
-        now = self._owner.clock.wall_ms()
+    def _limits_of(self, info: TopicInfo) -> Tuple[Tuple[str, int, bool], ...]:
+        """The topic's timestamp limits that are numbers: ``(name, limit, how late is refused)``."""
+        found = []
         for name, late in (
             ("message.timestamp.before.max.ms", True),
             ("message.timestamp.after.max.ms", False),
         ):
             limit = info.configs.get(name)
-            if limit is None or not limit.lstrip("-").isdigit():
-                continue
-            outside = now - stamp > int(limit) if late else stamp - now > int(limit)
-            if outside:
+            if limit is not None and limit.lstrip("-").isdigit():
+                found.append((name, int(limit), late))
+        return tuple(found)
+
+    def _check_time(self, record: KafkaRecord) -> None:
+        stamp = record.timestamp_ms
+        if stamp < 0:
+            raise FluxError(
+                FLX_3514,
+                f"topic {self.shape.topic!r}: the record of row {record.row} is before 1970 and "
+                "brokers refuse a negative timestamp; run a window that starts in 1970 or later",
+            )
+        if not self._limits:
+            return
+        # A paced stream reads the wall clock for each record, since it waits between them. An
+        # unpaced one reads it once for every `_CLOCK_EVERY` records, which take a few
+        # milliseconds to send against limits that are hours.
+        if self._paced or self._since_clock <= 0:
+            self._now = self._owner.clock.wall_ms()
+            self._since_clock = _CLOCK_EVERY
+        self._since_clock -= 1
+        now = self._now
+        for name, limit, late in self._limits:
+            if (now - stamp > limit) if late else (stamp - now > limit):
                 raise FluxError(
                     FLX_3514,
-                    f"topic {topic!r}: the record of row {record.row} is outside {name}={limit}; "
-                    "configure the topic for a backfill (a larger limit) or run a window nearer "
-                    "the present",
+                    f"topic {self.shape.topic!r}: the record of row {record.row} is outside "
+                    f"{name}={limit}; configure the topic for a backfill (a larger limit) or run "
+                    "a window nearer the present",
                 )
 
     def _begin(self) -> None:
@@ -812,12 +843,12 @@ class KafkaSink:
             self._txn_since = self._owner.clock.monotonic()
 
     def _send(self, record: KafkaRecord, value: Optional[bytes]) -> None:
-        assert self._producer is not None
+        producer = self._producer
+        assert producer is not None
         self._check_time(record)
-        self._begin()
-        self._producer.produce(
-            self.shape.topic, record.key, value, record.timestamp_ms, record.headers
-        )
+        if not self._txn_open:
+            self._begin()
+        producer.produce(self.shape.topic, record.key, value, record.timestamp_ms, record.headers)
         self._sent += 1
 
     def _commit(self, records: int, *, complete: bool) -> None:
@@ -891,6 +922,7 @@ class KafkaSink:
             "value": self._serialize.description if self._serialize else "json",
             "key": shape.key_format,
             "pace": settings.pace.text,
+            "compression": settings.compression,
             "transactions": self._transactions,
             "records": self._sent,
             "skipped": self._skipped,

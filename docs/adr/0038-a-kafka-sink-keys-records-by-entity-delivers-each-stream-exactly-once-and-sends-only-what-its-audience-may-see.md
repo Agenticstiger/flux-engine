@@ -78,12 +78,12 @@ replace event time with the time of the write, and a snapshot's topic must be co
 
 Every record is keyed by its entity, so each entity's records keep their order in one partition. The entity of a
 history's emit and of each projection of it (its snapshot, events and periodic rows) is the history's natural
-entity (ADR 0017); the entity of any other expose is its primary entity. `key.EXPOSE=COLUMN[,COLUMN...]` names
-the key columns instead. An expose with neither is `FLX-3513`, naming the option. `key-format=string`, the
-default, writes a one-column key as its rendered text, as Kafka's `StringSerializer` would; `key-format=json`
-writes the key columns as one JSON object in canonical form (RFC 8785), the shape Debezium's JSON converter gives
-a key. A key of several columns needs `json`, and a null key value is `FLX-3513`, naming the column and the row's
-position.
+entity (ADR 0017); the entity of any other expose is its primary entity. `key.EXPOSE=COLUMN[,COLUMN...]` names the
+key columns instead. An expose with neither is `FLX-3513`, naming the option. `key-format=string`, the default,
+writes a one-column key as its rendered text, as Kafka's `StringSerializer` would; `key-format=json` writes the key
+columns as one compact JSON object, the columns in the order `key.EXPOSE` names them, the shape Debezium's JSON
+converter gives a key. A key of several columns needs `json`, and a null key value is `FLX-3513`, naming the column
+and the row's position.
 
 The producer's partitioner is librdkafka's `murmur2_random`: Java's murmur2 over the key bytes, so a record lands
 on the partition a Java producer would choose for the same key bytes and partition count. librdkafka's own default,
@@ -146,8 +146,23 @@ With `--sink-opt registry=URL`, values go through confluent-kafka's registry ser
   forge's registry derivation: a DATE is `int` with `logicalType: date`, a TIMESTAMP is `long` with
   `timestamp-millis`, a DECIMAL is `bytes` with `logicalType: decimal`; every field is nullable.
 
-Without `registry`, a value is the canonical JSON (RFC 8785) of its object with the rendered values, which needs
-no registry to read; an expose whose contract names a subject is then `FLX-3515`, since its readers expect
+How the bytes are written does not change what they are. A derived Avro schema is registered once, when the
+stream opens, and each value is then written with fastavro behind the registry's framing (a zero byte and the
+schema's id), the bytes confluent-kafka's `AvroSerializer` writes for the same schema and value. A subject the
+contract names is written the same way when its schema carries no `ruleSet` and references no other schema; a
+schema with data-contract rules keeps confluent-kafka's serializer, since the rules run inside it. A derived JSON
+Schema is registered once and each value is written as compact JSON behind the same framing, the bytes
+`JSONSerializer` writes. It does not validate each value again with `jsonschema`: the value converter, built from
+the same schema, already holds every field to the schema's type and nullability and writes no field the schema
+does not list. A contract's JSON subject keeps `JSONSerializer` and its validation, since the schema is the
+author's.
+
+Without `registry`, a value is the compact JSON of its object with the rendered values (no spaces, text written as
+it is, not escaped), which needs no registry to read. The fields come in the order the stream declares them: a
+row's columns in the order of its header, an envelope as `before`, `after`, `source`, `op`, `ts_ms`, and a
+record inside it in the order of the history's columns. The order is a function of the declarations, so the
+bytes are the same at every pace and every `--jobs`, and no sorting of every object's keys (RFC 8785) is paid for
+on every record; an expose whose contract names a subject is then `FLX-3515`, since its readers expect
 registry framing.
 
 ### 9. Exactly once: one transaction per horizon, and progress inside it
@@ -164,6 +179,12 @@ offset commits with the records or not at all. A delivery that starts reads it: 
 and a partial one resumes after its last committed record. A read-committed consumer (`isolation.level` is
 `read_committed` by default in librdkafka and `read_uncommitted` in Java) sees each record exactly once, across a
 failure, a forced abort and a second delivery of the same run.
+
+The producer's batching suits the stream. An unpaced stream waits up to 20 ms to fill a batch of up to 100,000
+records and queues up to a million, so the brokers are sent few, large requests; a paced stream keeps librdkafka's
+5 ms, so a record is not held back from its time. `compression=none|gzip|snappy|lz4|zstd` sets the codec of the
+batches (`lz4` by default) and is recorded in the receipt. The producer drains its delivery reports once for every
+1,000 records, and waits 50 ms and tries again when its queue is full.
 
 ### 10. Pacing outside the digest
 
@@ -182,7 +203,8 @@ what it holds.
 Every record carries headers that label it synthetic and name its stream: `flux.synthetic: true`, `flux.run-id`,
 `flux.expose`, `flux.output-digest` and `flux.row`, the row's position in the stream. The receipt names the topic,
 its partition count, the shape (`debezium` or `row`), the value format and subject, the key format, the pace, the
-transactions, the records sent and skipped as already delivered, the audience and the grade. It holds no credential.
+compression, the transactions, the records sent and skipped as already delivered, the audience and the grade. It
+holds no credential.
 
 ### 12. Credentials and options
 
@@ -197,8 +219,8 @@ the `flux_engine.sinks.kafka` logger, never to the terminal directly.
 
 The options are `audience`, `registry`, `registry-auth-env`, `registry-ca-location`, `topic-prefix`,
 `topic.EXPOSE`, `key.EXPOSE`, `key-format`, `timestamp.EXPOSE`, `value-format`, `pace`, `commit-every`,
-`partitions`, `replication-factor`, `timeout`, `security-protocol`, `sasl-mechanism`, `sasl-username-env`,
-`sasl-password-env` and `ssl-ca-location`.
+`compression`, `partitions`, `replication-factor`, `timeout`, `security-protocol`, `sasl-mechanism`,
+`sasl-username-env`, `sasl-password-env` and `ssl-ca-location`.
 
 ## Consequences
 
@@ -222,6 +244,8 @@ The options are `audience`, `registry`, `registry-auth-env`, `registry-ca-locati
 - confluent-kafka-python 2.16.2 and librdkafka 2.16.0 (Apache-2.0, BSD-2-Clause): idempotence off by default,
   `consistent_random` by default, `murmur2_random` for Java's partitioning, explicit timestamps, transactions and
   `send_offsets_to_transaction`, and the registry serializers this sink uses.
+- fastavro 1.13 (MIT): the Avro writer confluent-kafka's `AvroSerializer` calls for each record. The sink calls it
+  directly behind the registry's framing once the schema's id is known, and the tests compare the bytes.
 - KIP-618 (Kafka Connect exactly-once source support): records and their source progress in one transaction, and
   fencing by a stable `transactional.id`.
 - KIP-937 and KIP-1030: the `message.timestamp.before.max.ms` and `after.max.ms` limits, and their defaults.

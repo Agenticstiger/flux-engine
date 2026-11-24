@@ -70,7 +70,7 @@ Every record is keyed by its entity, so one entity's records keep their order in
 | `key-format` | Key bytes |
 |---|---|
 | `string` (the default) | a one-column key as its rendered text, as Kafka's `StringSerializer` writes it |
-| `json` | the key columns as one JSON object in canonical form (RFC 8785), as Debezium's JSON converter writes a key |
+| `json` | the key columns as one compact JSON object, in the order `key.EXPOSE` names them, as Debezium's JSON converter writes a key |
 
 A key of several columns needs `json`. A null key value is refused (`FLX-3513`), naming the column and the row's position. The producer uses librdkafka's `murmur2_random` partitioner, so a record lands on the partition a Java producer would choose for the same key bytes and partition count.
 
@@ -109,7 +109,7 @@ A snapshot is the table's first load in the same envelope, with `op` `r`, `befor
 
 ## Schemas
 
-Without a registry, a value is the canonical JSON (RFC 8785) of its object, which needs nothing to read. With `registry=URL`, values go through confluent-kafka's registry serializers, and there are two cases.
+Without a registry, a value is the compact JSON of its object, which needs nothing to read: no spaces, text as it is, and the fields in the order the stream declares them (a row's columns in header order; an envelope as `before`, `after`, `source`, `op`, `ts_ms`). With `registry=URL`, values go through confluent-kafka's registry serializers, and there are two cases.
 
 ```text
 fluxsim run . --sink kafka:localhost:9092 --sink-opt audience=internal \
@@ -140,6 +140,21 @@ fluxsim run . --sink kafka:localhost:9092 --sink-opt audience=internal \
 
 A paced stream commits a transaction at least every `commit-every` seconds (1 by default) and before any wait longer than that, so a read-committed consumer sees records as they are sent, and each transaction carries the progress above. A delivery resumes only in the order it began: a paced delivery and an unpaced one of the same stream do not mix (`FLX-3504`). Keys, values, timestamps and headers are the same at every pace and every `--jobs`. Pacing chooses when a record is sent and never what it holds. A paced stream is held in memory until its last row arrives, and streams are delivered one after another, so pacing orders the records within a stream and not across streams.
 
+## Performance
+
+The figures below were measured with one delivery process on a 16-core laptop that was running other work, against a local single-node Kafka 4.4 and a Karapace registry in Docker, at `pace=max`, on a bundle whose change events number about 200,000 (about 209,000 records, since each delete adds a tombstone). One Python process builds, serializes and queues every record, so the figures are that process's.
+
+| Stream | Records per second | Values, megabytes per second | Every stream of the bundle (2.09 million records) |
+|---|---|---|---|
+| Change events, plain JSON | about 41,000 | about 11 | about 28,000 records per second, 75 s |
+| Change events, Avro through the registry | about 23,000 | about 2 | about 28,000 records per second, 75 s |
+
+Planning, generating and applying that bundle took about 30 s, so a run into Kafka took about 105 s from the plan to the last commit, for either value format. Each figure for the events stream is the best of three deliveries on fresh topics. They move by a quarter or more with what else the machine is doing, so read them as an order of magnitude and measure your own from a checkout of the repository with `python -m tests.bench.kafka_real_broker`, which starts its own broker and registry in Docker and removes them.
+
+For each record the process finds its key and event time, builds its value (the envelope for a change event) and writes its bytes. `make bench` times that work alone, over a broker that keeps nothing: on the same machine, change events took about 105,000 records per second of processor time as plain JSON and about 39,000 as Avro. Plain JSON is the cheapest. Avro and JSON Schema first convert each value to its field's exact type (a decimal text to a decimal that fits its precision and scale, a date to its day number), and Avro then encodes it. Registering the schema and building the converters happen once, when a stream opens, and no record asks the registry for anything. A paced stream is limited by its clock, not by these figures.
+
+Two options matter. `pace` is the one that changes the figures most: `max` sends as fast as the process can build records, and `realtime` or `xN` waits for each record's time. `compression` sets the codec of the producer's batches (`none`, `gzip`, `snappy`, `lz4` or `zstd`; `lz4` by default). On a broker on the same machine the codecs were within the noise of one another; the codec is chosen for the network and the brokers' disks, where fewer bytes are worth the cheap compression. An unpaced stream also batches for 20 ms before it sends, so the brokers get few, large requests; a paced stream keeps librdkafka's 5 ms so no record waits long past its time.
+
 ## Credentials
 
 A credential is never an option (`FLX-3508`) and never part of the target. SASL credentials come from the environment variables that `sasl-username-env` and `sasl-password-env` name, with `security-protocol` and `sasl-mechanism` (`PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`). The registry's basic credentials come from the variable `registry-auth-env` names, as `USER:PASSWORD`.
@@ -166,6 +181,7 @@ A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless ever
 | `timestamp.EXPOSE` | the timestamp column |
 | `value-format` | `json` for a derived JSON Schema instead of Avro |
 | `pace`, `commit-every` | `max`, `realtime` or `xN`, and the seconds between transactions |
+| `compression` | `none`, `gzip`, `snappy`, `lz4` (the default) or `zstd`: the codec of the producer's batches |
 | `partitions`, `replication-factor` | for a topic the sink creates |
 | `timeout` | the time limit for a broker or registry call |
 | `security-protocol`, `sasl-mechanism`, `sasl-username-env`, `sasl-password-env`, `ssl-ca-location` | the connection |
@@ -176,6 +192,6 @@ Any other option is `FLX-3504`, as for every sink.
 
 Every record carries headers that label it synthetic and name its stream: `flux.synthetic` (`true`), `flux.run-id`, `flux.expose`, `flux.output-digest` and `flux.row`, the row's position in the stream.
 
-The run's `sink-receipts.json` holds one receipt for each stream. It names the topic and its partition count, the shape (`debezium` or `row`), the value format and subject, the key format, the pace, the transactions, the records sent and the records skipped as already delivered, and the audience and the grade. It holds no credential.
+The run's `sink-receipts.json` holds one receipt for each stream. It names the topic and its partition count, the shape (`debezium` or `row`), the value format and subject, the key format, the pace, the compression, the transactions, the records sent and the records skipped as already delivered, and the audience and the grade. It holds no credential.
 
 The streams are also in the run directory as NDJSON, as for every sink, and those files are what the `outputDigest` covers. The shapes the sink reads are in [ADR 0027](../adr/0027-a-history-projects-snapshots-events-and-periods.md), and the grades it gates on are in [ADR 0020](../adr/0020-privacy-grades.md).

@@ -429,8 +429,12 @@ class _FaultyBroker:
     def progress(self, group: str, topic: str) -> Optional[str]:
         return self.inner.progress(group, topic)
 
-    def transactional_producer(self, transactional_id: str, group: str) -> TxnProducer:
-        producer = self.inner.transactional_producer(transactional_id, group)
+    def transactional_producer(
+        self, transactional_id: str, group: str, *, compression: str = "none", paced: bool = False
+    ) -> TxnProducer:
+        producer = self.inner.transactional_producer(
+            transactional_id, group, compression=compression, paced=paced
+        )
         if not self.faults:
             return producer
         after, zombie = self.faults.pop(0)

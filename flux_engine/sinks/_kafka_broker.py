@@ -53,6 +53,24 @@ TOPIC_CONFIGS: Tuple[str, ...] = (
 #: The librdkafka partitioner that picks the partition Java's murmur2 picks.
 PARTITIONER = "murmur2_random"
 
+#: The compression codecs a producer may use (``compression.type``), and the default.
+COMPRESSIONS: Tuple[str, ...] = ("none", "gzip", "snappy", "lz4", "zstd")
+DEFAULT_COMPRESSION = "lz4"
+
+#: What an unpaced stream's producer batches and queues: it waits 20 ms to fill a batch of up to
+#: 100,000 records and holds up to a million, so the brokers are given few, large requests.
+#: A paced stream keeps librdkafka's own 5 ms, so a record is not held back from its time.
+UNPACED_PRODUCER: Mapping[str, Any] = {
+    "linger.ms": 20,
+    "batch.num.messages": 100_000,
+    "queue.buffering.max.messages": 1_000_000,
+}
+PACED_PRODUCER: Mapping[str, Any] = {"linger.ms": 5}
+
+#: A producer drains its delivery reports once for this many records, and when its queue is full.
+POLL_EVERY = 1000
+FULL_QUEUE_WAIT = 0.05
+
 
 @dataclass(frozen=True)
 class TopicInfo:
@@ -110,9 +128,13 @@ class Broker(Protocol):
     def progress(self, group: str, topic: str) -> Optional[str]:
         """The metadata *group* committed on partition 0 of *topic*, or ``None``."""
 
-    def transactional_producer(self, transactional_id: str, group: str) -> TxnProducer:
+    def transactional_producer(
+        self, transactional_id: str, group: str, *, compression: str = "none", paced: bool = False
+    ) -> TxnProducer:
         """A producer under *transactional_id* whose transactions commit offsets of *group*.
 
+        Records are compressed with *compression* (one of :data:`COMPRESSIONS`); a *paced*
+        producer sends each record soon after it is queued, an unpaced one batches them.
         Initialising it fences any producer under the same id and aborts what that one left open.
         """
 
@@ -311,7 +333,9 @@ class ConfluentBroker:
                 except Exception:  # noqa: BLE001
                     LOGGER.debug("closing the progress consumer failed", exc_info=False)
 
-    def transactional_producer(self, transactional_id: str, group: str) -> TxnProducer:
+    def transactional_producer(
+        self, transactional_id: str, group: str, *, compression: str = "none", paced: bool = False
+    ) -> TxnProducer:
         """An initialised transactional producer; fences the previous one of the same id."""
         from confluent_kafka import Consumer, Producer
 
@@ -327,6 +351,8 @@ class ConfluentBroker:
                     "partitioner": PARTITIONER,
                     # At least a minute, and never shorter than the time one call may take.
                     "transaction.timeout.ms": max(60_000, int(timeout * 1000)),
+                    "compression.type": compression,
+                    **(PACED_PRODUCER if paced else UNPACED_PRODUCER),
                 }
             )
             producer.init_transactions(timeout)
@@ -365,6 +391,7 @@ class _ConfluentTxn:
         self._owner = owner
         self._timeout = owner._client.timeout
         self._failures: List[str] = []
+        self._queued = 0
 
     def _delivered(self, error: Any, _message: Any) -> None:
         if error is not None:
@@ -391,7 +418,7 @@ class _ConfluentTxn:
         headers: Sequence[Tuple[str, bytes]],
     ) -> None:
         self._raise_failures()
-        deadline = time.monotonic() + self._timeout
+        deadline = 0.0
         while True:
             try:
                 self._producer.produce(
@@ -405,14 +432,19 @@ class _ConfluentTxn:
                 break
             except BufferError:
                 # The local queue is full: let deliveries drain, then try again.
-                self._producer.poll(1)
-                if time.monotonic() >= deadline:
+                self._producer.poll(FULL_QUEUE_WAIT)
+                now = time.monotonic()
+                if deadline == 0.0:
+                    deadline = now + self._timeout
+                elif now >= deadline:
                     raise self._owner._fail(
                         BufferError("the local queue stayed full"), "could not queue a record"
                     ) from None
             except Exception as exc:  # noqa: BLE001
                 raise self._owner._fail(exc, "could not queue a record") from None
-        self._producer.poll(0)
+        self._queued += 1
+        if self._queued % POLL_EVERY == 0:
+            self._producer.poll(0)
 
     def commit(self, *, topic: str, records: int, metadata: str) -> None:
         from confluent_kafka import TopicPartition

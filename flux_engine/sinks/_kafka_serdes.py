@@ -4,35 +4,46 @@
 
 """What a Kafka record's value looks like on the wire (ADR 0038 section 8).
 
-Without a registry a value is the canonical JSON (RFC 8785) of its object (:func:`plain_json`).
-With one, :class:`ConfluentSerdes` builds confluent-kafka's registry serializers:
+Without a registry a value is the compact JSON of its object (:func:`plain_json`), its fields in
+the order the stream declares them. With one, :class:`ConfluentSerdes` builds confluent-kafka's registry serializers:
 
 * a stream whose contract names a subject is written against that subject, never registering
   anything under it, after its fields are checked against the stream's columns;
 * any other stream gets a schema derived from its columns (Avro, or JSON Schema for
   ``value-format=json``) registered under the topic's ``-value`` subject.
 
+Once a schema's id is known (it is registered, or looked up, when the stream opens) the bytes of a
+value are written here, behind Confluent's framing: Avro with fastavro, and JSON Schema as compact
+JSON. They equal what confluent-kafka's serializers write (the tests compare them), without the
+lookups and the validation they repeat for every record. A subject whose schema has data-contract
+rules, or references another schema, keeps confluent-kafka's Avro serializer; a contract's JSON
+subject keeps its ``JSONSerializer`` and validation.
+
 Values come in rendered (text, integers, booleans, null) and are converted by the field types of
 the schema they are written against, exactly: a decimal text becomes a ``Decimal`` that fits the
 field's precision and scale, a date its day number, a timestamp its milliseconds. A value a field
 cannot hold exactly is ``FLX-3515``, naming the field and never the value. A float never appears.
 
-The converters and the schema derivation are standard library only; ``confluent_kafka`` is
-imported inside :class:`ConfluentSerdes` when it builds a serializer.
+The converters and the schema derivation are standard library only; ``confluent_kafka`` and
+``fastavro`` (which confluent-kafka's Avro extra installs) are imported inside
+:class:`ConfluentSerdes` when it builds a serializer.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
+import io
 import json
 import re
+import struct
+from collections import abc as _abc
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
 
-from flux_engine.core.canonical import canonical_bytes
 from flux_engine.core.clock import parse_rfc3339_ms
 from flux_engine.core.errors import FluxError
 from flux_engine.sinks._kafka_shape import Envelope, StreamShape
@@ -45,6 +56,7 @@ __all__ = [
     "Serdes",
     "ValueSerializer",
     "avro_schema_for",
+    "compact_json",
     "json_schema_for",
     "plain_json",
     "require_supported_subject",
@@ -84,15 +96,27 @@ class Serdes(Protocol):
         """The serializer for *shape*; may fetch or register a schema."""
 
 
+#: Compact JSON with text as it is and no NaN: one encoder, built once.
+_COMPACT = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode
+
+
+def compact_json(value: Any) -> bytes:
+    """The compact JSON of *value* in the order its mappings hold, as UTF-8.
+
+    Deterministic, since the order is the stream's own, and readable by every JSON parser.
+    """
+    return _COMPACT(value).encode("utf-8")
+
+
 class _PlainJson:
     description = "json"
 
     def __call__(self, value: Mapping[str, Any], *, topic: str) -> bytes:
-        return canonical_bytes(dict(value))
+        return _COMPACT(value).encode("utf-8")
 
 
 def plain_json(shape: StreamShape) -> ValueSerializer:
-    """The canonical JSON of a value's rendered object: no registry, no library."""
+    """The compact JSON of a value's rendered object, fields in the stream's order: no registry."""
     del shape
     return _PlainJson()
 
@@ -306,36 +330,56 @@ def _refuse(at: str, why: str) -> FluxError:
     return FluxError(FLX_3515, f"field {at!r}: {why}")
 
 
-def _decimal(text: str, precision: int, scale: int, at: str) -> Decimal:
-    try:
-        value = Decimal(text)
-    except (InvalidOperation, ValueError):
-        raise _refuse(at, "a value is not a decimal number") from None
-    if not value.is_finite():
-        raise _refuse(at, "a value is not a finite decimal number")
+def _fit_decimal(precision: int, scale: int, at: str) -> Callable[[str], Decimal]:
+    """The check of a decimal text against ``decimal(precision, scale)``, built once."""
     step = Decimal(1).scaleb(-scale)
+
+    def fit(text: str) -> Decimal:
+        try:
+            value = Decimal(text)
+        except (InvalidOperation, ValueError):
+            raise _refuse(at, "a value is not a decimal number") from None
+        if not value.is_finite():
+            raise _refuse(at, "a value is not a finite decimal number")
+        try:
+            fitted = value.quantize(step)
+        except InvalidOperation:
+            raise _refuse(at, f"a value does not fit decimal({precision},{scale})") from None
+        if fitted != value or len(fitted.as_tuple().digits) > precision:
+            raise _refuse(at, f"a value does not fit decimal({precision},{scale}) exactly")
+        return fitted
+
+    return fit
+
+
+@lru_cache(maxsize=65536)
+def _day_number(text: str) -> int:
+    """The day number of a rendered DATE; ``ValueError`` when it is not one. Cached by text."""
+    if _DATE.fullmatch(text) is None:
+        raise ValueError(text)
+    return date.fromisoformat(text).toordinal() - _EPOCH_ORDINAL
+
+
+@lru_cache(maxsize=65536)
+def _milliseconds(text: str) -> int:
+    """The milliseconds of a rendered TIMESTAMP; ``ValueError`` when it is not one. Cached."""
     try:
-        fitted = value.quantize(step)
-    except InvalidOperation:
-        raise _refuse(at, f"a value does not fit decimal({precision},{scale})") from None
-    if fitted != value or len(fitted.as_tuple().digits) > precision:
-        raise _refuse(at, f"a value does not fit decimal({precision},{scale}) exactly")
-    return fitted
+        return parse_rfc3339_ms(text)
+    except FluxError:
+        raise ValueError(text) from None
 
 
 def _days(text: str, at: str) -> int:
-    if _DATE.fullmatch(text) is None:
-        raise _refuse(at, "a value is not a rendered DATE")
     try:
-        return date.fromisoformat(text).toordinal() - _EPOCH_ORDINAL
+        return _day_number(text)
     except ValueError:
         raise _refuse(at, "a value is not a rendered DATE") from None
 
 
 def _millis(text: str, at: str) -> int:
     try:
-        return parse_rfc3339_ms(text)
-    except FluxError:
+        return _milliseconds(text)
+    except ValueError:
         raise _refuse(at, "a value is not a rendered TIMESTAMP") from None
 
 
@@ -364,7 +408,7 @@ def _avro_leaf(node: Any, at: str) -> Converter:
     if base == "string":
 
         def to_string(value: Any) -> Any:
-            return _text_of(value, at)
+            return value if type(value) is str else _text_of(value, at)
 
         return to_string
     if base in ("int", "long"):
@@ -390,7 +434,7 @@ def _avro_leaf(node: Any, at: str) -> Converter:
             return to_millis
 
         def to_int(value: Any) -> Any:
-            if _is_int(value):
+            if type(value) is int or _is_int(value):
                 return value
             raise _refuse(at, "a value is not an integer")
 
@@ -405,12 +449,12 @@ def _avro_leaf(node: Any, at: str) -> Converter:
         return to_bool
     if base == "bytes":
         if logical == "decimal" and isinstance(node, Mapping):
-            precision, scale = int(node.get("precision", 0)), int(node.get("scale", 0))
+            fit = _fit_decimal(int(node.get("precision", 0)), int(node.get("scale", 0)), at)
 
             def to_decimal(value: Any) -> Any:
                 if not isinstance(value, str):
                     return _wrong(at, "DECIMAL")
-                return _decimal(value, precision, scale, at)
+                return fit(value)
 
             return to_decimal
 
@@ -466,26 +510,31 @@ def _qualified(record: Mapping[str, Any]) -> str:
     return name if "." in name or not namespace else f"{namespace}.{name}"
 
 
+_MISSING = object()
+
+
 def _avro_record(node: Mapping[str, Any], at: str, names: Dict[str, Any]) -> Converter:
     names[_qualified(node)] = node
-    fields: List[Tuple[str, Converter, bool, bool]] = []
+    fields: List[Tuple[str, Converter, bool, bool, str]] = []
     for item in node.get("fields", []):
         name = str(item["name"])
         where = f"{at}.{name}" if at else name
         convert, nullable = _avro_converter(item["type"], where, names)
-        fields.append((name, convert, nullable, "default" in item))
+        fields.append((name, convert, nullable, "default" in item, where))
+    plan = tuple(fields)
 
     def to_record(value: Any) -> Any:
         if value is None:
             return None
+        if type(value) is not dict and not isinstance(value, _abc.Mapping):
+            value = {}
         out: Dict[str, Any] = {}
-        for name, convert, nullable, has_default in fields:
-            where = f"{at}.{name}" if at else name
-            if not isinstance(value, Mapping) or name not in value:
+        for name, convert, nullable, has_default, where in plan:
+            item = value.get(name, _MISSING)
+            if item is _MISSING:
                 if has_default:
                     continue
                 raise _refuse(where, "the value has no such field")
-            item = value[name]
             if item is None:
                 if not nullable:
                     raise _refuse(where, "a null cannot go into a field that takes none")
@@ -528,7 +577,7 @@ def _json_converter(node: Mapping[str, Any], at: str) -> Tuple[Converter, bool]:
     if kind == "integer":
 
         def to_int(value: Any) -> Any:
-            if _is_int(value):
+            if type(value) is int or _is_int(value):
                 return value
             raise _refuse(at, "a value is not an integer")
 
@@ -552,7 +601,7 @@ def _json_converter(node: Mapping[str, Any], at: str) -> Tuple[Converter, bool]:
     if kind == "string":
 
         def to_string(value: Any) -> Any:
-            return _text_of(value, at)
+            return value if type(value) is str else _text_of(value, at)
 
         return to_string, nullable
     if kind == "boolean":
@@ -572,25 +621,30 @@ def _json_object(node: Mapping[str, Any], at: str) -> Converter:
     properties = node.get("properties")
     if not isinstance(properties, Mapping):
         raise _refuse(at or "(value)", "an object with no declared properties cannot be checked")
-    fields: List[Tuple[str, Converter, bool]] = []
+    fields: List[Tuple[str, Converter, bool, str]] = []
     for name, sub in properties.items():
-        convert, nullable = _json_converter(sub, f"{at}.{name}" if at else str(name))
-        fields.append((str(name), convert, nullable))
+        where = f"{at}.{name}" if at else str(name)
+        convert, nullable = _json_converter(sub, where)
+        fields.append((str(name), convert, nullable, where))
+    plan = tuple(fields)
+    listed = node.get("required")
+    required = frozenset(str(name) for name in listed) if isinstance(listed, list) else frozenset()
 
     def to_object(value: Any) -> Any:
         if value is None:
             return None
+        if type(value) is not dict and not isinstance(value, _abc.Mapping):
+            value = {}
         out: Dict[str, Any] = {}
-        for name, convert, nullable in fields:
-            if not isinstance(value, Mapping) or name not in value:
+        for name, convert, nullable, where in plan:
+            item = value.get(name, _MISSING)
+            if item is _MISSING:
+                if name in required:
+                    raise _refuse(where, "the value has no such field")
                 continue
-            item = value[name]
             if item is None:
                 if not nullable:
-                    raise _refuse(
-                        f"{at}.{name}" if at else name,
-                        "a null cannot go into a field that takes none",
-                    )
+                    raise _refuse(where, "a null cannot go into a field that takes none")
                 out[name] = None
             else:
                 out[name] = convert(item)
@@ -606,14 +660,32 @@ def json_converter(schema: Mapping[str, Any]) -> Converter:
     return _json_object(schema, "")
 
 
+_KEY = json.encoder.encode_basestring_ascii
+_TEXT = json.encoder.encode_basestring
+
+
 def _json_dumps(value: Any) -> str:
-    """JSON text of a converted value; a ``Decimal`` is written as the number it is, exactly."""
+    """JSON text of a converted value; a ``Decimal`` is written as the number it is, exactly.
+
+    Compact, in the order a mapping holds. A key is written ASCII-only and a value as it is.
+    """
+    kind = type(value)
+    if kind is str:
+        return _TEXT(value)
+    if kind is int:
+        return int.__repr__(value)
+    if value is None:
+        return "null"
+    if kind is bool:
+        return "true" if value else "false"
+    if kind is Decimal:
+        return format(value, "f")
+    if kind is dict:
+        return "{" + ",".join([f"{_KEY(str(k))}:{_json_dumps(v)}" for k, v in value.items()]) + "}"
     if isinstance(value, Decimal):
         return format(value, "f")
     if isinstance(value, Mapping):
-        return (
-            "{" + ",".join(f"{json.dumps(str(k))}:{_json_dumps(v)}" for k, v in value.items()) + "}"
-        )
+        return "{" + ",".join(f"{_KEY(str(k))}:{_json_dumps(v)}" for k, v in value.items()) + "}"
     if isinstance(value, (list, tuple)):
         return "[" + ",".join(_json_dumps(item) for item in value) + "]"
     return json.dumps(value, ensure_ascii=False, allow_nan=False)
@@ -654,6 +726,85 @@ def _json_field_list(schema: Mapping[str, Any]) -> List[Tuple[str, bool]]:
 # -- the serializers ---------------------------------------------------------------
 
 
+def _serializer_failure(exc: BaseException, known: Callable[[], Sequence[Known]]) -> FluxError:
+    """``FLX-3505`` for a serializer's error: one scrubbed line, the library's exception unchained."""
+    from flux_engine.sinks.errors import FLX_3505
+
+    lines = scrub(str(exc), known(), sink="kafka").strip().splitlines()
+    return FluxError(
+        FLX_3505,
+        f"kafka: the registry serializer failed: {type(exc).__name__}"
+        f"{': ' + lines[0][:300] if lines else ''}",
+    )
+
+
+#: Confluent's framing: a zero byte, then the schema's id as four big-endian bytes.
+def _frame_head(schema_id: int) -> bytes:
+    return b"\x00" + struct.pack(">I", schema_id)
+
+
+class _FramedAvro:
+    """Avro bytes behind Confluent's framing, written by fastavro into one reused buffer.
+
+    The schema's id is known before the first record (it was registered or looked up once), so
+    nothing here asks the registry again. The bytes are those of confluent-kafka's
+    ``AvroSerializer`` for the same schema, id and value, which a test compares.
+    """
+
+    def __init__(
+        self,
+        description: str,
+        schema_id: int,
+        parsed: Any,
+        convert: Converter,
+        known: Callable[[], Sequence[Known]],
+    ) -> None:
+        from fastavro import schemaless_writer
+
+        self.description = description
+        self._parsed = parsed
+        self._convert = convert
+        self._known = known
+        self._write = schemaless_writer
+        head = _frame_head(schema_id)
+        self._head = len(head)
+        self._buffer = io.BytesIO(head)
+        self._buffer.seek(self._head)
+
+    def __call__(self, value: Mapping[str, Any], *, topic: str) -> bytes:
+        converted = self._convert(value)
+        buffer = self._buffer
+        buffer.seek(self._head)
+        buffer.truncate()
+        try:
+            self._write(buffer, self._parsed, converted)
+        except FluxError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise _serializer_failure(exc, self._known) from None
+        return buffer.getvalue()
+
+
+class _FramedJson:
+    """JSON text behind Confluent's framing, for a schema this module derived.
+
+    confluent-kafka's ``JSONSerializer`` validates every record against the schema with
+    ``jsonschema``, which is most of its cost. A derived schema holds nothing the converter does
+    not already hold a value to (each field's type and whether it takes null, and no field the
+    schema does not list), so the converter is the check, built from the same schema; a test
+    validates every kind of record against the registered schema. The bytes are those of
+    ``JSONSerializer`` for the same schema, id and value.
+    """
+
+    def __init__(self, description: str, schema_id: int, convert: Converter) -> None:
+        self.description = description
+        self._head = _frame_head(schema_id)
+        self._convert = convert
+
+    def __call__(self, value: Mapping[str, Any], *, topic: str) -> bytes:
+        return self._head + _json_dumps(self._convert(value)).encode("utf-8")
+
+
 class _Registered:
     """A serializer built over a confluent-kafka serializer and a converter."""
 
@@ -680,14 +831,7 @@ class _Registered:
         except FluxError:
             raise
         except Exception as exc:  # noqa: BLE001
-            lines = scrub(str(exc), self._known(), sink="kafka").strip().splitlines()
-            from flux_engine.sinks.errors import FLX_3505
-
-            raise FluxError(
-                FLX_3505,
-                f"kafka: the registry serializer failed: {type(exc).__name__}"
-                f"{': ' + lines[0][:300] if lines else ''}",
-            ) from None
+            raise _serializer_failure(exc, self._known) from None
         if not isinstance(data, bytes):
             raise FluxError(FLX_3515, "the registry serializer returned no bytes")
         return data
@@ -772,6 +916,15 @@ class ConfluentSerdes:
         if subject.value_format == "AVRO":
             _check_fields(shape, _avro_field_list(document), name)
             convert = avro_converter(document)
+            description = f"avro:{name}@{registered.schema_id}"
+            if registered.schema.rule_set is None and not registered.schema.references:
+                # No data-contract rules run inside the serializer and no other schema is
+                # referenced, so the bytes are the framing and fastavro's own.
+                from fastavro import parse_schema
+
+                return _FramedAvro(
+                    description, registered.schema_id, parse_schema(document), convert, self._known
+                )
             inner: Any = AvroSerializer(client, registered.schema, conf=conf)
             kind = "avro"
         else:
@@ -789,33 +942,28 @@ class ConfluentSerdes:
         )
 
     def _derived(self, shape: StreamShape, client: Any, value_format: str) -> ValueSerializer:
+        """Register the schema derived from *shape*, once, and write each value behind its id."""
         from confluent_kafka.schema_registry import Schema
-        from confluent_kafka.schema_registry.avro import AvroSerializer
-        from confluent_kafka.schema_registry.json_schema import JSONSerializer
-        from confluent_kafka.serialization import MessageField, SerializationContext
 
         subject = f"{shape.topic}-value"
         if value_format == "json":
             document = json_schema_for(shape)
-            schema = Schema(json.dumps(document, sort_keys=True), "JSON")
-            schema_id = client.register_schema(subject, schema)
-            inner: Any = JSONSerializer(
-                schema, client, conf={"auto.register.schemas": True}, json_encode=_json_dumps
+            schema_id = client.register_schema(
+                subject, Schema(json.dumps(document, sort_keys=True), "JSON")
             )
-            convert = json_converter(document)
-            kind = "json-schema"
-        else:
-            document = avro_schema_for(shape)
-            schema = Schema(json.dumps(document, sort_keys=True), "AVRO")
-            schema_id = client.register_schema(subject, schema)
-            inner = AvroSerializer(client, schema, conf={"auto.register.schemas": True})
-            convert = avro_converter(document)
-            kind = "avro"
-        return _Registered(
-            f"{kind}:{subject}@{schema_id}",
-            inner,
-            convert,
+            return _FramedJson(
+                f"json-schema:{subject}@{schema_id}", schema_id, json_converter(document)
+            )
+        from fastavro import parse_schema
+
+        document = avro_schema_for(shape)
+        schema_id = client.register_schema(
+            subject, Schema(json.dumps(document, sort_keys=True), "AVRO")
+        )
+        return _FramedAvro(
+            f"avro:{subject}@{schema_id}",
+            schema_id,
+            parse_schema(document),
+            avro_converter(document),
             self._known,
-            MessageField.VALUE,
-            SerializationContext,
         )

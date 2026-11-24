@@ -140,6 +140,7 @@ def test_the_defaults_and_every_option_are_read() -> None:
     assert parsed.audience == "internal" and parsed.shape.topic_prefix == "sim."
     assert parsed.pace.text == "max" and parsed.commit_every == 1.0 and parsed.timeout == 30.0
     assert parsed.registry is None and parsed.security_protocol == "PLAINTEXT"
+    assert parsed.compression == "lz4"
     full = KafkaSettings.parse(
         "a.example.com:9092,[::1]:9093",
         {
@@ -155,6 +156,7 @@ def test_the_defaults_and_every_option_are_read() -> None:
             "value-format": "json",
             "pace": "x2",
             "commit-every": "0.5",
+            "compression": "zstd",
             "partitions": "6",
             "replication-factor": "3",
             "timeout": "10",
@@ -171,6 +173,7 @@ def test_the_defaults_and_every_option_are_read() -> None:
     assert full.registry == "https://registry.example.com:8081"
     assert full.value_format == "json" and full.pace.text == "x2" and full.commit_every == 0.5
     assert (full.partitions, full.replication_factor, full.timeout) == (6, 3, 10.0)
+    assert full.compression == "zstd"
     assert full.sasl_mechanism == "SCRAM-SHA-256" and full.uses_sasl
 
 
@@ -194,6 +197,8 @@ REFUSED: Sequence[Any] = [
     (BOOTSTRAP, {"audience": "internal", "pace": "fast"}, "pace"),
     (BOOTSTRAP, {"audience": "internal", "commit-every": "0"}, "commit-every"),
     (BOOTSTRAP, {"audience": "internal", "timeout": "abc"}, "timeout"),
+    (BOOTSTRAP, {"audience": "internal", "compression": "brotli"}, "compression"),
+    (BOOTSTRAP, {"audience": "internal", "compression": ""}, "compression"),
     (BOOTSTRAP, {"audience": "internal", "partitions": "0"}, "partitions"),
     (BOOTSTRAP, {"audience": "internal", "replication-factor": "-1"}, "replication-factor"),
     (BOOTSTRAP, {"audience": "internal", "registry": "ftp://r.example.com"}, "registry"),
@@ -449,7 +454,7 @@ def test_one_key_stays_in_one_partition_in_the_streams_order(
         assert starts == sorted(starts)
 
 
-def test_a_json_key_is_the_canonical_object_of_the_key_columns(kept: Kept) -> None:
+def test_a_json_key_is_the_compact_object_of_the_key_columns_in_the_order_named(kept: Kept) -> None:
     broker = FakeBroker()
     deliver(kept, broker, {"key-format": "json", "key.reading": "reading_id,device_id"})
     sample = broker.read("sim.reading")[0]
@@ -457,9 +462,8 @@ def test_a_json_key_is_the_canonical_object_of_the_key_columns(kept: Kept) -> No
     assert (
         sample.key
         == json.dumps(
-            {"device_id": value["device_id"], "reading_id": value["reading_id"]},
+            {"reading_id": value["reading_id"], "device_id": value["device_id"]},
             separators=(",", ":"),
-            sort_keys=True,
         ).encode()
     )
 
@@ -502,7 +506,7 @@ def test_events_are_envelopes_with_a_tombstone_after_each_delete(
         if record.value is None:
             continue
         value = doc(record)
-        assert list(value) == ["after", "before", "op", "source", "ts_ms"]
+        assert list(value) == ["before", "after", "source", "op", "ts_ms"]
         assert value["source"]["connector"] == "flux" and value["source"]["snapshot"] == "false"
         assert value["source"]["db"] == "fleet.devices"
         assert value["source"]["table"] == "device_version"
@@ -937,6 +941,7 @@ def test_the_receipt_says_what_was_written_and_holds_no_credential(
     assert writer["topic"] == "sim.device_change" and writer["partitions"] == 3
     assert writer["audience"] == "internal" and writer["privacyGrade"] == "P1"
     assert writer["partitioner"] == "murmur2_random" and writer["pace"] == "max"
+    assert writer["compression"] == "lz4"
     assert writer["records"] == len(broker.read("sim.device_change")) and writer["skipped"] == 0
     assert next(r for r in receipts if r.expose_id == "site").writer["shape"] == "row"
     text = json.dumps([r.as_document() for r in receipts])
@@ -1049,3 +1054,85 @@ def test_the_registry_scrubs_a_delivery_error_of_credentials_and_not_of_plain_op
 def test_the_clock_is_real_unless_a_test_replaces_it() -> None:
     clock = Clock()
     assert clock.wall_ms() > 1_700_000_000_000 and clock.monotonic() >= 0
+
+
+# -- the producer's settings --------------------------------------------------------
+
+
+def test_the_producer_is_told_the_compression_and_whether_the_stream_is_paced(kept: Kept) -> None:
+    broker = FakeBroker()
+    deliver(kept, broker, {"compression": "zstd"})
+    assert broker.producer_options and all(
+        o == {"compression": "zstd", "paced": False} for o in broker.producer_options
+    )
+    paced = FakeBroker()
+    deliver(kept, paced, {"pace": "x1000000", "compression": "none"})
+    assert all(o == {"compression": "none", "paced": True} for o in paced.producer_options)
+    default = FakeBroker()
+    deliver(kept, default)
+    assert {o["compression"] for o in default.producer_options} == {"lz4"}
+
+
+class _Recorder:
+    """A stand-in for confluent-kafka's ``Producer`` and ``Consumer`` that records what it is told."""
+
+    configs: List[Dict[str, Any]] = []
+
+    def __init__(self, conf: Dict[str, Any]) -> None:
+        type(self).configs.append(conf)
+        self.polls: List[float] = []
+        self.produced = 0
+        self.full = 0
+
+    def init_transactions(self, timeout: float) -> None:
+        pass
+
+    def poll(self, timeout: float) -> int:
+        self.polls.append(timeout)
+        return 0
+
+    def produce(self, topic: str, **kwargs: Any) -> None:
+        if self.full:
+            self.full -= 1
+            raise BufferError("full")
+        self.produced += 1
+
+
+def _producer_of(monkeypatch: pytest.MonkeyPatch, **more: Any) -> Any:
+    pytest.importorskip("confluent_kafka")
+    import confluent_kafka
+
+    _Recorder.configs = []
+    monkeypatch.setattr(confluent_kafka, "Producer", _Recorder)
+    monkeypatch.setattr(confluent_kafka, "Consumer", _Recorder)
+    settings = KafkaSettings.parse(BOOTSTRAP, INTERNAL)
+    broker = ConfluentBroker(settings.client(), lambda: Credentials(), lambda: [])
+    return broker.transactional_producer("id", "id", **more)
+
+
+def test_an_unpaced_producer_batches_and_a_paced_one_keeps_its_default_linger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _producer_of(monkeypatch, compression="lz4", paced=False)
+    conf = _Recorder.configs[0]
+    assert conf["compression.type"] == "lz4" and conf["enable.idempotence"] is True
+    assert conf["linger.ms"] == 20 and conf["batch.num.messages"] == 100_000
+    assert conf["queue.buffering.max.messages"] == 1_000_000
+    _producer_of(monkeypatch, compression="none", paced=True)
+    conf = _Recorder.configs[0]
+    assert conf["compression.type"] == "none" and conf["linger.ms"] == 5
+    assert "batch.num.messages" not in conf and "queue.buffering.max.messages" not in conf
+
+
+def test_a_producer_drains_its_reports_every_thousand_records_and_waits_when_full(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    txn = _producer_of(monkeypatch)
+    inner: _Recorder = txn._producer
+    for index in range(2500):
+        txn.produce("t", b"k", b"v", index, [("h", b"1")])
+    assert inner.produced == 2500 and inner.polls == [0, 0]
+    inner.polls.clear()
+    inner.full = 2
+    txn.produce("t", b"k", b"v", 0, [])
+    assert inner.polls == [0.05, 0.05] and inner.produced == 2501

@@ -27,8 +27,11 @@ from confluent_kafka.schema_registry import Schema  # noqa: E402
 from confluent_kafka.schema_registry._sync.mock_schema_registry_client import (  # noqa: E402
     MockSchemaRegistryClient,
 )
-from confluent_kafka.schema_registry.avro import AvroDeserializer  # noqa: E402
-from confluent_kafka.schema_registry.json_schema import JSONDeserializer  # noqa: E402
+from confluent_kafka.schema_registry.avro import AvroDeserializer, AvroSerializer  # noqa: E402
+from confluent_kafka.schema_registry.json_schema import (  # noqa: E402
+    JSONDeserializer,
+    JSONSerializer,
+)
 from confluent_kafka.serialization import MessageField, SerializationContext  # noqa: E402
 
 from flux_engine.core.errors import FluxError  # noqa: E402
@@ -36,11 +39,13 @@ from flux_engine.sinks._kafka_records import RecordBuilder  # noqa: E402
 from flux_engine.sinks._kafka_serdes import (  # noqa: E402
     ConfluentSerdes,
     RegistryAccess,
+    _json_dumps,
     avro_converter,
     avro_schema_for,
     json_converter,
     json_schema_for,
     namespace_of,
+    plain_json,
 )
 from flux_engine.sinks._kafka_shape import ShapeSettings, StreamShape, stream_shapes  # noqa: E402
 from flux_engine.stages.layout import RunLayout  # noqa: E402
@@ -441,6 +446,21 @@ def test_a_float_field_cannot_hold_a_rendered_value() -> None:
         assert caught.value.code.code == "FLX-3515" and "'x'" in str(caught.value)
 
 
+def test_a_json_value_without_a_required_field_is_refused_naming_it() -> None:
+    convert = json_converter(
+        {
+            "type": "object",
+            "properties": {"op": {"type": "string"}, "note": {"type": ["string", "null"]}},
+            "required": ["op"],
+        }
+    )
+    assert convert({"op": "c"}) == {"op": "c"}
+    for bad in ({"note": "x"}, "not an object"):
+        with pytest.raises(FluxError) as caught:
+            convert(bad)
+        assert caught.value.code.code == "FLX-3515" and "'op'" in str(caught.value)
+
+
 def test_json_values_are_integers_decimals_and_text() -> None:
     convert = json_converter(
         {
@@ -464,3 +484,190 @@ def test_json_values_are_integers_decimals_and_text() -> None:
         with pytest.raises(FluxError) as caught:
             convert(bad)
         assert caught.value.code.code == "FLX-3515"
+
+
+# -- the bytes are confluent's -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("expose_id", EXPOSES)
+def test_a_derived_avro_value_is_byte_for_byte_what_confluents_serializer_writes(
+    stream: Stream, expose_id: str
+) -> None:
+    client = mock_registry()
+    shape = stream.shapes[expose_id]
+    ours = serdes_over(client).serializer(shape, value_format="avro", registry=ACCESS)
+    document = avro_schema_for(shape)
+    reference = AvroSerializer(
+        client,
+        Schema(json.dumps(document, sort_keys=True), "AVRO"),
+        conf={"auto.register.schemas": True},
+    )
+    convert = avro_converter(document)
+    context = SerializationContext(shape.topic, MessageField.VALUE)
+    values = [value for value in stream.values(expose_id) if value is not None]
+    assert values
+    for value in values[:400]:
+        assert ours(value, topic=shape.topic) == reference(convert(value), context)
+
+
+@pytest.mark.parametrize("version", ["latest", "1"])
+def test_a_contract_avro_value_is_byte_for_byte_what_confluents_serializer_writes(
+    tmp_path: Path, stream: Stream, version: str
+) -> None:
+    shape = subject_stream(tmp_path, stream, KAFKA_BINDING % ("avro", version))
+    client = mock_registry()
+    schema_id = preregister(client, SITE_AVRO)
+    ours = serdes_over(client).serializer(shape, value_format="avro", registry=ACCESS)
+    schema = client.get_latest_version("site-value").schema
+    reference = AvroSerializer(
+        client,
+        schema,
+        conf={
+            "auto.register.schemas": False,
+            "use.schema.id": schema_id,
+            "subject.name.strategy": lambda _ctx, _record: "site-value",
+        },
+    )
+    context = SerializationContext("sites", MessageField.VALUE)
+    for row in (
+        {"site_id": 7, "region": "eu", "opened_on": "2023-05-04"},
+        {"site_id": -1, "region": None, "opened_on": "1969-12-31"},
+    ):
+        converted = avro_converter(SITE_AVRO)(row)
+        assert ours(row, topic="sites") == reference(converted, context)
+
+
+def test_a_subject_with_rules_keeps_confluents_serializer(tmp_path: Path, stream: Stream) -> None:
+    from confluent_kafka.schema_registry import Rule, RuleKind, RuleMode, RuleSet
+
+    shape = subject_stream(tmp_path, stream, KAFKA_BINDING % ("avro", "latest"))
+    client = mock_registry()
+    rules = RuleSet(
+        migration_rules=None,
+        domain_rules=[
+            Rule(
+                name="keep",
+                doc=None,
+                kind=RuleKind.CONDITION,
+                mode=RuleMode.WRITE,
+                type="CEL",
+                tags=None,
+                params=None,
+                expr="true",
+                on_success=None,
+                on_failure=None,
+                disabled=False,
+            )
+        ],
+    )
+    client.register_schema("site-value", Schema(json.dumps(SITE_AVRO), "AVRO", rule_set=rules))
+    serializer = serdes_over(client).serializer(shape, value_format="avro", registry=ACCESS)
+    assert type(serializer).__name__ == "_Registered", "the rules run inside confluent's serializer"
+
+
+def test_plain_values_are_compact_json_in_the_streams_order(stream: Stream) -> None:
+    shape = stream.shapes["reading"]
+    serializer = plain_json(shape)
+    value = {"reading_id": 1, "device_id": 2, "read_on": "2024-02-29", "value": "12.30"}
+    assert serializer(value, topic=shape.topic) == (
+        b'{"reading_id":1,"device_id":2,"read_on":"2024-02-29","value":"12.30"}'
+    )
+    text = {"b": 'caf\u00e9 "q" \n', "a": None, "c": True, "d": [1, 2]}
+    assert serializer(text, topic="t") == (
+        '{"b":"caf\u00e9 \\"q\\" \\n","a":null,"c":true,"d":[1,2]}'.encode()
+    )
+    for value in stream.values("device_change")[:50]:
+        if value is not None:
+            assert json.loads(serializer(value, topic="t")) == value
+
+
+@pytest.mark.parametrize("expose_id", EXPOSES)
+def test_a_derived_json_schema_value_is_byte_for_byte_what_confluents_serializer_writes(
+    stream: Stream, expose_id: str
+) -> None:
+    client = mock_registry()
+    shape = stream.shapes[expose_id]
+    ours = serdes_over(client).serializer(shape, value_format="json", registry=ACCESS)
+    document = json_schema_for(shape)
+    reference = JSONSerializer(
+        Schema(json.dumps(document, sort_keys=True), "JSON"),
+        client,
+        conf={"auto.register.schemas": True},
+        json_encode=_json_dumps,
+    )
+    convert = json_converter(document)
+    context = SerializationContext(shape.topic, MessageField.VALUE)
+    values = [value for value in stream.values(expose_id) if value is not None]
+    assert values
+    for value in values[:400]:
+        assert ours(value, topic=shape.topic) == reference(convert(value), context)
+
+
+@pytest.mark.parametrize("expose_id", EXPOSES)
+def test_the_converter_holds_every_value_to_the_derived_json_schema(
+    stream: Stream, expose_id: str
+) -> None:
+    """The framed writer does not validate, so what it writes must validate: it does."""
+    import jsonschema
+
+    shape = stream.shapes[expose_id]
+    document = json_schema_for(shape)
+    ours = serdes_over(mock_registry()).serializer(shape, value_format="json", registry=ACCESS)
+    validator = jsonschema.Draft7Validator(document)
+    for value in [v for v in stream.values(expose_id) if v is not None][:400]:
+        validator.validate(json.loads(ours(value, topic=shape.topic)[5:], parse_float=Decimal))
+
+
+def test_a_value_the_derived_json_schema_refuses_is_refused_before_it_is_written(
+    stream: Stream,
+) -> None:
+    shape = stream.shapes["reading"]
+    ours = serdes_over(mock_registry()).serializer(shape, value_format="json", registry=ACCESS)
+    good = {"reading_id": 1, "device_id": 2, "read_on": "2024-02-29", "value": "12.30"}
+    for field, bad in (
+        ("reading_id", "1"),
+        ("reading_id", True),
+        ("value", "ten"),
+        ("device_id", []),
+    ):
+        with pytest.raises(FluxError) as caught:
+            ours({**good, field: bad}, topic=shape.topic)
+        assert caught.value.code.code == "FLX-3515" and f"'{field}'" in str(caught.value)
+
+
+def _old_json_dumps(value: Any) -> str:
+    """The writer before it was made faster, kept here as the reference for its bytes."""
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, Mapping):
+        return (
+            "{"
+            + ",".join(f"{json.dumps(str(k))}:{_old_json_dumps(v)}" for k, v in value.items())
+            + "}"
+        )
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_old_json_dumps(item) for item in value) + "]"
+    return json.dumps(value, ensure_ascii=False, allow_nan=False)
+
+
+def test_the_json_writer_writes_the_bytes_it_always_wrote() -> None:
+    samples: List[Any] = [
+        None,
+        True,
+        False,
+        0,
+        -5,
+        10**30,
+        "plain",
+        'q"uote\\ \n\t\u0001 caf\u00e9 \u2028 \U0001f600',
+        Decimal("12.30"),
+        Decimal("-0.05"),
+        Decimal("1E+3"),
+        {"a": 1, "b": {"c": [1, "x", None, Decimal("2.50")]}, "caf\u00e9": True},
+        {"z": 1, "a": 2},
+        [],
+        {},
+        ("t", 1),
+    ]
+    for sample in samples:
+        assert _json_dumps(sample) == _old_json_dumps(sample)

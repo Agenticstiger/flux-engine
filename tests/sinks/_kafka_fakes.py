@@ -16,10 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from flux_engine.core.canonical import canonical_bytes
 from flux_engine.core.errors import FluxError
 from flux_engine.sinks._kafka_broker import TopicInfo, TxnProducer
-from flux_engine.sinks._kafka_serdes import RegistryAccess, ValueSerializer
+from flux_engine.sinks._kafka_serdes import RegistryAccess, ValueSerializer, compact_json
 from flux_engine.sinks._kafka_shape import StreamShape
 from flux_engine.sinks.errors import FLX_3505
 from flux_engine.sinks.kafka import Clock
@@ -200,6 +199,7 @@ class FakeBroker:
         self.committed: Dict[Tuple[str, str], str] = {}
         self.calls: List[Tuple[str, ...]] = []
         self.producers: List[FakeTxn] = []
+        self.producer_options: List[Dict[str, Any]] = []
         self.failures: List[Failure] = []
         self.closes = 0
         self._open: Dict[str, FakeTxn] = {}
@@ -236,8 +236,11 @@ class FakeBroker:
         self.calls.append(("progress", group, topic))
         return self.committed.get((group, topic))
 
-    def transactional_producer(self, transactional_id: str, group: str) -> TxnProducer:
+    def transactional_producer(
+        self, transactional_id: str, group: str, *, compression: str = "none", paced: bool = False
+    ) -> TxnProducer:
         self.calls.append(("producer", transactional_id))
+        self.producer_options.append({"compression": compression, "paced": paced})
         earlier = self._open.get(transactional_id)
         if earlier is not None:
             earlier.fenced = True
@@ -267,7 +270,7 @@ class FakeBroker:
 
 
 class FakeSerdes:
-    """Serdes that need no registry: values are canonical JSON, labelled like a registry's."""
+    """Serdes that need no registry: values are compact JSON, labelled like a registry's."""
 
     def __init__(self) -> None:
         self.calls: List[Tuple[str, str, Optional[str]]] = []
@@ -285,4 +288,4 @@ class _Labelled:
         self.description = description
 
     def __call__(self, value: Mapping[str, Any], *, topic: str) -> bytes:
-        return canonical_bytes(dict(value))
+        return compact_json(dict(value))

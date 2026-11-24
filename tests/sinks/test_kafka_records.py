@@ -99,6 +99,11 @@ def test_another_type_has_no_event_time(kind: str) -> None:
     assert "when" in refusal(lambda: epoch_ms("2024-01-01", kind, column="when", row=0))
 
 
+def test_an_event_time_column_of_another_type_stops_the_row() -> None:
+    made = builder(shape_of([("id", "STRING"), ("when", "STRING")], key=["id"], timestamp="when"))
+    assert "when" in refusal(lambda: made.records(["d-1", "2024-01-01T00:00:00Z"], 0, last=True))
+
+
 @pytest.mark.parametrize(
     ("rendered", "kind"),
     [
@@ -132,9 +137,10 @@ def test_a_string_key_is_the_rendered_text() -> None:
     assert encode_key(["héllo"], ["k"], "string", row=0) == "héllo".encode()
 
 
-def test_a_json_key_is_the_canonical_object() -> None:
+def test_a_json_key_is_the_compact_object_in_key_column_order() -> None:
     assert encode_key([5], ["id"], "json", row=0) == b'{"id":5}'
-    assert encode_key(["x", 2], ["b", "a"], "json", row=0) == b'{"a":2,"b":"x"}'
+    assert encode_key(["x", 2], ["b", "a"], "json", row=0) == b'{"b":"x","a":2}'
+    assert encode_key(["é\n"], ["k"], "json", row=0) == '{"k":"é\\n"}'.encode()
 
 
 @pytest.mark.parametrize("form", ["string", "json"])
@@ -197,7 +203,7 @@ def test_a_row_is_one_record_of_its_columns() -> None:
 def test_a_json_keyed_row() -> None:
     shape = shape_of(TABLE, key=["site_id", "region"], timestamp="opened_on", key_format="json")
     (record,) = builder(shape).records([7, "eu", "2024-01-02", None], 0, last=False)
-    assert record.key == b'{"region":"eu","site_id":7}'
+    assert record.key == b'{"site_id":7,"region":"eu"}'
     assert record.value is not None and record.value["value"] is None
 
 
