@@ -20,6 +20,61 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+Fixes for the findings of the 0.11.0 inspection. No digest moves, except for a bundle that hit the copula overflow
+described first under Fixed, whose outputs were wrong before.
+
+### Fixed
+
+- A copula column whose bin holds more than 2^62 grid values (a `DECIMAL(38,10)` bin from 0 to 6e8, for example) no
+  longer wraps in the column path's bisection. The sum `lo + hi` overflowed int64, so values fell below the declared
+  range and the column path stopped matching the row path, which made the run digest depend on the path. **The outputs
+  of a bundle that hit this change, because they were wrong before**; every other bundle keeps its bytes.
+- A copula column with a bin of 2^63 grid values or more no longer fails `validate`, `plan` and `run` with a raw
+  `OverflowError`. Such a column is located in Python integers, as the row path always did.
+- The grid cache of a copula column no longer grows without bound (about 20 entries per row for a wide column, about
+  30 GB at 10 million rows). It is a least-recently-used cache of fixed size over a pure function, so no value moves.
+- `verify` and `run --verify` exit 1 when a children-per-parent row of a relationship that has a `counts` entry is
+  outside the entry's tolerance, in the whole or in one class of a `given` column, which is what the assertion for the
+  row (`success: false`) already said. The text names the failing group by its ordinal. `ship` withholds the emit for
+  the same row. A relationship with no `counts` entry keeps a row that informs and fails nothing.
+- A `BrokenPipeError` from a sink socket, an upload or a plugin is an error with its message on stderr, not a silent
+  exit 141. Only a stdout that fails to flush is treated as a closed stdout.
+- A refusal is written to stderr when stdout has already gone, so `fluxsim validate DIR --json 2>err | true` leaves
+  `FLX-3108` in `err`.
+- A relationship's `structural` member counts as structure for the privacy grade only from profile format `1-4-0`. A
+  profile of an earlier format with `statistics: []` and `structural: ["childless"]` grades P1 again, as it did in
+  0.10.0.
+- `init` no longer widens a clique column's range beyond the contract's. Bin edges that reach past a bound the contract
+  declares are refused with `FLX-3402`, naming the edge and the bound, where they used to become the column's range and
+  let a run emit values the contract forbids. A date or timestamp column is held to a numeric range rule in the units
+  its edges are written in.
+- T-SQL `DATEDIFF(week, a, b)`, `DATEDIFF(wk, ...)` and `DATEDIFF_BIG(week, ...)` count the Sunday-start week
+  boundaries crossed, as T-SQL does, where they ran as DuckDB's `DATE_DIFF('WEEK', ...)`, which counts whole seven day
+  spans (Saturday to the next day is 1, not 0). Snowflake's Monday rule is unchanged.
+- `accuracy register` with a malformed `run_digest` is a `FLX-7005` refusal that names the key, where it was a bare
+  `ValueError`.
+- A Ctrl-C in the first half second of `fluxsim run --jobs N` no longer prints a `KeyboardInterrupt` traceback from
+  the early forkserver.
+
+### Changed
+
+- The failure line of a `rankCorrelation` property names the run's value, the profile's value, their distance, the
+  margin and the reach, and the line of a property grouped by `groupByBins` names that column, the margin and the
+  failing groups by ordinal. Both used to say only `outside the declared margin`.
+- `fluxsim explain FLX-5036` and its page cover the refusals of format `1-4-0`: followed relationships that are not a
+  tree (two into one table, an unreached parent, a cycle), estimated cliques and the clique work limit. A clique that
+  carries `measurements` or `published: estimated` gets the same message as one that carries an `estimate`.
+- `fluxsim forecast score --help` gives the `FLX-7013` horizon rule next to the `FLX-7001` registration rule for
+  `--observed-at`.
+- `fluxsim init` says, in one short line for each pair, that a noisy rank correlation released outside -1 to 1 was held
+  at the end of the range, and its note on the copula is four short sentences.
+- `fluxsim run --help` describes the `childrenPerParent` row and the `rankCorrelation` and `groupByBins` property
+  kinds.
+- The integrity line of `verify` words the `nulls` check as `non-null`, which is what its share counts. The `checks`
+  keys of the JSON and every digest are unchanged.
+
 ## 0.11.0 - 2026-11-24
 
 This release makes generation, rendering and `verify` faster, bit for bit, and fixes the known issues the 0.10.0

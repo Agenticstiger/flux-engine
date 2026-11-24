@@ -952,7 +952,7 @@
     "class": "_FluxArgumentParser",
     "prog": "fluxsim run",
     "usage": null,
-    "description": "Plan and apply in one call, then optionally verify, write every stream to a sink, and ship. Stops at the first stage that exits non-zero; the artifacts of every stage that did run are still returned under that stage's own key. When the run is already committed and its bundle declares generator plugins, the run is kept as it stands, the plugin is not asked again, and the rest of what was asked is done against it; a new sample needs a new run, for example another seed.",
+    "description": "Plan and apply in one call, then optionally verify, write every stream to a sink, and ship. Stops at the first stage that exits non-zero; the artifacts of every stage that did run are still returned under that stage's own key. When the run is already committed and its bundle declares generator plugins, the run is kept as it stands, the plugin is not asked again, and the rest of what was asked is done against it; a new sample needs a new run, for example another seed. With --verify and --profile the run is also scored against the pinned profile: each property the fidelity block declares, among them rankCorrelation and any property grouped by the bins of another column (groupByBins), is compared with it. Each counts entry of the bundle adds the rule lines counts:<relationship>.minChildren and counts:<relationship>.parentWhen to the child's rules, both enforced, and a profile that publishes the children per parent of a relationship adds a childrenPerParent row to the scorecard; a row of a relationship that has a counts entry fails the run when it is outside the entry's tolerance.",
     "epilog": null,
     "formatter_class": "_HelpFormatter",
     "defaults": {
@@ -1335,7 +1335,7 @@
     "class": "_FluxArgumentParser",
     "prog": "fluxsim verify",
     "usage": null,
-    "description": "Re-check an applied run on five independent legs: the run's own artifacts against its recorded digest, the golden regression, row conformance against the referenced contract, the RFC-04 enforcement vectors, and every declared fidelity check. One line per leg, with the flag that turns a `not checked` leg into a result. A run whose plan pins a profile is also scored against it, per property, table, dimension and overall, when the profile is passed with --profile. A bundle that declares consumer queries has every query counted on the run, the calibration queries apart from the held-out ones (--held-out), in the scorecard's queries dimension. Each counts entry of the bundle adds the rule lines counts:<relationship>.minChildren and counts:<relationship>.parentWhen to the child's rules, both enforced, and a profile that publishes the children per parent of a relationship adds a childrenPerParent row to the scorecard.",
+    "description": "Re-check an applied run on five independent legs: the run's own artifacts against its recorded digest, the golden regression, row conformance against the referenced contract, the RFC-04 enforcement vectors, and every declared fidelity check. One line per leg, with the flag that turns a `not checked` leg into a result. A run whose plan pins a profile is also scored against it, per property, table, dimension and overall, when the profile is passed with --profile. A bundle that declares consumer queries has every query counted on the run, the calibration queries apart from the held-out ones (--held-out), in the scorecard's queries dimension. Each counts entry of the bundle adds the rule lines counts:<relationship>.minChildren and counts:<relationship>.parentWhen to the child's rules, both enforced, and a profile that publishes the children per parent of a relationship adds a childrenPerParent row to the scorecard; a row of a relationship that has a counts entry fails the stage when it is outside the entry's tolerance.",
     "epilog": null,
     "formatter_class": "_HelpFormatter",
     "defaults": {
@@ -3115,7 +3115,7 @@
         "default": "None",
         "type": null,
         "required": true,
-        "help": "the instant the next state was read, as RFC 3339; it may not predate a forecast's registration (FLX-7001)",
+        "help": "the instant the next state was read, as RFC 3339; it may not predate a forecast's registration (FLX-7001) or its horizon end, the instant after which the next state can be read (FLX-7013)",
         "metavar": "T",
         "choices": null
       },
