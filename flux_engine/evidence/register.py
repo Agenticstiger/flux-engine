@@ -266,6 +266,9 @@ class RegisterSummary:
     overlays: Tuple[str, ...] = ()
     #: How many calibrated entries record a ``targets`` digest other than the pinned profile's.
     off_profile: int = 0
+    #: Whether the record is format 1-4-0, which counts the numbers of the namespace keys beside
+    #: ``emits`` (``counts``, ``history``, ``within`` and the rest).
+    counts_namespace_keys: bool = False
 
     def as_document(self) -> Dict[str, Any]:
         """The shares as a stage's ``--json`` envelope carries them."""
@@ -332,6 +335,7 @@ def parse_register(text: str) -> RegisterSummary:
         unused=_unused_notes(document),
         overlays=_overlay_names(entries, sources),
         off_profile=_off_profile(entries, sources, digest),
+        counts_namespace_keys=document.get("_schemaURL") == REGISTER_SCHEMA_URL_1_4,
     )
 
 
@@ -643,6 +647,21 @@ def _calibrated_clause(counts: Mapping[str, int], total: int, off_profile: int =
     )
 
 
+def _not_counted(summary: RegisterSummary) -> str:
+    """What the record's format leaves out of the count, as the sentence of the report's paragraph."""
+    if summary.counts_namespace_keys:
+        return (
+            "It counts the numbers of the namespace's other keys too (such as `counts`, "
+            "`history`, `within` and the sentinels of `links`). It does not count seeds, a "
+            "sweep, or the fidelity block's `encoding` and `budget`,"
+        )
+    return (
+        "It does not count seeds, a sweep, the fidelity block's `encoding` and `budget`, or "
+        "the namespace's own declarations of how rows relate and fall in time (such as "
+        "`links`, `history` and `within`),"
+    )
+
+
 def render_register_note(summary: RegisterSummary) -> str:
     """What ``EVIDENCE.md`` adds under "What Was Not Proven" for a bound register.
 
@@ -685,9 +704,7 @@ def render_register_note(summary: RegisterSummary) -> str:
         f"number{'s' if total != 1 else ''} of this run: the numbers under `spec` in the "
         "documents the run reads, and the numbers the Simulation's `com.agentics.flux/1` "
         "namespace holds at the positions the specification names (the fidelity block, the "
-        "rows and the rules). It does not count seeds, a sweep, the fidelity block's "
-        "`encoding` and `budget`, or the namespace's own declarations of how rows relate and "
-        "fall in time (such as `links`, `history` and `within`), so the run reads numbers this "
+        f"rows and the rules). {_not_counted(summary)} so the run reads numbers this "
         f"report does not show. {_share(profile, total)} {measured}, "
         f"{contract}{overlay}{calibrated}"
         f"{_share(assumed, total)} are assumptions and {_share(defaults, total)} are "
