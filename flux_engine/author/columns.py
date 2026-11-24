@@ -3697,6 +3697,7 @@ def _clip_bins(
         if scaled
         else [str(weights[cell[0]]) for cell in cells]
     )
+    _read_shaped(plan, _RANGE_SHAPED)
     plan.labels = [
         label
         for label in plan.labels
@@ -3716,6 +3717,27 @@ def _clip_bins(
         elif cell[0] in old_weights:
             plan.labels.append(Label(("binWeights", str(position)), old_weights[cell[0]]))
     return dropped
+
+
+#: Why a statistic a cut or a clip replaced the label of is still read.
+_WINDOW_SHAPED = "its value places an edge or a weight of the bins the run's time window then cuts"
+_RANGE_SHAPED = "its value places an edge or a weight of the draw the declared range then clips"
+
+
+def _read_shaped(plan: ColumnPlan, how: str) -> None:
+    """Record as read each statistic a bin or weight label cites, before a cut replaces those labels.
+
+    A cut or a clip keeps what the bins held inside it, so the statistics that placed them
+    (a published maximum that closed the ladder's top, a bin count) still shape the draw
+    although the label that cited them is gone (ADR 0014 section 1).
+    """
+    held = {tokens for tokens, _ in plan.reads}
+    for label in plan.labels:
+        if label.tokens[:1] in (("bins",), ("binWeights",)) and label.basis.statistic is not None:
+            tokens = label.basis.statistic[0]
+            if tokens not in held:
+                held.add(tokens)
+                plan.reads.append((tokens, how))
 
 
 _WINDOW_CLIPPED = (
@@ -3771,6 +3793,7 @@ def bound_to_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str]
     ]
     total = sum((weight for _, _, weight in kept), Fraction(0))
     plan.declaration["binWeights"] = share_texts([weight / total for _, _, weight in kept])
+    _read_shaped(plan, _WINDOW_SHAPED)
     plan.labels = [
         label
         for label in plan.labels
@@ -3788,6 +3811,7 @@ def _draw_clipped(
     """Replace the bins by one drawn evenly from *first* to *last*, or by the value they share."""
     for key in ("bins", "binWeights", "levels"):
         plan.declaration.pop(key, None)
+    _read_shaped(plan, _RANGE_SHAPED)
     plan.labels = [label for label in plan.labels if label.tokens[:1] not in _DRAW_POSITIONS[:3]]
     if first >= last:
         plan.declaration["levels"] = {_exact_text(first): "1"}
