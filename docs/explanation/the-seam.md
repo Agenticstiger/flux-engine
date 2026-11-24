@@ -156,7 +156,7 @@ The engine does not own the FLUID schema or the FLUX schema. It depends on the p
 
 ## What the seam does not do
 
-It does not publish. In this release the engine writes NDJSON files in a run directory and an evidence pack. It sends nothing to a Kafka topic or any platform.
+The engine publishes to no Kafka topic or platform by itself. It writes NDJSON files in a run directory and an evidence pack, and it delivers rows to the sinks you name with `--sink`: Parquet, Arrow IPC, ADBC databases, Iceberg, Delta and object stores. Nothing leaves the machine unless you name a target; see [offline](./offline.md).
 
 The contract's `binding` block is read for one thing: the first value of `binding.location` names the output dataset in `lineage.ndjson`. Here that is `billing.payment-recovery.v1`. The `platform` value is not read.
 
