@@ -41,6 +41,23 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - Register format `1-4-0`. A register that counts a new position, or cites a rank correlation or the
   `cliqueMarginal/2` clique definition, names `1-4-0`; any other register keeps the format it had, from `1-0-0` to
   `1-3-0`, and every digest it had. See `PARAMETER-REGISTER-SPEC.md`.
+- A Kafka sink: `fluxsim run --sink kafka:HOST:PORT[,HOST:PORT...]` (and `fluxsim apply --sink`) delivers every stream to
+  Kafka topics, from the optional `flux-sim-engine[kafka]` extra. Records are keyed by their entity and partitioned as a
+  Java producer would, carry the event's time as their timestamp, and are written as rows or, for a history's change
+  events, in Debezium's envelope with tombstones, as plain JSON or through a schema registry (a subject the contract
+  names, or one derived from the columns). Each stream is delivered exactly once in one transaction per horizon that also
+  commits its progress, so a retried delivery resumes where it stopped. `pace=realtime` and `pace=xN` send a stream at
+  its event-time rate without changing a byte of what it holds. Every target declares its audience, `internal` (needs a
+  run graded P1 or better) or `external` (needs P3 or better), and a stream below the minimum, or from a run whose plan
+  records no grade (one that pins no profile), is refused before anything is contacted (`FLX-3512`); declarations Kafka cannot take are `FLX-3513`, a topic that will not take the stream is
+  `FLX-3514`, and a registry subject that cannot carry it is `FLX-3515`. No digest moves. See
+  [Stream a simulation into Kafka](docs/how-to/stream-a-simulation-into-kafka.md) and
+  [ADR 0038](docs/adr/0038-a-kafka-sink-keys-records-by-entity-delivers-each-stream-exactly-once-and-sends-only-what-its-audience-may-see.md).
+- A sink is now told three more facts about a stream: `StreamContext.privacy_grade`, the grade the run's own plan records,
+  read only after the checks `apply` runs on that plan (`RecordedGrade`, which says what is missing when the plan records
+  no grade or does not check), and `StreamContext.bundle_directory` and `StreamContext.simulation_id`, which say where the
+  stream's declarations are and never what grade the run has. `fluxsim run --sink` and `fluxsim apply --run-id --sink`
+  fill all three. They default to `None`, no digest covers them, and the existing sinks ignore them.
 
 ### Changed
 
