@@ -56,7 +56,12 @@ from typing import Any, Dict, Optional, Sequence, Tuple
 
 from flux_engine._links import ISSUES_URL, command_url
 from flux_engine.cli._args import _jobs_from_environment
-from flux_engine.cli._output import BROKEN_PIPE_EXIT, _detach_stdout, _print_result
+from flux_engine.cli._output import (
+    BROKEN_PIPE_EXIT,
+    _detach_stdout,
+    _print_result,
+    _stdout_is_broken,
+)
 from flux_engine.cli._parser import Example, _children, _FluxArgumentParser
 from flux_engine.cli.commands import COMMANDS
 from flux_engine.cli.commands.accuracy import (
@@ -208,13 +213,15 @@ def _run_command(fn: Any, args: argparse.Namespace) -> int:
     stage = _stage_of(args)
     try:
         return fn(args)
-    except BrokenPipeError:
-        # The reader of stdout closed it while the command was still working, so the work was
-        # cut short: leave quietly with the status a shell reports for a writer stopped by a
-        # closed pipe. Nothing on stderr, and never the traceback hint.
-        _detach_stdout()
-        return BROKEN_PIPE_EXIT
     except Exception as error:  # noqa: BLE001 - the CLI's outermost boundary
+        if isinstance(error, BrokenPipeError) and _stdout_is_broken():
+            # The reader of stdout closed it while the command was still working, so the work was
+            # cut short: leave quietly with the status a shell reports for a writer stopped by a
+            # closed pipe. Nothing on stderr, and never the traceback hint. A broken pipe from
+            # anywhere else (a sink socket, an upload, a plugin) is a failure like any other and
+            # takes the path below, with its message.
+            _detach_stdout()
+            return BROKEN_PIPE_EXIT
         # A FluxError is not the only way a command can fail: a malformed
         # --request file, an unreadable path, a bug. Every one of those used
         # to escape as a raw Python traceback with ZERO bytes on stdout,

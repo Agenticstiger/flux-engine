@@ -242,9 +242,9 @@ $ fluxsim verify . --run-id $(ls -t .flux/runs | head -1) --committed-slice paym
 reproducible: not checked | validity: not asserted
 ...
   fidelity payment_recovery_moment: failed
-    property 000:levelHistogram:market@amount#bins (levelHistogram of market): outside the declared margin...
+    property 000:levelHistogram:market@amount#bins (levelHistogram of market, grouped by the bins of amount): outside the declared margin (margin 0.0999908447265625) in groups #0, #1, #2
 payment_recovery_moment: fidelity check failed
-  property 000:levelHistogram:market@amount#bins (levelHistogram of market): outside the declared margin...
+  property 000:levelHistogram:market@amount#bins (levelHistogram of market, grouped by the bins of amount): outside the declared margin (margin 0.0999908447265625) in groups #0, #1, #2
 ```
 
 The property's id says what was compared: its place in your `properties` list, its kind and column, and, after `@`, the column it is grouped by, with `#bins` when it is grouped by bins. A group is named by its place in the order of the bins, counted from zero, and never by an edge or a market, because those are values from your slice.

@@ -361,8 +361,11 @@ def _clique_object(value: Any, where: str) -> Mapping[str, Any]:
     """The object of a ``cliqueMarginal/2``, with exactly its five keys and its definition."""
     if not isinstance(value, Mapping):
         raise refuse(where, f"expected an object, got {type(value).__name__}")
-    if "estimate" in value:
-        raise refuse(f"{where}.estimate", _NOT_READ)
+    for key in ("estimate", "measurements"):
+        if key in value:
+            raise refuse(f"{where}.{key}", _NOT_READ)
+    if value.get("published") == "estimated":
+        raise refuse(f"{where}.published", _NOT_READ)
     allowed = {"definition", "columns", "domains", "noisyCounts", "noise"}
     unknown = sorted({str(key) for key in value} - allowed)
     if unknown:

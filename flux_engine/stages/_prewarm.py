@@ -28,14 +28,24 @@ import os
 import sys
 import threading
 from contextlib import contextmanager
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, List, Optional
 
 #: The module a forkserver imports once, so that a worker is a fork of an interpreter that
 #: holds what it needs. The smallest module with the worker's entry points: it brings the
 #: kernel, the generator's row code and the seam's emit code, and no stage.
 PRELOAD_MODULE = "flux_engine.stages._parallel"
 
+#: Imported before and after the preload: the first ignores ``SIGINT`` while the server imports,
+#: the last puts the interpreter's handler back (``multiprocessing`` ignores it only after the preload).
+SIGINT_GUARD_MODULE = "flux_engine.stages._sigint_guard"
+SIGINT_RESTORE_MODULE = "flux_engine.stages._sigint_restore"
+
 _SPAWN_LOCK = threading.Lock()
+
+
+def preload_modules(*between: str) -> List[str]:
+    """The modules the forkserver imports, in order: the guard, any of *between*, the preload, the restore."""
+    return [SIGINT_GUARD_MODULE, *between, PRELOAD_MODULE, SIGINT_RESTORE_MODULE]
 
 
 def cpu_jobs() -> int:
@@ -102,7 +112,8 @@ def children_without_the_working_directory() -> Iterator[None]:
 def pool_context() -> Any:
     """The multiprocessing context workers start from: a forkserver with the engine loaded.
 
-    The server imports :data:`PRELOAD_MODULE`, and with it what a worker needs, once;
+    The server imports :data:`PRELOAD_MODULE`, and with it what a worker needs, once, with
+    ``SIGINT`` ignored while it does (:func:`preload_modules`);
     each worker is then a fork of that interpreter, which starts in milliseconds where
     a ``spawn`` imports the engine again. The preload applies only to the server's first
     start in a process, and the server is started inside
@@ -113,7 +124,7 @@ def pool_context() -> Any:
 
     if sys.platform != "win32" and "forkserver" in multiprocessing.get_all_start_methods():
         context = multiprocessing.get_context("forkserver")
-        context.set_forkserver_preload([PRELOAD_MODULE])
+        context.set_forkserver_preload(preload_modules())
         return context
     return multiprocessing.get_context("spawn")
 

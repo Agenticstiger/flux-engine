@@ -62,11 +62,11 @@ Run the first checkpoint now and after every edit:
 fluxsim validate bundle
 ```
 
-If it refuses, run `fluxsim explain` on the code it printed, make the change the remedy names inside the bundle, and validate again. A refusal that can only be met by changing the contract goes to the user. Do not copy a new contract digest into the Simulation until you have read what changed in the contract and the user agrees: the digest makes a contract change a deliberate act ([use the FLUID seam](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/use-the-fluid-seam.md)).
+If it refuses, run `fluxsim explain` on the code it printed, make the change the remedy names inside the bundle, and validate again. A refusal that can only be met by changing the contract goes to the user. Do not copy a new contract digest into the Simulation until you have read what changed in the contract and the user agrees: the digest makes a contract change a deliberate act ([use the FLUID seam](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/use-the-fluid-seam.md)).
 
 ## 3. Add declarations
 
-Module facts live in the bundle, in the Simulation's `extensions` under `com.agentics.flux/1`, and never in the FLUID contract ([ADR 0018](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/adr/0018-module-facts-live-in-the-flux-bundle.md)). Each declaration is opt-in: a bundle that declares none keeps its bytes and digests.
+Module facts live in the bundle, in the Simulation's `extensions` under `com.agentics.flux/1`, and never in the FLUID contract ([ADR 0018](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/adr/0018-module-facts-live-in-the-flux-bundle.md)). Each declaration is opt-in: a bundle that declares none keeps its bytes and digests.
 
 1. Find the declaration's page in [the declaration families](references/declarations.md) and read it. Copy its shape; do not invent a key. The namespace's keys are closed, so a key nothing reads is refused.
 2. Say which kernel the declaration needs. A catalogue (a reference expose) needs kernel 0.2.0, and a kernel 0.1.0 run is refused with `FLX-3105`. Where a page names no kernel, say so and do not guess one.
@@ -79,7 +79,7 @@ fluxsim expr eval "tenureMonths == 24" --bundle bundle --values '{"tenureMonths"
 
    `expr model` prints the attribute model an expression is checked against; `expr eval` needs `--bundle` and `--values`, a subject view as JSON. An expression that does not parse is refused with a code such as `FLX-6001`; run `fluxsim explain` on it.
 4. Edit the Simulation, then run the first checkpoint again.
-5. Where a number is yours rather than the profile's, give its register entry a reason, as [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/write-a-bundle-from-a-profile.md) shows.
+5. Where a number is yours rather than the profile's, give its register entry a reason, as [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/write-a-bundle-from-a-profile.md) shows.
 
 ## 4. The four checkpoints
 
@@ -92,7 +92,7 @@ Stop at the first refusal. Do not go on to a later checkpoint, and do not genera
 
 The second to fourth belong to the `flux-run-and-verify` skill: hand over to it, with the bundle folder, once checkpoint 1 passes. For a bigger, split or delivered run, the `flux-scale-and-ship` skill follows. Run checkpoint 4, a `--sink` to a database and any other hand-over only when the user asked for it and named the destination.
 
-Never use an option that records past a refusal. Read each refusal's `fluxsim explain` text and page ([FLX-3105](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/reference/errors/FLX-3105.md) is the code a bundle that does not validate carries).
+Never use an option that records past a refusal. Read each refusal's `fluxsim explain` text and page ([FLX-3105](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/reference/errors/FLX-3105.md) is the code a bundle that does not validate carries).
 
 ## 5. Report
 

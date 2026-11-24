@@ -209,3 +209,13 @@ def test_a_table_of_no_rows_has_empty_columns_and_a_clean_relationship() -> None
         by_columns = link_integrity_columns(link, c, p)
         assert by_columns is not None
         assert by_columns.to_document() == by_rows.to_document()
+
+
+def test_the_line_words_the_nulls_check_as_non_null_and_the_document_keeps_its_key() -> None:
+    # The share counts the child rows whose key holds no null, so `nulls 2 of 4` read as its opposite.
+    child = [[1, 0, "a"], [None, 0, "b"], [2, 0, "c"], [None, 0, "d"]]
+    inner = _integrity(child, [[1, 0], [2, 0]], join_type="inner")
+    line = inner.line()
+    assert "non-null 2 of 4 (50.00%)" in line
+    assert " nulls " not in f" {line} "
+    assert "nulls" in inner.to_document()["checks"]

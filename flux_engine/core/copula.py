@@ -23,11 +23,12 @@ from __future__ import annotations
 
 import math
 import struct
+from collections import OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal, localcontext
 from fractions import Fraction
 from math import lcm
-from typing import Dict, List, Literal, Mapping, Optional, Sequence, Tuple, Union
+from typing import List, Literal, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -339,6 +340,14 @@ def threshold(numerator: int, denominator: int) -> float:
     return math.inf if argument < _SMALLEST_NORMAL else -kernel2.ppnd16(argument)
 
 
+#: The largest grid width a column's bisection holds in an int64 array; a wider bin is located in Python integers.
+_INT64_MAX = (1 << 63) - 1
+
+#: How many ``(bin, grid index)`` thresholds a :class:`ColumnLaw` keeps. The bisection of a wide bin
+#: probes midpoints that are rarely probed twice, so an unbounded cache grew by about twenty entries a row.
+GRID_CACHE_ENTRIES = 1 << 16
+
+
 class ColumnLaw:
     """One column's bins, and the two bisections that map a latent value to a bin and a grid value.
 
@@ -367,8 +376,13 @@ class ColumnLaw:
         self._last = positive[-1]
         self._bin_thresholds = [threshold(c, self._denominator) for c in self._before]
         self._bin_array = np.array(self._bin_thresholds, dtype=np.float64)
-        self._widths_array = np.array(self._widths, dtype=np.int64)
-        self._grid: Dict[Tuple[int, int], float] = {}
+        # A bin of 2**63 grid values or more does not fit an int64 array. Such a column is
+        # located one row at a time, in Python integers, which :meth:`locate` always does.
+        self._wide = any(width > _INT64_MAX for width in self._widths)
+        self._widths_array = None if self._wide else np.array(self._widths, dtype=np.int64)
+        # The thresholds are a pure function of (bin, grid index), so a cache only saves work:
+        # it is bounded, least recently used first out, and no value depends on what it holds.
+        self._grid: "OrderedDict[Tuple[int, int], float]" = OrderedDict()
 
     @property
     def bins(self) -> int:
@@ -382,19 +396,27 @@ class ColumnLaw:
     def grid_threshold(self, b: int, j: int) -> float:
         """``t(F(b, j))`` with ``F(b, j) = c_(b-1) + p_b * j / w_b``, exact."""
         key = (b, j)
-        cached = self._grid.get(key)
+        grid = self._grid
+        cached = grid.get(key)
         if cached is None:
             width = self._widths[b - 1]
             numerator = self._before[b - 1] * width + self._numerators[b - 1] * j
             cached = threshold(numerator, self._denominator * width)
-            self._grid[key] = cached
+            grid[key] = cached
+            if len(grid) > GRID_CACHE_ENTRIES:
+                grid.popitem(last=False)
+        else:
+            try:
+                grid.move_to_end(key)
+            except KeyError:  # pragma: no cover - evicted by another thread between the two calls
+                pass
         return cached
 
     def locate(self, x: float) -> Tuple[int, int]:
         """The bin ``b`` and grid index ``lo`` of latent value *x*, by the two bisections."""
         lo, hi = 0, self._last
         while hi - lo > 1:
-            mid = (lo + hi) // 2
+            mid = lo + (hi - lo) // 2
             if self._bin_thresholds[mid] <= x:
                 lo = mid
             else:
@@ -402,7 +424,7 @@ class ColumnLaw:
         b = lo + 1
         lo, hi = 0, self._widths[b - 1]
         while hi - lo > 1:
-            mid = (lo + hi) // 2
+            mid = lo + (hi - lo) // 2
             if self.grid_threshold(b, mid) <= x:
                 lo = mid
             else:
@@ -426,24 +448,34 @@ class ColumnLaw:
         """
         kernel2.require_subnormals()
         size = x.shape[0]
+        if self._wide:
+            # A grid index can pass int64: the row path's integers hold it, and the index
+            # array holds Python integers.
+            found = [self.locate(float(value)) for value in x.tolist()]
+            wide_bins = np.array([each[0] for each in found], dtype=np.int64)
+            wide_index = np.empty(size, dtype=object)
+            wide_index[:] = [each[1] for each in found]
+            return wide_bins, wide_index
         lo = np.zeros(size, dtype=np.int64)
         hi = np.full(size, self._last, dtype=np.int64)
         while True:
             active = hi - lo > 1
             if not active.any():
                 break
-            mid = (lo + hi) // 2
+            # lo + (hi - lo) // 2, not (lo + hi) // 2: the sum wraps once a bin holds more than 2**62 values.
+            mid = lo + (hi - lo) // 2
             below = self._bin_array[mid] <= x
             lo = np.where(active & below, mid, lo)
             hi = np.where(active & ~below, mid, hi)
         b = lo + 1
         lo = np.zeros(size, dtype=np.int64)
+        assert self._widths_array is not None
         hi = self._widths_array[b - 1]
         while True:
             active = hi - lo > 1
             if not active.any():
                 break
-            mid = (lo + hi) // 2
+            mid = lo + (hi - lo) // 2
             below = np.zeros(size, dtype=bool)
             below[active] = self._grid_thresholds(b[active], mid[active]) <= x[active]
             lo = np.where(active & below, mid, lo)

@@ -338,6 +338,21 @@ def test_an_estimated_clique_is_refused_and_the_message_says_it_is_not_read() ->
     assert "estimated cliques are not read" in _refused(document)
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda c: c.update(estimate={"variance": "1"}),
+        lambda c: c.update(measurements=[]),
+        lambda c: c.update(published="estimated"),
+    ],
+)
+def test_every_spelling_of_an_estimated_clique_gets_the_same_message(
+    change: Callable[[Dict[str, Any]], Any],
+) -> None:
+    message = _refused(_document(lambda d: change(_clique_2(d))))
+    assert "estimated cliques are not read in this format" in message
+
+
 def test_a_clique_needs_the_account_and_the_unit_s_table() -> None:
     def no_account(document: Dict[str, Any]) -> None:
         del document["privacy"]

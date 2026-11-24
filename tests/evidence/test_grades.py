@@ -814,3 +814,40 @@ def test_a_group_by_on_a_column_the_profile_does_not_describe_is_p1_in_format_1_
     graded = grade_profile(document, pinned=True)
     assert graded.pattern is Pattern.P1
     assert any("keys are data values" in reason for reason in graded.reasons)
+
+
+# ---------------------------------------------------------------------------
+# A relationship's ``structural`` member is structure only from format 1-4-0
+# ---------------------------------------------------------------------------
+
+
+def _with_structural(schema_url: str) -> ProfileGrade:
+    def change(document: Dict[str, Any]) -> None:
+        document["_schemaURL"] = document["_schemaURL"].replace("1-2-0", schema_url)
+        plan = copy.deepcopy(document["tables"]["subscriber"])
+        for member in ("cliques", "cliqueSelection", "rowCount", "columnPairs"):
+            plan.pop(member, None)
+        document["tables"]["plan"] = plan
+        document["relationships"] = [
+            {
+                "parent": {"table": "plan", "columns": ["region"]},
+                "child": {"table": "subscriber", "columns": ["region"]},
+                "statistics": [],
+                "structural": ["childless"],
+            }
+        ]
+
+    return _graded(change)
+
+
+def test_a_structural_member_in_a_profile_of_format_1_3_0_is_not_structure_and_is_p1() -> None:
+    # 0.10.0 graded this profile P1; the member was read as structure in every format since.
+    graded = _with_structural("1-3-0")
+    assert graded.pattern is Pattern.P1
+    assert any("structural" in reason and "does not know" in reason for reason in graded.reasons)
+
+
+def test_a_structural_member_in_a_profile_of_format_1_4_0_is_structure_and_keeps_p3() -> None:
+    graded = _with_structural("1-4-0")
+    assert graded.reasons == ()
+    assert graded.pattern is Pattern.P3

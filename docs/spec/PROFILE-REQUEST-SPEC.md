@@ -168,7 +168,10 @@ owner's choice, stated in the profile.
   method and the bins of a number column, and states them (PROFILE-SPEC.md section 5a).
 - `relationships[].groupBy`: a list of columns of the relationship's parent table, each named once, at most 64.
   The profile states the relationship's statistics grouped by each (PROFILE-SPEC.md section 5): by its levels for
-  a `category` column, and by bins the profiler chooses for a `number` or `timestamp` column.
+  a `category` column, and by bins the profiler chooses for a `number` or `timestamp` column. The request carries
+  column names only, so a profiler should cut a relationship's `groupByBins` on the parent column's own histogram
+  bins: `fluxsim init` draws children per parent given a number column only when the grouping's bins are those
+  bins, and sets any other grouping aside, with the reason in the ledger.
 - `relationships[].linked`: a list of `{ "column", "parentColumn" }`, a column of the child table and one of the
   parent table, each pair named once, at most 1 024. The profile states the child column's statistics grouped by
   the parent column through this relationship (`groupByLink`, PROFILE-SPEC.md section 3).

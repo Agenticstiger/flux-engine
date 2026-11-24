@@ -70,6 +70,7 @@ from flux_engine.seam.scorecard import (
     dimension_of,
 )
 from flux_stats import definition_for_property
+from flux_stats.fidelity import PropertyKind
 from flux_stats.profile import Profile
 
 if TYPE_CHECKING:
@@ -316,8 +317,12 @@ class PropertyScore:
 
 def _holds_1_5_0(prop: PropertyScore) -> bool:
     """Whether a property row holds what format 1-5-0 adds: a rank correlation, or a grouped
-    children-per-parent row (the ``groupBy`` or ``groupByBins`` member its document then has)."""
-    if prop.rank is not None or prop.group_by_bins is not None:
+    children-per-parent row (the ``groupBy`` or ``groupByBins`` member its document then has).
+
+    A rank correlation row is 1-5-0 whether or not a rank was measured: a censored or a refused one
+    carries no ``rank`` member and still has the row's other members, which 1-4-0 does not allow.
+    """
+    if prop.kind == PropertyKind.RANK_CORRELATION.value or prop.group_by_bins is not None:
         return True
     document = prop.document
     return (

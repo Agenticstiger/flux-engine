@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 __all__ = [
     "LineFailure",
     "build_run_scorecard",
+    "children_failures",
     "contract_shape",
     "copula_alphas",
     "line_failures",
@@ -98,6 +99,56 @@ def line_failures(
             LineFailure("exposure", each.expose_id, each.line()) for each in exposure.failed()
         )
     return found
+
+
+def children_failures(
+    module: Optional["ModuleChecks"], scorecard: Optional["Scorecard"]
+) -> List[LineFailure]:
+    """The children-per-parent rows of *scorecard* that are outside their tolerance, as lines that fail a run.
+
+    A ``counts`` entry that lays a relationship out *given* a parent column declares the tolerance of
+    the row's classes, so a row of such a relationship that is outside it (in a class, or in the
+    whole) is a failed check, as the assertion for the row (``success: false``) says. Any other row,
+    a relationship with no entry or one with no ``given``, informs and fails nothing. A group is
+    named by its ordinal, never by its key.
+    """
+    from flux_engine.concordance.module_scores import CHILDREN_PER_PARENT
+    from flux_engine.concordance.verifier import OUTSIDE
+
+    if module is None or scorecard is None or not any(entry.given for entry in module.counts):
+        return []
+    declared = {(entry.emit, entry.relationship) for entry in module.counts if entry.given}
+    found: List[LineFailure] = []
+    for table in scorecard.tables:
+        for row in table.properties:
+            document = row.document or {}
+            if (
+                row.kind != CHILDREN_PER_PARENT
+                or row.outcome != OUTSIDE
+                or (table.expose_id, document.get("relationship")) not in declared
+            ):
+                continue
+            found.append(LineFailure("children", table.expose_id, _children_line(row)))
+    return found
+
+
+def _children_line(row: "PropertyScore") -> str:
+    """The line for one children-per-parent row outside its tolerance: the groups, distances and tolerance."""
+    document = row.document or {}
+    name = f"{document.get('child')}.{document.get('relationship')}"
+    tolerance = document.get("tolerance")
+    grouping = document.get("groupBy") or (document.get("groupByBins") or {}).get("column")
+    if "groups" not in document:
+        return (
+            f"children {name}: the parents' children per parent are outside the tolerance "
+            f"{tolerance} of the profile's (distance {document.get('distance')})"
+        )
+    outside = [group for group in document["groups"] if group.get("outcome") == "outside"]
+    parts = [f"group #{group['ordinal']} (distance {group.get('distance')})" for group in outside]
+    return (
+        f"children {name}, given {grouping}: {', '.join(parts)} outside the tolerance {tolerance} "
+        "of the profile's"
+    )
 
 
 def _failed(module: Optional["ModuleChecks"]) -> List[Any]:

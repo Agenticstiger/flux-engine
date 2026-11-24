@@ -159,7 +159,8 @@ def test_more_than_one_job_starts_the_server_once_with_the_workers_preload(
 ) -> None:
     assert _prewarm.start_forkserver_early(4) is True
     assert started.calls == 1
-    assert forkserver_module._forkserver._preload_modules == [parallel.__name__]
+    assert forkserver_module._forkserver._preload_modules == _prewarm.preload_modules()
+    assert parallel.__name__ in _prewarm.preload_modules()
 
 
 @pytest.mark.unit
@@ -260,3 +261,102 @@ def test_a_run_with_the_server_started_early_gives_the_bytes_one_job_gives(
     assert build_plan_document(four) == build_plan_document(one)
     for mine, theirs in zip(four.emits, one.emits, strict=True):
         assert mine.writer.lines() == theirs.writer.lines()
+
+
+# ---------------------------------------------------------------------------
+# Ctrl-C while the server imports
+# ---------------------------------------------------------------------------
+
+_SLOW_IMPORT = """
+import pathlib, sys, time
+pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "marker").write_text("importing")
+time.sleep(3)
+"""
+
+_SERVER = """
+import multiprocessing, pathlib, signal, sys, time
+from multiprocessing import forkserver
+from flux_engine.stages import _prewarm
+
+directory = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(directory))
+context = multiprocessing.get_context("forkserver")
+context.set_forkserver_preload({preload})
+forkserver.ensure_running()
+deadline = time.monotonic() + 60
+while not (directory / "marker").exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+try:
+    # Inside the try: the test signals once it reads this line, so a Ctrl-C that
+    # lands on the print itself is this script's own, not the server's.
+    print("importing", flush=True)
+    time.sleep(5)
+except KeyboardInterrupt:
+    pass
+"""
+
+
+def _interrupt_while_the_server_imports(tmp_path: Path, preload: str) -> str:
+    """The stderr of a process group whose forkserver is mid-import when Ctrl-C reaches it."""
+    import os
+    import signal
+
+    (tmp_path / "slowmod.py").write_text(
+        _SLOW_IMPORT.replace(
+            'sys.argv[1] if len(sys.argv) > 1 else "marker"', f'r"{tmp_path / "marker"}"'
+        ),
+        encoding="utf-8",
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-P", "-c", _SERVER.format(preload=preload), str(tmp_path)],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+        env={**_clean_environment(), "PYTHONPATH": str(REPO_ROOT)},
+    )
+    assert process.stdout is not None
+    assert process.stdout.readline().strip() == "importing"
+    # What a terminal does with Ctrl-C: SIGINT to every process of the foreground group.
+    os.killpg(process.pid, signal.SIGINT)
+    try:
+        _, stderr = process.communicate(timeout=60)
+    except subprocess.TimeoutExpired:  # pragma: no cover - a server that took the signal and hung
+        os.killpg(process.pid, signal.SIGKILL)
+        _, stderr = process.communicate()
+    return stderr
+
+
+@pytest.mark.unit
+def test_the_preload_ignores_sigint_first_and_restores_the_handler_last() -> None:
+    assert _prewarm.preload_modules() == [
+        "flux_engine.stages._sigint_guard",
+        "flux_engine.stages._parallel",
+        "flux_engine.stages._sigint_restore",
+    ]
+    assert _prewarm.preload_modules("slowmod")[1] == "slowmod"
+    probe = (
+        "import signal\n"
+        "import flux_engine.stages._sigint_guard\n"
+        "print(signal.getsignal(signal.SIGINT) == signal.SIG_IGN)\n"
+        "import flux_engine.stages._sigint_restore\n"
+        "print(signal.getsignal(signal.SIGINT) is signal.default_int_handler)\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-P", "-c", probe],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**_clean_environment(), "PYTHONPATH": str(REPO_ROOT)},
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split() == ["True", "True"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a forkserver is a POSIX facility")
+@pytest.mark.unit
+def test_a_ctrl_c_while_the_server_imports_prints_no_traceback(tmp_path: Path) -> None:
+    stderr = _interrupt_while_the_server_imports(tmp_path, "_prewarm.preload_modules('slowmod')")
+    assert "KeyboardInterrupt" not in stderr and "Traceback" not in stderr, stderr

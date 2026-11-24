@@ -118,6 +118,16 @@ GRADED_RELATIONSHIP_MEMBERS = frozenset({"statistics", "dates", "exposure"})
 #: Members that carry no statistic: a column's domain, and a relationship's keys and structure.
 STRUCTURAL_COLUMN_MEMBERS = frozenset({"domain"})
 STRUCTURAL_RELATIONSHIP_MEMBERS = frozenset({"parent", "child", "structural"})
+#: ``structural`` (the classes of parents a constraint leaves empty) is structure only in format
+#: 1-4-0 and later; in an older format the member is not one the grade knows.
+_SINCE_1_4_RELATIONSHIP_MEMBERS = frozenset({"structural"})
+
+
+def _structural_relationship_members(accounting: Optional["Accounting"]) -> FrozenSet[str]:
+    """The relationship members that carry no statistic in the format *accounting* belongs to."""
+    if accounting is not None and accounting.from_1_4:
+        return STRUCTURAL_RELATIONSHIP_MEMBERS
+    return STRUCTURAL_RELATIONSHIP_MEMBERS - _SINCE_1_4_RELATIONSHIP_MEMBERS
 
 
 @dataclass(frozen=True)
@@ -577,7 +587,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
         unknown += [
             f"{at}.{_named(key)}"
             for key in relationship
-            if key not in GRADED_RELATIONSHIP_MEMBERS | STRUCTURAL_RELATIONSHIP_MEMBERS
+            if key not in GRADED_RELATIONSHIP_MEMBERS | _structural_relationship_members(accounting)
         ]
     if exact["row count"]:
         reasons.append("the profile holds a row count released without noise")

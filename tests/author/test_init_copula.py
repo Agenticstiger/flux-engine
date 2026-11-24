@@ -139,6 +139,12 @@ def test_a_noisy_pair_is_written_as_its_value_clamped_to_one(
     assert _pair(fidelity, "amount", "opened_at") == "-1"
     assert _pair(fidelity, "balance", "opened_at") == "0.25"
     assert "clamped" in _ledger(result, "columnPairs/0/statistics/0")["note"]
+    # The text says it too, one short line for each pair that was clamped and none for the others.
+    lines = [line for line in result.stdout.splitlines() if " is held at " in line]
+    assert len(lines) == 2
+    assert "amount, balance" in lines[0] and "released as 1.7 is held at 1" in lines[0]
+    assert "amount, opened_at" in lines[1] and "released as -3 is held at -1" in lines[1]
+    assert all(line.startswith("  copula: ") for line in lines)
 
 
 def test_each_pair_is_scored_by_a_rank_correlation_property_with_a_stated_tolerance(
@@ -493,3 +499,16 @@ def test_a_table_with_no_rank_correlation_is_not_read_at_all() -> None:
 
     assert declare_copula(_stub(), None, by_dates=set(), whole=None, counter_based=True) is None
     assert has_rank_statistics(None) is False
+
+
+def test_the_copula_note_is_short_sentences_not_one_long_one(
+    tmp_path: Path, data: List[rp.Row]
+) -> None:
+    result = _init(tmp_path, rp.profile(data, rows=ROWS))
+    assert result.exit_code == 0, result.stderr
+    (line,) = [each for each in result.stdout.splitlines() if "Gaussian copula" in each]
+    note = line.split("copula: ", 1)[1]
+    assert ";" not in note
+    sentences = [each for each in note.split(". ") if each]
+    assert len(sentences) >= 4
+    assert max(len(each) for each in sentences) <= 100

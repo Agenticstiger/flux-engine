@@ -109,6 +109,8 @@ class _Pair:
     measure: str
     value: Optional[Fraction]
     noisy: bool = False
+    #: A noisy value as released, before it was clamped to ``[-1, 1]``; ``None`` for an exact one.
+    released: Optional[Fraction] = None
 
 
 def has_rank_statistics(table: Any) -> bool:
@@ -138,8 +140,11 @@ def _read_pairs(table: Any, expose_id: str) -> Dict[FrozenSet[str], List[_Pair]]
             )
             group = statistic.groups[0] if statistic.groups else None
             value = group.value if group is not None and group.published else None
+            released = (
+                group.noisy[0] if group is not None and group.published and group.noisy else None
+            )
             found.setdefault(frozenset(pair.columns), []).append(
-                _Pair(tokens, measure, value, statistic.noise is not None)
+                _Pair(tokens, measure, value, statistic.noise is not None, released)
             )
     return found
 
@@ -402,6 +407,7 @@ def _declare(
     measure = _measure_of(names, published) or "kendall"
     pairs: List[Dict[str, Any]] = []
     held: List[Tuple[str, str]] = []
+    clamped: List[str] = []
     used: Set[Tuple[str, ...]] = set()
     for first in range(len(names)):
         for second in range(first + 1, len(names)):
@@ -427,6 +433,11 @@ def _declare(
             )
             result.reads.append((chosen.tokens, how))
             result.properties.append(_property(pair, measure, chosen.tokens))
+            if chosen.released is not None and abs(chosen.released) > 1:
+                clamped.append(
+                    f"{_spelled(pair)}: the noisy {_NAMES[measure]} released as "
+                    f"{_value_text(chosen.released)} is held at {'-1' if chosen.released < 0 else '1'}"
+                )
     result.declaration = {
         "columns": list(names),
         "rankCorrelations": {"measure": measure, "pairs": pairs},
@@ -435,6 +446,8 @@ def _declare(
     result.measure = measure
     _pass_all(result, published, out, measure, names, used)
     _notes(result, names, measure, held)
+    # A noisy release past the range of a correlation is clamped, and the text says which pair.
+    result.notes.extend(clamped)
 
 
 def _property(pair: Tuple[str, str], measure: str, tokens: Tuple[str, ...]) -> PropertyPlan:
@@ -488,10 +501,10 @@ def _notes(
 ) -> None:
     result.notes.append(
         f"{_spelled(names)} are drawn together through one Gaussian copula of their "
-        f"{_NAMES[measure]}, each pair's value the profile's, rounded to {_FIRST_PLACES} places; "
-        "the plan may shrink the matrix towards the identity to make it a correlation matrix, "
-        "which multiplies every correlation by 1 - alpha on the latent scale, and the evidence "
-        "states alpha"
+        f"{_NAMES[measure]}. Each pair's value is the profile's, rounded to {_FIRST_PLACES} "
+        "places. The plan may shrink the matrix towards the identity, so that it is a "
+        "correlation matrix. That multiplies every correlation by 1 - alpha on the latent "
+        "scale. The evidence states alpha."
     )
     if held:
         shown = "; ".join(_spelled(pair) for pair in held[:_SHOWN])

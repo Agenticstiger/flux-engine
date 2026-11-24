@@ -247,3 +247,57 @@ def test_bad_columns_are_refused() -> None:
         copula.ColumnLaw([Fraction(1), Fraction(0)], [1])
     with pytest.raises(ValueError):
         copula.ColumnLaw([Fraction(-1, 2), Fraction(3, 2)], [1, 1])
+
+
+# ---------------------------------------------------------------------------
+# Wide bins: the column path equals the row path, and the grid cache is bounded
+# ---------------------------------------------------------------------------
+
+
+def _latents(count: int = 600) -> "np.ndarray":
+    spread = np.linspace(-4.0, 4.0, count)
+    return np.concatenate([spread, np.array([-math.inf, math.inf, 0.0])])
+
+
+@pytest.mark.parametrize(
+    "width", [(1 << 61) + 1, (1 << 62) + 12345, 3 << 61, 6 * 10**18, (1 << 63) - 1]
+)
+def test_the_column_path_equals_the_row_path_for_bins_near_and_above_two_to_the_62(
+    width: int,
+) -> None:
+    # (lo + hi) // 2 on int64 wrapped once a bin held more than 2**62 values, and the column
+    # path then located a grid index below zero.
+    law = copula.ColumnLaw([Fraction(1, 3), Fraction(2, 3)], [width, 7])
+    x = _latents()
+    b, lo = law.locate_columns(x)
+    expected = [law.locate(float(value)) for value in x.tolist()]
+    assert list(zip(b.tolist(), lo.tolist(), strict=True)) == expected
+    assert all(index >= 0 for index in lo.tolist())
+
+
+@pytest.mark.parametrize("width", [1 << 63, (1 << 63) + (1 << 62), (1 << 64) - 1, 1 << 64])
+def test_a_bin_wider_than_int64_is_built_and_located_in_python_integers(width: int) -> None:
+    # np.array(widths, dtype=np.int64) raised a raw OverflowError for a width of 2**63 or more.
+    law = copula.ColumnLaw([Fraction(1, 2), Fraction(1, 2)], [width, 5])
+    x = _latents(200)
+    b, lo = law.locate_columns(x)
+    expected = [law.locate(float(value)) for value in x.tolist()]
+    assert list(zip(b.tolist(), lo.tolist(), strict=True)) == expected
+    assert all(0 <= index < width for index in lo.tolist())
+    assert max(lo.tolist()) > (1 << 62)  # indexes the int64 path could not hold
+
+
+def test_the_grid_cache_stays_bounded_over_many_rows_and_changes_no_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(copula, "GRID_CACHE_ENTRIES", 64)
+    width = 10**12
+    bounded = copula.ColumnLaw([Fraction(1, 2), Fraction(1, 2)], [width, width])
+    fresh = copula.ColumnLaw([Fraction(1, 2), Fraction(1, 2)], [width, width])
+    x = np.random.default_rng(7).normal(size=2000)
+    b, lo = bounded.locate_columns(x)
+    assert len(bounded._grid) <= 64
+    # Row by row, each from a cache that holds nothing, the same cells.
+    for position, value in enumerate(x.tolist()):
+        fresh._grid.clear()
+        assert fresh.locate(value) == (int(b[position]), int(lo[position]))

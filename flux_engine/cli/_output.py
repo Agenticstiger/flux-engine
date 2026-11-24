@@ -72,6 +72,22 @@ def _result_text(result: Any, *, as_json: bool) -> Optional[str]:
     return result.stdout or None
 
 
+def _stdout_is_broken() -> bool:
+    """Whether stdout's reader has gone, found by flushing what is waiting for it.
+
+    A ``BrokenPipeError`` can also come from a sink socket, an upload or a plugin, and nothing
+    about the exception says which pipe it was. Only a stdout that fails to flush is a closed
+    stdout.
+    """
+    try:
+        sys.stdout.flush()
+    except BrokenPipeError:
+        return True
+    except (OSError, ValueError, AttributeError):
+        return False
+    return False
+
+
 def _write_stdout(text: Optional[str]) -> bool:
     """Print *text* and flush stdout; ``False`` when its reader has gone.
 
@@ -102,9 +118,7 @@ def _print_result(result: Any, *, as_json: bool, next_steps: Sequence[str] = ())
     always still printed too so a human reading the terminal is not left
     staring at a JSON blob for the one line that matters.
     """
-    if not _write_stdout(_result_text(result, as_json=as_json)):
-        # The work is done and only the reader left: stop writing, keep the command's status.
-        return int(result.exit_code)
+    stdout_open = _write_stdout(_result_text(result, as_json=as_json))
     if result.stderr:
         # Flush stdout FIRST. stdout is block-buffered the moment it is
         # redirected while stderr never is, so `fluxsim run ... 2>&1 | tee log`
@@ -112,11 +126,19 @@ def _print_result(result: Any, *, as_json: bool, next_steps: Sequence[str] = ())
         # stderr line ABOVE the stdout lines that explain it, reading as if
         # the run had failed before it started. The call order was already
         # right; the buffering was not.
-        sys.stdout.flush()
+        #
+        # A reader that has gone from stdout does not take the message with it: a refusal
+        # is written to stderr all the same, so `fluxsim validate ... --json 2>err | true`
+        # still leaves its code in `err`.
+        if stdout_open:
+            sys.stdout.flush()
         print(result.stderr, file=sys.stderr)
         pointer = None if as_json or result.success else _failure_pointer(result)
         if pointer:
             print(pointer, file=sys.stderr)
+    if not stdout_open:
+        # The work is done and only the reader left: stop writing, keep the command's status.
+        return int(result.exit_code)
     if next_steps and result.success and progress_enabled(as_json=as_json):
         # Courtesy lines for a person at a terminal (see `_hints`): stderr only,
         # never under --json, silenced by FLUX_NO_PROGRESS, like progress.

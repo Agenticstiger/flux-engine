@@ -46,7 +46,7 @@ A Simulation that declares responses and pins no profile is refused (`FLX-3671`)
 fluxsim forecast make bundle --profile orders.profile.json --registered-at REGISTERED_AT --horizon-end HORIZON_END
 ```
 
-`make` runs the sweep as replicates, takes each item's median and interval, and registers it in the outcome-accuracy store under the state directory. The same forecast again changes nothing. Print what `make` printed: each item's id, forecast and interval. Then tell the user to publish each seal before the next state is released: the order of forecast and outcome rests on the time given and on that publication ([sealing a prediction](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/seal-and-score-a-prediction.md)).
+`make` runs the sweep as replicates, takes each item's median and interval, and registers it in the outcome-accuracy store under the state directory. The same forecast again changes nothing. Print what `make` printed: each item's id, forecast and interval. Then tell the user to publish each seal before the next state is released: the order of forecast and outcome rests on the time given and on that publication ([sealing a prediction](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/seal-and-score-a-prediction.md)).
 
 ## 4. Score against the next state
 
@@ -74,4 +74,4 @@ A question about what a code means, asked on its own, goes to the `flux-docs-loo
 ## More
 
 - [Declarations](references/declarations.md), [make and score](references/make-and-score.md), [reading the scores](references/scores.md), [refusals](references/refusals.md).
-- Pages: [forecast the next state](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/forecast-the-next-state.md), [ADR 0029](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/adr/0029-response-families-forecast-the-next-state-and-every-forecast-is-scored.md), [the command reference](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/reference/cli/forecast.md).
+- Pages: [forecast the next state](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/forecast-the-next-state.md), [ADR 0029](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/adr/0029-response-families-forecast-the-next-state-and-every-forecast-is-scored.md), [the command reference](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/reference/cli/forecast.md).

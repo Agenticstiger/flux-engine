@@ -72,7 +72,7 @@ from flux_engine.accuracy._entries import (
     read_entry,
     replace_entry,
 )
-from flux_engine.accuracy.records import FLX_7007, FLX_7008, FLX_7009, seal_prediction
+from flux_engine.accuracy.records import FLX_7005, FLX_7007, FLX_7008, FLX_7009, seal_prediction
 from flux_engine.api.accuracy import (
     FLX_7012,
     AccuracyVerdict,
@@ -114,9 +114,7 @@ def prediction_from_document(document: Mapping[str, Any]) -> PredictionRecord:
     """
     return PredictionRecord(
         prediction_id=document["prediction_id"],
-        run_digest=DigestRef(
-            value=document["run_digest"], domain=DigestDomain.JCS_DOCUMENT, subject="runDigest"
-        ),
+        run_digest=_run_digest(document["run_digest"]),
         metric_id=document["metric_id"],
         statement=document["statement"],
         predicted=Decimal(str(document["predicted"])),
@@ -135,6 +133,19 @@ def prediction_from_document(document: Mapping[str, Any]) -> PredictionRecord:
         state_digest=_optional_text(document, "stateDigest"),
         input_digest=_optional_text(document, "inputDigest"),
     )
+
+
+def _run_digest(value: Any) -> DigestRef:
+    """The ``run_digest`` of a prediction, or ``FLX-7005`` naming the key the caller passed."""
+    try:
+        return DigestRef(value=value, domain=DigestDomain.JCS_DOCUMENT, subject="runDigest")
+    except (ValueError, TypeError):
+        shown = value if isinstance(value, str) and len(value) <= 100 else "(not a digest text)"
+        raise FluxError(
+            FLX_7005,
+            f"run_digest: malformed digest {shown!r} "
+            "(expected 'sha256:' + 64 lowercase hex characters)",
+        ) from None
 
 
 def _optional_text(document: Mapping[str, Any], key: str) -> Optional[str]:
