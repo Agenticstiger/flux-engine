@@ -12,6 +12,9 @@ nodes it already lists:
 * a weekday or week part is rewritten to the DuckDB expression that has the value the dialect gives
   it under the dialect's documented default settings, or refused (``FLX-3622``) when no exact
   rewrite is written, naming the dialect and the part;
+* T-SQL ``DATEDIFF(week, a, b)`` counts the Sunday-start week boundaries crossed, where DuckDB's
+  ``DATE_DIFF('WEEK', ...)`` counts whole seven-day spans, so it is written as the difference of the
+  two operands' Sunday-start weeks;
 * ``YEAR(0)`` in T-SQL, where an integer is a day count from 1900-01-01, is rewritten to that date;
 * the nodes sqlglot writes for a T-SQL ``DATEDIFF`` operand (``TimeStrToTime``) and for a Snowflake
   ``LEN`` (a binary-aware ``Length``) are rewritten to a cast and a plain ``LENGTH``.
@@ -199,6 +202,25 @@ def _week_start_trunc(operand: exp.Expr, first: int) -> exp.Expr:
     if offset:
         truncated = exp.Add(this=truncated, expression=days())
     return exp.Cast(this=_paren(truncated), to=exp.DataType.build("DATE"))
+
+
+def _sunday_week_diff(node: exp.Expr) -> None:
+    """T-SQL ``DATEDIFF(week, a, b)``: the Sunday-start week boundaries crossed from *a* to *b*.
+
+    DuckDB's ``DATE_DIFF('WEEK', ...)`` counts whole seven-day spans, which is not that count:
+    Saturday to the next day, Sunday, crosses one boundary and spans none. Each operand moves
+    forward a day and is cut to DuckDB's Monday-start week, which is the Sunday-start week of
+    the operand itself, and the two weeks are counted apart (a whole number of them, exactly).
+    """
+    for key in ("this", "expression"):
+        operand = node.args.get(key)
+        if not isinstance(operand, exp.Expr):
+            raise _refusal("a DATEDIFF", "tsql", "WEEK", node)
+        moved = exp.Add(
+            this=operand.copy(),
+            expression=exp.Interval(this=exp.Literal.string("1"), unit=exp.Var(this="DAY")),
+        )
+        node.set(key, exp.DateTrunc(unit=exp.Literal.string("WEEK"), this=_paren(moved)))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -463,6 +485,13 @@ def _translate_node(node: exp.Expr, dialect: str, mapper: Optional[_Mapper], lab
         found = node.args.get("expression")
         if isinstance(found, exp.Expr) and _is_number(found):
             node.set("expression", _days_after_1900(found, describe_parent(None, node), label))
+    if (
+        dialect == "tsql"
+        and isinstance(node, exp.DateDiff)
+        and _unit_name(node.args.get("unit")) == "WEEK"
+    ):
+        _sunday_week_diff(node)
+        return
     if dialect == "duckdb":
         return
     part = _part_of(node)

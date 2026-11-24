@@ -11,6 +11,7 @@ dialect's documentation gives, written out here and not read from DuckDB.
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 from typing import List, Sequence, Tuple
 
 import pytest
@@ -154,3 +155,73 @@ def test_snowflake_len_inside_a_filter() -> None:
         "SELECT id, id AS v FROM subscriptions WHERE LEN(plan) = 3", dialect="snowflake"
     ).text
     assert _run(text, [(1, "ab", "2025-01-05"), (2, "abc", "2025-01-05")]) == [2]
+
+
+def _sunday_boundaries(start: "date", end: "date") -> int:
+    """The Sunday-start week boundaries crossed from *start* to *end*, as T-SQL's documentation counts them.
+
+    ``DATEDIFF(week, ...)`` counts the boundaries crossed, and a week begins on Sunday under
+    ``DATEFIRST`` 7, the default of U.S. English.
+    """
+
+    def sunday_of(day: "date") -> "date":
+        return day - timedelta(days=(day.weekday() + 1) % 7)
+
+    return (sunday_of(end) - sunday_of(start)).days // 7
+
+
+@pytest.mark.parametrize("spelling", ["DATEDIFF(week, {a}, {b})", "DATEDIFF(wk, {a}, {b})"])
+def test_t_sql_datediff_week_counts_the_sunday_boundaries_it_crosses(spelling: str) -> None:
+    # Saturday 2020-01-04 to Sunday 2020-01-05 crosses one boundary and spans one day; DuckDB's
+    # DATE_DIFF('WEEK') counts whole seven-day spans and said 0.
+    first = date(2020, 1, 1)
+    pairs = [
+        (first + timedelta(days=day), first + timedelta(days=(day * 5) % 400)) for day in range(366)
+    ]
+    pairs += [(date(2020, 1, 4), date(2020, 1, 5)), (date(2020, 1, 5), date(2020, 1, 11))]
+    pairs += [(date(2020, 1, 5), date(2020, 1, 12)), (date(2020, 1, 12), date(2020, 1, 4))]
+    expression = spelling.format(a="started", b="renewed_at")
+    text = check(f"SELECT id, {expression} AS v FROM subscriptions", dialect="tsql").text
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE TABLE subscriptions (id BIGINT, renewed_at DATE, started TIMESTAMP)")
+    for number, (start, end) in enumerate(pairs):
+        connection.execute(
+            "INSERT INTO subscriptions VALUES (?, ?, ?)",
+            (number, end.isoformat(), f"{start.isoformat()} 23:59:59"),
+        )
+    found = [
+        item[0] for item in connection.execute(f"SELECT v FROM ({text}) ORDER BY id").fetchall()
+    ]
+    assert found == [_sunday_boundaries(start, end) for start, end in pairs]
+    assert found[len(pairs) - 4] == 1
+
+
+def test_t_sql_datediff_big_week_counts_the_same_boundaries() -> None:
+    text = check(
+        "SELECT id, DATEDIFF_BIG(week, started, renewed_at) AS v FROM subscriptions",
+        dialect="tsql",
+    ).text
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE TABLE subscriptions (id BIGINT, renewed_at DATE, started TIMESTAMP)")
+    connection.execute("INSERT INTO subscriptions VALUES (1, '2020-01-05', '2020-01-04 12:00:00')")
+    connection.execute("INSERT INTO subscriptions VALUES (2, '2020-01-04', '2020-01-05 12:00:00')")
+    found = [
+        item[0] for item in connection.execute(f"SELECT v FROM ({text}) ORDER BY id").fetchall()
+    ]
+    assert found == [1, -1]
+
+
+def test_snowflake_datediff_week_keeps_its_monday_rule() -> None:
+    text = check(
+        "SELECT id, DATEDIFF(week, started, renewed_at) AS v FROM subscriptions",
+        dialect="snowflake",
+    ).text
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE TABLE subscriptions (id BIGINT, renewed_at DATE, started TIMESTAMP)")
+    # Sunday to Monday crosses the Monday boundary; Saturday to Sunday does not.
+    connection.execute("INSERT INTO subscriptions VALUES (1, '2020-01-06', '2020-01-05 00:00:00')")
+    connection.execute("INSERT INTO subscriptions VALUES (2, '2020-01-05', '2020-01-04 00:00:00')")
+    found = [
+        item[0] for item in connection.execute(f"SELECT v FROM ({text}) ORDER BY id").fetchall()
+    ]
+    assert found == [1, 0]
