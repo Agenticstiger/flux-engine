@@ -164,7 +164,7 @@ def layout_of(chain: HistoryPlan, projection: "ProjectionPlan") -> EventLayout:
         mask = np.isin(found.op, [OPS.index(code) for code in entry.on])
         if entry.when is not None:
             checked = view.compile_when(entry.when)
-            mask[mask] = view.holds(checked, found.about[mask])
+            mask[mask] = view.holds(checked, found.about[mask], where=f"events ({entry.emit}).when")
         found = _kept(found, mask)
         if len(_LAYOUTS) >= _LAYOUTS_KEPT:
             _LAYOUTS.clear()

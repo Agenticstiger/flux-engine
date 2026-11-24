@@ -22,7 +22,10 @@ of it needs a cell: the chain's arrays and the tracked levels are the history's 
   (:meth:`VersionView.holds`).
 
 A ``when`` reads nothing a cell draws, so its answer is known at plan time and the projection's
-count with it.
+count with it. The one column a cell draws that a ``when`` may name is the history's end column
+(ADR 0027, the amendment of 2026-11-24): it holds the end value on an ending version and a drawn
+level on any other, so the answer is known only where every level the column's statistics can
+draw gives the same one (:meth:`VersionView.holds` refuses ``FLX-3403`` where they differ).
 """
 
 from __future__ import annotations
@@ -32,12 +35,14 @@ from typing import Any, Dict, Hashable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
+from flux_engine.core.errors import FluxError
 from flux_engine.core.seedtree import SeedTreeRoot
 from flux_engine.expr2.check import PREDICATE, Checked, check
 from flux_engine.expr2.parser import Side, parse
 from flux_engine.expr2.scope import Expose, Model, Versions
 from flux_engine.expr2.types import column_type
 from flux_engine.generator import rows as _rows
+from flux_engine.generator.drawnend import DrawnEnd
 from flux_engine.generator.history import (
     HistoryPlan,
     chain_columns,
@@ -45,6 +50,7 @@ from flux_engine.generator.history import (
     tracked_levels,
 )
 from flux_engine.generator.relations import (
+    FLX_3403,
     ChainColumn,
     EntityColumn,
     TrackedColumn,
@@ -73,12 +79,16 @@ def unit_value(kind: LogicalKind, unit: int) -> Any:
 class _Version:
     """One version row as a :class:`~flux_engine.expr2.evaluate.RowView`: its own columns and the version before."""
 
-    __slots__ = ("_extra", "_row", "_view")
+    __slots__ = ("_extra", "_level", "_row", "_view")
 
     def __init__(
-        self, view: "VersionView", row: int, extra: Optional[Mapping[str, Any]] = None
+        self,
+        view: "VersionView",
+        row: int,
+        extra: Optional[Mapping[str, Any]] = None,
+        level: Any = None,
     ) -> None:
-        self._view, self._row, self._extra = view, row, extra
+        self._view, self._row, self._extra, self._level = view, row, extra, level
 
     @property
     def key(self) -> Hashable:
@@ -87,6 +97,9 @@ class _Version:
     def get(self, column: str) -> Any:
         if self._extra is not None and column in self._extra:
             return self._extra[column]
+        drawn = self._view.drawn
+        if drawn is not None and column == drawn.column:
+            return drawn.at(self._row, self._level)
         return self._view.values(column)[self._row]
 
     def follow(self, relationship: str) -> Optional["_Version"]:  # pragma: no cover
@@ -95,7 +108,7 @@ class _Version:
     def previous(self) -> Optional["_Version"]:
         if self._view.first[self._row]:
             return None
-        return _Version(self._view, self._row - 1)
+        return _Version(self._view, self._row - 1, level=self._level)
 
     def children(self, expose: str, relationship: str) -> Sequence[Any]:  # pragma: no cover
         raise NotImplementedError("a when reads the version's own columns")
@@ -134,6 +147,7 @@ class VersionView:
         self.first = self.ordinals == 0
         self._instants: Optional[Tuple["np.ndarray", "np.ndarray", "np.ndarray"]] = None
         self._values: Dict[str, List[Any]] = {}
+        self.drawn = DrawnEnd.of(history, chain, pick.entry.end, self._tracked)
 
     # -- the chain --------------------------------------------------------------------------
 
@@ -248,12 +262,48 @@ class VersionView:
         checked: Checked,
         rows: "np.ndarray",
         extra: Optional[Mapping[str, Any]] = None,
+        where: str = "when",
     ) -> "np.ndarray":
         """Whether *checked* is TRUE on each version row of *rows* (*extra* gives a row's own further columns)."""
+        if self.drawn is not None and self.drawn.is_read_by(checked):
+            return _holds_over_levels(self, checked, rows, extra, where)
         return np.array(
             [bool(checked.evaluate(_Version(self, int(row), extra))) for row in rows.tolist()],
             dtype=bool,
         )
+
+
+def _holds_over_levels(
+    view: VersionView,
+    checked: Checked,
+    rows: "np.ndarray",
+    extra: Optional[Mapping[str, Any]],
+    where: str,
+) -> "np.ndarray":
+    """:meth:`VersionView.holds` for a condition that reads the history's drawn end column.
+
+    It is evaluated over each level the column's statistics can draw, and refused (``FLX-3403``,
+    naming *where*) on a version where the levels give different answers: the answer would depend
+    on a draw.
+    """
+    drawn = view.drawn
+    assert drawn is not None
+    found = []
+    for row in rows.tolist():
+        answers = {
+            bool(checked.evaluate(_Version(view, int(row), extra, level))) for level in drawn.levels
+        }
+        if len(answers) > 1:
+            raise FluxError(
+                FLX_3403,
+                f"{where} reads {drawn.column!r}, the history's end column, and its result "
+                f"depends on a drawn value: {drawn.column!r} holds {drawn.value!r} on an ending "
+                f"version and one of {list(drawn.levels)} on any other, and version row {row} "
+                "answers differently for them; read it only where every level gives the same "
+                "answer, as in a test for the end value",
+            )
+        found.append(answers.pop() if answers else False)
+    return np.array(found, dtype=bool)
 
 
 #: How many views a process keeps (each holds arrays over the history's versions).

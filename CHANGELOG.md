@@ -48,6 +48,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   count towards the end `share`. `fluxsim verify` adds `history:within_parent`. A history without the key keeps
   every byte. `plan` notes how many entities end in one version with their parent and how many have a parent that
   leaves no room, and the plan-time work of the bound grows linearly with the entities.
+- A periods kind's `when` and an events `when` can read the history's end column (`history[].end.column`, such as
+  `status`), so a kind can leave out the ending versions: `status <> 'retired'`. On an ending version the column
+  holds the end value and on any other a drawn level, so the predicate is known at plan time only where every level
+  the column can draw gives the same answer; where they differ it is `FLX-3403`, naming the kind and the column
+  (ADR 0027, the amendment of 2026-11-24). A `when` that does not name the column keeps its bytes.
 
 ### Changed
 

@@ -768,9 +768,12 @@ def _check_when(
 ) -> None:
     """Refuse (*refusal*) a ``when`` that reads anything but the version's own columns.
 
-    It reads the history's tracked columns, its validity and its activation, and through
-    ``previous.`` those of the version before; *row_only* is the columns that only the row
-    reads, never ``previous.`` (a period column). A text that does not parse or check is refused
+    It reads the history's tracked columns, its validity and its activation, its end column
+    (ADR 0027, the amendment of 2026-11-24), and through ``previous.`` those of the version
+    before; *row_only* is the columns that only the row reads, never ``previous.`` (a period
+    column). The end column holds the end value on an ending version and a drawn level on any
+    other, so a ``when`` that reads it is refused at plan time where its result depends on that
+    draw. A text that does not parse or check is refused
     as any rule's is.
     """
     from flux_engine.expr2.check import PREDICATE, check
@@ -782,6 +785,8 @@ def _check_when(
     history = target.history
     version = {item.column for item in history.tracked}
     version.update(name for name in (target.start, target.end, history.activation) if name)
+    if history.end is not None and history.end.column is not None:
+        version.add(history.end.column)
     for read in checked.reads:
         allowed = version | (set(row_only) if read.reach == "row" else set())
         if read.reach not in ("row", "previous") or read.column not in allowed:

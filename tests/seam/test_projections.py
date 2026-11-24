@@ -688,7 +688,6 @@ def test_a_text_for_a_column_that_is_not_tracked_is_refused(tmp_path: Path) -> N
     "text",
     [
         "tier = 'gold'",
-        "status = 'active'",
         "customer.customer_id = 1",
         "plan <> 'basic' AND seats > 1",
         "previous.tier = 'gold'",
@@ -699,6 +698,13 @@ def test_a_when_that_reads_anything_but_the_versions_columns_is_refused(
 ) -> None:
     found = refused(bundle(tmp_path, "when", events=[event_with(when=text)]), "FLX-3403")
     assert "events (subscription_change).when" in found
+
+
+def test_a_when_may_read_the_end_column_of_the_history(tmp_path: Path) -> None:
+    # The end column is readable (ADR 0027, the amendment of 2026-11-24); whether its result
+    # depends on a drawn value is for the plan to say.
+    entry = event_with(when="status <> 'retired' AND previous.status IS NOT NULL")
+    resolved(bundle(tmp_path, "end-when", events=[entry]))
 
 
 def test_a_when_that_does_not_parse_is_refused_as_any_rule_is(tmp_path: Path) -> None:

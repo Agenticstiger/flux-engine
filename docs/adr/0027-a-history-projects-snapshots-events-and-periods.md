@@ -309,3 +309,21 @@ lines. This amendment fixes the order:
 - **What moves.** The rows of an events or a periodic emit whose rules read a cell the entry sets, and so their
   digests. Every other emit, and every such emit without rules, keeps its bytes. A snapshot is unchanged: its rows
   are the history's, rules included.
+
+## Amendment of 2026-11-24: a `when` reads the history's end column
+
+Sections 4 and 5 let an events `when` and a periods kind's `when` read the version's tracked columns, validity,
+activation and `previous.`, and no other column. A history's end column (`history[].end.column`, such as `status`)
+was one of the others, so a kind could not leave out the ending versions by name. It is readable now, and only a
+`when` that names it changes:
+
+- **The value.** On an ending version the column holds `end.value`. On any other version its cell is drawn, from
+  the levels its statistics give a weight above zero; the end value is never one of them, which the history already
+  refuses (ADR 0017 section 5). A column that the history tracks holds the tracked level and needs no more.
+- **At plan time, with no cell.** The `when` is evaluated over each level the column can draw on a version, with the
+  version before it, through `previous.`, holding the same level (a carried column keeps the entity's first value).
+  It is known at plan time where every level gives one result, as `status <> 'retired'` does: false on an
+  ending version, true on every other. Where the results differ for some version, the `when` is `FLX-3403`, naming
+  the kind (or the events entry) and the column and saying that the result depends on a drawn value.
+- **Opt-in.** A `when` that does not name the end column is as section 4 and 5 say, and keeps its bytes.
+

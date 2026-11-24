@@ -201,6 +201,7 @@ class _Kind:
     mask: Optional["np.ndarray"]
     checked: Optional[Checked]
     overrides: Tuple[Tuple[str, str], ...]
+    where: str = "when"
 
 
 @lru_cache(maxsize=1024)
@@ -226,9 +227,11 @@ def _kind_of(kind: PeriodKind, entry: PeriodsEntry, view: VersionView, where: st
     if kind.when is not None:
         checked = view.compile_when(kind.when, {entry.column: "DATE"})
         if all(read.column != entry.column for read in checked.reads):
-            mask = view.holds(checked, np.arange(view.chain.rows, dtype=np.int64))
+            mask = view.holds(
+                checked, np.arange(view.chain.rows, dtype=np.int64), where=f"{where}.when"
+            )
             checked = None
-    return _Kind(count, mask, checked, kind.overrides)
+    return _Kind(count, mask, checked, kind.overrides, f"{where}.when")
 
 
 def _rows_of(kind: _Kind, held: int) -> int:
@@ -275,7 +278,7 @@ class PeriodLayout:
         found = self.kinds[kind]
         if found.checked is not None:
             extra = {self.entry.column: self.days[period]}
-            return self.view.holds(found.checked, pairs, extra)
+            return self.view.holds(found.checked, pairs, extra, where=found.where)
         if found.mask is None:
             return np.ones(pairs.shape[0], dtype=bool)
         return found.mask[pairs]
