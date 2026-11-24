@@ -47,6 +47,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from flux_engine.author.basis import Label, assumed, from_profile
 from flux_engine.author.columns import (
+    _DAY_MS,
     DEFAULT_TOLERANCES,
     TOLERANCE_REASON,
     ColumnContext,
@@ -246,10 +247,9 @@ def _check_edges(
     if any((edge * (1 << context.fractional_bits)).denominator != 1 for edge in edges):
         raise _refuse(f"{where} lists an edge that does not land on the profile's grid")
     rule = context.range_rule
-    if rule is None or kind not in (LogicalKind.INT, LogicalKind.DECIMAL):
+    if rule is None:
         return
-    scale = context.column.logical_type.scale or 0
-    held = grid_bounds(rule, Fraction(1, 10**scale))
+    held = grid_bounds(rule, _grid_step_of(kind, context))
     if held is None:
         return
     low, high = held
@@ -258,6 +258,36 @@ def _check_edges(
             f"{where} lists bins that do not cover the range the contract declares for the "
             "column, so a value it may hold would lie in no bin"
         )
+    # The column's range is declared from the edges (`_declare_bins`), so an edge beyond the
+    # contract's range would let the column hold a value the contract forbids.
+    for position, bound, name_of_side in (
+        (0, low, "lowest"),
+        (len(edges) - 1, high, "highest"),
+    ):
+        if bound is None or not (
+            edges[position] < bound if name_of_side == "lowest" else edges[position] > bound
+        ):
+            continue
+        edge_spelled = _spell(kind, Decimal(edge_text(edges[position])))
+        bound_spelled = _spell(kind, Decimal(edge_text(bound)))
+        raise _refuse(
+            f"{where} lists bins that reach past the range the contract declares for the "
+            f"column: its {name_of_side} edge {edge_spelled} lies beyond {bound_spelled}, so the "
+            "column would hold values the contract forbids; list bins inside the range"
+        )
+
+
+def _grid_step_of(kind: LogicalKind, context: ColumnContext) -> Fraction:
+    """The step between values of a column of *kind*, in the unit its clique edges are written in.
+
+    A number moves by ``10**-scale``; a date and a timestamp are written in milliseconds, a date
+    moving by a whole day and a timestamp by one millisecond.
+    """
+    if kind is LogicalKind.DATE:
+        return Fraction(_DAY_MS)
+    if kind is LogicalKind.TIMESTAMP:
+        return Fraction(1)
+    return Fraction(1, 10 ** (context.column.logical_type.scale or 0))
 
 
 def _adopt_levels(plan: ColumnPlan, clique: CliqueEntry, levels: Tuple[str, ...]) -> None:

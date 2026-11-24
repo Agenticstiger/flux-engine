@@ -269,6 +269,49 @@ def test_edges_that_cover_the_contracts_range_are_drawn(tmp_path: Path, data: Li
     assert _columns(tmp_path)["balance"]["range"] == {"min": "0", "max": "5000"}
 
 
+def test_edges_that_reach_past_the_contracts_range_are_refused_and_named(
+    tmp_path: Path, data: List[rp.Row]
+) -> None:
+    # The range of the column is written from the edges, so edges of -500 to 6000 over a contract
+    # that allows 0 to 5000 had the run emit balances up to 5995.
+    document = _document(data, ["balance", "region"], balance=["-500", "0", "1000", "2000", "6000"])
+    result = _init(tmp_path, document, RANGED)
+    assert result.exit_code == 1
+    assert "FLX-3402" in result.stderr
+    assert "reach past the range the contract declares" in result.stderr
+    assert "lowest edge -500 lies beyond 0" in result.stderr
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_edges_that_reach_past_only_the_top_of_the_contracts_range_are_refused(
+    tmp_path: Path, data: List[rp.Row]
+) -> None:
+    document = _document(data, ["balance", "region"], balance=["0", "1000", "2000", "6000"])
+    result = _init(tmp_path, document, RANGED)
+    assert result.exit_code == 1
+    assert "highest edge 6000 lies beyond 5000" in result.stderr
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_a_timestamp_clique_column_is_held_to_the_contracts_range_too(
+    tmp_path: Path, data: List[rp.Row]
+) -> None:
+    ranged = rp.CONTRACT.replace(
+        "        - { name: opened_at, type: TIMESTAMP, required: false }",
+        "        - name: opened_at\n"
+        "          type: TIMESTAMP\n"
+        "          required: false\n"
+        "          validationRules:\n"
+        "            - { type: range, constraint: 'between 1000 and 2000' }",
+    )
+    assert ranged != rp.CONTRACT
+    document = _document(data, ["opened_at", "region"], opened_at=["500", "1000", "2000"])
+    result = _init(tmp_path, document, ranged)
+    assert result.exit_code == 1
+    assert "FLX-3402" in result.stderr and "reach past the range" in result.stderr
+    assert not (tmp_path / "bundle").exists()
+
+
 def test_a_column_that_holds_nulls_is_not_drawn_from_a_clique(
     tmp_path: Path, data: List[rp.Row]
 ) -> None:
