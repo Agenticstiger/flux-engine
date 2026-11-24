@@ -8,7 +8,7 @@ Accepted
 
 Google's Common Expression Language (CEL) is the standard non-Turing-
 complete, side-effect-free expression language for exactly this shape of
-problem -- a predicate evaluated against a small attribute model.
+problem: a predicate evaluated against a small attribute model.
 Borrow-before-build search: "cel-python Common Expression Language"
 (2026-09-06); fetched https://github.com/cloud-custodian/cel-python
 (Apache-2.0, pure Python on Lark, custom functions via
@@ -20,7 +20,7 @@ CEL's own grammar accepts expression forms FLUX does not want to accept,
 and is versioned by Google's own release cadence, not FLUX's. The design
 requires `flux-expr/1` to be a frozen, closed grammar whose AST
 compiles to a typed closure at plan time and is digest-stable across
-engine versions -- a property that has to be true of the language FLUX
+engine versions, a property that has to be true of the language FLUX
 ships, not of whatever CEL happens to accept in a given release.
 
 ## Decision

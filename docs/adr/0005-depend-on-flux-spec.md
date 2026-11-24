@@ -5,7 +5,7 @@
 Accepted. **Amended 2026-09-07:** the precondition this ADR was
 written around has occurred. `flux_spec` 0.5.0 is published from the
 public `Agenticstiger/flux` repository, and `flux-spec` is now a declared
-core dependency in `pyproject.toml` -- a PEP 508 direct reference pinned
+core dependency in `pyproject.toml`: a PEP 508 direct reference pinned
 to a commit until the PyPI release lands. See "Consequences" below, whose
 second bullet describes the state now in force.
 
@@ -27,17 +27,19 @@ path edits. `flux_engine.spec.SOURCE` stays, always `"flux_spec"`, because
 The second bullet under "Consequences" is history now, and so is the vendored
 half of the Decision.
 
+**Amended 2026-11-24:** the range is `flux-spec>=0.5.4,<0.6`, the floor `pyproject.toml` now carries.
+
 ## Context
 
 The FLUX offline reference validator, the RFC-04 enforcement gate, and the
 RFC-09 evidence bundler already exist, tested, in the FLUX specification
 repository (`Agenticstiger/flux`) as `scripts/validate.py`, `enforce.py`,
 and `bundle.py`. The plan was to publish these as a public, Apache-2.0
-`flux_spec` PyPI distribution in a later increment -- until then,
+`flux_spec` PyPI distribution in a later increment; until then,
 flux_engine cannot depend on a distribution that does not exist yet.
 
 (Written when the project started. That increment has since landed:
-`flux_spec` 0.5.0 is published and depended on -- see Status above. The
+`flux_spec` 0.5.0 is published and depended on; see Status above. The
 paragraph is kept as the context the decision was taken in, not as a
 description of today.)
 
@@ -56,7 +58,7 @@ backend is active, and `fluxsim describe --self` surfaces it.
 - flux_engine's enforcement-gate conformance (`fluxsim gate conform`) and
   future document validation both produce the identical verdict the
   public validator/gate would produce, by construction, whichever backend
-  is active -- there is one enforcement decision function, imported, not
+  is active: there is one enforcement decision function, imported, not
   reimplemented.
 - The `flux_spec` distribution has shipped and is a declared core
   dependency, so the vendored copy is now a pure fallback (kept for an
@@ -78,5 +80,5 @@ backend is active, and `fluxsim describe --self` surfaces it.
   did the latter looked for `flux_spec/vectors/` and `flux_spec/schema/`;
   the published distribution keeps its data under `flux_spec/data/`, so
   with the distribution installed the engine ran its code and read the
-  vendored schema and vectors -- silently, and reporting the wrong
+  vendored schema and vectors, silently, and reporting the wrong
   provenance.

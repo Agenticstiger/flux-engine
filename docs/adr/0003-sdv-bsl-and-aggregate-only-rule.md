@@ -48,7 +48,7 @@ scope for the v0.1/v0.2 build regardless of which library would supply it.
 
 - The v0.1 generator (`flux_engine.generator`) produces rows from a FLUID
   expose schema's declared column types and four distribution families,
-  parameterized by aggregate statistics -- never by fitting a model to
+  parameterized by aggregate statistics, never by fitting a model to
   real records.
 - No record-level library is a dependency, in any extra. synthcity
   (Apache-2.0) and SDMetrics (MIT) were first listed as an opt-in `[synth]`
@@ -61,7 +61,7 @@ scope for the v0.1/v0.2 build regardless of which library would supply it.
 
 - No production-license exposure from a restricted-license dependency.
 - The aggregate-only rule is enforced by what the v0.1/v0.2 code paths
-  call, not only by a license choice -- `flux_engine.generator` and the
+  call, not only by a license choice: `flux_engine.generator` and the
   fitted calibration path (v0.2) both take aggregate statistics as their
   only cross-boundary input, never a stream of individual records.
 

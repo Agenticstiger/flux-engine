@@ -12,7 +12,7 @@ from a fresh project made with `fluxsim init`.
 - [Model your customers](./model-customers.md): change the population, add a persona, test a segment expression.
 - [Add a journey](./add-a-journey.md): a new signal, detector and journey, wired in through a module.
 - [Use the FLUID seam](./use-the-fluid-seam.md): change the contract the rows follow and keep the pinned digest honest.
-- [Calibrate from aggregates: declare a scorecard](./calibrate-from-aggregates.md): add a Playback and read back its declared scorecard. Nothing is fitted in this release.
+- [Calibrate from aggregates: declare a scorecard](./calibrate-from-aggregates.md): add a Playback and read back its declared scorecard. This path fits nothing; fitting is in [Check consumer queries](./check-consumer-queries.md).
 - [Draw a column given another](./draw-a-column-given-another.md): declare a histogram drawn given a categorical column, from a grouped histogram's counts, and see the fidelity gate check the link.
 - [Draw a column given the bin of another](./draw-a-column-given-the-bin-of-another.md): declare a column drawn given the bin of a number column, from a table grouped by that column's bins, and see the fidelity gate check the link with `groupByBins`.
 - [Draw number columns together](./draw-number-columns-together.md): declare a Gaussian copula so two number or date columns are drawn with a stated rank correlation, keep each column's histogram, and score the correlation against a profile.

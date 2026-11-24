@@ -77,9 +77,9 @@ C4 calls a separately installed piece a *container*. FLUX has five.
 |---|---|---|
 | `flux-spec`, from [Agenticstiger/flux](https://github.com/Agenticstiger/flux) | The FLUX schemas, the FLUID schemas a contract may target, the document validator, the enforcement decision for AI calls, and the evidence bundler. | Everyone who installs the engine, which depends on it. Someone who only checks a pack can install it alone. |
 | `flux-sim-engine`, this repository | The `fluxsim` command and its Python library. | Whoever generates the rows. |
-| `flux-stats`, in `packages/flux-stats/` | One definition per statistic, the profile reader, the rules for reading a value from a record, and the mechanism of the `FLX` code catalog. It needs only the standard library. | Both sides. The engine pins its exact version, and the data owner installs it next to `fluid profile`. |
+| `flux-stats`, in `packages/flux-stats/` | One definition per statistic, the profile reader, the rules for reading a value from a record, and the mechanism of the `FLX` code catalog. It needs only the standard library. | Both sides. The engine requires a range of it (`>=0.11,<0.12` for this release), and the data owner installs it next to `fluid profile`. |
 | `fluid profile`, in forge-cli | Reading records where they live, the disclosure rules, and writing the profile. | The data owner, next to the data. |
-| Sinks | Where the rows land besides the run's own NDJSON files (one JSON value per line): Parquet or Arrow IPC files (the `arrow` extra), a database through ADBC, Arrow Database Connectivity (the `adbc` extra), or a plug-in. | Whoever generates, by choosing an extra or a plug-in. |
+| Sinks | Where the rows land besides the run's own NDJSON files (one JSON value per line): Parquet or Arrow IPC files (the `arrow` extra), a database through ADBC, Arrow Database Connectivity (the `adbc` extra), object stores, Iceberg tables and Delta tables (the `publish` extra), or a plug-in. | Whoever generates, by choosing an extra or a plug-in. |
 
 flux-stats is on PyPI from 0.6.0, released with the engine at the same version. `fluid profile` is in data-product-forge, forge-cli's package on PyPI, from 0.31.0, and its `profile` extra installs flux-stats from PyPI. It writes column metrics, a row count and an ungrouped `mean/1` for each number column, unless the output checks withhold it.
 
@@ -127,7 +127,7 @@ This is the map of the engine's packages. Find the thing that does X here, then 
 | `flux_engine/core/` | Kernel. Canonical bytes and digests, the seed tree, draws, the virtual clock, the trace, cohort splits. |
 | `flux_engine/world/` | Kernel. The population: cohorts, markets and traits. |
 | `flux_engine/runtime/` | Kernel. Signals, detectors, journeys, campaigns and experiments. |
-| `flux_engine/expr/`, `flux_engine/expr2/` | Kernel. The two expression languages, `flux-expr/1` and `flux-expr/2`. Nothing in a run reads `flux-expr/2` yet. |
+| `flux_engine/expr/`, `flux_engine/expr2/` | Kernel. The two expression languages, `flux-expr/1` and `flux-expr/2`. A run reads `flux-expr/2` in the rule, relation, period and plug-in generators (`flux_engine/generator/rules.py`, `relations.py`, `periods.py` and `plugin.py`). |
 | `flux_engine/seam/` | Kernel. Resolving the contract and its keys, the emit stream, attestations and the profile pin. |
 
 ```mermaid
@@ -150,7 +150,7 @@ flowchart TB
 
 *Each arrow is a direction of import the code uses. None leaves the kernel for `cli`, `engine`, `evidence` or `sinks`, and none leaves `flux_stats`.*
 
-The picture is not a strict stack. `cli` also calls a few packages directly for the commands outside the run, and the kernel uses the port types in `api`, the `spec` shim and one helper of the fidelity check, which is why that arrow has two heads. What the project enforces is narrower and stricter: seven contracts in `pyproject.toml` for import-linter, a tool that checks which module may import which. CI checks them on every pull request.
+The picture is not a strict stack. `cli` also calls a few packages directly for the commands outside the run, and the kernel uses the port types in `api`, the `spec` shim and one helper of the fidelity check, which is why that arrow has two heads. What the project enforces is narrower and stricter: eight contracts in `pyproject.toml` for import-linter, a tool that checks which module may import which. CI checks them on every pull request.
 
 | Rule | Why |
 |---|---|
@@ -161,6 +161,7 @@ The picture is not a strict stack. `cli` also calls a few packages directly for 
 | Only `governance.gate` may import `spec.enforce`. | One door to the enforcement decision. |
 | Only the sinks may import `pyarrow` or the ADBC driver manager. | The core install stays small; the heavy columnar libraries are extras. |
 | `flux_stats` may not import the engine, the six modules of the first rule, or `hashlib`. | The data owner can install the statistics alone. |
+| Only the consumer-query package (`flux_engine.consumers`) may import `sqlglot`. | Generation reads no SQL, so a run without consumer queries never loads the parser, and the parsed form the engine checks stays in one place. |
 
 A module could dodge an import rule by importing a function instead of its module, so `tests/test_architecture.py` also scans the kernel and `flux_stats` for calls to the clock, `uuid` and `random`.
 
@@ -316,7 +317,7 @@ Where a pattern is borrowed, a docstring or a decision record names the source. 
 
 - **Golden digests.** The plans, run digests and component digests of three reference bundles are stored under `tests/golden/` and compared on every test cell in CI. A stored file may change only with a row in `GOLDEN-CHANGELOG.md` that says why.
 - **Conformance vectors.** Vector files under `tests/vectors/` pin canonical bytes, seed streams, cohort splits, both expression languages, how a row becomes a line of output, and the fidelity check. The FLUID SQL/1 vectors are forge-cli's, copied unchanged, and DuckDB serves as an oracle for the parts of SQL that `flux-expr/2` takes over.
-- **Import rules.** `lint-imports` checks the seven contracts above, and `tests/test_architecture.py` scans the calls as well.
+- **Import rules.** `lint-imports` checks the eight contracts above, and `tests/test_architecture.py` scans the calls as well.
 - **Help snapshots.** `tests/cli/help-snapshots/` records every flag, default and help text of `fluxsim`, for each Python version CI runs. A change to the command surface fails until the snapshots are rewritten and reviewed with it.
 - **Pages that run.** Every command and file on these pages runs as a test (`tests/docs/`), the generated reference pages must match the code, and every link and named path must resolve.
 - **Accuracy and determinism.** Every pull request runs the digest tests on Ubuntu under Python 3.11, 3.12, 3.13 and 3.14 and on macOS under 3.12; the weekly run and each release tag run all seven combinations. The [accuracy program](../accuracy/DESIGN.md) measures whether the samplers draw from the distributions they declare and whether the fidelity check accepts and withholds when it should; PractRand tests streams that sit side by side in the seed tree, and mutation testing runs weekly on the kernel's numerics.

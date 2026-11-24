@@ -181,8 +181,8 @@ running in the background (Python threads cannot be cancelled), so this
 is a bound on how long the *caller* waits, not a kill. Same contract
 forge-cli's engine documents.
 
-**More than one job.** `plan`, `apply`, `run` and `replay` take `jobs`
-(default 1): how many processes may generate an emit's rows from declared
+**More than one job.** `plan`, `apply`, `run`, `verify` and `replay` take `jobs`
+(default 1): how many processes may generate or read an emit's rows from declared
 statistics. The rows and every digest are the ones one job gives. A run starts one
 pool of worker processes for all its emits and gives each worker the plans once. They
 are started from a forkserver (with spawn where there is none), so each one imports the host's

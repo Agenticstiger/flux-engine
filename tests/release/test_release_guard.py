@@ -108,7 +108,7 @@ def test_a_drifted_version_fallback_is_refused_without_any_tag(tmp_path: Path) -
     assert "must move together" in result.stderr
 
 
-@pytest.mark.parametrize("tag", ["v0.10.0.dev0", "v0.10.0.post1", "0.10.0", "release-0.10.0"])
+@pytest.mark.parametrize("tag", ["v0.11.0.dev0", "v0.11.0.post1", "0.11.0", "release-0.11.0"])
 def test_a_working_version_cannot_be_tagged_as_a_release(tag: str, tmp_path: Path) -> None:
     """The obvious way around a version mismatch: tag the dev string."""
     guard = _load_guard()
@@ -125,7 +125,7 @@ def test_a_consistent_tree_and_tag_is_accepted(tmp_path: Path) -> None:
     output = tmp_path / "github-output.txt"
     result = _run(
         "--tag",
-        "v0.10.0",
+        "v0.11.0",
         "--commit",
         head,
         "--root",
@@ -134,7 +134,7 @@ def test_a_consistent_tree_and_tag_is_accepted(tmp_path: Path) -> None:
         str(output),
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
-    assert output.read_text(encoding="utf-8") == "version=0.10.0\nprerelease=false\n"
+    assert output.read_text(encoding="utf-8") == "version=0.11.0\nprerelease=false\n"
 
 
 # ------------------------------------------------- the flux-stats requirement
@@ -155,18 +155,18 @@ def test_a_range_that_holds_the_flux_stats_version_is_accepted_without_any_tag(
     tmp_path: Path,
 ) -> None:
     """The green arm of the range policy: a floor and a ceiling around the version."""
-    fixture = _tree_with(tmp_path, "range", stats_requirement='"flux-stats>=0.10,<0.11"')
+    fixture = _tree_with(tmp_path, "range", stats_requirement='"flux-stats>=0.11,<0.12"')
     result = _run("--check-tree", "--root", str(fixture))
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
-    assert 'requires "flux-stats>=0.10,<0.11", which admits flux-stats "0.10.0"' in result.stdout
+    assert 'requires "flux-stats>=0.11,<0.12", which admits flux-stats "0.11.0"' in result.stdout
 
 
 def test_a_flux_stats_release_of_the_line_need_not_be_the_engines_version(
     tmp_path: Path,
 ) -> None:
-    """The point of versioning flux-stats by its format: 0.10.3 under an engine at 0.10.0."""
+    """The point of versioning flux-stats by its format: 0.11.3 under an engine at 0.11.0."""
     fixture = _tree_with(
-        tmp_path, "patch", stats="0.10.3", stats_requirement='"flux-stats>=0.10,<0.11"'
+        tmp_path, "patch", stats="0.11.3", stats_requirement='"flux-stats>=0.11,<0.12"'
     )
     result = _run("--check-tree", "--root", str(fixture))
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
@@ -175,12 +175,12 @@ def test_a_flux_stats_release_of_the_line_need_not_be_the_engines_version(
 @pytest.mark.parametrize(
     ("stats", "requirement"),
     [
-        ("0.11.0", '"flux-stats>=0.10,<0.11"'),  # the next line, past the ceiling
-        ("0.10.0", '"flux-stats>=0.9,<0.10"'),  # last line's pin
-        ("0.9.9", '"flux-stats>=0.10,<0.11"'),  # the line before, under the floor
-        ("0.10.0", '"flux-stats==0.9.9"'),  # an exact pin on another release
-        ("0.11.0rc1", '"flux-stats>=0.10,<0.11"'),  # `<0.11` keeps out a pre-release of 0.11
-        ("0.10.0rc1", '"flux-stats>=0.10,<0.11"'),  # a pre-release sorts below `>=0.10`
+        ("0.12.0", '"flux-stats>=0.11,<0.12"'),  # the next line, past the ceiling
+        ("0.11.0", '"flux-stats>=0.10,<0.11"'),  # last line's pin
+        ("0.10.9", '"flux-stats>=0.11,<0.12"'),  # the line before, under the floor
+        ("0.11.0", '"flux-stats==0.10.9"'),  # an exact pin on another release
+        ("0.12.0rc1", '"flux-stats>=0.11,<0.12"'),  # `<0.12` keeps out a pre-release of 0.12
+        ("0.11.0rc1", '"flux-stats>=0.11,<0.12"'),  # a pre-release sorts below `>=0.11`
     ],
 )
 def test_a_range_that_leaves_the_flux_stats_version_out_is_refused_without_any_tag(
@@ -195,22 +195,22 @@ def test_a_range_that_leaves_the_flux_stats_version_out_is_refused_without_any_t
 @pytest.mark.parametrize(
     ("requirement", "refusal"),
     [
-        ('"flux-stats>=0.10"', "has no upper bound"),
+        ('"flux-stats>=0.11"', "has no upper bound"),
         ('"flux-stats>0.8"', "has no upper bound"),
-        ('"flux-stats<0.11"', "has no lower bound"),
-        ('"flux-stats<=0.11"', "has no lower bound"),
+        ('"flux-stats<0.12"', "has no lower bound"),
+        ('"flux-stats<=0.12"', "has no lower bound"),
         ('"flux-stats"', "names no version range"),
-        ('"flux-stats~=0.10.0"', "is not a plain version range"),
-        ('"flux-stats!=0.10.1,>=0.10,<0.11"', "is not a plain version range"),
-        ('"flux-stats>=0.10.*,<0.11"', "is not a version this guard reads"),
-        ('"flux-stats[yaml]>=0.10,<0.11"', "is not a plain version range"),
-        ("\"flux-stats>=0.10,<0.11; python_version >= '3.11'\"", "is not a plain version range"),
+        ('"flux-stats~=0.11.0"', "is not a plain version range"),
+        ('"flux-stats!=0.11.1,>=0.11,<0.12"', "is not a plain version range"),
+        ('"flux-stats>=0.11.*,<0.12"', "is not a version this guard reads"),
+        ('"flux-stats[yaml]>=0.11,<0.12"', "is not a plain version range"),
+        ("\"flux-stats>=0.11,<0.12; python_version >= '3.11'\"", "is not a plain version range"),
         ('"flux-stats @ https://example.invalid/flux_stats.whl"', "is not a plain version range"),
-        ('"flux-stats>=0.10,<0.11.dev0"', "is not a version this guard reads"),
-        ('"flux-stats>=0.10,<0.11,"', "is not a plain version range"),
-        ('"flux-stats>=0.10,\\u00a0<0.11"', "is not a plain version range"),  # a no-break space
+        ('"flux-stats>=0.11,<0.12.dev0"', "is not a version this guard reads"),
+        ('"flux-stats>=0.11,<0.12,"', "is not a plain version range"),
+        ('"flux-stats>=0.11,\\u00a0<0.12"', "is not a plain version range"),  # a no-break space
         (
-            '"flux-stats>=\\u0660.\\u0669,<0.11"',
+            '"flux-stats>=\\u0660.\\u0669,<0.12"',
             "is not a version this guard reads",
         ),  # Arabic-Indic
     ],
@@ -227,7 +227,7 @@ def test_a_requirement_that_is_not_a_bounded_plain_range_is_refused(
 def test_a_flux_stats_version_the_guard_cannot_order_is_refused(tmp_path: Path) -> None:
     """A dev release is refused by name rather than ordered wrongly."""
     fixture = _tree_with(
-        tmp_path, "dev", stats="0.10.0.dev0", stats_requirement='"flux-stats>=0.8,<0.11"'
+        tmp_path, "dev", stats="0.11.0.dev0", stats_requirement='"flux-stats>=0.8,<0.12"'
     )
     result = _run("--check-tree", "--root", str(fixture))
     assert result.returncode == 1, result.stdout
@@ -237,36 +237,36 @@ def test_a_flux_stats_version_the_guard_cannot_order_is_refused(tmp_path: Path) 
 def test_a_tag_is_accepted_when_the_range_holds_the_flux_stats_version(tmp_path: Path) -> None:
     guard = _load_guard()
     fixture, head = guard.build_fixture(
-        tmp_path / "tag", REPO_ROOT, stats_requirement='"flux-stats>=0.10,<0.11"'
+        tmp_path / "tag", REPO_ROOT, stats_requirement='"flux-stats>=0.11,<0.12"'
     )
     output = tmp_path / "github-output.txt"
     result = _run(
-        "--tag", "v0.10.0", "--commit", head, "--root", str(fixture), "--github-output", str(output)
+        "--tag", "v0.11.0", "--commit", head, "--root", str(fixture), "--github-output", str(output)
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
-    assert output.read_text(encoding="utf-8") == "version=0.10.0\nprerelease=false\n"
+    assert output.read_text(encoding="utf-8") == "version=0.11.0\nprerelease=false\n"
 
 
 def test_a_pre_release_tag_needs_a_range_that_admits_the_pre_release(tmp_path: Path) -> None:
-    """`>=0.10` does not admit 0.10.0rc1, so a release candidate names it in the floor."""
+    """`>=0.11` does not admit 0.11.0rc1, so a release candidate names it in the floor."""
     guard = _load_guard()
     holds, head = guard.build_fixture(
         tmp_path / "holds",
         REPO_ROOT,
-        version="0.10.0rc1",
-        changelog="0.10.0rc1",
-        stats_requirement='"flux-stats>=0.10.0rc1,<0.11"',
+        version="0.11.0rc1",
+        changelog="0.11.0rc1",
+        stats_requirement='"flux-stats>=0.11.0rc1,<0.12"',
     )
-    result = _run("--tag", "v0.10.0rc1", "--commit", head, "--root", str(holds))
+    result = _run("--tag", "v0.11.0rc1", "--commit", head, "--root", str(holds))
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
     leaves_out, head = guard.build_fixture(
         tmp_path / "leaves-out",
         REPO_ROOT,
-        version="0.10.0rc1",
-        changelog="0.10.0rc1",
-        stats_requirement='"flux-stats>=0.10,<0.11"',
+        version="0.11.0rc1",
+        changelog="0.11.0rc1",
+        stats_requirement='"flux-stats>=0.11,<0.12"',
     )
-    result = _run("--tag", "v0.10.0rc1", "--commit", head, "--root", str(leaves_out))
+    result = _run("--tag", "v0.11.0rc1", "--commit", head, "--root", str(leaves_out))
     assert result.returncode == 1, result.stdout
     assert "does not admit the flux-stats in this tree" in result.stderr
 
@@ -274,35 +274,35 @@ def test_a_pre_release_tag_needs_a_range_that_admits_the_pre_release(tmp_path: P
 def test_a_tag_still_names_the_flux_stats_version_the_workflow_builds(tmp_path: Path) -> None:
     """The release workflow builds flux-stats's files at the tag's version.
 
-    So a range that admits 0.10.3 is not enough at a tag: the files the workflow
-    looks for are flux_stats-0.10.0, and the guard says so before the matrix runs.
+    So a range that admits 0.11.3 is not enough at a tag: the files the workflow
+    looks for are flux_stats-0.11.0, and the guard says so before the matrix runs.
     """
     guard = _load_guard()
     fixture, head = guard.build_fixture(
-        tmp_path / "other", REPO_ROOT, stats="0.10.3", stats_requirement='"flux-stats>=0.10,<0.11"'
+        tmp_path / "other", REPO_ROOT, stats="0.11.3", stats_requirement='"flux-stats>=0.11,<0.12"'
     )
-    result = _run("--tag", "v0.10.0", "--commit", head, "--root", str(fixture))
+    result = _run("--tag", "v0.11.0", "--commit", head, "--root", str(fixture))
     assert result.returncode == 1, result.stdout
     assert "flux-stats is built at the tag's version" in result.stderr
 
 
 # The specifiers a release might write, and the versions a tree might hold.
 _SPECIFIERS = (
-    ">=0.9,<0.10",
-    ">=0.9.0,<0.10.0",
-    ">=0.9.0rc1,<0.10",
-    ">=0.9,<0.10.0rc1",
-    "==0.9.0",
-    "==0.9",
-    ">0.9,<=0.10",
-    ">=0.9",
-    "<0.10",
-    ">0.9.0a1,<0.9.1",
-    ">=0.9.0a1,<=0.9.0rc2",
+    ">=0.10,<0.11",
+    ">=0.10.0,<0.11.0",
+    ">=0.10.0rc1,<0.11",
+    ">=0.10,<0.11.0rc1",
+    "==0.10.0",
+    "==0.10",
+    ">0.10,<=0.11",
+    ">=0.10",
+    "<0.11",
+    ">0.10.0a1,<0.10.1",
+    ">=0.10.0a1,<=0.10.0rc2",
     ">=1.0,<2",
     ">=0.0.1,<0.0.2",
-    ">=0.9,<0.10,<0.9.5",
-    ">=0.9,>=0.9.1,<0.10",
+    ">=0.10,<0.11,<0.10.5",
+    ">=0.10,>=0.10.1,<0.11",
 )
 _VERSIONS = (
     "0",
@@ -312,24 +312,24 @@ _VERSIONS = (
     "0.0.1rc1",
     "0.0.2rc1",
     "0.8.9",
-    "0.9",
-    "0.9.0",
-    "0.9.0.0",
-    "0.9.0a1",
-    "0.9.0b2",
-    "0.9.0rc1",
-    "0.9.0rc2",
-    "0.9.1",
-    "0.9.1a1",
-    "0.9.1rc1",
-    "0.9.4",
-    "0.9.5",
-    "0.9.99",
     "0.10",
     "0.10.0",
+    "0.10.0.0",
     "0.10.0a1",
+    "0.10.0b2",
     "0.10.0rc1",
+    "0.10.0rc2",
     "0.10.1",
+    "0.10.1a1",
+    "0.10.1rc1",
+    "0.10.4",
+    "0.10.5",
+    "0.10.99",
+    "0.11",
+    "0.11.0",
+    "0.11.0a1",
+    "0.11.0rc1",
+    "0.11.1",
     "1",
     "1.0",
     "1.0.0rc1",
@@ -389,15 +389,15 @@ def test_the_range_check_agrees_with_packaging_on_any_range_and_version(
     "text",
     [
         "",
-        "v0.9.0",
-        "0.9.0.dev1",
-        "0.9.0.post1",
-        "1!0.9.0",
-        "0.9.0+local",
-        "0.10.*",
-        "0.10.0\n",
-        "0.10.0 ",
-        "0.10.0\u00a0",
+        "v0.10.0",
+        "0.10.0.dev1",
+        "0.10.0.post1",
+        "1!0.10.0",
+        "0.10.0+local",
+        "0.11.*",
+        "0.11.0\n",
+        "0.11.0 ",
+        "0.11.0\u00a0",
         "\u0660.\u0669.\u0660",  # Arabic-Indic digits, which pip refuses
         "\uff10.\uff19.\uff10",  # fullwidth digits
         "a.b",
@@ -409,7 +409,7 @@ def test_a_spelling_the_guard_does_not_read_is_refused_not_ordered(text: str) ->
         guard.parse_version(text)
 
 
-@pytest.mark.parametrize("text", ["0.9" + "0" * 4000, "1" * 10 + ".0"])
+@pytest.mark.parametrize("text", ["0.10" + "0" * 4000, "1" * 10 + ".0"])
 def test_a_number_too_long_to_trust_is_refused_not_parsed(text: str) -> None:
     guard = _load_guard()
     with pytest.raises(guard.Refusal, match="is not a version this guard reads"):
@@ -476,6 +476,6 @@ def test_a_release_tag_on_a_tree_missing_a_skill_is_refused(tmp_path: Path) -> N
     fixture, head = _load_guard().build_fixture(
         tmp_path / "tag-one-short", REPO_ROOT, skills=_ALL_SKILLS[:-1]
     )
-    result = _run("--tag", "v0.10.0", "--commit", head, "--root", str(fixture))
+    result = _run("--tag", "v0.11.0", "--commit", head, "--root", str(fixture))
     assert result.returncode == 1, f"{result.stdout}\n{result.stderr}"
     assert "flux-docs-lookup" in result.stderr

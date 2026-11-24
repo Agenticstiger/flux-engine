@@ -18,7 +18,7 @@ every decision (cohort allocation, trait draw, signal, detection,
 transition, delivery/suppression, assignment, emit) must be reproducible
 byte-for-byte from a seed, hashed into a run digest, and free of any
 floating-point accumulation path. That is a narrow, closed vocabulary of a
-few hundred lines -- not a general research harness.
+few hundred lines, not a general research harness.
 
 ## Decision
 

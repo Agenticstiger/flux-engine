@@ -69,6 +69,10 @@ The package version is the set of strings below, and only that set.
      `fluxsim --version`: the console block in
      `docs/tutorial/first-evidence-pack.md` and its fixture in
      `tests/docs/test_harness.py`.
+   - The agent skills' plugin: `version` in `skills/.claude-plugin/plugin.json`
+     to `X.Y.Z`, and every documentation link under `skills/` from
+     `blob/v<old>/` to `blob/vX.Y.Z/`. `make skills-check` holds both to
+     `pyproject.toml`'s version and fails while either is stale.
 
    Two more places hold the version only as an example. Nothing fails when they
    go stale, so move them too, for the next reader: the placeholder in

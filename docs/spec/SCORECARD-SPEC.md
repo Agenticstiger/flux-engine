@@ -851,7 +851,7 @@ holds no such widening is byte for byte what it was.
 approximation, the distance of the run from the reference is within the margin and `w` with probability at
 least `1 - e^-5`. A multinomial is not Gaussian, and its tails at a small `n` differ from the Gaussian's,
 so the pass rate at small `n` is the one a test measures
-(`tests/concordance/test_sampling_widening_verify.py`), as §9 says of Laplace noise, not this statement.
+(`tests/concordance/test_sampling_verify.py`), as §9 says of Laplace noise, not this statement.
 
 **The row.** A property row whose tolerance declares `sampling: true` carries `widening`, an object with
 the member `sampling`: the widening applied, the largest over its groups, exact (format `1-4-0`). A

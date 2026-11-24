@@ -9,7 +9,7 @@ The FLUX Simulation Engine runs a [FLUX](https://agenticstiger.github.io/flux/) 
 declared universe of synthetic customers, against the
 [FLUID](https://open-data-protocol.github.io/fluid/) contract it refers to. The same
 bundle and the same seed give the same bytes on every system the project's CI checks
-(Linux and macOS, Python 3.11 to 3.14). A run that passes its checks can be packed into
+(Linux on Python 3.11 to 3.14, and macOS on 3.11 to 3.13, with determinism checked on 3.12 for each change). A run that passes its checks can be packed into
 an evidence archive. Anyone can check offline that the archive's files match its
 manifest, and the report inside says plainly what the run does not show. The command is
 `fluxsim`.
