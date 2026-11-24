@@ -21,6 +21,9 @@ fluxsim validate [options] <bundle>
 ```bash
 # check a bundle; nothing is written
 fluxsim validate ./bundle
+
+# also check the bundle against the profile it pins, as plan does
+fluxsim validate ./bundle --profile profile.json
 ```
 
 ## Arguments
@@ -33,6 +36,7 @@ fluxsim validate ./bundle
 
 | Option | Value | Description |
 |---|---|---|
+| `--profile` | `PATH` | the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, as plan does, an overlay or a parameter that names a table or column it does not describe, and a profile whose digest is not the pinned one; without it no profile is read |
 | `-j, --json` |  | emit machine-readable JSON |
 
 [All commands](./README.md)

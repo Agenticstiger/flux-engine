@@ -31,6 +31,15 @@ a single value:
    refusal here is the one ``verify`` would give. A tolerance its margin
    cannot meet is §3's, refused by ``plan``.
 
+7. With ``profile`` (``--profile``), the profile the Simulation pins is read as ``plan`` reads
+   it, so what ``plan`` refuses about it is refused here with the same code: a profile that is
+   not the pinned one (``FLX-3109``, ``FLX-3110``), an overlay that names a table or column it
+   lacks (``FLX-3105``), and a parameter that cites a table or column the profile does not
+   describe (``FLX-3113``). A Simulation that pins no profile is not read against one.
+   Without ``profile`` there is nothing to read, so a profile that lacks a table or column the
+   contract has is not found: ``validate`` says valid for it, as it always has, and ``plan``
+   refuses it.
+
 Nothing here is written to disk; ``validate`` never creates a run
 directory, which is the difference between it and ``plan``.
 """
@@ -47,11 +56,13 @@ from flux_engine.core.kernels import new_plan_is_counter_based
 from flux_engine.generator.rows import declared_range_findings
 from flux_engine.runtime import resolve_cast
 from flux_engine.seam.overlay import require_in_contract
+from flux_engine.seam.profile import require_profile
 from flux_engine.seam.resolve import (
     FLX_3105,
     declared_generators,
     declared_overlay,
     load_bundle,
+    profile_reference,
     resolve_all_emits,
     strict_coverage_declared,
 )
@@ -79,6 +90,7 @@ from flux_engine.stages.pipeline import (
     refuse_determined_columns,
     require_supported_fidelity,
 )
+from flux_engine.stages.plan import check_simulation_against_profile
 from flux_engine.verticals import pack_of_world
 
 __all__ = ["validate"]
@@ -151,8 +163,18 @@ def _check_overlay_names(resolved: Any, simulation: Mapping[str, Any], *, where:
     require_in_contract(contract, overlay, code=FLX_3105)
 
 
-def validate(bundle_directory: Union[str, Path], *, tolerate_additive: bool = True) -> StageResult:
-    """Validate the bundle at *bundle_directory*. Never writes anything."""
+def validate(
+    bundle_directory: Union[str, Path],
+    *,
+    tolerate_additive: bool = True,
+    profile: Union[str, Path, None] = None,
+) -> StageResult:
+    """Validate the bundle at *bundle_directory*. Never writes anything.
+
+    *profile* is the profile document the Simulations pin, as ``plan --profile`` takes it. Given,
+    every Simulation that pins a profile is read against it as ``plan`` reads it (see the module
+    docstring, check 7); not given, no profile is read and the checks are the ones that need none.
+    """
     directory = Path(bundle_directory)
     try:
         loaded = load_bundle(directory, tolerate_additive=tolerate_additive)
@@ -223,6 +245,15 @@ def validate(bundle_directory: Union[str, Path], *, tolerate_additive: bool = Tr
                 unchecked.append(simulation_id)
             # Parameter register: every register entry has to name numbers of this run.
             register = parameter_register_of(loaded, cast)
+            if profile is not None:
+                pin = profile_reference(cast.simulation, where=simulation_id)
+                if pin is not None:
+                    check_simulation_against_profile(
+                        cast.simulation,
+                        simulation_id,
+                        register,
+                        require_profile(pin, Path(profile), where=simulation_id),
+                    )
             simulations[simulation_id] = {
                 "fidelity": fidelity,
                 "documents": len(cast.documents),

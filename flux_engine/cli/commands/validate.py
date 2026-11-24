@@ -14,7 +14,13 @@ from flux_engine.cli._output import _finish
 from flux_engine.cli._parser import Example
 
 EXAMPLES: Dict[str, Tuple[Example, ...]] = {
-    "validate": (Example("fluxsim validate ./bundle", "check a bundle; nothing is written"),),
+    "validate": (
+        Example("fluxsim validate ./bundle", "check a bundle; nothing is written"),
+        Example(
+            "fluxsim validate ./bundle --profile profile.json",
+            "also check the bundle against the profile it pins, as plan does",
+        ),
+    ),
 }
 
 
@@ -29,6 +35,16 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         ),
     )
     validate_p.add_argument("bundle", help=_BUNDLE_HELP)
+    validate_p.add_argument(
+        "--profile",
+        default=None,
+        metavar="PATH",
+        help=(
+            "the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, as "
+            "plan does, an overlay or a parameter that names a table or column it does not "
+            "describe, and a profile whose digest is not the pinned one; without it no profile is read"
+        ),
+    )
     _add_json_flag(validate_p)
 
     validate_p.set_defaults(stage_name="validate")
@@ -37,4 +53,4 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 def _cmd_validate(args: argparse.Namespace) -> int:
     from flux_engine.stages.validate import validate
 
-    return _finish(args, validate(args.bundle))
+    return _finish(args, validate(args.bundle, profile=args.profile))

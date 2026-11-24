@@ -377,6 +377,10 @@
       {
         "command": "fluxsim validate ./bundle",
         "note": "check a bundle; nothing is written"
+      },
+      {
+        "command": "fluxsim validate ./bundle --profile profile.json",
+        "note": "also check the bundle against the profile it pins, as plan does"
       }
     ],
     "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/validate.html",
@@ -409,6 +413,21 @@
         "required": true,
         "help": "path to the FLUX bundle directory",
         "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, as plan does, an overlay or a parameter that names a table or column it does not describe, and a profile whose digest is not the pinned one; without it no profile is read",
+        "metavar": "PATH",
         "choices": null
       },
       {
