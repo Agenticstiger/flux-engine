@@ -41,6 +41,7 @@ sinks (fluxsim run --sink NAME:TARGET):
   delta      built-in  needs flux-sim-engine[publish] (...)
   iceberg    built-in  needs flux-sim-engine[publish] (...)
   parquet    built-in  needs flux-sim-engine[arrow] (installed)
+  kafka      flux-sim-engine ...  flux_engine.sinks.kafka:target
 generators (entry points of flux_engine.generators, none imported):
   none installed
 ```

@@ -82,7 +82,7 @@ def test_a_misnamed_sink_fails_before_the_simulation_runs(tmp_path: Path) -> Non
     result = run(FIXTURE, state_dir=state, sink="parquet", sink_options={})
     assert result.exit_code == 2 and result.error_code == "FLX-3504"
     assert not state.exists(), "nothing was planned or applied"
-    unknown = run(FIXTURE, state_dir=state, sink="kafka:topic")
+    unknown = run(FIXTURE, state_dir=state, sink="nonesuch:topic")
     assert unknown.exit_code == 2 and unknown.error_code == "FLX-3507"
 
 

@@ -52,9 +52,9 @@ def test_a_spec_without_a_sink_name_is_refused(spec: str) -> None:
 
 def test_an_unknown_sink_lists_the_known_ones() -> None:
     with pytest.raises(FluxError) as caught:
-        registry.open_target("kafka:topic")
+        registry.open_target("nonesuch:topic")
     assert caught.value.code.code == "FLX-3507"
-    assert "adbc, arrow-ipc, delta, iceberg, parquet" in str(caught.value)
+    assert "adbc, arrow-ipc, delta, iceberg, kafka, parquet" in str(caught.value)
 
 
 def test_the_built_ins_are_listed_with_their_extras() -> None:
@@ -70,12 +70,14 @@ def test_listing_the_sinks_imports_no_sink_library() -> None:
         "import sys\n"
         "from flux_engine.sinks.registry import available\n"
         "names = [sink.name for sink in available()]\n"
-        "print(names, [m for m in ('pyarrow', 'adbc_driver_manager', 'pyiceberg', 'deltalake') if m in sys.modules])\n"
+        "print(names, [m for m in ('pyarrow', 'adbc_driver_manager', 'pyiceberg', 'deltalake', 'confluent_kafka') if m in sys.modules])\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
-    assert result.stdout.strip() == "['adbc', 'arrow-ipc', 'delta', 'iceberg', 'parquet'] []"
+    assert (
+        result.stdout.strip() == "['adbc', 'arrow-ipc', 'delta', 'iceberg', 'parquet', 'kafka'] []"
+    )
 
 
 # ---------------------------------------------------------------------------

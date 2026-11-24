@@ -29,6 +29,10 @@ __all__ = [
     "FLX_3509",
     "FLX_3510",
     "FLX_3511",
+    "FLX_3512",
+    "FLX_3513",
+    "FLX_3514",
+    "FLX_3515",
 ]
 
 FLX_3501: ErrorCode = register(
@@ -40,7 +44,8 @@ FLX_3501: ErrorCode = register(
     "adbc-driver-manager, from flux-sim-engine[adbc], plus the ADBC driver for the "
     "database. An object store target for the Parquet and Arrow IPC sinks needs obstore, "
     "the Iceberg sink needs pyiceberg and the Delta sink needs deltalake, all from "
-    "flux-sim-engine[publish]. Install the extra the message names, for example "
+    "flux-sim-engine[publish]. The Kafka sink needs confluent-kafka, from "
+    "flux-sim-engine[kafka]. Install the extra the message names, for example "
     "pip install 'flux-sim-engine[arrow]', and run the command again. Nothing was "
     "written: the check runs before a sink opens.",
 )
@@ -206,4 +211,56 @@ FLX_3511: ErrorCode = register(
     "point a catalogue at another endpoint by carrying such a file. Run the command from "
     "another directory, or keep the catalogue configuration in the home directory or in the "
     "directory PYICEBERG_HOME names. Nothing was written.",
+)
+
+FLX_3512: ErrorCode = register(
+    "FLX-3512",
+    "a Kafka target's audience needs a stronger privacy grade than the run has",
+    "A Kafka target declares who reads it. An internal audience works for the data's owner and "
+    "needs a run graded P1 (checked) or better; an external audience does not, and needs P3 "
+    "(differentially private marginals) or better. Grades compare in ADR 0020's order, "
+    "P5 < P1 < P3 < P4 < P0, so P3, P4 and P0 reach an external audience and P5 reaches "
+    "neither. The sink is also refused when it was not given the run's grade, or was given one "
+    "that is not a grade. The message names the stream, the grade, the audience and the "
+    "minimum, never a value of the data. Pin a profile released under differential privacy to "
+    "reach an external audience, or deliver to an internal target. Nothing was written, and "
+    "nothing was contacted.",
+)
+
+FLX_3513: ErrorCode = register(
+    "FLX-3513",
+    "a stream's declarations do not say how to write it to Kafka",
+    "A Kafka record needs a key, an event time and a topic, and a history's changes need to say "
+    "which change each row is. The sink reads them from the bundle and refuses a stream that "
+    "leaves one out: an expose with no entity key (pass --sink-opt key.EXPOSE=COLUMN), "
+    "with no event time (pass --sink-opt timestamp.EXPOSE=COLUMN), an events entry without an "
+    "op column, a key of several columns with key-format=string (use key-format=json), a null "
+    "key value or a null event time in a row, an op that is not c, u or d, two streams on one "
+    "topic, an events column named like a field of the envelope's source, and a topic name "
+    "Kafka does not allow. The message names the expose, the column, the row's position and the "
+    "option that would fix it, never a value of the data. Nothing was written.",
+)
+
+FLX_3514: ErrorCode = register(
+    "FLX-3514",
+    "a Kafka topic will not take the stream as it is",
+    "The record timestamp is the event's time, and the sink never moves a record's bytes to fit "
+    "a topic. A topic whose message.timestamp.type is LogAppendTime would replace event time "
+    "with the time of the write, a snapshot's topic must be compacted, and a timestamp outside "
+    "the topic's message.timestamp.before.max.ms or after.max.ms, or below zero, is refused by "
+    "the brokers. The message names the topic and the limit. Configure the topic for the "
+    "backfill (CreateTime, compaction, wider timestamp limits), choose another topic with "
+    "--sink-opt topic.EXPOSE=NAME, or run a window nearer the present.",
+)
+
+FLX_3515: ErrorCode = register(
+    "FLX-3515",
+    "a registry subject cannot carry the stream",
+    "A stream whose contract names a registry subject is written against that subject, and the "
+    "sink never registers a schema under it. That needs --sink-opt registry=URL, an Avro or "
+    "JSON subject (a Protobuf subject and a Glue registry are not supported in this version), "
+    "a column for every field of the subject, a field for every column, and a value each "
+    "field's type holds exactly. The message names the subject, the field or the column, never "
+    "a value. Name the registry, change the contract's subject or its columns to agree, or "
+    "write the stream without a registry subject. Nothing was written.",
 )
