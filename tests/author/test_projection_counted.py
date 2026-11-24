@@ -13,7 +13,6 @@ the cases where it is kept and where it is unused, and the bundle of a contract 
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any, Dict
 
@@ -25,6 +24,7 @@ from flux_engine.stages.plan import plan
 from flux_engine.stages.validate import validate
 from flux_engine.stages.verify import verify
 
+from ._written import bundle_digests, plan_written
 from .test_history_init import _bins, _entries, _init, _metrics, _namespace, _states
 from .test_history_parent import _relationship
 from .test_projection_init import CONTRACT, _profile_with
@@ -208,14 +208,7 @@ def test_the_written_bundle_validates_plans_applies_and_verifies(
 def test_the_written_bundle_validates_and_plans(tmp_path: Path) -> None:
     _written(tmp_path, _profile())
     assert validate(tmp_path / "bundle").exit_code == 0
-    outcome = plan(
-        tmp_path / "bundle",
-        state_dir=tmp_path / "state",
-        profile=tmp_path / "plans.profile.json",
-        kernel="0.2.0",
-        stage=False,
-    )
-    assert outcome.success, outcome.stderr
+    plan_written(tmp_path)
 
 
 def test_a_snapshot_that_is_no_counted_child_writes_the_bundle_it_always_did(
@@ -223,11 +216,7 @@ def test_a_snapshot_that_is_no_counted_child_writes_the_bundle_it_always_did(
 ) -> None:
     profile = _profile_with("plan_current")
     _init(tmp_path, profile, CONTRACT.read_text(encoding="utf-8"))
-    digests = {
-        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted((tmp_path / "bundle").iterdir())
-        if path.is_file()
-    }
+    digests = bundle_digests(tmp_path)
     assert digests == WITHOUT_COUNTS
 
 

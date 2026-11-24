@@ -70,6 +70,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   entities per parent (ADR 0017, the amendment of 2026-11-24). The entities are then grouped under their parent, so
   a projection copies the parent's key consistently. A bundle for a contract without such a relationship is unchanged.
 
+- `fluxsim init` tracks a foreign key into a table the profile releases whole: the column declares the table's keys
+  as its levels and takes its `initial` and `transitions` from the history statistic. A key that is not published, or
+  a change that names no key, leaves the column carried, with the reason in the ledger (ADR 0017, the amendment of
+  2026-11-24).
+
 ### Changed
 
 - `flux_engine.author.author_bundle` takes one `AuthorInputs` instead of separate arguments.

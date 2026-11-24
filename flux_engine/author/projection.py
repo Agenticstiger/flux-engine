@@ -30,7 +30,12 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.author.basis import Label, assumed
 from flux_engine.author.columns import ColumnPlan
-from flux_engine.author.history import profile_relationship, structural_record
+from flux_engine.author.history import (
+    Published,
+    profile_relationship,
+    restate_assumptions,
+    structural_record,
+)
 from flux_engine.seam.contract import CompiledColumn, LogicalKind, compile_expose
 from flux_engine.seam.keys import ExposeKeys
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
@@ -39,6 +44,8 @@ __all__ = [
     "HistoryTarget",
     "Projected",
     "ProjectionSource",
+    "follow_history",
+    "history_target",
     "project",
     "release_counts",
     "span_primary_key",
@@ -508,6 +515,20 @@ _KEPT = (
 )
 
 
+def history_target(
+    entry: Mapping[str, Any], held: ExposeKeys, columns: Sequence[CompiledColumn]
+) -> HistoryTarget:
+    """The target of the ``history`` *entry* of the emit with the keys *held* and *columns*."""
+    declared = entry.get("parent")
+    name = declared.get("relationship") if isinstance(declared, dict) else None
+    return HistoryTarget(
+        str(entry["emit"]),
+        tuple(item.column for item in held.entities if item.kind == "natural"),
+        {column.name: column for column in columns},
+        None if name is None else _target_of(held, str(name)),
+    )
+
+
 def _target_of(keys: ExposeKeys, name: str) -> Optional[str]:
     """The expose the relationship *name* reaches, or ``None`` when the expose has none of that name."""
     for item in keys.relationships:
@@ -540,8 +561,7 @@ def release_counts(
     found: Projected,
     histories: Sequence[Dict[str, Any]],
     keys_of: Callable[[str], ExposeKeys],
-    published: Any,
-    lists: Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]],
+    published: Published,
 ) -> List[Tuple[str, str]]:
     """Take each ``counts`` entry off a projected emit and give its statistic to the history's parent.
 
@@ -549,12 +569,13 @@ def release_counts(
     stays a projection and the entry is dropped. When the history of the emit has a ``parent``
     under the same parent expose and no ``children`` of its own, the entry's ``children`` (and
     ``minChildren``, when the parent has none) become the parent's; otherwise the statistic is
-    unused, with why. *lists* are the ``counts`` entries and the used, unused, record and note
-    lists of the profile's relationships, changed in place; *histories* are the ``history``
-    entries. Returns each ``(emit, column)`` whose foreign key the counted layout no longer sets.
+    unused, with why. *published* holds the profile's relationships and the lists its layout made
+    of them, changed in place; *histories* are the ``history`` entries. Returns each
+    ``(emit, column)`` whose foreign key the counted layout no longer sets.
     """
     freed: List[Tuple[str, str]] = []
-    sources = published if isinstance(published, list) else []
+    lists = published.lists()
+    sources = published.relationships if isinstance(published.relationships, list) else []
     for emit, counts in found.released:
         name = str(counts["relationship"])
         declared = next(item for item in keys_of(emit).relationships if item.name == name)
@@ -621,3 +642,20 @@ def _move_statistic(
         used += [(pointer, sentence) for pointer, _ in gone]
     else:
         unused += [(pointer, sentence) for pointer, _ in gone]
+
+
+_FOLLOWS = (
+    "The emit is projected from {history}, so its rows follow from the history and the column "
+    "holds the value of a version, not a parent the counted layout sets."
+)
+
+
+def follow_history(expose: Any, column: str, history: str) -> None:
+    """Say that the foreign key *column* of a projected *expose* follows *history*, not a ``counts`` entry."""
+    sentence = _FOLLOWS.format(history=history)
+    for plan in expose.columns:
+        if plan.name == column:
+            plan.assumptions = [sentence]
+            plan.choices = [sentence]
+            plan.how = "a column of the history the emit is projected from"
+    restate_assumptions(expose)

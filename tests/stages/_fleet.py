@@ -19,7 +19,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 import yaml
 
@@ -151,9 +151,16 @@ def run_bundle(target: Path, state: Path, **options: Any) -> RunLayout:
     return RunLayout.for_state_dir(state, run_id)
 
 
+def group_by(
+    rows: Iterable[Mapping[str, Any]], column: str, keys: Optional[Iterable[Any]] = None
+) -> Dict[Any, List[Any]]:
+    """``rows`` grouped by ``column``, in the order they were written; ``keys`` fixes the groups."""
+    found: Dict[Any, List[Any]] = defaultdict(list) if keys is None else {k: [] for k in keys}
+    for row in rows:
+        found[row[column]].append(row)
+    return dict(found)
+
+
 def by_vehicle(history_rows: List[Dict[str, Any]]) -> Dict[Any, List[Dict[str, Any]]]:
     """A history's rows grouped by vehicle, in the order the rows were written."""
-    found: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
-    for row in history_rows:
-        found[row["vehicle_id"]].append(row)
-    return dict(found)
+    return group_by(history_rows, "vehicle_id")

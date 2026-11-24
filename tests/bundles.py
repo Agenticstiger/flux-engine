@@ -17,7 +17,7 @@ import json
 import re
 import shutil
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Mapping, Sequence, Tuple, Union
 
 import yaml
 
@@ -39,6 +39,11 @@ _DECLARED_PROPERTIES = re.compile(r"(?ms)^(          properties:\n).*?^(        
 _DECLARED_FIDELITY = re.compile(r"(?ms)^(        fidelity:).*?^(agentPolicy:)")
 
 _SIMULATION = "simulation.flux.yml"
+
+
+def by_file(directory: Path, value: Callable[[Path], Any]) -> Dict[str, Any]:
+    """``value`` of every regular file of ``directory``, by file name."""
+    return {path.name: value(path) for path in sorted(directory.iterdir()) if path.is_file()}
 
 
 def _rewritten(

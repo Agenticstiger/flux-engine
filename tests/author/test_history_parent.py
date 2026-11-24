@@ -16,16 +16,14 @@ Pinned here, through ``fluxsim init`` and the seam:
 from __future__ import annotations
 
 import copy
-import hashlib
 from pathlib import Path
 from typing import Any, Dict
 
 import pytest
 
 from flux_engine.seam.history import history_entries_of
-from flux_engine.seam.resolve import load_bundle, resolve_all_emits
-from flux_engine.stages.validate import validate
 
+from ._written import assert_state, bundle_digests, resolved_emits
 from .test_history_init import (
     CONTRACT,
     _bins,
@@ -90,9 +88,9 @@ def test_no_counts_entry_lays_the_history_parent_out_again(tmp_path: Path) -> No
 def test_a_childless_class_is_written_as_the_minimum(tmp_path: Path) -> None:
     result = _init(tmp_path, _with_accounts(structural=["childless"]))
     assert _parent(tmp_path)["minChildren"] == 1
-    state = _states(result)["/relationships/0/structural"]
-    assert state["state"] == "used"
-    assert "minChildren 1 on the history's parent" in state["note"]
+    assert_state(
+        result, "/relationships/0/structural", "used", "minChildren 1 on the history's parent"
+    )
 
 
 def test_a_relationship_with_no_published_statistic_is_the_parent_alone(tmp_path: Path) -> None:
@@ -109,9 +107,7 @@ def test_a_histogram_the_layout_cannot_read_leaves_the_parent_without_children(
     ]
     result = _init(tmp_path, profile)
     assert _parent(tmp_path) == {"relationship": "account"}
-    state = _states(result)[RELATIONSHIP]
-    assert state["state"] == "unused"
-    assert "no children for the history's parent" in state["note"]
+    assert_state(result, RELATIONSHIP, "unused", "no children for the history's parent")
 
 
 TWO_PARENTS = (
@@ -206,11 +202,7 @@ def test_a_contract_without_a_to_one_relationship_writes_the_entry_it_always_did
     assert "counts" not in _namespace(tmp_path)
     # The statistics of a relationship the contract does not declare stay unused.
     assert entry["entities"] == 1000
-    digests = {
-        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted((tmp_path / "bundle").iterdir())
-        if path.is_file()
-    }
+    digests = bundle_digests(tmp_path)
     # Pinned from the files `fluxsim init` wrote for this contract and profile before a history
     # wrote its parent.
     assert digests == WITHOUT_A_PARENT
@@ -226,13 +218,7 @@ WITHOUT_A_PARENT: Dict[str, str] = {
 
 def test_a_written_parent_resolves_through_the_seam(tmp_path: Path) -> None:
     _init(tmp_path, _with_accounts())
-    bundle = tmp_path / "bundle"
-    assert validate(bundle).exit_code == 0
-    loaded = load_bundle(bundle)
-    (simulation_id,) = loaded.simulation_ids()
-    emits = {
-        emit.expose_id: emit for emit in resolve_all_emits(loaded, simulation_id=simulation_id)
-    }
+    emits = resolved_emits(tmp_path)
     (entry,) = history_entries_of(emits["plan_version"].extension, "plan_version")
     assert entry.parent is not None and entry.parent.relationship == "account"
     assert entry.parent.children is not None

@@ -610,3 +610,20 @@ copies the parent's key (ADR 0027) rarely agreed with the history. `init` now wr
   the parent's.
 - **What moves.** A bundle `init` writes for a contract whose versioned expose has such a relationship. A contract
   without one, and every bundle of a profile without a history, keeps its bytes.
+
+## Amendment of 2026-11-24: `init` tracks a foreign key into a reference table
+
+Section 13 carried every candidate column for which the emit declares no levels, which left a foreign key into a
+catalogue untracked: a contract's `product_id` has no levels of its own, the keys of the table it points at are
+its values. `init` now tracks it:
+
+- **The levels.** A candidate column of the history's emit that is a to-one, one-column foreign key into an expose
+  the profile releases whole (`references`) declares that table's keys as its levels, at equal weights, since the
+  profile counts no weight for them, and so passes the check that a tracked column declares levels. Its `initial`
+  and `transitions` are the history statistic's, as for any categorical column, and their levels must be keys.
+- **No guess.** When the table's keys are not all published, or a published change names a value that is no key, the
+  column stays carried and its statistics are unused, with that reason. A foreign key into a table that is not
+  released whole stays carried as before. A reference table is never the history's `parent`: a catalogue does not
+  hold entities.
+- **What moves.** A bundle for a contract with such a foreign key in a history whose profile publishes its
+  `initial` and `transitions`. Every other bundle keeps its bytes.

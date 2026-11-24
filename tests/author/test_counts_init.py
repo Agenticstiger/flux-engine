@@ -40,6 +40,7 @@ from flux_engine.stages.run import run
 from flux_engine.stages.verify import verify
 from tests.bundles import init_from_texts
 
+from ._written import plan_written
 from .test_children import (
     BINS,
     CONTRACT,
@@ -269,15 +270,7 @@ def test_a_histogram_with_no_published_edge_the_layout_reads_is_laid_out_as_befo
 
 def _planned(tmp_path: Path) -> None:
     """The bundle written under *tmp_path* validates and plans, so no counts entry is refused."""
-    bundle = tmp_path / "bundle"
-    outcome = plan(
-        bundle,
-        state_dir=tmp_path / "state",
-        profile=tmp_path / SHOP[1],
-        kernel="0.2.0",
-        stage=False,
-    )
-    assert outcome.success, outcome.stderr
+    plan_written(tmp_path, SHOP[1])
 
 
 def test_a_nullable_foreign_key_with_a_published_null_share_gets_no_entry(tmp_path: Path) -> None:

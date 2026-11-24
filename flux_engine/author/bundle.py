@@ -112,20 +112,22 @@ from flux_engine.author.derived import (
 from flux_engine.author.exact import EXACT_HOW, allot_small_tables
 from flux_engine.author.given import choose_givens
 from flux_engine.author.history import (
+    HistoryReads,
     HistorySource,
+    Published,
     declare_date_ranges,
     decline_history,
-    parent_candidates,
-    release_relationship,
+    restate_assumptions,
     write_history,
 )
 from flux_engine.author.history import _pointers as declared_pointers
 from flux_engine.author.ledger import Ledger
 from flux_engine.author.noisy import cite_noisy, point_estimates
 from flux_engine.author.projection import (
-    HistoryTarget,
     Projected,
     ProjectionSource,
+    follow_history,
+    history_target,
     project,
     release_counts,
     span_primary_key,
@@ -2130,9 +2132,8 @@ def _projections(
     keys: Optional[ContractKeys],
     contract: Mapping[str, Any],
     histories: _Histories,
-    spread: _Spreads,
+    published: Published,
     declined: Optional[str],
-    published: Any = None,
 ) -> Projected:
     """The ``snapshots``, ``events`` and ``periods`` entries of the written exposes (ADR 0027 section 9).
 
@@ -2143,34 +2144,22 @@ def _projections(
     if keys is None or not histories.entries:
         return Projected()
     index = {expose.expose_id: expose for expose in exposes}
-    targets = []
-    for entry in histories.entries:
-        history = index[str(entry["emit"])]
-        held = keys.expose(history.expose_id)
-        columns = compile_expose(contract["exposes"][history.index]).columns
-        declared = entry.get("parent")
-        parent = next(
-            (
-                item.target
-                for item in held.relationships
-                if isinstance(declared, dict) and item.name == declared.get("relationship")
-            ),
-            None,
+    targets = [
+        history_target(
+            entry,
+            keys.expose(str(entry["emit"])),
+            compile_expose(contract["exposes"][index[str(entry["emit"])].index]).columns,
         )
-        targets.append(
-            HistoryTarget(
-                history.expose_id,
-                tuple(item.column for item in held.entities if item.kind == "natural"),
-                {column.name: column for column in columns},
-                parent,
-            )
-        )
+        for entry in histories.entries
+    ]
     sources = [
         ProjectionSource(
             expose.expose_id,
             contract["exposes"][expose.index],
             keys.expose(expose.expose_id),
-            counts=tuple(entry for entry in spread.entries if entry["emit"] == expose.expose_id),
+            counts=tuple(
+                entry for entry in published.spread.entries if entry["emit"] == expose.expose_id
+            ),
         )
         for expose in exposes
         if not expose.reference
@@ -2183,52 +2172,17 @@ def _projections(
             f"the bundle written with these projections is refused, so none is written: {declined}"
         )
         return Projected(notes=[(f"{emit}: projection", why) for emit in sorted(found.emits)])
-    freed = release_counts(
-        found,
-        histories.entries,
-        keys.expose,
-        published,
-        (spread.entries, spread.used, spread.unused, spread.records, spread.notes),
-    )
+    freed = release_counts(found, histories.entries, keys.expose, published)
     for emit, reason in found.emits.items():
         index[emit].projected = reason
         if emit in found.carried:
             _release_carried(index[emit], *found.carried[emit])
     for emit, column in freed:
-        _release_counted_key(index[emit], column, found.carried[emit][0])
-        _restate(index[emit])
+        follow_history(index[emit], column, found.carried[emit][0])
     for entry in (*found.events, *found.periods):
         emit = str(entry["emit"])
         span_primary_key(index[emit].columns, keys.expose(emit))
     return found
-
-
-def _restate(expose: AuthoredExpose) -> None:
-    """Take the assumptions of the expose's columns from what their plans say now.
-
-    A history changes how some columns are drawn after the exposes were planned, so the sentences
-    a column's earlier plan assumed are replaced by the ones its plan assumes now.
-    """
-    names = {plan.name for plan in expose.columns}
-    expose.assumptions = [item for item in expose.assumptions if item[0] not in names] + [
-        (plan.name, sentence) for plan in expose.columns for sentence in plan.assumptions
-    ]
-
-
-_FOLLOWS = (
-    "The emit is projected from {history}, so its rows follow from the history and the column "
-    "holds the value of a version, not a parent the counted layout sets."
-)
-
-
-def _release_counted_key(expose: AuthoredExpose, column: str, history: str) -> None:
-    """Say that a projected emit's foreign key follows its history, not a ``counts`` entry."""
-    sentence = _FOLLOWS.format(history=history)
-    for plan in expose.columns:
-        if plan.name == column:
-            plan.assumptions = [sentence]
-            plan.choices = [sentence]
-            plan.how = "a column of the history the emit is projected from"
 
 
 #: The keys of a column's declaration that ``verify`` holds the rows to, as against the ones the draw reads.
@@ -2274,9 +2228,8 @@ def _histories(
     *,
     minimum_cell: int,
     fractional_bits: int,
+    published: Published,
     declined: Optional[str] = None,
-    relationships: Any = None,
-    spread: Optional[_Spreads] = None,
 ) -> _Histories:
     """Write the ``history`` entry of each written expose whose profile table publishes one.
 
@@ -2287,7 +2240,7 @@ def _histories(
     unused for that reason.
     """
     result = _Histories([], [], [], [])
-    rows_of = {item.expose_id: item.rows for item in exposes if item.skipped is None}
+    reads = HistoryReads(exposes, published)
     for expose in exposes:
         table = tables.get(expose.expose_id)
         if expose.reference or not isinstance(table, Mapping) or "history" not in table:
@@ -2306,23 +2259,14 @@ def _histories(
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
             set_by_rules=frozenset(expose.derives) | frozenset(expose.copies) | expose.dependents,
-            parents=(
-                parent_candidates(expose.expose_id, held, rows_of, relationships)
-                if held is not None
-                else ()
-            ),
+            parents=reads.candidates(expose.expose_id, held),
+            catalogues=reads.catalogues(held),
         )
         written = write_history(source) if declined is None else decline_history(source, declined)
         if written.entry is not None:
             result.entries.append(written.entry)
-            _restate(expose)
-            if written.parent_of is not None and spread is not None:
-                release_relationship(
-                    (spread.entries, spread.used, spread.unused, spread.records, spread.notes),
-                    expose.expose_id,
-                    *written.parent_of,
-                )
-                spread.records.extend(written.records)
+            restate_assumptions(expose)
+            reads.release(expose.expose_id, written)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)
         result.used.extend(written.used)
         result.unused.extend(written.unused)
@@ -3776,6 +3720,9 @@ def _histories_and_projections(
             _declared_histories(authored, keys, contract, planned.reading.tables, window, declared),
             _declared_projections(authored, keys, contract, declared),
         )
+    published = Published(
+        planned.reading.profile.get("relationships"), planned.reading.references, planned.spread
+    )
     histories = _histories(
         authored,
         keys,
@@ -3784,19 +3731,10 @@ def _histories_and_projections(
         window,
         minimum_cell=planned.reading.minimum_cell,
         fractional_bits=planned.reading.fractional_bits,
+        published=published,
         declined=declined[0],
-        relationships=planned.reading.profile.get("relationships"),
-        spread=planned.spread,
     )
-    projections = _projections(
-        authored,
-        keys,
-        contract,
-        histories,
-        planned.spread,
-        declined[1],
-        planned.reading.profile.get("relationships"),
-    )
+    projections = _projections(authored, keys, contract, histories, published, declined[1])
     return histories, projections
 
 
