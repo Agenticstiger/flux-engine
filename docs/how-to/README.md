@@ -12,7 +12,7 @@ from a fresh project made with `fluxsim init`.
 - [Model your customers](./model-customers.md): change the population, add a persona, test a segment expression.
 - [Add a journey](./add-a-journey.md): a new signal, detector and journey, wired in through a module.
 - [Use the FLUID seam](./use-the-fluid-seam.md): change the contract the rows follow and keep the pinned digest honest.
-- [Calibrate from aggregates: declare a scorecard](./calibrate-from-aggregates.md): add a Playback and read back its declared scorecard. Nothing is fitted in this release.
+- [Calibrate from aggregates: declare a scorecard](./calibrate-from-aggregates.md): add a Playback and read back its declared scorecard. This path fits nothing; fitting is in [Check consumer queries](./check-consumer-queries.md).
 - [Draw a column given another](./draw-a-column-given-another.md): declare a histogram drawn given a categorical column, from a grouped histogram's counts, and see the fidelity gate check the link.
 - [Ship with evidence](./ship-with-evidence.md): the fidelity gate, committed slices, signing, and sending the pack on.
 - [Write a bundle from a profile](./write-a-bundle-from-a-profile.md): turn a FLUID contract and a profile of the data into a bundle that runs, every number labelled by what it rests on.

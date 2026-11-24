@@ -1,6 +1,6 @@
 ---
 title: "Calibrate from aggregates: declare a scorecard"
-description: "Declare where a Playback's dials came from, read its scorecard back with fluxsim calibrate, and see how an emit's minCredibility uses it. Nothing is fitted in this release."
+description: "Declare where a Playback's dials came from, read its scorecard back with fluxsim calibrate, and see how an emit's minCredibility uses it. The declared-scorecard path fits nothing; `calibrate --fit` does."
 ---
 
 # Calibrate from aggregates: declare a scorecard
@@ -8,7 +8,7 @@ description: "Declare where a Playback's dials came from, read its scorecard bac
 Use this page to attach a Playback to a FLUX bundle, read its declared scorecard back, and gate an emit on the credibility it states.
 
 ::: warning What calibration means in version 0.1
-Calibration here is declared-scorecard calibration. A Playback states where its dials came from and carries a scorecard. `fluxsim calibrate` reads that scorecard and reports it. No fitting is performed, and the optional fitting backends are not part of this release. `fluxsim describe --self` lists `calibrate` among the capabilities that are on and `calibrate_abc` among those that are not available.
+Calibration here is declared-scorecard calibration. A Playback states where its dials came from and carries a scorecard. `fluxsim calibrate` reads that scorecard and reports it. This declared-scorecard path performs no fitting. Fitting declared numbers to the rates of consumer queries is a separate path, `fluxsim calibrate --fit` (CMA-ES, the `calibrate` extra), described in [Check consumer queries](./check-consumer-queries.md). `fluxsim describe --self` lists `calibrate` among the capabilities that are on and `calibrate_abc` among those that are not available.
 :::
 
 The rule behind the scorecard is that a Playback describes aggregate statistics only (rates, mixes, counts), never record-level customer data. In this release the engine reads nothing from a Playback's `sourceStream`; the field only names where the numbers came from.
@@ -96,7 +96,7 @@ $ fluxsim calibrate . --write --run-id $(ls .flux/runs)
 wrote .flux/runs/.../calibration-provenance.json
 ```
 
-6. Open the file it wrote. In this release it records the world and an empty `dials` map, because nothing was fitted.
+6. Open the file it wrote. On this path it records the world and an empty `dials` map, because nothing was fitted. For a file with fitted values, see the `--fit` path in [Check consumer queries](./check-consumer-queries.md).
 
 ```console
 $ cat .flux/runs/*/calibration-provenance.json
