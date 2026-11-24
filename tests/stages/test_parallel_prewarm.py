@@ -286,8 +286,10 @@ forkserver.ensure_running()
 deadline = time.monotonic() + 60
 while not (directory / "marker").exists() and time.monotonic() < deadline:
     time.sleep(0.01)
-print("importing", flush=True)
 try:
+    # Inside the try: the test signals once it reads this line, so a Ctrl-C that
+    # lands on the print itself is this script's own, not the server's.
+    print("importing", flush=True)
     time.sleep(5)
 except KeyboardInterrupt:
     pass
