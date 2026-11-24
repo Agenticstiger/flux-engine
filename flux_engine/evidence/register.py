@@ -45,6 +45,7 @@ from flux_engine.seam.parameters import (
     SOURCES_1_0,
     SOURCES_1_2,
     SOURCES_1_3,
+    SOURCES_1_4,
     ParameterRegister,
     RegisterEntry,
     Source,
@@ -58,6 +59,7 @@ __all__ = [
     "REGISTER_SCHEMA_URL_1_1",
     "REGISTER_SCHEMA_URL_1_2",
     "REGISTER_SCHEMA_URL_1_3",
+    "REGISTER_SCHEMA_URL_1_4",
     "Assumption",
     "BoundRegister",
     "RegisterSummary",
@@ -107,12 +109,27 @@ REGISTER_SCHEMA_URL_1_3 = (
     "FluxParameterRegister.json"
 )
 
+#: Format 1-4-0, which counts the numbers of the namespace keys beside ``emits`` and of the
+#: fidelity block's copula, and lets a citation name the definitions of the rank correlations
+#: and of a clique marginal. A record names it only when it counts a number at one of those
+#: positions or an entry cites one of those definitions, so every other record keeps the bytes it
+#: had. It carries every member and source format 1-3-0 does.
+REGISTER_SCHEMA_URL_1_4 = (
+    "https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-4-0/"
+    "FluxParameterRegister.json"
+)
+
+#: The formats that carry the additions of format 1-3-0: a calibration, an estimate, an
+#: overlay entry, a ``replacedBy``.
+_FROM_1_3 = (REGISTER_SCHEMA_URL_1_3, REGISTER_SCHEMA_URL_1_4)
+
 #: The sources each format this build reads lists, in report order.
 _FORMAT_SOURCES: Mapping[str, Tuple[str, ...]] = {
     REGISTER_SCHEMA_URL: tuple(source.value for source in SOURCES_1_0),
     REGISTER_SCHEMA_URL_1_1: tuple(source.value for source in SOURCES_1_2),
     REGISTER_SCHEMA_URL_1_2: tuple(source.value for source in SOURCES_1_2),
     REGISTER_SCHEMA_URL_1_3: tuple(source.value for source in SOURCES_1_3),
+    REGISTER_SCHEMA_URL_1_4: tuple(source.value for source in SOURCES_1_4),
 }
 
 #: A pinned profile's digest, as the record names it (the pin's own spelling).
@@ -144,6 +161,8 @@ def _entry_document(entry: RegisterEntry) -> Dict[str, Any]:
 
 def _schema_url(register: ParameterRegister) -> str:
     """The schema URL of the format *register* needs: the latest of its additions."""
+    if register.uses_1_4_additions:
+        return REGISTER_SCHEMA_URL_1_4
     if register.uses_1_3_additions:
         return REGISTER_SCHEMA_URL_1_3
     if register.lists_unused:
@@ -157,7 +176,8 @@ def build_register_document(register: ParameterRegister) -> Dict[str, Any]:
     A number's ``entry`` is the index of the entry that decided it, or ``null``
     for a default no entry names. ``counts`` holds every source of the record's
     format, so a share is a count over ``declared`` with nothing to infer. The
-    format is 1-3-0 when the register holds an overlay, a calibrated value, a response estimate
+    format is 1-4-0 when it counts a number at a position that format added or names a definition
+    it added, 1-3-0 when the register holds an overlay, a calibrated value, a response estimate
     or a ``replacedBy``, 1-2-0 when the Simulation lists the profile's unused statistics, 1-1-0
     when an entry names the contract, and 1-0-0 otherwise.
     """
@@ -341,7 +361,7 @@ def _replacements(
 
 def _replacement_of(cited: Any, source: str, url: Any) -> Tuple[str, Optional[str]]:
     """One entry's ``replacedBy`` as a pointer and a definition; ``ValueError`` when it is not one."""
-    if url != REGISTER_SCHEMA_URL_1_3 or source not in (
+    if url not in _FROM_1_3 or source not in (
         Source.ASSUMPTION.value,
         Source.DEFAULT.value,
     ):
@@ -389,7 +409,7 @@ def _check_format_1_3(document: Mapping[str, Any], entries: List[Any]) -> None:
     entry with a ``kind`` is a response estimate: a ``profile`` entry with its
     ``value`` and ``cells``, and an ``interval`` for an effect only.
     """
-    later = document.get("_schemaURL") == REGISTER_SCHEMA_URL_1_3
+    later = document.get("_schemaURL") in _FROM_1_3
     for entry in entries:
         calibrated = entry.get("source") == Source.CALIBRATED.value
         if calibrated != ("calibration" in entry):
@@ -420,11 +440,11 @@ def _unused_notes(document: Mapping[str, Any]) -> Optional[Tuple[UnusedNote, ...
     """The record's ``unused`` list, which format 1-2-0 holds and no earlier one does."""
     listed = document.get("unused")
     url = document.get("_schemaURL")
-    if url not in (REGISTER_SCHEMA_URL_1_2, REGISTER_SCHEMA_URL_1_3):
+    if url not in (REGISTER_SCHEMA_URL_1_2, *_FROM_1_3):
         if listed is not None:
             raise ValueError("only a record of format 1-2-0 or later lists unused statistics")
         return None
-    if listed is None and url == REGISTER_SCHEMA_URL_1_3:
+    if listed is None and url in _FROM_1_3:
         return None  # format 1-3-0 lists them only when the Simulation does
     if not isinstance(listed, list):
         raise ValueError("a record of this format lists its unused statistics")

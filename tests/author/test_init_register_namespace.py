@@ -22,8 +22,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from flux_engine.cli._init import run_init
+from flux_engine.evidence.register import REGISTER_SCHEMA_URL_1_4, build_register_document
 from flux_engine.runtime import resolve_cast
 from flux_engine.seam.parameters import Source
 from flux_engine.seam.resolve import load_bundle
@@ -48,6 +50,21 @@ BESIDE_EMITS = (
     "periods",
     "conditions",
 )
+
+
+def _is_format_1_4_0(register: Any) -> None:
+    """The record counts a new position and cites a new definition, so it is format 1-4-0."""
+    document = build_register_document(register)
+    assert document["_schemaURL"] == REGISTER_SCHEMA_URL_1_4
+    schema = json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "docs"
+            / "spec"
+            / "parameter-register-1-4.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    Draft202012Validator(schema).validate(document)
 
 
 def _register(bundle: Path) -> Any:
@@ -158,6 +175,7 @@ def test_the_values_of_a_copula_cite_the_rank_correlation_of_their_pair(tmp_path
         if "/copula/" in number.number.pointer
     }
     assert counted and set(counted.values()) == {Source.PROFILE}
+    _is_format_1_4_0(register)
     _planned(bundle, tmp_path / "p.profile.json", tmp_path / "state")
 
 
@@ -173,4 +191,5 @@ def test_the_numbers_a_binned_clique_gives_cite_cliquemarginal_2(tmp_path: Path)
     ]
     assert cited
     assert all(entry.source is Source.PROFILE for entry in cited)
+    _is_format_1_4_0(register)
     _planned(bundle, tmp_path / "p.profile.json", tmp_path / "state")

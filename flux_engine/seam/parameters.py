@@ -78,7 +78,9 @@ from flux_stats.cliques import CLIQUE_DEFINITION, CLIQUE_DEFINITION_2
 from flux_stats.rank_correlation import RANK_IDENTIFIERS
 
 __all__ = [
+    "DEFINITIONS_ADDED_1_4",
     "ENGINE_BLOCK_NUMBERS",
+    "NUMBERS_ADDED_1_4",
     "MOST_GIVEN",
     "FLX_3113",
     "FLX_3716",
@@ -89,6 +91,7 @@ __all__ = [
     "SOURCES_1_0",
     "SOURCES_1_2",
     "SOURCES_1_3",
+    "SOURCES_1_4",
     "UNUSED_KEY",
     "Calibration",
     "Citation",
@@ -189,6 +192,9 @@ SOURCES_1_3: Tuple["Source", ...] = (
     Source.DEFAULT,
     Source.CALIBRATED,
 )
+
+#: The sources of register format 1-4-0, in report order: those of format 1-3-0.
+SOURCES_1_4: Tuple["Source", ...] = SOURCES_1_3
 
 #: Every key one register entry may carry. Closed, as the namespace is.
 _ENTRY_KEYS: FrozenSet[str] = frozenset(
@@ -322,10 +328,20 @@ ENGINE_BLOCK_NUMBERS: Tuple[Tuple[str, ...], ...] = (
     ("scorecard", "thresholds", "overall", "*"),
     ("scorecard", "thresholds", "dimensions", "*", "*"),
     ("scorecard", "thresholds", "tables", "*", "*"),
-    # The copula's rank correlations (SEAM-FIDELITY-SPEC.md section 2).
+)
+
+#: The positions register format 1-4-0 adds: the copula's rank correlations
+#: (SEAM-FIDELITY-SPEC.md section 2) and the numbers of the keys beside ``emits``. A record that
+#: counts a number at one is format 1-4-0.
+NUMBERS_ADDED_1_4: Tuple[Tuple[str, ...], ...] = (
     ("emits", "*", "fidelity", "copula", "rankCorrelations", "pairs", "#", "value"),
     *_OTHER_KEYS,
 )
+ENGINE_BLOCK_NUMBERS = ENGINE_BLOCK_NUMBERS + NUMBERS_ADDED_1_4
+
+#: The definitions a citation could not name before register format 1-4-0 (``cliqueMarginal/1``
+#: was always citable, and a record that names it keeps its format).
+DEFINITIONS_ADDED_1_4: FrozenSet[str] = frozenset({*RANK_IDENTIFIERS, CLIQUE_DEFINITION_2})
 
 #: The most columns a ``given`` may list (docs/spec/SEAM-FIDELITY-SPEC.md section 2). A column
 #: drawn given several columns nests its weight table one mapping deeper for each, so the numbers
@@ -453,6 +469,9 @@ class DeclaredNumber:
     kind: str
     tokens: Tuple[str, ...]
     value: str
+    #: Whether the number sits at a position register format 1-4-0 added
+    #: (:data:`NUMBERS_ADDED_1_4`).
+    added_1_4: bool = False
 
     @property
     def pointer(self) -> str:
@@ -576,7 +595,8 @@ def _engine_block_numbers(
             continue
         text = _number_text(value, strings=True)
         if text is not None:
-            numbers.append(DeclaredNumber(doc_id, kind, path, text))
+            added = any(_matches(marks, pattern) for pattern in NUMBERS_ADDED_1_4)
+            numbers.append(DeclaredNumber(doc_id, kind, path, text, added))
     return numbers
 
 
@@ -1059,6 +1079,21 @@ class ParameterRegister:
         )
 
     @property
+    def uses_1_4_additions(self) -> bool:
+        """Whether the register uses anything format 1-4-0 adds, and so is recorded as 1-4-0.
+
+        It counts a number at a position the format added, or an entry (or an unused statistic)
+        names a definition the format added.
+        """
+        citations = [entry.citation for entry in self.entries]
+        citations.extend(entry.replaced_by for entry in self.entries)
+        citations.extend(item.citation for item in self.unused or ())
+        return any(registered.number.added_1_4 for registered in self.numbers) or any(
+            citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
+            for citation in citations
+        )
+
+    @property
     def lists_unused(self) -> bool:
         """Whether the Simulation lists the profile's unused statistics: register format 1-2-0."""
         return self.unused is not None
@@ -1072,9 +1107,11 @@ class ParameterRegister:
         """The sources the register's format knows, in report order.
 
         ``contract`` only when an entry names it or the register is of format
-        1-2-0, and ``overlay`` and ``calibrated`` only in format 1-3-0, so a register that
+        1-2-0, and ``overlay`` and ``calibrated`` only in format 1-3-0 and later, so a register that
         uses none of the later additions is reported, recorded and counted exactly as it was.
         """
+        if self.uses_1_4_additions:
+            return SOURCES_1_4
         if self.uses_1_3_additions:
             return SOURCES_1_3
         return SOURCES_1_2 if self.uses_contract or self.lists_unused else SOURCES_1_0

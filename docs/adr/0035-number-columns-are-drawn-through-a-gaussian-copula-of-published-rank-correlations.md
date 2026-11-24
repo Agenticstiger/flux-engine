@@ -391,6 +391,8 @@ evidence says so.
    does not count, beside `counts` and `conditions`, and a citation may not name the new definitions. Counting the
    copula's values, with the rank correlation each rests on, would be register format 1-4-0.
 
+   Amended 2026-11-24: register format 1-4-0 counts the copula's values and the namespace keys' numbers, and a citation may name the rank correlation and clique marginal definitions. A record is format 1-4-0 only when it counts a number at one of those positions or cites one of those definitions, so every other record keeps its format, bytes and digests.
+
 ## What would change this decision
 
 - A pinned eigensolver fast enough for 64 columns: the repair would become the nearest correlation matrix.

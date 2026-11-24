@@ -34,7 +34,7 @@ import yaml
 
 from flux_engine.author.columns import ASSUMED_CHECK_REASON
 from flux_engine.cli._init import run_init
-from flux_engine.evidence.register import REGISTER_SCHEMA_URL_1_3
+from flux_engine.evidence.register import REGISTER_SCHEMA_URL_1_3, REGISTER_SCHEMA_URL_1_4
 from flux_engine.seam.parameters import parse_pointer
 from flux_engine.stages.run import run
 from flux_engine.stages.validate import validate
@@ -327,7 +327,7 @@ def test_an_enum_the_contract_declares_is_cited_from_the_contract(keyed: Authore
     for token in parse_pointer(cited[0]["contract"]["pointer"]):
         node = node[int(token)] if isinstance(node, list) else node[token]
     assert node == "enum('DE','FR','GB','IE')"
-    assert keyed.record["_schemaURL"] == REGISTER_SCHEMA_URL_1_3
+    assert keyed.record["_schemaURL"] == REGISTER_SCHEMA_URL_1_4
     assert keyed.record["counts"]["contract"] == 1
 
 

@@ -1,0 +1,774 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-4-0/FluxParameterRegister.json",
+  "title": "FLUX parameter register, format 1-4-0",
+  "description": "What each number a run reads rests on: a statistic of the profile its Simulation pins, a place in the FLUID contract the run emits from, a statistic of the overlaid profile (the pinned profile with the Simulation's overlay applied, a scenario the maintainers wrote and not a measurement), an assumption with its reason, a value a calibration fitted, or a default, and, when the Simulation lists them, the statistics of the pinned profile no number rests on. Format 1-3-0 adds to format 1-2-0 the overlay source, with the overlay and statistic members of its entries, the replacedBy member of an assumption or default entry, a calibrated value with its calibration member, and the response estimates derived at plan time, and a record names it only when the register holds one of them, so every other record keeps the format and the bytes it had. Format 1-4-0 adds to format 1-3-0 no member and no source: it counts the numbers of the namespace keys beside emits and of the fidelity block's copula, and lets an entry name the rank correlation and clique marginal definitions, and a record names it only when it counts a number at one of those positions or an entry cites one of those definitions, so every other record keeps the format and the bytes it had. Written by apply as run/parameter-register.json when the Simulation declares a register, bound by the plan's parameterRegisterDigest. Counts are JSON integers, and every number of the bundle is written as the exact decimal text it was declared as. The shape is checked here; docs/spec/PARAMETER-REGISTER-SPEC.md states the rules the schema cannot express, among them that the counts add up to declared and that each parameter's source is its entry's.",
+  "type": "object",
+  "required": [
+    "_producer",
+    "_schemaURL",
+    "simulationId",
+    "profile",
+    "declared",
+    "counts",
+    "entries",
+    "parameters"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_producer": {
+      "type": "string",
+      "format": "uri",
+      "description": "The tool that wrote the record (OpenLineage BaseFacet)."
+    },
+    "_schemaURL": {
+      "const": "https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-4-0/FluxParameterRegister.json"
+    },
+    "simulationId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The Simulation whose run the record describes."
+    },
+    "profile": {
+      "description": "The profile the Simulation pins, or null when it pins none.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "digest"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "The pinned profile's jcs-document digest."
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "declared": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many numbers the register counts: the length of parameters."
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "profile",
+        "contract",
+        "overlay",
+        "assumption",
+        "default",
+        "calibrated"
+      ],
+      "additionalProperties": false,
+      "description": "How many numbers rest on each source. They add up to declared.",
+      "properties": {
+        "profile": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contract": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "overlay": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assumption": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "default": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "calibrated": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "description": "The register's entries as the Simulation declares them, in its order, then the response estimates derived at plan time.",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/entry"
+          },
+          {
+            "$ref": "#/$defs/responseEstimate"
+          }
+        ]
+      }
+    },
+    "parameters": {
+      "type": "array",
+      "description": "Every number the register counts, documents in NFC order of their ids, each document in key order.",
+      "items": {
+        "$ref": "#/$defs/parameter"
+      }
+    },
+    "unused": {
+      "description": "The statistics of the pinned profile no number of the run rests on, in the order the Simulation lists them. Present only when the Simulation lists them.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unused"
+      }
+    }
+  },
+  "$defs": {
+    "pointer": {
+      "type": "string",
+      "pattern": "^(/([^~]|~[01])*)*$",
+      "description": "An RFC 6901 JSON Pointer."
+    },
+    "source": {
+      "enum": [
+        "profile",
+        "contract",
+        "overlay",
+        "assumption",
+        "default",
+        "calibrated"
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "index",
+        "document",
+        "pointer",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The entry's place in the declared list."
+        },
+        "document": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The id of the document the pointer is read in."
+        },
+        "pointer": {
+          "$ref": "#/$defs/pointer",
+          "description": "The numbers the entry names: one, or every number under a mapping or a list."
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "statistic": {
+          "type": "object",
+          "required": [
+            "pointer"
+          ],
+          "additionalProperties": false,
+          "description": "A profile or overlay source's citation: a pointer into the pinned profile (profile) or into the overlaid profile (overlay) and the registered definition it lands in (a table's rowCount has none).",
+          "properties": {
+            "pointer": {
+              "$ref": "#/$defs/pointer"
+            },
+            "definition": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*/[1-9][0-9]*$"
+            }
+          }
+        },
+        "contract": {
+          "type": "object",
+          "required": [
+            "productRef",
+            "pointer"
+          ],
+          "additionalProperties": false,
+          "description": "A contract source's citation: the id of a FLUID contract the run emits from (the productRef its emit names) and a pointer into that contract.",
+          "properties": {
+            "productRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pointer": {
+              "$ref": "#/$defs/pointer"
+            }
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Why an assumption holds, or a default's note: one line of text."
+        },
+        "overlay": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "maxLength": 63,
+          "description": "An overlay source's overlay: the name of the overlay the Simulation declares."
+        },
+        "replacedBy": {
+          "type": "object",
+          "required": [
+            "pointer"
+          ],
+          "additionalProperties": false,
+          "description": "An assumption or default entry's replacement: the statistic a profile of the contract would publish for the number, as a pointer into that profile and the registered definition it lands in (a table's rowCount has none). It is a request for a measurement, not a citation of the pinned profile, and plan does not read it.",
+          "properties": {
+            "pointer": {
+              "$ref": "#/$defs/pointer"
+            },
+            "definition": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*/[1-9][0-9]*$"
+            }
+          }
+        },
+        "calibration": {
+          "$ref": "#/$defs/calibration"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "profile"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "statistic"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "contract"
+                  ]
+                },
+                {
+                  "required": [
+                    "overlay"
+                  ]
+                },
+                {
+                  "required": [
+                    "replacedBy"
+                  ]
+                },
+                {
+                  "required": [
+                    "calibration"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "contract"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "contract"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "statistic"
+                  ]
+                },
+                {
+                  "required": [
+                    "overlay"
+                  ]
+                },
+                {
+                  "required": [
+                    "replacedBy"
+                  ]
+                },
+                {
+                  "required": [
+                    "calibration"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "overlay"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "statistic",
+              "overlay"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "contract"
+                  ]
+                },
+                {
+                  "required": [
+                    "replacedBy"
+                  ]
+                },
+                {
+                  "required": [
+                    "calibration"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "assumption"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reason"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "statistic"
+                  ]
+                },
+                {
+                  "required": [
+                    "contract"
+                  ]
+                },
+                {
+                  "required": [
+                    "overlay"
+                  ]
+                },
+                {
+                  "required": [
+                    "calibration"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "default"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "statistic"
+                  ]
+                },
+                {
+                  "required": [
+                    "contract"
+                  ]
+                },
+                {
+                  "required": [
+                    "overlay"
+                  ]
+                },
+                {
+                  "required": [
+                    "calibration"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "calibrated"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "calibration"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "statistic"
+                  ]
+                },
+                {
+                  "required": [
+                    "contract"
+                  ]
+                },
+                {
+                  "required": [
+                    "reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "overlay"
+                  ]
+                },
+                {
+                  "required": [
+                    "replacedBy"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "parameter": {
+      "type": "object",
+      "required": [
+        "document",
+        "kind",
+        "pointer",
+        "value",
+        "source",
+        "entry"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "description": "The FLUX kind of the document."
+        },
+        "pointer": {
+          "$ref": "#/$defs/pointer"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+          "description": "The number exactly as declared, as decimal text."
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "entry": {
+          "description": "The index of the entry that decided the source, or null for a default no entry names.",
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "unused": {
+      "type": "object",
+      "required": [
+        "statistic",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "statistic": {
+          "type": "object",
+          "required": [
+            "pointer"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "pointer": {
+              "$ref": "#/$defs/pointer"
+            },
+            "definition": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "description": "Addition 1 of format 1-3-0: how a calibrated value was fitted. before and after are exact decimal texts, and after is the value the document holds at the entry's pointer.",
+      "required": [
+        "queries",
+        "before",
+        "after",
+        "patch",
+        "targets",
+        "heldOut",
+        "versions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "queries": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "The ids of the queries the value was fitted to."
+        },
+        "before": {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+          "maxLength": 1000
+        },
+        "after": {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+          "maxLength": 1000
+        },
+        "patch": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The calibration patch's digest."
+        },
+        "targets": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The digest of the profile that held the targets."
+        },
+        "heldOut": {
+          "type": "object",
+          "required": [
+            "profile",
+            "largestGap",
+            "tolerance"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "profile": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "largestGap": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 1000
+            },
+            "tolerance": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 1000
+            }
+          }
+        },
+        "versions": {
+          "type": "object",
+          "required": [
+            "cma",
+            "sqlglot",
+            "duckdb"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "cma": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sqlglot": {
+              "type": "string",
+              "minLength": 1
+            },
+            "duckdb": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "responseEstimate": {
+      "description": "Addition 2 of format 1-3-0: a response estimate derived at plan time, listed after the declared entries. A control rate reads one cell, an effect reads two (control, then treated) and has an interval. No number is counted for it.",
+      "type": "object",
+      "required": [
+        "index",
+        "kind",
+        "document",
+        "pointer",
+        "value",
+        "source",
+        "cells"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "document": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Simulation."
+        },
+        "pointer": {
+          "$ref": "#/$defs/pointer"
+        },
+        "value": {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+          "maxLength": 1000,
+          "description": "The estimate as exact decimal text."
+        },
+        "source": {
+          "const": "profile"
+        },
+        "kind": {
+          "enum": [
+            "responseControl",
+            "responseEffect"
+          ]
+        },
+        "cells": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^queries/[^/]+/[^/]+$"
+          },
+          "description": "The query cells the estimate was read from, as queries/<query id>/<group key>."
+        },
+        "interval": {
+          "type": "object",
+          "required": [
+            "low",
+            "high",
+            "confidence"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "low": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 1000
+            },
+            "high": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 1000
+            },
+            "confidence": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+              "maxLength": 1000
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "responseControl"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "cells": {
+                "minItems": 1,
+                "maxItems": 1
+              }
+            },
+            "not": {
+              "required": [
+                "interval"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "responseEffect"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "interval"
+            ],
+            "properties": {
+              "cells": {
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
