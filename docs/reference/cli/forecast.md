@@ -82,7 +82,7 @@ fluxsim forecast score ./bundle --profile state.json --next next-state.json --ob
 | `--simulation-id` | `SIMULATION_ID` | which Simulation document to resolve (default: the bundle's only one) |
 | `--profile` | `STATE_K` | the profile the Simulation pins, the state the forecasts were made on; refused when its digest is not the pinned one **(required)** |
 | `--next` | `STATE_K1` | the profile of the next state, a later release answering the same request; refused when it is the pinned state (FLX-7143) **(required)** |
-| `--observed-at` | `T` | the instant the next state was read, as RFC 3339; it may not predate a forecast's registration (FLX-7001) **(required)** |
+| `--observed-at` | `T` | the instant the next state was read, as RFC 3339; it may not predate a forecast's registration (FLX-7001) or its horizon end, the instant after which the next state can be read (FLX-7013) **(required)** |
 | `--state-dir` | `STATE_DIR` | run-state directory (default: ./.flux) |
 | `-j, --json` |  | emit machine-readable JSON |
 
