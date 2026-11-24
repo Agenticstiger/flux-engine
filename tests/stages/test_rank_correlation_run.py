@@ -280,6 +280,11 @@ def test_a_profile_that_states_another_correlation_than_the_run_draws_is_outside
     assert kendall["groups"] == {"scored": 1, "censored": 0, "outside": [0]}
     assert Fraction(kendall["score"]) < Fraction(3, 4)
     assert "rankCorrelation of amount, balance" in result.stderr
+    # The line says what was measured: the run's value, the profile's, their distance, the margin.
+    line = next(each for each in result.stderr.splitlines() if "rankCorrelation of amount" in each)
+    assert f"profile {kendall['rank']['reference']}" in line
+    assert f"run {kendall['rank']['run']}" in line
+    assert f"distance {kendall['rank']['distance']}" in line and "margin " in line
 
 
 def test_a_reference_too_noisy_to_tell_says_so_and_cannot_fail_the_run(tmp_path: Path) -> None:

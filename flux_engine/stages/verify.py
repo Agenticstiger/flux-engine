@@ -164,6 +164,7 @@ from flux_engine.stages.layout import (
 )
 from flux_engine.stages.plan import read_column_provenance, read_parameter_register
 from flux_engine.stages.run_binding import require_receipt_binds_plan, require_run_files_named
+from flux_stats.spelling import render_exact
 
 if TYPE_CHECKING:
     from flux_engine.concordance.calendar_lines import CalendarChecks
@@ -1858,6 +1859,18 @@ def _failed_before_comparing(detail: str) -> Dict[str, Any]:
     return {"status": "failed", "refusals": [], "outside": [], "detail": detail}
 
 
+def _bins_column(outcome: "PropertyOutcome") -> Optional[str]:
+    """The column *outcome*'s property is grouped by the bins of, or ``None``.
+
+    The outcome of a comparison with a committed slice does not carry the grouping, only the id
+    that names it (``<n>:<kind>:<columns>@<column>#bins``), so the id is read when it does not.
+    """
+    if outcome.group_by_bins is not None:
+        return outcome.group_by_bins.column
+    _, found, tail = outcome.property_id.rpartition("@")
+    return tail[: -len("#bins")] if found and tail.endswith("#bins") else None
+
+
 def _outside_document(outcome: "PropertyOutcome", *, refused: bool) -> Dict[str, Any]:
     """One property that is not within its margin, as ``--json`` and the failed line name it.
 
@@ -1885,6 +1898,25 @@ def _outside_document(outcome: "PropertyOutcome", *, refused: bool) -> Dict[str,
             for ordinal, group in enumerate(outcome.groups)
             if group.outcome == "outside"
         ]
+    elif (bins_column := _bins_column(outcome)) is not None:
+        # A property grouped by the bins of a column: the column and the bins that landed
+        # outside, named by ordinal like any group (the edges are values of the slice).
+        document["groupByBins"] = bins_column
+        document["groupOrdinals"] = [
+            ordinal for ordinal, group in enumerate(outcome.groups) if group.outcome == "outside"
+        ]
+    if outcome.margin is not None and (outcome.rank is not None or "groupByBins" in document):
+        document["margin"] = outcome.margin
+    if outcome.rank is not None:
+        # Aggregates, as the scorecard's row carries them: both correlations, how far apart they
+        # are and how far apart they may be.
+        found = outcome.rank
+        document["rank"] = {
+            "run": render_exact(found.run),
+            "profile": render_exact(found.reference),
+            "distance": render_exact(found.distance),
+            "reach": render_exact(found.reach),
+        }
     return document
 
 
@@ -1906,8 +1938,12 @@ def _failure_lines(outcome: Mapping[str, Any]) -> List[str]:
     for entry in outcome.get("outside", ()):
         subject = f"{entry['property']} of {', '.join(entry['columns'])}"
         where = ""
-        if "groupBy" in entry:
-            subject += f", grouped by {entry['groupBy']}"
+        if "groupBy" in entry or "groupByBins" in entry:
+            subject += (
+                f", grouped by {entry['groupBy']}"
+                if "groupBy" in entry
+                else f", grouped by the bins of {entry['groupByBins']}"
+            )
             ordinals = entry["groupOrdinals"]
             if ordinals and not entry["refused"]:
                 noun = "groups" if len(ordinals) > 1 else "group"
@@ -1919,6 +1955,8 @@ def _failure_lines(outcome: Mapping[str, Any]) -> List[str]:
             if code and entry["refused"]
             else "refused, not compared" if entry["refused"] else "outside the declared margin"
         )
+        if not entry["refused"]:
+            verdict += _measured_text(entry)
         lines.append(f"property {entry['propertyId']} ({subject}): {verdict}{where}")
     for refusal in outcome.get("refusals", ()):
         names = f" on property {refusal['propertyId']}" if refusal.get("propertyId") else ""
@@ -1928,6 +1966,29 @@ def _failure_lines(outcome: Mapping[str, Any]) -> List[str]:
         lines.append(f"against the pinned profile: {profiled.get('detail')}")
         lines.extend(f"  {line}" for line in _failure_lines(profiled))
     return lines
+
+
+def _measured_text(entry: Mapping[str, Any]) -> str:
+    """What a rank correlation or a property grouped by bins measured, as the rest of its failure line.
+
+    A rank correlation names the run's value, the profile's, their distance and how far apart
+    they may be: the margin, and the reach that margin takes with the noise of the profile and the
+    run's sampling. A property grouped by bins names the margin its groups were held to. Each is
+    an aggregate and never a value of the data.
+    """
+    parts: List[str] = []
+    if "margin" in entry:
+        parts.append(f"margin {entry['margin']}")
+    found = entry.get("rank")
+    if found is not None:
+        parts = [
+            f"run {found['run']}",
+            f"profile {found['profile']}",
+            f"distance {found['distance']}",
+            *parts,
+            f"reach {found['reach']}",
+        ]
+    return f" ({', '.join(parts)})" if parts else ""
 
 
 def _sampled_failure_lines(outcome: Mapping[str, Any]) -> List[str]:
