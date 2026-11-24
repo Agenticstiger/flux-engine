@@ -152,6 +152,7 @@ from flux_engine.seam.parameters import (
     build_parameter_register,
     changed_by_overlay,
     cited_definition,
+    counted_positions,
     declared_numbers,
     parse_pointer,
     read_parameters_block,
@@ -160,7 +161,7 @@ from flux_engine.seam.parameters import (
 )
 from flux_engine.seam.profile import load_profile
 from flux_engine.seam.profile_request import column_domains
-from flux_engine.seam.projections import PERIODS_KEY
+from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
 from flux_engine.seam.resolve import EXTENSION_NAMESPACE, FLX_3105, ExactLoader, read_bundle_file
 from flux_engine.starter import StarterFile
 from flux_stats.cliques import CliqueEntry
@@ -3226,33 +3227,47 @@ def _namespace_labels(
 
     for entry, cite in spread.cited:
         place(COUNTS_KEY, entry, (cite,))
-    for entry in namespace.get(HISTORY_KEY) or ():
-        cites = _history_cited(entry)
-        if declared:
-            # The numbers are the --history file's, not statistics of the profile's history.
-            cites = [(member, None, _DECLARED_BY_HISTORY) for member, _, _ in cites]
-        place(HISTORY_KEY, entry, cites)
+    if declared:
+        # The numbers under the keys the file declares are its own, not statistics of the
+        # profile's history: every counted position under them is assumed, one entry for each.
+        found.extend(_declared_labels(namespace, profile))
+    else:
+        for entry in namespace.get(HISTORY_KEY) or ():
+            place(HISTORY_KEY, entry, _history_cited(entry))
     for key, entry, member, tokens, how in _dated_cited(dated):
         place(key, entry, ((member, tokens, how),))
-    for entry in namespace.get(PERIODS_KEY) or ():
-        place(
-            PERIODS_KEY,
-            entry,
-            [
-                (
-                    ("kinds", str(position), "count"),
-                    None,
+    if not declared:
+        for entry in namespace.get(PERIODS_KEY) or ():
+            place(
+                PERIODS_KEY,
+                entry,
+                [
                     (
-                        _DECLARED_BY_HISTORY
-                        if declared
-                        else "fluxsim init writes one periodic row for each period a version "
-                        "overlaps, so each kind's count is 1 (ADR 0027)."
-                    ),
-                )
-                for position in range(len(entry.get("kinds", ())))
-            ],
-        )
+                        ("kinds", str(position), "count"),
+                        None,
+                        "fluxsim init writes one periodic row for each period a version "
+                        "overlaps, so each kind's count is 1 (ADR 0027).",
+                    )
+                    for position in range(len(entry.get("kinds", ())))
+                ],
+            )
     return found
+
+
+#: The keys of the namespace a ``--history`` file declares.
+_DECLARED_KEYS = frozenset({HISTORY_KEY, SNAPSHOTS_KEY, EVENTS_KEY, PERIODS_KEY, ASOF_KEY})
+
+
+def _declared_labels(
+    namespace: Mapping[str, Any], profile: Mapping[str, Any]
+) -> List[Tuple[Tuple[str, ...], Basis]]:
+    """One assumed label for each entry (or key) of the declared keys that holds a counted number."""
+    places: List[Tuple[str, ...]] = []
+    for path in counted_positions(namespace, _DECLARED_KEYS):
+        at = path[:2] if isinstance(namespace.get(path[0]), list) else path[:1]
+        if at not in places:
+            places.append(at)
+    return [(at, _basis_of(profile, None, _DECLARED_BY_HISTORY)) for at in places]
 
 
 def _dated_cited(
@@ -3379,6 +3394,8 @@ def _author_bundle(
     team, owner_note = _owner(planned.contract)
     window, window_note, given_window = _bundle_window(planned, inputs)
     _widen_ranges(planned.authored, fallbacks.widened)
+    if given_window is not None:
+        _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
     histories, projections = _histories_and_projections(
         planned, window, declared, (declined_history, declined_projection)
     )
@@ -3394,8 +3411,6 @@ def _author_bundle(
     )
     contract_path = planned.contract_path
     files = _starter_files(
-    if given_window is not None:
-        _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
         contract_path,
         Path(inputs.profile_path),
         planned.contract_bytes,
@@ -3558,21 +3573,6 @@ def _bundle_window(
     return window, window_note, given_window
 
 
-def _check_declared_entries(planned: _Planned, declared: DeclaredHistory) -> None:
-    """Refuse a history file that names an expose the bundle does not write, or one with no validity window."""
-    keys = planned.keys
-    if keys is None:
-        raise AuthorError(
-            f"{declared.name}: the contract declares no keys, so no expose of it has a "
-            "validity window for a history"
-        )
-    written = [expose for expose in planned.authored if not expose.reference]
-    try:
-        check_entries(
-            declared,
-            {expose.expose_id for expose in written},
-            {expose.expose_id for expose in written if keys.expose(expose.expose_id).versioned},
-        )
 def _refuse_a_window_that_misses_ranges(
     planned: _Planned,
     window: Tuple[str, str],
@@ -3628,6 +3628,21 @@ def _declared_ranges_of(
     return found
 
 
+def _check_declared_entries(planned: _Planned, declared: DeclaredHistory) -> None:
+    """Refuse a history file that names an expose the bundle does not write, or one with no validity window."""
+    keys = planned.keys
+    if keys is None:
+        raise AuthorError(
+            f"{declared.name}: the contract declares no keys, so no expose of it has a "
+            "validity window for a history"
+        )
+    written = [expose for expose in planned.authored if not expose.reference]
+    try:
+        check_entries(
+            declared,
+            {expose.expose_id for expose in written},
+            {expose.expose_id for expose in written if keys.expose(expose.expose_id).versioned},
+        )
     except DeclaredHistoryError as error:
         raise AuthorError(str(error)) from None
 

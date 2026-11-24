@@ -600,6 +600,26 @@ def _engine_block_numbers(
     return numbers
 
 
+def counted_positions(block: Any, keys: FrozenSet[str]) -> List[Tuple[str, ...]]:
+    """The paths, relative to the namespace *block*, of every counted number under one of its *keys*.
+
+    The positions are those :func:`declared_numbers` counts, found in the document itself, so a
+    number added to a key's closed set is found without a list of members kept beside it.
+    """
+    if not isinstance(block, Mapping):
+        return []
+    found: List[Tuple[str, ...]] = []
+    for path, marks, value in _leaves(block, (), ()):
+        if (
+            path[:1]
+            and path[0] in keys
+            and any(_matches(marks, item) for item in ENGINE_BLOCK_NUMBERS)
+        ):
+            if _number_text(value, strings=True) is not None:
+                found.append(path)
+    return found
+
+
 def declared_numbers(
     documents: Mapping[str, Mapping[str, Any]], *, simulation_id: str, namespace: str
 ) -> Tuple[DeclaredNumber, ...]:

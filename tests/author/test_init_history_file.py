@@ -452,3 +452,47 @@ def test_a_number_the_file_writes_unquoted_is_kept_exactly(tmp_path: Path) -> No
     result = _init(tmp_path, _write(tmp_path, text))
     assert result.exit_code == 0, result.stderr
     assert _namespace(tmp_path)[HISTORY_KEY][0]["versions"]["binWeights"] == ["0.6", "0.4"]
+
+
+def test_every_counted_number_under_the_declared_keys_is_assumed(tmp_path: Path) -> None:
+    from flux_engine.seam.parameters import declared_numbers, parse_pointer
+    from flux_stats.exact_yaml import load_documents
+
+    document = copy.deepcopy(HISTORY_FILE)
+    document["history"][0]["parent"]["children"] = {
+        "bins": ["1", "2", "4"],
+        "binWeights": ["0.5", "0.5"],
+    }
+    document["events"][0]["lag"] = {"bins": ["0", "5", "30"], "binWeights": ["0.7", "0.3"]}
+    _declared(tmp_path, document)
+    (simulation,) = load_documents(
+        (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8"), name="sim"
+    )
+    numbers = declared_numbers(
+        {simulation["id"]: simulation}, simulation_id=simulation["id"], namespace=NAMESPACE
+    )
+    under = [
+        number
+        for number in numbers
+        if number.tokens[2:3]
+        in (("history",), ("snapshots",), ("events",), ("periods",), ("asOf",))
+    ]
+    reached = {"parent.minChildren": False, "parent.children": False, "lag": False}
+    register = _namespace(tmp_path)["parameters"]
+    for number in under:
+        entries = [
+            entry
+            for entry in register
+            if entry["document"] == simulation["id"]
+            and number.tokens[: len(parse_pointer(entry["pointer"]))]
+            == parse_pointer(entry["pointer"])
+        ]
+        assert entries, number.tokens
+        deepest = max(entries, key=lambda entry: len(parse_pointer(entry["pointer"])))
+        assert deepest["source"] == "assumption", number.tokens
+        assert "declared by --history" in deepest["reason"], number.tokens
+        tail = number.tokens[4:]
+        reached["parent.minChildren"] |= tail[:2] == ("parent", "minChildren")
+        reached["parent.children"] |= tail[:2] == ("parent", "children")
+        reached["lag"] |= tail[:1] == ("lag",)
+    assert all(reached.values()), reached
