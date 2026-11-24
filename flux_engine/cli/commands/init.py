@@ -65,6 +65,16 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         ),
     )
     init_p.add_argument("directory", help="where to write the project (created if missing)")
+    _add_input_options(init_p)
+    _add_check_options(init_p)
+    _add_shape_options(init_p)
+    _add_json_flag(init_p)
+
+    init_p.set_defaults(stage_name="init")
+
+
+def _add_input_options(init_p: argparse.ArgumentParser) -> None:
+    """The options that name what a bundle is written from."""
     init_p.add_argument(
         "--contract",
         default=None,
@@ -122,6 +132,10 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "--contract and the sql extra"
         ),
     )
+
+
+def _add_check_options(init_p: argparse.ArgumentParser) -> None:
+    """The options that check a bundle as it is written."""
     init_p.add_argument(
         "--strict",
         action="store_true",
@@ -142,6 +156,10 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "accepts nothing"
         ),
     )
+
+
+def _add_shape_options(init_p: argparse.ArgumentParser) -> None:
+    """The options that set the run window and give a declared history."""
     init_p.add_argument(
         "--window",
         nargs=2,
@@ -166,9 +184,6 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "counted layouts, exact allotments and the ended status's weight are written to fit it"
         ),
     )
-    _add_json_flag(init_p)
-
-    init_p.set_defaults(stage_name="init")
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
