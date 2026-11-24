@@ -855,9 +855,16 @@ def _in_group_order(keys: Iterable[str], declaration: PropertyDeclaration) -> Li
     The NFC-sorted order of their keys, or, for a property grouped by bins, the order of the bins
     (a key is a lower edge's decimal text, and ``10`` sorts before ``2`` as text).
     """
-    if declaration.group_by_bins is not None:
-        return sorted(keys, key=Fraction)
-    return sorted(keys)
+    return group_order(keys, by_bins=declaration.group_by_bins is not None)
+
+
+def group_order(keys: Iterable[str], *, by_bins: bool) -> List[str]:
+    """*keys* in the order groups are named by ordinal: by the order of the bins, or as text.
+
+    A key of a group by bins is a lower edge's decimal text, so ``10`` sorts before ``2`` as text and
+    the keys are ordered as the numbers they spell. Any other key is ordered as it is.
+    """
+    return sorted(keys, key=Fraction) if by_bins else sorted(keys)
 
 
 def _reach(variance: Fraction, cells: int, group: ProfileGroup) -> Fraction:

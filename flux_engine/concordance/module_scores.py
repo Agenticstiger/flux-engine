@@ -43,7 +43,7 @@ from flux_engine.concordance.rule_shares import RuleShare
 from flux_engine.concordance.scorecard import PropertyScore
 from flux_engine.concordance.shares import Holds
 from flux_engine.concordance.similarity import total_variation
-from flux_engine.concordance.verifier import CENSORED, OUTSIDE, WITHIN
+from flux_engine.concordance.verifier import CENSORED, OUTSIDE, WITHIN, group_order
 from flux_engine.core.canonical import nfc
 from flux_engine.core.errors import FluxError
 from flux_engine.seam.counts import CountsEntry
@@ -417,9 +417,13 @@ def grouped_children_row(
     edges = tuple(statistic.bins)
     run = _run_groups(parents, statistic, edges)
     allowed = tolerance if tolerance is not None else DEFAULT_CHILDREN_TOLERANCE
+    # Named by ordinal in the order of the bins when grouped by bins, as a property's groups are
+    # (SCORECARD-SPEC.md section 3), not in the text order of the profile's keys.
+    held = {group.key: group for group in statistic.groups}
+    ordered = [held[key] for key in group_order(held, by_bins=statistic.group_by_bins is not None)]
     scored = [
         _score_group(statistic, group, ordinal, run.get(group.key), allowed)
-        for ordinal, group in enumerate(statistic.groups)
+        for ordinal, group in enumerate(ordered)
     ]
     distances = [item.distance for item in scored if item.distance is not None]
     scores = [_ONE - distance for distance in distances]
