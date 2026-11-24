@@ -1067,7 +1067,11 @@ def _score_and_gate(
     decisions = {expose_id: outcome.decision for expose_id, outcome in outcomes.items()}
     if pinned is None:
         return None, _gate_on_lines(decisions, failed)
-    from flux_engine.stages._scorecard import build_run_scorecard, with_line_failures
+    from flux_engine.stages._scorecard import (
+        build_run_scorecard,
+        children_failures,
+        with_line_failures,
+    )
 
     scorecard = build_run_scorecard(
         plan_document=plan_document,
@@ -1082,6 +1086,7 @@ def _score_and_gate(
         calendar=calendar,
         queries=queries,
     )
+    failed = [*failed, *children_failures(module, scorecard)]
     scorecard = with_line_failures(scorecard, failed) if failed else scorecard
     return scorecard, _gate_on_lines(_gate_on_scorecard(decisions, scorecard), failed)
 

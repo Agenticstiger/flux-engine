@@ -1502,9 +1502,16 @@ class ProfileLegs:
         calendar is gated by it), so the scorecard and its ``scorecard`` leg are set here, once all
         of them are known. A run no line fails is returned as it is.
         """
-        from flux_engine.stages._scorecard import line_failures, with_line_failures
+        from flux_engine.stages._scorecard import (
+            children_failures,
+            line_failures,
+            with_line_failures,
+        )
 
-        failed = line_failures(self.module, self.calendar, self.exposure)
+        failed = [
+            *line_failures(self.module, self.calendar, self.exposure),
+            *children_failures(self.module, self.scorecard),
+        ]
         if self.scorecard is None or not failed:
             return self
         scorecard = with_line_failures(self.scorecard, failed)
@@ -1515,8 +1522,11 @@ class ProfileLegs:
 
     def failures(self) -> List[str]:
         """A missed threshold or ``minCredibility``, or a rule off its band, one line each: each fails the stage."""
+        from flux_engine.stages._scorecard import children_failures
+
         found = self.scorecard.failure_lines() if self.scorecard is not None else []
         found += self.module.failures() if self.module is not None else []
+        found += [each.line for each in children_failures(self.module, self.scorecard)]
         found = found + (self.calendar.failures() if self.calendar is not None else [])
         return found + (self.exposure.failures() if self.exposure is not None else [])
 
