@@ -139,6 +139,12 @@ def test_a_noisy_pair_is_written_as_its_value_clamped_to_one(
     assert _pair(fidelity, "amount", "opened_at") == "-1"
     assert _pair(fidelity, "balance", "opened_at") == "0.25"
     assert "clamped" in _ledger(result, "columnPairs/0/statistics/0")["note"]
+    # The text says it too, one short line for each pair that was clamped and none for the others.
+    lines = [line for line in result.stdout.splitlines() if " is held at " in line]
+    assert len(lines) == 2
+    assert "amount, balance" in lines[0] and "released as 1.7 is held at 1" in lines[0]
+    assert "amount, opened_at" in lines[1] and "released as -3 is held at -1" in lines[1]
+    assert all(line.startswith("  copula: ") for line in lines)
 
 
 def test_each_pair_is_scored_by_a_rank_correlation_property_with_a_stated_tolerance(

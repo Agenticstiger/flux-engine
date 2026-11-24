@@ -145,7 +145,8 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         metavar="T",
         help=(
             "the instant the next state was read, as RFC 3339; it may not predate a "
-            "forecast's registration (FLX-7001)"
+            "forecast's registration (FLX-7001) or its horizon end, the instant after which "
+            "the next state can be read (FLX-7013)"
         ),
     )
     _add_state_dir(score_p)
