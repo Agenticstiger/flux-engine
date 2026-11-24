@@ -36,6 +36,7 @@ from typing import (
     Callable,
     Dict,
     FrozenSet,
+    Iterator,
     List,
     Mapping,
     NamedTuple,
@@ -149,6 +150,7 @@ from flux_engine.seam.parameters import (
     UNUSED_KEY,
     build_parameter_register,
     changed_by_overlay,
+    cited_definition,
     declared_numbers,
     parse_pointer,
     read_parameters_block,
@@ -157,12 +159,13 @@ from flux_engine.seam.parameters import (
 )
 from flux_engine.seam.profile import load_profile
 from flux_engine.seam.profile_request import column_domains
+from flux_engine.seam.projections import PERIODS_KEY
 from flux_engine.seam.resolve import EXTENSION_NAMESPACE, FLX_3105, ExactLoader, read_bundle_file
 from flux_engine.starter import StarterFile
-from flux_stats.cliques import CLIQUE_DEFINITION_2, CliqueEntry
+from flux_stats.cliques import CliqueEntry
 from flux_stats.column_metrics import COUNT
 from flux_stats.exact_yaml import load_documents
-from flux_stats.rank_correlation import RANK_IDENTIFIERS
+from flux_stats.rank_correlation import KENDALL_TAU_ID, SPEARMAN_RHO_ID
 from flux_stats.request import ProfileRequest
 
 __all__ = [
@@ -1264,7 +1267,21 @@ def _labels(authored: AuthoredExpose) -> List[Label]:
             labels.append(
                 Label(fidelity + ("properties", str(position)) + label.tokens, label.basis)
             )
+    labels.extend(_copula_labels(authored, fidelity))
     return labels
+
+
+def _copula_labels(authored: AuthoredExpose, fidelity: Tuple[str, ...]) -> List[Label]:
+    """The value of each pair of the copula cites the rank correlation of the pair it was read from."""
+    copula = authored.copula
+    if copula is None or copula.declaration is None:
+        return []
+    definition = KENDALL_TAU_ID if copula.measure == "kendall" else SPEARMAN_RHO_ID
+    where = fidelity + (COPULA_KEY, "rankCorrelations", "pairs")
+    return [
+        Label(where + (str(index), "value"), from_profile(tokens, definition))
+        for index, (tokens, _how) in enumerate(copula.reads)
+    ]
 
 
 def _register(
@@ -1290,9 +1307,6 @@ def _register(
     entries: List[Dict[str, Any]] = []
     for document_id, tokens, basis in labels:
         if (document_id, tokens) not in under:
-            continue
-        if basis.statistic is not None and basis.statistic[1] in _NOT_IN_THE_REGISTER:
-            # The register cannot cite a definition it does not hold (see _NOT_IN_THE_REGISTER).
             continue
         entries.append(
             {"document": document_id, "pointer": render_pointer(tokens), **basis.entry_fields()}
@@ -1615,6 +1629,14 @@ class _Spreads(NamedTuple):
     records: List[_Note]
     #: What is assumed of a relationship, by its name: a sentence a person reads.
     notes: List[Tuple[str, str]]
+    #: What each number of a ``counts`` entry rests on, by the entry (see :data:`_Cited`).
+    cited: Tuple[Tuple[Dict[str, Any], "_Cited"], ...] = ()
+
+
+#: What a number of a written entry rests on: the member of the entry (tokens below it), the
+#: statistic of the profile it was read from (tokens into the profile; ``None`` when init chose
+#: the number itself) and the sentence that says how, or why.
+_Cited = Tuple[Tuple[str, ...], Optional[Tuple[str, ...]], str]
 
 
 class _Placed(NamedTuple):
@@ -1628,6 +1650,8 @@ class _Placed(NamedTuple):
     counted: bool
     #: Why the counted layout did not place it, when it did not.
     laid: Optional[str]
+    #: What each number of the ``counts`` entry rests on.
+    cited: Tuple[_Cited, ...] = ()
 
 
 def _given_parent(parent: AuthoredExpose) -> GivenParent:
@@ -1735,7 +1759,8 @@ def _lay_out_children(
             used += given.used
             unused += given.unused
             _take_given(given, child_plan, parent_expose, (notes, f"{child_table}.{declared.name}"))
-        return _Placed(used, unused, counts, notes, True, None)
+        cited = _counts_cited(counted, given)
+        return _Placed(used, unused, counts, notes, True, None, cited)
     spread = spread_children(
         entry,
         tokens,
@@ -1751,6 +1776,53 @@ def _lay_out_children(
     )
     laid = held or "the histogram of children per parent is not one the layout can read"
     return _Placed(list(spread.used), list(spread.unused), None, notes, False, laid)
+
+
+def _counts_cited(counted: Any, given: Optional[Any]) -> Tuple[_Cited, ...]:
+    """What each number of a ``counts`` entry rests on (ADR 0016 section 7).
+
+    The classes and their weights rest on the profile's histogram of children per parent, an open
+    last class's upper edge on the total of children (a published mean, or the child rows),
+    ``minChildren`` on the class the profile marks structural, and the weights given a column of the
+    parent on the statistic grouped by it.
+    """
+    shape = counted.members["children"]
+    pointer, how = counted.used[0]
+    found: List[_Cited] = [(("children",), pointer, how)]
+    if "levels" in shape:
+        found.append(
+            (
+                ("children", "levels"),
+                None,
+                "A one_to_one relationship gives a parent none or one child, so the entry's "
+                "levels are 0 and 1.",
+            )
+        )
+    elif len(counted.used) > 1:
+        last = ("children", "bins", str(len(shape["bins"]) - 1))
+        found.append((last, counted.used[1][0], counted.used[1][1]))
+    else:
+        found.append(
+            (
+                ("children", "bins", str(len(shape["bins"]) - 1)),
+                None,
+                "The open last class's upper edge is chosen so that its even spread holds the "
+                "child rows, which the layout gives each a parent.",
+            )
+        )
+    if "minChildren" in counted.members:
+        found.append(
+            (
+                ("minChildren",),
+                None,
+                "The profile marks the class of parents with no child as structural, so every "
+                "parent has a child and the entry's minChildren is 1.",
+            )
+        )
+    if given is not None and given.members:
+        grouped, how = given.used[-1]
+        found.append((("childrenGiven",), grouped, how))
+    return tuple(found)
 
 
 def _resolve(
@@ -1823,6 +1895,7 @@ def _spread_relationships(
     entries: List[Dict[str, Any]] = []
     records: List[_Note] = []
     notes: List[Tuple[str, str]] = []
+    cited: List[Tuple[Dict[str, Any], _Cited]] = []
     found = profile.get("relationships")
     found_tables = profile.get("tables")
     tables: Mapping[str, Any] = found_tables if isinstance(found_tables, Mapping) else {}
@@ -1874,6 +1947,7 @@ def _spread_relationships(
         notes += placed.notes
         if placed.entry is not None:
             entries.append(placed.entry)
+            cited += [(placed.entry, item) for item in placed.cited]
         counted, laid = placed.counted, placed.laid
         if classes:
             recorded, sentence = _structural_note(classes, counted, laid)
@@ -1881,7 +1955,7 @@ def _spread_relationships(
                 records.append((tokens + ("structural",), sentence))
             else:
                 notes.append((f"{child_table}.{declared.name}", sentence))
-    return _Spreads(used, unused, entries, records, notes)
+    return _Spreads(used, unused, entries, records, notes, tuple(cited))
 
 
 class _Histories(NamedTuple):
@@ -2514,20 +2588,14 @@ def _relationships_of(keys: ContractKeys, expose_id: str) -> Sequence[Any]:
         return ()
 
 
-#: The definitions of a profile that the register's own list of them does not hold.
-_NOT_IN_THE_REGISTER = RANK_IDENTIFIERS | {CLIQUE_DEFINITION_2}
-
-
 def _unused_block(ledger: Ledger) -> List[Dict[str, Any]]:
     """The register's ``unused`` list: each unused statistic with its definition and reason.
 
-    A statistic of a definition the register does not hold (a rank correlation, a binned clique)
-    cannot be cited there, so the ledger names it and the register leaves it out.
+    Every statistic the ledger holds as unused is listed, a rank correlation and a binned clique
+    included: the register holds their definitions.
     """
     block: List[Dict[str, Any]] = []
     for entry in ledger.unused_entries():
-        if entry.definition in _NOT_IN_THE_REGISTER:
-            continue
         statistic: Dict[str, Any] = {"pointer": entry.pointer}
         if entry.definition is not None:
             statistic["definition"] = entry.definition
@@ -3085,14 +3153,121 @@ def _world_and_persona(
     return world, persona
 
 
+def _basis_of(profile: Mapping[str, Any], tokens: Optional[Tuple[str, ...]], how: str) -> Basis:
+    """The source of a number read from the statistic at *tokens* of *profile*, or assumed.
+
+    A statistic that lands in a registered definition is cited. A member of the profile with none
+    (an order, a structural class), and a number init chose itself (*tokens* ``None``), are assumed,
+    for the reason *how* gives.
+    """
+    definition = cited_definition(profile, tokens) if tokens is not None else None
+    if tokens is None or definition is None:
+        return assumed(how)
+    return from_profile(tokens, definition)
+
+
+def _history_cited(entry: Mapping[str, Any]) -> List[_Cited]:
+    """What each number of a ``history`` entry rests on: the history statistic it was read from."""
+    base = ("tables", str(entry["emit"]), "history")
+    found: List[_Cited] = []
+    for member, statistic, how in (
+        (
+            ("entities",),
+            "versionsPerEntity",
+            "the entities, from the profile's versions per entity",
+        ),
+        (("versions",), "versionsPerEntity", "the classes of versions per entity, with weights"),
+        (("start",), "firstStart", "the histogram of first starts, as the entry's start"),
+        (("length",), "versionLength", "the histogram of version lengths, as the entry's length"),
+        (("reasons",), "reasons", "the share of changes each tracked column makes"),
+        (("end", "share"), "lastVersion", "the closed share of last versions, as the end share"),
+    ):
+        if member[0] in entry:
+            found.append((member, base + (statistic,), how))
+    for index, tracked in enumerate(entry.get("tracked", ())):
+        where = base + ("columns", str(tracked["column"]))
+        for key, how in (
+            ("initial", "the level a first version takes"),
+            ("transitions", "the moves between levels of the tracked column, per level"),
+        ):
+            if key in tracked:
+                found.append((("tracked", str(index), key), where + (key,), how))
+    return found
+
+
+def _namespace_labels(
+    namespace: Mapping[str, Any],
+    spread: _Spreads,
+    dated: Any,
+    profile: Mapping[str, Any],
+) -> List[Tuple[Tuple[str, ...], Basis]]:
+    """The source of the numbers written under the namespace's keys beside ``emits``.
+
+    Each is at a position below the namespace: a ``counts`` entry's numbers rest on the profile's
+    children per parent, a ``history`` entry's on the history it publishes, a ``lifetimes``,
+    ``within`` or ``rates`` entry's on what the date rules read, and a number init chose itself
+    (a periodic row's count) is assumed. The entries are found by identity in the lists the
+    namespace holds.
+    """
+    found: List[Tuple[Tuple[str, ...], Basis]] = []
+
+    def place(key: str, entry: Any, cites: Sequence[_Cited]) -> None:
+        listed = namespace.get(key) or ()
+        index = next((at for at, item in enumerate(listed) if item is entry), None)
+        if index is not None:
+            for member, tokens, how in cites:
+                found.append(((key, str(index)) + member, _basis_of(profile, tokens, how)))
+
+    for entry, cite in spread.cited:
+        place(COUNTS_KEY, entry, (cite,))
+    for entry in namespace.get(HISTORY_KEY) or ():
+        place(HISTORY_KEY, entry, _history_cited(entry))
+    for key, entry, member, tokens, how in _dated_cited(dated):
+        place(key, entry, ((member, tokens, how),))
+    for entry in namespace.get(PERIODS_KEY) or ():
+        place(
+            PERIODS_KEY,
+            entry,
+            [
+                (
+                    ("kinds", str(position), "count"),
+                    None,
+                    "fluxsim init writes one periodic row for each period a version overlaps, "
+                    "so each kind's count is 1 (ADR 0027).",
+                )
+                for position in range(len(entry.get("kinds", ())))
+            ],
+        )
+    return found
+
+
+def _dated_cited(
+    dated: Any,
+) -> Iterator[Tuple[str, Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]]:
+    """Each number the date rules wrote, with the list its entry is in."""
+    keys = (
+        *((LIFETIMES_KEY, item) for item in dated.lifetimes),
+        *((WITHIN_KEY, item) for item in dated.within),
+        *((RATES_KEY, item) for item in dated.rates),
+    )
+    for entry, member, tokens, how in dated.cited:
+        key = next((name for name, item in keys if item is entry), None)
+        if key is not None:
+            yield key, entry, member, tokens, how
+
+
 def _register_labels(
     world_id: str,
     persona_id: str,
     simulation_id: str,
     authored: Sequence[AuthoredExpose],
     noisy: Any,
+    others: Sequence[Tuple[Tuple[str, ...], Basis]] = (),
 ) -> List[Tuple[str, Tuple[str, ...], Any]]:
-    """The label of every number of the documents, for the parameter register."""
+    """The label of every number of the documents, for the parameter register.
+
+    *others* are the numbers of the namespace's keys beside ``emits`` (:func:`_namespace_labels`).
+    """
     template = (
         "fluxsim init writes the least World a run needs: the generator emits read none of "
         "its numbers, so they change no row."
@@ -3116,6 +3291,8 @@ def _register_labels(
             labels.append(
                 (simulation_id, namespace_tokens + label.tokens, cite_noisy(label.basis, noisy))
             )
+    for tokens, basis in others:
+        labels.append((simulation_id, namespace_tokens + tokens, cite_noisy(basis, noisy)))
     return labels
 
 
@@ -3316,7 +3493,12 @@ def _author_bundle(
     }
     ledger = _ledger(profile, exposes, contract_ids, children, noisy)
     labels = _register_labels(
-        f"world-{product_ref}", f"persona-{product_ref}", simulation_id, authored, noisy
+        f"world-{product_ref}",
+        f"persona-{product_ref}",
+        simulation_id,
+        authored,
+        noisy,
+        _namespace_labels(namespace, spread, dated, profile),
     )
     # The register counts numbers as the engine reads the files back (a YAML
     # float is an exact decimal there), so it is built from that reading.

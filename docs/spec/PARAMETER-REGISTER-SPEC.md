@@ -264,19 +264,51 @@ and `budget` (when the check runs), the namespace's `profile`,
 `strictCoverage` and `parameters`, other namespaces, and anything outside
 `spec` and this namespace, such as `metadata`, `agentPolicy` and `skills`.
 
-Also not counted are the numbers of the namespace's own declarations of how rows relate and
-fall in time, and of what a patch or a consumer asks for: `facts`, `links`, `bridges`,
-`counts`, `history`, `asOf`, `snapshots`, `events`, `periods`, `copies`, `generators`,
-`lifetimes`, `within`, `rates`, `conditions`, `overlay`, `consumers`, `responses`,
-`forecasts` and `privacy`. A number there is read by the run but has no entry and no share in
-the record, so a calibration cannot name it (`FLX-3706`). Counting one would change the record, and with it the plan's
-`parameterRegisterDigest`, of every run whose Simulation declares the key, so a position
-joins the table above only in a new format.
+The namespace's declarations of how rows relate and fall in time sit beside `emits` and name
+positions of their own. A number counts there when it is an integer, a decimal, or text read as a
+finite decimal, as above. `<n>` is an index of the key's list:
 
-The numbers of the fidelity block's `copula` (`rankCorrelations.pairs[].value`,
-SEAM-FIDELITY-SPEC.md section 2), which sits beside the positions above and joins none of them, are not counted either, and a citation may
-not name the definitions `kendallTau/1` and `spearmanRho/1` or `cliqueMarginal/2`. Counting the copula's values,
-with the rank correlation each rests on, would be a new register format. The register stays at format `1-3-0`.
+| Position | What it is |
+|---|---|
+| `facts[<n>].tolerance` | a fact's tolerance |
+| `links[<n>].sentinels.<column>` | a sentinel's text, when it reads as a number |
+| `counts[<n>].minChildren`, `.tolerance` | the least children of a parent, and the check's tolerance |
+| `counts[<n>].children.levels[]`, `.levelWeights[]`, `.bins[]`, `.binWeights[]` | the classes of children per parent, and their weights |
+| `counts[<n>].childrenGiven.<class>[]` | the weights of each class of the given column |
+| `history[<n>].entities` | the number of entities |
+| `history[<n>].parent.minChildren`, `.parent.children.levels[]`, `.levelWeights[]`, `.bins[]`, `.binWeights[]` | the parent's children, as `counts` holds them |
+| `history[<n>].versions.levels[]`, `.levelWeights[]`, `.bins[]`, `.binWeights[]` | the classes of versions per entity, and their weights |
+| `history[<n>].start.bins[]`, `.binWeights[]`, `.length.bins[]`, `.binWeights[]` | the histograms of the first start and of a version's length |
+| `history[<n>].tracked[].initial.levelWeights[]`, `.transitions.<level>.<level>` | a tracked column's first-level weights and its moves |
+| `history[<n>].reasons.levelWeights[]`, `.end.share` | the share of changes each column makes, and the share of histories that end |
+| `events[<n>].lag.bins[]`, `.binWeights[]` | an event's lag |
+| `periods[<n>].kinds[].count`, `.count.levels[]`, `.count.levelWeights[]` | the rows a period holds, as one number or as classes with weights |
+| `lifetimes[<n>].target` | the share of rows that may break the lifetime's order |
+| `lifetimes[<n>].duration.bins[]`, `.binWeights[]`, `.open`, `.mean`, and the same under `.duration.states.<state>` and `.duration.otherwise` | a duration's histogram or exponential, or a dwell family's |
+| `within[<n>].target`, `.offset.bins[]`, `.offset.binWeights[]` | a date's target share and its offset from the lifetime |
+| `rates[<n>].month[]`, `.dayOfWeek[]`, `.hourOfWeek[]` | the seasonal weights |
+| `conditions.<exposeId>[<n>].count` | the rows of a group |
+| `emits.<exposeId>.fidelity.copula.rankCorrelations.pairs[].value` | a pair's rank correlation (SEAM-FIDELITY-SPEC.md section 2) |
+
+A `levels` list that names the levels of a column, as `history[<n>].tracked[].initial` and
+`.reasons` do, holds names and is not counted, nor are `values` of a `conditions` group, an
+`overrides` of a periods kind or `end.value`, which are values of a column.
+
+Not counted are the namespace's declarations of what a patch or a consumer asks for, and the ones
+that hold no number: `bridges`, `asOf`, `snapshots`, `copies`, `generators`, `overlay`,
+`consumers`, `responses`, `forecasts` and `privacy`. A number there is read by the run but has no
+entry and no share in the record, so a calibration cannot name it (`FLX-3706`).
+
+**Counting a position changes the record of a run that declares it.** The numbers of a key a
+Simulation does not declare are not there to count, so a run that declares none of the keys above
+keeps its record, bytes and digest, and the register stays at format `1-3-0`. A run that declares
+one counts its numbers, and its `parameterRegisterDigest`, and so its plan's digest, differ from
+what the engine before this change recorded. A number no entry names is a `default`, as every
+other is.
+
+A citation may name the definitions of the rank correlations, `kendallTau/1` and `spearmanRho/1`,
+and of a clique marginal, `cliqueMarginal/1` and `cliqueMarginal/2`, as it names any other
+registered definition (section 3).
 
 The record lists the numbers by document, documents in NFC order of their ids,
 and within a document in key order (Unicode code points, mapping by mapping;
@@ -290,7 +322,7 @@ come from, and an `overlay` entry's where in the overlaid profile:
 | Key | Holds |
 |---|---|
 | `pointer` | An RFC 6901 JSON Pointer into the pinned profile. |
-| `definition` | The registered definition the pointer lands in: a statistic (`mean/1`, `marginalHistogram/1`, `levelHistogram/1`, `support/1`, `correlation/1`, `quantile/1`, `quantile/2`) or a column metric (`count/1`, `nullCount/1`, `distinctCount/1`, `sum/1`, `min/1`, `max/1`, `quantiles/1`). A table's `rowCount` has none, and neither has an entry of `references` (`/references/<expose>`, a table published whole), which an `unused` item may name. |
+| `definition` | The registered definition the pointer lands in: a statistic (`mean/1`, `marginalHistogram/1`, `levelHistogram/1`, `support/1`, `correlation/1`, `quantile/1`, `quantile/2`, `kendallTau/1`, `spearmanRho/1`, `cliqueMarginal/1`, `cliqueMarginal/2`) or a column metric (`count/1`, `nullCount/1`, `distinctCount/1`, `sum/1`, `min/1`, `max/1`, `quantiles/1`). A table's `rowCount` has none, and neither has an entry of `references` (`/references/<expose>`, a table published whole), which an `unused` item may name. |
 
 `plan` is always handed the profile a Simulation pins (PROFILE-SPEC.md
 section 6), and it reads every citation in it, or in the overlaid profile for an

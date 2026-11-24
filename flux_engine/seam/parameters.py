@@ -30,10 +30,11 @@ register format 1-2-0)::
 its list of entries. It is every number the register counts (:func:`declared_numbers`):
 every JSON number under ``spec`` in each document of the run's cast and in each
 Playback bound to its World, and every number at a position the engine's own
-namespace names (:data:`ENGINE_BLOCK_NUMBERS`). The numbers of the namespace's
-other keys (``counts``, ``history``, ``lifetimes`` and the like) are not counted,
-because counting one would change the record, and the plan's digest of it, of every
-run that declares the key. A number no entry names is a ``default``, decided by the
+namespace names (:data:`ENGINE_BLOCK_NUMBERS`): the numbers of ``emits`` and the scorecard's
+thresholds, of the keys beside ``emits`` that declare how rows relate and fall in time
+(``counts``, ``history``, ``lifetimes``, ``within``, ``rates``, ``conditions`` and the like) and
+of the fidelity block's ``copula``. The numbers of what a patch or a consumer asks for are not
+counted. A number no entry names is a ``default``, decided by the
 engine rather than by an entry, as an SDMX observation with no status reads as
 normal. So the shares always add up to every number the register counts, and a
 register that names one number cannot report that number as all of them.
@@ -73,7 +74,8 @@ from flux_engine.core.canonical import canonicalise, nfc
 from flux_engine.core.errors import ErrorCode, FluxError, register
 from flux_engine.seam.coverage import printable
 from flux_stats import registry as _stats_registry
-from flux_stats.cliques import CLIQUE_DEFINITION
+from flux_stats.cliques import CLIQUE_DEFINITION, CLIQUE_DEFINITION_2
+from flux_stats.rank_correlation import RANK_IDENTIFIERS
 
 __all__ = [
     "ENGINE_BLOCK_NUMBERS",
@@ -105,6 +107,7 @@ __all__ = [
     "changed_by_overlay",
     "check_contract_citations",
     "check_profile_citations",
+    "cited_definition",
     "declared_numbers",
     "parse_pointer",
     "read_parameters_block",
@@ -222,6 +225,65 @@ NOT_PARAMETERS: FrozenSet[Tuple[str, Tuple[str, ...]]] = frozenset(
     }
 )
 
+
+def _shape(*prefix: str) -> Tuple[Tuple[str, ...], ...]:
+    """The numbers of a shape over counts at *prefix*: ``{levels, levelWeights}`` or ``{bins, binWeights}``."""
+    return (
+        prefix + ("levels", "#"),
+        prefix + ("levelWeights", "#"),
+        prefix + ("bins", "#"),
+        prefix + ("binWeights", "#"),
+    )
+
+
+def _histogram(*prefix: str) -> Tuple[Tuple[str, ...], ...]:
+    return (prefix + ("bins", "#"), prefix + ("binWeights", "#"))
+
+
+def _dwell(*prefix: str) -> Tuple[Tuple[str, ...], ...]:
+    """A dwell: a histogram with an ``open`` weight, or an exponential's ``mean`` and ``open``."""
+    return (*_histogram(*prefix), prefix + ("open",), prefix + ("mean",))
+
+
+#: Where the namespace's other keys hold a number (ADR 0016, 0017, 0022, 0024, 0025, 0027, 0028):
+#: ``facts``, ``counts``, ``history``, the projections, ``lifetimes``, ``within``, ``rates``,
+#: ``conditions`` and the sentinels of ``links``. Each key's closed key set is the one its reader
+#: reads, and a test keeps the two in step. A ``levels`` list over the levels of a column is names,
+#: not numbers, and so is not here.
+_OTHER_KEYS: Tuple[Tuple[str, ...], ...] = (
+    ("facts", "#", "tolerance"),
+    ("links", "#", "sentinels", "*"),
+    ("counts", "#", "minChildren"),
+    ("counts", "#", "tolerance"),
+    *_shape("counts", "#", "children"),
+    ("counts", "#", "childrenGiven", "*", "#"),
+    ("history", "#", "entities"),
+    ("history", "#", "parent", "minChildren"),
+    *_shape("history", "#", "parent", "children"),
+    *_shape("history", "#", "versions"),
+    *_histogram("history", "#", "start"),
+    *_histogram("history", "#", "length"),
+    ("history", "#", "tracked", "#", "initial", "levelWeights", "#"),
+    ("history", "#", "tracked", "#", "transitions", "*", "*"),
+    ("history", "#", "reasons", "levelWeights", "#"),
+    ("history", "#", "end", "share"),
+    *_histogram("events", "#", "lag"),
+    ("periods", "#", "kinds", "#", "count"),
+    ("periods", "#", "kinds", "#", "count", "levels", "#"),
+    ("periods", "#", "kinds", "#", "count", "levelWeights", "#"),
+    ("lifetimes", "#", "target"),
+    *_dwell("lifetimes", "#", "duration"),
+    *_dwell("lifetimes", "#", "duration", "states", "*"),
+    *_dwell("lifetimes", "#", "duration", "otherwise"),
+    ("within", "#", "target"),
+    *_histogram("within", "#", "offset"),
+    ("rates", "#", "month", "#"),
+    ("rates", "#", "dayOfWeek", "#"),
+    ("rates", "#", "hourOfWeek", "#"),
+    ("conditions", "*", "#", "count"),
+)
+
+
 #: Where the engine's namespace holds a number, relative to the namespace.
 #: ``*`` is any key of a mapping and ``#`` any index of a list. The fidelity
 #: block spells most of its numbers as decimal strings, so the positions are
@@ -260,6 +322,9 @@ ENGINE_BLOCK_NUMBERS: Tuple[Tuple[str, ...], ...] = (
     ("scorecard", "thresholds", "overall", "*"),
     ("scorecard", "thresholds", "dimensions", "*", "*"),
     ("scorecard", "thresholds", "tables", "*", "*"),
+    # The copula's rank correlations (SEAM-FIDELITY-SPEC.md section 2).
+    ("emits", "*", "fidelity", "copula", "rankCorrelations", "pairs", "#", "value"),
+    *_OTHER_KEYS,
 )
 
 #: The most columns a ``given`` may list (docs/spec/SEAM-FIDELITY-SPEC.md section 2). A column
@@ -608,11 +673,12 @@ class UnusedStatistic:
 
 
 def _registered_identifiers() -> FrozenSet[str]:
-    """Every statistic and metric definition a profile can hold, and a clique marginal's."""
+    """Every statistic and metric definition a profile can hold, a clique marginal's and a rank correlation's."""
     return (
         frozenset(entry.identifier for entry in _stats_registry.definitions())
         | frozenset(metric.identifier for metric in _stats_registry.metrics())
-        | frozenset({CLIQUE_DEFINITION})
+        | frozenset({CLIQUE_DEFINITION, CLIQUE_DEFINITION_2})
+        | RANK_IDENTIFIERS
     )
 
 
@@ -1464,6 +1530,17 @@ def _cited_statistic(
             if isinstance(definition, str) and nfc(definition) in identifiers:
                 return nfc(definition), chain[position:]
     return None, chain
+
+
+def cited_definition(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> Optional[str]:
+    """The registered definition a citation of *tokens* lands in, or ``None`` when it lands in none.
+
+    ``None`` too when the pointer reaches nothing. The one a ``profile`` entry names is this one.
+    """
+    try:
+        return _cited_statistic(profile, tokens)[0]
+    except LookupError:
+        return None
 
 
 def _is_row_count(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> bool:

@@ -22,6 +22,7 @@ import pytest
 from flux_engine.concordance import predicate
 from flux_engine.core.errors import FluxError
 from flux_engine.runtime import resolve_cast
+from flux_engine.seam import conditions, counts, dates, facts, history, links, projections
 from flux_engine.seam import parameters as module
 from flux_engine.seam.parameters import (
     ENGINE_BLOCK_NUMBERS,
@@ -330,6 +331,149 @@ def test_the_engine_block_counts_its_named_positions_and_nothing_else() -> None:
     assert not [key for key in found if key[1].startswith(("/agentPolicy", "/skills"))]
 
 
+_OTHER_KEYS_BLOCK: Dict[str, Any] = {
+    "facts": [{"emit": "a", "rule": "r", "tolerance": "0.05"}],
+    "links": [{"emit": "a", "relationship": "r", "sentinels": {"x": "0", "y": "n/a"}}],
+    "counts": [
+        {
+            "emit": "a",
+            "relationship": "r",
+            "minChildren": 1,
+            "parentWhen": "x > 1",
+            "children": {"bins": ["0", "2", "5"], "binWeights": ["0.5", "0.5"]},
+            "childrenGiven": {"gold": ["0.2", "0.8"]},
+        },
+        {
+            "emit": "a",
+            "relationship": "s",
+            "children": {"levels": ["0", "1"], "levelWeights": ["0.5", "0.5"]},
+        },
+    ],
+    "history": [
+        {
+            "emit": "a",
+            "entities": 10,
+            "versions": {"bins": ["1", "3"], "binWeights": ["1"]},
+            "start": {"bins": ["2025-01-01", "2025-02-01"], "binWeights": ["1"]},
+            "length": {"bins": ["1", "30"], "binWeights": ["1"], "closed": "lower"},
+            "until": "2025-10-01",
+            "tracked": [
+                {
+                    "column": "tier",
+                    "initial": {"levels": ["1", "2"], "levelWeights": ["0.5", "0.5"]},
+                    "transitions": {"1": {"2": "1"}, "2": {"1": "1"}},
+                }
+            ],
+            "reasons": {"levels": ["7", "8"], "levelWeights": ["0.5", "0.5"]},
+            "end": {"mode": "closeLast", "share": "0.15", "column": "c", "value": "9"},
+        }
+    ],
+    "events": [
+        {"emit": "e", "of": "a", "date": "d", "lag": {"bins": ["0", "3"], "binWeights": ["1"]}}
+    ],
+    "periods": [
+        {
+            "emit": "p",
+            "of": "a",
+            "kinds": [{"count": 1}, {"count": {"levels": ["1"], "levelWeights": ["1"]}}],
+        }
+    ],
+    "lifetimes": [
+        {
+            "emit": "a",
+            "start": "s",
+            "end": "e",
+            "target": "2.5",
+            "duration": {
+                "given": "g",
+                "states": {"on": {"mean": "30", "open": "0.1"}},
+                "otherwise": {"bins": ["0", "9"], "binWeights": ["1"], "open": "0.2"},
+            },
+        }
+    ],
+    "within": [
+        {
+            "emit": "a",
+            "relationship": "r",
+            "date": "d",
+            "offset": {"bins": ["0", "3"], "binWeights": ["1"]},
+            "target": "1",
+        }
+    ],
+    "rates": [{"emit": "a", "column": "d", "month": ["1"] * 12}],
+    "conditions": {"a": [{"values": {"plan": "5"}, "count": 400}]},
+    "snapshots": [{"emit": "s", "of": "a", "ended": "drop"}],
+}
+
+
+def test_the_numbers_of_the_namespace_keys_beside_emits_are_counted() -> None:
+    simulation = {
+        "kind": "Simulation",
+        "spec": {},
+        "extensions": {EXTENSION_NAMESPACE: copy.deepcopy(_OTHER_KEYS_BLOCK)},
+    }
+    numbers = declared_numbers(
+        {"sim": simulation}, simulation_id="sim", namespace=EXTENSION_NAMESPACE
+    )
+    found = {number.pointer.removeprefix(BLOCK): number.value for number in numbers}
+    assert found["/facts/0/tolerance"] == "0.05"
+    assert found["/links/0/sentinels/x"] == "0"
+    assert "/links/0/sentinels/y" not in found  # text that is no number
+    assert found["/counts/0/minChildren"] == "1"
+    assert found["/counts/0/children/bins/2"] == "5"
+    assert found["/counts/0/childrenGiven/gold/1"] == "0.8"
+    assert found["/counts/1/children/levels/1"] == "1"
+    assert "/counts/0/parentWhen" not in found
+    assert found["/history/0/entities"] == "10"
+    assert found["/history/0/versions/binWeights/0"] == "1"
+    assert found["/history/0/length/bins/1"] == "30"
+    assert found["/history/0/tracked/0/initial/levelWeights/1"] == "0.5"
+    assert found["/history/0/tracked/0/transitions/1/2"] == "1"
+    assert found["/history/0/end/share"] == "0.15"
+    # What names a column's levels is not a number, though it reads as one.
+    assert "/history/0/tracked/0/initial/levels/0" not in found
+    assert "/history/0/reasons/levels/0" not in found
+    assert "/history/0/end/value" not in found
+    assert "/conditions/a/0/values/plan" not in found
+    assert found["/history/0/reasons/levelWeights/0"] == "0.5"
+    assert found["/events/0/lag/binWeights/0"] == "1"
+    assert found["/periods/0/kinds/0/count"] == "1"
+    assert found["/periods/0/kinds/1/count/levels/0"] == "1"
+    assert found["/lifetimes/0/target"] == "2.5"
+    assert found["/lifetimes/0/duration/states/on/mean"] == "30"
+    assert found["/lifetimes/0/duration/otherwise/open"] == "0.2"
+    assert found["/within/0/offset/bins/1"] == "3"
+    assert found["/within/0/target"] == "1"
+    assert found["/rates/0/month/11"] == "1"
+    assert found["/conditions/a/0/count"] == "400"
+    assert not [key for key in found if key.startswith("/snapshots")]
+
+
+def test_a_simulation_that_declares_none_of_the_keys_counts_what_it_did() -> None:
+    cast, documents = _documents(STARTER)
+    plain = declared_numbers(
+        documents, simulation_id=cast.simulation_id, namespace=EXTENSION_NAMESPACE
+    )
+    assert len(plain) == 20
+    declared = copy.deepcopy(documents)
+    declared[cast.simulation_id].setdefault("extensions", {}).setdefault(EXTENSION_NAMESPACE, {})[
+        "conditions"
+    ] = {"a": [{"values": {"plan": "5"}, "count": 4}]}
+    more = declared_numbers(
+        declared, simulation_id=cast.simulation_id, namespace=EXTENSION_NAMESPACE
+    )
+    assert len(more) == 21
+
+
+def test_the_register_cites_a_rank_correlation_and_a_clique_marginal() -> None:
+    from flux_stats.cliques import CLIQUE_DEFINITION, CLIQUE_DEFINITION_2
+    from flux_stats.rank_correlation import RANK_IDENTIFIERS
+
+    held = module._registered_identifiers()
+    assert RANK_IDENTIFIERS <= held
+    assert {CLIQUE_DEFINITION, CLIQUE_DEFINITION_2} <= held
+
+
 def test_a_playback_bound_to_the_run_s_world_is_read_and_another_is_not() -> None:
     loaded = load_bundle(SMALL)
     cast = resolve_cast(loaded.flux_documents)
@@ -400,6 +544,73 @@ def test_every_key_of_the_fidelity_block_is_placed(
     keys: Tuple[str, ...], prefix: Tuple[str, ...], not_numbers: set
 ) -> None:
     """A key added to one of the block's closed sets has to be counted or left out on purpose."""
+    # The copula is the generator's, not the check's: its numbers are placed, and its key is not in
+    # the check's grammar.
+    placed = _placed(*prefix) - ({"copula"} if prefix == ("emits", "*", "fidelity") else set())
+    assert set(keys) == placed | not_numbers
+    assert not placed & not_numbers
+
+
+_COPULA = ("emits", "*", "fidelity", "copula")
+_KEY_SETS = [
+    # (the keys the reader reads, the place they are under, the keys that hold no number there)
+    (facts._ENTRY_KEYS, ("facts", "#"), {"emit", "rule"}),
+    (links._ENTRY_KEYS, ("links", "#"), {"emit", "relationship", "when", "weight"}),
+    (counts._ENTRY_KEYS, ("counts", "#"), {"emit", "relationship", "parentWhen", "given"}),
+    (counts._LEVEL_KEYS + counts._BIN_KEYS, ("counts", "#", "children"), set()),
+    (history._ENTRY_KEYS, ("history", "#"), {"emit", "until", "chain", "openEnd", "activation"}),
+    (history._PARENT_KEYS, ("history", "#", "parent"), {"relationship", "parentWhen"}),
+    (history._LEVEL_KEYS + history._BIN_KEYS, ("history", "#", "parent", "children"), set()),
+    (history._LEVEL_KEYS + history._BIN_KEYS, ("history", "#", "versions"), set()),
+    (history._HISTOGRAM_KEYS, ("history", "#", "start"), {"closed"}),
+    (history._HISTOGRAM_KEYS, ("history", "#", "length"), {"closed"}),
+    (history._TRACKED_KEYS, ("history", "#", "tracked", "#"), {"column"}),
+    # The levels of a tracked column and of the reasons are names of a column's levels.
+    (history._LEVEL_KEYS, ("history", "#", "tracked", "#", "initial"), {"levels"}),
+    (history._LEVEL_KEYS, ("history", "#", "reasons"), {"levels"}),
+    (history._END_KEYS, ("history", "#", "end"), {"mode", "column", "value"}),
+    (
+        projections._EVENTS_KEYS,
+        ("events", "#"),
+        {"emit", "of", "date", "at", "on", "op", "type", "before", "after", "when"},
+    ),
+    (history._HISTOGRAM_KEYS, ("events", "#", "lag"), {"closed"}),
+    (projections._SNAPSHOT_KEYS, ("snapshots", "#"), set(projections._SNAPSHOT_KEYS)),
+    (projections._PERIODS_KEYS, ("periods", "#"), {"emit", "of", "column", "grain", "match"}),
+    (projections._KIND_KEYS, ("periods", "#", "kinds", "#"), {"when", "overrides"}),
+    (projections._LEVEL_KEYS, ("periods", "#", "kinds", "#", "count"), set()),
+    (dates._LIFETIME_KEYS, ("lifetimes", "#"), {"emit", "start", "end", "endPastWindow"}),
+    (
+        dates._DURATION_KEYS + dates._EXPONENTIAL_KEYS + dates._FAMILY_KEYS,
+        ("lifetimes", "#", "duration"),
+        {"closed", "given"},
+    ),
+    (
+        dates._DURATION_KEYS + dates._EXPONENTIAL_KEYS,
+        ("lifetimes", "#", "duration", "otherwise"),
+        {"closed"},
+    ),
+    (
+        dates._DURATION_KEYS + dates._EXPONENTIAL_KEYS,
+        ("lifetimes", "#", "duration", "states", "*"),
+        {"closed"},
+    ),
+    (dates._WITHIN_KEYS, ("within", "#"), {"emit", "relationship", "date", "lifetime", "exposure"}),
+    (dates._OFFSET_KEYS, ("within", "#", "offset"), {"closed"}),
+    (dates._RATES_KEYS, ("rates", "#"), {"emit", "column"}),
+    (conditions._GROUP_KEYS, ("conditions", "*", "#"), {"values"}),
+    # The generator's copula reader (flux_engine/generator/copula.py) names these inline.
+    (("columns", "rankCorrelations"), _COPULA, {"columns"}),
+    (("measure", "pairs"), _COPULA + ("rankCorrelations",), {"measure"}),
+    (("columns", "value"), _COPULA + ("rankCorrelations", "pairs", "#"), {"columns"}),
+]
+
+
+@pytest.mark.parametrize(("keys", "prefix", "not_numbers"), _KEY_SETS)
+def test_every_key_of_the_namespace_is_placed_or_holds_no_number(
+    keys: Tuple[str, ...], prefix: Tuple[str, ...], not_numbers: set
+) -> None:
+    """A key a reader's closed set gains has to be counted, or left out here on purpose."""
     placed = _placed(*prefix)
     assert set(keys) == placed | not_numbers
     assert not placed & not_numbers
@@ -410,13 +621,28 @@ def test_every_namespace_key_is_counted_or_named_as_not_counted_in_the_spec() ->
     from flux_engine.seam.resolve import _NAMESPACE_KEYS
 
     counted = {pattern[0] for pattern in ENGINE_BLOCK_NUMBERS}
-    assert counted == {"emits", "scorecard"}
+    assert counted == {
+        "emits",
+        "scorecard",
+        "facts",
+        "links",
+        "counts",
+        "history",
+        "events",
+        "periods",
+        "lifetimes",
+        "within",
+        "rates",
+        "conditions",
+    }
     spec = (REPO_ROOT / "docs" / "spec" / "PARAMETER-REGISTER-SPEC.md").read_text("utf-8")
-    start = spec.index("Also not counted")
+    start = spec.index("Not counted are the namespace's declarations")
     named = set(re.findall(r"`([A-Za-z]+)`", spec[start : spec.index("A number there", start)]))
     # ``profile``, ``strictCoverage`` and ``parameters`` are named earlier; ``unused`` holds citations.
     left_out = _NAMESPACE_KEYS - counted - {"profile", "strictCoverage", "parameters", "unused"}
     assert left_out == named
+    positioned = set(re.findall(r"^\| `([a-z]+)[\[.]", spec, flags=re.MULTILINE))
+    assert {key for key in counted if key not in ("emits", "scorecard")} <= positioned
 
 
 def _numeric_positions(schema: Mapping[str, Any]) -> List[Tuple[str, Tuple[str, ...]]]:
