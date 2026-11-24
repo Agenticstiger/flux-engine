@@ -116,15 +116,16 @@ from flux_engine.generator.dwell import (
     family_span,
 )
 from flux_engine.generator.families import ColumnType, Family
-from flux_engine.generator.history import HistoryBinding
+from flux_engine.generator.history import HistoryBinding, parent_bound_notes
 from flux_engine.generator.plugin import PluginExpose, check_rows, generate_values, request_of
-from flux_engine.generator.projections import derived_rows, project_plan, projection_of
+from flux_engine.generator.projections import chain_of, derived_rows, project_plan, projection_of
 from flux_engine.generator.rates import Rates
 from flux_engine.generator.reference import ReferenceRows, build_reference_plan
 from flux_engine.generator.relations import (
     FLX_3403,
     KeySpaceTooSmall,
     check_links_resolved,
+    history_pick_of,
     relate_plans,
     related_columns,
 )
@@ -303,6 +304,7 @@ __all__ = [
     "PipelineResult",
     "compile_declared_fidelity",
     "execute",
+    "parent_bound_history_notes",
     "input_digest_of",
     "parameter_register_of",
     "parse_declared_fidelity",
@@ -678,6 +680,19 @@ def period_end_null_notes(resolved: Sequence[ResolvedEmit]) -> Tuple[str, ...]:
             "is open, because it is cut at a closed parent's end (ADR 0024 section 5), so the "
             f"share generated can be lower than {declared}"
         )
+    return tuple(notes)
+
+
+def parent_bound_history_notes(
+    plans: Sequence[GeneratorPlan], root: SeedTreeRoot
+) -> Tuple[str, ...]:
+    """The notes of each history that keeps to its parent's lifetime (:func:`parent_bound_notes`)."""
+    notes: List[str] = []
+    for plan in plans:
+        pick = history_pick_of(plan)
+        if pick is None or pick.parent_lifetime is None:
+            continue
+        notes.extend(parent_bound_notes(plan.expose.expose_id, chain_of(plan, root)))
     return tuple(notes)
 
 
@@ -3444,9 +3459,38 @@ def _histories_of(resolved: Sequence[ResolvedEmit]) -> Dict[str, HistoryBinding]
         if "start" not in ends:
             continue  # relate_plans refuses the emit with the contract's own words
         found[nfc(emit.expose_id)] = HistoryBinding(
-            entries[0], entries[0].entities, ends["start"], ends.get("end")
+            entries[0],
+            entries[0].entities,
+            ends["start"],
+            ends.get("end"),
+            _parent_lifetime_of(emit, entries[0], resolved),
         )
     return found
+
+
+def _parent_lifetime_of(
+    emit: ResolvedEmit, entry: Any, resolved: Sequence[ResolvedEmit]
+) -> Optional[Tuple[str, Optional[str]]]:
+    """The start and end columns of the ``lifetimes`` entry on the emit a history's ``parent`` reaches.
+
+    Read only for an entry that declares ``parent.lifetime`` (ADR 0017, amendment of 2026-11-24);
+    ``None`` otherwise, and when the parent emit declares no lifetime, which the layout refuses.
+    """
+    if entry.parent is None or not entry.parent.lifetime or emit.keys is None:
+        return None
+    reached = next(
+        (
+            relationship.target
+            for relationship in emit.keys.relationships
+            if relationship.name == entry.parent.relationship
+        ),
+        None,
+    )
+    for other in resolved:
+        if reached is not None and nfc(other.expose_id) == nfc(reached):
+            held = lifetime_entries_of(other.extension, other.expose_id)[:1]
+            return (held[0].start, held[0].end) if held else None
+    return None
 
 
 def _bridges_of(resolved: Sequence[ResolvedEmit]) -> Dict[str, Tuple[Tuple[str, str], ...]]:

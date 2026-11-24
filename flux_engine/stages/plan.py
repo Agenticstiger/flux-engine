@@ -779,6 +779,10 @@ def plan_with_result(
     period_notes = _pipeline.period_end_null_notes(
         [outcome.resolved for outcome in result.emits]
         + [outcome.resolved for outcome in result.hidden_emits]
+    ) + _pipeline.parent_bound_history_notes(
+        [outcome.plan for outcome in result.emits if outcome.plan is not None]
+        + [outcome.plan for outcome in result.hidden_emits if outcome.plan is not None],
+        result.root,
     )
     return (
         StageResult(

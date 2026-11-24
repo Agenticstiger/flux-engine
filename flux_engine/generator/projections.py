@@ -154,6 +154,10 @@ def chain_of(history: GeneratorPlan, root: SeedTreeRoot) -> HistoryPlan:
         raise _refuse(
             f"projection of {history.expose.expose_id!r}: the emit has no history to project"
         )
+    if pick.parent_lifetime is not None:
+        from flux_engine.generator.relations import bound_history_of
+
+        return bound_history_of(history, root)
     return plan_history(
         root,
         history.sim_id,

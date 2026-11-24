@@ -93,7 +93,7 @@ _ENTRY_KEYS = (
     "reasons",
     "end",
 )
-_PARENT_KEYS = ("relationship", "minChildren", "parentWhen", "children")
+_PARENT_KEYS = ("relationship", "minChildren", "parentWhen", "children", "lifetime")
 _HISTOGRAM_KEYS = ("bins", "binWeights", "closed")
 _LENGTH_REFUSED = ("mean", "given", "states", "otherwise", "open")
 _LEVEL_KEYS = ("levels", "levelWeights")
@@ -138,6 +138,7 @@ class HistoryParent:
     min_children: Optional[int] = None
     parent_when: Optional[str] = None
     children: Optional[ChildShape] = None
+    lifetime: bool = False
 
     def as_member(self) -> Dict[str, Any]:
         """The parent as the entry holds it, each key only when declared."""
@@ -148,6 +149,8 @@ class HistoryParent:
             member["parentWhen"] = self.parent_when
         if self.children is not None:
             member["children"] = self.children.as_member()
+        if self.lifetime:
+            member["lifetime"] = True
         return member
 
 
@@ -421,11 +424,15 @@ def _parent(raw: Any, at: str, code: ErrorCode, refusal: ErrorCode) -> HistoryPa
         )
         _unknown(shape, _LEVEL_KEYS + _BIN_KEYS, f"{at}.children", code)
         children = _shape(shape, f"{at}.children", refusal)
+    lifetime = mapping.get("lifetime", False)
+    if not isinstance(lifetime, bool):
+        raise FluxError(refusal, f"{at}.lifetime is true or false")
     return HistoryParent(
         relationship=relationship,
         min_children=minimum,
         parent_when=nfc(condition) if isinstance(condition, str) else None,
         children=children,
+        lifetime=lifetime,
     )
 
 
@@ -1175,6 +1182,33 @@ def check_history_sources(
     sets = _history_sets(entry, target)
     _check_lifetime_sources(entry, lifetimes, sets, refusal)
     _check_within_sources(entry, within, sets, refusal)
+    _check_parent_lifetime(entry, target, lifetimes)
+
+
+def _check_parent_lifetime(
+    entry: HistoryEntry, target: HistoryTarget, lifetimes: Sequence[LifetimeEntry]
+) -> None:
+    """Refuse (``FLX-3403``) ``parent.lifetime`` where there is nothing to keep to (ADR 0017, amendment of 2026-11-24).
+
+    The key needs ``parent.relationship``, a to-one relationship of the emit whose target emit
+    declares a ``lifetimes`` entry: its start, and optionally its end, are the columns the history
+    keeps to. The message names the key.
+    """
+    parent = entry.parent
+    if parent is None or not parent.lifetime:
+        return
+    at = f"history ({entry.emit}).parent.lifetime"
+    relationship = target.relationships.get(parent.relationship)
+    if relationship is None:
+        return  # check_history refuses a parent that is no relationship of the emit
+    held = nfc(relationship.target)
+    if not any(nfc(found.emit) == held for found in lifetimes):
+        raise FluxError(
+            get("FLX-3403"),
+            f"{at} needs a lifetimes entry on {relationship.target!r}, the emit relationship "
+            f"{parent.relationship!r} reaches: it names the start, and the end, the history "
+            "keeps to",
+        )
 
 
 def _history_sets(entry: HistoryEntry, target: HistoryTarget) -> Dict[str, str]:

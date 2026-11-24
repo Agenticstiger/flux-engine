@@ -299,6 +299,27 @@ Seven things hold, whatever the seed:
 
 The rows of a history's emit are grouped by parent, then by entity, then by version, and an entity's versions are consecutive rows. A consumer that needs another order sorts the table.
 
+## Keep the history inside its parent's lifetime
+
+A vehicle should not start before its depot opened, nor outlive the depot. Declare the depot's lifetime
+with a [`lifetimes` entry](./keep-dates-inside-their-parents-lifetime.md) and ask the history to keep to it:
+
+```yaml
+lifetimes:
+  - { emit: depot, start: opened_on, end: closed_on }
+history:
+  - emit: vehicle_version
+    parent: { relationship: depot, minChildren: 1, lifetime: true }
+```
+
+An entity's first start is then drawn inside its depot's lifetime, with room for its versions before the depot's
+last day, and its versions end by that day. An entity whose depot closed ends: under `finalVersion` its final version
+starts, and under `closeLast`, or with no `end`, its last version closes, by the depot's last day. Those entities
+count towards the `share` of the `end`. A depot with no end, a NULL end, or an end before its start cuts nothing.
+The key needs a `lifetimes` entry on the emit the relationship reaches, or the plan refuses it with `FLX-3403`.
+An entity whose depot leaves no room for a chain (it closed before the window, or opened in the last days before
+`until`) keeps its own draw and breaks the bound.
+
 ## The `history` key
 
 `history` is a list in the Simulation's `com.agentics.flux/1` extensions, with at most one entry for each emit. The emit's contract names the entity, the start and the end, so none of them is repeated in the bundle.
@@ -307,7 +328,7 @@ The rows of a history's emit are grouped by parent, then by entity, then by vers
 |---|---|
 | `emit` | The expose that holds the versions. Its contract declares one `natural` entity and two time dimensions with `validityParams`, `isStart` and `isEnd`, both DATE or both TIMESTAMP. Required. |
 | `entities` | A whole number above zero: how many entities. `--scale` scales it as it scales `rows`; the emit's `rows` is the number of versions. Required. |
-| `parent` | Optional: `{relationship, minChildren, parentWhen, children}`. A to-one relationship of the emit whose parent holds each entity, with the three layout keys of a [`counts` entry](./give-every-parent-its-children.md#the-counts-key), read over entities instead of rows. |
+| `parent` | Optional: `{relationship, minChildren, parentWhen, children, lifetime}`. A to-one relationship of the emit whose parent holds each entity, with the three layout keys of a [`counts` entry](./give-every-parent-its-children.md#the-counts-key), read over entities instead of rows. `lifetime: true` keeps the history to its parent's lifetime: see below. |
 | `versions` | Optional: the shape of the number of versions per entity, `levels` with `levelWeights` or `bins` with `binWeights` over whole counts of at least 1. |
 | `start` | Optional: a histogram of an entity's first start, `bins` and `binWeights` over values of the start column's type, with edges inside the window and not after `until`. Without it the first start is spread evenly over what the entity has room for. |
 | `length` | Required: a version's length, a histogram whose edges are whole days of at least one, in the spelling of a fidelity `distribution` (`bins`, `binWeights`, `closed`). A TIMESTAMP chain draws whole milliseconds inside its day bins. |
@@ -382,6 +403,7 @@ Each line is enforced, so one violating entity fails the run, except the `asOf:`
 | `history:no_gaps_no_overlap` | an entity's versions meet end to start, as the chain says. |
 | `history:one_current` | an entity has one open version, its last, unless it ended under `closeLast`, when it has none. |
 | `history:ended_is_last` | with an `end.column` and `end.value`, the value appears only on an entity's last version. |
+| `history:within_parent` | with `parent.lifetime: true`: an entity's first start is not before its parent's start, no version starts after the parent's last day, every closed end is at or before it, and an entity whose parent ended by `until` has ended. It covers the entities whose parent row has a start. |
 | `asOf:<relationship>.<date>` | how many rows read a version. Not enforced. |
 
 A rule that reads `previous` is checked like any other rule, on every row.

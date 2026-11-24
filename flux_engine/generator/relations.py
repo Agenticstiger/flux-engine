@@ -118,6 +118,7 @@ from flux_engine.generator.counts import (
 from flux_engine.generator.families import ColumnType, Family
 from flux_engine.generator.history import (
     Chain,
+    DeferredBound,
     HistoryBinding,
     HistoryPick,
     HistoryPlan,
@@ -136,6 +137,7 @@ from flux_engine.generator.history import (
     unit_of,
     version_valid_on,
 )
+from flux_engine.generator.parent_bounds import deferred_bound
 from flux_engine.generator.paths import CellStreams
 from flux_engine.generator.reference import (
     ReferenceColumn,
@@ -1364,8 +1366,11 @@ class RelationReader:
         """The version layout of *owner*'s history, worked out once per process (ADR 0017 section 3).
 
         It reads no parent: which entity a version row belongs to does not depend on who the
-        entity's parent is, so the natural entity's column needs nothing else.
+        entity's parent is, so the natural entity's column needs nothing else. A history that keeps
+        to its parent's lifetime is the exception: its layout is :meth:`_history_of`'s.
         """
+        if pick.parent_lifetime is not None:
+            return self._history_of(owner, _bound_driver(self._plans.get(owner.expose_id), pick))
         address = (owner.sim_id, owner.expose_id, "")
         found = self._histories.get(address)
         if found is None:
@@ -1418,6 +1423,7 @@ class RelationReader:
                 expected=expected,
                 identity=(None if parent is None else parent.digest().value, hook),
             ),
+            bound=_deferred_bound(self, owner, driver),
         )
         self._histories[address] = found
         return found
@@ -2187,6 +2193,29 @@ def _foreign_driver(plan: "_rows.GeneratorPlan", relationship: str) -> Optional[
     return None
 
 
+def _bound_driver(plan: Optional["_rows.GeneratorPlan"], pick: HistoryPick) -> ForeignKey:
+    """The ``parent`` relationship's driver of a history that keeps to its parent's lifetime."""
+    assert pick.entry.parent is not None
+    driver = None if plan is None else _foreign_driver(plan, pick.entry.parent.relationship)
+    if driver is None:
+        raise _refuse(
+            f"history ({pick.entry.emit}) keeps to its parent's lifetime, whose plan this pass "
+            "does not read"
+        )
+    return driver
+
+
+def _deferred_bound(
+    reader: "RelationReader", owner: _Owner, driver: ForeignKey
+) -> Optional[DeferredBound]:
+    """The lifetimes of *driver*'s parent rows when its history keeps to them (ADR 0017), else ``None``."""
+    history = driver.history
+    if history is None or history.parent_lifetime is None:
+        return None
+    parent = reader._parent_plan(owner, driver)
+    return deferred_bound(reader.root, parent, history.parent_lifetime, history.kind)
+
+
 def _composite_part(
     plan: "_rows.GeneratorPlan", relationship: str
 ) -> Optional[Tuple[CompositeKey, int, ParentPart]]:
@@ -2209,6 +2238,20 @@ def history_pick_of(plan: "_rows.GeneratorPlan") -> Optional[HistoryPick]:
         if isinstance(driver, (EntityColumn, ChainColumn, TrackedColumn)):
             return driver.history
     return None
+
+
+def bound_history_of(plan: "_rows.GeneratorPlan", root: SeedTreeRoot) -> HistoryPlan:
+    """The layout of *plan*'s history emit, which keeps to its parent's lifetime, for a reader with no reader.
+
+    A projection reads the chain of its history without a pass of its own, so the layout that reads
+    the parents' lifetimes is worked out here, on a reader of its own; the plans and the parents'
+    lifetimes are kept by their digests, so the work is done once per process.
+    """
+    pick = history_pick_of(plan)
+    assert pick is not None and pick.parent_lifetime is not None
+    reader = RelationReader(root)
+    reader.know(plan)
+    return reader._chain_of(owner_of(plan), pick)
 
 
 def carried_columns(plan: "_rows.GeneratorPlan") -> FrozenSet[str]:
@@ -2764,9 +2807,11 @@ def _history_shape_of(
         rows=plan.rows,
         entities=binding.entities,
         window_start=plan.time_bounds[0],
+        parent_lifetime=binding.parent_lifetime,
     )
     # The refusals that follow from declared values alone, before any layout is worked out.
     declared = binding.entry.parent
+    _check_parent_lifetime(expose_id, binding, plans, keys)
     target = None
     if declared is not None:
         target = next(
@@ -2794,6 +2839,36 @@ def _history_shape_of(
         start=binding.start,
         end=binding.end,
     )
+
+
+def _check_parent_lifetime(
+    expose_id: str,
+    binding: HistoryBinding,
+    plans: Mapping[str, "_rows.GeneratorPlan"],
+    keys: ContractKeys,
+) -> None:
+    """Refuse (``FLX-3403``) a ``parent.lifetime`` whose parent emit gives no lifetime columns to read.
+
+    The entry needs a ``lifetimes`` entry on the emit its ``parent.relationship`` reaches, and that
+    emit must be generated in the Simulation, with the entry's start and end among its columns.
+    """
+    declared = binding.entry.parent
+    if declared is None or not declared.lifetime:
+        return
+    where = f"history ({expose_id}).parent.lifetime"
+    reached = next(
+        (r for r in keys.expose(expose_id).relationships if r.name == declared.relationship), None
+    )
+    lifetime = binding.parent_lifetime
+    if reached is None or lifetime is None or reached.target not in plans:
+        raise _refuse(
+            f"{where} needs a lifetimes entry on the emit {declared.relationship!r} reaches, and "
+            "that emit generated in this Simulation"
+        )
+    named = {column_plan.column.name for column_plan in plans[reached.target].columns}
+    for column in (lifetime[0], *(() if lifetime[1] is None else (lifetime[1],))):
+        if column not in named:
+            raise _refuse(f"{where}: {reached.target!r} has no column {column!r}")
 
 
 def _declared_relationships(keys: ContractKeys) -> FrozenSet[_Declared]:
@@ -2858,9 +2933,26 @@ def _paths_of(plan: "_rows.GeneratorPlan") -> List[Tuple[str, ...]]:
                 driver.counted.parent_when is not None
                 or driver.counted.hook is not None
                 or driver.counted.given is not None
+                or (driver.history is not None and driver.history.parent_lifetime is not None)
             )
         )
+        # A foreign key into a history that keeps to its parent's lifetime reads that history's cells,
+        # whose layout needs the history's own plan and its parent's.
+        paths.update(
+            (driver.relationship,)
+            for _, driver in plan.relations.drivers
+            if isinstance(driver, ForeignKey) and _reaches_bound_history(driver)
+        )
     return sorted(paths)
+
+
+def _reaches_bound_history(driver: ForeignKey) -> bool:
+    """Whether *driver*'s parent is the emit of a history that keeps to its parent's lifetime."""
+    return any(
+        isinstance(held, (EntityColumn, ChainColumn, TrackedColumn))
+        and held.history.parent_lifetime is not None
+        for _, held in driver.parent.drivers
+    )
 
 
 def _refuse_given(message: str) -> FluxError:
