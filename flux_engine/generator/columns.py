@@ -242,6 +242,8 @@ def _vectorized(
         draw = 0 if statistics.null_fraction is None else 1
         return _histogram(column_plan, streams.column_key(column.name), rows, draw, None, labels)
     key = streams.column_key(column.name)
+    if column_plan.copula is not None:
+        return _copula_values(column_plan, streams, rows, key)
     if statistics.null_fraction is None:
         values = _draws(column_plan, key, rows, 0, parents)
         _set_conditioned(column_plan, plan, streams, rows, levels, key, values)
@@ -253,6 +255,24 @@ def _vectorized(
     values = _draws(column_plan, key, rows, 1, parents)
     if values is None:
         return None
+    return [None if null else value for null, value in zip(nulls, values, strict=True)]
+
+
+def _copula_values(
+    column_plan: "_rows.ColumnPlan", streams: CellStreams, rows: "np.ndarray", key: kernel2.Key
+) -> List[Any]:
+    """A copula column's values: the copula's draws for *rows*, and its NULL draw at index 0.
+
+    What :func:`_rows._copula_cell` makes for each row; the copula's draws are shared by the
+    columns of the chunk (:meth:`~flux_engine.generator.copula.CopulaDraw.column_values`).
+    """
+    copula = column_plan.copula
+    assert copula is not None
+    values = copula.column_values(streams.root, rows, _rows.nfc(column_plan.column.name))
+    fraction = column_plan.statistics.null_fraction
+    if fraction is None:
+        return values
+    nulls = kernel2.column_bernoulli(kernel2.column_uniform53(key, rows, 0), fraction).tolist()
     return [None if null else value for null, value in zip(nulls, values, strict=True)]
 
 
@@ -274,6 +294,24 @@ def _set_conditioned(
     decided = conditions.column_levels(
         column.name, rows, u53, lambda name: _levels_of(plan, name, streams, rows, levels)
     )
+    if _rows.is_binned(column_plan):
+        # The group chose each row's bin; the place inside it is the histogram's own draw at
+        # index 1, the bin's pick at index 0 left unread (ADR 0036 decision 5).
+        names = _rows.class_names(column_plan)
+        positions = sorted(decided)
+        if not positions:
+            return
+        drawn = _histogram(
+            column_plan,
+            key,
+            rows[positions],
+            0,
+            None,
+            [names.index(decided[position]) for position in positions],
+        )
+        for position, value in zip(positions, drawn or [], strict=True):
+            values[position] = value
+        return
     for position, level in decided.items():
         values[position] = _rows._level_to_value(level, column)
 
@@ -323,6 +361,13 @@ def _levels_of(
         return cache[name]
     column_plan = plan.column_plan(name)
     statistics, column = column_plan.statistics, column_plan.column
+    if _rows.is_binned(column_plan):
+        # A column drawn from bins is given by the bin of the value it draws.
+        drawn = _vectorized(column_plan, plan, streams, rows, cache)
+        if drawn is None:
+            raise FluxError(_rows.FLX_3402, f"{name}: not drawn by arrays")
+        cache[name] = [_rows.bin_class(column_plan, value) for value in drawn]
+        return cache[name]
     if column_plan.allocated_rows is not None:
         # The first draw is left unread: the level is the one of the row's slot.
         cache[name] = [str(label) for label in _allocated(column_plan, plan, streams, rows)]

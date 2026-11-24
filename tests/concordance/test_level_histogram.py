@@ -355,7 +355,12 @@ def test_the_document_is_counts_and_nothing_else() -> None:
 
 
 @pytest.mark.parametrize(
-    "kind", [kind for kind in PropertyKind if kind is not PropertyKind.LEVEL_HISTOGRAM]
+    "kind",
+    [
+        kind
+        for kind in PropertyKind
+        if kind not in (PropertyKind.LEVEL_HISTOGRAM, PropertyKind.RANK_CORRELATION)
+    ],
 )
 def test_no_other_property_documents_level_counts(kind: PropertyKind) -> None:
     group = GroupStatistic(group=UNGROUPED, k=1, level_counts=(1,), bin_counts=(1,))

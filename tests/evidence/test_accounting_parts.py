@@ -1,0 +1,307 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""A profile's budget is enumerated once: the reader's parts are the account's parts (ADR 0020).
+
+The grade used to list the noisy parts of a profile by hand, so a statistic the list did not know
+(a rank correlation, say) was missing from the spent figure, and a profile whose only noisy
+statistics were those graded P1 with "an account spent by nothing". It now counts the reader's own
+``parts``. These tests walk the document generically and check that every ``noise`` block is one part,
+whichever place it sits in, and that the ``selection`` and ``domain`` shares of a ``cliqueSelection``
+(a bare ``privacyLoss`` with no mechanism and no scale) are one part each.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+from pathlib import Path
+from typing import Any, Dict, Iterator, List
+
+import pytest
+
+from flux_engine.core.grades import Pattern
+from flux_engine.evidence.grades import accounting_of, grade_profile
+from flux_stats.profile import parse_profile
+
+pytestmark = pytest.mark.unit
+
+REPO = Path(__file__).resolve().parents[2]
+SPEC = REPO / "docs" / "spec"
+TELCO = REPO / "tests" / "fixtures" / "private-telco" / "telco.profile.json"
+MONTHS = [f"{n:02d}" for n in range(1, 13)]
+NOISE = {"mechanism": "gaussian", "scale": "10", "privacyLoss": {"rho": "0.05"}}
+
+
+def _load(path: Path) -> Dict[str, Any]:
+    document: Dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return document
+
+
+def _under(node: Any, name: str) -> Iterator[Any]:
+    """Every mapping stored under the key *name*, anywhere in a JSON document."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == name and isinstance(value, dict):
+                yield value
+            yield from _under(value, name)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _under(item, name)
+
+
+def _noise_blocks(node: Any) -> Iterator[Any]:
+    """Every value stored under a ``noise`` key, anywhere in a JSON document."""
+    return _under(node, "noise")
+
+
+def _share_blocks(node: Any) -> Iterator[Any]:
+    """Every ``selection`` and ``domain`` share of a ``cliqueSelection``, anywhere in a document."""
+    for block in _under(node, "cliqueSelection"):
+        for name in ("selection", "domain"):
+            if name in block:
+                yield block[name]
+
+
+def _histogram(levels: List[str], **more: Any) -> Dict[str, Any]:
+    return {
+        "definition": "levelHistogram/1",
+        "levels": levels,
+        "sampleSize": {"min": 1000, "max": 9999},
+        "disclosure": "noisy",
+        "noise": copy.deepcopy(NOISE),
+        "groups": [
+            {"group": "", "status": "F", "noisyCounts": [str(100 + n) for n in range(len(levels))]}
+        ],
+    } | more
+
+
+def _rank(definition: str, value: str) -> Dict[str, Any]:
+    return {
+        "definition": definition,
+        "rowFloor": 99,
+        "sampleSize": {"min": 1000, "max": 9999},
+        "disclosure": "noisy",
+        "noise": {"mechanism": "gaussian", "scale": "0.5", "privacyLoss": {"rho": "0.0162"}},
+        "groups": [{"group": "", "status": "F", "noisyValue": value}],
+    }
+
+
+def _everywhere() -> Dict[str, Any]:
+    """A 1-4-0 profile with a noise block in every place one can sit today."""
+    document = _load(SPEC / "profile-1-4-example.json")
+    document["privacy"]["privacyLoss"] = {"rho": "5"}
+    table = document["tables"]["subscriber"]
+    columns = table["columns"]
+    columns["plan"] = {"domain": "category"}
+    columns["channel"] = {"domain": "category"}
+    columns["joined_at"] = {"domain": "timestamp"}
+    columns["left_at"] = {"domain": "timestamp"}
+    columns["usage"] = {"domain": "number"}
+    # a grouped histogram: one noise block for all of its groups
+    columns["plan"]["statistics"] = [
+        _histogram(
+            ["basic", "pro"],
+            groupBy="region",
+            groups=[
+                {"group": region, "status": "F", "noisyCounts": ["10", "20"]}
+                for region in ("east", "north", "west")
+            ],
+        )
+    ]
+    columns["usage"]["statistics"] = [
+        {
+            "definition": "marginalHistogram/1",
+            "bins": ["0", "50", "100"],
+            "sampleSize": {"min": 1000, "max": 9999},
+            "disclosure": "noisy",
+            "noise": copy.deepcopy(NOISE),
+            "groups": [{"group": "", "status": "F", "noisyCounts": ["400", "600"]}],
+        }
+    ]
+    table["cliques"] = [
+        {
+            "definition": "cliqueMarginal/1",
+            "columns": ["plan", "channel"],
+            "levels": [["basic", "pro"], ["online", "store"]],
+            "noisyCounts": ["10", "20", "30", "40"],
+            "noise": copy.deepcopy(NOISE),
+        }
+    ]
+    table["cliques"].append(
+        {
+            "definition": "cliqueMarginal/2",
+            "columns": ["plan", "usage"],
+            "domains": [{"levels": ["basic", "pro"]}, {"bins": ["0", "50", "100"]}],
+            "noisyCounts": ["10", "20", "30", "40"],
+            "noise": copy.deepcopy(NOISE),
+        }
+    )
+    table["cliqueSelection"] = {
+        "method": "aim",
+        "producer": "https://example.org/profiler/1.0",
+        "selection": {"privacyLoss": {"rho": "0.01"}},
+        "domain": {"privacyLoss": {"rho": "0.02"}},
+        "published": "measured",
+    }
+    table["calendar"] = [{"column": "joined_at", "month": _histogram(MONTHS)}]
+    table["datePairs"] = [
+        {
+            "start": "joined_at",
+            "end": "left_at",
+            "statistics": [],
+            "order": _histogram(["after", "before", "same"]),
+        }
+    ]
+    table["columnPairs"].append(
+        {"columns": ["age", "usage"], "statistics": [_rank("kendallTau/1", "0.31")]}
+    )
+    # a relationship's histogram of children per parent, from the unit's expose to a table it does
+    # not follow, and a statistic grouped by a link to a table the unit does not reach
+    columns["id"] = {"domain": "category"}
+    document["tables"]["usage_event"] = {"columns": {"sub_id": {"domain": "category"}}}
+    document["tables"]["plan_dim"] = {
+        "columns": {"id": {"domain": "category"}, "tier": {"domain": "category"}}
+    }
+    document["relationships"] = [
+        {
+            "parent": {"table": "subscriber", "columns": ["id"]},
+            "child": {"table": "usage_event", "columns": ["sub_id"]},
+            "statistics": [
+                {
+                    "definition": "marginalHistogram/1",
+                    "bins": ["0", "1", "5"],
+                    "sampleSize": {"min": 1000, "max": 9999},
+                    "disclosure": "noisy",
+                    "noise": copy.deepcopy(NOISE),
+                    "groups": [{"group": "", "status": "F", "noisyCounts": ["400", "600"]}],
+                }
+            ],
+        }
+    ]
+    columns["channel"]["statistics"] = [
+        _histogram(
+            ["a", "b"],
+            groupByLink={
+                "parent": {"table": "plan_dim", "columns": ["id"]},
+                "columns": ["plan"],
+                "column": "tier",
+            },
+            groups=[
+                {"group": tier, "status": "F", "noisyCounts": ["10", "20"]}
+                for tier in ("gold", "iron")
+            ],
+        )
+    ]
+    return document
+
+
+FIXTURES = {
+    "the telco fixture": lambda: _load(TELCO),
+    "the private 1-2-0 example": lambda: _load(SPEC / "profile-1-2-private-example.json"),
+    "the 1-4-0 example, with two rank correlations": lambda: _load(
+        SPEC / "profile-1-4-example.json"
+    ),
+    "the 1-4-0 example of cliques and a selection": lambda: _load(
+        SPEC / "profile-1-4-cliques-example.json"
+    ),
+    "the 1-4-0 example of a unit that follows its children": lambda: _load(
+        SPEC / "profile-1-4-follows-example.json"
+    ),
+    "every place a noise block sits": _everywhere,
+}
+
+
+@pytest.mark.parametrize("name", FIXTURES)
+def test_every_noise_block_is_one_part_of_the_reader_and_of_the_account(name: str) -> None:
+    document = FIXTURES[name]()
+    blocks = list(_noise_blocks(document)) + list(_share_blocks(document))
+    profile = parse_profile(document)
+    assert len(profile.parts) == len(blocks) > 0
+    accounting = accounting_of(document)
+    assert accounting is not None and accounting.parts == len(blocks)
+    # the places are distinct, so no block is entered twice
+    assert len({where for where, _ in profile.parts}) == len(profile.parts)
+
+
+def test_the_everywhere_profile_holds_a_part_in_every_kind_of_place() -> None:
+    places = [where for where, _ in parse_profile(_everywhere()).parts]
+    for section in (
+        "columns.region",
+        "columns.plan",
+        "columns.usage",
+        "cliques[0]",
+        "cliques[1]",
+        "cliqueSelection.selection",
+        "cliqueSelection.domain",
+        "calendar",
+        "columns.channel",
+    ):
+        assert any(f".{section}" in where for where in places), section
+    assert sum(".columnPairs[" in where for where in places) == 3
+    assert any(".datePairs[0]" in where for where in places)
+    assert sum(where.startswith("profile.relationships[0]") for where in places) == 1
+    assert len(places) == 14
+
+
+def test_the_spent_figure_adds_the_share_of_every_part_including_a_rank_correlation() -> None:
+    document = _load(SPEC / "profile-1-4-example.json")
+    accounting = accounting_of(document)
+    assert accounting is not None
+    # the histogram's 0.1, the Kendall's 0.02 and the Spearman's 0.0162
+    assert accounting.parts == 3 and accounting.spent == {"rho": "0.1362"}
+    assert accounting.total == {"rho": "0.15"}
+
+
+def test_a_profile_whose_only_noisy_statistics_are_rank_correlations_is_p3() -> None:
+    document = _load(SPEC / "profile-1-4-example.json")
+    del document["tables"]["subscriber"]["columns"]["region"]
+    document["privacy"]["privacyLoss"] = {"rho": "0.05"}
+    graded = grade_profile(document, pinned=True)
+    assert graded.accounting is not None and graded.accounting.parts == 2
+    assert graded.reasons == () and graded.pattern is Pattern.P3
+
+
+def test_the_spent_figure_of_every_place_adds_up() -> None:
+    accounting = accounting_of(_everywhere())
+    assert accounting is not None and accounting.parts == 14
+    # the example's 0.1362, eight blocks of 0.05 (two histograms, two cliques, a calendar, an order,
+    # a relationship's histogram and a statistic grouped by a link), the second pair's Kendall's
+    # 0.0162 and the selection's 0.01 and the domain's 0.02
+    assert accounting.spent == {"rho": "0.5824"}
+
+
+def test_a_selection_share_alone_is_a_part_so_a_profile_of_shares_is_not_spent_by_nothing() -> None:
+    document = _load(SPEC / "profile-1-4-cliques-example.json")
+    table = document["tables"]["subscriber"]
+    table["cliques"] = []
+    accounting = accounting_of(document)
+    assert accounting is not None and accounting.parts == 2
+    assert accounting.spent == {"rho": "0.02"}
+    assert grade_profile(document, pinned=True).accounting == accounting
+
+
+def test_the_shares_move_the_spent_figure_and_the_cliques_do_not_grade_a_profile_down() -> None:
+    document = _load(SPEC / "profile-1-4-cliques-example.json")
+    accounting = accounting_of(document)
+    assert accounting is not None and accounting.spent == {"rho": "0.06"}
+    graded = grade_profile(document, pinned=True)
+    # nothing in it is released without noise: a clique carries noise, and the selection is accounting
+    assert graded.reasons == () and graded.pattern is Pattern.P3
+    del document["tables"]["subscriber"]["cliqueSelection"]
+    after = accounting_of(document)
+    assert after is not None and after.spent == {"rho": "0.04"} and after.parts == 2
+    assert grade_profile(document, pinned=True).pattern is Pattern.P3
+
+
+def test_a_profile_the_reader_refuses_has_no_parts_and_is_not_p3() -> None:
+    document = _everywhere()
+    document["tables"]["subscriber"]["columnPairs"][0]["statistics"].append(
+        copy.deepcopy(document["tables"]["subscriber"]["columnPairs"][0]["statistics"][0])
+    )
+    accounting = accounting_of(document)
+    assert accounting is not None and accounting.parts == 0 and accounting.spent == {"rho": "0"}
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any("refuses the profile" in reason for reason in graded.reasons)

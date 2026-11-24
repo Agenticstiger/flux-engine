@@ -497,9 +497,11 @@ column declaring it carries one weight table per level of that column, in place 
   mapping of level to weight, P(level | level), from a two-way count table. Every mapping names the same levels.
 
 The weights are counts or shares, normalised per level of the given column as `binWeights` is, and every list or
-mapping carries some weight. The given column is a categorical with no `nullFraction`, so each row has exactly
-one level to look up, and the table names exactly the levels it can draw. The links form a forest: a column has
-at most one `given`, a cycle is refused, and a histogram column is always a leaf, because a bin is not a level.
+mapping carries some weight. The given column is a categorical with no `nullFraction`, or a column drawn from
+`bins` (below), so each row has exactly one class to look up, and the table names exactly the classes it can
+draw. The links form a forest: a column has at most one `given` and a cycle is refused. A histogram column is a
+parent only in the form below, which names its bins as classes; the Chow-Liu forest of
+`flux_engine.calibrate.structure` still takes a histogram column as a leaf.
 A column is drawn after the column it is given, whatever the declared column order; every cell keeps its own
 §1 path, so column-first generation and slices are unchanged, and a root of the forest (a column drawn given
 nothing) draws exactly the values it drew without the links. A declaration the
@@ -533,6 +535,85 @@ refused, and so is a list of given columns that holds a path. Kernel 0.2.0 only:
 (`FLX-3402`, naming the kernel). The cell is drawn on its own §1 path at the index it always takes, so no seed-tree
 path is added (KERNEL-SPEC-2.md §12); a plan that declares none documents none of it, and the plan lists the plan it
 reads. The column path of kernel 0.2.0 leaves such a plan to the per-row path, its oracle.
+
+**`given` may name a column drawn from bins.** `given`, alone or in a list, may name a number or timestamp column
+of the emit that is drawn from `bins` and `binWeights` (or `binWeightsGiven`), with no `nullFraction`, that is not
+a key and is not set by a rule, a `lifetimes`, `within` or `rates` entry, a copy or a hidden declaration. Its
+classes are its bins. In `levelWeightsGiven` and `binWeightsGiven` they are keyed by the text of each bin's lower
+edge as the parent's `bins` write it, and every bin has an entry:
+
+```yaml
+columns:
+  balance:
+    bins: ["0", "1000", "5000", "50000"]
+    binWeights: ["0.55", "0.35", "0.10"]
+  plan:
+    given: balance
+    levelWeightsGiven:
+      "0":    { basic: "0.9", premium: "0.1" }
+      "1000": { basic: "0.6", premium: "0.4" }
+      "5000": { basic: "0.2", premium: "0.8" }
+    support: { values: [basic, premium] }
+```
+
+The class of a row is the bin the parent's own draw chose, known before the child draws, on the per-row path and
+on the column path alike. The place inside a bin of a binned column drawn given others is the bounded draw a
+histogram makes, independent of every other column. The child draws on its own §1 path at the index it always
+takes, and the parent's bin only chooses the table the uniform is searched in, so no seed-tree path is added
+(KERNEL-SPEC-2.md section 12). A column drawn with `allocation: exact` given a binned parent is refused, and so is
+a column of a copula (below), which is one joint. Everything this paragraph refuses is `FLX-3402`, except that
+kernel `0.1.0` refuses a binned parent with `FLX-3105`, naming the kernel. A grouped `marginalHistogram` or
+`levelHistogram` property over the child with `groupByBins` the parent states the same table. Like every `given`,
+it is in the fidelity block, so it enters both `H` and `G`.
+
+**`copula` draws number columns together.** The fidelity block may hold one `copula` (ADR 0035), read under
+kernel `0.2.0` only:
+
+```yaml
+fidelity:
+  copula:
+    columns: [amount, balance, opened_at]
+    rankCorrelations:
+      measure: kendall
+      pairs:
+        - { columns: [amount, balance], value: "0.42" }
+        - { columns: [amount, opened_at], value: "-0.08" }
+```
+
+- `columns`: 2 to 64 distinct columns of the emit, each a `number` or `timestamp` column (a DATE column is one)
+  drawn from `bins` and `binWeights`, with no `given` and no `allocation`, that is nobody's `given` parent either,
+  and that nothing else sets: not a key, and not set by a rule, a `lifetimes`, `within` or `rates` entry, a
+  history, a hidden declaration or a copy. A column has one joint. The order of `columns` is the order of the
+  draws. A copula column may declare a `nullFraction`: its NULL draw stays on its own cell path, independent of
+  the copula, and the copula draws its value whether or not the cell is NULL.
+- `rankCorrelations.measure`: `kendall` or `spearman`, the population measure the values estimate.
+- `rankCorrelations.pairs`: a list of `{ "columns": [a, b], "value" }`, each naming two different listed columns,
+  each pair at most once in either order, `value` a decimal text in `[-1, 1]`. A pair not listed is 0.
+- A bin of positive weight that holds no grid value is refused. Anything else the declaration gets wrong is
+  `FLX-3402`, naming where and never a value, and kernel `0.1.0` refuses the key with `FLX-3105`, naming the
+  kernel.
+
+The plan makes the latent matrix valid in pinned arithmetic and states `copula: { alpha, factor }` in the emit's
+entry of `plan.json`, only for an emit that declares a copula, so it enters `planDigest` there and nowhere else
+(KERNEL-SPEC-2.md section 8.6). The key lives in the fidelity block, so, like `given` and the weights beside it,
+it enters both `H` and `G` (§3), and a committed state made under one copula is not reused under another. The
+fidelity check reads the block without the key: the declaration is the generator's. `EVIDENCE.md` names the
+columns and the measure, and says when the matrix was shrunk, so a reader knows that the columns are less
+correlated than declared.
+
+**A property may state a rank correlation, or be grouped by bins.**
+
+- `{ property: rankCorrelation, columns: [a, b], measure: kendall | spearman, tolerance: { type: absolute, max } }`
+  states the rank correlation of two different range columns of the emit. `measure` is required, `max` is
+  positive and defaults to `"0.05"`, and the property is ungrouped. It is scored against a profile only
+  (SCORECARD-SPEC.md section 3): a committed slice names the property and compares nothing, since `S` and `A4`
+  of the profile (PROFILE-SPEC.md section 5) do not add up across blocks. It lives in the `joint` dimension.
+- `groupByBins: { column, bins }` groups a property by the bins of another range column of the emit, in place of
+  `groupBy`. `bins` are at least two strictly increasing edges on the grid, in the column's domain (days for a
+  DATE column), and cover the column's declared range, so every value lies in a bin; a bin is half open and the
+  last is closed above. The groups are keyed by the canonical text of each lower edge and named by ordinal in
+  the order of the bins. A property holds at most one of `groupBy` and `groupByBins`. The profile's statistic
+  must hold the same `groupByBins` (PROFILE-SPEC.md section 7).
 
 **`allocation` makes a column's classes exact.** `allocation: exact` gives each class of the column exactly its share of
 the expose's rows, in place of a share each row draws for itself: the column's levels (with `levelWeights`, or equal
@@ -598,7 +679,9 @@ dotted `columns` entry.
 - A **fact with a tolerance** (`extensions["com.agentics.flux/1"].facts`, ADR 0018) is part of the run's fidelity predicate, so it is bound into `H` before any row is drawn. The emit's `extension` member gains a `facts` key, `{"<ruleId>": {"tolerance": "<decimal as written>"}}`, **only when the Simulation declares a fact with a tolerance for that emit**, so every other emit and every bundle that declares none keeps its `H`. `G` leaves the `facts` member out, as it leaves out every tolerance: an emit whose only extension entry is `facts` has the `G` it had without it.
 - A **link entry** (`extensions["com.agentics.flux/1"].links`, ADR 0022 section 5) is a list of `{emit, relationship, when, sentinels, weight}` entries, each naming an emitted expose and a relationship it declares, with at least one of the other three. `weight` names a number column of the relationship's target, and the parent row is then picked by the weights of the parent's final rows (ADR 0023 section 4, KERNEL-SPEC section 8.2). It changes the rows the emit generates, so it is bound into `H`: the emit's `extension` member gains a `links` key, a list of `{"relationship", "when", "sentinels", "weight"}` (each key only when declared) in relationship order, **only when the Simulation declares an entry for that emit**, so every other emit and every bundle that declares none keeps its `H`. `G` leaves the `links` member out. The namespace's closed set of top-level keys gains `links`, and kernel `0.1.0` refuses the key.
 - A **bridge** (`extensions["com.agentics.flux/1"].bridges`, ADR 0022 section 8) is a list of `{emit, relationships: [a, b]}` entries, each naming an emitted expose and two distinct relationships it declares. It changes the rows the emit generates, so it is bound into `H` the way a link entry is: the emit's `extension` member gains a `bridges` key, a list of `{"relationships": [a, b]}` in name order, **only when the Simulation declares a bridge for that emit**, and `G` leaves the member out. The order of the two names is part of `H`, since `a` is the major part of the pair layout. The namespace's closed set of top-level keys gains `bridges`, and kernel `0.1.0` refuses the key.
-- A **counts entry** (`extensions["com.agentics.flux/1"].counts`, ADR 0016 section 1) is a list of `{emit, relationship, minChildren, parentWhen, children, tolerance}` entries, each naming an emitted expose and a relationship it declares, at most one entry per relationship. It puts the relationship on the counted layout (KERNEL-SPEC-2 section 8.1): the child's rows take their parents from a layout that gives each parent a whole number of children. `minChildren`, a whole number of 0 or more (an integer or decimal text, anything else is `FLX-3105`), is the least number of children of every parent that may have any, and `parentWhen`, a FLUID SQL/1 predicate text over the parent's own columns, says which may: only a parent whose final row makes it TRUE has children (NULL and FALSE do not). A `parentWhen` that reads a link, a previous version, children, siblings or a column a summary over the parent's children sets is `FLX-3403`. `children` is the shape of the number of children per parent, exactly one of `{levels, levelWeights}` and `{bins, binWeights}` with every entry a string, and `tolerance` a decimal text between 0 and 1. No other key is read, and an unknown key is `FLX-3105`. It changes the rows the emit generates, so it is bound into `H` the way a link entry is: the emit's `extension` member gains a `counts` key, a list of `{"relationship", "minChildren", "parentWhen", "children", "tolerance"}` (each key only when declared) in relationship order, **only when the Simulation declares an entry for that emit**, and `G` leaves the member out. The namespace's closed set of top-level keys gains `counts`, and kernel `0.1.0` refuses the key.
+- A **counts entry** (`extensions["com.agentics.flux/1"].counts`, ADR 0016 section 1) is a list of `{emit, relationship, minChildren, parentWhen, children, tolerance, given, childrenGiven}` entries, each naming an emitted expose and a relationship it declares, at most one entry per relationship. It puts the relationship on the counted layout (KERNEL-SPEC-2 section 8.1): the child's rows take their parents from a layout that gives each parent a whole number of children. `minChildren`, a whole number of 0 or more (an integer or decimal text, anything else is `FLX-3105`), is the least number of children of every parent that may have any, and `parentWhen`, a FLUID SQL/1 predicate text over the parent's own columns, says which may: only a parent whose final row makes it TRUE has children (NULL and FALSE do not). A `parentWhen` that reads a link, a previous version, children, siblings or a column a summary over the parent's children sets is `FLX-3403`. `children` is the shape of the number of children per parent, exactly one of `{levels, levelWeights}` and `{bins, binWeights}` with every entry a string, and `tolerance` a decimal text between 0 and 1. `given` and `childrenGiven` make the shape depend on a column of the parent (below). No other key is read, and an unknown key is `FLX-3105`. It changes the rows the emit generates, so it is bound into `H` the way a link entry is: the emit's `extension` member gains a `counts` key, a list of `{"relationship", "minChildren", "parentWhen", "children", "tolerance", "given", "childrenGiven"}` (each key only when declared) in relationship order, **only when the Simulation declares an entry for that emit**, and `G` leaves the member out. The namespace's closed set of top-level keys gains `counts`, and kernel `0.1.0` refuses the key.
+  - **`given` and `childrenGiven`** (kernel `0.2.0` only; kernel `0.1.0` refuses them with `FLX-3105`, naming the kernel). `given` names one column of the parent expose: a `category` column with declared levels, or a column drawn from bins, with no `nullFraction`. `childrenGiven` maps classes of it, the levels or the text of each bin's lower edge as the column's `bins` write it, to a list of weights over the classes `children` declares, one weight each and in the same order, as `binWeights` or `levelWeights` read them. A class with no list takes `children`'s own weights, and the plan states which did. `children` is required with `given`, and `childrenGiven` with no `given` is refused. The classes weigh the number of children per parent, never the parents themselves, which the column's own statistics place. The emit's `extension` member carries the entry for `H` with both keys, and `G` leaves it out, as it leaves `counts` out. The layout is KERNEL-SPEC-2 section 8.1. When a run's emit has such a relationship, its `plan.json` entry gains `countsGiven`, a list in relationship order of `{"relationship", "given", "childrenGiven", "childrenGivenDefault"}`: `childrenGiven` holds the weights of every class of the column, those the entry gave and those it took from `children`, and `childrenGivenDefault` lists the classes that took `children`'s weights, and is left out when there are none. Any other emit has no key, so its plan keeps its bytes. Verification scores such a relationship per class (SCORECARD-SPEC.md section 3).
+  - **What is refused** (`FLX-3403`, at plan time, naming where and never quoting a value): a `given` that is not a column of the parent, or is neither a category column with declared levels nor a column drawn from bins, or declares a `nullFraction`; a key of `childrenGiven` that is not a class of the column; a list with no weight or of another length than `children` has classes, or whose weights `children` would refuse; and, as for `parentWhen`, a given column that is drawn given a column of a linked row, that a rule sets from a link, a previous version, children or siblings (a column drawn from bins may not be set by a rule at all), or that a summary over the parent's children sets. A final value of the column that is no class of it is refused when the layout is worked out.
 - **Copies** (`extensions["com.agentics.flux/1"].copies`, ADR 0022 section 4) is the top-level key `copies: true`, whose only value is `true` (anything else is `FLX-3105`). Under kernel `0.2.0` it makes the emits that list a `sharedColumns` or a `sharedAttribute` copy them (EXPR-SPEC-2 §9); without it the two declarations are read as declared and not generated, so a plan written before copies existed keeps its bytes and digests (KERNEL-SPEC-2 section 12). It changes the rows the emit generates, so it is bound into `H` the way a link entry is: the emit's `extension` member gains `"copies": true`, **only when the Simulation declares it and the emit's expose lists something to copy**, and `G` leaves the member out. The namespace's closed set of top-level keys gains `copies`, and kernel `0.1.0` refuses the key (`FLX-3105`, naming the kernel). `fluxsim init` writes it for a contract that declares a `sharedColumns` or a `sharedAttribute`, and for no other.
 - A **generator plugin** (`extensions["com.agentics.flux/1"].generators`, ADR 0032 section 2) is a mapping from an emitted `exposeId` to `{plugin, distribution, version, grade, reproducibility}` and, as the grade asks, `privacy`, `model` and `options`. `plugin` is an entry-point name (`^[A-Za-z][A-Za-z0-9_.-]*$`), `distribution` and `version` pin the distribution that provides it, `grade` is `P4` or `P5` (anything else is `FLX-3105`), and `reproducibility` is `bytes`, `environment` or `none`. A `P4` declares `privacy` (`unit` and `accounting`, non-empty strings of at most 1000 characters, and `epsilon` and `delta` or `rho`, exact decimal strings, with epsilon and rho positive and delta at least 0 and below 1) and `model.digest` (`sha256:` and 64 lowercase hex digits); a `P5` declares no `privacy` and may declare the digest. `options` is plain data, and a mapping key anywhere inside it that names a credential is refused, naming the key and never a value. The declaration changes the rows its expose generates, so it is bound into `H`: the emit's `extension` member gains a `generators` key, the declaration as written (each part only when declared), **only for the exposes the Simulation declares a plugin for**, and `G` keeps it. The run's grade is the weakest of the profile's and every plugin's, which the governance gate checks (`FLX-4005`). The namespace's closed set of top-level keys gains `generators`, and kernel `0.1.0` refuses the key (`FLX-3105`, naming the kernel). Nothing in this record imports or calls a plugin.
 - **Lifetimes, `within` entries and hidden declarations** (`extensions["com.agentics.flux/1"].lifetimes`, `.within` and `.rates`, ADR 0024 sections 4 and 5 and ADR 0025 section 2; an emit's `hidden` and `hiddenColumns`, ADR 0024 sections 2 and 3) change the rows the emit generates, so each is bound into `H` the way a link entry is: the emit's `extension` member gains a `lifetimes` key (the emit's entry, each key only when declared), a `within` key and a `rates` key (each a list of the emit's entries in the order declared, each key only when declared), `"hidden": true` and a `hiddenColumns` key (the list as declared), **only when the emit declares it**, so every other emit and every bundle that declares none keeps its `H`. `G` leaves all five members out, as it leaves out `links`. The namespace's closed set of top-level keys gains `lifetimes`, `within` and `rates`, and kernel `0.1.0` refuses each of the five (`FLX-3105`, naming the kernel).

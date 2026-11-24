@@ -1,0 +1,789 @@
+{
+  "_producer": "https://github.com/Agenticstiger/flux-engine",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-5-0/FluxScorecard.json",
+  "coverage": {
+    "columns": {
+      "covered": 3,
+      "of": 4,
+      "share": "0.75"
+    },
+    "relationships": {
+      "covered": 0,
+      "of": 1,
+      "share": "0"
+    },
+    "tables": {
+      "counted": 1,
+      "total": 2
+    }
+  },
+  "dimensions": [
+    {
+      "counts": {
+        "censored": 0,
+        "properties": 1,
+        "refused": 0,
+        "scored": 1
+      },
+      "dimension": "structure",
+      "score": "0.875",
+      "status": "measured",
+      "weight": "1"
+    },
+    {
+      "counts": {
+        "censored": 1,
+        "properties": 3,
+        "refused": 0,
+        "scored": 2
+      },
+      "dimension": "marginals",
+      "score": "1",
+      "status": "measured",
+      "weight": "1"
+    },
+    {
+      "counts": {
+        "censored": 0,
+        "properties": 4,
+        "refused": 1,
+        "scored": 3
+      },
+      "dimension": "joint",
+      "score": "1",
+      "status": "measured",
+      "weight": "1"
+    },
+    {
+      "counts": {
+        "censored": 0,
+        "properties": 2,
+        "refused": 0,
+        "scored": 2
+      },
+      "dimension": "crossTable",
+      "score": "1",
+      "status": "measured",
+      "weight": "1"
+    },
+    {
+      "counts": {
+        "censored": 0,
+        "properties": 0,
+        "refused": 0,
+        "scored": 0
+      },
+      "dimension": "temporal",
+      "score": null,
+      "status": "not measured",
+      "weight": "1"
+    },
+    {
+      "counts": {
+        "censored": 1,
+        "properties": 2,
+        "refused": 0,
+        "scored": 1
+      },
+      "dimension": "invariants",
+      "score": "0.995",
+      "status": "measured",
+      "weight": "1"
+    },
+    {
+      "counts": {
+        "censored": 0,
+        "properties": 0,
+        "refused": 0,
+        "scored": 0
+      },
+      "dimension": "queries",
+      "score": null,
+      "status": "not measured",
+      "weight": "1"
+    },
+    {
+      "counts": {
+        "censored": 0,
+        "properties": 0,
+        "refused": 0,
+        "scored": 0
+      },
+      "dimension": "defects",
+      "score": null,
+      "status": "not measured",
+      "weight": "1"
+    }
+  ],
+  "intervals": {
+    "status": "not computed"
+  },
+  "met": false,
+  "overall": {
+    "counts": {
+      "censored": 2,
+      "properties": 12,
+      "refused": 1,
+      "scored": 9
+    },
+    "score": "0.974",
+    "status": "measured"
+  },
+  "profile": {
+    "digest": "sha256:1900eab6c028483d7126599ee6f50de0d27907b5c65fa90524580b4b0f9852b0"
+  },
+  "run": {
+    "planDigest": "sha256:64879f7d6b960a01909762d911a32d4582c20010c5641ee90278b644a9e3b525",
+    "runDigest": "sha256:acba25512100f80b56fc3ccd14c65be55d94800cda77585c5f41a887e398f9be",
+    "runId": "64879f7d6b960a01"
+  },
+  "shapeFlags": {
+    "level": "1/1000",
+    "status": "checked",
+    "tables": [
+      {
+        "columns": [
+          {
+            "column": "amount",
+            "distinct": 471,
+            "flags": [
+              {
+                "alert": "EMPTY_BINS",
+                "cells": [
+                  3,
+                  4
+                ]
+              }
+            ],
+            "records": 480,
+            "status": "checked"
+          },
+          {
+            "column": "attempts",
+            "distinct": 6,
+            "flags": [],
+            "records": 480,
+            "status": "checked"
+          },
+          {
+            "column": "market",
+            "distinct": 3,
+            "flags": [],
+            "records": 480,
+            "status": "checked"
+          }
+        ],
+        "exposeId": "recovery_moment",
+        "status": "checked"
+      },
+      {
+        "columns": [
+          {
+            "column": "plan",
+            "distinct": 1,
+            "flags": [
+              {
+                "alert": "CONSTANT"
+              }
+            ],
+            "records": 1200,
+            "status": "checked"
+          }
+        ],
+        "exposeId": "subscriber_snapshot",
+        "status": "checked"
+      }
+    ],
+    "testLevel": "1/7000",
+    "tests": 7
+  },
+  "tables": [
+    {
+      "counts": {
+        "censored": 2,
+        "properties": 12,
+        "refused": 1,
+        "scored": 9
+      },
+      "coverage": {
+        "columns": {
+          "covered": 3,
+          "of": 4,
+          "share": "0.75"
+        },
+        "relationships": {
+          "covered": 0,
+          "of": 1,
+          "share": "0"
+        }
+      },
+      "credibility": {
+        "basis": "measured",
+        "met": true,
+        "minCredibility": "0.7",
+        "score": "587/600"
+      },
+      "dataQualityAssertions": {
+        "_producer": "https://github.com/Agenticstiger/flux-engine",
+        "_schemaURL": "https://openlineage.io/spec/facets/1-1-0/DataQualityAssertionsDatasetFacet.json#/$defs/DataQualityAssertionsDatasetFacet",
+        "assertions": [
+          {
+            "assertion": "mean/1",
+            "column": "amount",
+            "name": "000:mean:amount",
+            "params": {
+              "dimension": "marginals",
+              "outcome": "within",
+              "score": "1",
+              "tolerance": {
+                "type": "relative",
+                "value": "0.25"
+              }
+            },
+            "severity": "error",
+            "success": true
+          },
+          {
+            "assertion": "marginalHistogram/1",
+            "column": "amount",
+            "name": "001:marginalHistogram:amount",
+            "params": {
+              "dimension": "marginals",
+              "outcome": "within",
+              "score": "1",
+              "tolerance": {
+                "max": "0.2",
+                "measure": "totalVariation",
+                "type": "distance"
+              }
+            },
+            "severity": "error",
+            "success": true
+          },
+          {
+            "assertion": "support/1",
+            "column": "market",
+            "name": "002:support:market",
+            "params": {
+              "dimension": "structure",
+              "outcome": "outside",
+              "score": "0.875",
+              "tolerance": {
+                "max": "0",
+                "type": "count"
+              }
+            },
+            "severity": "error",
+            "success": false
+          },
+          {
+            "assertion": "mean/1",
+            "column": "amount",
+            "name": "003:mean:amount@market",
+            "params": {
+              "dimension": "joint",
+              "groupBy": "market",
+              "outcome": "refused",
+              "tolerance": {
+                "type": "absolute",
+                "value": "2"
+              }
+            },
+            "severity": "error",
+            "success": false
+          },
+          {
+            "assertion": "correlation/1",
+            "name": "004:correlation:amount+attempts",
+            "params": {
+              "columns": [
+                "amount",
+                "attempts"
+              ],
+              "dimension": "joint",
+              "outcome": "within",
+              "score": "1",
+              "tolerance": {
+                "type": "absolute",
+                "value": "0.5"
+              }
+            },
+            "severity": "error",
+            "success": true
+          },
+          {
+            "assertion": "fact",
+            "name": "fact:recovery_moment.paid_after_due",
+            "params": {
+              "dimension": "invariants",
+              "gap": "0.005",
+              "outcome": "within",
+              "score": "0.995",
+              "tolerance": "0.01"
+            },
+            "severity": "error",
+            "success": true
+          },
+          {
+            "assertion": "referentialIntegrity",
+            "name": "relationship:recovery_moment.subscriber",
+            "params": {
+              "dimension": "crossTable",
+              "outcome": "within",
+              "score": "1"
+            },
+            "severity": "error",
+            "success": true
+          },
+          {
+            "assertion": "kendallTau/1",
+            "name": "006:rankCorrelation:amount+attempts",
+            "params": {
+              "columns": [
+                "amount",
+                "attempts"
+              ],
+              "dimension": "joint",
+              "outcome": "within",
+              "score": "0.9903",
+              "tolerance": {
+                "max": "0.05",
+                "type": "absolute"
+              }
+            },
+            "severity": "error",
+            "success": true
+          },
+          {
+            "assertion": "mean/1",
+            "column": "amount",
+            "name": "007:mean:amount@attempts",
+            "params": {
+              "dimension": "joint",
+              "outcome": "within",
+              "score": "0.994",
+              "tolerance": {
+                "type": "absolute",
+                "value": "2"
+              }
+            },
+            "severity": "error",
+            "success": true
+          }
+        ]
+      },
+      "declaresFidelity": true,
+      "exposeId": "recovery_moment",
+      "properties": [
+        {
+          "columns": [
+            "amount"
+          ],
+          "dimension": "marginals",
+          "groups": {
+            "censored": 0,
+            "outside": [],
+            "scored": 1
+          },
+          "margin": "0.125",
+          "outcome": "within",
+          "property": "mean",
+          "propertyId": "000:mean:amount",
+          "refusals": [],
+          "score": "1",
+          "statistic": "mean/1",
+          "tolerance": {
+            "type": "relative",
+            "value": "0.25"
+          },
+          "weight": "1"
+        },
+        {
+          "columns": [
+            "amount"
+          ],
+          "dimension": "marginals",
+          "groups": {
+            "censored": 0,
+            "outside": [],
+            "scored": 1
+          },
+          "margin": "0.1875",
+          "outcome": "within",
+          "property": "marginalHistogram",
+          "propertyId": "001:marginalHistogram:amount",
+          "refusals": [],
+          "score": "1",
+          "statistic": "marginalHistogram/1",
+          "tolerance": {
+            "max": "0.2",
+            "measure": "totalVariation",
+            "type": "distance"
+          },
+          "weight": "1"
+        },
+        {
+          "columns": [
+            "market"
+          ],
+          "dimension": "structure",
+          "groups": {
+            "censored": 0,
+            "outside": [
+              0
+            ],
+            "scored": 1
+          },
+          "margin": null,
+          "outcome": "outside",
+          "property": "support",
+          "propertyId": "002:support:market",
+          "refusals": [],
+          "score": "0.875",
+          "statistic": "support/1",
+          "tolerance": {
+            "max": "0",
+            "type": "count"
+          },
+          "weight": "1"
+        },
+        {
+          "columns": [
+            "amount"
+          ],
+          "dimension": "joint",
+          "groupBy": "market",
+          "groups": {
+            "censored": 0,
+            "outside": [],
+            "scored": 0
+          },
+          "margin": "1.9375",
+          "outcome": "refused",
+          "property": "mean",
+          "propertyId": "003:mean:amount@market",
+          "refusals": [
+            {
+              "code": "FLX-5005",
+              "reason": "synthetic dataset: 003:mean:amount@market group #0: 1 records, minimum is 4"
+            }
+          ],
+          "score": null,
+          "statistic": "mean/1",
+          "tolerance": {
+            "type": "absolute",
+            "value": "2"
+          },
+          "weight": "1"
+        },
+        {
+          "columns": [
+            "amount",
+            "attempts"
+          ],
+          "dimension": "joint",
+          "groups": {
+            "censored": 0,
+            "outside": [],
+            "scored": 1
+          },
+          "margin": "0.25",
+          "outcome": "within",
+          "property": "correlation",
+          "propertyId": "004:correlation:amount+attempts",
+          "refusals": [],
+          "score": "1",
+          "statistic": "correlation/1",
+          "tolerance": {
+            "type": "absolute",
+            "value": "0.5"
+          },
+          "weight": "1"
+        },
+        {
+          "columns": [
+            "amount"
+          ],
+          "dimension": "marginals",
+          "groups": {
+            "censored": 1,
+            "outside": [],
+            "scored": 0
+          },
+          "margin": "0.9375",
+          "outcome": "censored",
+          "property": "quantile",
+          "propertyId": "005:quantile:amount",
+          "refusals": [],
+          "score": null,
+          "statistic": "quantile/1",
+          "tolerance": {
+            "type": "absolute",
+            "value": "1"
+          },
+          "weight": "1"
+        },
+        {
+          "dimension": "invariants",
+          "enforced": true,
+          "fact": "recovery_moment.paid_after_due",
+          "gap": "0.005",
+          "outcome": "within",
+          "profile": {
+            "satisfied": 7960,
+            "share": "0.995",
+            "total": 8000
+          },
+          "property": "fact",
+          "propertyId": "fact:recovery_moment.paid_after_due",
+          "run": {
+            "satisfied": 396,
+            "share": "0.99",
+            "total": 400
+          },
+          "score": "0.995",
+          "tolerance": "0.01",
+          "weight": "1"
+        },
+        {
+          "dimension": "invariants",
+          "enforced": false,
+          "fact": "recovery_moment.plan_matches_amount",
+          "gap": null,
+          "outcome": "censored",
+          "profile": null,
+          "property": "fact",
+          "propertyId": "fact:recovery_moment.plan_matches_amount",
+          "run": {
+            "satisfied": 400,
+            "share": "1",
+            "total": 400
+          },
+          "score": null,
+          "tolerance": "0",
+          "weight": "1"
+        },
+        {
+          "cardinality": "many_to_one",
+          "checks": {
+            "found": {
+              "satisfied": 400,
+              "share": "1",
+              "total": 400
+            },
+            "unique": {
+              "satisfied": 120,
+              "share": "1",
+              "total": 120
+            }
+          },
+          "child": "recovery_moment",
+          "dimension": "crossTable",
+          "fromColumns": [
+            "subscriber_id"
+          ],
+          "joinType": "left",
+          "outcome": "within",
+          "parent": "subscriber_snapshot",
+          "property": "referentialIntegrity",
+          "propertyId": "relationship:recovery_moment.subscriber",
+          "relationship": "subscriber",
+          "score": "1",
+          "toColumns": [
+            "subscriber_id"
+          ],
+          "weight": "1"
+        },
+        {
+          "columns": [
+            "amount",
+            "attempts"
+          ],
+          "dimension": "joint",
+          "groups": {
+            "censored": 0,
+            "outside": [],
+            "scored": 1
+          },
+          "margin": "0.049987792969",
+          "noise": {
+            "cellVariance": "0.0001",
+            "mechanism": "gaussian",
+            "widening": "0.031622776602"
+          },
+          "outcome": "within",
+          "property": "rankCorrelation",
+          "propertyId": "006:rankCorrelation:amount+attempts",
+          "rank": {
+            "alpha": "0.05",
+            "distance": "0.0194",
+            "measure": "kendall",
+            "reach": "0.114960569571",
+            "records": 4000,
+            "reference": "0.39",
+            "run": "0.3706",
+            "samplingWidening": "0.03335",
+            "tooNoisyToTell": false
+          },
+          "refusals": [],
+          "score": "0.9903",
+          "statistic": "kendallTau/1",
+          "tolerance": {
+            "max": "0.05",
+            "type": "absolute"
+          },
+          "weight": "1"
+        },
+        {
+          "columns": [
+            "amount"
+          ],
+          "dimension": "joint",
+          "groupByBins": {
+            "bins": [
+              "0",
+              "2",
+              "5",
+              "10"
+            ],
+            "column": "attempts"
+          },
+          "groups": {
+            "censored": 0,
+            "outside": [],
+            "scored": 3
+          },
+          "margin": "1.99998474121",
+          "outcome": "within",
+          "property": "mean",
+          "propertyId": "007:mean:amount@attempts",
+          "refusals": [],
+          "score": "0.994",
+          "statistic": "mean/1",
+          "tolerance": {
+            "type": "absolute",
+            "value": "2"
+          },
+          "weight": "1"
+        },
+        {
+          "bins": [
+            "0",
+            "1",
+            "3",
+            "10"
+          ],
+          "child": "recovery_moment",
+          "dimension": "crossTable",
+          "distance": "0.025",
+          "groupBy": "plan",
+          "groups": [
+            {
+              "distance": "0.0138",
+              "ordinal": 0,
+              "outcome": "within",
+              "profile": {
+                "binCounts": [
+                  18,
+                  71,
+                  29
+                ],
+                "parents": 118
+              },
+              "run": {
+                "binCounts": [
+                  20,
+                  70,
+                  30
+                ],
+                "parents": 120
+              }
+            },
+            {
+              "distance": "0.025",
+              "ordinal": 1,
+              "outcome": "within",
+              "profile": {
+                "binCounts": [
+                  12,
+                  40,
+                  28
+                ],
+                "parents": 80
+              },
+              "run": {
+                "binCounts": [
+                  10,
+                  40,
+                  30
+                ],
+                "parents": 80
+              }
+            }
+          ],
+          "outcome": "within",
+          "parent": "subscriber_snapshot",
+          "property": "childrenPerParent",
+          "propertyId": "children:recovery_moment.subscriber",
+          "relationship": "subscriber",
+          "score": "0.95",
+          "tolerance": "0.1",
+          "weight": "1"
+        }
+      ],
+      "refusals": [],
+      "score": "587/600",
+      "status": "measured"
+    },
+    {
+      "counts": {
+        "censored": 0,
+        "properties": 0,
+        "refused": 0,
+        "scored": 0
+      },
+      "coverage": null,
+      "dataQualityAssertions": {
+        "_producer": "https://github.com/Agenticstiger/flux-engine",
+        "_schemaURL": "https://openlineage.io/spec/facets/1-1-0/DataQualityAssertionsDatasetFacet.json#/$defs/DataQualityAssertionsDatasetFacet",
+        "assertions": []
+      },
+      "declaresFidelity": false,
+      "exposeId": "subscriber_snapshot",
+      "properties": [],
+      "refusals": [],
+      "score": null,
+      "status": "not measured"
+    }
+  ],
+  "thresholds": [
+    {
+      "met": true,
+      "operator": "mustBeGreaterOrEqualTo",
+      "score": "0.974",
+      "target": "overall",
+      "value": "0.9"
+    },
+    {
+      "met": false,
+      "operator": "mustBeGreaterOrEqualTo",
+      "score": "0.875",
+      "target": "dimensions.structure",
+      "value": "0.95"
+    },
+    {
+      "met": true,
+      "operator": "mustBeGreaterThan",
+      "score": "587/600",
+      "target": "tables.recovery_moment",
+      "value": "0.8"
+    },
+    {
+      "met": false,
+      "operator": "mustBeGreaterOrEqualTo",
+      "score": "0.75",
+      "target": "coverage.columns",
+      "value": "0.8"
+    }
+  ]
+}

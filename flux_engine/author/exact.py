@@ -13,7 +13,7 @@ rounding term alone. A column ``allocation`` cannot read is left as it is.
 
 ``allocation`` reads (``flux_engine.generator.rows._require_allocatable``) a column drawn from
 levels, or from bins with their weights; one that is given another column when that column is
-itself exact and is given nothing. It refuses a key, a foreign key, a column a rule sets, and
+itself exact, categorical and given nothing. It refuses a key, a foreign key, a column a rule sets, and
 any other family.
 """
 
@@ -171,6 +171,9 @@ def _exact_names(expose: Any, by_name: Mapping[str, ColumnPlan]) -> Set[str]:
             isinstance(parent, str)
             and parent in exact
             and not any(key in by_name[parent].declaration for key in _GIVEN)
+            # A column given a column drawn from bins cannot be allocated exactly (ADR 0036
+            # decision 3): the layout is given a categorical column only.
+            and "bins" not in by_name[parent].declaration
         ):
             exact.add(name)
     return exact

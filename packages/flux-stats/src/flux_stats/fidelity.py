@@ -71,14 +71,17 @@ from functools import partial
 from types import MappingProxyType
 from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
+from flux_stats.definitions import bin_index
 from flux_stats.errors import ErrorCode, FluxError, register
 from flux_stats.fixedpoint import DEFAULT_FRACTIONAL_BITS, FLX_5005, Grid, Interval
+from flux_stats.rank_correlation import KENDALL_TAU, SPEARMAN_RHO
 from flux_stats.reading import (
     FLX_5031,
     NullPolicy,
     Row,
     ValueDomain,
     category,
+    cell,
     digits_written_out,
     encode_value,
     level_cells,
@@ -94,7 +97,7 @@ from flux_stats.registry import (
     StatisticDefinition,
     definition_for_kind,
 )
-from flux_stats.spelling import MOST_DIGITS
+from flux_stats.spelling import MOST_DIGITS, render_exact
 
 __all__ = [
     "COLUMN_KEYS",
@@ -106,6 +109,7 @@ __all__ = [
     "FLX_5034",
     "SUPPORT_DECLARED",
     "SUPPORT_VALUES_KEY",
+    "BinsGrouping",
     "Budget",
     "ColumnDeclaration",
     "ColumnKind",
@@ -117,6 +121,7 @@ __all__ = [
     "NullPolicy",
     "PropertyDeclaration",
     "PropertyKind",
+    "RANK_MEASURES",
     "RecordsRange",
     "Tolerance",
     "ToleranceKind",
@@ -125,6 +130,7 @@ __all__ = [
     "definition_for_property",
     "expose_from_contract",
     "is_date_type",
+    "bin_group_keys",
     "is_link_key",
     "measure_group",
     "parse_duration_ms",
@@ -536,6 +542,7 @@ class PropertyKind(str, Enum):
     CORRELATION = "correlation"
     QUANTILE = "quantile"
     LEVEL_HISTOGRAM = "levelHistogram"
+    RANK_CORRELATION = "rankCorrelation"
 
 
 class ToleranceKind(str, Enum):
@@ -582,6 +589,7 @@ _TOLERANCE_KINDS: Mapping[PropertyKind, Tuple[ToleranceKind, ...]] = MappingProx
         PropertyKind.CORRELATION: (ToleranceKind.ABSOLUTE,),
         PropertyKind.QUANTILE: (ToleranceKind.ABSOLUTE,),
         PropertyKind.LEVEL_HISTOGRAM: (ToleranceKind.DISTANCE,),
+        PropertyKind.RANK_CORRELATION: (ToleranceKind.ABSOLUTE,),
     }
 )
 
@@ -597,7 +605,16 @@ _COLUMN_KINDS: Mapping[PropertyKind, ColumnKind] = MappingProxyType(
         PropertyKind.CORRELATION: ColumnKind.RANGE,
         PropertyKind.QUANTILE: ColumnKind.RANGE,
         PropertyKind.LEVEL_HISTOGRAM: ColumnKind.SUPPORT,
+        PropertyKind.RANK_CORRELATION: ColumnKind.RANGE,
     }
+)
+
+#: The two measures of a ``rankCorrelation`` property (ADR 0035 decision 7), and the default
+#: tolerance a property that states none is held to.
+RANK_MEASURES = ("kendall", "spearman")
+DEFAULT_RANK_TOLERANCE = {"type": "absolute", "max": "0.05"}
+RANK_DEFINITIONS_BY_MEASURE: Mapping[str, StatisticDefinition] = MappingProxyType(
+    {"kendall": KENDALL_TAU, "spearman": SPEARMAN_RHO}
 )
 
 
@@ -926,6 +943,24 @@ class Tolerance:
 
 
 @dataclass(frozen=True)
+class BinsGrouping:
+    """``groupByBins``: a property grouped by the bins of another range column (format 1-4-0).
+
+    The groups are the bins, keyed by the canonical decimal text of each lower edge as the declaration
+    writes it (a DATE column's edges are days), and a record whose value of ``column`` is null is in
+    none (``null: exclude``) or refused (``null: fail``), as a ``groupBy`` column's null is.
+    """
+
+    column: str
+    bins: Tuple[Fraction, ...]
+
+    @property
+    def keys(self) -> Tuple[str, ...]:
+        """The group key of each bin, in the order of the bins."""
+        return tuple(render_exact(edge) for edge in self.bins[:-1])
+
+
+@dataclass(frozen=True)
 class PropertyDeclaration:
     """One entry of the block's ``properties`` list (§2)."""
 
@@ -939,6 +974,15 @@ class PropertyDeclaration:
     bins: Tuple[Fraction, ...] = ()
     level: Optional[Fraction] = None
     min_variance: Optional[Fraction] = None
+    #: A ``rankCorrelation``'s measure, ``kendall`` or ``spearman``; ``None`` for any other kind.
+    measure: Optional[str] = None
+    #: The bins the property is grouped by, in place of ``group_by``; at most one of the two is set.
+    group_by_bins: Optional[BinsGrouping] = None
+
+    @property
+    def grouped(self) -> bool:
+        """Whether the property is grouped, by a column or by bins."""
+        return self.group_by is not None or self.group_by_bins is not None
 
     @property
     def property_id(self) -> str:
@@ -950,6 +994,8 @@ class PropertyDeclaration:
         rows line up with the declaration order a reader is looking at.
         """
         tail = f"@{self.group_by}" if self.group_by is not None else ""
+        if self.group_by_bins is not None:
+            tail = f"@{self.group_by_bins.column}#bins"
         return f"{self.index:03d}:{self.kind.value}:{'+'.join(self.columns)}{tail}"
 
 
@@ -1001,6 +1047,8 @@ class FidelityBlock:
             covered.update(prop.columns)
             if prop.group_by is not None:
                 covered.add(prop.group_by)
+            if prop.group_by_bins is not None:
+                covered.add(prop.group_by_bins.column)
         return tuple(sorted(covered))
 
 
@@ -1071,6 +1119,8 @@ _PROPERTY_KEYS = (
     "bins",
     "level",
     "minVariance",
+    "measure",
+    "groupByBins",
 )
 _TOLERANCE_KEYS = ("type", "value", "max", "measure", "sampling")
 
@@ -1340,27 +1390,44 @@ def _given_of(mapping: Mapping[str, Any]) -> Tuple[str, ...]:
 
 
 def _tolerance_magnitude(
-    mapping: Mapping[str, Any], tolerance_kind: ToleranceKind, subject: str
+    mapping: Mapping[str, Any],
+    tolerance_kind: ToleranceKind,
+    subject: str,
+    *,
+    ranked: bool = False,
 ) -> Fraction:
-    """The ``value`` or ``max`` a tolerance of *tolerance_kind* carries, as an exact fraction."""
+    """The ``value`` or ``max`` a tolerance of *tolerance_kind* carries, as an exact fraction.
+
+    A ``rankCorrelation``'s absolute tolerance (*ranked*) is written with ``max``, as a bound on
+    a distance is; every other absolute tolerance is written with ``value``.
+    """
+    if ranked:
+        why = "a rank correlation's tolerance has no value"
+        return _positive(_keyed(mapping, "max", "value", subject, why), subject, "max")
     if tolerance_kind in (ToleranceKind.ABSOLUTE, ToleranceKind.RELATIVE):
-        if "value" not in mapping:
-            raise FluxError(FLX_5034, f"{subject} needs a value")
-        if "max" in mapping:
-            raise FluxError(FLX_5030, f"{subject}: a {tolerance_kind.value} tolerance has no max")
-        magnitude = Fraction(_require_decimal(mapping["value"], f"{subject}.value"))
-        if magnitude <= 0:
-            raise FluxError(FLX_5030, f"{subject}.value must be positive")
-        return magnitude
-    if "max" not in mapping:
-        raise FluxError(FLX_5034, f"{subject} needs a max")
-    if "value" in mapping:
-        raise FluxError(FLX_5030, f"{subject}: a {tolerance_kind.value} tolerance has no value")
+        why = f"a {tolerance_kind.value} tolerance has no max"
+        return _positive(_keyed(mapping, "value", "max", subject, why), subject, "value")
+    why = f"a {tolerance_kind.value} tolerance has no value"
+    raw = _keyed(mapping, "max", "value", subject, why)
     if tolerance_kind is ToleranceKind.COUNT:
-        return Fraction(_require_int(mapping["max"], f"{subject}.max"))
-    magnitude = Fraction(_require_decimal(mapping["max"], f"{subject}.max"))
+        return Fraction(_require_int(raw, f"{subject}.max"))
+    return _positive(raw, subject, "max")
+
+
+def _keyed(mapping: Mapping[str, Any], need: str, forbid: str, subject: str, why: str) -> Any:
+    """The value of the key *need*, refused when it is missing (``FLX-5034``) or *forbid* is beside it."""
+    if need not in mapping:
+        raise FluxError(FLX_5034, f"{subject} needs a {need}")
+    if forbid in mapping:
+        raise FluxError(FLX_5030, f"{subject}: {why}")
+    return mapping[need]
+
+
+def _positive(raw: Any, subject: str, key: str) -> Fraction:
+    """*raw* as an exact decimal above zero, or ``FLX-5030`` naming the key."""
+    magnitude = Fraction(_require_decimal(raw, f"{subject}.{key}"))
     if magnitude <= 0:
-        raise FluxError(FLX_5030, f"{subject}.max must be positive")
+        raise FluxError(FLX_5030, f"{subject}.{key} must be positive")
     return magnitude
 
 
@@ -1420,7 +1487,9 @@ def _parse_tolerance(raw: Any, kind: PropertyKind, subject: str) -> Tolerance:
     elif "measure" in mapping:
         raise FluxError(FLX_5030, f"{subject}: only a distance tolerance carries a measure")
 
-    magnitude = _tolerance_magnitude(mapping, tolerance_kind, subject)
+    magnitude = _tolerance_magnitude(
+        mapping, tolerance_kind, subject, ranked=kind is PropertyKind.RANK_CORRELATION
+    )
     sampling = _tolerance_sampling(mapping, tolerance_kind, subject)
     declared = _tolerance_declared(mapping)
     return Tolerance(
@@ -1440,29 +1509,30 @@ def _property_columns(raw: Mapping[str, Any], kind: PropertyKind, subject: str) 
     is refused rather than resolved, and a correlation that does not end
     up with exactly two distinct columns is ``FLX-5033``.
     """
+    names = _listed_columns(raw, subject)
+    if kind is PropertyKind.CORRELATION or kind is PropertyKind.RANK_CORRELATION:
+        noun = "a correlation" if kind is PropertyKind.CORRELATION else "a rank correlation"
+        if len(names) != 2:
+            raise FluxError(FLX_5033, f"{subject}: {noun} declares two columns, got {len(names)}")
+        if names[0] == names[1]:
+            raise FluxError(FLX_5033, f"{subject}: {noun} needs two distinct columns")
+    elif len(names) != 1:
+        raise FluxError(FLX_5030, f"{subject}: a {kind.value} property names one column")
+    return names
+
+
+def _listed_columns(raw: Mapping[str, Any], subject: str) -> Tuple[str, ...]:
+    """The names a property spells with ``column`` or ``columns``, NFC; both, or neither, is refused."""
     if "column" in raw and "columns" in raw:
         raise FluxError(FLX_5030, f"{subject} declares both column and columns")
     if "columns" in raw:
         listed = raw["columns"]
         if not isinstance(listed, Sequence) or isinstance(listed, (str, bytes)):
             raise FluxError(FLX_5030, f"{subject}.columns must be a list")
-        names = tuple(nfc(str(entry)) for entry in listed)
-    elif "column" in raw:
-        names = (nfc(str(raw["column"])),)
-    else:
-        raise FluxError(FLX_5034, f"{subject} names no column")
-
-    if kind is PropertyKind.CORRELATION:
-        if len(names) != 2:
-            raise FluxError(
-                FLX_5033,
-                f"{subject}: a correlation declares two columns, got {len(names)}",
-            )
-        if names[0] == names[1]:
-            raise FluxError(FLX_5033, f"{subject}: a correlation needs two distinct columns")
-    elif len(names) != 1:
-        raise FluxError(FLX_5030, f"{subject}: a {kind.value} property names one column")
-    return names
+        return tuple(nfc(str(entry)) for entry in listed)
+    if "column" in raw:
+        return (nfc(str(raw["column"])),)
+    raise FluxError(FLX_5034, f"{subject} names no column")
 
 
 def _parse_bins(
@@ -1508,6 +1578,118 @@ def _parse_bins(
     return tuple(edges)
 
 
+def _parse_group_by_bins(
+    mapping: Mapping[str, Any],
+    names: Tuple[str, ...],
+    columns: Mapping[str, ColumnDeclaration],
+    grid: Grid,
+    subject: str,
+    group_by: Optional[str],
+) -> Optional[BinsGrouping]:
+    """Read ``groupByBins``: ``{column, bins}``, the profile's spelling (PROFILE-SPEC.md section 5).
+
+    ``column`` is a range column of the block other than the property's own, and ``bins`` are at least
+    two strictly increasing edges on the grid, in the column's domain, that cover its declared range,
+    so that every value a record may hold lies in a bin (a bin is half open and the last is closed).
+    """
+    if "groupByBins" not in mapping:
+        return None
+    here = f"{subject}.groupByBins"
+    if group_by is not None:
+        raise FluxError(
+            FLX_5030, f"{subject}: a property holds at most one of groupBy and groupByBins"
+        )
+    raw = _require_mapping(mapping["groupByBins"], here)
+    _known_keys(raw, ("column", "bins"), here)
+    if "column" not in raw or "bins" not in raw:
+        raise FluxError(FLX_5034, f"{here} needs a column and bins")
+    name = nfc(str(raw["column"]))
+    column = _group_column(name, columns, names, here)
+    return BinsGrouping(column=name, bins=_group_edges(raw["bins"], column, grid, here))
+
+
+def _group_column(
+    name: str, columns: Mapping[str, ColumnDeclaration], own: Tuple[str, ...], here: str
+) -> ColumnDeclaration:
+    """The range column a ``groupByBins`` names, which is not one of the property's own."""
+    if name not in columns:
+        raise FluxError(FLX_5034, f"{here}: column {name!r} has no declaration in fidelity.columns")
+    column = columns[name]
+    if column.kind is not ColumnKind.RANGE:
+        raise FluxError(
+            FLX_5030, f"{here}: groupByBins needs a range column, and {name!r} is a support"
+        )
+    if name in own:
+        raise FluxError(FLX_5030, f"{here}: groupByBins repeats the property's own column")
+    return column
+
+
+def _group_edge(
+    value: Any, previous: Optional[Fraction], column: ColumnDeclaration, grid: Grid, where: str
+) -> Fraction:
+    """One edge of a ``groupByBins``: in the column's domain, above *previous*, and on the grid."""
+    edge, domain = _read_bound(value, where, date=column.domain is ValueDomain.DATE)
+    if domain is not column.domain:
+        raise FluxError(FLX_5032, f"{where} is not in the same domain as the column's range")
+    if previous is not None and edge <= previous:
+        raise FluxError(FLX_5032, f"{where} does not increase")
+    if not grid.is_on_grid(edge):
+        raise FluxError(FLX_5032, f"{where} does not land on the declared grid")
+    return edge
+
+
+def _group_edges(
+    listed: Any, column: ColumnDeclaration, grid: Grid, here: str
+) -> Tuple[Fraction, ...]:
+    """The edges of a ``groupByBins``: increasing, on the grid, and covering the column's range."""
+    if not isinstance(listed, Sequence) or isinstance(listed, (str, bytes)):
+        raise FluxError(FLX_5030, f"{here}.bins must be a list")
+    if len(listed) < 2:
+        raise FluxError(FLX_5032, f"{here}.bins needs at least two edges")
+    edges: List[Fraction] = []
+    for position, value in enumerate(listed):
+        edges.append(
+            _group_edge(
+                value, (edges[-1] if edges else None), column, grid, f"{here}.bins[{position}]"
+            )
+        )
+    interval = column.interval
+    if edges[0] > interval.lo or edges[-1] < interval.hi:
+        raise FluxError(
+            FLX_5032, f"{here}.bins do not cover the column's declared minimum and maximum"
+        )
+    return tuple(edges)
+
+
+def bin_group_keys(
+    rows: Sequence[Row],
+    grouping: BinsGrouping,
+    column: ColumnDeclaration,
+    grid: Grid,
+    *,
+    first_row: int = 0,
+) -> List[Tuple[str, List[int]]]:
+    """Partition row indices by the bin each row's value of the grouping column falls in.
+
+    A group's key is the text of its bin's lower edge; groups with no record are left out, and come
+    back in the order of the bins, never in the order the rows arrived. A null is left out under
+    ``exclude`` and refused under ``fail``, as :func:`flux_stats.reading.group_keys` does.
+    """
+    edges = [grid.quantise(edge, subject="bin edge") for edge in grouping.bins]
+    keys = grouping.keys
+    buckets: Dict[int, List[int]] = {}
+    for index, row in enumerate(rows):
+        named = first_row + index
+        value = cell(row, column, row_index=named)
+        if value is None:
+            if column.null_policy is NullPolicy.FAIL:
+                raise FluxError(FLX_5005, f"column {column.name!r} row {named}: null is refused")
+            continue
+        units = encode_value(value, column, grid, row_index=named)
+        buckets.setdefault(bin_index(units, edges), []).append(index)
+    return [(keys[position], buckets[position]) for position in sorted(buckets)]
+
+
 def _parse_property(
     index: int,
     raw: Any,
@@ -1525,6 +1707,8 @@ def _parse_property(
     except ValueError:
         raise FluxError(FLX_5030, f"{subject}.property {text!r} has no comparison") from None
 
+    if kind is PropertyKind.RANK_CORRELATION and ("groupBy" in mapping or "groupByBins" in mapping):
+        raise FluxError(FLX_5030, f"{subject}: a rank correlation is ungrouped")
     names = _property_columns(mapping, kind, subject)
     wanted_kind = _COLUMN_KINDS[kind]
     for name in names:
@@ -1564,6 +1748,9 @@ def _parse_property(
         if group_by in names:
             raise FluxError(FLX_5030, f"{subject}: groupBy repeats the property's own column")
 
+    group_by_bins = _parse_group_by_bins(mapping, names, columns, grid, subject, group_by)
+    if "tolerance" not in mapping and kind is PropertyKind.RANK_CORRELATION:
+        mapping = {**mapping, "tolerance": dict(DEFAULT_RANK_TOLERANCE)}
     if "tolerance" not in mapping:
         raise FluxError(FLX_5034, f"{subject} needs a tolerance")
     tolerance = _parse_tolerance(mapping["tolerance"], kind, f"{subject}.tolerance")
@@ -1608,6 +1795,18 @@ def _parse_property(
     elif "minVariance" in mapping:
         raise FluxError(FLX_5030, f"{subject}: only a correlation carries a minVariance")
 
+    measure: Optional[str] = None
+    if kind is PropertyKind.RANK_CORRELATION:
+        if "measure" not in mapping:
+            raise FluxError(FLX_5034, f"{subject} needs a measure")
+        measure = nfc(str(mapping["measure"]))
+        if measure not in RANK_MEASURES:
+            raise FluxError(
+                FLX_5030, f"{subject}.measure is {' or '.join(RANK_MEASURES)}, not {measure!r}"
+            )
+    elif "measure" in mapping:
+        raise FluxError(FLX_5030, f"{subject}: only a rankCorrelation carries a measure")
+
     return PropertyDeclaration(
         index=index,
         kind=kind,
@@ -1617,6 +1816,8 @@ def _parse_property(
         bins=bins,
         level=level,
         min_variance=min_variance,
+        measure=measure,
+        group_by_bins=group_by_bins,
     )
 
 
@@ -1753,6 +1954,8 @@ def definition_for_property(declaration: PropertyDeclaration) -> StatisticDefini
     compare it, match a profile's or score it, picks it here, so no two of
     them can disagree about which one a property is.
     """
+    if declaration.kind is PropertyKind.RANK_CORRELATION:
+        return RANK_DEFINITIONS_BY_MEASURE[declaration.measure or ""]
     binned = declaration.kind is PropertyKind.QUANTILE and bool(declaration.bins)
     return definition_for_kind(declaration.kind, binned=binned)
 
@@ -1793,7 +1996,7 @@ def measure_group(
     if kind is PropertyKind.LEVEL_HISTOGRAM:
         return _level_histogram_group(rows, indices, key, columns[declaration.columns[0]])
 
-    if kind is PropertyKind.CORRELATION:
+    if kind is PropertyKind.CORRELATION or kind is PropertyKind.RANK_CORRELATION:
         pairs = read_pairs(
             rows,
             indices,

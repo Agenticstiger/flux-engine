@@ -1,4 +1,4 @@
-# Profile document: normative specification (format 1-3-0)
+# Profile document: normative specification (format 1-4-0)
 
 A profile is a JSON document of aggregate statistics about the data a bundle
 imitates. A profiler computes it where the data lives and lets out only
@@ -9,11 +9,11 @@ of from a committed slice (§7).
 
 Normative files beside this page:
 
-- [`profile-1-3.schema.json`](profile-1-3.schema.json): the JSON Schema, whose
-  `$id` is `https://agenticstiger.github.io/flux/engine/spec/profile/1-3-0/FluxProfile.json`.
-  It validates format `1-0-0` to `1-2-0` documents too. The schemas of
-  [`1-2-0`](profile-1-2.schema.json), [`1-1-0`](profile-1.schema.json) and
-  [`1-0-0`](profile-1-0.schema.json) are kept as published.
+- [`profile-1-4.schema.json`](profile-1-4.schema.json): the JSON Schema, whose
+  `$id` is `https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json`.
+  It validates format `1-0-0` to `1-3-0` documents too. The schemas of
+  [`1-3-0`](profile-1-3.schema.json), [`1-2-0`](profile-1-2.schema.json),
+  [`1-1-0`](profile-1.schema.json) and [`1-0-0`](profile-1-0.schema.json) are kept as published.
   The schema checks the shape. The rules it cannot express are stated here,
   and the reader (`flux_stats.profile`, in the flux-stats distribution the
   engine depends on) applies both.
@@ -25,8 +25,13 @@ Normative files beside this page:
   under differential privacy: a `privacy` block, a noisy statistic and two noisy cliques
   (sections 3a and 5a). [`profile-1-3-example.json`](profile-1-3-example.json) is a profile of
   format `1-3-0`: a reference table, a statistic grouped by a number column, one grouped by a
-  linked row, one counted per entity, the days between two dates, a calendar and an exposure (sections 3, 5 and 5b). The
-  tests read all four and validate them against the schemas.
+  linked row, one counted per entity, the days between two dates, a calendar and an exposure (sections 3, 5 and 5b).
+  [`profile-1-4-example.json`](profile-1-4-example.json) is a profile of format `1-4-0` released under differential
+  privacy, with a Kendall and a Spearman rank correlation of one pair of columns (section 5).
+  [`profile-1-4-cliques-example.json`](profile-1-4-cliques-example.json) holds a `cliqueMarginal/1`, a
+  `cliqueMarginal/2` over a category and a number column, and a `cliqueSelection` (section 5a).
+  [`profile-1-4-follows-example.json`](profile-1-4-follows-example.json) is a profile whose unit of privacy follows
+  a relationship (section 3a). The tests read all seven and validate them against the schemas.
 
 Every statistic in a profile is an instance of a registered definition
 (`flux_stats`, one definition per statistic). The statistics that the
@@ -42,7 +47,7 @@ A profile is one JSON object (RFC 8259) in UTF-8.
 | Key | Required | Holds |
 |---|---|---|
 | `_producer` | yes | A URI naming the tool that wrote the profile. |
-| `_schemaURL` | yes | The `$id` of the format the document is written in. This engine reads formats `1-0-0` to `1-3-0` (§8) and refuses any other URL. |
+| `_schemaURL` | yes | The `$id` of the format the document is written in. This engine reads formats `1-0-0` to `1-4-0` (§8) and refuses any other URL. |
 | `encoding` | yes | The grid that encoded quantities were formed on (§2). |
 | `disclosureRules` | yes | The disclosure rules, by name (§2). |
 | `tables` | yes | One entry per table, keyed by the FLUID `exposeId` it conforms to (§5). |
@@ -50,7 +55,7 @@ A profile is one JSON object (RFC 8259) in UTF-8.
 | `queries` | no | Rates, one per named query (§5). |
 | `invariants` | no | The share of rows on which each declared fact holds (§5). Format `1-2-0`. |
 | `references` | no | The rows of a table the owner releases whole, one entry per `exposeId` (§5b). Format `1-3-0`. |
-| `privacy` | no | The release-level account of a profile released under differential privacy: the measure, the total privacy loss and the unit of privacy (§3a). Format `1-2-0`. |
+| `privacy` | no | The release-level account of a profile released under differential privacy: the measure, the total privacy loss and the unit of privacy, which in format `1-4-0` may follow child rows (§3a). Format `1-2-0`. |
 
 `_producer` and `_schemaURL` are the OpenLineage facet envelope (`BaseFacet`).
 The format version is part of the schema URL, so a later format has a new
@@ -86,7 +91,10 @@ never quotes a value.
 to 128. It is the grid that the statistics which depend on a grid were
 formed on (KERNEL-SPEC §12): `mean/1`, `correlation/1` and `quantile/1`,
 whose quantities are encoded values, and `marginalHistogram/1` and
-`quantile/2`, whose values are floored onto the grid before they are binned.
+`quantile/2`, whose values are floored onto the grid before they are binned. In format `1-4-0`
+the values of `kendallTau/1` and `spearmanRho/1` are floored onto the grid before they are
+ranked, so a tie is a tie on the grid, and so are the values a `groupByBins` places in a bin
+(§3).
 
 `disclosureRules` maps a rule name to the rule that was applied. Every
 statistic and metric names one rule. The fields are ACRO's output-checking
@@ -135,7 +143,7 @@ A statistic is an object with these keys:
 
 | Key | Holds |
 |---|---|
-| `definition` | A registered identifier: `mean/1`, `marginalHistogram/1`, `levelHistogram/1`, `support/1`, `correlation/1`, `quantile/1` or `quantile/2`. |
+| `definition` | A registered identifier: `mean/1`, `marginalHistogram/1`, `levelHistogram/1`, `support/1`, `correlation/1`, `quantile/1` or `quantile/2`, and, in a `columnPairs` entry of format `1-4-0`, `kendallTau/1` or `spearmanRho/1` (§5). |
 | `sampleSize` | `{ "min": a, "max": b }`, the band the number of records behind the statistic lies in. `max` may be absent, and is never below `min`. |
 | `disclosure` | The name of the rule in `disclosureRules` that was applied. |
 | `groups` | The groups, sorted by key, each key at most once (below). |
@@ -144,9 +152,11 @@ A statistic is an object with these keys:
 | `level` | `quantile/1` and `quantile/2` only: the quantile level, a decimal string in `[0, 1]` with no sign. |
 | `groupBy` | A column statistic grouped by a categorical column of the same table, or, in format `1-3-0`, by a number column of it (§5). |
 | `groupByLink` | A column statistic grouped by a column of the row a relationship of its table names (§5). Format `1-3-0`. |
+| `groupByBins` | A column statistic grouped by the bins of another number or timestamp column of its table (below). Format `1-4-0`. |
 | `per` | A column statistic counted once per distinct value of named columns of its table (§5). Format `1-3-0`. |
 | `of` | A period statistic: the number column it sums (§5). |
-| `noise` | A column statistic released under differential privacy: its mechanism, scale and share of the budget (§3a). `levelHistogram/1` and `marginalHistogram/1` only, and never one with `per` or one of a `history`. Format `1-2-0`. |
+| `rowFloor` | A rank correlation only: the count of records its value is formed with (§5). Format `1-4-0`. |
+| `noise` | A statistic released under differential privacy: its mechanism, scale and share of the budget (§3a). `levelHistogram/1` and `marginalHistogram/1`, a rank correlation, and never one with `per` or one of a `history`. Format `1-2-0`. |
 
 A group is spelled as `S` spells a group (SEAM-FIDELITY-SPEC §4), with a
 `status`:
@@ -158,6 +168,8 @@ A group is spelled as `S` spells a group (SEAM-FIDELITY-SPEC §4), with a
 | `levelHistogram/1` | `levelCounts`, one count per level |
 | `support/1` | `support`, the distinct members, sorted |
 | `correlation/1` | `Sx`, `Sy`, `Sxx`, `Sxy`, `Syy` |
+| `kendallTau/1` | `S`, the sum over pairs of records of the product of the signs of the two differences (§5) |
+| `spearmanRho/1` | `A4`, four times the sum of the products of the centred mid-ranks (§5) |
 | `quantile/1` | `quantileWitness`, `quantileBelow`, `quantileAtOrBelow` |
 | `quantile/2` | `quantileBin`, `binBelow`, `binThrough` |
 
@@ -287,8 +299,8 @@ how the loss is accounted for.
 |---|---|
 | `measure` | `zeroConcentratedDP` (OpenDP's `zero_concentrated_divergence`) or `approximateDP` (`fixed_smoothed_max_divergence`). Pure DP is approximate DP with `delta` `"0"`. |
 | `privacyLoss` | The total privacy loss of the release: `{ "rho": r }` under zero-concentrated DP, `{ "epsilon": e, "delta": d }` under approximate DP. Each is a decimal string; `rho` and `epsilon` are above zero and `delta` lies in `[0, 1)`. |
-| `privacyUnit` | `{ "expose": id }`: the unit of privacy is one row of that expose. Neighbouring data sets differ by adding or removing one row of it (OpenDP's symmetric distance at distance one). |
-| `publicStructure` | Optional boolean. `true` declares that the levels of the profile's histograms, their bin edges and the `sampleSize` bands were chosen without the data, or are part of the release. See below. |
+| `privacyUnit` | `{ "expose": id }`: the unit of privacy is one row of that expose. In format `1-4-0` it may also hold `follows`, and the unit is then one row with the child rows it takes with it (below). Neighbouring data sets differ by adding or removing one unit (OpenDP's symmetric distance at distance one). |
+| `publicStructure` | Optional boolean. `true` declares that the structure of the release was chosen without the data, or is part of it. See below. |
 
 **The `noise` block** of a statistic or a clique holds exactly `mechanism`, `scale` and
 `privacyLoss`:
@@ -299,18 +311,19 @@ how the loss is accounted for.
 | `scale` | The noise scale, a decimal string above zero: the standard deviation of a Gaussian, the `b` of a Laplace. |
 | `privacyLoss` | This statistic's share of the budget, in the measure of the `privacyLoss` of the block above: `rho`, or `epsilon` and `delta`. |
 
-Every count table has sensitivity 1 under adding or removing one row of the unit's expose: a row
-lands in one cell, so the L1 and the L2 sensitivity are both 1. The reader checks each pairing of a
-mechanism and a measure, in exact arithmetic, and refuses (`FLX-5036`) a share below what the
-mechanism spends, which is an understated loss. A share above it is accepted as the profiler's
-slack.
+A noisy statistic has an L1 sensitivity `D1` and an L2 sensitivity `D2` under adding or removing one unit
+of privacy. Every count table over the rows of the unit's expose has both equal to 1: a row lands in one
+cell. The other statistics, and the tables a unit that follows child rows reaches, have the sensitivities
+of "What a noisy statistic is charged" below. The reader checks each pairing of a mechanism and a measure,
+in exact arithmetic, and refuses (`FLX-5036`) a share below what the mechanism spends, which is an
+understated loss. A share above it is accepted as the profiler's slack.
 
 | Mechanism | Measure | The share is at least |
 |---|---|---|
-| `gaussian` or `discreteGaussian`, scale `s` | `zeroConcentratedDP` | `rho = 1 / (2 s^2)` |
-| `gaussian` or `discreteGaussian`, scale `s` | `approximateDP` | `epsilon = rho + 2 sqrt(rho ln(1 / delta))` with `rho = 1 / (2 s^2)`, and `0 < delta < 1` |
-| `laplace`, scale `b` | `approximateDP` | `epsilon = 1 / b`, with any `delta` |
-| `laplace`, scale `b` | `zeroConcentratedDP` | `rho = (1 / b)^2 / 2` |
+| `gaussian` or `discreteGaussian`, scale `s` | `zeroConcentratedDP` | `rho = D2^2 / (2 s^2)` |
+| `gaussian` or `discreteGaussian`, scale `s` | `approximateDP` | `epsilon = rho + 2 sqrt(rho ln(1 / delta))` with `rho = D2^2 / (2 s^2)`, and `0 < delta < 1` |
+| `laplace`, scale `b` | `approximateDP` | `epsilon = D1 / b`, with any `delta` |
+| `laplace`, scale `b` | `zeroConcentratedDP` | `rho = (D1 / b)^2 / 2` |
 
 An epsilon-DP release is (epsilon^2 / 2)-zero-concentrated DP (Bun and Steinke 2016, Proposition
 1.4), which gives the Laplace's rho. A rho-zero-concentrated release is (epsilon, delta)-DP for every
@@ -325,10 +338,14 @@ The variance of one noisy cell is `scale^2` for `gaussian`, `2 * scale^2` for `l
 `discreteGaussian`, `scale^2`, which the discrete Gaussian's variance does not exceed. The reader
 holds it exactly, as a rational.
 
-**A noisy statistic** is a `levelHistogram/1` or `marginalHistogram/1` of a column of the table
-named by `privacyUnit` that carries a `noise` block. A noisy statistic in another table, in a
-relationship, a query, an invariant, a pair or a period is refused: the profile does not state how
-many rows of another table one unit contributes, so the loss there is not known. Its groups are
+**A noisy statistic** is a `levelHistogram/1` or `marginalHistogram/1` of a column that carries a
+`noise` block, in a table whose rows one unit changes. Without `follows` that table is the expose of
+`privacyUnit`: a noisy statistic of a column of another table is refused, since the profile does not state
+how many rows of another table one unit contributes, so the loss there is not known. A noisy statistic in a
+query, an invariant or a period is refused in every format. Format `1-4-0` allows the block in more places,
+under the rules below: a rank correlation of a pair (§5), a column statistic with `groupByBins` or
+`groupByLink` (§3), a relationship's `marginalHistogram/1` (§5), and a statistic of a table the unit follows
+into. Its groups are
 `{ "group", "status": "F", "noisyCounts": [...] }`: every group is published, `noisyCounts` has
 one value per cell, each a decimal string that can be negative or fractional, and neither `k`,
 `levelCounts`, `binCounts` nor `cellStatus` is written. `sampleSize` and `disclosure` are written
@@ -355,33 +372,142 @@ the variance above. The reader makes them a valid distribution by one rule, in e
 The result depends on the values alone. It is post-processing of the release.
 
 **The budget.** The parts are the `privacyLoss` of every `noise` block of the document, in the
-statistics and in the cliques. Under `zeroConcentratedDP` their `rho` adds, and under
+statistics and in the cliques and, in format `1-4-0`, the `selection` and `domain` shares of every
+`cliqueSelection` (§5a). Under `zeroConcentratedDP` their `rho` adds, and under
 `approximateDP` their `epsilon` adds and their `delta` adds (basic composition). Each sum is exact
 and is compared with its total on its own. The reader refuses the document (`FLX-5036`) when:
 
-- a `noise` block or a clique appears and there is no `privacy` block;
-- a `privacy` block appears and no statistic or clique spends any of it;
+- a `noise` block, a clique or a `cliqueSelection` appears and there is no `privacy` block;
+- a `privacy` block appears and no statistic, clique or share spends any of it;
 - a part is not in the measure of the total (a `rho` under approximate DP, say);
 - the parts add up to more than the total.
 
 A sum below the total is accepted. The reader does not check that a mechanism of the stated kind
 and scale made the numbers: it reads numbers, not samplers.
 
+### A unit that follows its child rows (format `1-4-0`)
+
+`privacyUnit` is `{ "expose": id }` or, in this format, `{ "expose": id, "follows": [...] }`. Without
+`follows` the unit is one row of `expose`, as in every earlier format, and a profile's charges and bytes are
+what they were. A document that holds `follows` names `1-4-0`, and one that names an earlier format and holds
+it is refused with `FLX-5036`. Each entry of `follows` is
+`{ "parent": { "table", "columns" }, "child": { "table", "columns" }, "maxChildren": c }`:
+
+- it names exactly one entry of the profile's `relationships`, by its parent and child tables and columns, and
+  no entry is named twice;
+- `c` is a count of at least 1, a fixed public cap chosen without the data.
+
+The listed relationships form a tree rooted at the expose. Each table they reach, other than the expose, is the
+child of exactly one listed relationship; the parent of every listed relationship is the expose or a table they
+reach; no table is listed as a child twice; they form no cycle; and the expose is never a child. Anything else is
+refused (`FLX-5036`), naming the entry. A table reached by two paths, or a child whose parent the unit does not
+reach, would make the stated reach understate the sensitivity: two followed keys of cap 1 into one table state
+a reach of 2, yet one parent row can bring rows in through both, and the rows under a parent that is no part of
+the unit move with that parent.
+
+One unit of privacy is one row of `expose` together with, recursively, the rows of child tables that reference a
+row of the unit through a listed relationship. Neighbouring data sets differ by one unit.
+
+**What the profiler does.** Before it measures anything, the profiler keeps at most `c` children of each
+parent row on each listed relationship. It drops the others by a rule that reads only that parent's own child
+rows, such as a fixed order of their values or a seeded draw, and a dropped row takes with it the rows that
+follow it. It also drops the rows of a followed table that follow no row of the unit's expose. Every statistic
+of the document is measured on what remains. The engine cannot check that the profiler did so, as it cannot
+check that noise was drawn, and the evidence says so.
+
+**Reach.** `m_T` is the number of rows of table `T` that one unit contributes: `m_expose = 1`, and for a
+reached table `T`, `m_T = c * m_P` for its one listed relationship (`P` to `T`, cap `c`), that is the product
+of the caps along the one path from the expose to `T`. A table that no listed relationship reaches has
+`m_T = 0`. The numbers are exact integers.
+
+**What the guarantee covers.** Units. The rows of a table with `m_T = 0` are the same in every neighbouring
+data set, so a statistic grouped by such a table's column, or a count of its rows' children, protects the
+unit's rows and not that table's. The account names the tables the unit reaches and the tables it treats as
+fixed. For the minimum grade of a column (ADR 0020), any labelled column (one that carries a sensitivity
+label such as `pii` or `restricted`) of a table with `m_T = 0` counts as `P1`, whether or not the statistic
+that touches it is noisy. A table the profile does not hold is not reached either. The floor applies to a
+profile that names `1-4-0`; an earlier profile keeps the check it had.
+
+### What a noisy statistic is charged (format `1-4-0`)
+
+A noisy statistic over the rows of table `T` has the sensitivity of the table below times `m_T`.
+
+| Statistic | L1 for one row of `T` | L2 for one row of `T` |
+|---|---|---|
+| a count table: `levelHistogram/1` or `marginalHistogram/1` of a column, grouped by `groupBy`, `groupByBins` or `groupByLink` or not, a calendar or date pair histogram, a clique of either definition | 1 | 1 |
+| `kendallTau/1` with `rowFloor` `f` | `4 / (f + 1)` | `4 / (f + 1)` |
+| `spearmanRho/1` with `rowFloor` `f` | `9 / (f + 1)` | `9 / (f + 1)` |
+
+Kendall's bound is reached at `n = f`. Spearman's bound is not tight: the largest change found by exhaustive
+search is `6 / (f + 2)`, and the reader charges `9 / (f + 1)` until a tighter argument replaces it. Each pair
+of a copula's matrix is a statistic with a share of its own, and the shares add (the budget, above).
+
+Two forms read a row of another table and have their own rules:
+
+- **A statistic with `groupByLink`**, of table `T` grouped by a column of parent table `P`, may carry noise only
+  when `m_P = 0`, or when its relationship is listed in `follows`. It is charged `m_T` as a count table.
+  Otherwise its noise is refused.
+- **A relationship's `marginalHistogram/1`**, from parent table `P` to child table `C`. Let `m_C'` be `m_C` less
+  the contribution of this relationship to it (`c * m_P` when it is listed, 0 when it is not).
+  - `m_P >= 1` and `m_C' = 0`: L1 and L2 are `m_P`.
+  - `m_P = 0` and `m_C >= 1`: L1 is `2 * m_C` and L2 is `sqrt(2) * m_C`, so the squared L2 is `2 * m_C^2`.
+  - Otherwise its noise is refused.
+
+  A `groupBy` or `groupByBins` naming a column of `P` leaves the sensitivity as it is.
+
+The arithmetic is that of the table of mechanisms above with these sensitivities, and all four pairings of a
+mechanism and a measure are checked. `discreteGaussian` applies to count tables only.
+
+**Refused with `FLX-5036`**, naming where in the document and never a value: a noisy statistic over a table
+with `m_T = 0`; a `groupByLink` or relationship statistic that the rules above refuse; noise on a `mean/1`, a
+quantile, a `support/1`, a `per` statistic, a `history` member, or a relationship's `dates` or `exposure`; and
+every refusal of §5's rank correlations.
+
 **What the guarantee needs of the rest of the profile.** The numbers of a noisy statistic are
 the release, but a histogram also has levels, bin edges and a `sampleSize` band, which a profiler
 chooses. If it looked at the data to choose them they describe the data without noise. A profile
 declares `publicStructure: true` when they were chosen without the data (the contract's enum, edges
 fixed in advance, a band stated from public information) or are part of the release. The engine cannot
-check the declaration, and the evidence says so. A run is graded P3 (ADR 0020) only when the profile
-has this account and the declaration, and every statistic and metric it holds that the engine can
-read is noisy: no `rowCount`, no column metric, no statistic without a `noise` block, and no pair,
-period, relationship, query or fact section, none of which can be released with noise in this
-format.
-A noisy statistic that still states data is graded P1 too, because the declaration covers levels,
-bin edges and bands and not these: a `groupBy` on a column that is not categorical (a number or
-timestamp column, or a column the profile does not hold), whose group keys are data values; a
-`groupByLink`, whose keys are values of another table; and a `sampleSize` band whose `min` equals
-its `max`, which is an exact size.
+check the declaration, and the evidence says so.
+
+**The declaration about structure in format `1-4-0`.** In a profile of format `1-4-0`,
+`publicStructure: true` declares that these were chosen without the data, or are part of the release: the
+levels and bin edges of the profile's histograms and cliques, the bins of every `groupByBins`, the group keys
+of every grouped noisy statistic, the `sampleSize` bands, every `rowFloor` and every `maxChildren`. A profile
+whose `cliqueSelection` states a `domain` share has released some of the levels or edges under its account,
+which the declaration allows. The group keys are the levels of a `groupBy` column, the lower edges of
+`groupByBins` and the values of the parent column of a `groupByLink`: a noisy statistic publishes every group
+it names, and the names themselves come from the declaration, not from a count. A `sampleSize` band is a
+number of records stated beside noisy values, so it too is chosen without the data or is part of the release.
+A profile of an earlier format keeps the declaration it had, which covers the levels, the bin edges and the
+`sampleSize` bands.
+
+When a later format reads estimated cliques (§5a), an estimate's `variance` must be a function of the
+measurement design and the noise scales only, and it joins this list: a variance computed from the data would be
+a number released outside the account.
+
+**P3.** A run is graded P3 (ADR 0020) only when the profile has the account and the declaration, and every
+statistic and metric it holds that the engine can read is noisy under that account: no `rowCount`, no column
+metric, no statistic without a `noise` block, and no `periods`, `queries`, `invariants` or `references`
+section, none of which can be released with noise. A `columnPairs` entry is noisy when every statistic in it
+carries a `noise` block, so a `correlation/1` keeps a profile from P3 and a rank correlation need not. A
+relationship is noisy when every statistic in it carries `noise` (so it holds no `mean/1` and no quantile) and
+it holds no `dates` and no `exposure`. A statistic with `groupByBins` or `groupByLink` is noisy when it carries
+`noise`, a clique of either definition is always noisy, `cliqueSelection` is accounting and never keeps a
+profile from P3, and the unit's `follows` is part of the account: `EVIDENCE.md` states the unit with what it
+follows and names the tables the unit does not reach, which the guarantee treats as fixed. A `history`, a `per`
+statistic and a `datePairs` or `calendar` histogram without noise keep a profile from P3, as before. A member
+the grade does not know counts as released without noise.
+
+A noisy statistic that still states data is graded P1 too, in every format: a `groupBy` on a column that
+is not categorical (a number or timestamp column, or a column the profile does not hold), whose group keys
+are data values, and a `sampleSize` band whose `min` equals its `max`, which is an exact size. The check
+reads the statistics of columns, of `datePairs` and `columnPairs`, and of `relationships` (whose `groupBy`
+names a column of the parent table). In a profile of an earlier format a `groupByLink` is graded P1 as well,
+because its keys are values of another table and that declaration covers levels, bin edges and bands only;
+in format `1-4-0` the declaration covers the values of a `category` column of the parent table, so a
+`groupByLink` whose `column` is any other column (a number or timestamp column, or one the profile does not
+describe), whose keys are data values, is graded P1.
 
 ## 4. Column metrics
 
@@ -413,7 +539,8 @@ once.
 ## 5. Sections
 
 **`tables.<exposeId>`** holds `columns`, an optional `rowCount` (a count), and
-optional `columnPairs`, `periods` and, in format `1-3-0`, `datePairs` and `calendar`.
+optional `columnPairs`, `periods` and, in format `1-3-0`, `datePairs` and `calendar`. A table may also hold
+`cliques` (§5a) and, in format `1-4-0`, `cliqueSelection` (§5a).
 
 **`columns.<name>`** holds `domain` (`category`, `number` or `timestamp`) and
 optionally `metrics` (§4) and `statistics`. A column's statistics are
@@ -438,17 +565,29 @@ names `1-3-0`, and one that names an earlier format and holds one is refused wit
   `references` (§5b), and `column` is one of its columns. Group keys are the parent column's
   values, written as a cell is (§5b). The child records whose link reaches no row of the parent,
   or whose parent value is NULL, are one more group, never written. A statistic holds at most
-  one of `groupBy` and `groupByLink`. The disclosure rules apply group by group, exactly as for
-  `groupBy`. A statistic with `groupByLink` carries no `noise` block: removing one row of a table
-  moves every row that links to it into another group, so the sensitivity of 1 that §3a charges
-  does not hold.
+  one of `groupBy` and `groupByLink` (and, in format `1-4-0`, of `groupByBins`). The disclosure rules
+  apply group by group, exactly as for `groupBy`. In a profile of a format before `1-4-0` a statistic
+  with `groupByLink` carries no `noise` block: removing one row of a table moves every row that links
+  to it into another group, so the sensitivity of 1 that §3a charges does not hold. Format `1-4-0`
+  allows the block where the profile states what one unit changes (§3a).
 - **`per`.** A list of 1 to 8 distinct column names of the statistic's own table, none of them
   the statistic's own column. The statistic is counted once per distinct value of those columns,
   so a trait that is stable per entity is published per entity: `k` and every count are
   entities, and each entity counts at the value its rows most often hold, the first in code
-  point order on a tie. A statistic with `per` holds no `groupBy` and no `groupByLink`. It carries no `noise` block: one changed
-  row can move an entity between two cells, and the budget of §3a charges a noisy statistic a
-  sensitivity of 1.
+  point order on a tie. A statistic with `per` holds no `groupBy`, no `groupByLink` and no `groupByBins`. It carries no `noise`
+  block: one changed row can move an entity between two cells, and the budget of §3a charges a noisy
+  statistic the sensitivity of a count table.
+
+Format `1-4-0` adds **`groupByBins`**, and a document that holds it names `1-4-0`; one that names an earlier
+format and holds it is refused with `FLX-5036`. `"groupByBins": { "column": name, "bins": [...] }` groups a
+column statistic by the bins of `column`, a `number` or `timestamp` column of the same table other than the
+statistic's own, with `bins` at least two strictly increasing decimal strings, read as a histogram's (a value is
+floored onto the grid, bin `i` is `[e_i, e_(i+1))` and the last bin is closed above). Its groups are keyed by
+the canonical decimal text of each bin's lower edge (no exponent, no leading zeros, no trailing zeros after the
+point, `0` for zero). The records whose grouping value is NULL are one more group, never written. A statistic
+holds at most one of `groupBy`, `groupByLink`, `groupByBins` and `per`. The disclosure rules apply group by
+group, as for `groupBy`. A `levelHistogram/1` or `marginalHistogram/1` with `groupByBins` may carry `noise`,
+and a noisy one publishes a group for every bin, since the bins are part of the declared structure (§3a).
 
 **`cliques`** (format `1-2-0`) is a list of noisy clique marginals (§5a).
 
@@ -490,7 +629,41 @@ The key is read from format `1-3-0` only.
 
 **`columnPairs`** is a list of `{ "columns": [a, b], "statistics": [...] }`.
 `a` and `b` are two different number or timestamp columns of the table, and
-the statistics are `correlation/1` over the pair in that order.
+the statistics are `correlation/1` over the pair in that order and, in format `1-4-0`, the rank
+correlations below.
+
+**Rank correlations (format `1-4-0`).** A `columnPairs` entry may hold, beside `correlation/1`, the two
+definitions below over its pair `[a, b]`. Each value is floored onto the profile's grid before it is ranked, so a
+tie is a tie on the grid. A record counts when both of its values are known, and `n` is their number. A
+document that holds one, or a `rowFloor`, names `1-4-0`, and one that names an earlier format and holds one is
+refused with `FLX-5036`.
+
+| Definition | Quantities besides `group`, `k` and `status` | The statistic |
+|---|---|---|
+| `kendallTau/1` | `S`: the sum over every pair of counted records of `sign(a_i - a_j) * sign(b_i - b_j)`, a tied pair adding 0 | `tau = S / C(N, 2)` |
+| `spearmanRho/1` | `A4`: four times `sum (R_i - (n + 1) / 2) * (Q_i - (n + 1) / 2)`, with `R` and `Q` the mid-ranks of the counted records in `a` and in `b` | `rho = 3 * A4 / (N * (N^2 - 1))` |
+
+- `k = n`, a count. `S` and `A4` are integers written as decimal strings, as a sum is. A published group whose
+  `S` or `A4` is beyond what its `k` allows (`|S| <= C(k, 2)`, `3 |A4| <= k (k^2 - 1)`) is refused.
+- `N = max(n, f)`, where `f` is the statistic's `rowFloor` when it has one, and `n` when it has none.
+- `rowFloor` is optional: a count of at least 2, chosen without the data (§3a). The statistic is formed
+  with it. It does not state that `n` is at least `f`: a smaller `n` only shrinks the value towards zero.
+- Neither value is the Pearson correlation of the ranks. With ties that form has no bound on what one added row
+  can change, and the charge of §3a needs one. Neither depends on the margins of the two columns, and a DATE
+  column in days or in milliseconds gives the same value, since ranks do not change.
+- A published group with `k` below 2 is refused. A rank correlation is ungrouped: its one group is keyed by the
+  empty string.
+- **Disclosure.** An exact rank correlation names a disclosure rule, and the group size rule of §3 applies to its
+  one group as it does to a `correlation/1`: a group of fewer than `minimumCell` records is withheld. The rule
+  never withholds the noisy form. A noisy rank correlation is released whatever the number of its records, since
+  its noise is its protection and its `sampleSize` band is part of the declared structure (§3a).
+
+**The noisy form.** A rank correlation may carry a `noise` block (§3a) when it has a `rowFloor`. Its group is
+`{ "group": "", "status": "F", "noisyValue": v }`, with `v` a decimal string that may lie outside `[-1, 1]`, and
+it holds no `S`, `A4` or `k`. The mechanism is `gaussian` or `laplace`. The reader's point estimate is `v`
+clamped to `[-1, 1]`, which is post-processing of the release, with the variance of §3a (`scale^2`, or
+`2 * scale^2` for a Laplace). Refused with `FLX-5036`: a noisy rank correlation with no `rowFloor`, one under
+`discreteGaussian`, and, as before, a noisy `correlation/1`.
 
 **`datePairs`** (format `1-3-0`) is a list of `{ "start", "end", "statistics", "order" }`, at most
 1 024 of them. `start` and `end` are two different `timestamp` columns of the table, and the pair
@@ -531,6 +704,15 @@ and `child` are `{ "table", "columns" }`, two tables of the profile and key
 columns of each, the same number on both sides. The statistics describe the
 number of child rows each parent row has: `mean/1`, `marginalHistogram/1`,
 `quantile/1` and `quantile/2`.
+
+In format `1-4-0` a statistic of a relationship may hold `groupBy`, naming a `category` column of the parent
+table, or `groupByBins`, naming a `number` or `timestamp` column of it. Its groups follow `groupByBins` above
+and the rules of a grouped column statistic: the parents whose value is NULL are one more group, never written.
+A relationship's `marginalHistogram/1`, grouped or not, may carry `noise` under §3a; its other statistics may
+not. A relationship that the unit follows (§3a) holds no bin whose least count is above the cap `maxChildren`: a
+bin of the number of children whose lower edge, taken up to the next whole number, exceeds it is refused,
+whatever its count says. A relationship named only so that the unit follows it may hold an empty list of
+statistics, and then releases nothing.
 
 A `relationships` entry may carry `structural` (format `1-3-0`), a non-empty list of distinct values
 from `childless` and `orphan`. `childless` says the source enforces at least one child per parent,
@@ -608,8 +790,10 @@ characters per cell. A document beyond one is refused whole, with `FLX-5036`.
 
 ## 5a. Noisy clique marginals
 
-A clique is the joint count table of two or more categorical columns of one table, released under
-noise (§3a). It is an object of `tables.<exposeId>.cliques`:
+A clique is the joint count table of columns of one table, released under noise (§3a). A
+`cliqueMarginal/1` holds two or more categorical columns. Format `1-4-0` adds `cliqueMarginal/2`, which also
+holds number and timestamp columns by their bins (below). A clique is an object of
+`tables.<exposeId>.cliques`:
 
 | Key | Holds |
 |---|---|
@@ -632,7 +816,8 @@ one column, the levels listed for each shared column are the same, and each cliq
 shared columns gives exactly the same noisy value for every combination of their levels. The
 comparison is exact, on decimal strings read as rationals: a profiler that makes its noisy tables
 consistent (a post-processing step) writes values it computed exactly. Two cliques over the same
-set of columns are refused, because one joint is released once. A document with cliques that
+set of columns are refused, because one joint is released once. Cliques of both definitions in one table agree
+as this paragraph says: a column they share has the same levels, or the same bin edges, in each. A document with cliques that
 disagree is refused whole (`FLX-5036`), and the message names both cliques by their place and
 columns.
 
@@ -642,8 +827,68 @@ grouped by the other. The reader forms each as a statistic of the column, marked
 point estimate of §3a and the variance of a sum of independent cells (`cells summed * variance`),
 unless the column already carries that statistic in the document. A fidelity check can therefore
 compare a run with a clique without a property kind of its own, and only through these one- and
-two-way marginals. Cliques are over categorical columns; a number column is released as a noisy
-`marginalHistogram/1` of its own.
+two-way marginals. A column of a `cliqueMarginal/1` is categorical. A number column is released as a noisy
+`marginalHistogram/1` of its own or, in format `1-4-0`, in a `cliqueMarginal/2`.
+
+### `cliqueMarginal/2` (format `1-4-0`)
+
+| Key | Holds |
+|---|---|
+| `definition` | `cliqueMarginal/2`. |
+| `columns` | One to 32 distinct names of columns of the table, each `category`, `number` or `timestamp`. |
+| `domains` | One object per column, in the order of `columns`: `{ "levels": [...] }` for a `category` column, distinct and sorted by code point, or `{ "bins": [...] }` for a `number` or `timestamp` column, at least two strictly increasing decimal strings. |
+| `noisyCounts` | One noisy value per combination of levels and bins, row-major: the first column varies slowest and the last fastest. |
+| `noise` | The mechanism, scale and share (§3a). |
+
+- Bins are read as `marginalHistogram/1`'s: a value is floored onto the grid, bin `i` is `[e_i, e_(i+1))`, and
+  the last bin is closed above. The profiler chooses edges that cover the column's declared range. The reader
+  cannot check that, since the range is the contract's, and `fluxsim init`, which reads the contract, refuses a
+  clique whose edges do not cover it (`FLX-3402`). A DATE column's edges are milliseconds, converted to days as
+  §7 converts a histogram's.
+- The cells of a binned column are named by the canonical text of each bin's lower edge, as `groupByBins` names
+  its groups (§3).
+- A record counts when every column of the clique is known.
+- A clique holds at most 1,000,000 cells. A document of this format holds at most 1,024 cliques in a table and
+  10,000,000 cells over a table's cliques, checked before the counts are read. The work a table asks of the reader
+  is limited too: the sum over its cliques of the clique's cells times the number of marginals the reader sums it
+  onto (each column, each two-way table it forms, and each set of shared columns the agreement check compares),
+  plus, for each set of shared columns, its cells for every clique compared on it, is at most 40,000,000. A
+  table over it is refused, from its structure alone and before any count is summed. A clique of 32 columns sums
+  onto 528 marginals, so one of 75,000 cells is near the limit.
+- The reader forms the one-way and two-way marginals as above, now with bins: a number column's one-way marginal
+  is a `marginalHistogram/1` over the clique's bins; a number and a category give a `marginalHistogram/1` of the
+  number grouped by the category; two numbers give a `marginalHistogram/1` of the first in the clique's order
+  grouped by the bins of the second (`groupByBins`). Each is marked derived, with the variance of the cells it
+  sums: `v` times their number, with `v` the noise's variance.
+- The noise is a count table's: a record lands in one cell, so the sensitivity is that of a count table (§3a).
+- A document that holds a `cliqueMarginal/2` names `1-4-0`.
+
+### `cliqueSelection` (format `1-4-0`)
+
+A table may hold `cliqueSelection`, which says how its cliques were chosen and released:
+
+| Key | Holds |
+|---|---|
+| `method` | `aim`, `mst`, `fixed` (the cliques were named before the data was read) or `other`. |
+| `producer` | A URI naming the tool that chose and measured the cliques, with its version. |
+| `selection` | Optional: `{ "privacyLoss": ... }`, the share spent choosing the cliques, in the measure of the total. A table whose method is `fixed` states none. |
+| `domain` | Optional: `{ "privacyLoss": ... }`, the share spent releasing levels or bin edges that were not public. |
+| `published` | `measured`. |
+
+- **Measured.** Every clique of the table carries its own `noise` block and share. The two shares of
+  `cliqueSelection` are parts of the account (§3a), each exactly once, with no mechanism and no scale: they are
+  statements of what was spent, not noise the reader can check.
+- **Estimated cliques are not read in this format.** A clique with an `estimate`, the key `measurements`, and
+  `published: estimated` are refused with `FLX-5036`, which says that estimated cliques are not read in this
+  format. A later format may read cliques estimated from listed measurements, such as the marginals of a model
+  fitted to them. An estimate's `variance` must then be a function of the measurement design and the noise
+  scales only, and it joins the declaration about structure (§3a).
+- **What the reader does not check.** That the method ran as stated, and that the selection's share is what it
+  spent. Each is the profiler's statement, as a noise scale is, and the evidence says so.
+- The grade treats `cliqueSelection` as accounting: it holds no statistic and never keeps a profile from P3.
+- A document that holds one names `1-4-0`, and the table must be one whose rows the unit changes (§3a).
+
+[clique-selection-for-profilers.md](./clique-selection-for-profilers.md) is a note for the authors of a profiler.
 
 ## 6. Pinning a profile
 
@@ -711,7 +956,8 @@ missing:
   column is `category`, and a `range` column is `number` or `timestamp`;
 - the table holds the kind's definition (`quantile/2` for a quantile
   property that declares bins) over the same column (or the same
-  pair, in order, for a correlation), with the same `groupBy`, the same bin
+  pair, in order, for a correlation, and in either order for a `rankCorrelation`), with the same `groupBy`
+  or the same `groupByBins`, the same bin
   edges, the column's declared levels (sorted) for a level histogram, and the
   same quantile level;
 - for `mean/1`, `marginalHistogram/1`, `correlation/1`, `quantile/1` and
@@ -739,7 +985,10 @@ exactly, before it compares anything:
   holds more than dates, and a floored number would be a different
   statistic from the one the profile publishes. A profile of a date column
   holds whole days, so its statistics always divide;
-- a `correlation/1` over a DATE column is refused (`FLX-5037`);
+- a `correlation/1` over a DATE column is refused (`FLX-5037`), and a rank correlation needs no conversion,
+  since ranks do not change when milliseconds become days;
+- a `groupByBins` of a DATE column is spelled in days by the declaration and in milliseconds by the profile,
+  and the check converts the profile's edges and keys before it matches them;
 - a profile that reads the column as a `number` holds days, and is read as such.
 
 The fail-closed conditions of SEAM-FIDELITY-SPEC §5 hold on the profile's
@@ -815,6 +1064,15 @@ count statistic with its `noisyCounts` groups, and `cliques` (§3a, §5a). A doc
 of them names `1-2-0`, and one that names `1-0-0` or `1-1-0` and holds one is refused
 (`FLX-5036`). A document that holds none of them reads as it did and keeps its digest.
 
+Format `1-4-0` adds, all optional and all additive, the rank correlations `kendallTau/1` and `spearmanRho/1`
+of a `columnPairs` entry with the `rowFloor` key (§5), `cliqueMarginal/2` and a table's `cliqueSelection` (§5a),
+`groupByBins` on a column statistic (§3), `groupBy` and `groupByBins` on a relationship's statistic (§5),
+`noise` on a relationship's statistic, on a statistic with `groupByLink` and on a rank correlation (§3a), and
+`follows` in the `privacyUnit` (§3a). A document that holds any of them names `1-4-0`, and one that names an
+earlier format and holds one is refused (`FLX-5036`). A document that holds none of them reads as it did and
+keeps its digest. The schema `profile-1-4.schema.json` validates documents of formats `1-0-0` to `1-4-0`, and
+the earlier schemas are kept as published.
+
 Every addition is an aggregate that a profiler computes where the data
 lives. The engine still reads no record, and `flux_stats` still imports
 nothing but the standard library. The additions already planned fit
@@ -844,6 +1102,12 @@ that rule as follows. Format `1-0-0` implements none of them.
   `fixed_smoothed_max_divergence`. A vocabulary only; nothing of it is used.
 - **Private-PGM** (github.com/ryan112358/private-pgm, Apache-2.0): marginals of cliques of
   columns, released noisily and made consistent, as the pattern behind §5a. No code is used.
+- **DPCopula** (H. Li, L. Xiong and X. Jiang, "Differentially Private Synthesization of Multi-Dimensional Data
+  using Copula Functions", EDBT 2014): the release of Kendall's tau of each pair with noise, and its
+  sensitivity of `4 / (n + 1)`, which `rowFloor` makes independent of the number of records (§5). No code is
+  used.
+- **OpenDP** 0.16.0 (MIT): `make_contingency_table`, the recommended route to measured cliques with bin edges
+  fixed without the data (§5a).
 - **OpenLineage** (spec 2-0-2, facet `DataQualityMetricsInputDatasetFacet`
   1-0-0): the `_producer` and `_schemaURL` envelope, the version in the
   schema's `$id`, and the `columnMetrics` names. OpenLineage writes the

@@ -596,7 +596,10 @@ refused (`FLX-3641`). Each group's rows hold its values, and the rest of each ro
 **Which columns.** A name that is not a column of the expose, and a value that is not one of the column's
 levels, is refused before any row is drawn (`FLX-3642`). A fixed column must be categorical and drawn on its
 own, from its marginal or given other columns, through a junction tree (ADR 0021) or a Chow-Liu forest
-(ADR 0014). A key or foreign key, an identifier, a column a rule sets (a copied column included), a column
+(ADR 0014). A column drawn from `bins` with no `nullFraction` is not fixed by a group, but it is a variable of
+the elimination below, its states its bins named by the text of each lower edge (SEAM-FIDELITY-SPEC.md section 2),
+so a group that fixes a categorical column drawn given a bin changes the weights of the bins to their posterior.
+A key or foreign key, an identifier, a column a rule sets (a copied column included), a column
 a conditional link writes, a column drawn given a column of a linked row, a column that declares a
 `nullFraction`, and a column that is not categorical are refused (`FLX-3643`). So are conditions on an emit
 that declares a history and on a projected emit (a snapshot, events or periods of a history), whose rows the
@@ -625,7 +628,9 @@ table. The per-row and the column path build the same thresholds.
 
 **Draws.** A drawn cell of a conditioned row draws on its own path, at the index every cell of its column
 draws at, and the values only choose the table of weights its uniform is searched in, as KERNEL-SPEC-2
-section 12 says of `given`. A fixed cell draws nothing. No seed path is added, and a bundle without the key
+section 12 says of `given`. A fixed cell draws nothing. A cell of a column drawn from bins chooses its bin from
+the group's table with its first word, and the place inside the bin is the histogram's own draw at the index it
+always has, the bin's pick left unread, on the per-row path and the column path alike. No seed path is added, and a bundle without the key
 has the bytes it had. The groups are bound into the emit's `H` and not its `G`. Conditioned rows are kernel
 0.2.0 only: kernel `0.1.0` refuses the key with `FLX-3105`, naming the kernel.
 

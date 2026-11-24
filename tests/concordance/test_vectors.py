@@ -91,7 +91,8 @@ def test_the_published_blocks_exercise_every_property_the_spec_names(vectors) ->
         for _, block in published_blocks(vectors)
         for entry in block["extension"]["fidelity"]["properties"]
     }
-    assert published == {kind.value for kind in PropertyKind}
+    # A rank correlation is scored from a profile only: a committed slice names it and compares nothing.
+    assert published == {kind.value for kind in PropertyKind} - {"rankCorrelation"}
 
 
 def test_the_published_block_exercises_both_column_kinds_and_both_null_policies(

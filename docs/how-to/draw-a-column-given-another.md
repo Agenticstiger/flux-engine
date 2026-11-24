@@ -254,7 +254,7 @@ payment_recovery_moment: fidelity check failed
 
 ## Pick the links from your tables
 
-With more columns, you choose which column each one is drawn given. `flux_engine.calibrate.structure` suggests the choice from two-way count tables alone. It builds a Chow-Liu tree: the spanning tree with the most mutual information between linked columns (Chow and Liu, 1968), the selection step of the MST synthesizer (McKenna, Miklau and Sheldon, 2021), without its privacy noise. A histogram column is always a leaf, because a bin is not a level another column can be drawn given. `declarations` turns the tree into the `columns` entries to declare. The module is outside the governed `flux_engine.api` surface (see the [Python API](../reference/python-api.md) reference), so its names can still change.
+With more columns, you choose which column each one is drawn given. `flux_engine.calibrate.structure` suggests the choice from two-way count tables alone. It builds a Chow-Liu tree: the spanning tree with the most mutual information between linked columns (Chow and Liu, 1968), the selection step of the MST synthesizer (McKenna, Miklau and Sheldon, 2021), without its privacy noise. It takes a histogram column as a leaf only. A declaration can name the bin of a histogram column as a parent ([Draw a column given the bin of another](./draw-a-column-given-the-bin-of-another.md)), but the suggestion does not yet. `declarations` turns the tree into the `columns` entries to declare. The module is outside the governed `flux_engine.api` surface (see the [Python API](../reference/python-api.md) reference), so its names can still change.
 
 ```python
 from dataclasses import dataclass

@@ -40,10 +40,10 @@ check beside them, and it raises ``FLX-4005``. A plan that pins a profile record
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Collection, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.core.errors import ErrorCode, FluxError, register
-from flux_engine.core.grades import Pattern, at_least
+from flux_engine.core.grades import Pattern, at_least, weakest
 
 __all__ = [
     "BUILT_IN_FLOORS",
@@ -205,6 +205,8 @@ class Shortfall:
     sensitivity: str
     grade: Pattern
     minimum: Pattern
+    #: The column lies in a table the unit of privacy does not reach, so it counts as ``P1``.
+    fixed: bool = False
 
 
 #: What the message of ``FLX-4005`` tells the caller to do, so a person who never opens the page can.
@@ -225,7 +227,13 @@ class GradeBelowMinimum(FluxError):
     ) -> None:
         shown = "; ".join(
             f"{_name(item.expose_id)}.{_name(item.column)} is {item.sensitivity}, which needs "
-            f"{item.minimum.value} or stronger, and {grade_of} is {item.grade.value}"
+            f"{item.minimum.value} or stronger, and "
+            + (
+                f"the profile's unit of privacy does not reach {_name(item.expose_id)}, whose rows "
+                f"the guarantee treats as fixed, so its columns count as {item.grade.value}"
+                if item.fixed
+                else f"{grade_of} is {item.grade.value}"
+            )
             for item in shortfalls[:10]
         )
         more = f"; and {len(shortfalls) - 10} more" if len(shortfalls) > 10 else ""
@@ -246,10 +254,16 @@ def enforce_minimum_grades(
     columns: Sequence[Tuple[str, str]],
     *,
     grade_of: str = "the run's grade",
+    fixed: Collection[str] = (),
 ) -> None:
     """Refuse (``FLX-4005``) a run whose grade is below the floor of a labelled column.
 
     *grade_of* names the profile the grade belongs to, for the message, when it is not the run's own.
+
+    *fixed* are the exposes whose rows the profile's unit of privacy does not reach (ADR 0037
+    decision 1): the guarantee treats their rows as the same in every neighbouring data set, so it
+    says nothing about them, and a labelled column of such an expose counts as ``P1`` here whatever
+    the run's grade, and whether or not a noisy statistic touches it.
 
     *grade* is the run's one grade, *sensitivities* the labels by ``(exposeId, column)``, *floors*
     each label's floor and *columns* every column the run emits. A labelled column that is not one
@@ -265,7 +279,8 @@ def enforce_minimum_grades(
                 "emits, so its minimum grade cannot be checked",
             )
         floor = floors.get(label)
-        if floor is not None and not at_least(grade, floor):
-            short.append(Shortfall(expose_id, name, label, grade, floor))
+        held = weakest([grade, Pattern.P1]) if expose_id in fixed else grade
+        if floor is not None and not at_least(held, floor):
+            short.append(Shortfall(expose_id, name, label, held, floor, expose_id in fixed))
     if short:
         raise GradeBelowMinimum(short, grade_of=grade_of)

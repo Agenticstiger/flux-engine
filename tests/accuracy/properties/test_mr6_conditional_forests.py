@@ -638,7 +638,9 @@ def test_every_corruption_is_refused_with_flx_3402(tier: Tier, accuracy_log: Res
         forest, decls, kind = case
         with pytest.raises(FluxError) as refused:
             make_plan(forest, 4, decls=decls)
-        assert refused.value.code.code == "FLX-3402", (kind, str(refused.value))
+        # A binned parent is drawn on kernel 0.2.0 only (ADR 0036): this plan is kernel 0.1.0.
+        expected = "FLX-3105" if kind == "given_hist" else "FLX-3402"
+        assert refused.value.code.code == expected, (kind, str(refused.value))
         examples["n"] += 1
 
     prop()

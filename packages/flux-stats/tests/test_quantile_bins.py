@@ -680,7 +680,7 @@ def test_a_quantile_2_statistic_in_a_relationship_is_read_and_validates() -> Non
 
 def test_an_unknown_format_url_is_refused() -> None:
     document = _binned_document()
-    document["_schemaURL"] = SCHEMA_URL_1_1_0.replace("1-1-0", "1-4-0")
+    document["_schemaURL"] = SCHEMA_URL_1_1_0.replace("1-1-0", "1-5-0")
     assert _refused(document).detail.startswith("profile._schemaURL")
     assert list(VALIDATOR.iter_errors(document)), "the schema refuses it too"
 

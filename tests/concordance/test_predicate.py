@@ -89,7 +89,11 @@ def test_every_property_kind_the_spec_names_has_a_parsed_form() -> None:
             published["extension"]["fidelity"], build_expose(published)
         ).properties
     }
-    assert parsed == set(PropertyKind), "the published blocks must exercise every property kind"
+    # A rank correlation is scored from a profile only (ADR 0035 decision 7): a committed slice names
+    # it and compares nothing, so no published block of committed slices holds it.
+    assert parsed == set(PropertyKind) - {
+        PropertyKind.RANK_CORRELATION
+    }, "the published blocks must exercise every property kind a committed slice compares"
 
 
 def test_columns_iterate_in_one_order_whatever_the_yaml_order_was(document, expose) -> None:
@@ -760,6 +764,7 @@ def test_the_closed_sets_have_exactly_the_members_the_spec_names() -> None:
         "correlation",
         "quantile",
         "levelHistogram",
+        "rankCorrelation",
     }
 
 

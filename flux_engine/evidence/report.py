@@ -199,6 +199,42 @@ def render_conditions_note(conditioned: Sequence[ConditionedEmit]) -> Optional[s
     return "\n\n".join(entries)
 
 
+#: One emit whose plan holds a copula: its ``exposeId``, its columns in draw order, its measure and
+#: its shrinkage ``alpha`` as the plan states it.
+CopulaEmit = Tuple[str, Sequence[str], str, str]
+
+
+def render_copula_note(copulas: Sequence[CopulaEmit]) -> Optional[str]:
+    """What "Fidelity" says of each emit drawn through a copula, or ``None`` when there is none.
+
+    The columns, the measure and the shrinkage. A shrunk matrix is said to be: every latent
+    correlation was multiplied by ``1 - alpha``, so the columns are less correlated than declared.
+    """
+    if not copulas:
+        return None
+    entries = []
+    for expose_id, columns, measure, alpha in copulas:
+        names = ", ".join(_cell(name, "a column") for name in columns)
+        text = (
+            f"Copula of emit {_cell(expose_id, 'an emit')}: {names} are drawn together through a "
+            f"Gaussian copula of the declared {_number_word(measure)} rank correlations."
+        )
+        if _number(alpha) != "0":
+            text += (
+                f" The declared matrix was shrunk (alpha {_number(alpha)}): every correlation was "
+                "multiplied by one minus alpha on the latent scale, so the columns are less correlated "
+                "than declared."
+            )
+        else:
+            text += " The declared matrix was valid as written (alpha 0)."
+        entries.append(text)
+    return "\n\n".join(entries)
+
+
+def _number_word(measure: str) -> str:
+    return {"kendall": "Kendall", "spearman": "Spearman"}.get(measure, "rank")
+
+
 _NUMBER = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
 
 
@@ -486,12 +522,60 @@ def _accounting_lines(accounting: Any) -> List[str]:
     spent = ", ".join(f"{key} {value}" for key, value in accounting.spent.items())
     return [
         f"- Definition: {accounting.definition}.",
-        f"- Unit of privacy: one row of {_cell(accounting.unit, 'the expose')}; neighbouring "
-        "data sets differ by adding or removing one row of it.",
+        *_unit_lines(accounting),
         f"- Privacy loss, in total: {loss}.",
         f"- Accounting: {accounting.composition}; {accounting.parts} noisy "
         f"part{'s' if accounting.parts != 1 else ''} spend {spent or 'nothing'}, within the total.",
     ]
+
+
+def _unit_lines(accounting: Any) -> List[str]:
+    """The unit of privacy, with what it follows, the tables it reaches and the tables it treats as fixed.
+
+    A profile that names format 1-4-0 states the unit with what it follows (ADR 0037): for a unit
+    that follows relationships, the rows of each followed table one row of the expose takes with it,
+    and in every case the tables whose rows the unit does not reach and the guarantee therefore
+    treats as fixed. An earlier profile keeps the one line it always had.
+    """
+    expose = _cell(accounting.unit, "the expose")
+    if not accounting.from_1_4:
+        return [
+            f"- Unit of privacy: one row of {expose}; neighbouring "
+            "data sets differ by adding or removing one row of it."
+        ]
+    if not accounting.follows:
+        lines = [
+            f"- Unit of privacy: one row of {expose}; neighbouring data sets differ by adding or "
+            "removing one row of it."
+        ]
+    else:
+        followed = ", ".join(
+            f"at most {cap} row{'s' if cap != 1 else ''} of "
+            f"{_cell(child, 'a table')} for each row of {_cell(parent, 'a table')}"
+            for parent, child, cap in accounting.follows
+        )
+        lines = [
+            f"- Unit of privacy: one row of {expose} together with the rows that follow it, "
+            f"{followed}; neighbouring data sets differ by adding or removing one such unit."
+        ]
+    reached = [(table, rows) for table, rows in accounting.reached if table != accounting.unit]
+    if reached:
+        shown = ", ".join(
+            f"{_cell(table, 'a table')} ({rows} row{'s' if rows != 1 else ''})"
+            for table, rows in reached
+        )
+        lines.append(
+            f"- Tables the unit reaches besides {expose}, with the most rows one unit contributes: "
+            f"{shown}."
+        )
+    if accounting.fixed:
+        shown = ", ".join(_cell(table, "a table") for table in accounting.fixed)
+        lines.append(
+            f"- Tables the unit does not reach: {shown}. The guarantee treats their rows as fixed, "
+            "the same in every neighbouring data set, so it says nothing about them; a column of "
+            "such a table that carries a sensitivity label counts as P1 for its minimum grade."
+        )
+    return lines
 
 
 _NOT_COVERED = (
@@ -500,6 +584,18 @@ _NOT_COVERED = (
     "without the data. Not covered: hand-written parameters (they are not data, and the guarantee "
     "says nothing about how they were chosen), any entity larger than the unit, any other release "
     "of the same data, and the profiler's own conduct."
+)
+
+#: The same for a profile that names format 1-4-0, whose declaration covers the structure of the
+#: release more fully: what was chosen without the data, or is part of the release.
+_NOT_COVERED_1_4 = (
+    "The profile states, and the engine cannot check, that the mechanism it names made the numbers "
+    "and that the levels and bin edges of its histograms and cliques, the bins of every "
+    "groupByBins, the group keys of its grouped noisy statistics, its sampleSize bands, every "
+    "rowFloor and every maxChildren were chosen without the data. Not covered: hand-written "
+    "parameters (they are not data, and the guarantee says nothing about how they were chosen), any "
+    "entity larger than the unit, any other release of the same data, and the profiler's own "
+    "conduct."
 )
 
 
@@ -581,7 +677,7 @@ def render_privacy_section(grade: Optional[RunGrade]) -> str:
         )
         lines = [head, *_accounting_lines(profile.accounting)]
         if pattern is Pattern.P3:
-            lines.append(f"- {_NOT_COVERED}")
+            lines.append(f"- {_NOT_COVERED_1_4 if profile.accounting.from_1_4 else _NOT_COVERED}")
         blocks.append("\n".join(lines))
     if grade.generators:
         blocks.append(_generator_lines(grade.generators))
@@ -720,6 +816,7 @@ def render_evidence_report(
     conditioned: Sequence[ConditionedEmit] = (),
     forecast_accuracy: Optional[ForecastAccuracy] = None,
     held_out_grade: Optional[Pattern] = None,
+    copulas: Sequence[CopulaEmit] = (),
 ) -> str:
     """Render ``EVIDENCE.md``'s eight fixed sections for one bundle, and a ninth for forecasts.
 
@@ -766,6 +863,9 @@ def render_evidence_report(
     (:func:`render_conditions_note`); empty, the default, adds nothing, so a run with
     no conditions gets the report it got before.
 
+    *copulas* is each emit of the run whose plan holds a copula (:func:`render_copula_note`),
+    stated under "Fidelity"; empty, the default, adds nothing.
+
     *forecast_accuracy* is the run's forecasts, scored or pending
     (:func:`flux_engine.evidence.forecast_accuracy.build_forecast_accuracy`). Given one, the
     report gains "Forecast Accuracy" after "Fidelity"
@@ -795,7 +895,9 @@ def render_evidence_report(
         ),
         "Conformance": conformance_summary,
         "Reproducibility": render_reproducibility_section(reproducibility, stored_generators),
-        "Fidelity": fidelity_summary,
+        "Fidelity": "\n\n".join(
+            part for part in (fidelity_summary, render_copula_note(copulas)) if part
+        ),
         FORECAST_ACCURACY_SECTION: (
             render_forecast_accuracy_section(forecast_accuracy)
             if forecast_accuracy is not None

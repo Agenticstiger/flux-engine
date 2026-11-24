@@ -81,6 +81,7 @@ __all__ = [
     "SCHEMA_URL",
     "SCHEMA_URL_1_3_0",
     "SCHEMA_URL_1_4_0",
+    "SCHEMA_URL_1_5_0",
     "SCORECARD_FILE",
     "Aggregate",
     "ContractShape",
@@ -113,6 +114,14 @@ SCHEMA_URL_1_3_0 = (
 #: §9a): every other scorecard keeps the format it wrote before.
 SCHEMA_URL_1_4_0 = (
     "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-4-0/FluxScorecard.json"
+)
+
+#: Format ``1-5-0``, written only by a scorecard that holds a ``rankCorrelation`` row, a row
+#: grouped by the bins of a column, or a children-per-parent row grouped by a parent column
+#: (SCORECARD-SPEC.md §3): every other scorecard
+#: keeps the format it wrote before.
+SCHEMA_URL_1_5_0 = (
+    "https://agenticstiger.github.io/flux/engine/spec/scorecard/1-5-0/FluxScorecard.json"
 )
 
 #: The ``property`` of the rows that make a scorecard format ``1-4-0``.
@@ -201,6 +210,13 @@ class PropertyScore:
     #: The widening the run's sampling gave the margin of a distance tolerance that declares
     #: ``sampling: true`` (format 1-4-0): the largest any group took. ``None`` without the key.
     sampling: Optional[str] = None
+    #: A rank correlation's comparison, as the row writes it (format 1-5-0): the measure, both
+    #: values, the distance, the sampling widening and what the two may differ by, and the copula's
+    #: ``alpha`` when the run's plan has one. ``None`` for every other kind.
+    rank: Optional[Mapping[str, Any]] = None
+    #: The bins the property is grouped by, as ``{"column": name, "bins": [edges]}`` (format 1-5-0),
+    #: in place of ``group_by``; its groups are the bins, named by ordinal in the order of the bins.
+    group_by_bins: Optional[Mapping[str, Any]] = None
 
     @property
     def subject(self) -> str:
@@ -210,6 +226,8 @@ class PropertyScore:
         text = f"{self.kind} of {', '.join(self.columns)}"
         if self.group_by is not None:
             text += f", grouped by {self.group_by}"
+        if self.group_by_bins is not None:
+            text += f", grouped by the bins of {self.group_by_bins['column']}"
         return text
 
     def to_document(self) -> Dict[str, Any]:
@@ -238,10 +256,14 @@ class PropertyScore:
         }
         if self.group_by is not None:
             document["groupBy"] = self.group_by
+        if self.group_by_bins is not None:
+            document["groupByBins"] = dict(self.group_by_bins)
         if self.noise is not None:
             document["noise"] = dict(self.noise)
         if self.sampling is not None:
             document["widening"] = {"sampling": self.sampling}
+        if self.rank is not None:
+            document["rank"] = dict(self.rank)
         return document
 
     def assertion(self) -> Optional[Dict[str, Any]]:
@@ -274,6 +296,8 @@ class PropertyScore:
             params["score"] = render_exact(self.score)
         if self.group_by is not None:
             params["groupBy"] = self.group_by
+        if self.group_by_bins is not None:
+            params["groupByBins"] = dict(self.group_by_bins)
         entry: Dict[str, Any] = {
             "assertion": self.statistic,
             "success": self.outcome == WITHIN,
@@ -288,6 +312,19 @@ class PropertyScore:
             # whole dataset to OpenLineage; the pair travels in params.
             params["columns"] = list(self.columns)
         return entry
+
+
+def _holds_1_5_0(prop: PropertyScore) -> bool:
+    """Whether a property row holds what format 1-5-0 adds: a rank correlation, or a grouped
+    children-per-parent row (the ``groupBy`` or ``groupByBins`` member its document then has)."""
+    if prop.rank is not None or prop.group_by_bins is not None:
+        return True
+    document = prop.document
+    return (
+        document is not None
+        and document.get("property") == "childrenPerParent"
+        and ("groupBy" in document or "groupByBins" in document)
+    )
 
 
 def _holds_1_4_0(prop: PropertyScore) -> bool:
@@ -801,6 +838,8 @@ class Scorecard:
     def _format(self) -> str:
         """The schema the document names: the oldest format that can hold every row it has."""
         rows = [prop for table in self.tables for prop in table.properties]
+        if any(_holds_1_5_0(prop) for prop in rows):
+            return SCHEMA_URL_1_5_0
         if (
             self.overlay is not None
             or self.queries is not None
@@ -924,12 +963,35 @@ class TableInput:
     module_rows: Tuple["PropertyScore", ...] = ()
 
 
+def _rank_document(
+    outcome: Optional[PropertyOutcome], alpha: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """The ``rank`` member of a rank correlation's row, or ``None`` when no comparison was made."""
+    found = outcome.rank if outcome is not None else None
+    if found is None:
+        return None
+    document: Dict[str, Any] = {
+        "measure": found.measure,
+        "records": found.records,
+        "run": render_exact(found.run),
+        "reference": render_exact(found.reference),
+        "distance": render_exact(found.distance),
+        "samplingWidening": render_exact(found.sampling),
+        "reach": render_exact(found.reach),
+        "tooNoisyToTell": found.too_noisy,
+    }
+    if alpha is not None:
+        document["alpha"] = alpha
+    return document
+
+
 def _property_score(
     expose_id: str,
     entry: CompiledProperty,
     outcome: Optional[PropertyOutcome],
     refusals: Sequence[Refusal],
     table_refused: bool,
+    alpha: Optional[str] = None,
 ) -> PropertyScore:
     declaration = entry.declaration
     kind = declaration.kind.value
@@ -956,7 +1018,15 @@ def _property_score(
         statistic=definition_for_property(declaration).identifier,
         columns=tuple(declaration.columns),
         group_by=declaration.group_by,
-        dimension=dimension_of(kind, declaration.group_by is not None),
+        group_by_bins=(
+            {
+                "column": declaration.group_by_bins.column,
+                "bins": [render_exact(edge) for edge in declaration.group_by_bins.bins],
+            }
+            if declaration.group_by_bins is not None
+            else None
+        ),
+        dimension=dimension_of(kind, declaration.grouped),
         outcome=status,
         score=score,
         groups_scored=len(scores),
@@ -981,10 +1051,13 @@ def _property_score(
             if outcome is not None and outcome.cell_variance is not None
             else None
         ),
+        rank=_rank_document(outcome, alpha),
     )
 
 
-def _table(table: TableInput, profile: Optional[Profile]) -> TableScore:
+def _table(
+    table: TableInput, profile: Optional[Profile], alpha: Optional[str] = None
+) -> TableScore:
     compiled, evaluation = table.compiled, table.evaluation
     declares = (
         table.declares_fidelity if table.declares_fidelity is not None else compiled is not None
@@ -1016,6 +1089,7 @@ def _table(table: TableInput, profile: Optional[Profile]) -> TableScore:
                 outcomes.get(entry.property_id),
                 refusals,
                 bool(table_refusals),
+                alpha,
             )
             for entry in compiled.properties
         )
@@ -1071,6 +1145,7 @@ def build_scorecard(
     module_rows: Optional[Mapping[str, Sequence["PropertyScore"]]] = None,
     overlay: Optional[Tuple[str, str]] = None,
     queries: Optional[QueriesDimension] = None,
+    copula_alphas: Optional[Mapping[str, str]] = None,
 ) -> Scorecard:
     """Score a run from its per-emit evaluations against the pinned profile.
 
@@ -1084,15 +1159,18 @@ def build_scorecard(
     *overlay* is the name and digest of the profile overlay *profile* was made with, if any
     (format 1-4-0): the scorecard then names it. *queries* holds the consumers' queries as counted on
     the run (format 1-4-0): it scores the ``queries`` dimension, which otherwise no property of a
-    table does.
+    table does. *copula_alphas* holds the shrinkage of each emit whose plan has a copula, by
+    ``exposeId`` (format 1-5-0): a rank correlation row of that emit carries it.
     """
     if module_rows:
         tables = [
             replace(table, module_rows=tuple(module_rows.get(table.expose_id, ())))
             for table in tables
         ]
+    alphas = copula_alphas or {}
     scored = tuple(
-        _table(table, profile) for table in sorted(tables, key=lambda entry: entry.expose_id)
+        _table(table, profile, alphas.get(table.expose_id))
+        for table in sorted(tables, key=lambda entry: entry.expose_id)
     )
     everything = [entry for table in scored for entry in table.properties]
     dimensions = tuple(

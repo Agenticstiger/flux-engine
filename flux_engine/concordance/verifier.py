@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.concordance.boundary.slice import CommittedState
 from flux_engine.concordance.boundary.statistic import (
@@ -50,17 +50,22 @@ from flux_engine.concordance.errors import FLX_5011, FLX_5037
 from flux_engine.concordance.predicate import (
     ColumnDeclaration,
     ColumnKind,
+    PropertyDeclaration,
     PropertyKind,
     ValueDomain,
 )
+from flux_engine.concordance.rank import RankComparison, compare_rank, run_rank_value
 from flux_engine.concordance.similarity import similarity
 from flux_engine.core.canonical import canonical_bytes
 from flux_engine.core.digest import DigestRef, digest_of_stream
 from flux_engine.core.errors import FluxError
 from flux_stats import Check, StatisticDefinition, definition_for_property
+from flux_stats.cliques import edge_text
+from flux_stats.fidelity import BinsGrouping
 from flux_stats.fixedpoint import FLX_5005, require_sample
 from flux_stats.noise import sampling_widening, widening
 from flux_stats.profile import (
+    BinGrouping,
     ColumnEntry,
     LinkGrouping,
     Profile,
@@ -229,6 +234,11 @@ class PropertyOutcome:
     #: The mechanism that statistic was released under (``gaussian``, ``discreteGaussian`` or
     #: ``laplace``); for a statistic formed from a clique, the clique's.
     noise_mechanism: Optional[str] = None
+    #: A rank correlation's comparison (ADR 0035 decision 7): both values, the distance, the
+    #: widenings and the verdict. ``None`` for every other kind.
+    rank: Optional[RankComparison] = None
+    #: The bins the property is grouped by, when it is grouped by bins (format 1-4-0).
+    group_by_bins: Optional[BinsGrouping] = None
 
     @property
     def widening(self) -> Optional[Fraction]:
@@ -268,6 +278,11 @@ class PropertyOutcome:
             row["columns"] = list(self.columns)
         if self.group_by is not None:
             row["groupBy"] = self.group_by
+        if self.group_by_bins is not None:
+            row["groupByBins"] = {
+                "column": self.group_by_bins.column,
+                "bins": [render_exact(edge) for edge in self.group_by_bins.bins],
+            }
         row["tolerance"] = dict(sorted(self.tolerance.items()))
         row["margin"] = self.margin
         row["epsilon"] = self.epsilon
@@ -305,6 +320,9 @@ class FidelityEvaluation:
     outcomes: Tuple[PropertyOutcome, ...]
     refusals: Tuple[Refusal, ...] = ()
     synthetic_rows: int = 0
+    #: The properties this comparison named and did not compare: a rank correlation against a
+    #: committed slice, whose ``S`` and ``A4`` do not add up across blocks (ADR 0035 decision 7).
+    not_compared: Tuple[str, ...] = ()
 
     @property
     def refused(self) -> bool:
@@ -386,6 +404,7 @@ def _unscored(entry: CompiledProperty) -> PropertyOutcome:
         kind=declaration.kind,
         columns=declaration.columns,
         group_by=declaration.group_by,
+        group_by_bins=declaration.group_by_bins,
         tolerance=declaration.tolerance.declared,
         margin=render_exact(entry.margin) if entry.margin is not None else None,
         epsilon=render_exact(entry.epsilon),
@@ -541,7 +560,11 @@ class ClearStatistic:
             )
 
         outcomes: List[PropertyOutcome] = []
+        not_compared: List[str] = []
         for entry in self.compiled.properties:
+            if entry.declaration.kind is PropertyKind.RANK_CORRELATION:
+                not_compared.append(entry.property_id)
+                continue
             outcome, property_refusals = self._evaluate_property(entry)
             refusals.extend(property_refusals)
             outcomes.append(outcome)
@@ -550,6 +573,7 @@ class ClearStatistic:
             outcomes=tuple(outcomes),
             refusals=tuple(refusals),
             synthetic_rows=len(self.synthetic_rows),
+            not_compared=tuple(not_compared),
         )
 
     def _evaluate_property(self, entry: CompiledProperty) -> Tuple[PropertyOutcome, List[Refusal]]:
@@ -825,6 +849,17 @@ def _cell_labels(kind: PropertyKind, reference: StatisticEntry) -> Tuple[str, ..
     return ()
 
 
+def _in_group_order(keys: Iterable[str], declaration: PropertyDeclaration) -> List[str]:
+    """The groups of a property in the order they are named by ordinal.
+
+    The NFC-sorted order of their keys, or, for a property grouped by bins, the order of the bins
+    (a key is a lower edge's decimal text, and ``10`` sorts before ``2`` as text).
+    """
+    if declaration.group_by_bins is not None:
+        return sorted(keys, key=Fraction)
+    return sorted(keys)
+
+
 def _reach(variance: Fraction, cells: int, group: ProfileGroup) -> Fraction:
     """:func:`flux_stats.noise.widening` of one noisy group: its exact total and its records.
 
@@ -920,6 +955,8 @@ class ClearProfile:
         names = list(declaration.columns)
         if declaration.group_by is not None:
             names.append(declaration.group_by)
+        if declaration.group_by_bins is not None:
+            names.append(declaration.group_by_bins.column)
         for name in names:
             if name in self.link_groupings:
                 # A column of the linked row: the profile holds it as a grouping, not a column.
@@ -971,6 +1008,8 @@ class ClearProfile:
                 f"{self.profile.fractional_bits}, the block declares "
                 f"{block.encoding.fractional_bits}",
             )
+        if declaration.kind is PropertyKind.RANK_CORRELATION:
+            return self._rank_reference(entry)
         levels: Tuple[str, ...] = ()
         if declaration.kind is PropertyKind.LEVEL_HISTOGRAM:
             levels = level_cells(block.columns[declaration.columns[0]])
@@ -989,6 +1028,16 @@ class ClearProfile:
         # nearest candidate lacks.
         link = self.link_groupings.get(declaration.group_by or "")
         grouping = None if link is not None else declaration.group_by
+        # The profile spells a DATE column's bin edges in milliseconds; the declaration's are days.
+        wanted_bins: Optional[BinGrouping] = None
+        keys_in_days = False
+        if declaration.group_by_bins is not None:
+            keys_in_days = self._read_in_days(declaration.group_by_bins.column, table)
+            scale = MS_PER_DAY if keys_in_days else 1
+            wanted_bins = BinGrouping(
+                column=declaration.group_by_bins.column,
+                bins=tuple(edge * scale for edge in declaration.group_by_bins.bins),
+            )
         nearest: Optional[List[str]] = None
         for candidate in candidates:
             bins = candidate.bins
@@ -1000,7 +1049,9 @@ class ClearProfile:
                     for name, same in (
                         (
                             "groupBy",
-                            candidate.group_by == grouping and candidate.group_by_link == link,
+                            candidate.group_by == grouping
+                            and candidate.group_by_link == link
+                            and candidate.group_by_bins == wanted_bins,
                         ),
                         ("bins", bins == declaration.bins),
                         ("levels", candidate.levels == levels),
@@ -1014,18 +1065,28 @@ class ClearProfile:
                 candidate.identifier == statistic.identifier
                 and candidate.group_by == grouping
                 and candidate.group_by_link == link
+                and candidate.group_by_bins == wanted_bins
                 and not candidate.per
                 and bins == declaration.bins
                 and candidate.levels == levels
                 and candidate.level == declaration.level
             ):
+                found = candidate
                 if in_days:
-                    return replace(
-                        candidate,
+                    found = replace(
+                        found,
                         bins=bins,
-                        groups=tuple(_group_in_days(group) for group in candidate.groups),
+                        groups=tuple(_group_in_days(group) for group in found.groups),
                     )
-                return candidate
+                if keys_in_days:
+                    found = replace(
+                        found,
+                        groups=tuple(
+                            replace(group, key=edge_text(Fraction(group.key) / MS_PER_DAY))
+                            for group in found.groups
+                        ),
+                    )
+                return found
         if nearest:
             raise FluxError(
                 FLX_5037,
@@ -1035,6 +1096,85 @@ class ClearProfile:
         raise FluxError(
             FLX_5037,
             f"the profile holds no {statistic.identifier} statistic over this property's columns",
+        )
+
+    def _rank_reference(self, entry: CompiledProperty) -> StatisticEntry:
+        """The profile's rank correlation of the property's pair, read in either order, or refuse.
+
+        Both statistics are symmetric, so the pair is found whichever way the profile names it.
+        """
+        declaration = entry.declaration
+        statistic = definition_for_property(declaration)
+        expose_id = self.compiled.block.expose_id
+        pair = tuple(declaration.columns)
+        for order in (pair, pair[::-1]):
+            for candidate in self.profile.pair_statistics(expose_id, order):
+                if candidate.identifier == statistic.identifier:
+                    return candidate
+        raise FluxError(
+            FLX_5037,
+            f"the profile holds no {statistic.identifier} statistic over this property's columns",
+        )
+
+    def _evaluate_rank(
+        self, entry: CompiledProperty, table: TableEntry
+    ) -> Tuple[PropertyOutcome, List[Refusal]]:
+        """Compare one rank correlation with the profile's (ADR 0035 decision 7, :mod:`flux_engine.concordance.rank`)."""
+        property_id = entry.property_id
+        block = self.compiled.block
+        base = _unscored(entry)
+        try:
+            reference = self._reference(entry, table)
+            run, records = run_rank_value(
+                self.synthetic_rows,
+                entry.declaration,
+                block.columns,
+                block,
+                subject="synthetic dataset",
+            )
+        except FluxError as error:
+            return base, [
+                Refusal(code=error.code.code, reason=error.detail, property_id=property_id)
+            ]
+        group = reference.groups[0]
+        if not group.published or group.value is None:
+            return (
+                replace(
+                    base,
+                    outcome=CENSORED,
+                    groups=(GroupOutcome("", 0, records, CENSORED),),
+                ),
+                [],
+            )
+        assert entry.margin is not None
+        found = compare_rank(
+            entry.declaration,
+            entry.margin,
+            run=run,
+            records=records,
+            reference=group.value,
+            variance=reference.cell_variance,
+        )
+        outcome = WITHIN if found.within else OUTSIDE
+        return (
+            replace(
+                base,
+                outcome=outcome,
+                groups=(
+                    GroupOutcome(
+                        group="",
+                        committed_count=group.statistic.k if group.statistic is not None else 0,
+                        synthetic_count=records,
+                        outcome=outcome,
+                        score=found.score,
+                        widening=found.noise,
+                    ),
+                ),
+                cell_variance=reference.cell_variance,
+                noise_mechanism=reference.noise.mechanism if reference.noise is not None else None,
+                rank=found,
+            ),
+            [],
         )
 
     def _draw_statistic(
@@ -1056,8 +1196,14 @@ class ClearProfile:
             (
                 found
                 for found in column.clique_statistics
-                if (found.identifier, found.group_by, found.levels)
-                == (reference.identifier, reference.group_by, reference.levels)
+                if (found.identifier, found.group_by, found.group_by_bins, found.levels, found.bins)
+                == (
+                    reference.identifier,
+                    reference.group_by,
+                    reference.group_by_bins,
+                    reference.levels,
+                    reference.bins,
+                )
             ),
             None,
         )
@@ -1163,6 +1309,8 @@ class ClearProfile:
         self, entry: CompiledProperty, table: TableEntry
     ) -> Tuple[PropertyOutcome, List[Refusal]]:
         """Compare one property with the profile, refusing only that property."""
+        if entry.declaration.kind is PropertyKind.RANK_CORRELATION:
+            return self._evaluate_rank(entry, table)
         property_id = entry.property_id
         block = self.compiled.block
         base = _unscored(entry)
@@ -1190,14 +1338,14 @@ class ClearProfile:
             ]
         statistic = definition_for_property(entry.declaration)
         check = replace(_check_of(entry), reference_side="profile")
-        grouped = entry.declaration.group_by is not None
+        grouped = entry.declaration.grouped
         width_units = self._width_units(entry)
         refusals: List[Refusal] = []
         group_outcomes: List[GroupOutcome] = []
         drawn = self._draw_statistic(entry, table, reference)
         labels = _cell_labels(entry.declaration.kind, reference)
         draws = {group.key: group for group in drawn.groups} if drawn is not None else {}
-        for ordinal, key in enumerate(sorted(profiled)):
+        for ordinal, key in enumerate(_in_group_order(profiled, entry.declaration)):
             group = profiled[key]
             synthetic = synthetic_groups[key]
             outcome, committed, score, widened, sampled = CENSORED, 0, None, None, None

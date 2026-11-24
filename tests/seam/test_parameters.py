@@ -380,7 +380,7 @@ def _placed(*prefix: str) -> set:
         (
             predicate._PROPERTY_KEYS,
             ("emits", "*", "fidelity", "properties", "#"),
-            {"property", "column", "columns", "groupBy"},
+            {"property", "column", "columns", "groupBy", "measure", "groupByBins"},
         ),
         (
             predicate._TOLERANCE_KEYS,

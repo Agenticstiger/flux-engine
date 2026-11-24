@@ -217,10 +217,32 @@ Five things hold, whatever the seed:
 | `parentWhen` | A FLUID SQL/1 predicate over the parent expose's own columns. Only a parent whose final row makes it true has children, and every other parent has none. With no condition every parent is eligible. |
 | `children` | The shape of the number of children per parent, in the spelling of a fidelity column: `levels` with `levelWeights`, or `bins` with `binWeights`, over whole counts. Each level is one count. Each bin is the whole counts from its lower edge up to the next edge, and the last bin holds its upper edge. A bin spreads its parents evenly over its counts. With no `children` the children are spread as evenly as whole counts allow. |
 | `tolerance` | A decimal, default `0.10`: the largest total variation distance a check of children per parent allows against a profile. |
+| `given` | A column of the parent expose whose class sets the weights of `children` (see [Children that depend on a column of the parent](#children-that-depend-on-a-column-of-the-parent)). Needs `children`. |
+| `childrenGiven` | For each class of `given`, a list of weights over the classes `children` declares. A class with no list takes `children`'s weights. |
 
 No other key is read, and an unknown key is refused with [FLX-3105](../reference/errors/FLX-3105.md). A module may also supply an expected number of children for each parent, which the layout reads as a weight; that is not a key of the bundle.
 
 The entry changes the rows the child table generates, so a change to it moves the plan's digests. A bundle with no `counts` entry keeps every byte and digest it had.
+
+## Children that depend on a column of the parent
+
+Larger customers often have more invoices. A `counts` entry can say so: `given` names a column of the parent, and `childrenGiven` gives each of its classes its own weights over the classes `children` declares.
+
+```text
+counts:
+  - emit: invoice
+    relationship: account
+    children: { bins: ["0", "1", "3", "10"], binWeights: ["0.2", "0.5", "0.3"] }
+    given: segment
+    childrenGiven:
+      business: ["0.05", "0.35", "0.60"]
+```
+
+The column is a `category` column of the parent with declared levels, or a column drawn from bins, and it declares no `nullFraction`. Its classes are its levels, or its bins named by the text of their lower edges. Each list has one weight for each class of `children`, in order. Here `business` accounts mostly have three or more invoices, and every other segment takes the weights of `children`, which the plan lists under `countsGiven` for the emit, with the classes that took them in `childrenGivenDefault`. The parents of each class still total the child rows: the layout splits the eligible parents by the class on their final row and lays each class out by the largest remainder, as above. It needs kernel 0.2.0, which refuses the keys under 0.1.0 with [FLX-3105](../reference/errors/FLX-3105.md).
+
+The generator refuses the entry with [FLX-3403](../reference/errors/FLX-3403.md) when `given` is no column of the parent, is not a category column with declared levels nor a column drawn from bins, declares a `nullFraction`, is drawn given a column of a linked row, or is set by a rule from a link, a previous version, children or siblings or by a summary over the children, since the children wait on the parent's final rows. A key of `childrenGiven` that is no class of the column, or a list that does not match the classes of `children`, is refused as well.
+
+When the pinned profile holds a histogram of children per parent grouped by that column (or by its bins), `fluxsim verify` scores the relationship group by group and its `childrenPerParent` row names scorecard format `1-5-0`; a profile with only the ungrouped histogram leaves the row as it is.
 
 ## Summaries of the children
 

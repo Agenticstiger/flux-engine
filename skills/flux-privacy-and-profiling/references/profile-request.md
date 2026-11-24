@@ -13,6 +13,8 @@ A request holds names and registered identifiers and nothing else. It carries no
 - `relationships`: the children-per-parent statistics asked of each declared relationship.
 - `facts`: the fact shares asked of the contract's rules.
 
+Request format 1-2-0 adds four optional asks, which ask for the statistics of profile format 1-4-0: a table's `rankCorrelations` (`kendallTau/1` or `spearmanRho/1` over 2 to 64 number or timestamp columns, which the profile states for every pair), a table's `cliqueColumns` (the columns a profiler may join into cliques), and a relationship's `groupBy` (parent columns its statistics are grouped by) and `linked` (a child column grouped by a parent column through it). A request that uses one names format 1-2-0; one that names an earlier format and holds one is refused with FLX-5038. It still holds names only: how much noise to add, and where, is the data owner's choice.
+
 `fluxsim init` writes the request in name order and refuses with FLX-5038 a contract whose table, column or fact name the reader would refuse, naming it. Run `fluxsim explain FLX-5038` for the remedy.
 
 ## Where it is written
@@ -24,7 +26,7 @@ A request holds names and registered identifiers and nothing else. It carries no
 When the owner releases the statistics under differential privacy (grade P3), the profile has one budget for the whole release, stated once: the measure, the total privacy loss and the unit of privacy. Every noisy statistic states its own share. The profiler divides the budget over the statistics the request asks for; the engine does not choose the split.
 
 - Parts add up: under zero-concentrated DP the parts are values of rho and rho adds; under approximate DP epsilon adds and delta adds. Every part is in the measure of the total; the engine does not convert.
-- The engine refuses a profile whose parts exceed the total, or whose part is below what its mechanism spends, with FLX-5036, naming the statistic and never a value. A noisy statistic outside the unit's table is refused too.
+- The engine refuses a profile whose parts exceed the total, or whose part is below what its mechanism spends, with FLX-5036, naming the statistic and never a value. A noisy statistic in a table whose rows one unit does not change is refused too: by default the unit is one row of one table, and a profile of format 1-4-0 may state a unit that follows child rows.
 - Several releases of one data set are several profiles, each with its own budget, and the engine cannot add them.
 - Asking for more statistics divides the same budget thinner, so each is noisier. A smaller request is a choice for the owner.
 

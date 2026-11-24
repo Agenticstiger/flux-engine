@@ -1,0 +1,128 @@
+{
+  "_producer": "https://github.com/Agenticstiger/flux-engine",
+  "_schemaURL": "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json",
+  "encoding": {
+    "fractionalBits": 16,
+    "rounding": "floor"
+  },
+  "disclosureRules": {
+    "noisy": {}
+  },
+  "privacy": {
+    "measure": "zeroConcentratedDP",
+    "privacyLoss": {
+      "rho": "0.1"
+    },
+    "privacyUnit": {
+      "expose": "subscriber"
+    },
+    "publicStructure": true
+  },
+  "tables": {
+    "subscriber": {
+      "columns": {
+        "region": {
+          "domain": "category"
+        },
+        "plan": {
+          "domain": "category"
+        },
+        "age": {
+          "domain": "number"
+        }
+      },
+      "cliques": [
+        {
+          "definition": "cliqueMarginal/1",
+          "columns": [
+            "region",
+            "plan"
+          ],
+          "levels": [
+            [
+              "east",
+              "north",
+              "west"
+            ],
+            [
+              "basic",
+              "pro"
+            ]
+          ],
+          "noisyCounts": [
+            "30",
+            "20",
+            "25",
+            "25",
+            "10",
+            "40"
+          ],
+          "noise": {
+            "mechanism": "gaussian",
+            "scale": "5",
+            "privacyLoss": {
+              "rho": "0.02"
+            }
+          }
+        },
+        {
+          "definition": "cliqueMarginal/2",
+          "columns": [
+            "region",
+            "age"
+          ],
+          "domains": [
+            {
+              "levels": [
+                "east",
+                "north",
+                "west"
+              ]
+            },
+            {
+              "bins": [
+                "0",
+                "30",
+                "60",
+                "100"
+              ]
+            }
+          ],
+          "noisyCounts": [
+            "10",
+            "20",
+            "20",
+            "25",
+            "15",
+            "10",
+            "5",
+            "5",
+            "40"
+          ],
+          "noise": {
+            "mechanism": "gaussian",
+            "scale": "5",
+            "privacyLoss": {
+              "rho": "0.02"
+            }
+          }
+        }
+      ],
+      "cliqueSelection": {
+        "method": "aim",
+        "producer": "https://github.com/opendp/opendp",
+        "selection": {
+          "privacyLoss": {
+            "rho": "0.01"
+          }
+        },
+        "domain": {
+          "privacyLoss": {
+            "rho": "0.01"
+          }
+        },
+        "published": "measured"
+      }
+    }
+  }
+}

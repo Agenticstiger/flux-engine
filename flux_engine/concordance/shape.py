@@ -206,6 +206,7 @@ def _cells(profile: Profile, entry: ColumnEntry, grid: Grid) -> Optional[_Cells]
             statistic.identifier != wanted.identifier
             or statistic.group_by is not None
             or statistic.group_by_link is not None
+            or statistic.group_by_bins is not None
             or statistic.per
         ):
             continue

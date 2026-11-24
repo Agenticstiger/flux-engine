@@ -60,9 +60,16 @@ from typing import (
 
 from flux_stats.cliques import (
     CLIQUE_DEFINITION,
+    CLIQUE_DEFINITION_2,
+    MOST_CLIQUES,
     CliqueEntry,
+    CliqueSelection,
     check_consistency,
+    check_table_limits,
+    edge_text,
     read_clique,
+    read_clique_2,
+    read_clique_selection,
 )
 from flux_stats.column_metrics import (
     CATEGORY,
@@ -77,11 +84,19 @@ from flux_stats.definitions import QUANTILE_BINNED, level_order
 from flux_stats.fixedpoint import MAX_FRACTIONAL_BITS
 from flux_stats.noise import (
     Accounting,
+    Follow,
     Noise,
+    Spent,
     check_budget,
     point_estimate,
     read_accounting,
     read_noise,
+)
+from flux_stats.rank_correlation import (
+    RANK_DEFINITIONS,
+    RANK_IDENTIFIERS,
+    rank_sensitivity,
+    rank_value,
 )
 from flux_stats.registry import (
     GroupStatistic,
@@ -102,9 +117,12 @@ from flux_stats.spelling import (
 )
 
 __all__ = [
+    "BinGrouping",
     "CLIQUE_DEFINITION",
+    "CLIQUE_DEFINITION_2",
     "CONF_STATUS",
     "CliqueEntry",
+    "CliqueSelection",
     "CALENDAR_LEVELS",
     "CalendarEntry",
     "ColumnEntry",
@@ -137,6 +155,7 @@ __all__ = [
     "SCHEMA_URL_1_1_0",
     "SCHEMA_URL_1_2_0",
     "SCHEMA_URL_1_3_0",
+    "SCHEMA_URL_1_4_0",
     "SEVERAL",
     "STRUCTURAL_CLASSES",
     "SampleSize",
@@ -167,6 +186,31 @@ SCHEMA_URL_1_2_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-2
 #: ``per``, and changes nothing format ``1-2-0`` says. A document that holds one of them names it.
 SCHEMA_URL_1_3_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-3-0/FluxProfile.json"
 
+#: Format ``1-4-0``, the ``$id`` of ``docs/spec/profile-1-4.schema.json``. It adds the rank correlations
+#: ``kendallTau/1`` and ``spearmanRho/1`` of a ``columnPairs`` entry and the ``rowFloor`` key of
+#: PROFILE-SPEC.md section 5, the clique ``cliqueMarginal/2``, a table's ``cliqueSelection`` and a
+#: statistic's ``groupByBins``, and changes nothing format ``1-3-0`` says. A document that holds one of
+#: :data:`_FORMS_OF_1_4_0` names it.
+SCHEMA_URL_1_4_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json"
+
+#: Every form that only format ``1-4-0`` holds, by the key the reader names it with, and what the
+#: refusal calls it. A document that names an earlier format and holds one is refused
+#: (:meth:`_Reader.require_1_4_0`). A later form of the format is one more entry here and one call at
+#: the place the reader reads it.
+_FORMS_OF_1_4_0: Mapping[str, str] = MappingProxyType(
+    {
+        "rankCorrelation": "a rank correlation (kendallTau/1 or spearmanRho/1)",
+        "rowFloor": "a rowFloor",
+        "cliqueMarginal/2": "a cliqueMarginal/2",
+        "cliqueSelection": "a cliqueSelection",
+        "groupByBins": "a groupByBins",
+        "follows": "a privacyUnit.follows",
+        "relationshipGroupBy": "a groupBy or groupByBins on a relationship's statistic",
+        "relationshipNoise": "a noise block on a relationship's statistic",
+        "linkNoise": "a noise block on a statistic with groupByLink",
+    }
+)
+
 #: The classes a relationship may declare structurally empty (format 1-3-0): parents with no child,
 #: and child keys, not NULL, whose parent is missing.
 STRUCTURAL_CLASSES: Tuple[str, ...] = ("childless", "orphan")
@@ -191,10 +235,19 @@ SEVERAL = "several"
 
 #: Every format this reader reads. A later format is a new URL, so a reader that predates it
 #: refuses the document rather than skip what it cannot read.
-_READ_FORMATS = (SCHEMA_URL, SCHEMA_URL_1_1_0, SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0)
+_READ_FORMATS = (
+    SCHEMA_URL,
+    SCHEMA_URL_1_1_0,
+    SCHEMA_URL_1_2_0,
+    SCHEMA_URL_1_3_0,
+    SCHEMA_URL_1_4_0,
+)
 
 #: The formats that hold the sections of format ``1-2-0`` (``invariants``, ``privacy``).
-_FROM_1_2_0 = (SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0)
+_FROM_1_2_0 = (SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0)
+
+#: The formats that hold the forms of format ``1-3-0``.
+_FROM_1_3_0 = (SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0)
 
 #: The most columns a ``per`` names (PROFILE-SPEC.md section 3).
 MAX_PER_COLUMNS = 8
@@ -336,6 +389,10 @@ class ProfileGroup:
     #: an exact one. :attr:`statistic` then holds the point estimate they make
     #: (:func:`flux_stats.noise.point_estimate`).
     noisy: Tuple[Fraction, ...] = ()
+    #: The value of a rank correlation's group (format 1-4-0), exact: ``S / C(N, 2)`` or
+    #: ``3 A4 / (N (N^2 - 1))`` for an exact group, and for a noisy one the released number clamped
+    #: to ``[-1, 1]``. ``None`` for every other statistic and for a suppressed group.
+    value: Optional[Fraction] = None
 
     @property
     def published(self) -> bool:
@@ -364,6 +421,25 @@ class LinkGrouping:
 
 
 @dataclass(frozen=True)
+class BinGrouping:
+    """A column statistic grouped by the bin of another column of its table (format 1-4-0).
+
+    ``column`` is a number or timestamp column and ``bins`` its edges, strictly increasing. The
+    groups are keyed by the canonical decimal text of each bin's lower edge
+    (:func:`flux_stats.cliques.edge_text`); the records whose value of ``column`` is NULL are one
+    more group, never written.
+    """
+
+    column: str
+    bins: Tuple[Fraction, ...]
+
+    @property
+    def keys(self) -> Tuple[str, ...]:
+        """The group keys, one per bin, in order."""
+        return tuple(edge_text(edge) for edge in self.bins[:-1])
+
+
+@dataclass(frozen=True)
 class StatisticEntry:
     """One statistic of a profile and the declared shape it was formed on."""
 
@@ -389,6 +465,12 @@ class StatisticEntry:
     #: The columns the statistic is counted once per distinct value of (format 1-3-0): its counts
     #: are entities, not rows. Empty for a statistic counted per row.
     per: Tuple[str, ...] = ()
+    #: The grouping by the bins of another column (format 1-4-0); ``None`` for a statistic with
+    #: none. A statistic that holds one is grouped even though :attr:`group_by` is ``None``.
+    group_by_bins: Optional[BinGrouping] = None
+    #: The ``rowFloor`` of a rank correlation (format 1-4-0), a count of at least 2; ``None`` when
+    #: the statistic states none and ``N`` is the number of its records.
+    row_floor: Optional[int] = None
 
     @property
     def identifier(self) -> str:
@@ -545,8 +627,14 @@ class TableEntry:
     columns: Mapping[str, ColumnEntry]
     pairs: Tuple[PairEntry, ...]
     periods: Tuple[PeriodEntry, ...]
-    #: The noisy clique marginals of format 1-2-0, in document order.
+    #: The noisy clique marginals of format 1-2-0 (``cliqueMarginal/1``), in document order.
     cliques: Tuple[CliqueEntry, ...] = ()
+    #: The ``cliqueMarginal/2`` cliques (format 1-4-0), in document order. They are kept apart from
+    #: :attr:`cliques` so that a consumer that draws categorical cliques only does not read a
+    #: binned one as one; the agreement of the two lists is checked together.
+    cliques2: Tuple[CliqueEntry, ...] = ()
+    #: How the table's cliques were chosen and released (format 1-4-0), or ``None``.
+    clique_selection: Optional[CliqueSelection] = None
     #: The statistics of the days between two timestamp columns of the table (format 1-3-0).
     date_pairs: Tuple[DatePairEntry, ...] = ()
     #: The counts of a timestamp column by month, day of week and hour of week (format 1-3-0).
@@ -646,6 +734,10 @@ class Profile:
     accounting: Optional[Accounting] = None
     #: The tables released whole, by ``exposeId`` (format 1-3-0); empty for an earlier format.
     references: Mapping[str, ReferenceTable] = field(default_factory=lambda: MappingProxyType({}))
+    #: Every noisy part of the release, once each: the place in the document and its mechanism,
+    #: scale and share. This is the one enumeration of the budget's parts. The reader checks the
+    #: total against it, and a grade or a report counts from it and never from the document.
+    parts: Tuple[Tuple[str, Spent], ...] = ()
 
     def invariant(self, name: str) -> Optional[InvariantEntry]:
         """One fact's entry, or ``None``."""
@@ -918,19 +1010,36 @@ def _disclosure_rule(value: Any, where: str) -> DisclosureRule:
     )
 
 
+@dataclass(frozen=True)
+class _Charge:
+    """The sensitivity of a release of one statistic's cells, for one unit of privacy.
+
+    ``l1`` is the L1 sensitivity and ``l2_squared`` the squared L2 sensitivity of the noisy vector
+    under adding or removing one unit, the figures :func:`flux_stats.noise.read_noise` checks a share
+    against.
+    """
+
+    l1: Fraction
+    l2_squared: Fraction
+
+
 def _statistic_optional(
     noisy_in: Optional[str],
     grouped_by: Optional[Set[str]],
     of: Optional[Set[str]],
     plain_group: bool,
     query_group: bool = False,
+    binned_by: Optional[Set[str]] = None,
+    relationship: bool = False,
 ) -> Tuple[str, ...]:
     """The keys a statistic may carry beyond the required four, as its section allows them."""
     optional: Tuple[str, ...] = ("bins", "levels", "level")
-    if noisy_in is not None:
+    if noisy_in is not None or relationship:
         optional += ("noise",)
     if grouped_by is not None:
         optional += ("groupBy",) if plain_group else ("groupBy", "groupByLink", "per")
+        if binned_by is not None and (relationship or not plain_group):
+            optional += ("groupByBins",)
     if query_group:
         optional += ("groupBy",)
     if of is not None:
@@ -965,6 +1074,14 @@ def _exposure_window(value: Any, where: str) -> Tuple[int, int]:
     return edges[0], edges[1]
 
 
+def _every_bin_published(groups: Sequence[Any], grouping: BinGrouping, where: str) -> None:
+    """Refuse (``FLX-5036``) a noisy statistic grouped by bins that leaves a bin without a group."""
+    if [group.key for group in groups] != list(grouping.keys):
+        raise refuse(
+            f"{where}.groups", "a noisy statistic grouped by bins publishes one group for every bin"
+        )
+
+
 class _Reader:
     """One profile's reading state: the rules a statistic may name."""
 
@@ -975,21 +1092,36 @@ class _Reader:
         first_format: bool,
         accounting: Optional[Accounting] = None,
         from_1_3: bool = False,
+        from_1_4: bool = False,
     ) -> None:
         self.rules = rules
         #: Whether the document names format ``1-3-0``, the only one that holds a ``groupBy`` on
         #: a number column, a ``groupByLink`` or a ``per``.
         self.from_1_3 = from_1_3
+        #: Whether the document names format ``1-4-0``, the only one that holds the forms of
+        #: :data:`_FORMS_OF_1_4_0`.
+        self.from_1_4 = from_1_4
         #: Every statistic grouped by a link, with the place it was read at and its own table,
         #: checked against the tables once all of them are read (:meth:`check_links`).
         self.links: List[Tuple[str, str, StatisticEntry]] = []
         #: The release-level account, when the document states one (format 1-2-0).
         self.accounting = accounting
         #: Every noisy statistic and clique read, by place, for the budget check.
-        self.parts: List[Tuple[str, Noise]] = []
+        self.parts: List[Tuple[str, Spent]] = []
         #: Whether the document names format ``1-0-0``, which holds none of
         #: the statistics :data:`_ADDED_IN_1_1_0` names.
         self.first_format = first_format
+
+    def require_1_4_0(self, form: str, where: str) -> None:
+        """Refuse (``FLX-5036``) a form of format 1-4-0 in a document that names an earlier one."""
+        if form not in _FORMS_OF_1_4_0:
+            raise KeyError(f"{form!r} is no form of format 1-4-0")
+        if not self.from_1_4:
+            raise refuse(
+                where,
+                f"{_FORMS_OF_1_4_0[form]} is a form of format 1-4-0, and this document names an "
+                "earlier format",
+            )
 
     # -- statistics ----------------------------------------------------------
 
@@ -1008,6 +1140,9 @@ class _Reader:
         column_of: Optional[Tuple[str, Set[str]]] = None,
         plain_group: bool = False,
         query_group: bool = False,
+        binned_by: Optional[Set[str]] = None,
+        charge_of: Optional[Callable[[str], _Charge]] = None,
+        most_children: Optional[int] = None,
     ) -> StatisticEntry:
         """Read one statistic of a section that allows *kinds*.
 
@@ -1016,28 +1151,38 @@ class _Reader:
         a ``groupBy`` may name in format ``1-3-0``, and *column_of* is the statistic's own column
         and every column of the table, for ``per``. A *plain_group* section takes a ``groupBy`` and
         no ``groupByLink`` and no ``per``. *query_group* lets a query's statistic carry a ``groupBy``
-        (format ``1-3-0``).
+        (format ``1-3-0``). *binned_by* are the number and timestamp columns of the table other
+        than the statistic's own, which a ``groupByBins`` may name (format ``1-4-0``).
+
+        A relationship's statistic passes *charge_of*, which gives the sensitivity of a noisy release
+        of it at the place it is read, or refuses (ADR 0037 decision 2), and *most_children*, the cap
+        of the followed relationship when the unit follows it: no bin of its histogram may start
+        above the cap. Both belong to format ``1-4-0``, as a ``groupBy`` of such a statistic does.
         """
         raw = _mapping(
             value,
             where,
             required=("definition", "sampleSize", "disclosure", "groups"),
-            optional=_statistic_optional(noisy_in, grouped_by, of, plain_group, query_group),
+            optional=_statistic_optional(
+                noisy_in,
+                grouped_by,
+                of,
+                plain_group,
+                query_group,
+                binned_by,
+                charge_of is not None,
+            ),
         )
         entry = self._read_definition(raw, where, kinds, domain)
         bins = self._bins(raw, where, entry)
         levels = self._levels(raw, where, entry)
         level = _quantile_level(raw, where, entry)
-        if query_group:
-            group_by, key_form = self._query_group_by(raw, where)
-        else:
-            group_by, key_form = self._group_by(raw, where, grouped_by, numeric_by)
-        link = self._group_by_link(raw, where, group_by)
-        per = self._read_per(raw, where, group_by, link, column_of)
+        group_by, key_form, link, bin_grouping = self._read_grouping(
+            raw, where, (grouped_by, numeric_by, binned_by), (query_group, charge_of is not None)
+        )
+        per = self._read_per(raw, where, group_by, link, bin_grouping, column_of)
         if per and "noise" in raw:
             raise refuse(f"{where}.noise", _MOVES_AN_ENTITY + " in a statistic with per")
-        if link is not None and "noise" in raw:
-            raise refuse(f"{where}.noise", _MOVES_AN_ENTITY + " in a statistic with groupByLink")
         measured = self._measured(raw, where, of)
         disclosure = raw["disclosure"]
         if not isinstance(disclosure, str) or disclosure not in self.rules:
@@ -1045,17 +1190,21 @@ class _Reader:
         cells = (
             (len(bins) - 1) if entry.kind == "marginalHistogram" or entry.binned else len(levels)
         )
-        noise = self._noise(raw, where, entry, noisy_in)
+        if most_children is not None:
+            self._below_the_cap(entry, bins, where, most_children)
+        noise = self._noise(raw, where, entry, noisy_in, link=link, charge_of=charge_of)
         groups = self._groups(
             raw["groups"],
             f"{where}.groups",
             entry,
             cells=cells,
-            grouped=group_by is not None or link is not None,
+            grouped=group_by is not None or link is not None or bin_grouping is not None,
             period=period,
             noisy=noise is not None,
             key_form=key_form,
         )
+        if noise is not None and bin_grouping is not None:
+            _every_bin_published(groups, bin_grouping, where)
         found = StatisticEntry(
             definition=entry,
             sample_size=_sample_size(raw["sampleSize"], f"{where}.sampleSize"),
@@ -1070,11 +1219,44 @@ class _Reader:
             cell_variance=noise.variance if noise is not None else None,
             group_by_link=link,
             per=per,
+            group_by_bins=bin_grouping,
         )
         if link is not None:
             assert noisy_in is not None  # a link is read only in a column statistic
             self.links.append((where, noisy_in, found))
         return found
+
+    def _read_grouping(
+        self,
+        raw: Mapping[str, Any],
+        where: str,
+        columns: Tuple[Optional[Set[str]], Optional[Set[str]], Optional[Set[str]]],
+        form: Tuple[bool, bool],
+    ) -> Tuple[
+        Optional[str],
+        Optional[Callable[[str], bool]],
+        Optional[LinkGrouping],
+        Optional[BinGrouping],
+    ]:
+        """``groupBy``, the form of a group key, ``groupByLink`` and ``groupByBins`` of a statistic.
+
+        *columns* are the columns a ``groupBy`` of a categorical column, of a number column and a
+        ``groupByBins`` may name, and *form* says whether the statistic is a query's and whether it
+        is a relationship's.
+        """
+        grouped_by, numeric_by, binned_by = columns
+        query_group, relational = form
+        if query_group:
+            group_by, key_form = self._query_group_by(raw, where)
+        else:
+            group_by, key_form = self._group_by(raw, where, grouped_by, numeric_by)
+        if relational and group_by is not None:
+            self.require_1_4_0("relationshipGroupBy", f"{where}.groupBy")
+        link = self._group_by_link(raw, where, group_by)
+        bin_grouping = self._group_by_bins(raw, where, group_by, link, binned_by)
+        if bin_grouping is not None:
+            key_form = bin_grouping.keys.__contains__
+        return group_by, key_form, link, bin_grouping
 
     def _read_definition(
         self, raw: Mapping[str, Any], where: str, kinds: FrozenSet[str], domain: Optional[str]
@@ -1152,20 +1334,54 @@ class _Reader:
             raise refuse(where, "a statistic holds at most one of groupBy and groupByLink")
         return self._link(raw["groupByLink"], f"{where}.groupByLink")
 
+    def _group_by_bins(
+        self,
+        raw: Mapping[str, Any],
+        where: str,
+        group_by: Optional[str],
+        link: Optional[LinkGrouping],
+        binned_by: Optional[Set[str]],
+    ) -> Optional[BinGrouping]:
+        """The bins a statistic is grouped by (format 1-4-0), or ``None``."""
+        if "groupByBins" not in raw:
+            return None
+        here = f"{where}.groupByBins"
+        self.require_1_4_0("groupByBins", here)
+        if group_by is not None or link is not None:
+            raise refuse(
+                where, "a statistic holds at most one of groupBy, groupByLink and groupByBins"
+            )
+        assert binned_by is not None  # the key is optional only where a statistic may carry it
+        raw_bins = _mapping(raw["groupByBins"], here, required=("column", "bins"))
+        column = _name(raw_bins["column"], f"{here}.column")
+        if column not in binned_by:
+            raise refuse(
+                f"{here}.column",
+                "names no number or timestamp column of this table other than the statistic's own",
+            )
+        edges = tuple(
+            read_decimal(edge, f"{here}.bins[{index}]")
+            for index, edge in enumerate(_list(raw_bins["bins"], f"{here}.bins"))
+        )
+        if len(edges) < 2 or any(b <= a for a, b in zip(edges, edges[1:], strict=False)):
+            raise refuse(f"{here}.bins", "bin edges are at least two, strictly increasing")
+        return BinGrouping(column=column, bins=edges)
+
     def _read_per(
         self,
         raw: Mapping[str, Any],
         where: str,
         group_by: Optional[str],
         link: Optional[LinkGrouping],
+        bin_grouping: Optional[BinGrouping],
         column_of: Optional[Tuple[str, Set[str]]],
     ) -> Tuple[str, ...]:
         """The columns a statistic is counted per (format 1-3-0), or none."""
         if "per" not in raw:
             return ()
         self._require_1_3(f"{where}.per", "a per")
-        if group_by is not None or link is not None:
-            raise refuse(where, "a statistic with per holds no groupBy and no groupByLink")
+        if group_by is not None or link is not None or bin_grouping is not None:
+            raise refuse(where, "a statistic with per holds no groupBy, groupByLink or groupByBins")
         assert column_of is not None
         return self._per(raw["per"], f"{where}.per", *column_of)
 
@@ -1268,20 +1484,81 @@ class _Reader:
         where: str,
         entry: StatisticDefinition,
         noisy_in: Optional[str],
+        *,
+        link: Optional[LinkGrouping] = None,
+        charge_of: Optional[Callable[[str], _Charge]] = None,
     ) -> Optional[Noise]:
-        """The statistic's ``noise`` block, read and entered in the budget, or ``None``."""
+        """The statistic's ``noise`` block, read and entered in the budget, or ``None``.
+
+        A count table of a column is charged its table's reach (ADR 0037 decision 2): one row lands
+        in one cell, so a unit that contributes ``m`` rows moves ``m`` cells by one each. A statistic
+        grouped by a link is charged the same, and only where the parent's rows never change or the
+        unit follows the link. A relationship's statistic is charged by *charge_of*.
+        """
         if "noise" not in raw:
             return None
+        at = f"{where}.noise"
         if entry.kind not in _NOISY_KINDS:
-            raise refuse(
-                f"{where}.noise", f"is carried by {sorted(_NOISY_KINDS)} statistics, as counts"
-            )
-        accounting = self._require_account(f"{where}.noise")
-        assert noisy_in is not None  # the key is optional only where a statistic may carry it
-        self._in_unit(noisy_in, f"{where}.noise", accounting)
-        noise = read_noise(raw["noise"], f"{where}.noise", accounting)
+            raise refuse(at, f"is carried by {sorted(_NOISY_KINDS)} statistics, as counts")
+        accounting = self._require_account(at)
+        if charge_of is not None:
+            self.require_1_4_0("relationshipNoise", at)
+            charge = charge_of(at)
+        else:
+            assert noisy_in is not None  # the key is optional only where a statistic may carry it
+            reach = self._reach(noisy_in, at, accounting)
+            if link is not None:
+                self.require_1_4_0("linkNoise", at)
+                self._link_is_followed_or_fixed(noisy_in, link, at, accounting)
+            charge = _Charge(Fraction(reach), Fraction(reach * reach))
+        noise = read_noise(raw["noise"], at, accounting, l1=charge.l1, l2_squared=charge.l2_squared)
         self.parts.append((where, noise))
         return noise
+
+    @staticmethod
+    def _link_is_followed_or_fixed(
+        table: str, link: LinkGrouping, where: str, accounting: Accounting
+    ) -> None:
+        """A noisy statistic grouped by a link: the parent's rows never change, or the unit follows it.
+
+        A unit that removed a row of the parent without its rows of the statistic's table would move
+        them into the group that is never written. When the parent is not reached its rows are the
+        same in every neighbouring data set; when the link's relationship is listed in ``follows``
+        a removed parent takes its rows with it, and they are counted in the reach.
+        """
+        if accounting.reach(link.parent_table) == 0:
+            return
+        listed = any(
+            (entry.parent_table, entry.parent_columns, entry.child_table, entry.child_columns)
+            == (link.parent_table, link.parent_columns, table, link.child_columns)
+            for entry in accounting.follows
+        )
+        if not listed:
+            raise refuse(
+                where,
+                "a statistic grouped by a link carries noise only when the unit does not reach the "
+                "parent table, or follows the link's relationship: a parent row that moves alone "
+                "would move its rows into a group that is never written",
+            )
+
+    @staticmethod
+    def _below_the_cap(
+        entry: StatisticDefinition, bins: Tuple[Fraction, ...], where: str, cap: int
+    ) -> None:
+        """On a followed relationship no parent has more than ``cap`` children (ADR 0037).
+
+        A bin whose least count, the least whole number at or above its lower edge, is above the cap
+        holds no parent, whatever its count says, so a profile that states one is refused.
+        """
+        if not bins or not (entry.kind == "marginalHistogram" or entry.binned):
+            return
+        for position, edge in enumerate(bins[:-1]):
+            if max(0, -((-edge.numerator) // edge.denominator)) > cap:
+                raise refuse(
+                    f"{where}.bins[{position}]",
+                    "a bin of a followed relationship starts above the unit's cap on children "
+                    "per parent",
+                )
 
     def _require_account(self, where: str) -> Accounting:
         if self.accounting is None:
@@ -1289,14 +1566,21 @@ class _Reader:
         return self.accounting
 
     @staticmethod
-    def _in_unit(expose_id: str, where: str, accounting: Accounting) -> None:
-        """A noisy count lies in the table of the unit of privacy, and only there (ADR 0019)."""
-        if expose_id != accounting.unit:
+    def _reach(expose_id: str, where: str, accounting: Accounting) -> int:
+        """``m_T`` of a table a noisy statistic lies in: how many of its rows one unit contributes.
+
+        It is 1 for the unit's expose, and for a table the unit follows into the product of the caps
+        on the way (ADR 0037). A table the unit does not reach has none, and no noise is read there.
+        """
+        reach = accounting.reach(expose_id)
+        if reach < 1:
             raise refuse(
                 where,
-                "the profile's unit of privacy is one row of another expose, and the profile "
-                "does not state how many rows of this table one unit contributes",
+                "the profile's unit of privacy is one row of another expose, or follows no "
+                "relationship into this table, and the profile does not state how many rows of "
+                "this table one unit contributes",
             )
+        return reach
 
     def statistics(self, value: Any, where: str, **section: Any) -> Tuple[StatisticEntry, ...]:
         """Read a section's list of statistics; no two may answer one question."""
@@ -1304,12 +1588,19 @@ class _Reader:
             self.statistic(item, f"{where}[{index}]", **section)
             for index, item in enumerate(_list(value, where))
         )
+        self._no_repeats(read, where)
+        return read
+
+    @staticmethod
+    def _no_repeats(read: Tuple[StatisticEntry, ...], where: str) -> None:
+        """Refuse a list in which two statistics answer one question."""
         seen: Set[Tuple[Any, ...]] = set()
         for index, statistic in enumerate(read):
             key = (
                 statistic.identifier,
                 statistic.group_by,
                 statistic.group_by_link,
+                statistic.group_by_bins,
                 statistic.per,
                 statistic.of,
                 statistic.bins,
@@ -1319,7 +1610,6 @@ class _Reader:
             if key in seen:
                 raise refuse(f"{where}[{index}]", "repeats a statistic already in this list")
             seen.add(key)
-        return read
 
     @staticmethod
     def _bins(
@@ -1540,6 +1830,7 @@ class _Reader:
         expose_id: Optional[str] = None,
         numeric: Optional[Set[str]] = None,
         names: Optional[Set[str]] = None,
+        ordered: Optional[Set[str]] = None,
     ) -> ColumnEntry:
         raw = _mapping(value, where, required=("domain",), optional=("metrics", "statistics"))
         domain = raw["domain"]
@@ -1562,6 +1853,7 @@ class _Reader:
             noisy_in=expose_id,
             numeric_by=(numeric or set()) - {name},
             column_of=(name, names if names is not None else {name}),
+            binned_by=(ordered or set()) - {name},
         )
         low, high = found_metrics.get("min"), found_metrics.get("max")
         if low is not None and high is not None and low.value is not None:
@@ -1587,6 +1879,7 @@ class _Reader:
                 "datePairs",
                 "calendar",
                 "history",
+                "cliqueSelection",
             ),
         )
         declared = _object(raw["columns"], f"{where}.columns")
@@ -1610,12 +1903,24 @@ class _Reader:
                 expose_id,
                 numeric=numeric,
                 names=names,
+                ordered=ordered,
             )
             for name in sorted(names)
         }
-        cliques = self._cliques(raw.get("cliques", []), where, expose_id, categorical)
-        if cliques:
-            formed = {name: _derived(name, cliques, entry) for name, entry in columns.items()}
+        cliques, cliques2 = self._cliques(
+            raw.get("cliques", []),
+            where,
+            expose_id,
+            categorical,
+            {name: domain for name, domain in domains.items() if isinstance(domain, str)},
+        )
+        selection = self._clique_selection(raw, where, expose_id)
+        if cliques or cliques2:
+            formed = {
+                name: _derived(name, cliques + cliques2, entry) for name, entry in columns.items()
+            }
+            for clique in cliques + cliques2:
+                clique.clear_sums()
             columns = {
                 name: replace(
                     entry,
@@ -1625,7 +1930,7 @@ class _Reader:
                 for name, entry in columns.items()
             }
         pairs = tuple(
-            self._pair(item, f"{where}.columnPairs[{index}]", ordered)
+            self._pair(item, f"{where}.columnPairs[{index}]", ordered, expose_id)
             for index, item in enumerate(_list(raw.get("columnPairs", []), f"{where}.columnPairs"))
         )
         if len({pair.columns for pair in pairs}) != len(pairs):
@@ -1646,6 +1951,8 @@ class _Reader:
             pairs=pairs,
             periods=periods,
             cliques=cliques,
+            cliques2=cliques2,
+            clique_selection=selection,
             date_pairs=date_pairs,
             calendar=self._calendar(raw, where, expose_id, domains),
             history=self._history(raw, where, expose_id, domains),
@@ -1894,39 +2201,199 @@ class _Reader:
         return reasons
 
     def _cliques(
-        self, value: Any, where: str, expose_id: str, categorical: Set[str]
-    ) -> Tuple[CliqueEntry, ...]:
-        """A table's noisy cliques, each read, entered in the budget and checked for agreement."""
+        self,
+        value: Any,
+        where: str,
+        expose_id: str,
+        categorical: Set[str],
+        domains: Mapping[str, str],
+    ) -> Tuple[Tuple[CliqueEntry, ...], Tuple[CliqueEntry, ...]]:
+        """A table's noisy cliques, each read, entered in the budget and checked for agreement.
+
+        The ``cliqueMarginal/1`` cliques and the ``cliqueMarginal/2`` ones (format 1-4-0) come back
+        apart, each in document order, and every clique of both is checked against the others. A
+        document of format 1-4-0 holds at most :data:`flux_stats.cliques.MOST_CLIQUES` cliques in a
+        table and :data:`flux_stats.cliques.MOST_TABLE_CELLS` cells over them.
+        """
         items = _list(value, f"{where}.cliques")
         if not items:
-            return ()
+            return (), ()
         accounting = self._require_account(f"{where}.cliques")
-        self._in_unit(expose_id, f"{where}.cliques", accounting)
-        cliques = tuple(
-            read_clique(
-                item,
-                f"{where}.cliques[{index}]",
-                expose_id=expose_id,
-                index=index,
-                categorical=categorical,
-                accounting=accounting,
-            )
-            for index, item in enumerate(items)
-        )
-        for clique in cliques:
+        self._reach(expose_id, f"{where}.cliques", accounting)
+        if self.from_1_4 and len(items) > MOST_CLIQUES:
+            check_table_limits(where, len(items), 0)
+        first: List[CliqueEntry] = []
+        second: List[CliqueEntry] = []
+        cells = 0
+        for index, item in enumerate(items):
+            at = f"{where}.cliques[{index}]"
+            if isinstance(item, Mapping) and item.get("definition") == CLIQUE_DEFINITION_2:
+                self.require_1_4_0("cliqueMarginal/2", f"{at}.definition")
+                clique = read_clique_2(
+                    item,
+                    at,
+                    expose_id=expose_id,
+                    index=index,
+                    domains=domains,
+                    accounting=accounting,
+                )
+                second.append(clique)
+            else:
+                clique = read_clique(
+                    item,
+                    at,
+                    expose_id=expose_id,
+                    index=index,
+                    categorical=categorical,
+                    accounting=accounting,
+                )
+                first.append(clique)
+            cells += clique.cell_count
+            if self.from_1_4:
+                check_table_limits(where, len(items), cells)
+        read = sorted(first + second, key=lambda clique: clique.index)
+        for clique in read:
             self.parts.append((f"{where}.cliques[{clique.index}]", clique.noise))
-        check_consistency(cliques)
-        return cliques
+        check_consistency(read, work_where=where if self.from_1_4 else None)
+        return tuple(first), tuple(second)
 
-    def _pair(self, value: Any, where: str, ordered: Set[str]) -> PairEntry:
+    def _clique_selection(
+        self, raw: Mapping[str, Any], where: str, expose_id: str
+    ) -> Optional[CliqueSelection]:
+        """A table's ``cliqueSelection`` (format 1-4-0), its shares entered in the budget, or ``None``.
+
+        A share is a part of the account in the account's measure, once each: ``selection`` and
+        ``domain`` are :class:`flux_stats.noise.PrivacyShare` parts, with no mechanism and no scale.
+        """
+        if "cliqueSelection" not in raw:
+            return None
+        at = f"{where}.cliqueSelection"
+        self.require_1_4_0("cliqueSelection", at)
+        accounting = self._require_account(at)
+        self._reach(expose_id, at, accounting)
+        selection = read_clique_selection(raw["cliqueSelection"], at, accounting=accounting)
+        for key, share in (("selection", selection.selection), ("domain", selection.domain)):
+            if share is not None:
+                self.parts.append((f"{at}.{key}", share))
+        return selection
+
+    def _pair(self, value: Any, where: str, ordered: Set[str], expose_id: str) -> PairEntry:
         raw = _mapping(value, where, required=("columns", "statistics"))
         columns = tuple(read_texts(raw["columns"], f"{where}.columns"))
         if len(columns) != 2 or columns[0] == columns[1] or not set(columns) <= ordered:
             raise refuse(f"{where}.columns", "a pair is two different number or timestamp columns")
-        return PairEntry(
-            columns=(columns[0], columns[1]),
-            statistics=self.statistics(raw["statistics"], f"{where}.statistics", kinds=_PAIR_KINDS),
+        statistics = tuple(
+            self._pair_statistic(item, f"{where}.statistics[{index}]", expose_id)
+            for index, item in enumerate(_list(raw["statistics"], f"{where}.statistics"))
         )
+        self._no_repeats(statistics, f"{where}.statistics")
+        return PairEntry(columns=(columns[0], columns[1]), statistics=statistics)
+
+    def _pair_statistic(self, value: Any, where: str, expose_id: str) -> StatisticEntry:
+        """One statistic of a column pair: a ``correlation/1``, or a rank correlation (format 1-4-0)."""
+        named = value.get("definition") if isinstance(value, Mapping) else None
+        if isinstance(named, str) and named in RANK_IDENTIFIERS:
+            return self._rank_statistic(value, where, expose_id)
+        return self.statistic(value, where, kinds=_PAIR_KINDS)
+
+    def _rank_statistic(self, value: Any, where: str, expose_id: str) -> StatisticEntry:
+        """A ``kendallTau/1`` or ``spearmanRho/1`` of a column pair (PROFILE-SPEC.md section 5).
+
+        Exact, its one group holds ``k`` and ``S`` or ``A4``. Noisy, which needs a ``rowFloor``, it
+        holds the released value, and the share is charged the sensitivity of the definition at that
+        floor (:func:`flux_stats.rank_correlation.rank_sensitivity`) and enters the budget once.
+        """
+        self.require_1_4_0("rankCorrelation", f"{where}.definition")
+        raw = _mapping(
+            value,
+            where,
+            required=("definition", "sampleSize", "disclosure", "groups"),
+            optional=("rowFloor", "noise"),
+        )
+        entry = RANK_DEFINITIONS[raw["definition"]]
+        floor: Optional[int] = None
+        if "rowFloor" in raw:
+            self.require_1_4_0("rowFloor", f"{where}.rowFloor")
+            floor = read_count(raw["rowFloor"], f"{where}.rowFloor")
+            if floor < 2:
+                raise refuse(f"{where}.rowFloor", "a row floor is a count of at least 2")
+        disclosure = raw["disclosure"]
+        if not isinstance(disclosure, str) or disclosure not in self.rules:
+            raise refuse(f"{where}.disclosure", "names no rule in disclosureRules")
+        noise: Optional[Noise] = None
+        if "noise" in raw:
+            if floor is None:
+                raise refuse(
+                    f"{where}.noise",
+                    "a noisy rank correlation states a rowFloor, so that its sensitivity does not "
+                    "depend on the number of records",
+                )
+            accounting = self._require_account(f"{where}.noise")
+            reach = self._reach(expose_id, f"{where}.noise", accounting)
+            sensitivity = reach * rank_sensitivity(entry.identifier, floor)
+            noise = read_noise(
+                raw["noise"],
+                f"{where}.noise",
+                accounting,
+                l1=sensitivity,
+                l2_squared=sensitivity * sensitivity,
+            )
+            if noise.mechanism == "discreteGaussian":
+                raise refuse(
+                    f"{where}.noise.mechanism",
+                    "a rank correlation is not an integer count, so a discrete Gaussian does not apply",
+                )
+            self.parts.append((where, noise))
+        group = self._rank_group(
+            raw["groups"], f"{where}.groups", entry, floor, noisy=noise is not None
+        )
+        return StatisticEntry(
+            definition=entry,
+            sample_size=_sample_size(raw["sampleSize"], f"{where}.sampleSize"),
+            disclosure=disclosure,
+            groups=(group,),
+            noise=noise,
+            cell_variance=noise.variance if noise is not None else None,
+            row_floor=floor,
+        )
+
+    def _rank_group(
+        self,
+        value: Any,
+        where: str,
+        entry: StatisticDefinition,
+        floor: Optional[int],
+        *,
+        noisy: bool,
+    ) -> ProfileGroup:
+        """The one group of a rank correlation, keyed by the empty string, with its value."""
+        items = _list(value, where)
+        if len(items) != 1:
+            raise refuse(where, "a rank correlation has one group, keyed by the empty string")
+        at = f"{where}[0]"
+        if noisy:
+            raw = _mapping(items[0], at, required=("group", "status", "noisyValue"))
+            if raw["status"] != FREE:
+                raise refuse(f"{at}.status", "a noisy statistic publishes every group, status F")
+            if raw["group"] != "":
+                raise refuse(f"{at}.group", "a rank correlation is keyed by the empty string")
+            released = read_decimal(raw["noisyValue"], f"{at}.noisyValue")
+            clamped = max(Fraction(-1), min(Fraction(1), released))
+            return ProfileGroup(key="", status=FREE, noisy=(released,), value=clamped)
+        group = self._group(items[0], at, entry, cells=0)
+        if group.key != "":
+            raise refuse(f"{at}.group", "a rank correlation is keyed by the empty string")
+        state = group.statistic
+        if state is None:
+            return group
+        size = state.k
+        if size < 2:
+            raise refuse(f"{at}.k", "a published rank correlation holds at least 2 records")
+        if abs(state.rank_s) > size * (size - 1) // 2:
+            raise refuse(f"{at}.S", "lies within plus or minus C(k, 2)")
+        if 3 * abs(state.rank_a4) > size * (size * size - 1):
+            raise refuse(f"{at}.A4", "lies within plus or minus k (k^2 - 1) / 3")
+        return replace(group, value=rank_value(entry.identifier, state, floor))
 
     def _period(self, value: Any, where: str, domains: Mapping[str, Any]) -> PeriodEntry:
         raw = _mapping(value, where, required=("column", "period", "statistics"))
@@ -1970,17 +2437,86 @@ class _Reader:
         if len(ends[0][1]) != len(ends[1][1]):
             raise refuse(where, "a parent and a child key have the same number of columns")
         structural = self._structural(raw, where)
+        parent_table, child_table = ends[0][0], ends[1][0]
+        follow = self._followed(parent_table, ends[0][1], child_table, ends[1][1])
+        parent_columns = tables[parent_table].columns
         return RelationshipEntry(
             parent_table=ends[0][0],
             parent_columns=ends[0][1],
             child_table=ends[1][0],
             child_columns=ends[1][1],
             statistics=self.statistics(
-                raw["statistics"], f"{where}.statistics", kinds=_RELATIONSHIP_KINDS
+                raw["statistics"],
+                f"{where}.statistics",
+                kinds=_RELATIONSHIP_KINDS,
+                grouped_by={n for n, c in parent_columns.items() if c.domain == CATEGORY},
+                binned_by={n for n, c in parent_columns.items() if c.domain in _ORDERED_DOMAINS},
+                plain_group=True,
+                charge_of=lambda at: self._relationship_charge(
+                    parent_table, child_table, follow, at
+                ),
+                most_children=follow.max_children if follow is not None else None,
             ),
             structural=structural,
             dates=self._relationship_dates(raw, where, tables, ends[0][0], ends[1][0]),
             exposure=self._exposure(raw, where, tables, ends[0][0]),
+        )
+
+    def _followed(
+        self,
+        parent: str,
+        parent_columns: Tuple[str, ...],
+        child: str,
+        child_columns: Tuple[str, ...],
+    ) -> Optional[Follow]:
+        """The ``follows`` entry that names this relationship, or ``None`` when the unit does not follow it."""
+        if self.accounting is None:
+            return None
+        key = (parent, parent_columns, child, child_columns)
+        return next(
+            (
+                entry
+                for entry in self.accounting.follows
+                if (
+                    entry.parent_table,
+                    entry.parent_columns,
+                    entry.child_table,
+                    entry.child_columns,
+                )
+                == key
+            ),
+            None,
+        )
+
+    def _relationship_charge(
+        self, parent: str, child: str, follow: Optional[Follow], where: str
+    ) -> _Charge:
+        """The sensitivity of the children-per-parent histogram of a relationship (ADR 0037 decision 2).
+
+        Its records are the rows of the parent and its value a parent's number of children. Let
+        ``m_P`` and ``m_C`` be the reach of the two tables and ``m_C'`` the reach of the child less
+        this relationship's own share of it (``c * m_P`` when the unit follows it, else 0).
+
+        * ``m_P >= 1`` and ``m_C' = 0``: one unit adds or removes at most ``m_P`` records with their
+          children and changes no other record, so L1 and L2 are ``m_P``.
+        * ``m_P = 0`` and ``m_C >= 1``: each of the unit's ``m_C`` child rows moves one parent between
+          two count classes, so L1 is ``2 m_C``, L2 is ``sqrt(2) m_C`` and the squared L2 is
+          ``2 m_C^2``.
+        * Otherwise there is no bound the reader can state, and the noise is refused.
+        """
+        accounting = self._require_account(where)
+        m_parent = accounting.reach(parent)
+        m_child = accounting.reach(child)
+        others = m_child - (follow.max_children * m_parent if follow is not None else 0)
+        if m_parent >= 1 and others == 0:
+            return _Charge(Fraction(m_parent), Fraction(m_parent * m_parent))
+        if m_parent == 0 and m_child >= 1:
+            return _Charge(Fraction(2 * m_child), Fraction(2 * m_child * m_child))
+        raise refuse(
+            where,
+            "a relationship's histogram carries noise only where the unit reaches the parent table "
+            "and reaches the child table through this relationship alone, or reaches the child "
+            "table and not the parent table",
         )
 
     def _structural(self, raw: Mapping[str, Any], where: str) -> FrozenSet[str]:
@@ -2118,21 +2654,25 @@ class _Reader:
 def _derived(
     name: str, cliques: Tuple[CliqueEntry, ...], entry: ColumnEntry
 ) -> Tuple[Tuple[StatisticEntry, ...], Tuple[StatisticEntry, ...]]:
-    """The level histograms of column *name* that its cliques answer, as the reader forms them.
+    """The histograms of column *name* that its cliques answer, as the reader forms them.
 
-    Summing a clique onto one column gives that column's ungrouped level histogram, and onto two
-    gives a level histogram grouped by the other (a two-way count table). Each is a post-processing
-    of the noisy counts: the point estimate of the summed values (one group of the whole, or one per
-    level of the other column), with the variance of a sum of independent cells. A statistic the
-    column already carries in the document is not added to its statistics: the one formed is kept
-    apart (:attr:`ColumnEntry.clique_statistics`), because the draw of a column in a clique rests on
-    it. One pair is formed once, from the first clique that holds it. The result is the statistics
-    to add and the ones kept apart.
+    Summing a clique onto one column gives that column's ungrouped histogram, and onto two gives a
+    histogram grouped by the other (a two-way count table). A category column gives a
+    ``levelHistogram/1``. A number or timestamp column of a ``cliqueMarginal/2`` gives a
+    ``marginalHistogram/1`` over the clique's bins, grouped by a category column of the clique, or,
+    for two binned columns, the first in the clique's order grouped by the bins of the later one
+    (``groupByBins``). Each is a post-processing of the noisy counts: the point estimate of the
+    summed values (one group of the whole, or one per level or bin of the other column), with the
+    variance of a sum of independent cells. A statistic the column already carries in the document
+    is not added to its statistics: the one formed is kept apart
+    (:attr:`ColumnEntry.clique_statistics`), because the draw of a column in a clique rests on it.
+    One pair is formed once, from the first clique that holds it. The result is the statistics to
+    add and the ones kept apart.
     """
-    from flux_stats.definitions import LEVEL_HISTOGRAM
+    from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM
 
     have = {
-        (item.identifier, item.group_by, item.levels)
+        (item.identifier, item.group_by, item.group_by_bins, item.levels, item.bins)
         for item in entry.statistics
         if item.group_by_link is None and not item.per
     }
@@ -2143,7 +2683,16 @@ def _derived(
         if name not in clique.columns:
             continue
         levels = clique.levels_of(name)
-        others: List[Optional[str]] = [None, *(c for c in clique.columns if c != name)]
+        edges = clique.edges_of(name)
+        position = clique.columns.index(name)
+        others: List[Optional[str]] = [None]
+        for neighbour in clique.columns:
+            if neighbour == name:
+                continue
+            if not clique.binned(neighbour):
+                others.append(neighbour)
+            elif edges and clique.columns.index(neighbour) > position:
+                others.append(neighbour)
         for other in others:
             if other in seen:
                 continue
@@ -2156,29 +2705,43 @@ def _derived(
             for key in keys:
                 cells = [table[(level,) if other is None else (key, level)] for level in levels]
                 estimate = point_estimate(cells)
+                held = {"bin_counts" if edges else "level_counts": estimate.counts}
                 groups.append(
                     ProfileGroup(
                         key=key,
                         status=FREE,
                         statistic=GroupStatistic(
-                            group=key, k=estimate.records, level_counts=estimate.counts
+                            group=key, k=estimate.records, **held  # type: ignore[arg-type]
                         ),
                         noisy=tuple(cells),
                     )
                 )
-            (shadowed if (LEVEL_HISTOGRAM.identifier, other, levels) in have else formed).append(
+            by_bins = (
+                BinGrouping(column=other, bins=clique.edges_of(other))
+                if other is not None and clique.binned(other)
+                else None
+            )
+            group_by = None if by_bins is not None else other
+            identifier = (MARGINAL_HISTOGRAM if edges else LEVEL_HISTOGRAM).identifier
+            (
+                shadowed
+                if (identifier, group_by, by_bins, levels if not edges else (), edges) in have
+                else formed
+            ).append(
                 StatisticEntry(
-                    definition=LEVEL_HISTOGRAM,
+                    definition=MARGINAL_HISTOGRAM if edges else LEVEL_HISTOGRAM,
                     sample_size=SampleSize(
                         minimum=min(g.statistic.k for g in groups if g.statistic)
                     ),
                     disclosure="",
                     groups=tuple(groups),
-                    group_by=other,
-                    levels=levels,
+                    group_by=group_by,
+                    levels=() if edges else levels,
+                    bins=edges,
                     noise=clique.noise,
                     cell_variance=clique.noise.variance * summed,
                     derived=True,
+                    group_by_bins=by_bins,
                 )
             )
     return tuple(formed), tuple(shadowed)
@@ -2226,7 +2789,7 @@ def _require_format_of_sections(raw: Mapping[str, Any]) -> None:
                 f"profile.{section}",
                 "is a section of format 1-2-0, and this document names an earlier format",
             )
-    if "references" in raw and raw["_schemaURL"] != SCHEMA_URL_1_3_0:
+    if "references" in raw and raw["_schemaURL"] not in _FROM_1_3_0:
         raise refuse(
             "profile.references",
             "is a section of format 1-3-0, and this document names an earlier format",
@@ -2244,6 +2807,21 @@ def _read_references(raw: Mapping[str, Any], rules: Mapping[str, Any]) -> Dict[s
         )
         for name in sorted(declared)
     }
+
+
+def _check_follows(accounting: Accounting, relationships: Sequence[RelationshipEntry]) -> None:
+    """Each followed relationship is an entry of the profile's ``relationships`` (ADR 0037)."""
+    held = {
+        (item.parent_table, item.parent_columns, item.child_table, item.child_columns)
+        for item in relationships
+    }
+    for index, entry in enumerate(accounting.follows):
+        key = (entry.parent_table, entry.parent_columns, entry.child_table, entry.child_columns)
+        if key not in held:
+            raise refuse(
+                f"profile.privacy.privacyUnit.follows[{index}]",
+                "names no entry of the profile's relationships by its parent and child",
+            )
 
 
 def parse_profile(document: Any) -> Profile:
@@ -2280,8 +2858,11 @@ def parse_profile(document: Any) -> Profile:
         MappingProxyType(rules),
         first_format=raw["_schemaURL"] == SCHEMA_URL,
         accounting=accounting,
-        from_1_3=raw["_schemaURL"] == SCHEMA_URL_1_3_0,
+        from_1_3=raw["_schemaURL"] in _FROM_1_3_0,
+        from_1_4=raw["_schemaURL"] == SCHEMA_URL_1_4_0,
     )
+    if accounting is not None and accounting.follows:
+        reader.require_1_4_0("follows", "profile.privacy.privacyUnit.follows")
     declared = _object(raw["tables"], "profile.tables")
     tables = {
         _name(name, "profile.tables"): reader.table(name, declared[name], f"profile.tables.{name}")
@@ -2306,6 +2887,7 @@ def parse_profile(document: Any) -> Profile:
     references = _read_references(raw, rules)
     reader.check_links(tables, references)
     if accounting is not None:
+        _check_follows(accounting, relationships)
         check_budget(accounting, reader.parts)
     return Profile(
         producer=producer,
@@ -2318,4 +2900,5 @@ def parse_profile(document: Any) -> Profile:
         invariants=invariants,
         accounting=accounting,
         references=MappingProxyType(references),
+        parts=tuple(reader.parts),
     )

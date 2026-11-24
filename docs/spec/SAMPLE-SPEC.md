@@ -164,7 +164,10 @@ comparison. A property is `outside` when any of its groups is, else
 `undecided` when any is, else `within`; it is `censored` when the profile
 withheld every group. The properties of another kind (a quantile without bins,
 a level histogram, a support, a correlation) are not estimated: they are
-named, and nothing is compared for them.
+named, and nothing is compared for them. So is a `rankCorrelation` property (SCORECARD-SPEC.md section 3):
+the sums `S` and `A4` that form a rank correlation do not add up across blocks, so a sample of blocks has no
+estimate of it. And so is a property with `groupByBins`, whose groups a sample of blocks does not estimate in
+this version.
 
 An emit's sampled check is `failed` when a property is `outside` or
 `undecided` or a fail-closed condition is met, `passed` when at least one

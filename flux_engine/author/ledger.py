@@ -30,6 +30,8 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
 from flux_engine.author.forms import unread_reason
 from flux_engine.seam.parameters import render_pointer
+from flux_stats.definitions import CORRELATION
+from flux_stats.rank_correlation import RANK_IDENTIFIERS
 
 __all__ = ["USED", "UNUSED", "WITHHELD", "Ledger", "LedgerEntry"]
 
@@ -38,22 +40,33 @@ UNUSED = "unused"
 WITHHELD = "withheld"
 
 _FREE = "F"
+_RANK_DEFINITIONS = RANK_IDENTIFIERS
+_CORRELATION = CORRELATION.identifier
 
 #: Why a statistic of a section no rule reads is unused, by section.
 _SECTION_REASONS: Mapping[str, str] = {
     "columnPairs": (
-        "a correlation between two number columns has no declaration a generator emit " "draws from"
+        "a correlation between two number columns has no declaration a generator emit draws from"
     ),
     "periods": "a generator emit draws no mean month by month",
     "relationships": (
         "children per parent are read from an ungrouped histogram or mean of a one-column "
-        "relationship the contract declares, and this is neither"
+        "relationship the contract declares, or from a histogram grouped by a column of its parent "
+        "that the layout can be given, and this is none of those"
     ),
     "queries": "the count a query matches has no declaration a generator emit draws from",
     "datePairs": "no rule of fluxsim init reads this statistic of the days between two dates",
     "dates": "no rule of fluxsim init reads this statistic of the days between two dates",
     "exposure": "no rule of fluxsim init reads this exposure of a parent's lifetime",
 }
+
+#: Why a rank correlation of a pair no copula holds is unused, and why a Pearson correlation is
+#: unused now that the copula reads rank correlations.
+_RANK_REASON = "no copula of fluxsim init holds this pair, so no declaration reads its value"
+_CORRELATION_REASON = (
+    "the copula reads rank correlations (kendallTau/1, spearmanRho/1), and no declaration draws "
+    "from a Pearson correlation"
+)
 
 #: Why a column statistic no rule took up is unused.
 _COLUMN_REASON = "no rule of fluxsim init reads this statistic for this column"
@@ -72,6 +85,15 @@ _GROUPED_REASON = (
     "a statistic grouped by another column is not read: the column is drawn from its own "
     "statistics"
 )
+
+
+def _pair_statistics(pairs: Any) -> Iterator[Tuple[Tuple[str, ...], Mapping[str, Any]]]:
+    """Each statistic of each ``columnPairs`` entry, with the tokens that point at it below the table."""
+    for index, item in enumerate(pairs if isinstance(pairs, list) else ()):
+        statistics = item.get("statistics") if isinstance(item, Mapping) else None
+        for position, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
+            if isinstance(statistic, Mapping):
+                yield ("columnPairs", str(index), "statistics", str(position)), statistic
 
 
 @dataclass
@@ -229,6 +251,7 @@ class Ledger:
             for index, item in enumerate(found if isinstance(found, list) else ()):
                 if isinstance(item, Mapping):
                     self._pair(base + (section, str(index)), item, _SECTION_REASONS[section])
+        self._rank_reasons(base, table.get("columnPairs"))
 
     def _columns(self, base: Tuple[str, ...], columns: Any) -> None:
         for column, entry in (columns.items() if isinstance(columns, Mapping) else ()):
@@ -279,6 +302,18 @@ class Ledger:
         order = item.get("order")
         if isinstance(order, Mapping):
             self._add(base + ("order",), order, reason, metric=False)
+
+    def _rank_reasons(self, base: Tuple[str, ...], pairs: Any) -> None:
+        """Give a rank correlation, and a Pearson correlation, of a column pair its own reason."""
+        for tokens, statistic in _pair_statistics(pairs):
+            entry = self._entries.get(base + tokens)
+            if entry is None or entry.state != UNUSED:
+                continue
+            definition = statistic.get("definition")
+            if definition in _RANK_DEFINITIONS:
+                entry.note = _RANK_REASON
+            elif definition == _CORRELATION:
+                entry.note = _CORRELATION_REASON
 
     def _history(self, base: Tuple[str, ...], history: Mapping[str, Any]) -> None:
         """The statistics of a table's ``history`` (profile format 1-3-0), each unused until read."""

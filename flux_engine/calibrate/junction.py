@@ -29,7 +29,9 @@ the order ``(-shared columns, names)``, and the tree is walked breadth first fro
 in name order. Nothing depends on the order the cliques were written in the profile, except to
 name them in a refusal.
 
-Everything here is on names. No count is read.
+Everything here is on names. No count is read, so a clique of either definition arranges the same
+way: a number or timestamp column of a ``cliqueMarginal/2`` is a node whose levels are its bins
+(ADR 0036 decision 2), and a column drawn given a separator that holds it reads its bin.
 """
 
 from __future__ import annotations

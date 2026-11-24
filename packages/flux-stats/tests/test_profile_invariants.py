@@ -102,7 +102,7 @@ def test_a_1_2_0_document_may_hold_no_section() -> None:
 
 
 def test_an_unknown_url_is_still_refused() -> None:
-    document = _edit(lambda d: d.update(_schemaURL=SCHEMA_URL_1_2_0.replace("1-2-0", "1-4-0")))
+    document = _edit(lambda d: d.update(_schemaURL=SCHEMA_URL_1_2_0.replace("1-2-0", "1-5-0")))
     assert "profile._schemaURL" in _refused(document)
 
 

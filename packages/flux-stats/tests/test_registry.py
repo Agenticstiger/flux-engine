@@ -85,6 +85,7 @@ ALLOWED_IMPORTS: FrozenSet[str] = frozenset(
         "flux_stats.fixedpoint",
         "flux_stats.integers",
         "flux_stats.noise",
+        "flux_stats.rank_correlation",
         "flux_stats.reading",
         "flux_stats.registry",
         "flux_stats.request",
@@ -104,6 +105,7 @@ STATS_CLOSURE: FrozenSet[str] = frozenset(
         "flux_stats.exact_yaml",
         "flux_stats.fidelity",
         "flux_stats.fixedpoint",
+        "flux_stats.rank_correlation",
         "flux_stats.reading",
         "flux_stats.registry",
         "flux_stats.request",
@@ -273,7 +275,12 @@ def _fresh(statement: str) -> Dict[str, Any]:
         ("flux_stats", STATS_CLOSURE),
         (
             "flux_stats.profile",
-            STATS_CLOSURE | {"flux_stats.cliques", "flux_stats.noise", "flux_stats.profile"},
+            STATS_CLOSURE
+            | {
+                "flux_stats.cliques",
+                "flux_stats.noise",
+                "flux_stats.profile",
+            },
         ),
     ],
 )

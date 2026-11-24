@@ -114,6 +114,11 @@ class GroupStatistic:
     quantile_bin: Optional[int] = None
     bin_below: int = 0
     bin_through: int = 0
+    #: ``kendallTau/1`` and ``spearmanRho/1`` (:mod:`flux_stats.rank_correlation`): ``S``, the sum of
+    #: the products of the signs of the differences, and ``A4``, four times the sum of the products
+    #: of the centred mid-ranks.
+    rank_s: int = 0
+    rank_a4: int = 0
 
     def cell_counts(self, kind: str) -> Tuple[int, ...]:
         """The counts a total-variation comparison reads for a *kind* statistic.
@@ -488,6 +493,8 @@ _QUANTITIES: Mapping[str, Tuple[str, Callable[[Any, str], Any]]] = {
     "quantileBin": ("quantile_bin", _read_bin),
     "binBelow": ("bin_below", read_count),
     "binThrough": ("bin_through", read_count),
+    "S": ("rank_s", read_units),
+    "A4": ("rank_a4", read_units),
 }
 
 

@@ -21,7 +21,15 @@ from typing import Any, Dict, Tuple
 import pytest
 
 from flux_stats.errors import FluxError
-from flux_stats.noise import PrivacyLoss, _epsilon_at_delta, _require_spent
+from flux_stats.noise import (
+    APPROXIMATE_DP,
+    ZERO_CONCENTRATED_DP,
+    Accounting,
+    PrivacyLoss,
+    _epsilon_at_delta,
+    _require_spent,
+    read_noise,
+)
 from flux_stats.profile import parse_profile
 
 pytestmark = pytest.mark.unit
@@ -40,9 +48,18 @@ EXAMPLE: Dict[str, Any] = json.loads(
 PARTS = 3  # the example's two cliques and its one noisy histogram
 
 
+ONE = Fraction(1)
+
+
+def _accepted(mechanism: str, scale: Fraction, loss: PrivacyLoss, **sensitivity: Fraction) -> None:
+    """Check a share against a count table's sensitivity, or the one given, written out."""
+    sensitivity = {"l1": ONE, "l2_squared": ONE, **sensitivity}
+    _require_spent(mechanism, scale, loss, "x", **sensitivity)
+
+
 def _refused(mechanism: str, scale: str, loss: PrivacyLoss, **sensitivity: Fraction) -> str:
     with pytest.raises(FluxError) as refused:
-        _require_spent(mechanism, Fraction(scale), loss, "x", **sensitivity)
+        _accepted(mechanism, Fraction(scale), loss, **sensitivity)
     assert refused.value.code.code == "FLX-5036"
     return str(refused.value)
 
@@ -108,8 +125,8 @@ def test_a_gaussian_under_approximate_dp_must_state_a_delta_above_zero(mechanism
 def test_a_laplace_under_zero_concentrated_dp_states_at_least_epsilon_squared_over_two() -> None:
     # scale 3 is epsilon 1/3, so rho = 1/18 exactly.
     exact = Fraction(1, 18)
-    _require_spent("laplace", Fraction(3), PrivacyLoss(rho=exact), "x")
-    _require_spent("laplace", Fraction(3), PrivacyLoss(rho=exact * 2), "x")
+    _accepted("laplace", Fraction(3), PrivacyLoss(rho=exact))
+    _accepted("laplace", Fraction(3), PrivacyLoss(rho=exact * 2))
     assert "zero-concentrated" in _refused(
         "laplace", "3", PrivacyLoss(rho=exact - Fraction(1, 10**12))
     )
@@ -164,11 +181,9 @@ def test_a_gaussian_under_approximate_dp_states_the_computed_epsilon_or_more(
 ) -> None:
     needed, delta = _gaussian_share("1", "0.000001")
     # the exact bound, and the bound rounded up to a few places, are accepted
-    _require_spent(mechanism, Fraction(1), PrivacyLoss(epsilon=needed, delta=delta), "x")
-    _require_spent(
-        mechanism, Fraction(1), PrivacyLoss(epsilon=Fraction("5.756522"), delta=delta), "x"
-    )
-    _require_spent(mechanism, Fraction(1), PrivacyLoss(epsilon=Fraction(6), delta=delta), "x")
+    _accepted(mechanism, Fraction(1), PrivacyLoss(epsilon=needed, delta=delta))
+    _accepted(mechanism, Fraction(1), PrivacyLoss(epsilon=Fraction("5.756522"), delta=delta))
+    _accepted(mechanism, Fraction(1), PrivacyLoss(epsilon=Fraction(6), delta=delta))
     # anything clearly below is refused, the rounded down figure and a far smaller one alike
     for below in ("5.756521", "5.7", "1", "0.0001"):
         message = _refused(mechanism, "1", PrivacyLoss(epsilon=Fraction(below), delta=delta))
@@ -216,30 +231,92 @@ def test_the_pairings_that_were_checked_still_are_and_valid_profiles_stay_accept
 def test_a_larger_sensitivity_raises_what_each_pairing_needs() -> None:
     two = Fraction(2)
     # Laplace, scale 4: epsilon l1 / b = 1/2 at l1 = 2, and rho = (1/2)^2 / 2 = 1/8
-    _require_spent(
-        "laplace", Fraction(4), PrivacyLoss(epsilon=Fraction(1, 2), delta=0), "x", l1=two
-    )
+    _accepted("laplace", Fraction(4), PrivacyLoss(epsilon=Fraction(1, 2), delta=0), l1=two)
     assert _refused("laplace", "4", PrivacyLoss(epsilon=Fraction(1, 4), delta=Fraction(0)), l1=two)
-    _require_spent("laplace", Fraction(4), PrivacyLoss(rho=Fraction(1, 8)), "x", l1=two)
+    _accepted("laplace", Fraction(4), PrivacyLoss(rho=Fraction(1, 8)), l1=two)
     assert _refused("laplace", "4", PrivacyLoss(rho=Fraction(1, 9)), l1=two)
     # Gaussian, scale 2: rho = l2^2 / (2 s^2) = 4 / 8 = 1/2 at l2^2 = 4
     four = Fraction(4)
-    _require_spent("gaussian", Fraction(2), PrivacyLoss(rho=Fraction(1, 2)), "x", l2_squared=four)
+    _accepted("gaussian", Fraction(2), PrivacyLoss(rho=Fraction(1, 2)), l2_squared=four)
     assert _refused("gaussian", "2", PrivacyLoss(rho=Fraction(1, 3)), l2_squared=four)
     # the same scale at sensitivity one needs an eighth, so what holds there is refused at four
     assert _refused("gaussian", "2", PrivacyLoss(rho=Fraction(1, 8)), l2_squared=four)
     delta = Fraction(1, 10**6)
     needed = _epsilon_at_delta(Fraction(1, 2), delta)
-    _require_spent(
-        "gaussian", Fraction(2), PrivacyLoss(epsilon=needed, delta=delta), "x", l2_squared=four
-    )
+    _accepted("gaussian", Fraction(2), PrivacyLoss(epsilon=needed, delta=delta), l2_squared=four)
     assert _refused("gaussian", "2", PrivacyLoss(epsilon=needed - 1, delta=delta), l2_squared=four)
 
 
 def test_a_sensitivity_that_is_not_above_zero_is_a_programming_error() -> None:
     with pytest.raises(ValueError):
-        _require_spent("laplace", Fraction(1), PrivacyLoss(rho=Fraction(1)), "x", l1=Fraction(0))
+        _accepted("laplace", Fraction(1), PrivacyLoss(rho=Fraction(1)), l1=Fraction(0))
     with pytest.raises(ValueError):
-        _require_spent(
-            "gaussian", Fraction(1), PrivacyLoss(rho=Fraction(1)), "x", l2_squared=Fraction(-1)
-        )
+        _accepted("gaussian", Fraction(1), PrivacyLoss(rho=Fraction(1)), l2_squared=Fraction(-1))
+
+
+# ---------------------------------------------------------------------------
+# The sensitivities have no default
+# ---------------------------------------------------------------------------
+
+
+def test_a_forgotten_sensitivity_is_a_type_error_not_a_charge_of_one() -> None:
+    loss = PrivacyLoss(rho=Fraction(1))
+    with pytest.raises(TypeError):
+        _require_spent("gaussian", Fraction(1), loss, "x")  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        _require_spent("gaussian", Fraction(1), loss, "x", l1=ONE)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        _require_spent("gaussian", Fraction(1), loss, "x", l2_squared=ONE)  # type: ignore[call-arg]
+    block = {"mechanism": "gaussian", "scale": "1", "privacyLoss": {"rho": "1"}}
+    accounting = Accounting(
+        measure=ZERO_CONCENTRATED_DP, total=PrivacyLoss(rho=Fraction(2)), unit="t"
+    )
+    with pytest.raises(TypeError):
+        read_noise(block, "x", accounting)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        read_noise(block, "x", accounting, l1=ONE)  # type: ignore[call-arg]
+    assert read_noise(block, "x", accounting, l1=ONE, l2_squared=ONE).scale == 1
+
+
+def test_a_sensitivity_above_one_raises_the_least_share_exactly() -> None:
+    """Gaussian rho = l2^2 / (2 s^2), Laplace epsilon = l1 / b, and both cross pairings."""
+    accounting_rho = Accounting(
+        measure=ZERO_CONCENTRATED_DP, total=PrivacyLoss(rho=Fraction(100)), unit="t"
+    )
+    accounting_eps = Accounting(
+        measure=APPROXIMATE_DP,
+        total=PrivacyLoss(epsilon=Fraction(100), delta=Fraction(0)),
+        unit="t",
+    )
+    l1, l2_squared = Fraction(4, 5), Fraction(16, 25)  # 4 / (f + 1) at f = 4, and its square
+    scale = Fraction(2)
+
+    def read(mechanism: str, measure: Accounting, share: Dict[str, str]) -> None:
+        block = {"mechanism": mechanism, "scale": "2", "privacyLoss": share}
+        read_noise(block, "n", measure, l1=l1, l2_squared=l2_squared)
+
+    # Gaussian under zero-concentrated DP: rho = (16/25) / 8 = 2/25
+    least = l2_squared / (2 * scale * scale)
+    assert least == Fraction(2, 25)
+    read("gaussian", accounting_rho, {"rho": "0.08"})
+    for share in ("0.0799999", "0.0625"):  # just below, and under the least
+        with pytest.raises(FluxError) as refused:
+            read("gaussian", accounting_rho, {"rho": share})
+        assert refused.value.code.code == "FLX-5036"
+    # Laplace under approximate DP: epsilon = (4/5) / 2 = 2/5
+    read("laplace", accounting_eps, {"epsilon": "0.4", "delta": "0"})
+    with pytest.raises(FluxError) as refused:
+        read("laplace", accounting_eps, {"epsilon": "0.3999", "delta": "0"})
+    assert refused.value.code.code == "FLX-5036"
+    # Laplace under zero-concentrated DP: rho = (2/5)^2 / 2 = 2/25
+    read("laplace", accounting_rho, {"rho": "0.08"})
+    with pytest.raises(FluxError):
+        read("laplace", accounting_rho, {"rho": "0.0799"})
+    # Gaussian under approximate DP: epsilon at least rho + 2 sqrt(rho ln(1 / delta)), rho = 2/25
+    delta = Fraction(1, 10**6)
+    needed = _epsilon_at_delta(least, delta)
+    share = {"epsilon": format(float(needed) + 1e-9, ".12f"), "delta": "0.000001"}
+    read("gaussian", accounting_eps, share)
+    below = {"epsilon": format(float(needed) - 1e-3, ".12f"), "delta": "0.000001"}
+    with pytest.raises(FluxError):
+        read("gaussian", accounting_eps, below)

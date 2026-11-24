@@ -666,7 +666,7 @@ def test_the_request_asks_for_every_pair_of_date_columns(tmp_path: Path) -> None
     contract = tmp_path / "dated.fluid.yaml"
     contract.write_text(CONTRACT, encoding="utf-8")
     text = _request(tmp_path, contract)
-    assert "profile-request/1-1-0/" in text
+    assert "profile-request/1-2-0/" in text  # which also holds the 1-1-0 asks of the dates
     request = load_request_text(text)
     tables = {table.expose_id: table for table in request.tables}
     assert [(pair.start, pair.end) for pair in tables["customer"].date_pairs] == [
@@ -702,8 +702,6 @@ exposes:
     - name: store_id
       type: STRING
       required: true
-    - name: region
-      type: STRING
   binding:
     platform: local
     format: parquet
@@ -723,11 +721,9 @@ def test_a_contract_with_no_date_column_keeps_its_request_as_format_one_zero_zer
         assert key not in text
 
 
-def test_a_contract_with_one_date_column_asks_its_calendar_in_format_one_one_zero(
-    tmp_path: Path,
-) -> None:
+def test_a_contract_with_one_date_column_asks_its_calendar(tmp_path: Path) -> None:
     text = _request(tmp_path, ORDERS_CONTRACT)
-    assert "profile-request/1-1-0/" in text
+    assert "profile-request/1-2-0/" in text
     assert "datePairs" not in text
     assert [table.calendar for table in load_request_text(text).tables] == [("created_at",)]
 

@@ -93,7 +93,9 @@ def profile_targets(profile: Profile) -> Mapping[str, Tuple[QueryTarget, ...]]:
     """Each query of the profile's ``queries`` section with the rates its statistics state."""
     return {
         entry.name: tuple(
-            QueryTarget(statistic.group_by, _target_of(statistic)) for statistic in entry.statistics
+            QueryTarget(statistic.group_by, _target_of(statistic))
+            for statistic in entry.statistics
+            if statistic.group_by_bins is None
         )
         for entry in profile.queries
     }

@@ -446,6 +446,9 @@ def _sampled_property(
 def _sampled_kind(entry: CompiledProperty) -> str:
     """The kind of estimate a property takes on a sample, or ``""`` for one that takes none."""
     kind = entry.declaration.kind
+    if entry.declaration.group_by_bins is not None:
+        # A group per bin of another column is not one a sample of blocks estimates in this version.
+        return ""
     if kind is PropertyKind.MEAN:
         return "mean"
     if kind is PropertyKind.MARGINAL_HISTOGRAM:

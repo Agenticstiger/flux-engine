@@ -25,7 +25,7 @@ released, and everything computed from it is post-processing of that release.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import (
     ROUND_CEILING,
     Context,
@@ -36,23 +36,31 @@ from decimal import (
 )
 from fractions import Fraction
 from math import isqrt
-from typing import Any, Mapping, Optional, Sequence, Tuple
+from types import MappingProxyType
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence, Set, Tuple
 
-from flux_stats.spelling import read_decimal, refuse
+from flux_stats.spelling import read_count, read_decimal, read_texts, refuse
 
 __all__ = [
     "APPROXIMATE_DP",
     "Accounting",
+    "Follow",
+    "MAX_FOLLOWS",
     "MECHANISMS",
     "MEASURES",
     "Noise",
     "PointEstimate",
     "PrivacyLoss",
+    "PrivacyShare",
+    "Spent",
     "ZERO_CONCENTRATED_DP",
     "check_budget",
     "point_estimate",
     "read_accounting",
     "read_noise",
+    "read_follows",
+    "read_share",
+    "reach_of",
     "sampling_widening",
     "variance_of",
     "widening",
@@ -114,10 +122,25 @@ class Accounting:
     measure: str
     total: PrivacyLoss
     unit: str
-    #: The profiler declares that the levels of its histograms, their bin edges and the
-    #: ``sampleSize`` bands were chosen without the data, or are part of the release
-    #: (PROFILE-SPEC.md section 3a). The engine cannot check it.
+    #: The relationships the unit follows (format 1-4-0), each with its public cap; empty for a unit
+    #: that is one row of the expose.
+    follows: Tuple[Follow, ...] = ()
+    #: ``m_T`` for every table the unit reaches (:func:`reach_of`); empty when the
+    #: unit follows nothing, and then :meth:`reach` is 1 for the expose and 0 for every other table.
+    reached: Mapping[str, int] = field(default_factory=dict)
+    #: The profiler declares that the structure of the release was chosen without the data, or is
+    #: part of it (PROFILE-SPEC.md section 3a): the levels and bin edges of its histograms and
+    #: cliques, the bins of every ``groupByBins``, the group keys of its grouped noisy statistics,
+    #: the ``sampleSize`` bands, every ``rowFloor`` and every ``maxChildren``. The engine cannot
+    #: check it.
     public_structure: bool = False
+
+    def reach(self, table: str) -> int:
+        """``m_T``: how many rows of *table* one unit contributes. 1 for the expose, 0 for a table the
+        unit does not reach."""
+        if table == self.unit:
+            return 1
+        return self.reached.get(table, 0)
 
 
 @dataclass(frozen=True)
@@ -132,6 +155,25 @@ class Noise:
     def variance(self) -> Fraction:
         """The variance of one noisy cell, exact. The discrete Gaussian's is not above ``scale^2``."""
         return variance_of(self.mechanism, self.scale)
+
+
+@dataclass(frozen=True)
+class PrivacyShare:
+    """A share of the budget with no mechanism and no scale: a bare ``privacyLoss``.
+
+    It is what choosing cliques or releasing a domain spent (``cliqueSelection``): the profiler
+    states the loss, and there is no noise block to check it against. It adds to the account as a
+    :class:`Noise` does, in the account's measure.
+    """
+
+    loss: PrivacyLoss
+
+
+class Spent(Protocol):
+    """A part of the account: anything that states the privacy loss it spends."""
+
+    @property
+    def loss(self) -> PrivacyLoss: ...
 
 
 def variance_of(mechanism: str, scale: Fraction) -> Fraction:
@@ -171,6 +213,140 @@ def _loss(value: Any, where: str, measure: str) -> PrivacyLoss:
     return PrivacyLoss(epsilon=epsilon, delta=delta)
 
 
+# ---------------------------------------------------------------------------
+# A unit of privacy that follows its child rows (ADR 0037)
+# ---------------------------------------------------------------------------
+
+# A unit with ``follows`` is one row of the expose with the rows of child tables that reference it
+# through the listed relationships, which form a tree rooted at the expose; ``m_T`` is the product of
+# the caps along the one path into a table, and a noisy statistic of ``T`` is charged ``m_T`` times
+# the sensitivity of one row of ``T``. Two paths into one table, or a parent the unit does not reach,
+# would make the stated reach understate what one unit changes, so both are refused.
+
+#: The most relationships one unit may follow.
+MAX_FOLLOWS = 1024
+
+
+@dataclass(frozen=True)
+class Follow:
+    """One followed relationship: its two ends and the fixed public cap on children per parent."""
+
+    parent_table: str
+    parent_columns: Tuple[str, ...]
+    child_table: str
+    child_columns: Tuple[str, ...]
+    max_children: int
+
+
+def _end(value: Any, where: str) -> Tuple[str, Tuple[str, ...]]:
+    if not isinstance(value, Mapping):
+        raise refuse(where, f"expected an object, got {type(value).__name__}")
+    unknown = sorted(str(key) for key in value if key not in ("table", "columns"))
+    if unknown:
+        raise refuse(where, f"unknown key {unknown[0]!r}")
+    for key in ("table", "columns"):
+        if key not in value:
+            raise refuse(where, f"missing key {key!r}")
+    table = read_texts([value["table"]], f"{where}.table")[0]
+    columns = tuple(read_texts(value["columns"], f"{where}.columns"))
+    if not columns:
+        raise refuse(f"{where}.columns", "names at least one key column")
+    return table, columns
+
+
+def _follow(value: Any, where: str) -> Follow:
+    if not isinstance(value, Mapping):
+        raise refuse(where, f"expected an object, got {type(value).__name__}")
+    unknown = sorted(str(key) for key in value if key not in ("parent", "child", "maxChildren"))
+    if unknown:
+        raise refuse(where, f"unknown key {unknown[0]!r}")
+    for key in ("parent", "child", "maxChildren"):
+        if key not in value:
+            raise refuse(where, f"missing key {key!r}")
+    parent_table, parent_columns = _end(value["parent"], f"{where}.parent")
+    child_table, child_columns = _end(value["child"], f"{where}.child")
+    if len(parent_columns) != len(child_columns):
+        raise refuse(where, "a parent and a child key have the same number of columns")
+    cap = read_count(value["maxChildren"], f"{where}.maxChildren")
+    if cap < 1:
+        raise refuse(
+            f"{where}.maxChildren", "a cap on children per parent is a count of at least 1"
+        )
+    return Follow(parent_table, parent_columns, child_table, child_columns, cap)
+
+
+def read_follows(value: Any, where: str) -> Tuple[Follow, ...]:
+    """Read the ``follows`` list of a ``privacyUnit``: each entry on its own, not yet as a tree."""
+    if not isinstance(value, list):
+        raise refuse(where, f"expected a list, got {type(value).__name__}")
+    if not value:
+        raise refuse(where, "follows names at least one relationship, or is left out")
+    if len(value) > MAX_FOLLOWS:
+        raise refuse(where, f"follows names at most {MAX_FOLLOWS} relationships")
+    return tuple(_follow(item, f"{where}[{index}]") for index, item in enumerate(value))
+
+
+def reach_of(unit: str, follows: Sequence[Follow], where: str) -> Mapping[str, int]:
+    """``m_T`` of every table the followed relationships reach, the expose included, or refuse.
+
+    The relationships must form a tree rooted at *unit* (see the module text); an entry that breaks
+    that is refused with ``FLX-5036`` at ``where[index]``, never quoting a value of the document.
+    """
+    parent_of = _children_by_table(unit, follows, where)
+    reach: Dict[str, int] = {unit: 1}
+    for index, entry in enumerate(follows):
+        if entry.child_table in reach:
+            continue
+        path = _path_into(entry, parent_of, reach, f"{where}[{index}]")
+        count = reach[path[-1].parent_table]
+        for step in reversed(path):
+            count *= step.max_children
+            reach[step.child_table] = count
+    return MappingProxyType(reach)
+
+
+def _children_by_table(unit: str, follows: Sequence[Follow], where: str) -> Dict[str, Follow]:
+    """Each followed relationship by its child table, refusing a table with two paths into it."""
+    parent_of: Dict[str, Follow] = {}
+    for index, entry in enumerate(follows):
+        at = f"{where}[{index}]"
+        if entry.child_table == unit:
+            raise refuse(at, "the unit's own expose is never the child of a followed relationship")
+        if entry.child_table in parent_of:
+            raise refuse(
+                at,
+                "a table is the child of one followed relationship only: a second path into it "
+                "would make the stated reach understate what one unit changes",
+            )
+        parent_of[entry.child_table] = entry
+    return parent_of
+
+
+def _path_into(
+    entry: Follow, parent_of: Mapping[str, Follow], reach: Mapping[str, int], at: str
+) -> List[Follow]:
+    """The relationships from *entry* up to one whose parent is already reached, *entry* first."""
+    path: List[Follow] = []
+    seen: Set[str] = set()
+    current = entry
+    while True:
+        if current.child_table in seen:
+            raise refuse(at, "followed relationships form no cycle")
+        seen.add(current.child_table)
+        path.append(current)
+        if current.parent_table in reach:
+            return path
+        found = parent_of.get(current.parent_table)
+        if found is None:
+            raise refuse(
+                at,
+                "the parent of a followed relationship is the unit's expose or a table another "
+                "followed relationship reaches: the rows of a parent the unit does not reach "
+                "move with that parent, not with the unit",
+            )
+        current = found
+
+
 def read_accounting(value: Any, where: str) -> Accounting:
     """Read the ``privacy`` block: ``measure``, ``privacyLoss`` and ``privacyUnit``."""
     allowed = {"measure", "privacyLoss", "privacyUnit", "publicStructure"}
@@ -197,20 +373,47 @@ def read_accounting(value: Any, where: str) -> Accounting:
     measure = raw["measure"]
     if measure not in MEASURES:
         raise refuse(f"{where}.measure", f"a measure is one of {list(MEASURES)}")
-    unit = _mapping(raw["privacyUnit"], f"{where}.privacyUnit", ("expose",))
+    unit = raw["privacyUnit"]
+    if not isinstance(unit, Mapping):
+        raise refuse(f"{where}.privacyUnit", f"expected an object, got {type(unit).__name__}")
+    unit = _mapping(
+        unit, f"{where}.privacyUnit", ("expose", "follows") if "follows" in unit else ("expose",)
+    )
     expose = unit["expose"]
     if not isinstance(expose, str) or not expose:
         raise refuse(f"{where}.privacyUnit.expose", "the unit of privacy is an expose id")
+    follows: Tuple[Follow, ...] = ()
+    reached: Mapping[str, int] = {}
+    if "follows" in unit:
+        at = f"{where}.privacyUnit.follows"
+        follows = read_follows(unit["follows"], at)
+        reached = reach_of(expose, follows, at)
     return Accounting(
         measure=measure,
         total=_loss(raw["privacyLoss"], f"{where}.privacyLoss", measure),
         unit=expose,
+        follows=follows,
+        reached=MappingProxyType(dict(reached)),
         public_structure=declared is True,
     )
 
 
-def read_noise(value: Any, where: str, accounting: Accounting) -> Noise:
-    """Read a ``noise`` block: ``mechanism``, ``scale`` and the share ``privacyLoss``."""
+def read_noise(
+    value: Any,
+    where: str,
+    accounting: Accounting,
+    *,
+    l1: Fraction,
+    l2_squared: Fraction,
+) -> Noise:
+    """Read a ``noise`` block: ``mechanism``, ``scale`` and the share ``privacyLoss``.
+
+    ``l1`` and ``l2_squared`` are the L1 sensitivity and the squared L2 sensitivity of what the
+    block noises, under adding or removing one unit of privacy: the sensitivity of one row of the
+    table, times the table's reach (:meth:`Accounting.reach`). They have no default: a count table
+    passes its reach for both, written out, so a caller that forgets them fails instead of charging a
+    sensitivity of one by accident.
+    """
     raw = _mapping(value, where, ("mechanism", "scale", "privacyLoss"))
     mechanism = raw["mechanism"]
     if mechanism not in MECHANISMS:
@@ -219,8 +422,14 @@ def read_noise(value: Any, where: str, accounting: Accounting) -> Noise:
     if scale <= 0 or str(raw["scale"]).startswith("-"):
         raise refuse(f"{where}.scale", "a noise scale is above zero")
     loss = _loss(raw["privacyLoss"], f"{where}.privacyLoss", accounting.measure)
-    _require_spent(mechanism, scale, loss, f"{where}.privacyLoss")
+    _require_spent(mechanism, scale, loss, f"{where}.privacyLoss", l1=l1, l2_squared=l2_squared)
     return Noise(mechanism=mechanism, scale=scale, loss=loss)
+
+
+def read_share(value: Any, where: str, accounting: Accounting) -> PrivacyShare:
+    """Read ``{"privacyLoss": ...}``, a share stated without a mechanism, in the account's measure."""
+    raw = _mapping(value, where, ("privacyLoss",))
+    return PrivacyShare(loss=_loss(raw["privacyLoss"], f"{where}.privacyLoss", accounting.measure))
 
 
 #: The arithmetic that turns a rho and a delta into an epsilon: 60 significant digits and every
@@ -262,8 +471,8 @@ def _require_spent(
     loss: PrivacyLoss,
     where: str,
     *,
-    l1: Fraction = Fraction(1),
-    l2_squared: Fraction = Fraction(1),
+    l1: Fraction,
+    l2_squared: Fraction,
 ) -> None:
     """Refuse a share below what the mechanism spends on a release of the stated sensitivity (ADR 0019).
 
@@ -340,13 +549,14 @@ def _require_gaussian(scale: Fraction, loss: PrivacyLoss, where: str, l2_squared
         )
 
 
-def check_budget(accounting: Accounting, parts: Sequence[Tuple[str, Noise]]) -> None:
+def check_budget(accounting: Accounting, parts: Sequence[Tuple[str, Spent]]) -> None:
     """Refuse a release whose parts add up to more than its total (ADR 0019).
 
     Under zero-concentrated DP the parts' rho adds; under approximate DP their epsilon adds and
     their delta adds (basic composition). Each is compared on its own, in exact arithmetic. A
     release with no noisy part is refused too: its account states a loss nothing spends.
-    ``parts`` pairs each part's place in the document with its :class:`Noise`.
+    ``parts`` pairs each part's place in the document with its :class:`Noise` or
+    :class:`PrivacyShare`.
     """
     if not parts:
         raise refuse(

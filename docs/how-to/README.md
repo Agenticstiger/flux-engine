@@ -1,6 +1,6 @@
 ---
 title: "How-to guides"
-description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, ship with evidence, write a bundle from a profile, score a run against a profile, seal and score a prediction, forecast the next state and score it, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, check consumer queries and calibrate to them, fix values and seed rows, give an entity a history, project a history, keep dates inside their parent's lifetime."
+description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, draw a column given the bin of another, draw number columns together, ship with evidence, write a bundle from a profile, score a run against a profile, seal and score a prediction, forecast the next state and score it, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, check consumer queries and calibrate to them, fix values and seed rows, give an entity a history, project a history, keep dates inside their parent's lifetime."
 ---
 
 # How-to guides
@@ -14,6 +14,8 @@ from a fresh project made with `fluxsim init`.
 - [Use the FLUID seam](./use-the-fluid-seam.md): change the contract the rows follow and keep the pinned digest honest.
 - [Calibrate from aggregates: declare a scorecard](./calibrate-from-aggregates.md): add a Playback and read back its declared scorecard. This path fits nothing; fitting is in [Check consumer queries](./check-consumer-queries.md).
 - [Draw a column given another](./draw-a-column-given-another.md): declare a histogram drawn given a categorical column, from a grouped histogram's counts, and see the fidelity gate check the link.
+- [Draw a column given the bin of another](./draw-a-column-given-the-bin-of-another.md): declare a column drawn given the bin of a number column, from a table grouped by that column's bins, and see the fidelity gate check the link with `groupByBins`.
+- [Draw number columns together](./draw-number-columns-together.md): declare a Gaussian copula so two number or date columns are drawn with a stated rank correlation, keep each column's histogram, and score the correlation against a profile.
 - [Ship with evidence](./ship-with-evidence.md): the fidelity gate, committed slices, signing, and sending the pack on.
 - [Write a bundle from a profile](./write-a-bundle-from-a-profile.md): turn a FLUID contract and a profile of the data into a bundle that runs, every number labelled by what it rests on.
 - [Score a run against a profile, in full or sampled](./score-a-run-against-a-profile.md): pin a data owner's profile, score a run against it, and check its means, histograms and quantile bins on a sample of blocks.

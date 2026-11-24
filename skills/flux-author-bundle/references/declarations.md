@@ -16,6 +16,7 @@ A declaration is read under the kernel the plan names. A new plan takes kernel 0
 
 - A catalogue, a reference expose, needs kernel 0.2.0; on kernel 0.1.0 the plan is refused with `FLX-3105`, which names the kernel ([publish a catalogue](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/publish-a-catalogue.md)).
 - The keys of ADR 0022 (the table's last row) need kernel 0.2.0; under kernel 0.1.0 the plan is refused with `FLX-3105`, naming the kernel.
+- A copula (`fidelity.copula`) and a column given the bin of another number column need kernel 0.2.0; under kernel 0.1.0 the plan is refused with `FLX-3105`, naming the kernel ([draw number columns together](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/draw-number-columns-together.md), [draw a column given the bin of another](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/draw-a-column-given-the-bin-of-another.md)).
 - The pages on journeys, drawing a column given another and calibration name no kernel. Say that the page names none; do not guess one.
 
 If a plan is refused with a kernel in the message, read `fluxsim explain FLX-3105` and the page; do not switch kernels to get past it without the user's agreement, since the digests of a new plan differ between kernels.
@@ -33,6 +34,8 @@ If a plan is refused with a kernel in the message, read `fluxsim explain FLX-310
 |---|---|---|
 | Journeys: a second signal, detector, treatment and journey | separate FLUX documents, wired through a Module's resources and the Simulation's `moduleRefs` | [Add a journey](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/add-a-journey.md) |
 | A column drawn given another, with its own weights per level | the emit's `fidelity` block, under `extensions` | [Draw a column given another](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/draw-a-column-given-another.md) |
+| A column drawn given the bin of a number column | the emit's `fidelity` block, with `given` naming a column drawn from `bins` | [Draw a column given the bin of another](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/draw-a-column-given-the-bin-of-another.md) |
+| Number or date columns that move together, with a stated rank correlation | the emit's `fidelity` block, under `copula` | [Draw number columns together](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/draw-number-columns-together.md) |
 | A small table that other tables point at, kept as the owner's own rows | the emit's block under `emits`, with the profile pinned | [Publish a catalogue whole](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/publish-a-catalogue.md) |
 | Where a model's dials came from, and a minimum credibility an emit requires | a Playback document, and `minCredibility` on an emit | [Calibrate from aggregates](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/calibrate-from-aggregates.md) |
 | A change to the contract's columns, its pinned digest, or its keys | the contract (the owner's) and the Simulation's `emits[]` entry | [Use the FLUID seam](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/use-the-fluid-seam.md) |

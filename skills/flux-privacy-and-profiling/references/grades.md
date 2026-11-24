@@ -15,12 +15,16 @@ P2 is not defined. A pattern keeps its number whatever is added. A run's pattern
 ## How a run is graded
 
 - No profile pinned: P0.
-- A profile pinned: P3 only when it states an account of a release under differential privacy, declares `publicStructure`, and every statistic the engine reads from it is noisy under that account. A row count, a column metric, a statistic without a `noise` block, or a pair, period, relationship, query or fact statistic makes it not P3.
+- A profile pinned: P3 only when it states an account of a release under differential privacy, declares `publicStructure`, and every statistic the engine reads from it is noisy under that account. A row count, a column metric, a statistic without a `noise` block, a period, a query or a fact statistic makes it not P3. A column pair is noisy only when every statistic in it carries a `noise` block: a Pearson `correlation/1` never does, so it makes the profile not P3, and a rank correlation (`kendallTau/1`, `spearmanRho/1`, profile format 1-4-0) can be noisy. A relationship is noisy when every statistic in it carries a `noise` block, so one with a mean or a quantile is not.
 - Otherwise P1, and `EVIDENCE.md` lists why the profile is not P3.
 
 The grade is read from the pinned profile and from every generator plugin the bundle declares, and the run takes the weakest of them. The bundle's register, its labels and its assumptions do not enter it, so a bundle cannot change its own grade by what it says about itself. A profile that mixes noisy and exact statistics is P1 for the whole run. The run has one grade, and each labelled column's floor is compared with it.
 
-P3 rests on the profile's statement. The engine checks that the stated shares add up and that the cliques agree. It does not check that noise was applied, and it does not check the declaration that the structure is public.
+P3 rests on the profile's statement. The engine checks that the stated shares add up, that each share is at least what its mechanism spends for the statistic's sensitivity, and that the cliques agree. It does not check that noise was applied, that a float-safe sampler drew it, or the declaration that the structure is public. For a profile of format 1-4-0 that declaration covers the levels and bin edges of its histograms and cliques, the bins of every `groupByBins`, the group keys of its grouped noisy statistics, the `sampleSize` bands, every `rowFloor` and every `maxChildren`.
+
+## When the unit follows child rows
+
+A profile of format 1-4-0 may state a unit of privacy that is one row of a table with the child rows it takes with it (`privacyUnit.follows`, each followed relationship with a public cap `maxChildren`). `EVIDENCE.md` then states the unit with what it follows and names the tables the unit does not reach, whose rows the guarantee treats as fixed. A labelled column of such a table counts as P1 for its minimum grade, so a run that draws on a `pii` or `restricted` column of a table the unit does not follow is not held to P3. Say so to the user when the evidence names fixed tables.
 
 ## Generator plugins
 
