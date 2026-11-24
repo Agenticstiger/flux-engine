@@ -953,6 +953,42 @@ jobs:
       - name: The real-library sink tests, none skipped (make publish-extra)
         run: make publish-extra
 
+  # ------------------------------------------------------------- kafka-extra
+  # Every other job installs the dev extras only, so confluent-kafka is absent
+  # and the Kafka sink's registry and producer tests skip at import. This job
+  # installs the `kafka` extra, type-checks the sink with the library's own
+  # annotations in view and runs the sink's tests against the real package; it
+  # fails if any of them skips. The tests that start a broker in Docker are not
+  # among them. The check is the `make kafka-extra` target, which
+  # `make ci-local` runs too.
+  kafka-extra:
+    name: Kafka extra
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: flux-engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev and kafka extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev,kafka]"
+
+      - name: The Kafka sink's types and tests, none skipped (make kafka-extra)
+        run: make kafka-extra
+
   # ------------------------------------------------------- offline journey
   # FLUX needs no network to produce results (docs/explanation/offline.md). The test
   # jobs check that in the test process, with sockets blocked (make's OFFLINE flags).
@@ -1024,6 +1060,7 @@ jobs:
       - proof-guard
       - lineage-extra
       - publish-extra
+      - kafka-extra
       - offline-journey
     runs-on: ubuntu-latest
     timeout-minutes: 5

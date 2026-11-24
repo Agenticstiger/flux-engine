@@ -66,8 +66,9 @@ vocabulary lint, the naming guardrail, the licence-header check, the
 skills drift check and the proof-material guard) and the fast tests. CI runs more:
 the slow shards, and a matrix of operating systems and Python versions.
 `make ci-local` mirrors all of it and takes about half an hour. It also runs
-the lineage tests against the real OpenLineage client, so install that extra
-first: `uv sync --extra dev --extra lineage`.
+the lineage, publishing and Kafka sink tests against the real libraries, so
+install those extras first: `uv sync --extra dev --extra lineage --extra
+publish --extra kafka`, then `uv pip install "sqlalchemy>=2.0.18,<3"`.
 
 No CI job runs [the end-to-end harness](e2e/aws/README.md) under `e2e/aws/`.
 It is a uv project of its own that checks FLUX the way a data owner would use
