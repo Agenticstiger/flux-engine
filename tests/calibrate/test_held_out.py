@@ -34,7 +34,7 @@ pytest.importorskip("pyarrow")
 pytest.importorskip("cma")
 
 from flux_engine.calibrate import fit as fit_module  # noqa: E402
-from flux_engine.calibrate.fit import FitRequest, run_fit  # noqa: E402
+from flux_engine.calibrate.fit import FitRequest, HeldOutNeeded, run_fit  # noqa: E402
 from flux_engine.cli import main  # noqa: E402
 from flux_engine.core.errors import FluxError  # noqa: E402
 from flux_engine.evidence.grades import grade_profile  # noqa: E402
@@ -350,18 +350,70 @@ def test_an_unreadable_held_out_profile_leaves_no_patch_and_the_rerun_is_not_ref
     assert outcome.calibrated
 
 
-def test_a_bundle_with_no_held_out_query_refuses_a_held_out_profile_before_any_run(
-    tmp_path: Path,
-) -> None:
-    bundle = make(tmp_path)
+def without_held_out_query(root: Path) -> Path:
+    bundle = make(root)
     path = bundle / SIMULATION
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     for query in document["extensions"][NAMESPACE]["consumers"]["queries"]:
         query.pop("heldOut", None)
     path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    with pytest.raises(FluxError) as error:
-        run_fit(request(bundle, tmp_path))
-    assert error.value.code.code == "FLX-3702"
+    return bundle
+
+
+def fit_command(bundle: Path, root: Path, *more: str) -> int:
+    return main(
+        [
+            "calibrate",
+            "--fit",
+            str(bundle),
+            "--profile",
+            str(PROFILE),
+            "--out",
+            str(root / "calibrated"),
+            "--state-dir",
+            str(root / "state"),
+            *more,
+        ]
+    )
+
+
+def test_a_bundle_with_no_held_out_query_is_fitted_without_a_held_out_profile(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status = fit_command(without_held_out_query(tmp_path), tmp_path)
+    captured = capsys.readouterr()
+    assert status == 1 and "FLX-3712" in captured.err
+    assert "the bundle declares no held-out query" in captured.out
+    assert "no held-out check was made" in captured.out
+    assert (tmp_path / "calibrated.patch.json").is_file() and not (tmp_path / "calibrated").exists()
+
+
+def test_the_json_document_says_no_held_out_check_was_made(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fit_command(without_held_out_query(tmp_path), tmp_path, "--json")
+    artifacts = json.loads(capsys.readouterr().out)["artifacts"]
+    assert artifacts["heldOut"] is None and artifacts["calibrated"] is False
+    assert "declares no held-out query" in artifacts["heldOutNote"]
+
+
+def test_a_held_out_profile_given_to_a_bundle_with_no_held_out_query_is_not_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    corrupt = tmp_path / "corrupt.json"
+    corrupt.write_text("{ not a profile", encoding="utf-8")
+    fit_command(without_held_out_query(tmp_path), tmp_path, "--held-out", str(corrupt), "--json")
+    artifacts = json.loads(capsys.readouterr().out)["artifacts"]
+    assert artifacts["heldOut"] is None
+    assert "was not read" in artifacts["heldOutNote"]
+    assert (tmp_path / "calibrated.patch.json").is_file()
+
+
+def test_a_bundle_with_a_held_out_query_still_needs_a_held_out_profile(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    status = fit_command(make(tmp_path), tmp_path)
+    assert status == 2 and "--fit needs --held-out" in capsys.readouterr().err
     assert not (tmp_path / "calibrated.patch.json").exists() and not (tmp_path / "state").exists()
 
 
@@ -372,12 +424,10 @@ def test_a_held_out_profile_that_is_not_a_file_is_refused_before_any_run(tmp_pat
     assert not (tmp_path / "calibrated.patch.json").exists() and not (tmp_path / "state").exists()
 
 
-def test_without_a_held_out_profile_the_patch_is_written_and_nothing_is_calibrated(
-    tmp_path: Path,
-) -> None:
-    outcome = run_fit(request(make(tmp_path), tmp_path, None))
-    assert outcome.gate is None and not outcome.calibrated and outcome.bundle is None
-    assert (tmp_path / "calibrated.patch.json").is_file() and not (tmp_path / "calibrated").exists()
+def test_the_library_refuses_a_held_out_query_with_no_held_out_profile(tmp_path: Path) -> None:
+    with pytest.raises(HeldOutNeeded):
+        run_fit(request(make(tmp_path), tmp_path, None))
+    assert not (tmp_path / "calibrated.patch.json").exists()
 
 
 def test_nothing_is_left_under_the_state_directory(passed: Dict[str, Any]) -> None:

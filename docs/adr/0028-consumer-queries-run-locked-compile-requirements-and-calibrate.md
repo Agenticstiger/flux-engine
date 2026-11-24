@@ -368,6 +368,11 @@ calibration:
   `calibrate` writes the patch and its report, exits with status 1, and names each held-out query that
   missed, with its gap. A fit with no held-out target is never called calibrated.
 
+  *Amendment, 2026-11-24.* A bundle that declares no held-out query is fitted without one: `--held-out` is
+  optional for it, a profile given anyway is not read, the patch is written, and the output (text and
+  `--json`) says that no held-out check was made because the bundle declares no held-out query. Such a fit is
+  not called calibrated, as above. A bundle that declares a held-out query still needs `--held-out`.
+
 ### 10. Conditional generation: fixed values and seed rows
 
 A Simulation may declare `conditions`, a key no engine before this one reads, per `exposeId`:

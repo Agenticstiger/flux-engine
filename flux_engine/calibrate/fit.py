@@ -30,6 +30,9 @@ The work, in this order, and every refusal that needs no run is made before the 
    at the same scale, and the held-out queries are counted and set against their tolerances
    (:mod:`flux_engine.calibrate.gate`). The held-out profile's name is checked before the fit and its
    queries are not read until the patch exists.
+   A bundle that declares no held-out query is fitted without this step, and the outcome says so
+   (:attr:`FitOutcome.held_out_note`); a bundle that declares one refuses a fit without ``--held-out``
+   (:class:`HeldOutNeeded`) before anything runs.
 8. When the check holds, the calibrated bundle is written at ``DIR`` (:mod:`flux_engine.calibrate.bundle`).
    Otherwise the patch and the report stand, and each held-out query that missed is named.
 
@@ -71,7 +74,6 @@ from flux_engine.calibrate.patch import (
 from flux_engine.calibrate.search import INSTALL_COMMAND, CmaCalibrator, Evaluation, FitResult
 from flux_engine.concordance.queries import QueryRow
 from flux_engine.consumers.outcome import QueryTarget, profile_targets, query_rows, require_apart
-from flux_engine.consumers.verify_errors import FLX_3702
 from flux_engine.core.errors import FluxError
 from flux_engine.safeio import read_text_nofollow, write_text_atomic
 from flux_engine.seam.consumers import Ceilings, ConsumerRegistry, raised_ceilings
@@ -83,6 +85,7 @@ from flux_stats.spelling import render_exact
 __all__ = [
     "FitOutcome",
     "FitRequest",
+    "HeldOutNeeded",
     "check_output",
     "fit_ceilings",
     "patch_path_of",
@@ -91,6 +94,14 @@ __all__ = [
 
 #: The libraries a fit needs: the ``[calibrate]`` extra.
 _LIBRARIES = ("sqlglot", "duckdb", "pyarrow", "cma")
+
+
+#: What the output says when the bundle declares no held-out query.
+NO_HELD_OUT_QUERY = "no held-out check was made: the bundle declares no held-out query"
+NO_HELD_OUT_QUERY_GIVEN = (
+    "no held-out check was made: the held-out profile was not read, "
+    "since the bundle declares no held-out query"
+)
 
 
 @dataclass(frozen=True)
@@ -125,6 +136,8 @@ class FitOutcome:
     gate: Optional[GateReport] = None
     #: The calibrated bundle; ``None`` unless the held-out check held.
     bundle: Optional[CalibratedBundle] = None
+    #: Why no held-out check was made when the bundle declares no held-out query; else ``None``.
+    held_out_note: Optional[str] = None
 
     @property
     def calibrated(self) -> bool:
@@ -483,22 +496,31 @@ def _grade_of(document: Mapping[str, Any]) -> str:
     return str(grade_profile(document, pinned=True).pattern.value)
 
 
-def _preflight_held_out(request: FitRequest, prepared: _Prepared) -> None:
-    """The refusals about the held-out profile that need no read of it: it is a file, and it has a use."""
+class HeldOutNeeded(Exception):
+    """The bundle declares a held-out query and the request names no held-out profile.
+
+    A usage refusal, not a ``FLX`` code: the command reports it as it reports a missing option
+    (exit status 2). Nothing was run.
+    """
+
+
+def _preflight_held_out(request: FitRequest, prepared: _Prepared) -> Optional[str]:
+    """The refusals about the held-out profile that need no read of it; the note when it has no use.
+
+    A bundle that declares no held-out query is fitted without a held-out check, and a held-out profile
+    given with it is not read: the returned text says so. A bundle that declares one needs the profile.
+    """
+    if not any(query.held_out for query in prepared.registry.queries):
+        return NO_HELD_OUT_QUERY_GIVEN if request.held_out is not None else NO_HELD_OUT_QUERY
     if request.held_out is None:
-        return
+        raise HeldOutNeeded("--fit needs --held-out")
     if not request.held_out.is_file():
         raise FluxError(
             FLX_3109,
             f"the held-out profile at {request.held_out} could not be read: it is not a file; "
             "nothing was run",
         )
-    if not any(query.held_out for query in prepared.registry.queries):
-        raise FluxError(
-            FLX_3702,
-            "a held-out profile was given and the bundle declares no held-out query "
-            "(heldOut: true) for it to answer; nothing was run",
-        )
+    return None
 
 
 def _check_held_out(
@@ -560,7 +582,7 @@ def run_fit(request: FitRequest) -> FitOutcome:
     )
     check_output(request.out, request.bundle)
     prepared = _prepare(request, ceilings)
-    _preflight_held_out(request, prepared)
+    held_out_note = _preflight_held_out(request, prepared)
     files = _candidate_files(prepared)
     locations = _locations(prepared, files)
     calibration = _counted(prepared, held_out=False)
@@ -620,7 +642,7 @@ def run_fit(request: FitRequest) -> FitOutcome:
             write_text_atomic(patch_path, text)
             digest = patch_digest(text)
             # The patch exists and its digest is taken: the held-out profile is opened now, never before.
-            if request.held_out is not None:
+            if held_out_note is None and request.held_out is not None:
                 try:
                     gate = _check_held_out(request, prepared, evaluator, result.values)
                 except BaseException:
@@ -648,4 +670,5 @@ def run_fit(request: FitRequest) -> FitOutcome:
         simulation_id=prepared.cast.simulation_id,
         gate=gate,
         bundle=bundle,
+        held_out_note=held_out_note,
     )

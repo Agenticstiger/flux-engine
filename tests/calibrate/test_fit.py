@@ -84,7 +84,7 @@ def request(bundle: Path, root: Path, **more: Any) -> FitRequest:
         profile=PROFILE,
         out=root / "calibrated",
         state_dir=root / "state",
-        **more,
+        **{"held_out": HELD_OUT, **more},
     )
 
 
@@ -552,7 +552,7 @@ def test_the_command_reports_a_refusal_with_its_code(
     [
         ["--fit", "b", "--out", "o"],
         ["--fit", "b", "--profile", "p"],
-        ["--fit", "b", "--profile", "p", "--out", "o"],
+        ["--fit", "b", "--held-out", "h"],
         ["b", "--fit", "b", "--profile", "p", "--out", "o"],
         ["b", "--profile", "p"],
         ["b", "--out", "o"],
