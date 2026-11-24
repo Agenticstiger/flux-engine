@@ -53,6 +53,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   holds the end value and on any other a drawn level, so the predicate is known at plan time only where every level
   the column can draw gives the same answer; where they differ it is `FLX-3403`, naming the kind and the column
   (ADR 0027, the amendment of 2026-11-24). A `when` that does not name the column keeps its bytes.
+- A `sharedColumns` copy into the foreign key of another relationship sets that relationship's pick, under
+  `copies: true` on kernel 0.2.0. A trip that copies `depot_id` through its vehicle takes the
+  depot the vehicle has, so the two agree on every row and a rule over `depot.<column>` reads that
+  depot's row. The copied column must be the source's own foreign key to the same keys, which keeps the
+  value a key of the target; what cannot hold is refused before a row is drawn (ADR 0022, the amendment of
+  2026-11-24). A bundle without `copies: true` keeps every byte.
 
 ### Changed
 
@@ -74,6 +80,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   every eligible entity ends and `plan` notes the share yielded (ADR 0017, the amendment of 2026-11-24).
   **The bytes of such a history and of every projection of it move**; a history with no `end`, and a `closeLast`
   end without a column, keep theirs.
+- Under `copies: true` on kernel 0.2.0, a `sharedColumns` entry that names a foreign-key column of another
+  relationship was listed as declared and not generated. It now sets that relationship's pick, so **the bytes of
+  that foreign-key column move** and a rule that reads through the relationship reads the copied row, or the plan is
+  refused (`FLX-3403` or `FLX-6210`, naming the column and the relationship) where the copy cannot be carried out
+  (ADR 0022, the amendment of 2026-11-24). A bundle without `copies: true`, and kernel 0.1.0, keep their bytes.
 
 ### Fixed
 

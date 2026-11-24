@@ -56,6 +56,12 @@ and the parent table is never held). Which row:
   every version of ``e``. It draws nothing. The natural entity's column is laid out over the
   entities and not over the rows (:class:`EntityColumn`).
 
+* ``copied`` (kernel 0.2.0): a ``sharedColumns`` copy through another relationship ``R`` into this
+  relationship's one foreign key column (ADR 0022 section 4 amendment of 2026-11-24). The parent row
+  is the one the parent of ``R`` reaches through the relationship that holds the same column as its
+  own foreign key, so the copied value is a key the target holds by construction. It draws nothing
+  and costs two picks, with no index and no search over keys.
+
 A foreign key column keeps its declared ``nullFraction`` when the relationship's
 ``joinType`` is ``left`` (FLUID's default): a null references no row. An
 ``inner`` relationship joins every row, so a ``nullFraction`` on its columns is
@@ -145,7 +151,13 @@ from flux_engine.generator.reference import (
     is_reference_plan,
     reference_levels,
 )
-from flux_engine.generator.rules import FORM_DEPENDENCY, ParentCondition, parent_condition
+from flux_engine.generator.rules import (
+    FORM_DEPENDENCY,
+    ParentCondition,
+    PickCopy,
+    RulePlan,
+    parent_condition,
+)
 from flux_engine.generator.statistics import DATE_EPOCH_ORDINAL
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
 from flux_engine.seam.counts import CountsEntry
@@ -745,6 +757,8 @@ class ForeignKey:
     counted: Optional[CountedPick] = None
     #: A ``history`` pick's chain; ``None`` for every other pick.
     history: Optional[HistoryPick] = None
+    #: A ``copied`` pick's source; ``None`` for every other pick.
+    copied: Optional[PickCopy] = None
 
     def target_of(self, column: str) -> str:
         return self.to_columns[self.from_columns.index(column)]
@@ -763,6 +777,11 @@ class ForeignKey:
             document["counts"] = self.counted.as_document()
         if self.history is not None:
             document["history"] = self.history.as_document()
+        if self.copied is not None:
+            document["copiedThrough"] = {
+                "relationship": self.copied.through,
+                "source": self.copied.source,
+            }
         return document
 
 
@@ -1100,6 +1119,8 @@ class RelationReader:
         The null draw first, then the pick: the draws :meth:`_cell` has always made, in the
         same order on the same streams.
         """
+        if driver.pick == "copied":
+            return _copied_parent(self, self._plans[owner.expose_id], driver, row)
         # A foreign key's columns are null together: the first column's null
         # draw, on its own stream, decides for all of them (only the first may
         # declare one: _check_key_columns refuses one on any other).
@@ -1213,11 +1234,8 @@ class RelationReader:
         column this way, once per key (EXPR-SPEC-2 section 8). A ``distinct`` pick is a
         function of the row, not a draw, and is not taken here.
         """
-        if driver.pick in ("counted", "history"):
-            raise _refuse(
-                f"relationship {driver.relationship!r} is on a counted layout, which no draw "
-                "makes, so a dependency cannot draw its key; let the layout set it"
-            )
+        if driver.pick in ("counted", "history", "copied"):
+            raise _has_no_draw(driver)
         if driver.pick not in ("declared", "uniform") or len(driver.from_columns) != 1:
             raise _refuse(
                 f"relationship {driver.relationship!r} is not a one-column foreign key with a draw"
@@ -1366,8 +1384,7 @@ class RelationReader:
         """The version layout of *owner*'s history, worked out once per process (ADR 0017 section 3).
 
         It reads no parent: which entity a version row belongs to does not depend on who the
-        entity's parent is, so the natural entity's column needs nothing else. A history that keeps
-        to its parent's lifetime is the exception: its layout is :meth:`_history_of`'s.
+        entity's parent is, so the natural entity's column needs nothing else.
         """
         if pick.parent_lifetime is not None:
             return self._history_of(owner, _bound_driver(self._plans.get(owner.expose_id), pick))
@@ -2039,8 +2056,8 @@ class RelationReader:
         rows: "np.ndarray",
     ) -> None:
         """:meth:`_cell`'s foreign key draws for *rows*: the first column's null, then the pick."""
-        if driver.pick == "weighted":
-            return  # a weighted pick reads its parent's rows: the per-row code takes it
+        if driver.pick in ("weighted", "copied"):
+            return  # these read other rows' picks or final rows: the per-row code takes them
         ready = self._ready.setdefault((owner.sim_id, owner.expose_id, driver.relationship), {})
         rows = _missing(rows, ready)
         if rows.shape[0] == 0:
@@ -2194,7 +2211,10 @@ def _foreign_driver(plan: "_rows.GeneratorPlan", relationship: str) -> Optional[
 
 
 def _bound_driver(plan: Optional["_rows.GeneratorPlan"], pick: HistoryPick) -> ForeignKey:
-    """The ``parent`` relationship's driver of a history that keeps to its parent's lifetime."""
+    """The ``parent`` relationship's driver of a history that keeps to its parent's lifetime.
+
+    Such a history's layout reads the parents, so it is :meth:`RelationReader._history_of`'s.
+    """
     assert pick.entry.parent is not None
     driver = None if plan is None else _foreign_driver(plan, pick.entry.parent.relationship)
     if driver is None:
@@ -2384,6 +2404,8 @@ class _Shape:
     hooked: Mapping[str, Tuple[ExpectedCountHook, Mapping[str, Any]]] = field(default_factory=dict)
     #: The emit's history, when the Simulation declares one (ADR 0017).
     history: Optional[_HistoryShape] = None
+    #: The copy that sets each relationship's pick, by relationship (ADR 0022 section 4).
+    copied: Mapping[str, PickCopy] = field(default_factory=dict)
 
     @property
     def columns(self) -> Tuple[str, ...]:
@@ -2490,9 +2512,34 @@ def relate_plans(
         )
         for expose_id in sorted(plans)
     }
+    _refuse_copies_into_histories(shapes, histories)
     related = _with_drivers(plans, _Resolver(shapes))
     _check_asof_reads(related, keys)
     return _attach_sums(_attach_reads(_link_givens(related, keys), keys))
+
+
+def _refuse_copies_into_histories(
+    shapes: Mapping[str, _Shape], histories: Mapping[str, HistoryBinding]
+) -> None:
+    """Refuse (``FLX-3403``) a copy through a relationship whose target declares a history (ADR 0022 section 4).
+
+    A history's emit holds the foreign keys of an entity's first version on every later version, so
+    the row a copy reaches from a later version, followed through the relationship that holds the
+    copied column, is not the row the copied cell names there: a relationship into a slowly
+    changing target is out of reach of a copy, as it is of a one_to_one pick.
+    """
+    held = {nfc(expose_id) for expose_id in histories}
+    for expose_id in sorted(shapes):
+        for copied in shapes[expose_id].copied.values():
+            if nfc(copied.reach) in held:
+                raise _refuse(
+                    f"expose {expose_id!r} copies {copied.column!r} through relationship "
+                    f"{copied.through!r} into relationship {copied.relationship!r}, but "
+                    f"{copied.reach!r} declares a history, whose foreign keys are those of an "
+                    "entity's first version on each of its versions, so the copy would not equal "
+                    f"the row {copied.relationship!r} names on a later version; read the column "
+                    "from a table with no history, or leave the copy out"
+                )
 
 
 def _periodic_emits(namespace: Mapping[str, Any]) -> FrozenSet[str]:
@@ -2921,6 +2968,12 @@ def _paths_of(plan: "_rows.GeneratorPlan") -> List[Tuple[str, ...]]:
             if isinstance(driver, ForeignKey)
             and driver.pick == "weighted"
             and driver.weight_values is None
+        )
+        # A copied pick reads the pick of the row its relationship reaches.
+        paths.update(
+            (driver.copied.through,)
+            for _, driver in plan.relations.drivers
+            if isinstance(driver, ForeignKey) and driver.copied is not None
         )
         # A parentWhen, a given column and an expected-count hook read the parent's final rows, and the child's
         # digest holds the parent's.
@@ -3662,11 +3715,244 @@ def _shape(
         conditions=conditions,
         hooked=hooked,
         history=history,
+        copied=_check_copied(
+            plan,
+            plans,
+            relationships,
+            key_tuples,
+            owners,
+            (distinct, absorbed, on_counts, weights, bridges, history),
+        ),
     )
     _check_key_columns(
         shape, by_name, relationships, _entity_keys(expose_id, keys, declared), key_tuples
     )
     return shape
+
+
+def _first_pick(
+    shape: _Shape, relationship: Relationship, parent: ParentView, first: Any
+) -> Tuple[str, Optional[Any], Optional[Union[KeyGrid, ReferenceColumn]]]:
+    """How the parent is first picked: its pick, the key of a distinct layout, a declared grid."""
+    plan = shape.plan
+    if relationship.name in shape.distinct:
+        return "distinct", _layout_key(plan, "rel", relationship.name), None
+    if len(relationship.from_columns) == 1:
+        target = parent.driver(relationship.to_columns[0])
+        if isinstance(target, (KeyGrid, ReferenceColumn)) and _declares_draw(first):
+            if isinstance(target, ReferenceColumn):
+                _check_declared_keys(plan, first, relationship, target)
+            return "declared", None, target
+    return "uniform", None, None
+
+
+def _check_copied(
+    plan: "_rows.GeneratorPlan",
+    plans: Mapping[str, "_rows.GeneratorPlan"],
+    relationships: Sequence[Relationship],
+    key_tuples: Sequence[Tuple[str, ...]],
+    owners: Mapping[str, Relationship],
+    layouts: Tuple[
+        FrozenSet[str],
+        FrozenSet[str],
+        Mapping[str, bool],
+        Mapping[str, str],
+        Sequence[Tuple[str, str]],
+        Optional[_HistoryShape],
+    ],
+) -> Dict[str, PickCopy]:
+    """The copies that set a relationship's pick, each refused (``FLX-3403``) when it cannot (ADR 0022 section 4).
+
+    A copy of a column into the foreign key of another relationship ``S`` makes ``S``'s pick
+    follow the relationship it is copied through, so ``S`` may be nothing that picks or lays its
+    parents out on its own: not one that references each parent once, is part of a key or a bridge,
+    is counted, weighted or a history's parent, and its column declares no draw, ``nullFraction``,
+    ``allocation`` or ``given``, and no rule sets it. The relationship it is copied through
+    sets its pick on a draw of its own, with no conditional link that clears it and no rule that
+    sets its columns, and its target is generated from statistics (not a reference expose); the
+    source relationship of that target is read the same way. A cycle of such copies is
+    ``FLX-6210``, found when the plans read each other.
+    """
+    rules = plan.rules
+    found: Dict[str, PickCopy] = {}
+    if rules is None or not rules.pick_copies:
+        return found
+    by_name = {relationship.name: relationship for relationship in relationships}
+    for copy in rules.pick_copies:
+        where = (
+            f"expose {plan.expose.expose_id!r} copies {copy.column!r} through relationship "
+            f"{copy.through!r} into relationship {copy.relationship!r}"
+        )
+        reasons = _copy_layout_reasons(copy, key_tuples, layouts) + _copy_column_reasons(
+            copy, plan, by_name[copy.relationship], owners
+        )
+        if reasons:
+            raise _refuse(f"{where}, but " + " and ".join(reasons) + "; a copy sets the pick alone")
+        through = _copy_through(where, copy, by_name, owners)
+        if _sets_columns(rules, copy.through, through.from_columns):
+            raise _refuse(
+                f"{where}, but a conditional link or a rule sets the columns of "
+                f"{copy.through!r}, so the row it reaches is not the pick; drop it, or the copy"
+            )
+        reached = plans.get(copy.reach)
+        if reached is None or is_reference_plan(reached):
+            raise _refuse(
+                f"{where}, but {copy.reach!r} is not generated from statistics with rows of its "
+                "own to read a pick from"
+            )
+        _check_copy_givens(where, copy, (plan, through.from_columns), (reached, (copy.column,)))
+        if _sets_columns(reached.rules, copy.source, (copy.column,)):
+            raise _refuse(
+                f"{where}, but a conditional link or a rule of {copy.reach!r} sets the columns of "
+                f"{copy.source!r}, so the row it reaches is not the pick"
+            )
+        found[copy.relationship] = copy
+    return found
+
+
+def _copy_layout_reasons(
+    copy: PickCopy,
+    key_tuples: Sequence[Tuple[str, ...]],
+    layouts: Tuple[
+        FrozenSet[str],
+        FrozenSet[str],
+        Mapping[str, bool],
+        Mapping[str, str],
+        Sequence[Tuple[str, str]],
+        Optional[_HistoryShape],
+    ],
+) -> List[str]:
+    """What in the layout of the relationship a copy sets keeps it from setting the pick."""
+    distinct, absorbed, counted, weights, bridges, history = layouts
+    reasons: List[str] = []
+    if copy.relationship in distinct:
+        reasons.append("it references each parent row at most once")
+    if copy.relationship in absorbed or any(copy.column in key for key in key_tuples):
+        reasons.append(f"{copy.column!r} is part of a key")
+    if copy.relationship in {name for pair in bridges for name in pair}:
+        reasons.append("it is a side of a bridge")
+    if copy.relationship in counted:
+        reasons.append("it is on the counted layout")
+    if copy.relationship in weights:
+        reasons.append("a links entry weights it")
+    if history is not None and (
+        history.parent is not None and history.parent.relationship == copy.relationship
+    ):
+        reasons.append("it is the history's parent")
+    return reasons
+
+
+def _copy_column_reasons(
+    copy: PickCopy,
+    plan: "_rows.GeneratorPlan",
+    mine: Relationship,
+    owners: Mapping[str, Relationship],
+) -> List[str]:
+    """What the copied column declares, or another relationship or a rule sets, that a copy cannot keep."""
+    assert plan.rules is not None
+    first = plan.column_plan(copy.column)
+    statistics = first.statistics
+    reasons: List[str] = []
+    if owners.get(copy.column) is not mine:
+        reasons.append(f"another relationship sets {copy.column!r}")
+    if statistics.null_fraction is not None:
+        reasons.append(f"{copy.column!r} declares a nullFraction")
+    if _declares_draw(first) or statistics.allocation is not None or statistics.parents:
+        reasons.append(f"{copy.column!r} declares a draw, an allocation or a given")
+    if copy.column in plan.rules.determined:
+        reasons.append(f"a rule sets {copy.column!r}")
+    return reasons
+
+
+def _copy_through(
+    where: str,
+    copy: PickCopy,
+    by_name: Mapping[str, Relationship],
+    owners: Mapping[str, Relationship],
+) -> Relationship:
+    """The relationship a copy goes through, which sets its columns' pick on a draw of its own."""
+    through = by_name.get(copy.through)
+    if through is None or owners.get(through.from_columns[0]) is not through:
+        raise _refuse(
+            f"{where}, but another relationship sets the columns of {copy.through!r}, so it "
+            "has no pick of its own to follow"
+        )
+    return through
+
+
+def _sets_columns(rules: Optional[RulePlan], relationship: str, columns: Sequence[str]) -> bool:
+    """Whether a conditional link on *relationship* or a rule of *rules* sets any of *columns*."""
+    return rules is not None and (
+        any(link.relationship == relationship for link in rules.links)
+        or any(column in rules.determined for column in columns)
+    )
+
+
+def _check_copy_givens(
+    where: str,
+    copy: PickCopy,
+    *sources: Tuple["_rows.GeneratorPlan", Sequence[str]],
+) -> None:
+    """Refuse a copy whose pick is another column's level or is read as one (neither source may be)."""
+    for held_plan, columns in sources:
+        given = _rows._given_columns(held_plan)
+        for column in columns:
+            if held_plan.column_plan(column).statistics.parents or column in given:
+                raise _refuse(
+                    f"{where}, but {column!r} of {held_plan.expose.expose_id!r} is drawn given "
+                    "another column or another column is drawn given it, so its pick is not "
+                    "read from the row alone; drop the given, or the copy"
+                )
+
+
+def _copied_parent(
+    reader: "RelationReader", child: "_rows.GeneratorPlan", driver: ForeignKey, row: int
+) -> Optional[int]:
+    """The parent row a ``copied`` pick takes: the row its source relationship reaches.
+
+    The row ``through`` reaches at *row* is read as a link reads it, and the row the source
+    relationship of that row's expose reaches there is this relationship's parent. ``None``
+    when either reaches no row. A pure function of the two plans and the seed tree.
+    """
+    copied = driver.copied
+    assert copied is not None  # relate_plans sets it for this pick
+    held = reader.parent_row(child, copied.through, row)
+    if held is None:
+        return None
+    reached = next(read for expose_id, read in child.reads if expose_id == copied.reach)
+    return reader.parent_row(reached, copied.source, held)
+
+
+def _has_no_draw(driver: ForeignKey) -> FluxError:
+    """A dependency cannot draw the key of a relationship that a layout or a copy sets (``FLX-3403``)."""
+    if driver.copied is not None:
+        return _refuse(
+            f"relationship {driver.relationship!r} takes its parent from a copy through "
+            f"{driver.copied.through!r}, so a dependency cannot draw its key"
+        )
+    return _refuse(
+        f"relationship {driver.relationship!r} is on a counted layout, which no draw "
+        "makes, so a dependency cannot draw its key; let the layout set it"
+    )
+
+
+def _check_copy_source(held: Optional[Driver], expose_id: str, copied: PickCopy) -> None:
+    """Refuse (``FLX-3403``) a copy whose source relationship has no pick of its own to follow.
+
+    A copy follows the pick of the relationship of ``reach`` that holds the copied column as
+    its foreign key (:class:`~flux_engine.generator.rules.PickCopy`), so that relationship
+    needs a foreign key or a part of a key it is laid out as in ``reach``'s plan.
+    """
+    if isinstance(held, CompositeMember) or (
+        isinstance(held, ForeignKey) and held.relationship == copied.source
+    ):
+        return
+    raise _refuse(
+        f"expose {expose_id!r} copies {copied.column!r} through relationship "
+        f"{copied.through!r} into relationship {copied.relationship!r}, but relationship "
+        f"{copied.source!r} of {copied.reach!r} has no foreign key of its own to follow "
+        f"({copied.column!r} is laid out another way there)"
+    )
 
 
 def _refuse_on_counts(
@@ -5253,7 +5539,7 @@ class _Resolver:
         parent = self.view(relationship.target, relationship.to_columns)
         first = plan.column_plan(relationship.from_columns[0])
         weight = shape.weights.get(relationship.name)
-        pick, key, grid = self._first_pick(shape, relationship, parent, first)
+        pick, key, grid = _first_pick(shape, relationship, parent, first)
         counted = self._counted(shape, relationship, self.shapes[relationship.target].plan)
         history: Optional[HistoryPick] = None
         if counted is not None:
@@ -5261,6 +5547,10 @@ class _Resolver:
             history = self._history_pick(shape, relationship)
             if history is not None:
                 pick = "history"
+        copied = shape.copied.get(relationship.name)
+        if copied is not None:
+            pick, grid, key = "copied", None, None
+            _check_copy_source(self.driver(copied.reach, copied.column), expose_id, copied)
         weight_values: Optional[ReferenceColumn] = None
         if weight is not None:
             weight_values = self._weighted(shape, relationship, pick, first, weight)
@@ -5279,25 +5569,10 @@ class _Resolver:
             weight_values=weight_values,
             counted=counted,
             history=history,
+            copied=copied,
         )
         self._foreign[(expose_id, relationship.name)] = foreign
         return foreign
-
-    @staticmethod
-    def _first_pick(
-        shape: _Shape, relationship: Relationship, parent: ParentView, first: Any
-    ) -> Tuple[str, Optional[Any], Optional[Union[KeyGrid, ReferenceColumn]]]:
-        """How the parent is first picked: its pick, the key of a distinct layout, a declared grid."""
-        plan = shape.plan
-        if relationship.name in shape.distinct:
-            return "distinct", _layout_key(plan, "rel", relationship.name), None
-        if len(relationship.from_columns) == 1:
-            target = parent.driver(relationship.to_columns[0])
-            if isinstance(target, (KeyGrid, ReferenceColumn)) and _declares_draw(first):
-                if isinstance(target, ReferenceColumn):
-                    _check_declared_keys(plan, first, relationship, target)
-                return "declared", None, target
-        return "uniform", None, None
 
     @staticmethod
     def _history_pick(shape: _Shape, relationship: Relationship) -> Optional[HistoryPick]:

@@ -21,12 +21,9 @@ import pytest
 
 from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
 from flux_engine.stages import pipeline
-from flux_engine.stages.apply import apply
-from flux_engine.stages.layout import RunLayout
-from flux_engine.stages.plan import plan
 from flux_engine.stages.validate import validate
-from flux_engine.stages.verify import verify as run_verify
 
+from ._jobs import plan_apply_verify
 from .test_shared_columns_run import _CONTRACT_TEXT, INVOICES, _bundle
 
 _ATTRIBUTES = re.sub(r"\n *sharedColumns: \[[^\]]*\]", "", _CONTRACT_TEXT)
@@ -122,34 +119,7 @@ def test_validate_accepts_the_bundle_as_plan_reads_it(bundle: Path) -> None:
 def test_plan_apply_and_verify_score_each_copy_for_any_number_of_jobs(
     bundle: Path, tmp_path: Path
 ) -> None:
-    digests = []
-    rules = []
-    for jobs in (1, 4):
-        state = tmp_path / f"state-{jobs}"
-        planned = plan(bundle, state_dir=state, jobs=jobs)
-        assert planned.success, planned.stderr
-        applied = apply(bundle, state_dir=state, run_id=str(planned.artifacts["run_id"]), jobs=jobs)
-        assert applied.success, applied.stderr
-        layout = RunLayout.for_state_dir(state, str(applied.artifacts["run_id"]))
-        verified = run_verify(
-            bundle,
-            run_id=layout.run_id,
-            state_dir=state,
-            allow_declared_baseline_drift=True,
-            jobs=jobs,
-        )
-        assert verified.success, verified.stderr
-        digests.append(
-            (
-                planned.artifacts.get("plan_digest"),
-                {
-                    k: v
-                    for k, v in applied.artifacts.items()
-                    if "digest" in k.lower() and k != "run_id"
-                },
-            )
-        )
-        rules.append(verified.artifacts["rules"]["emits"])
+    digests, rules = plan_apply_verify(bundle, tmp_path)
     assert digests[0] == digests[1]
     assert rules[0] == rules[1]
     by_rule = {entry["rule"]: entry for entry in rules[0]["invoice"]}

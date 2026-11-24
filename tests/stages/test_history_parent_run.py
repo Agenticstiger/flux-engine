@@ -31,11 +31,10 @@ from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.plan import build_plan_document
 from flux_engine.stages.verify import verify
 
-from ._fleet import DEPOT, NAMESPACE, UNTIL, apply_module, by_vehicle, plan_module
+from ._fleet import DEPOT, NAMESPACE, UNTIL, apply_module, by_vehicle, plan_module, run_bundle
 from ._fleet import HISTORY as EMIT
 from ._fleet import bundle as fleet_bundle
 from ._fleet import rows as read_rows
-from ._fleet import run as run_bundle
 
 pytestmark = pytest.mark.integration
 

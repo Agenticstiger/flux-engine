@@ -12,18 +12,18 @@ count enters ``planDigest`` and not an entry for ``H``; a declared ``rows`` is r
 from __future__ import annotations
 
 import json
-import shutil
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
-import yaml
 
 from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
+
+from . import _fleet as fleet
 
 apply_module = import_module("flux_engine.stages.apply")
 plan_module = import_module("flux_engine.stages.plan")
@@ -35,6 +35,15 @@ NAMESPACE = "com.agentics.flux/1"
 HISTORY = "subscription_version"
 SNAPSHOT = "subscription_current"
 STATUSES = {"status": {"levels": {"active": "0.7", "paused": "0.3", "cancelled": "0"}}}
+NAMES = fleet.Names(
+    "customer",
+    "customer_id",
+    HISTORY,
+    "subscription_sk",
+    "subscription_id",
+    SNAPSHOT,
+    STATUSES,
+)
 
 
 def _bundle(
@@ -50,34 +59,19 @@ def _bundle(
     snapshot_rows: Optional[int] = None,
 ) -> Path:
     """A copy of the fixture, with its sizes, its window end, its end mode or its snapshot's ``ended`` changed."""
-    target = tmp_path / name
-    shutil.copytree(FIXTURE, target)
-    path = target / "simulation.flux.yml"
-    document = yaml.safe_load(path.read_text("utf-8"))
-    flux = document["extensions"][NAMESPACE]
-    emits = flux["emits"]
-    emits["customer"]["rows"] = customers
-    emits["customer"]["fidelity"]["columns"]["customer_id"]["range"]["max"] = str(customers)
-    emits[HISTORY]["rows"] = versions
-    declared = emits[HISTORY]["fidelity"]["columns"]
-    declared["subscription_sk"]["range"]["max"] = str(versions)
-    declared["subscription_id"]["range"]["max"] = str(max(entities, 200))
-    emits[SNAPSHOT]["fidelity"]["columns"]["subscription_id"]["range"]["max"] = str(
-        max(entities, 200)
+    return fleet.bundle(
+        tmp_path,
+        fixture=FIXTURE,
+        names=NAMES,
+        name=name,
+        versions=versions,
+        entities=entities,
+        depots=customers,
+        window_end=window_end,
+        ended=ended,
+        end=end,
+        snapshot_rows=snapshot_rows,
     )
-    flux["history"][0]["entities"] = entities
-    if end is not None:
-        flux["history"][0]["end"] = end
-        declared.update(STATUSES)
-        emits[SNAPSHOT]["fidelity"]["columns"].update(STATUSES)
-    if ended is not None:
-        flux["snapshots"][0]["ended"] = ended
-    if snapshot_rows is not None:
-        emits[SNAPSHOT]["rows"] = snapshot_rows
-    if window_end is not None:
-        document["spec"]["timeBounds"]["end"] = window_end
-    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
-    return target
 
 
 def _rows(layout: RunLayout, expose_id: str) -> List[Dict[str, Any]]:

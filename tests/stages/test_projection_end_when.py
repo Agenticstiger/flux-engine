@@ -26,10 +26,9 @@ import yaml
 
 from flux_engine.core.kernels import KERNEL_V2
 
-from ._fleet import EVENTS, HISTORY, NAMESPACE, PERIODIC, plan_module
+from ._fleet import EVENTS, HISTORY, NAMESPACE, PERIODIC, plan_module, run_bundle
 from ._fleet import bundle as fleet_bundle
 from ._fleet import rows as read_rows
-from ._fleet import run as run_bundle
 
 pytestmark = pytest.mark.integration
 

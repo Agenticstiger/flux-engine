@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections import defaultdict
+from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -46,9 +47,27 @@ STATUSES = {"status": {"levels": {"active": "0.7", "maintenance": "0.3", "retire
 FINAL = {"mode": "finalVersion", "share": "0.25", "column": "status", "value": "retired"}
 
 
+@dataclass(frozen=True)
+class Names:
+    """What ``bundle`` calls the tables and keys of a fixture it copies."""
+
+    parent: str
+    parent_key: str
+    history: str
+    history_sk: str
+    key: str
+    snapshot: str
+    statuses: Dict[str, Any]
+
+
+FLEET = Names(DEPOT, "depot_id", HISTORY, "vehicle_sk", "vehicle_id", SNAPSHOT, STATUSES)
+
+
 def bundle(
     tmp_path: Path,
     *,
+    fixture: Path = FIXTURE,
+    names: Names = FLEET,
     name: str = "bundle",
     versions: int = 200,
     entities: int = 60,
@@ -61,31 +80,32 @@ def bundle(
     history: Optional[Dict[str, Any]] = None,
     columns: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """A copy of the fixture with its sizes, window end, end mode or snapshot ``ended`` changed."""
+    """A copy of ``fixture`` with its sizes, window end, end mode or snapshot ``ended`` changed."""
     target = tmp_path / name
-    shutil.copytree(FIXTURE, target)
+    shutil.copytree(fixture, target)
     path = target / "simulation.flux.yml"
     document = yaml.safe_load(path.read_text("utf-8"))
     flux = document["extensions"][NAMESPACE]
     emits = flux["emits"]
-    emits[DEPOT]["rows"] = depots
-    emits[DEPOT]["fidelity"]["columns"]["depot_id"]["range"]["max"] = str(depots)
-    emits[HISTORY]["rows"] = versions
-    declared = emits[HISTORY]["fidelity"]["columns"]
-    declared["vehicle_sk"]["range"]["max"] = str(versions)
-    declared["vehicle_id"]["range"]["max"] = str(max(entities, 200))
-    emits[SNAPSHOT]["fidelity"]["columns"]["vehicle_id"]["range"]["max"] = str(max(entities, 200))
+    emits[names.parent]["rows"] = depots
+    emits[names.parent]["fidelity"]["columns"][names.parent_key]["range"]["max"] = str(depots)
+    emits[names.history]["rows"] = versions
+    declared = emits[names.history]["fidelity"]["columns"]
+    declared[names.history_sk]["range"]["max"] = str(versions)
+    declared[names.key]["range"]["max"] = str(max(entities, 200))
+    snapshot_columns = emits[names.snapshot]["fidelity"]["columns"]
+    snapshot_columns[names.key]["range"]["max"] = str(max(entities, 200))
     flux["history"][0]["entities"] = entities
     if minimum is not None:
         flux["history"][0]["parent"]["minChildren"] = minimum
     if end is not None:
         flux["history"][0]["end"] = end
-        declared.update(STATUSES)
-        emits[SNAPSHOT]["fidelity"]["columns"].update(STATUSES)
+        declared.update(names.statuses)
+        snapshot_columns.update(names.statuses)
     if ended is not None:
         flux["snapshots"][0]["ended"] = ended
     if snapshot_rows is not None:
-        emits[SNAPSHOT]["rows"] = snapshot_rows
+        emits[names.snapshot]["rows"] = snapshot_rows
     if window_end is not None:
         document["spec"]["timeBounds"]["end"] = window_end
     flux["history"][0].update(history or {})
@@ -119,7 +139,7 @@ def rows(layout: RunLayout, expose_id: str) -> List[Dict[str, Any]]:
     ]
 
 
-def run(target: Path, state: Path, **options: Any) -> RunLayout:
+def run_bundle(target: Path, state: Path, **options: Any) -> RunLayout:
     """Plan and apply a bundle under kernel 0.2.0; the run's layout."""
     planned = plan_module.plan(
         target, state_dir=state, kernel=KERNEL_V2.version, stage=False, **options

@@ -33,9 +33,19 @@ from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.plan import build_plan_document
 from flux_engine.stages.verify import verify
 
-from ._fleet import CONTRACT, EVENTS, FINAL, NAMESPACE, PERIODIC, bundle, expose, plan_module, repin
+from ._fleet import (
+    CONTRACT,
+    EVENTS,
+    FINAL,
+    NAMESPACE,
+    PERIODIC,
+    bundle,
+    expose,
+    plan_module,
+    repin,
+    run_bundle,
+)
 from ._fleet import rows as read_rows
-from ._fleet import run as run_bundle
 
 pytestmark = pytest.mark.integration
 
