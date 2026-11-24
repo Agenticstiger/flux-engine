@@ -22,8 +22,12 @@ the help.
 - [Draw a column given another](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/draw-a-column-given-another.md): declare a histogram column drawn given a categorical one, and how the fidelity gate checks the link.
 - [Fix values and seed rows](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/fix-values-and-seed-rows.md): declare conditions so a group of rows holds fixed values and the rest is drawn given them, with seed rows as groups of one.
 - [Forecast the next state and score it](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/forecast-the-next-state.md): declare a response family and forecasts, make them before the next profile exists, and score them against it.
+- [Give an entity a history](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/give-an-entity-a-history.md): declare a history with a validity window, so every entity gets a chain of versions and a dated row reads the version valid on its date.
 - [Give every parent its children](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/give-every-parent-its-children.md): declare how many children each parent has with a counts entry, so every parent gets its children and the number per parent follows its histogram.
+- [Keep dates inside their parent's lifetime](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/keep-dates-inside-their-parents-lifetime.md): give each table a lifetime, keep dates within a parent's lifetime, and read what `fluxsim init` and `verify` say about it.
 - [Load a simulation into a database](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/load-a-simulation-into-a-database.md): write a run to files or load it into a database with the `--sink` option of `fluxsim run`.
+- [Model your customers](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/model-customers.md): change the population in the World, add a second Persona and a Segment checked with `fluxsim expr`.
+- [Project a history](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/project-a-history.md): derive a snapshot, a change event stream and periodic rows from a history.
 - [Publish a catalogue whole](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/publish-a-catalogue.md): declare a small table as a reference expose so other tables pick only its rows.
 - [Score a run against a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/score-a-run-against-a-profile.md): pin a profile, then check a run in full or on a sample of blocks.
 - [Seal and score a prediction](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/seal-and-score-a-prediction.md): register a prediction before the outcome, score it later, publish an outcomes-only record.
@@ -37,6 +41,7 @@ the help.
 - [Explanation](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/README.md): index of the background pages.
 - [Architecture and patterns](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/architecture.md): how the parts, packages and rules between them fit together, and the life of a run.
 - [Determinism and the seed tree](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/determinism-and-the-seed-tree.md): why one bundle and seed give the same bytes, and what the input digest covers.
+- [Runs offline](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/offline.md): where the network can be touched, how to keep it off, and how CI checks it.
 - [The evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/the-evidence-pack.md): what `fluxsim ship` writes, what a recipient can check offline, and what the pack does not say.
 - [The FLUID seam](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/the-seam.md): why a Simulation references a contract instead of restating it.
 - [The six-step loop](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/the-six-step-loop.md): why a run is validate, plan, apply, run, verify, ship, and what each step reads and refuses.
@@ -99,6 +104,7 @@ See the [error codes index](https://github.com/Agenticstiger/flux-engine/blob/v0
 - [Scorecard](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/spec/SCORECARD-SPEC.md): how a run is scored against its pinned profile, and the thresholds.
 - [Sample-based verification](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/spec/SAMPLE-SPEC.md): checking a run on a sample of blocks, with intervals.
 - [Parameter register](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/spec/PARAMETER-REGISTER-SPEC.md): what each number a run reads rests on.
+- [Consumer queries](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/spec/CONSUMER-QUERIES-SPEC.md): the SQL a Simulation declares, how it is checked and counted, and what it asks of the copy.
 
 ## Decision records
 
