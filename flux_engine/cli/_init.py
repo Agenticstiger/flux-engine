@@ -153,6 +153,7 @@ def run_init(
     overlays: Tuple[str, ...] = (),
     consumers: Optional[str] = None,
     window: Optional[Tuple[str, str]] = None,
+    history: Optional[str] = None,
 ) -> StageResult:
     """Scaffold *directory* and report it as a :class:`StageResult`.
 
@@ -227,6 +228,9 @@ def run_init(
     given = _window_given(window, contract, profile)
     if isinstance(given, StageResult):
         return given
+    declared = _history_declared(history, contract, profile, window)
+    if isinstance(declared, StageResult):
+        return declared
     if contract is not None and profile is not None:
         if overlays:
             return run_author_overlays(
@@ -238,6 +242,7 @@ def run_init(
                 allow=allow,
                 consumers=consumers,
                 window=given,
+                history=declared,
             )
         return run_author(
             directory,
@@ -247,6 +252,7 @@ def run_init(
             allow=allow,
             consumers=consumers,
             window=given,
+            history=declared,
         )
     if contract is not None:
         from flux_engine.cli._request import run_request
@@ -300,6 +306,50 @@ def _window_given(
         return parse_window(window[0], window[1])
     except WindowError as error:
         return StageResult(stage="init", exit_code=2, stderr=f"init: {printable(str(error))}")
+
+
+def _history_declared(
+    history: Optional[str],
+    contract: Optional[str],
+    profile: Optional[str],
+    window: Optional[Tuple[str, str]],
+) -> Any:
+    """The history file ``--history`` names, read; ``None`` without it; or the refusal.
+
+    Exit ``2`` when it comes without ``--contract`` and ``--profile``, or when the file's
+    ``timeBounds`` and ``--window`` both give the window. Exit ``1`` when the file cannot be read or
+    holds what a history file may not; the message names it.
+    """
+    from flux_engine.author.declared_history import DeclaredHistoryError, read_history_file
+    from flux_engine.seam.coverage import printable
+
+    if history is None:
+        return None
+    if contract is None or profile is None:
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --history declares the history of a bundle written from --contract and "
+                "--profile; pass both, for example `fluxsim init bundle --contract "
+                "contract.orders.fluid.yaml --profile orders.profile.json --history "
+                "history.yml`"
+            ),
+        )
+    try:
+        declared = read_history_file(Path(history))
+    except DeclaredHistoryError as error:
+        return StageResult(stage="init", exit_code=1, stderr=f"init: --history {error}")
+    if declared.time_bounds is not None and window is not None:
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                f"init: {printable(declared.name)} gives the window in timeBounds and --window "
+                "gives it too; give the window once"
+            ),
+        )
+    return declared
 
 
 def _overlays_need_inputs(
@@ -547,6 +597,7 @@ def _authored(
     allow: Tuple[str, ...],
     consumers: Optional[str] = None,
     window: Optional[Tuple[str, str]] = None,
+    history: Optional[Any] = None,
 ) -> Any:
     """The checked bundle for *contract* and *profile* (with *overlay*), or the refusal to report.
 
@@ -565,10 +616,20 @@ def _authored(
             overlay,
             consumers_path=_maybe_path(consumers),
             window=window,
+            history=history,
         )
     except AuthorError as error:
         # A refusal can quote the contract (a column name, a FLUX message about it): no
         # control character of it reaches the terminal.
+        code = getattr(error, "code", None)
+        if isinstance(code, str):
+            return StageResult(
+                stage="init",
+                exit_code=1,
+                _artifacts={"code": code},
+                stderr=f"init: {printable(str(error))}",
+                error_code=code,
+            )
         return StageResult(stage="init", exit_code=1, stderr=f"init: {printable(str(error))}")
     except FluxError as error:
         if error.code.code == "FLX-3109":
@@ -630,6 +691,7 @@ def run_author(
     allow: Tuple[str, ...] = (),
     consumers: Optional[str] = None,
     window: Optional[Tuple[str, str]] = None,
+    history: Optional[Any] = None,
 ) -> StageResult:
     """Write a bundle for the data *contract* and *profile* describe into *directory*.
 
@@ -642,7 +704,14 @@ def run_author(
     from flux_engine.starter import ScaffoldError, write_project
 
     bundle = _authored(
-        contract, profile, None, strict=strict, allow=allow, consumers=consumers, window=window
+        contract,
+        profile,
+        None,
+        strict=strict,
+        allow=allow,
+        consumers=consumers,
+        window=window,
+        history=history,
     )
     if isinstance(bundle, StageResult):
         return bundle
@@ -762,6 +831,7 @@ def _authored_each(
     allow: Tuple[str, ...],
     consumers: Optional[str] = None,
     window: Optional[Tuple[str, str]] = None,
+    history: Optional[Any] = None,
 ) -> Any:
     """The checked bundle of each overlay, or the first refusal, which names the overlay."""
     bundles: List[Any] = []
@@ -774,6 +844,7 @@ def _authored_each(
             allow=allow,
             consumers=consumers,
             window=window,
+            history=history,
         )
         if isinstance(bundle, StageResult):
             if bundle.stderr:
@@ -845,6 +916,7 @@ def run_author_overlays(
     allow: Tuple[str, ...] = (),
     consumers: Optional[str] = None,
     window: Optional[Tuple[str, str]] = None,
+    history: Optional[Any] = None,
 ) -> StageResult:
     """Write one bundle per overlay of *overlay_files* into *directory*, each in a directory named after it.
 
@@ -867,6 +939,7 @@ def run_author_overlays(
         allow=allow,
         consumers=consumers,
         window=window,
+        history=history,
     )
     if isinstance(bundles, StageResult):
         return bundles
@@ -1053,6 +1126,7 @@ def _described(
             },
             "simulationId": bundle.simulation_id,
             "profileDigest": bundle.profile_digest,
+            **({"historyFile": bundle.history_file} if bundle.history_file is not None else {}),
             **({"assumptionsRequest": str(request)} if request is not None else {}),
             **(
                 {"overlay": {"name": bundle.overlay.name, "digest": bundle.overlay.digest.value}}

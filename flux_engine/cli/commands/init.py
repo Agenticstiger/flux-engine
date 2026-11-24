@@ -155,6 +155,17 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "leave a window given here are cut at it (needs --contract and --profile)"
         ),
     )
+    init_p.add_argument(
+        "--history",
+        default=None,
+        metavar="FILE",
+        help=(
+            "with --contract and --profile: a YAML file of a declared history and its "
+            "projections (the namespace's history, snapshots, events, periods and asOf, and an "
+            "optional timeBounds), merged into the bundle in place of the ones init would infer; "
+            "counted layouts, exact allotments and the ended status's weight are written to fit it"
+        ),
+    )
     _add_json_flag(init_p)
 
     init_p.set_defaults(stage_name="init")
@@ -174,6 +185,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
             overlays=tuple(args.overlay or ()),
             consumers=args.consumers,
             window=tuple(args.window) if args.window else None,
+            history=args.history,
         ),
         as_json=args.json,
     )
