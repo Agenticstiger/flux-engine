@@ -47,7 +47,7 @@ directory, which is the difference between it and ``plan``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Sequence, Set, Tuple, Union
 
 from flux_engine.api.stages import StageResult
 from flux_engine.core.clock import declared_time_bounds
@@ -218,7 +218,15 @@ def _validate_simulation(
     # Parameter register: every register entry has to name numbers of this run.
     register = parameter_register_of(loaded, cast)
     _check_pinned_profile(cast.simulation, simulation_id, register, profile)
-    summary = {
+    summary = _simulation_summary(cast, resolved, fidelity, register)
+    return summary, is_unchecked
+
+
+def _simulation_summary(
+    cast: Any, resolved: Sequence[Any], fidelity: str, register: Any
+) -> Dict[str, Any]:
+    """What ``validate`` reports of a Simulation it found valid."""
+    return {
         "fidelity": fidelity,
         "documents": len(cast.documents),
         "emits": [entry.expose_id for entry in resolved],
@@ -229,7 +237,6 @@ def _validate_simulation(
             else {}
         ),
     }
-    return summary, is_unchecked
 
 
 def _check_pinned_profile(

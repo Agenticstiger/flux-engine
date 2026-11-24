@@ -87,6 +87,7 @@ from flux_engine.author.dates import (
     DATE_KINDS,
     DatedExpose,
     declare_dates,
+    statistic_tokens,
     window_end_ms,
     window_start_ms,
 )
@@ -1870,25 +1871,10 @@ def _resolve(
     return None, declared, tables, columns
 
 
-def _statistic_tokens(entry: Mapping[str, Any], tokens: Tuple[str, ...]) -> List[Tuple[str, ...]]:
-    """The profile pointer of each statistic of a ``relationships`` entry, as tokens below *tokens*."""
-    statistics = entry.get("statistics")
-    return [
-        tokens + ("statistics", str(position))
-        for position, _ in enumerate(statistics if isinstance(statistics, list) else ())
-    ]
-
-
 def _structural_classes(entry: Mapping[str, Any]) -> List[str]:
     """The classes of children per parent a ``relationships`` entry marks structural."""
     structural = entry.get("structural")
     return [str(name) for name in structural] if isinstance(structural, list) else []
-
-
-def _columns_of(tables: Mapping[str, Any], table: str) -> Optional[Any]:
-    """The ``columns`` entries the profile holds for *table*, or ``None``."""
-    found = tables.get(table)
-    return found.get("columns") if isinstance(found, Mapping) else None
 
 
 def _resolved(
@@ -1938,7 +1924,7 @@ def _spread_relationships(
         if not isinstance(entry, Mapping):
             continue
         tokens = ("relationships", str(index))
-        every = _statistic_tokens(entry, tokens)
+        every = statistic_tokens(entry, tokens)
         why, declared, (parent_table, child_table), (parent_columns, child_columns) = _resolved(
             entry, keys, planned, held_back
         )
@@ -1948,7 +1934,10 @@ def _spread_relationships(
         child_expose, parent_expose = planned[child_table], planned[parent_table]
         child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
         parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
-        child_entries = _columns_of(tables, child_table)
+        child_table_entry = tables.get(child_table)
+        child_entries = (
+            child_table_entry.get("columns") if isinstance(child_table_entry, Mapping) else None
+        )
         placed = _lay_out_children(
             entry,
             tokens,

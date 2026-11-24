@@ -359,11 +359,16 @@ class _Pair:
     histogram: Optional[_Histogram]
 
     def statistic_tokens(self) -> List[Tuple[str, ...]]:
-        statistics = self.item.get("statistics")
-        return [
-            self.tokens + ("statistics", str(index))
-            for index, _ in enumerate(statistics if isinstance(statistics, list) else ())
-        ] + [self.tokens + ("order",)]
+        return statistic_tokens(self.item, self.tokens) + [self.tokens + ("order",)]
+
+
+def statistic_tokens(item: Mapping[str, Any], tokens: Tuple[str, ...]) -> List[Tuple[str, ...]]:
+    """The profile pointer of each statistic of a ``datePairs`` or ``relationships`` entry, as tokens."""
+    statistics = item.get("statistics")
+    return [
+        tokens + ("statistics", str(index))
+        for index, _ in enumerate(statistics if isinstance(statistics, list) else ())
+    ]
 
 
 def _pair(
@@ -581,7 +586,7 @@ class _Declarer:
             f"{orientation}, and the share of rows that break its order is the target "
             f"({target or '0'}%)"
         )
-        self._cite_lifetime(entry, pair, family, how_plain, order_how)
+        self._cite_lifetime(entry, pair, family, (order_how, how_plain))
         self.keep(pair, order_how, how_plain, used_how, unused_why)
 
     def _cite_lifetime(
@@ -589,10 +594,14 @@ class _Declarer:
         entry: Dict[str, Any],
         pair: _Pair,
         family: Optional["_Family"],
-        how_plain: Optional[str],
-        order_how: str,
+        how: Tuple[str, Optional[str]],
     ) -> None:
-        """Record what each number of a lifetime entry rests on: its target, its duration, its states."""
+        """Record what each number of a lifetime entry rests on: its target, its duration, its states.
+
+        *how* is the sentence for the target, and the one for the duration's histogram when it
+        has one.
+        """
+        order_how, how_plain = how
         histogram = pair.histogram
         if "target" in entry:
             self.cited.append((entry, ("target",), pair.tokens + ("order",), order_how))
