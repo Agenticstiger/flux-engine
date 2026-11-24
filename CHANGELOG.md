@@ -82,6 +82,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   so it is created and removed with the bundle. The loader and `inputDigest` do not read it, and `ship` packs it.
 - The ledger records a published end that a window or a range cut relies on (the last edge of a quantile ladder, for
   example) as read, not as unused.
+- The rules of a change-events or periodic emit run after the projection has set its cells. A derive that read the
+  period column, a column of the version the row carries, a kind's override, or an event's `op`, `at`, `date` or
+  image read the drawn value that the row then lost, so `fluxsim verify` failed a run that `plan` and `apply` had
+  made (ADR 0027, the amendment of 2026-11-24). **The rows of such an emit change, because they were wrong
+  before**; an emit without rules, and every other emit, keeps its bytes. A rule that sets a column the projection
+  sets is now `FLX-6203` at plan, and a rule that reads through a relationship whose foreign-key column the
+  projection sets (a derive over `relationship.column`, a copy, a conditional link) is `FLX-3403` at plan, since
+  it would read the row the relationship drew rather than the row the cell names.
 
 ## 0.11.1 - 2026-11-24
 

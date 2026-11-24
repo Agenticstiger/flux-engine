@@ -2313,6 +2313,36 @@ def generate_row_slice(
     )
 
 
+def cells_before_rules(
+    plan: GeneratorPlan, start: int, stop: int, *, root: SeedTreeRoot
+) -> Tuple[Tuple[Any, ...], ...]:
+    """Rows *start* to *stop* - 1 of a plan that projects nothing, as its own cells draw them.
+
+    No rule has set a column yet. A projected emit's rows start here (ADR 0027 sections 4 and
+    5): the projection sets its cells over them, and :func:`with_rules` then runs the emit's
+    rules, so a rule reads the cells the projection set as it reads any cell.
+    """
+    rows = _cell_rows(plan, start, stop, _stream_source(plan, root, None))
+    if plan.plugin is not None:
+        # A plugin's values reach only a pass over a plan that projects nothing.
+        rows = plan.plugin.overlay(rows, None)
+    return rows
+
+
+def with_rules(
+    plan: GeneratorPlan, rows: Sequence[Tuple[Any, ...]], start: int, *, root: SeedTreeRoot
+) -> Tuple[Tuple[Any, ...], ...]:
+    """*rows*, rows *start* onward of *plan*, with the plan's rules applied as a row pass applies them.
+
+    A plan whose rules hold a window over siblings takes every row of its expose at once.
+    """
+    if plan.rules is None or not (plan.rules.order or plan.rules.links):
+        return rows if isinstance(rows, tuple) else tuple(rows)
+    from flux_engine.generator.rules import apply_rules
+
+    return apply_rules(plan, rows, start, root=root)
+
+
 def _cell_rows(
     plan: GeneratorPlan, start: int, stop: int, streams: _Source
 ) -> Tuple[Tuple[Any, ...], ...]:

@@ -47,7 +47,7 @@ from flux_engine.generator import rows as _rows
 from flux_engine.generator.counts import CountClass, classes_of, digest_key, slot_values
 from flux_engine.generator.history import HistoryPlan
 from flux_engine.generator.paths import KIND_PATH_SHAPE, kind_path
-from flux_engine.generator.rows import GeneratorPlan, generate_row_slice
+from flux_engine.generator.rows import GeneratorPlan, cells_before_rules, generate_row_slice
 from flux_engine.generator.versionview import DAY_MS, VersionView, unit_value, view_of
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
 from flux_engine.seam.projections import PeriodKind, PeriodsEntry
@@ -450,14 +450,16 @@ def _override(text: str, column: CompiledColumn) -> Any:
 def periods_rows(
     plan: GeneratorPlan, layout: PeriodLayout, start: int, stop: int, root: SeedTreeRoot
 ) -> Tuple[Tuple[Any, ...], ...]:
-    """Rows *start* to *stop* - 1 of the periodic emit *plan*."""
+    """Rows *start* to *stop* - 1 of the periodic emit *plan*, before the emit's rules run."""
     projection = plan.projection
     assert projection is not None and isinstance(projection.entry, PeriodsEntry)
     entry = projection.entry
     if start == stop:
         return ()
     held, versions, kinds = _row_plan(layout, start, stop)
-    own = generate_row_slice(replace(plan, projection=None), start, stop, root=root)
+    # The emit's own cells, before its rules: they run over the row once the period, the
+    # version's columns and the kind's overrides are set (projections.projection_rows).
+    own = cells_before_rules(replace(plan, projection=None), start, stop, root=root)
     names = [column.column.name for column in plan.columns]
     position = names.index(entry.column)
     kind = plan.column_plan(entry.column).column.logical_type.kind

@@ -284,3 +284,28 @@ scored, with that reason.
 - Debezium's `r`, a snapshot read at the start of a stream, if a source publishes its stream from a snapshot.
 - A history that grows past `until` (ADR 0017's "What would change this decision"), after which events would
   append too, and periods would hold new versions.
+
+## Amendment of 2026-11-24: a projected row's rules run after its projected cells
+
+Sections 4 and 5 say which cells an events or a periodic row takes from the history and which it draws, and said
+nothing of when the emit's own rules run. The generator ran them over the drawn cells and set the projected cells
+afterwards, so a derive that read the period column, a column of the version, a kind's override, `op`, `at`, `date`
+or an image read a drawn value that the row no longer held, and `fluxsim verify` failed the run on its own rule
+lines. This amendment fixes the order:
+
+- **The order.** An events or a periodic row is its emit's drawn cells, then the cells the entry sets (section 4's
+  `op`, `at`, `date`, `type`, images and columns of the version; section 5's period column, columns of the version
+  and the kind's overrides), then the emit's rules: a contract's derives and checks, the FLUX-side rules, the
+  copies and the links, in the order the plan sets their columns. A rule reads a cell the entry set as it reads any
+  other cell of its own row. An emit whose rules hold a window over siblings is made whole first, as any such emit is.
+- **One source per column.** A rule that sets a column the entry sets is `FLX-6203` at plan, naming the column, the
+  entry and the rule: the entry is the column's source. A derive on a foreign key stays `FLX-6210`, as on any emit.
+- **A path through a relationship is refused when the entry sets its key.** A rule that reads through a
+  relationship (a derive over `relationship.column`, a copy, a path under an as-of link) or a conditional link
+  reads the row's drawn pick of that relationship, not the value in the foreign-key cell. When the entry sets the
+  relationship's foreign-key column (a column of the version the row carries), the cell and the pick name different
+  rows, so such a rule would read another row's value. It is `FLX-3403` at plan in this version, naming the rule,
+  the relationship and the column; a rule over the row's own cells is not affected.
+- **What moves.** The rows of an events or a periodic emit whose rules read a cell the entry sets, and so their
+  digests. Every other emit, and every such emit without rules, keeps its bytes. A snapshot is unchanged: its rows
+  are the history's, rules included.
