@@ -17,7 +17,7 @@ import json
 import shlex
 import shutil
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -232,28 +232,12 @@ def run_init(
     if isinstance(declared, StageResult):
         return declared
     if contract is not None and profile is not None:
-        if overlays:
-            return run_author_overlays(
-                directory,
-                contract,
-                profile,
-                overlays,
-                strict=strict,
-                allow=allow,
-                consumers=consumers,
-                window=given,
-                history=declared,
-            )
-        return run_author(
-            directory,
-            contract,
-            profile,
-            strict=strict,
-            allow=allow,
-            consumers=consumers,
-            window=given,
-            history=declared,
+        asked = _AuthorRequest(
+            contract, profile, strict, allow, consumers=consumers, window=given, history=declared
         )
+        if overlays:
+            return run_author_overlays(directory, asked, overlays)
+        return run_author(directory, asked)
     if contract is not None:
         from flux_engine.cli._request import run_request
 
@@ -588,35 +572,41 @@ def _consumer_report_document(bundle: Any) -> Dict[str, Any]:
     return {"consumers": bundle.consumers.as_document()}
 
 
-def _authored(
-    contract: str,
-    profile: str,
-    overlay: Optional[Any],
-    *,
-    strict: bool,
-    allow: Tuple[str, ...],
-    consumers: Optional[str] = None,
-    window: Optional[Tuple[str, str]] = None,
-    history: Optional[Any] = None,
-) -> Any:
-    """The checked bundle for *contract* and *profile* (with *overlay*), or the refusal to report.
+@dataclass(frozen=True)
+class _AuthorRequest:
+    """What ``init`` writes a bundle from: the two documents as named, and the options that shape it."""
+
+    contract: str
+    profile: str
+    strict: bool = False
+    allow: Tuple[str, ...] = ()
+    consumers: Optional[str] = None
+    window: Optional[Tuple[str, str]] = None
+    history: Optional[Any] = None
+
+
+def _authored(asked: _AuthorRequest, overlay: Optional[Any]) -> Any:
+    """The checked bundle for the contract and profile of *asked* (with *overlay*), or the refusal to report.
 
     Exit ``1`` when an input cannot be used (the message names it and, for a refusal the engine
-    shares, its ``FLX`` code), when no expose can be written, or when *strict* refuses an unused
-    statistic or a gap that no *allow* pointer accepts (ADR 0014). Nothing is written here.
+    shares, its ``FLX`` code), when no expose can be written, or when *asked* is strict and refuses
+    an unused statistic or a gap that no allow pointer accepts (ADR 0014). Nothing is written here.
     """
-    from flux_engine.author import AuthorError, author_bundle, strict_findings
+    from flux_engine.author import AuthorError, AuthorInputs, author_bundle, strict_findings
     from flux_engine.core.errors import FluxError
     from flux_engine.seam.coverage import printable
 
+    contract, strict, allow = asked.contract, asked.strict, asked.allow
     try:
         bundle = author_bundle(
-            Path(contract),
-            Path(profile),
-            overlay,
-            consumers_path=_maybe_path(consumers),
-            window=window,
-            history=history,
+            AuthorInputs(
+                Path(contract),
+                Path(asked.profile),
+                overlay,
+                _maybe_path(asked.consumers),
+                asked.window,
+                asked.history,
+            )
         )
     except AuthorError as error:
         # A refusal can quote the contract (a column name, a FLUX message about it): no
@@ -682,18 +672,8 @@ def _authored(
     return bundle
 
 
-def run_author(
-    directory: str,
-    contract: str,
-    profile: str,
-    *,
-    strict: bool = False,
-    allow: Tuple[str, ...] = (),
-    consumers: Optional[str] = None,
-    window: Optional[Tuple[str, str]] = None,
-    history: Optional[Any] = None,
-) -> StageResult:
-    """Write a bundle for the data *contract* and *profile* describe into *directory*.
+def run_author(directory: str, asked: _AuthorRequest) -> StageResult:
+    """Write a bundle for the data the contract and profile of *asked* describe into *directory*.
 
     Exit ``1`` when an input cannot be used (the message names it and, for a
     refusal the engine shares, its ``FLX`` code), when no expose can be written,
@@ -703,28 +683,19 @@ def run_author(
     """
     from flux_engine.starter import ScaffoldError, write_project
 
-    bundle = _authored(
-        contract,
-        profile,
-        None,
-        strict=strict,
-        allow=allow,
-        consumers=consumers,
-        window=window,
-        history=history,
-    )
+    bundle = _authored(asked, None)
     if isinstance(bundle, StageResult):
         return bundle
-    asked = _request_path(directory, bundle)
+    request = _request_path(directory, bundle)
     try:
         names = write_project(Path(directory), lambda: bundle.files)
     except ScaffoldError as error:
         return StageResult(stage="init", exit_code=1, stderr=f"init: {error}")
-    written = _write_request(asked, bundle)
+    written = _write_request(request, bundle)
     if isinstance(written, StageResult):
-        _remove(Path(directory), names, asked)
+        _remove(Path(directory), names, request)
         return written
-    return _described(directory, bundle, names, contract, profile, written)
+    return _described(directory, bundle, names, asked.contract, asked.profile, written)
 
 
 def _request_path(directory: str, bundle: Any) -> Optional[Path]:
@@ -818,30 +789,11 @@ def _read_overlays(files: Tuple[str, ...]) -> Any:
     return overlays
 
 
-def _authored_each(
-    contract: str,
-    profile: str,
-    overlays: List[Any],
-    *,
-    strict: bool,
-    allow: Tuple[str, ...],
-    consumers: Optional[str] = None,
-    window: Optional[Tuple[str, str]] = None,
-    history: Optional[Any] = None,
-) -> Any:
+def _authored_each(asked: _AuthorRequest, overlays: List[Any]) -> Any:
     """The checked bundle of each overlay, or the first refusal, which names the overlay."""
     bundles: List[Any] = []
     for overlay in overlays:
-        bundle = _authored(
-            contract,
-            profile,
-            overlay,
-            strict=strict,
-            allow=allow,
-            consumers=consumers,
-            window=window,
-            history=history,
-        )
+        bundle = _authored(asked, overlay)
         if isinstance(bundle, StageResult):
             if bundle.stderr:
                 bundle = replace(
@@ -852,7 +804,7 @@ def _authored_each(
     return bundles
 
 
-def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -> StageResult:
+def _written_each(root: Path, bundles: List[Any], asked: _AuthorRequest) -> StageResult:
     """Write each bundle into *root*, named after its overlay, with the request for its assumptions.
 
     When a directory or a
@@ -860,7 +812,7 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
     """
     from flux_engine.starter import ScaffoldError, write_project
 
-    asked = [_request_path(str(root / bundle.overlay.name), bundle) for bundle in bundles]
+    requests = [_request_path(str(root / bundle.overlay.name), bundle) for bundle in bundles]
     written: List[Tuple[Path, bool, Tuple[str, ...], Optional[Path]]] = []
     results: List[StageResult] = []
 
@@ -877,7 +829,7 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
                 except OSError:
                     pass
 
-    for bundle, request in zip(bundles, asked, strict=True):
+    for bundle, request in zip(bundles, requests, strict=True):
         target = root / bundle.overlay.name
         existed = target.exists()
         try:
@@ -890,7 +842,9 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
         if isinstance(placed, StageResult):
             undo()
             return placed
-        results.append(_described(str(target), bundle, names, contract, profile, placed))
+        results.append(
+            _described(str(target), bundle, names, asked.contract, asked.profile, placed)
+        )
     return StageResult(
         stage="init",
         exit_code=0,
@@ -904,16 +858,7 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
 
 
 def run_author_overlays(
-    directory: str,
-    contract: str,
-    profile: str,
-    overlay_files: Tuple[str, ...],
-    *,
-    strict: bool = False,
-    allow: Tuple[str, ...] = (),
-    consumers: Optional[str] = None,
-    window: Optional[Tuple[str, str]] = None,
-    history: Optional[Any] = None,
+    directory: str, asked: _AuthorRequest, overlay_files: Tuple[str, ...]
 ) -> StageResult:
     """Write one bundle per overlay of *overlay_files* into *directory*, each in a directory named after it.
 
@@ -928,19 +873,10 @@ def run_author_overlays(
     overlays = _read_overlays(overlay_files)
     if isinstance(overlays, StageResult):
         return overlays
-    bundles = _authored_each(
-        contract,
-        profile,
-        overlays,
-        strict=strict,
-        allow=allow,
-        consumers=consumers,
-        window=window,
-        history=history,
-    )
+    bundles = _authored_each(asked, overlays)
     if isinstance(bundles, StageResult):
         return bundles
-    done = _written_each(Path(directory), bundles, contract, profile)
+    done = _written_each(Path(directory), bundles, asked)
     if done.exit_code != 0:
         return done
     heading = f"created {len(bundles)} bundles in {printable(directory)}, one for each overlay:"

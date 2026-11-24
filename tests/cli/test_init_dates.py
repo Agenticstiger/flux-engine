@@ -1473,10 +1473,10 @@ def test_a_widened_child_date_the_table_has_no_other_property_for_is_not_dated(
 
 
 def test_a_widened_range_is_recorded_in_the_used_note_of_its_statistic(tmp_path: Path) -> None:
-    from flux_engine.author.bundle import author_bundle
+    from flux_engine.author.bundle import AuthorInputs, author_bundle
 
     written = _written(tmp_path, _late_child_profile())
-    authored = author_bundle(tmp_path / "dated.fluid.yaml", written.profile_path)
+    authored = author_bundle(AuthorInputs(tmp_path / "dated.fluid.yaml", written.profile_path))
     notes = [
         entry.note
         for entry in authored.ledger

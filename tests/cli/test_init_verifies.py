@@ -509,7 +509,7 @@ def test_passes_spent_on_trial_declines_end_with_a_message_that_says_so(
 
     monkeypatch.setattr(authoring, "_author_with_fallbacks", decline)
     with pytest.raises(authoring.AuthorError) as ended:
-        authoring.author_bundle(Path("contract"), Path("profile"))
+        authoring.author_bundle(authoring.AuthorInputs(Path("contract"), Path("profile")))
     message = str(ended.value)
     assert "trial runs did not settle which exposures, rates entries or within entries" in message
     assert f"within {authoring._MOST_WIDENINGS} passes" in message
@@ -524,7 +524,7 @@ def test_passes_spent_on_widening_keep_the_widening_message(
 
     monkeypatch.setattr(authoring, "_author_with_fallbacks", widen)
     with pytest.raises(authoring.AuthorError, match="cannot be widened"):
-        authoring.author_bundle(Path("contract"), Path("profile"))
+        authoring.author_bundle(authoring.AuthorInputs(Path("contract"), Path("profile")))
 
 
 def test_a_profile_whose_history_would_derive_a_hundred_million_rows_is_written_quickly(

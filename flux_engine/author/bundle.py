@@ -2719,15 +2719,34 @@ _WIDENED_RANGE = (
 )
 
 
-def author_bundle(
-    contract_path: Path,
-    profile_path: Path,
-    overlay: Optional[Overlay] = None,
-    consumers_path: Optional[Path] = None,
-    window: Optional[Tuple[str, str]] = None,
-    history: Optional[DeclaredHistory] = None,
-) -> AuthoredBundle:
-    """Read *contract_path* and *profile_path*, and return the checked files of a bundle.
+@dataclass(frozen=True)
+class AuthorInputs:
+    """What a bundle is authored from: the two documents and the options that shape it.
+
+    *overlay*, *consumers_path*, *window* and *history* are each described at
+    :func:`author_bundle`.
+    """
+
+    contract_path: Path
+    profile_path: Path
+    overlay: Optional[Overlay] = None
+    consumers_path: Optional[Path] = None
+    window: Optional[Tuple[str, str]] = None
+    history: Optional[DeclaredHistory] = None
+
+
+@dataclass(frozen=True)
+class _Fallbacks:
+    """What the passes of :func:`author_bundle` leave out or widen, each keyed by its exposeId and column."""
+
+    widened: Dict[Tuple[str, str], Tuple[int, int]]
+    declined: Dict[Tuple[str, str], str]
+    undated: Dict[Tuple[str, str], str]
+    unrated: Dict[Tuple[str, str], str]
+
+
+def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
+    """Read the contract and the profile of *inputs*, and return the checked files of a bundle.
 
     With an *overlay* (ADR 0030 section 7) the bundle is written from the overlaid profile,
     ``MergePatch(profile, patch)``, and its Simulation declares the overlay beside the pin of the
@@ -2758,35 +2777,21 @@ def author_bundle(
     document that is not a profile ``FLX-5036``, a contract past the read's
     bounds ``FLX-3105``, and an integer in it too long to read ``FLX-1003``).
     """
-    widened: Dict[Tuple[str, str], Tuple[int, int]] = {}
-    declined: Dict[Tuple[str, str], str] = {}
-    undated: Dict[Tuple[str, str], str] = {}
-    unrated: Dict[Tuple[str, str], str] = {}
+    fallbacks = _Fallbacks({}, {}, {}, {})
     last_was_trial = False
     for _ in range(_MOST_WIDENINGS):
         try:
-            return _author_with_fallbacks(
-                contract_path,
-                profile_path,
-                overlay,
-                consumers_path,
-                widened,
-                declined,
-                undated,
-                unrated,
-                window,
-                history,
-            )
+            return _author_with_fallbacks(inputs, fallbacks)
         except _WithinDeclined as fewer_dates:
             last_was_trial = True
-            _leave_undated(undated, widened, fewer_dates.reasons)
+            _leave_undated(fallbacks.undated, fallbacks.widened, fewer_dates.reasons)
         except _ExposuresDeclined as fewer:
             last_was_trial = True
-            declined.update(fewer.reasons)
-            unrated.update(fewer.rates)
+            fallbacks.declined.update(fewer.reasons)
+            fallbacks.unrated.update(fewer.rates)
         except _RangesWidened as more:
             last_was_trial = False
-            _widen_to_hold(widened, more.ranges)
+            _widen_to_hold(fallbacks.widened, more.ranges)
     if last_was_trial:
         raise AuthorError(
             "the trial runs did not settle which exposures, rates entries or within entries the "
@@ -2816,32 +2821,19 @@ def _widen_to_hold(
         widened[key] = (low, high) if held is None else (min(held[0], low), max(held[1], high))
 
 
-def _author_with_fallbacks(
-    contract_path: Path,
-    profile_path: Path,
-    overlay: Optional[Overlay],
-    consumers_path: Optional[Path],
-    widened: Mapping[Tuple[str, str], Tuple[int, int]],
-    declined: Mapping[Tuple[str, str], str] = {},
-    undated: Mapping[Tuple[str, str], str] = {},
-    unrated: Mapping[Tuple[str, str], str] = {},
-    window: Optional[Tuple[str, str]] = None,
-    history: Optional[DeclaredHistory] = None,
-) -> AuthoredBundle:
+def _author_with_fallbacks(inputs: AuthorInputs, fallbacks: _Fallbacks) -> AuthoredBundle:
     """:func:`author_bundle` once, writing without the projections or the history the plan refuses."""
-    inputs = (contract_path, profile_path, overlay, consumers_path)
-    more = (widened, declined, undated, unrated)
-    if history is not None:
+    if inputs.history is not None:
         # The history file is the person's: a refusal is theirs to read, not a reason to drop it.
-        return _author_bundle(*inputs, None, None, *more, given_window=window, declared=history)
+        return _author_bundle(inputs, fallbacks)
     try:
-        return _author_bundle(*inputs, None, None, *more, given_window=window)
+        return _author_bundle(inputs, fallbacks)
     except _ProjectionRefused as refused:
         projection = str(refused)
     try:
-        return _author_bundle(*inputs, None, projection, *more, given_window=window)
+        return _author_bundle(inputs, fallbacks, None, projection)
     except _HistoryRefused as refused:
-        return _author_bundle(*inputs, str(refused), projection, *more, given_window=window)
+        return _author_bundle(inputs, fallbacks, str(refused), projection)
 
 
 @dataclass(frozen=True)
@@ -3350,86 +3342,201 @@ def _starter_files(
 
 
 def _author_bundle(
-    contract_path: Path,
-    profile_path: Path,
-    overlay: Optional[Overlay],
-    consumers_path: Optional[Path],
-    declined_history: Optional[str],
-    declined_projection: Optional[str],
-    widened: Mapping[Tuple[str, str], Tuple[int, int]] = {},
-    declined_exposures: Mapping[Tuple[str, str], str] = {},
-    undated: Mapping[Tuple[str, str], str] = {},
-    unrated: Mapping[Tuple[str, str], str] = {},
-    given_window: Optional[Tuple[str, str]] = None,
-    declared: Optional[DeclaredHistory] = None,
+    inputs: AuthorInputs,
+    fallbacks: _Fallbacks,
+    declined_history: Optional[str] = None,
+    declined_projection: Optional[str] = None,
 ) -> AuthoredBundle:
     """:func:`author_bundle`, writing no history when *declined_history* is why plan refuses the bundle.
 
-    Each range in *widened* (milliseconds, per exposeId and column) is declared in place of the
-    one the profile gives. When the plan would refuse a date's range, :class:`_RangesWidened` says
-    which ranges it accepts.
+    Each range in ``fallbacks.widened`` (milliseconds, per exposeId and column) is declared in place
+    of the one the profile gives. When the plan would refuse a date's range, :class:`_RangesWidened`
+    says which ranges it accepts.
 
     With *declined_projection*, the reason plan refuses it with its projections, none is written.
 
-    A date of *undated* (per exposeId and column, with its reason) is dated by no ``within``
-    entry. When a widened range leaves the expose no property to compare,
+    A date of ``fallbacks.undated`` (per exposeId and column, with its reason) is dated by no
+    ``within`` entry. When a widened range leaves the expose no property to compare,
     :class:`_WithinDeclined` says which dates, so the bundle is written again without them.
 
-    An exposure of *declined_exposures* (per exposeId and relationship, with its reason) and a
-    ``rates`` entry of *unrated* (per exposeId and column, with its reason) are not declared. When
-    a trial run scores a declared exposure, or the calendar of a column a ``rates`` entry shapes,
-    outside its tolerance, :class:`_ExposuresDeclined` says which, so the bundle is written again
-    without them.
+    An exposure of ``fallbacks.declined`` (per exposeId and relationship, with its reason) and a
+    ``rates`` entry of ``fallbacks.unrated`` (per exposeId and column, with its reason) are not
+    declared. When a trial run scores a declared exposure, or the calendar of a column a ``rates``
+    entry shapes, outside its tolerance, :class:`_ExposuresDeclined` says which, so the bundle is
+    written again without them.
     """
-    contract_path = Path(contract_path)
+    declared = inputs.history
+    planned = _plan_bundle(inputs)
+    team, owner_note = _owner(planned.contract)
+    window, window_note, given_window = _bundle_window(planned, inputs)
+    _widen_ranges(planned.authored, fallbacks.widened)
+    histories, projections = _histories_and_projections(
+        planned, window, declared, (declined_history, declined_projection)
+    )
+    exact_notes = allot_small_tables(
+        [expose for expose in planned.drawn if expose.skipped is None],
+        _follows_the_entity(planned.authored, histories),
+    )
+    dated = _dated_columns(planned, window, fallbacks)
+    _release_dated_columns(planned.authored, dated)
+    _declare_copulas(planned.authored, planned.reading, dated, histories)
+    drafted = _draft_documents(
+        planned, inputs, _Layers(window, histories, projections, dated), team
+    )
+    contract_path = planned.contract_path
+    files = _starter_files(
+        contract_path,
+        Path(inputs.profile_path),
+        planned.contract_bytes,
+        drafted.world,
+        drafted.persona,
+        drafted.simulation,
+        planned.scoped,
+    )
+    _refuse_unless_widened(files, planned.authored, fallbacks.widened)
+    _check_histories(
+        files,
+        planned.pinned,
+        histories,
+        projections,
+        declined_history,
+        planned.scoped.citing,
+        declared,
+    )
+    _refuse_unless_reproduced(
+        files, dated.within, dated.rates, planned.keys, Path(inputs.profile_path)
+    )
+    spread = planned.spread
+    notes = (
+        tuple(note for note in (window_note, owner_note) if note)
+        + tuple(spread.notes)
+        + tuple(histories.notes)
+        + tuple(projections.notes)
+        + tuple(exact_notes)
+    )
+    namespace = drafted.namespace
+    counts = _counts(
+        namespace["parameters"],
+        namespace[UNUSED_KEY],
+        drafted.documents,
+        drafted.simulation_id,
+        planned.scoped.name,
+    )
+    return AuthoredBundle(
+        files=files,
+        exposes=tuple(planned.exposes),
+        counts=counts,
+        notes=notes,
+        profile_digest=planned.pinned.digest.value,
+        simulation_id=drafted.simulation_id,
+        ledger=drafted.ledger,
+        gaps=_gaps(planned.exposes, None if given_window is not None else window_note),
+        overlay=inputs.overlay,
+        assumptions_request=drafted.asked,
+        consumers=_consumers_report(planned.needs, planned.exposes, window),
+        history_file=declared.name if declared is not None else None,
+    )
+
+
+@dataclass(frozen=True)
+class _Planned:
+    """What an authoring run read and drew before it fixed the window, the histories or the dates."""
+
+    contract_path: Path
+    contract: Any
+    contract_bytes: bytes
+    pinned: Any
+    scoped: _Scoped
+    reading: _Reading
+    keys: Optional[ContractKeys]
+    needs: Optional[Any]
+    exposes: List[AuthoredExpose]
+    drawn: List[AuthoredExpose]
+    spread: _Spreads
+    authored: List[AuthoredExpose]
+
+
+class _Layers(NamedTuple):
+    """What the bundle's documents are drafted over: the window and each declared layer."""
+
+    window: Tuple[str, str]
+    histories: _Histories
+    projections: Projected
+    dated: Any
+
+
+class _Drafted(NamedTuple):
+    """The documents of a bundle, with its register, ledger and request, before they are checked."""
+
+    world: Dict[str, Any]
+    persona: Dict[str, Any]
+    simulation: Dict[str, Any]
+    namespace: Dict[str, Any]
+    documents: Dict[str, Any]
+    simulation_id: str
+    ledger: Any
+    asked: Any
+
+
+def _plan_bundle(inputs: AuthorInputs) -> _Planned:
+    """Read the contract and the profile of *inputs*, plan each expose and draw what links them."""
+    contract_path = Path(inputs.contract_path)
     contract, contract_bytes = _read_contract(contract_path)
-    pinned = load_profile(Path(profile_path))
-    scoped = _scoped(pinned, overlay)
+    pinned = load_profile(Path(inputs.profile_path))
+    scoped = _scoped(pinned, inputs.overlay)
     reading = _Reading.of(pinned, scoped)
-    profile, noisy = reading.profile, reading.noisy
-    product_ref = str(contract["id"])
     try:
         keys = compile_keys(contract)
     except FluxError as error:
         raise AuthorError(f"the contract's keys do not resolve: {error}") from error
-    needs = _consumers_plan(consumers_path, contract, keys)
+    needs = _consumers_plan(inputs.consumers_path, contract, keys)
 
     exposes = _plan_exposes(contract, reading, keys, needs)
     _skip_unreadable_references(exposes, keys)
     drawn = [expose for expose in exposes if expose.skipped is None and not expose.reference]
+    declared = inputs.history
     held_back = _held_back(declared) if declared is not None else None
     spread = _draw_and_link(reading, keys, exposes, drawn, held_back)
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
+    return _Planned(
+        contract_path,
+        contract,
+        contract_bytes,
+        pinned,
+        scoped,
+        reading,
+        keys,
+        needs,
+        exposes,
+        drawn,
+        spread,
+        authored,
+    )
 
-    team, owner_note = _owner(contract)
+
+def _bundle_window(
+    planned: _Planned, inputs: AuthorInputs
+) -> Tuple[Tuple[str, str], Optional[Tuple[str, str]], Optional[Tuple[str, str]]]:
+    """The run window, the note that it was assumed, and the window given (by ``--window`` or the history file).
+
+    A history file is checked against the exposes it names. With a given window, the bins of each
+    date column that leave it are cut at it; without one the window is the hull of every date
+    column's range, so no column's bins are cut.
+    """
+    declared = inputs.history
+    authored = planned.authored
+    given_window, given_by = inputs.window, "--window"
     if given_window is None and declared is not None:
-        given_window = declared.time_bounds
-        given_by = declared.name
-    else:
-        given_by = "--window"
+        given_window, given_by = declared.time_bounds, declared.name
     if declared is not None:
-        if keys is None:
-            raise AuthorError(
-                f"{declared.name}: the contract declares no keys, so no expose of it has a "
-                "validity window for a history"
-            )
-        try:
-            check_entries(
-                declared,
-                {expose.expose_id for expose in authored if not expose.reference},
-                {
-                    expose.expose_id
-                    for expose in authored
-                    if not expose.reference and keys.expose(expose.expose_id).versioned
-                },
-            )
-        except DeclaredHistoryError as error:
-            raise AuthorError(str(error)) from None
+        _check_declared_entries(planned, declared)
     window, window_note = _time_bounds(
-        authored, contract, given_window, declared_spans(declared) if declared is not None else ()
+        authored,
+        planned.contract,
+        given_window,
+        declared_spans(declared) if declared is not None else (),
     )
     if given_window is not None:
-        # Without a given window it is the hull, and no column's bins leave it.
         for expose in authored:
             for column in expose.columns:
                 bound_to_window(column, expose.kinds[column.name], window)
@@ -3437,28 +3544,62 @@ def _author_bundle(
             "time window",
             f"The run covers {window[0]} to {window[1]}, as {given_by} gives.",
         )
-    _widen_ranges(authored, widened)
-    if declared is not None and keys is not None:
-        histories = _declared_histories(authored, keys, contract, reading.tables, window, declared)
-        projections = _declared_projections(authored, keys, contract, declared)
-    else:
-        histories = _histories(
-            authored,
-            keys,
-            contract,
-            reading.tables,
-            window,
-            minimum_cell=reading.minimum_cell,
-            fractional_bits=reading.fractional_bits,
-            declined=declined_history,
+    return window, window_note, given_window
+
+
+def _check_declared_entries(planned: _Planned, declared: DeclaredHistory) -> None:
+    """Refuse a history file that names an expose the bundle does not write, or one with no validity window."""
+    keys = planned.keys
+    if keys is None:
+        raise AuthorError(
+            f"{declared.name}: the contract declares no keys, so no expose of it has a "
+            "validity window for a history"
         )
-        projections = _projections(authored, keys, contract, histories, spread, declined_projection)
-    exact_notes = allot_small_tables(
-        [expose for expose in drawn if expose.skipped is None],
-        _follows_the_entity(authored, histories),
+    written = [expose for expose in planned.authored if not expose.reference]
+    try:
+        check_entries(
+            declared,
+            {expose.expose_id for expose in written},
+            {expose.expose_id for expose in written if keys.expose(expose.expose_id).versioned},
+        )
+    except DeclaredHistoryError as error:
+        raise AuthorError(str(error)) from None
+
+
+def _histories_and_projections(
+    planned: _Planned,
+    window: Tuple[str, str],
+    declared: Optional[DeclaredHistory],
+    declined: Tuple[Optional[str], Optional[str]],
+) -> Tuple[_Histories, Projected]:
+    """The histories and the projections: the history file's, or those the profile and the contract give.
+
+    *declined* is the reason plan refuses the histories, and the reason it refuses the projections.
+    """
+    authored, keys, contract = planned.authored, planned.keys, planned.contract
+    if declared is not None and keys is not None:
+        return (
+            _declared_histories(authored, keys, contract, planned.reading.tables, window, declared),
+            _declared_projections(authored, keys, contract, declared),
+        )
+    histories = _histories(
+        authored,
+        keys,
+        contract,
+        planned.reading.tables,
+        window,
+        minimum_cell=planned.reading.minimum_cell,
+        fractional_bits=planned.reading.fractional_bits,
+        declined=declined[0],
     )
-    dated = declare_dates(
-        profile,
+    projections = _projections(authored, keys, contract, histories, planned.spread, declined[1])
+    return histories, projections
+
+
+def _dated_columns(planned: _Planned, window: Tuple[str, str], fallbacks: _Fallbacks) -> Any:
+    """Declare the dates of the written exposes: ``within`` entries, exposures and ``rates``."""
+    return declare_dates(
+        planned.reading.profile,
         {
             expose.expose_id: DatedExpose(
                 kinds={name: kind for name, kind in expose.kinds.items() if kind in DATE_KINDS},
@@ -3468,19 +3609,27 @@ def _author_bundle(
                 | frozenset(plan.name for plan in expose.columns if plan.fixed),
                 columns=frozenset(expose.kinds),
             )
-            for expose in authored
+            for expose in planned.authored
             if not expose.reference
         },
-        keys,
+        planned.keys,
         window_end=window_end_ms(window[1]),
         window_start=window_start_ms(window[0]),
-        minimum_cell=reading.minimum_cell,
-        declined_exposures=declined_exposures,
-        declined_within=undated,
-        declined_rates=unrated,
+        minimum_cell=planned.reading.minimum_cell,
+        declined_exposures=fallbacks.declined,
+        declined_within=fallbacks.undated,
+        declined_rates=fallbacks.unrated,
     )
-    _release_dated_columns(authored, dated)
-    _declare_copulas(authored, reading, dated, histories)
+
+
+def _draft_documents(
+    planned: _Planned, inputs: AuthorInputs, layers: _Layers, team: str
+) -> _Drafted:
+    """The World, the Persona and the Simulation, with the register that counts their numbers."""
+    contract, reading, spread = planned.contract, planned.reading, planned.spread
+    histories, dated = layers.histories, layers.dated
+    declared = inputs.history
+    product_ref = str(contract["id"])
     children = (
         spread.used + histories.used + dated.used,
         spread.unused + histories.unused + dated.unused,
@@ -3491,27 +3640,27 @@ def _author_bundle(
     namespace = _namespace_block(
         contract,
         reading,
-        keys,
-        authored,
+        planned.keys,
+        planned.authored,
         spread,
         histories,
-        projections,
-        needs,
+        layers.projections,
+        planned.needs,
         dated,
         declared.as_of_entries() if declared is not None else None,
     )
-    simulation = _simulation_document(contract, authored, namespace, window, team)
+    simulation = _simulation_document(contract, planned.authored, namespace, layers.window, team)
     contract_ids = {
         str(expose.get("exposeId")) for expose in contract["exposes"] if isinstance(expose, Mapping)
     }
-    ledger = _ledger(profile, exposes, contract_ids, children, noisy)
+    ledger = _ledger(reading.profile, planned.exposes, contract_ids, children, reading.noisy)
     labels = _register_labels(
         f"world-{product_ref}",
         f"persona-{product_ref}",
         simulation_id,
-        authored,
-        noisy,
-        _namespace_labels(namespace, spread, dated, profile, declared is not None),
+        planned.authored,
+        reading.noisy,
+        _namespace_labels(namespace, spread, dated, reading.profile, declared is not None),
     )
     # The register counts numbers as the engine reads the files back (a YAML
     # float is an exact decimal there), so it is built from that reading.
@@ -3523,47 +3672,14 @@ def _author_bundle(
     namespace["parameters"] = _register(labels, documents, simulation_id)
     namespace["parameters"], asked = _cite_and_replace(
         namespace["parameters"],
-        (pinned.document, scoped.document, overlay),
+        (planned.pinned.document, planned.scoped.document, inputs.overlay),
         (contract, _contract_digest(contract), reading.fractional_bits),
         simulation_id,
         ledger,
     )
     namespace[UNUSED_KEY] = _unused_block(ledger)
     documents[simulation_id] = _as_read(simulation)
-
-    files = _starter_files(
-        contract_path, Path(profile_path), contract_bytes, world, persona, simulation, scoped
-    )
-    _refuse_unless_widened(files, authored, widened)
-    _check_histories(
-        files, pinned, histories, projections, declined_history, scoped.citing, declared
-    )
-    _refuse_unless_reproduced(files, dated.within, dated.rates, keys, Path(profile_path))
-    notes = (
-        tuple(note for note in (window_note, owner_note) if note)
-        + tuple(spread.notes)
-        + tuple(histories.notes)
-        + tuple(projections.notes)
-        + tuple(exact_notes)
-    )
-    counts = _counts(
-        namespace["parameters"], namespace[UNUSED_KEY], documents, simulation_id, scoped.name
-    )
-    report = _consumers_report(needs, exposes, window)
-    return AuthoredBundle(
-        files=files,
-        exposes=tuple(exposes),
-        counts=counts,
-        notes=notes,
-        profile_digest=pinned.digest.value,
-        simulation_id=simulation_id,
-        ledger=ledger,
-        gaps=_gaps(exposes, None if given_window is not None else window_note),
-        overlay=overlay,
-        assumptions_request=asked,
-        consumers=report,
-        history_file=declared.name if declared is not None else None,
-    )
+    return _Drafted(world, persona, simulation, namespace, documents, simulation_id, ledger, asked)
 
 
 def _consumers_plan(consumers_path: Optional[Path], contract: Any, keys: Any) -> Optional[Any]:

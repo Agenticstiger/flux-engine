@@ -220,7 +220,7 @@ def test_an_expose_that_misses_a_column_of_the_history_is_unused_and_keeps_its_r
 
 
 def _bundle_notes(tmp_path: Path, *names: str) -> List[str]:
-    from flux_engine.author.bundle import author_bundle
+    from flux_engine.author.bundle import AuthorInputs, author_bundle
 
     contract = tmp_path / "plans.fluid.yml"
     contract.write_text(CONTRACT.read_text(encoding="utf-8"), encoding="utf-8")
@@ -228,7 +228,7 @@ def _bundle_notes(tmp_path: Path, *names: str) -> List[str]:
 
     profile = tmp_path / "plans.profile.json"
     profile.write_text(json.dumps(_profile_with(*names)), encoding="utf-8")
-    bundle = author_bundle(contract, profile)
+    bundle = author_bundle(AuthorInputs(contract, profile))
     return [f"{subject}: {sentence}" for subject, sentence in bundle.notes]
 
 
