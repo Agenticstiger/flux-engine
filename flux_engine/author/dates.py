@@ -306,6 +306,30 @@ def _duration(
     return _histogram_member(kept_edges, kept_weights, upper=False)
 
 
+def _lifetime_citations(
+    entry: Dict[str, Any],
+    pair: _Pair,
+    family: Optional["_Family"],
+    how: Tuple[str, Optional[str]],
+) -> List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]]:
+    """What each number of a lifetime *entry* rests on: its target, its duration and its states.
+
+    *how* is the sentence for the target, and the one for the duration's histogram when it has one.
+    """
+    order_how, how_plain = how
+    histogram = pair.histogram
+    found: List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]] = []
+    if "target" in entry:
+        found.append((entry, ("target",), pair.tokens + ("order",), order_how))
+    if histogram is not None and how_plain is not None:
+        member = ("duration", "otherwise") if family is not None else ("duration",)
+        found.append((entry, member, pair.tokens + ("statistics", str(histogram.index)), how_plain))
+    if family is not None:
+        tokens = pair.tokens + ("statistics", str(family.index))
+        found.append((entry, ("duration", "states"), tokens, family.note))
+    return found
+
+
 def _lifetime_duration(
     plain: Optional[Dict[str, Any]], family: Optional["_Family"]
 ) -> Optional[Dict[str, Any]]:
@@ -586,32 +610,8 @@ class _Declarer:
             f"{orientation}, and the share of rows that break its order is the target "
             f"({target or '0'}%)"
         )
-        self._cite_lifetime(entry, pair, family, (order_how, how_plain))
+        self.cited.extend(_lifetime_citations(entry, pair, family, (order_how, how_plain)))
         self.keep(pair, order_how, how_plain, used_how, unused_why)
-
-    def _cite_lifetime(
-        self,
-        entry: Dict[str, Any],
-        pair: _Pair,
-        family: Optional["_Family"],
-        how: Tuple[str, Optional[str]],
-    ) -> None:
-        """Record what each number of a lifetime entry rests on: its target, its duration, its states.
-
-        *how* is the sentence for the target, and the one for the duration's histogram when it
-        has one.
-        """
-        order_how, how_plain = how
-        histogram = pair.histogram
-        if "target" in entry:
-            self.cited.append((entry, ("target",), pair.tokens + ("order",), order_how))
-        if histogram is not None and how_plain is not None:
-            member = ("duration", "otherwise") if family is not None else ("duration",)
-            tokens = pair.tokens + ("statistics", str(histogram.index))
-            self.cited.append((entry, member, tokens, how_plain))
-        if family is not None:
-            tokens = pair.tokens + ("statistics", str(family.index))
-            self.cited.append((entry, ("duration", "states"), tokens, family.note))
 
     def _family(
         self, expose: str, pair: _Pair, start: str, end: str, reversed_pair: bool
