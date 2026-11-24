@@ -465,5 +465,5 @@ def test_an_entry_point_that_cannot_be_imported_is_refused(site: Path) -> None:
     resolved = registry.resolve("learned", DIST, "1.0", forbidden_roots=[])
     with pytest.raises(FluxError) as caught:
         registry.load(resolved)
-    assert code_of(caught) == "FLX-3118"
+    assert code_of(caught) == "FLX-3124"
     assert "AttributeError" in str(caught.value)

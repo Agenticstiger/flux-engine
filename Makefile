@@ -436,19 +436,42 @@ gate-conform:
 # and the last two recipe lines scaffold the starter project from the
 # installed wheel and run it through verify and ship: a wheel that lacks the
 # starter files installs fine and then fails on the first command anyone types.
+#
+# With PKG_LOCK_DIR unset (every local run, and the Packaging job) the build
+# toolchain and the engine's dependencies come from the index, as they always
+# did. The release workflow sets PKG_LOCK_DIR to a directory holding
+# build-tools.txt and runtime.txt. Then the toolchain is installed from the
+# first with --require-hashes and the wheels are built without build isolation,
+# so the backend is the one that was hashed, and the engine's dependencies are
+# installed from the second, the uv.lock export, with --require-hashes and
+# --no-deps. `pip check` then proves the locked set satisfies the wheel. No
+# step of a locked run resolves a version.
+PKG_LOCK_DIR ?=
+ifeq ($(PKG_LOCK_DIR),)
+PKG_TOOLS_INSTALL = pip install --quiet --upgrade pip build
+PKG_BUILD_FLAGS =
+PKG_RUNTIME_INSTALL = pip install --quiet $(CI_SCRATCH)/pkg/dist/*.whl
+else
+PKG_TOOLS_INSTALL = pip install --quiet --require-hashes -r $(PKG_LOCK_DIR)/build-tools.txt
+PKG_BUILD_FLAGS = --no-isolation
+PKG_RUNTIME_INSTALL = pip install --quiet --require-hashes --no-deps -r $(PKG_LOCK_DIR)/runtime.txt \
+	&& $(CI_SCRATCH)/pkg/venv/bin/pip install --quiet --no-deps --no-index $(CI_SCRATCH)/pkg/dist/*.whl \
+	&& $(CI_SCRATCH)/pkg/venv/bin/pip check
+endif
+
 packaging-smoke:
 	rm -rf $(CI_SCRATCH)/pkg
 	mkdir -p $(CI_SCRATCH)/pkg
 	$(BIN)python -m venv $(CI_SCRATCH)/pkg/build-env
-	$(CI_SCRATCH)/pkg/build-env/bin/pip install --quiet --upgrade pip build
-	$(CI_SCRATCH)/pkg/build-env/bin/python -m build --outdir $(CI_SCRATCH)/pkg/dist .
-	$(CI_SCRATCH)/pkg/build-env/bin/python -m build --outdir $(CI_SCRATCH)/pkg/dist $(STATS_DIR)
+	$(CI_SCRATCH)/pkg/build-env/bin/$(PKG_TOOLS_INSTALL)
+	$(CI_SCRATCH)/pkg/build-env/bin/python -m build $(PKG_BUILD_FLAGS) --outdir $(CI_SCRATCH)/pkg/dist .
+	$(CI_SCRATCH)/pkg/build-env/bin/python -m build $(PKG_BUILD_FLAGS) --outdir $(CI_SCRATCH)/pkg/dist $(STATS_DIR)
 	$(BIN)python -c "import glob, sys, tarfile, zipfile; found = [(f, n) for f in sorted(glob.glob(sys.argv[1] + '/*')) for n in ([m for m in zipfile.ZipFile(f).namelist()] if f.endswith('.whl') else [m.split('/', 1)[-1] for m in tarfile.open(f).getnames()] if f.endswith('.tar.gz') else []) if n.startswith(('skills/', '.claude-plugin/'))]; assert not found, 'agent skills in a distribution: %s' % found; print('no skills/ or .claude-plugin/ path in the built wheels and source archives')" $(CI_SCRATCH)/pkg/dist
 	$(BIN)python -m venv $(CI_SCRATCH)/pkg/stats-venv
 	$(CI_SCRATCH)/pkg/stats-venv/bin/pip install --quiet --no-index $(CI_SCRATCH)/pkg/dist/flux_stats-*.whl
 	cd $(CI_SCRATCH)/pkg && ./stats-venv/bin/python -I -c "import importlib.metadata as m, importlib.util as u, sys; from flux_stats.profile import load_profile_text; names = sorted({d.metadata['Name'] for d in m.distributions()} - {'pip', 'setuptools'}); assert names == ['flux-stats'], names; assert u.find_spec('flux_engine') is None, 'flux_engine is importable'; profile, _ = load_profile_text(open(sys.argv[1], encoding='utf-8').read()); print('installed flux-stats', m.version('flux-stats'), 'alone reads a profile of', sorted(profile.tables))" "$(CURDIR)/docs/spec/profile-example.json"
 	$(BIN)python -m venv $(CI_SCRATCH)/pkg/venv
-	$(CI_SCRATCH)/pkg/venv/bin/pip install --quiet $(CI_SCRATCH)/pkg/dist/*.whl
+	$(CI_SCRATCH)/pkg/venv/bin/$(PKG_RUNTIME_INSTALL)
 	cd $(CI_SCRATCH)/pkg && ./venv/bin/fluxsim gate conform
 	cd $(CI_SCRATCH)/pkg && ./venv/bin/fluxsim describe --self --json > describe.json
 	$(BIN)python -c "import json; a=json.load(open('$(CI_SCRATCH)/pkg/describe.json'))['artifacts']; assert a['spec_version'], a; print('installed wheel describes:', a['version'], a['spec_version'], a['spec_source'])"

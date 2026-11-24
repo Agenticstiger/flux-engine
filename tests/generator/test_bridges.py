@@ -262,7 +262,10 @@ def test_the_same_relationship_in_two_bridges_is_refused() -> None:
     bridges: Mapping[str, Sequence[Tuple[str, str]]] = {
         "e": [("student", "course"), ("course", "student")]
     }
-    assert "already holds" in _refused(bridges=bridges)
+    message = _refused(bridges=bridges)
+    # The pair is named as plain text, never as a Python list.
+    assert "already holds" in message and "bridge (student, course)" in message
+    assert "[" not in message
 
 
 def test_a_bridge_on_an_expose_the_simulation_does_not_generate_is_refused() -> None:

@@ -46,6 +46,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Seque
 from flux_engine.api.emit import EmitSink
 from flux_engine.core.errors import FluxError
 from flux_engine.core.target_label import target_label
+from flux_engine.sinks._objects import adls_gen2_target
 from flux_engine.sinks._optional import is_available
 from flux_engine.sinks._options import option_name
 from flux_engine.sinks._secrets import (
@@ -223,7 +224,7 @@ def _refuse_credentials(name: str, target: str, options: Mapping[str, str]) -> N
             "as an option: credentials come from the environment or the platform's "
             "credential chain",
         )
-    if credential_url(target):
+    if credential_url(target) and not adls_gen2_target(target):
         raise FluxError(
             FLX_3509,
             f"{target_label(name, target)!r} (shown with them removed); name the place alone and give "

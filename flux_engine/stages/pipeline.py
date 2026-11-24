@@ -275,12 +275,14 @@ from flux_engine.stages._parallel import (
     workers_for,
 )
 from flux_engine.stages._plugin_exposes import plugin_exposes, refuse_plugin_combinations
+from flux_engine.stages._prewarm import start_forkserver_early
 from flux_engine.stages.scaling import (
     FLX_3404,
     FLX_3405,
     child_rows_note,
     key_space_note,
     scale_emit,
+    scaled_rows,
     share_of,
     too_many_child_rows_note,
 )
@@ -641,6 +643,70 @@ def _declared_null_fractions(resolved: ResolvedEmit) -> Dict[str, Any]:
         for name, block in columns.items()
         if isinstance(block, Mapping) and "nullFraction" in block
     }
+
+
+def _is_zero_share(declared: Any) -> bool:
+    """Whether a declared ``nullFraction`` is zero, which no cut can lower."""
+    try:
+        return Fraction(str(declared)) == 0
+    except (ValueError, ZeroDivisionError):
+        return False
+
+
+def period_end_null_notes(resolved: Sequence[ResolvedEmit]) -> Tuple[str, ...]:
+    """One sentence for each period end that declares a ``nullFraction`` under a parent that can close.
+
+    A period's end is cut at a closed parent's end (ADR 0024 section 5), so it is NULL only under a
+    parent that is open, and the share generated can be lower than the share declared. The sentence
+    names the emit, the column and the declared share. It is advice only: nothing here changes how a
+    value is drawn, and the plan's document and digests do not carry it. A period whose parent has no
+    end, or whose end column declares no ``nullFraction`` or a zero one, gets none.
+    """
+    held = {(str(emit.contract_path), emit.expose_id): emit for emit in resolved}
+    notes: List[str] = []
+    for emit in resolved:
+        nullable_end = _nullable_period_end(emit)
+        if nullable_end is None:
+            continue
+        end, declared = nullable_end
+        parent_id = _closing_parent_of(emit, held)
+        if parent_id is None:
+            continue
+        notes.append(
+            f"note: {emit.expose_id}.{end} declares nullFraction {declared}, and it is a period "
+            f"end within {parent_id}, which can close; an end is NULL only under a parent that "
+            "is open, because it is cut at a closed parent's end (ADR 0024 section 5), so the "
+            f"share generated can be lower than {declared}"
+        )
+    return tuple(notes)
+
+
+def _nullable_period_end(emit: ResolvedEmit) -> Optional[Tuple[str, Any]]:
+    """The end column of *emit*'s lifetime and its declared ``nullFraction``, when that is above zero."""
+    own = lifetime_entries_of(emit.extension, emit.expose_id)[:1]
+    end = own[0].end if own else None
+    declared = _declared_null_fractions(emit).get(nfc(end)) if end is not None else None
+    if end is None or declared is None or _is_zero_share(declared):
+        return None
+    return end, declared
+
+
+def _closing_parent_of(
+    emit: ResolvedEmit, held: Mapping[Tuple[str, str], ResolvedEmit]
+) -> Optional[str]:
+    """The parent of the first ``within`` lifetime of *emit* that has an end of its own, else ``None``."""
+    for entry in within_entries_of(emit.extension, emit.expose_id):
+        if not entry.lifetime:
+            continue
+        try:
+            parent_id = _targets_along(emit, entry.relationship)[-1]
+        except FluxError:  # pragma: no cover - the plan refused the relationship already
+            continue
+        parent = held.get((str(emit.contract_path), parent_id))
+        lifetime = lifetime_entries_of(parent.extension, parent.expose_id)[:1] if parent else ()
+        if lifetime and lifetime[0].end is not None:
+            return parent_id
+    return None
 
 
 def counted_relationships(
@@ -1505,28 +1571,32 @@ def refuse_determined_columns(
 def check_relations_declared(
     resolved_emits: Sequence[ResolvedEmit],
     simulation: Mapping[str, Any],
-    *,
     sim_id: str,
     strict: bool,
+    plugins: Optional[Mapping[str, PluginExpose]] = None,
 ) -> None:
     """Refuse the counts and weights ``plan`` refuses when it lays the relationships out, offline.
 
     One call into :func:`_relate_emits`, the relation step ``plan`` runs, over plans built as
     ``validate`` builds them, with the init pre-flight's placeholder digest. A bundle whose
     relation checks read what only a run knows is left to ``plan``: an emit that takes its rows
-    from the run (no declared ``rows``), a reference expose, and an emit whose plan cannot be
-    built. So it refuses nothing ``plan`` accepts.
+    from the run (no declared ``rows``) and a reference expose. An emit's plan is built as
+    ``plan`` builds it, so what the plan refuses (an allocation on a key, a ``nullFraction`` a
+    column cannot hold, no rows for a parent to reference) is refused here with ``plan``'s code.
+    So it refuses nothing ``plan`` accepts.
     """
     counter_based = _kernels.new_plan_is_counter_based()
     version = GENERATOR_VERSION_2 if counter_based else GENERATOR_VERSION
     planned: List[_PlannedEmit] = []
     for resolved in resolved_emits:
+        plugin = (plugins or {}).get(resolved.expose_id)
         if resolved.is_reference or (
-            resolved.fidelity is not None and not resolved.declared_row_count
+            (resolved.fidelity is not None or plugin is not None)
+            and resolved.declared_row_count is None
         ):
             return
         expose = resolved.compile()
-        if resolved.fidelity is None:
+        if resolved.fidelity is None and plugin is None:
             planned.append(
                 _PlannedEmit(
                     expose=expose,
@@ -1546,22 +1616,18 @@ def check_relations_declared(
             windowed=simulation.get("spec", {}).get("timeBounds") is not None,
             time_bounds=simulation.get("spec", {}).get("timeBounds"),
         )
-        try:
-            built = build_plan(
-                expose,
-                sim_id=sim_id,
-                seam_digest="sha256:" + "0" * 64,
-                rows=resolved.declared_row_count or 1,
-                fidelity=resolved.fidelity,
-                time_bounds=simulation.get("spec", {}).get("timeBounds"),
-                related=related_columns(resolved.keys),
-                rules=rules,
-                generator_version=version,
-            )
-        except Expr2Error:
-            raise
-        except FluxError:
-            return
+        built = build_plan(
+            resolved.compile_planned(),
+            sim_id=sim_id,
+            seam_digest="sha256:" + "0" * 64,
+            rows=resolved.declared_row_count or 0,
+            fidelity=resolved.fidelity,
+            time_bounds=simulation.get("spec", {}).get("timeBounds"),
+            related=_related_of(resolved),
+            rules=rules,
+            generator_version=version,
+            plugin=plugin,
+        )
         planned.append(
             _PlannedEmit(expose=expose, plan=built, mapping=None, coverage=coverage_of_plan(built))
         )
@@ -1766,6 +1832,10 @@ def execute(
     many bundles keeps none of it past the run.
     """
     require_jobs(jobs)
+    # The forkserver's import of what a worker needs takes about 0.3 s; started here it runs
+    # beside the load, the compile and the simulation below instead of after them. Nothing
+    # starts at one job, and no worker is reserved: the pool is built later, as always.
+    start_forkserver_early(jobs)
     run_kernel = _kernels.DEFAULT_KERNEL if kernel is None else kernel
     if run_kernel.seed_tree_version != kernel2.SEED_TREE_VERSION:
         # New generation features run on kernel 0.2.0 only: 0.1.0's draws are frozen.
@@ -2183,23 +2253,28 @@ def _refuses_unscaled(directory: Any, options: Mapping[str, Any]) -> bool:
     return False
 
 
-def _scale_causes(short: TooFewChildRows, declared_rows: Mapping[str, Optional[int]]) -> bool:
+def _scale_causes(
+    short: TooFewChildRows, declared_rows: Mapping[str, Optional[int]], scale: Decimal
+) -> bool:
     """Whether child rows too few for a minimum at a scale below 1 are short because of the scale.
 
     The refusal names the child and the parent expose, and *declared_rows* holds what each declares
-    before any scaling. At scale 1 the child rows are ``N1`` and no more than ``P1`` parents are
-    eligible (every one, or those that meet a ``parentWhen``). The scale is the cause when
-    ``N1 >= m * P1``: the same counts at scale 1 clear the minimum even if every parent is eligible.
-    When ``N1 < m * P1`` scale 1 falls short (exactly so when every parent is eligible).
-    Where they do not, scale 1 fails, or may fail, the same way, and the note would send the person
-    to a retry that fails too, so it is left out. Rows an expose does not declare (they come from
-    the run's own moments) give no such count, and the note is given as before.
+    before any scaling. At scale 1 the child rows are ``N1`` and the parents ``P1``. The scaled run
+    had ``e`` eligible parents among the ``Ps`` it drew; with no ``parentWhen`` that is all of them,
+    and otherwise the parents beyond the first ``Ps`` add at most ``P1 - Ps`` more, so no more than
+    ``e + P1 - Ps`` parents are eligible at scale 1 (``P1`` when every parent is). The scale is the
+    cause when ``N1 >= m * (e + P1 - Ps)``: scale 1 clears the minimum even if every one of those
+    is eligible. Where it does not, scale 1 fails, or may fail, the same way, and the note would
+    send the person to a retry that fails too, so it is left out. Rows an expose does not declare
+    (they come from the run's own moments) give no such count, and the note is given as before.
     """
     children = declared_rows.get(short.child)
     parents = declared_rows.get(short.parent)
     if children is None or parents is None:
         return True
-    return children >= short.minimum * parents
+    drawn = scaled_rows(parents, scale)
+    most_eligible = min(parents, short.eligible + max(0, parents - drawn))
+    return children >= short.minimum * most_eligible
 
 
 def _check_declared_blocks(
@@ -2386,7 +2461,7 @@ def _scale_noted(
         elif (
             scale < 1
             and isinstance(small, TooFewChildRows)
-            and not _scale_causes(small, declared_rows)
+            and not _scale_causes(small, declared_rows, scale)
         ):
             raise
         else:

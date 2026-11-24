@@ -507,6 +507,7 @@ def plan(
             scale=scale,
             allow_generators=allow_generators,
             stage_required=not stage,
+            reuse_committed=True,
         )[0],
     )
 
@@ -566,6 +567,11 @@ def _profile_grade(result: "_pipeline.PipelineResult", pinned: Optional[Any]) ->
         accounting=graded.accounting,
     )
     return grade
+
+
+def _period_note_fields(notes: Sequence[str]) -> Dict[str, Any]:
+    """The plan result's ``period_end_notes`` entry, empty when there are no notes."""
+    return {"period_end_notes": list(notes)} if notes else {}
 
 
 def plan_with_result(
@@ -703,6 +709,11 @@ def plan_with_result(
                     "plan_digest": digested.ref.value,
                     "input_digest": result.input_digest.ref.value,
                 },
+                stdout=(
+                    f"run {run_id_for(digested.ref.value)} keeps its stored plugin output: it is "
+                    "never generated again, and a new sample needs a new run, for example "
+                    "another seed"
+                ),
             ),
             None,
         )
@@ -747,6 +758,10 @@ def plan_with_result(
         # apply to commit.
         discard_stage(layout)
 
+    period_notes = _pipeline.period_end_null_notes(
+        [outcome.resolved for outcome in result.emits]
+        + [outcome.resolved for outcome in result.hidden_emits]
+    )
     return (
         StageResult(
             stage="plan",
@@ -782,7 +797,9 @@ def plan_with_result(
                 **({"profile_digest": pinned.digest.value} if pinned is not None else {}),
                 **({"parameter_register": register.as_document()} if register is not None else {}),
                 **({"consumer_queries_checked": False} if unchecked else {}),
+                **_period_note_fields(period_notes),
             },
+            stderr="\n".join(period_notes),
             stdout="\n".join(
                 [
                     _plan_stdout(

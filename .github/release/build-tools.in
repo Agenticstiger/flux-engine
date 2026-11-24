@@ -1,0 +1,15 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# The build toolchain of the release job: uv (reads uv.lock), the PEP 517
+# frontend and the setuptools and wheel the two pyproject.toml files ask for.
+# Installed with --require-hashes, so nothing here moves unless this file does.
+# Regenerate with:
+#   uv pip compile .github/release/build-tools.in --universal --python-version 3.11 \
+#     --generate-hashes \
+#     --no-header --no-annotate -o .github/release/build-tools.txt
+uv==0.11.23
+build==1.5.0
+setuptools>=77.0.3,<83
+wheel>=0.45

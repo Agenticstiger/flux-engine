@@ -61,6 +61,19 @@ FLX_7003 = register(
 )
 
 
+FLX_7012 = register(
+    "FLX-7012",
+    "prediction interval has its low above its high",
+    "A prediction's declared interval runs from interval_low to interval_high, so the low "
+    "may not be above the high. An interval whose ends are reversed has a negative width, "
+    "contains no value, and would score as if it were wider than any real interval. A low "
+    "equal to the high is a point interval and is accepted. `fluxsim accuracy register` and "
+    "`fluxsim forecast make` refuse such a record before anything is written, and a record "
+    "already in the store that holds one is refused when it is read, naming the record. "
+    "Swap the two values, or leave both out.",
+)
+
+
 def require_identifier(value: object, *, field_name: str) -> str:
     """Return *value* when it is a safe single-component identifier, else raise ``FLX-7003``."""
     if not isinstance(value, str) or IDENTIFIER_PATTERN.fullmatch(value) is None:
@@ -127,6 +140,16 @@ class PredictionRecord:
 
     def __post_init__(self) -> None:
         require_identifier(self.prediction_id, field_name="prediction_id")
+        if (
+            self.interval_low is not None
+            and self.interval_high is not None
+            and self.interval_low > self.interval_high
+        ):
+            raise FluxError(
+                FLX_7012,
+                f"prediction {self.prediction_id!r}: interval_low {self.interval_low} is above "
+                f"interval_high {self.interval_high}",
+            )
 
 
 @dataclass(frozen=True)

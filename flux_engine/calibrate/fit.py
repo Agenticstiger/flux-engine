@@ -22,7 +22,9 @@ The work, in this order, and every refusal that needs no run is made before the 
    wherever the values that differ do not decide them. The objective is the sum of the squared gaps
    between each query's rate and its target.
 6. The best candidate becomes the calibration patch, ``DIR.patch.json`` (:mod:`flux_engine.calibrate.patch`),
-   and its digest is taken.
+   and its digest is taken. The search evaluates the start point first and keeps it unless a candidate
+   beats it; a fit that moves no value writes no bundle. A refusal made after this step (an unreadable held-out profile, one naming a calibration
+   query) removes the patch again; a held-out query that misses is a report, and the patch stays.
 7. Only then is the held-out profile opened (``--held-out``; the profile may not name a calibration
    query). It is graded under ADR 0020's rule 2 beside the pinned profile, the calibrated values are run
    at the same scale, and the held-out queries are counted and set against their tolerances
@@ -619,12 +621,18 @@ def run_fit(request: FitRequest) -> FitOutcome:
             digest = patch_digest(text)
             # The patch exists and its digest is taken: the held-out profile is opened now, never before.
             if request.held_out is not None:
-                gate = _check_held_out(request, prepared, evaluator, result.values)
+                try:
+                    gate = _check_held_out(request, prepared, evaluator, result.values)
+                except BaseException:
+                    # A refusal here is no report: the patch it follows is not left behind, so the
+                    # rerun is not met by "already exists".
+                    patch_path.unlink(missing_ok=True)
+                    raise
     finally:
         shutil.rmtree(work, ignore_errors=True)
     bundle = (
         _write_bundle(request, prepared, (operations, digest, versions), gate)
-        if gate is not None and gate.calibrated
+        if gate is not None and gate.calibrated and operations
         else None
     )
     return FitOutcome(

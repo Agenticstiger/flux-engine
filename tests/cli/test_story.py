@@ -250,14 +250,19 @@ def test_a_refusal_under_json_is_an_envelope_with_its_code(
         captured = capsys.readouterr()
         envelope = json.loads(captured.out)
         assert status == 1 and envelope["exitCode"] == 1 and envelope["ok"] is False
-        assert envelope["stage"] == "story" and envelope["artifacts"] == {}
+        assert envelope["stage"] == "story" and envelope["artifacts"] == {"code": code}
         assert envelope["error"]["code"] == code and text in envelope["error"]["message"]
+        # The convention of every command: the message is also on stderr, the code is in both places.
+        assert captured.err.strip() == envelope["error"]["message"]
     status = main(
         ["-j", "story", "--state-dir", str(state_dir), "--run-id", "0" * 16]
         + ["--emit", "customer", "--key", "1"]
     )
-    envelope = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    envelope = json.loads(captured.out)
     assert status == 1 and envelope["error"]["code"] == "FLX-2109"
+    assert envelope["artifacts"] == {"code": "FLX-2109"}
+    assert captured.err.strip() == envelope["error"]["message"]
 
 
 def test_a_mistyped_key_column_is_named_with_the_columns_the_expose_has(

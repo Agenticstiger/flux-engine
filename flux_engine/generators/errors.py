@@ -28,6 +28,7 @@ __all__ = [
     "FLX_3121",
     "FLX_3122",
     "FLX_3123",
+    "FLX_3124",
 ]
 
 FLX_3114: ErrorCode = register(
@@ -86,9 +87,10 @@ FLX_3118: ErrorCode = register(
     "After the import it checks again that the loaded object's module file lies inside "
     "that checked package and, for an installed distribution, is listed in its RECORD. "
     "A module swapped between the check and the import (a changed sys.path, or a "
-    "module already in sys.modules) fails this check, and so does an entry point that "
-    "cannot be imported. The message names the file found and the package expected. "
-    "Reinstall the plugin and run the command again.",
+    "module already in sys.modules) fails this check, and so does an entry point whose "
+    "loaded object has no module file. The message names the file found and the package "
+    "expected. Reinstall the plugin and run the command again. A plugin whose import or "
+    "factory raises is FLX-3124.",
 )
 
 FLX_3119: ErrorCode = register(
@@ -170,4 +172,19 @@ FLX_3123: ErrorCode = register(
     "record, for a plugin the bundle declares none, for an editable install, and for one "
     "declared environment when the environment it measures is not the recorded one; a "
     "replay never exits 0 from the stored run.",
+)
+
+FLX_3124: ErrorCode = register(
+    "FLX-3124",
+    "a generator plugin could not be loaded",
+    "The engine imports the plugin's module and calls its factory only after the "
+    "bundle, the command line and the installation checks have passed. Any exception "
+    "raised by either step, such as a syntax error or an error at import, an entry "
+    "point that names nothing, a module that is missing or a factory that raises, "
+    "ends the command with this code. The message names the expose, the plugin the "
+    "bundle declares, the phase (importing the module, or calling the factory), and "
+    "the type and first line of the exception. A missing module is named, and the "
+    "message says whether it is the plugin's own module or one it imports. The "
+    "message never quotes the plugin's options and prints no traceback. Install the "
+    "plugin's dependencies, or correct the plugin, and run the command again.",
 )

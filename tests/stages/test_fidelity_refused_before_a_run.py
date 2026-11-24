@@ -177,6 +177,16 @@ def test_a_valid_property_of_every_kind_validates(tmp_path: Path) -> None:
         ),
     )
 
+    # `plan` refuses declared bins without declared binWeights: one weight per bin.
+    declaration = bundle / "simulation.flux.yml"
+    text = declaration.read_text(encoding="utf-8")
+    anchor = 'range: { min: "1", max: "10000" }\n              null: exclude\n'
+    assert text.count(anchor) == 1, "the fixture's amount column moved"
+    declaration.write_text(
+        text.replace(anchor, anchor + '              binWeights: ["1", "2", "1"]\n'),
+        encoding="utf-8",
+    )
+
     result = validate(bundle)
 
     assert result.success, result.stderr

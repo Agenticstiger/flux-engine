@@ -31,7 +31,7 @@ A JSON document. Its header holds the method, the library versions, the seed, th
 
 ## "Calibrated" waits on the held-out queries
 
-A fit is called calibrated only when at least one held-out query has a target and every held-out query with a target falls within its tolerance (its own, or else `heldOutTolerance`). A held-out query with no tolerance to hold it to, or one that could not be counted, is a miss. Otherwise the command writes the patch, names each query that missed with its gap, exits 1 with `FLX-3712`, and writes no bundle. A fit with no held-out target is never called calibrated.
+A fit is called calibrated only when at least one held-out query has a target and every held-out query with a target falls within its tolerance (its own, or else `heldOutTolerance`). A held-out query with no tolerance to hold it to, or one that could not be counted, is a miss. Otherwise the command writes the patch, names each query that missed with its gap, exits 1 with `FLX-3712`, and writes no bundle. A fit with no held-out target is never called calibrated, and neither is one where no candidate beat the start point, which moves no value.
 
 When it misses:
 

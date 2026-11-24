@@ -327,11 +327,12 @@ def test_the_exit_codes_the_index_lists_are_the_ones_the_cli_states() -> None:
     import flux_engine.cli as cli
 
     documented = {code for code, _meaning in gen_docs._EXIT_CODES}
-    assert documented == {"0", "1", "2", "3"}
+    assert documented == {"0", "1", "2", "3", "141"}
     assert "2 for a usage error" in (cli.__doc__ or "")
     assert "1 for a command that ran and failed" in (cli.__doc__ or "")
     assert "``fluxsim gate decide``" in (cli.__doc__ or "")
     assert "returns 3" in (cli.__doc__ or "")
+    assert "141" in (cli.__doc__ or "")
 
 
 def test_the_envelope_the_index_shows_has_the_keys_of_a_real_envelope(

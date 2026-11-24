@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -576,3 +577,165 @@ def test_the_cli_shows_a_harmless_target_by_its_label(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert f"under {tmp_path / 'out'}/" in result.stdout
+
+
+def test_two_deliveries_through_one_variable_name_keep_two_receipts(tmp_path: Path) -> None:
+    pytest.importorskip("adbc_driver_sqlite")
+    state = tmp_path / "state"
+    hidden = [tmp_path / "hunter2-one", tmp_path / "hunter2-two"]
+    for place in hidden:
+        place.mkdir()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "flux_engine.cli",
+                "--json",
+                "run",
+                str(FIXTURE),
+                "--state-dir",
+                str(state),
+                "--sink",
+                "adbc:sqlite",
+                "--sink-opt",
+                "uri-env=FLUX_TEST_SINK_URI",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env={**os.environ, "FLUX_TEST_SINK_URI": (place / "sim.sqlite").as_uri()},
+        )
+        assert result.returncode == 0, result.stderr
+    run_id = json.loads(result.stdout)["artifacts"]["plan"]["run_id"]
+    text = (state / "runs" / run_id / "sink-receipts.json").read_text()
+    document = json.loads(text)
+    assert len(document["receipts"]) == 2
+    assert len({entry["targetId"] for entry in document["receipts"]}) == 2
+    assert all(entry["target"] == "sqlite:$FLUX_TEST_SINK_URI" for entry in document["receipts"])
+    assert "hunter2" not in text
+    for place in hidden:
+        assert (place / "sim.sqlite").is_file()
+
+
+def test_a_receipts_file_written_before_the_target_id_still_reads(tmp_path: Path) -> None:
+    from flux_engine.stages.deliver import write_receipts
+    from flux_engine.stages.layout import RunLayout
+
+    layout = RunLayout.for_state_dir(tmp_path, "0123456789abcdef")
+    layout.run_dir.mkdir(parents=True)
+    old = {
+        "sink": "adbc",
+        "runId": layout.run_id,
+        "exposeId": "e",
+        "outputDigest": "sha256:" + "0" * 64,
+        "rows": 1,
+        "target": "sqlite:$VAR",
+        "table": "e",
+        "synthetic": True,
+        "writer": {},
+    }
+    layout.sink_receipts_path.write_text(
+        json.dumps({"version": RECEIPTS_VERSION, "runId": layout.run_id, "receipts": [old]})
+    )
+    receipt = SinkReceipt(
+        sink="adbc",
+        run_id=layout.run_id,
+        expose_id="e",
+        output_digest="sha256:" + "0" * 64,
+        rows=1,
+        target="sqlite:$VAR",
+        table="e",
+        target_id="1a2b3c4d5e6f",
+    )
+    write_receipts(layout, [receipt])
+    entries = json.loads(layout.sink_receipts_path.read_text())["receipts"]
+    assert sorted("targetId" in entry for entry in entries) == [False, True]
+
+
+def _three_streams(first: Any) -> Any:
+    import types
+
+    def stream(expose_id: str) -> Any:
+        return types.SimpleNamespace(
+            resolved=types.SimpleNamespace(
+                expose_id=expose_id, contract_digest=first.resolved.contract_digest
+            ),
+            result=first.result,
+            expose=types.SimpleNamespace(
+                expose_id=expose_id,
+                column_names=first.expose.column_names,
+                type_names=first.expose.type_names,
+                columns=first.expose.columns,
+            ),
+            writer=first.writer,
+        )
+
+    return types.SimpleNamespace(emits=(stream("stream_a"), stream("stream_b"), stream("stream_c")))
+
+
+@pytest.mark.parametrize("raises", [FluxError("FLX-3505", "the destination refused"), OSError("x")])
+def test_a_failure_on_the_second_of_three_streams_names_it_and_counts_the_delivered(
+    tmp_path: Path, raises: Exception
+) -> None:
+    from flux_engine.stages import pipeline
+    from flux_engine.stages.deliver import deliver, write_receipts
+    from flux_engine.stages.layout import RunLayout
+
+    result = _three_streams(pipeline.execute(FIXTURE).emits[0])
+    target = registry.open_target(f"parquet:{tmp_path / 'out'}")
+
+    class SecondFails:
+        name = "parquet"
+
+        def sink_for(self, context: StreamContext) -> Any:
+            sink = target.sink_for(context)
+            if context.expose_id == "stream_b":
+
+                def refuse(header: Any) -> None:
+                    raise raises
+
+                sink.open = refuse
+            return sink
+
+    layout = RunLayout.for_state_dir(tmp_path / "state", "0123456789abcdef")
+    layout.run_dir.mkdir(parents=True)
+    with pytest.raises(FluxError) as caught:
+        deliver(
+            result,
+            run_id=layout.run_id,
+            target=SecondFails(),  # type: ignore[arg-type]
+            record=lambda receipt: write_receipts(layout, [receipt]),
+        )
+    message = str(caught.value)
+    assert caught.value.code.code == "FLX-3505"
+    assert "'stream_b'" in message
+    assert "1 of 3 streams were delivered" in message
+    assert "sink-receipts.json" in message
+    document = json.loads(layout.sink_receipts_path.read_text())
+    assert [entry["exposeId"] for entry in document["receipts"]] == ["stream_a"]
+
+
+@pytest.mark.parametrize(
+    ("uri", "secret"),
+    [
+        ("host=db.internal user=u password=hunter2 dbname=sim", "hunter2"),
+        ("Driver=x;PWD=abc;Server=h", "abc"),
+        ("postgresql://u:pa/ss@h/db", "pa/ss"),
+    ],
+)
+def test_a_uri_that_is_not_a_clean_url_gets_no_target_id(uri: str, secret: str) -> None:
+    from flux_engine.sinks.adbc import AdbcSink
+
+    sink = object.__new__(AdbcSink)
+    sink.uri, sink.uri_env = uri, "SIM_URI"
+    assert sink._target_id() is None
+
+
+def test_a_clean_url_still_gets_a_target_id() -> None:
+    from flux_engine.sinks.adbc import AdbcSink
+
+    sink = object.__new__(AdbcSink)
+    sink.uri, sink.uri_env = "postgresql://u:s3cret@h/db?sslmode=require", "SIM_URI"
+    target_id = sink._target_id()
+    assert target_id is not None and "s3cret" not in target_id

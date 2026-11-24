@@ -39,14 +39,21 @@ commands from a built wheel instead.
 
 ## Which version these pages describe
 
-These pages describe the engine on the `main` branch of
-[Agenticstiger/flux-engine](https://github.com/Agenticstiger/flux-engine), and the latest
-release on PyPI can lag behind it. A feature that `main` has and the latest release lacks is
-marked where a page first mentions it, with the release it came after, for example
-*(added after 0.6.0)*. A build from `main` reports the version number of the last
-release, so `fluxsim --version` does not tell the two apart.
+The docs site carries the pages of the latest release tag, so what it says matches the
+release you install from PyPI. The `docs/` folder in the
+[Agenticstiger/flux-engine](https://github.com/Agenticstiger/flux-engine) repository
+describes the `main` branch, which can be ahead of the latest release. A feature that `main`
+has and the latest release lacks is marked where a page first mentions it, with the release
+it came after, for example *(added after 0.6.0)*. A build from `main` reports the version
+number of the last release, so `fluxsim --version` does not tell the two apart.
 
-To run exactly what these pages describe, install the engine from `main` with uv:
+To follow the pages on the site, install the latest release:
+
+```text
+pip install flux-sim-engine
+```
+
+To try what the repository's `docs/` folder describes, install `main` instead. With uv:
 
 ```text
 uv tool install git+https://github.com/Agenticstiger/flux-engine

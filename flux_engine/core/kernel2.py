@@ -41,6 +41,7 @@ from __future__ import annotations
 import bisect
 import math
 import struct
+import threading
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation, localcontext
 from functools import lru_cache
@@ -756,15 +757,156 @@ def _mulhilo(a: "np.ndarray", m: int) -> Tuple["np.ndarray", "np.ndarray"]:
     return high, a * np.uint64(m)
 
 
-def philox_arrays(
+def _philox_ufunc(
     c0: "np.ndarray", c1: "np.ndarray", c2: "np.ndarray", c3: "np.ndarray", key: Key
 ) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray", "np.ndarray"]:
-    """Philox4x64-10 of every counter ``(c0[i], c1[i], c2[i], c3[i])`` under *key*, as arrays."""
+    """The reference implementation: ten rounds over uint64 ufuncs. It is the oracle."""
     for k0, k1 in _schedule(key):
         high0, low0 = _mulhilo(c0, _M0)
         high1, low1 = _mulhilo(c2, _M1)
         c0, c1, c2, c3 = high1 ^ c1 ^ np.uint64(k0), low1, high0 ^ c3 ^ np.uint64(k1), low0
     return c0, c1, c2, c3
+
+
+# Contiguous counters through numpy's own C Philox. numpy's ``Philox`` bit generator is
+# Random123's Philox4x64-10 (same multipliers, key bumps and ten rounds as above) and
+# increments its 256-bit counter, word 0 lowest, before it computes each block, so a
+# generator whose counter is ``C - 1`` yields the blocks of C, C + 1, and so on, four words
+# apiece. The known-answer vector of Random123 (counter 0, key 0) pins the equivalence, and
+# the first use of the fast path re-checks it against the ufunc code, because numpy does not
+# promise the stream of ``random_raw`` across versions.
+
+_TOP = (1 << 256) - 1
+#: One bit generator per thread, so a state assignment and the draw after it never interleave.
+_LOCAL = threading.local()
+#: ``None`` until the first use has checked numpy against the ufunc code, then True or False.
+_FAST_PATH: Optional[bool] = None
+
+
+def _fast_blocks(first: int, count: int, key: Key) -> "np.ndarray":
+    """The blocks of counters ``first .. first + count - 1`` under *key*, as ``(count, 4)``."""
+    generator = getattr(_LOCAL, "generator", None)
+    if generator is None:
+        generator = _LOCAL.generator = np.random.Philox(key=0)
+    before = (first - 1) & _TOP
+    generator.state = {
+        "bit_generator": "Philox",
+        "state": {
+            "counter": [(before >> (64 * i)) & _WORD_MASK for i in range(4)],
+            "key": [key[0], key[1]],
+        },
+        "buffer": [0, 0, 0, 0],
+        "buffer_pos": 4,
+        "has_uint32": 0,
+        "uinteger": 0,
+    }
+    return generator.random_raw(4 * count).reshape(count, 4)
+
+
+#: First counters the self-check runs: block 0, the word 0 to 1, 1 to 2 and 2 to 3 carries,
+#: the top of the 256-bit counter, and a counter with only high words set.
+_CHECK_FIRSTS = (
+    0,
+    1,
+    (1 << 64) - 2,
+    (1 << 128) - 2,
+    (1 << 192) - 2,
+    (1 << 128) + 7,
+    _TOP - 3,
+)
+_CHECK_KEYS = ((0, 0), (0x0123456789ABCDEF, 0xFEDCBA9876543210), (_WORD_MASK, _WORD_MASK))
+_CHECK_RUN = 4
+
+
+def _fast_path_agrees() -> bool:
+    """Whether numpy's Philox equals the ufunc code on a fixed set of counters and keys.
+
+    Includes Random123's known-answer vector (block 0 under the zero key) and runs of four
+    blocks across every carry edge. The oracle runs once per key over all counters joined.
+    """
+    counters = [first + i for first in _CHECK_FIRSTS for i in range(_CHECK_RUN)]
+    words = [
+        np.array([(c >> (64 * j)) & _WORD_MASK for c in counters], dtype=np.uint64)
+        for j in range(4)
+    ]
+    try:
+        for key in _CHECK_KEYS:
+            got = np.concatenate([_fast_blocks(first, _CHECK_RUN, key) for first in _CHECK_FIRSTS])
+            reference = _philox_ufunc(words[0], words[1], words[2], words[3], key)
+            if got.shape != (len(counters), 4) or any(
+                not np.array_equal(got[:, j], reference[j]) for j in range(4)
+            ):
+                return False
+    except Exception:  # noqa: BLE001  a numpy without this generator or state layout
+        return False
+    return True
+
+
+def fast_path_enabled() -> bool:
+    """Whether contiguous counters use numpy's Philox; decided once per process."""
+    global _FAST_PATH
+    if _FAST_PATH is None:
+        _FAST_PATH = _fast_path_agrees()
+    return _FAST_PATH
+
+
+def _contiguous_first(
+    c0: "np.ndarray", c1: "np.ndarray", c2: "np.ndarray", c3: "np.ndarray"
+) -> Optional[int]:
+    """The 256-bit counter of row 0 when the rows count up by one with the other words fixed.
+
+    The run must not carry out of word 0, since the counters are four independent words
+    here and numpy's counter is one 256-bit integer.
+    """
+    size = c0.shape[0]
+    if size == 0:
+        return None
+    first = int(c0[0])
+    if first + size - 1 > _WORD_MASK:
+        return None
+    if size > 1:
+        if int(c0[-1]) != first + size - 1 or not (c0[1:] - c0[:-1] == 1).all():
+            return None
+    for word in (c1, c2, c3):
+        if size > 1 and not (word == word[0]).all():
+            return None
+    return first | (int(c1[0]) << 64) | (int(c2[0]) << 128) | (int(c3[0]) << 192)
+
+
+def _blocks_or_none(
+    c0: "np.ndarray", c1: "np.ndarray", c2: "np.ndarray", c3: "np.ndarray", key: Key
+) -> "Optional[np.ndarray]":
+    if c0.shape[0] == 0 or not fast_path_enabled():
+        return None
+    first = _contiguous_first(c0, c1, c2, c3)
+    if first is None:
+        return None
+    return _fast_blocks(first, c0.shape[0], key)
+
+
+def philox_arrays(
+    c0: "np.ndarray", c1: "np.ndarray", c2: "np.ndarray", c3: "np.ndarray", key: Key
+) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray", "np.ndarray"]:
+    """Philox4x64-10 of every counter ``(c0[i], c1[i], c2[i], c3[i])`` under *key*, as arrays.
+
+    Counters that count up by one in word 0 with the rest fixed take numpy's C Philox;
+    every other shape takes the ufunc rounds. Both give the same words.
+    """
+    blocks = _blocks_or_none(c0, c1, c2, c3, key)
+    if blocks is None:
+        return _philox_ufunc(c0, c1, c2, c3, key)
+    return blocks[:, 0].copy(), blocks[:, 1].copy(), blocks[:, 2].copy(), blocks[:, 3].copy()
+
+
+def philox_word0(
+    c0: "np.ndarray", c1: "np.ndarray", c2: "np.ndarray", c3: "np.ndarray", key: Key
+) -> "np.ndarray":
+    """Word 0 of each block: :func:`philox_arrays`' first array, with one copy instead of four."""
+    blocks = _blocks_or_none(c0, c1, c2, c3, key)
+    if blocks is None:
+        return _philox_ufunc(c0, c1, c2, c3, key)[0]
+    word: "np.ndarray" = blocks[:, 0].copy()
+    return word
 
 
 def _counters(
@@ -781,7 +923,7 @@ def _counters(
 
 def column_words(key: Key, rows: "np.ndarray", draw: int, attempt: int = 0) -> "np.ndarray":
     """Word 0 of draw *draw*'s block at *attempt*, for each row of a column keyed *key*."""
-    return philox_arrays(*_counters(rows, 0, draw, attempt), key)[0]
+    return philox_word0(*_counters(rows, 0, draw, attempt), key)
 
 
 def column_uniform53(key: Key, rows: "np.ndarray", draw: int) -> "np.ndarray":
@@ -994,10 +1136,10 @@ def permute2_array(key: bytes, domain: int, indexes: "np.ndarray") -> List[int]:
         for round_index in range(4):
             stage = np.full(count, round_index, dtype=np.uint64)
             if round_index % 2 == 0:
-                word = philox_arrays(right, zeros, stage, zeros, round_key)[0]
+                word = philox_word0(right, zeros, stage, zeros, round_key)
                 left = (left + word) & left_mask
             else:
-                word = philox_arrays(left, zeros, stage, zeros, round_key)[0]
+                word = philox_word0(left, zeros, stage, zeros, round_key)
                 right = (right + word) & right_mask
         if whole:
             inside = np.ones(count, dtype=bool)

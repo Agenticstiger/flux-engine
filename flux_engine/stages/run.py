@@ -450,4 +450,5 @@ def _run(
         exit_code=0,
         _artifacts=artifacts,
         stdout="\n".join(stdout_lines),
+        stderr=planned.stderr,
     )

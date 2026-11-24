@@ -348,7 +348,12 @@ def make_forecasts(
             )
         )
     store = AccuracyStore.for_state_dir(state_dir)
-    registered: List[ForecastOutcome] = []
+    from flux_engine.accuracy.store import prediction_from_document
+
+    # Every record is built and checked against the store before the first is written, so a
+    # refusal that can be decided without writing (a used id with another claim, FLX-7007; a
+    # reversed interval, FLX-7012; a record that does not verify) leaves nothing registered.
+    pending: List[Tuple[PredictionRecord, Dict[str, Any], ForecastItem, Summary, str]] = []
     for item, summary in summaries:
         family = by_id[item.response]
         query = getattr(family.estimate, item.arm)
@@ -373,20 +378,32 @@ def make_forecasts(
             "stateDigest": pinned,
             "inputDigest": input_digest,
         }
-        from flux_engine.accuracy.store import prediction_from_document
-
         prediction: PredictionRecord = prediction_from_document(document)
-        registration = store.register(prediction, document)
-        registered.append(
-            ForecastOutcome(
-                prediction_id=prediction_id,
-                metric_id=metric,
-                seal=registration.seal.value,
-                created=registration.created,
-                summary=summary,
-                path=registration.path,
+        store.check_registrable(prediction, document)
+        pending.append((prediction, document, item, summary, metric))
+    registered: List[ForecastOutcome] = []
+    try:
+        for prediction, document, _item, summary, metric in pending:
+            registration = store.register(prediction, document)
+            registered.append(
+                ForecastOutcome(
+                    prediction_id=prediction.prediction_id,
+                    metric_id=metric,
+                    seal=registration.seal.value,
+                    created=registration.created,
+                    summary=summary,
+                    path=registration.path,
+                )
             )
-        )
+    except OSError as error:
+        # A write that fails part way cannot be undone: a sealed record is never removed.
+        done = [item.prediction_id for item in registered if item.created]
+        raise OSError(
+            error.errno,
+            f"{error.strerror or error}; the forecasts registered before it failed, which stay "
+            f"registered, are {', '.join(done) if done else 'none'}; run the command again to "
+            "register the rest",
+        ) from error
     return registered, made
 
 

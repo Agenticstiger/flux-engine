@@ -100,6 +100,47 @@ at `1-3-0`. The kernel does not change: the new seed path is read only by a bund
   an earlier format keeps the declaration it had.
 - flux-stats: `read_noise` takes the L1 and the squared L2 sensitivity as required keywords, so a statistic whose
   sensitivity is not one cannot be charged as a count table by a caller that forgot them.
+- KERNEL-SPEC-2 sections 8.1 and 8.3 say that a plan using a counted layout or an exact allocation replays only on engine 0.10.0 and later, and why the kernel version did not move.
+
+### Security
+
+- The release workflow builds and smoke-tests the distributions in a read-only job that installs only from hash-checked files (the build toolchain and an export of `uv.lock`); the job that attests and publishes holds the write and OIDC permissions, installs nothing, and checks the distributions, the SBOM and the release body against the digests the build job recorded.
+- A plan that records, for a run whose Simulation pins a profile, a grade such a run cannot have (`P0`, `P4`, anything but `P1`, `P3` and `P5`) is read as `P1`, so a hand-edited `plan.json` can no longer claim a stronger grade for a pinned run.
+- A profile that declares `publicStructure` grades P1, not P3, when a noisy statistic is grouped by a number or timestamp column or through a link, or carries a `sampleSize` band whose `min` equals its `max`; EVIDENCE.md gives a fixed reason.
+- `fluxsim verify` and `fluxsim ship` compare the receipt's simulation id and emit ids with the run's plan and refuse a run directory where they differ (`FLX-2122`), so a hand-edited receipt can no longer name a simulation or an emit the plan does not.
+- `fluxsim verify` and `fluxsim ship` refuse a committed run directory that holds a file the run did not write, such as an extra `emits/<id>.ndjson` (`FLX-2123`), because `ship` packs the directory whole; a `.DS_Store` that a file manager leaves is neither refused nor packed.
+- A calibrated register entry records the digest of the profile it was fitted to (`calibration.targets`), and the register note in EVIDENCE.md now says when that digest is not the pinned profile's.
+- `verify` and `ship` accept a share stream or share record only when it is the share of the whole stream the receipt binds and matches the plan, and refuse a `seed-paths.ndjson` that does not digest to the plan's `seedTreeDigest` (`FLX-2108`); `sink-receipts.json` and `calibration-provenance.json` are carried as the run directory holds them.
+
+### Fixed
+
+- `fluxsim forecast make` checks every forecast against the store before it registers any, so a conflict (`FLX-7007`) or a malformed record on one item leaves nothing registered, as its message says; a write that fails part way names what was registered.
+- `fluxsim accuracy register` and `forecast make` refuse an interval whose low is above its high (`FLX-7012`), `forecast score` refuses a stored record that holds one, and it refuses an `--observed-at` earlier than the sealed horizon end (`FLX-7013`).
+- `calibrate --fit` leaves no `.patch.json` behind when a held-out profile is refused after the fit.
+- The calibration search evaluates its start point as well as its budget and keeps it unless a candidate is strictly better; a fit that moves no value writes no bundle and ends in `FLX-3712`.
+- `validate` refuses, as `plan` does and naming the expose, column or option at fault, a generator plugin's expose that an aggregate or a counts `parentWhen` reads, a plugin column declaring `allocation: exact`, and a plugin `options` integer above 2^53.
+- `validate` refuses an `allocation: exact` on a key, a `nullFraction` on a required column and a table that declares no rows, with the codes `plan` gives.
+- `verify` accepts a correct run whose string link sentinel is written in a form other than NFC: the sentinel is compared in NFC, like the cells the writer emits.
+- The Population section of EVIDENCE.md keeps the letters and numbers of any script in a label, replaces characters that render as nothing, and ends a label that needed a replacement or a cut in a short stable hash of its text, so two different labels never print the same and none prints blank.
+- `plan` and `run` say on stderr, and `plan --json` lists under `period_end_notes`, when a period end declares a `nullFraction` under a parent that can close: the end is cut at a closed parent's end, so the generated NULL share can be lower than declared. No digest moves.
+- A T-SQL integer given to `YEAR`, `MONTH`, `DAY` or `DATEPART` in a consumer query is read as days after 1900-01-01, as T-SQL reads it, and a number that no dialect reads as a date is refused when the query is compiled (`FLX-3622`).
+- T-SQL `DATEDIFF` with `GETDATE()`, BigQuery `DATE_TRUNC(x, WEEK)` and Snowflake `LEN` are accepted in consumer queries with the value their dialect gives; `GETDATE()` reads the registry's `asOf`, like `NOW()`.
+- Weekday and week parts of consumer queries in T-SQL, BigQuery, Snowflake and MySQL are mapped to the value they have in that dialect under its default settings, and a part with no exact mapping is refused, naming the dialect and the part.
+- `fluxsim plan` on a bundle whose plugin run is already committed asks the plugin for no rows and writes nothing, and says the run keeps its stored plugin output.
+- `fluxsim apply --run-id` on a committed run whose bundle changed after the run was made names the run and says so in its `FLX-2101` refusal.
+- Two deliveries through one `uri-env` variable name no longer share a key in `sink-receipts.json` when the variable holds a URL: the receipt carries a `targetId`, a short digest of the URL without its user information, query or fragment, and a value that is not such a URL gets none, so no digest of a password is written.
+- The Azure Data Lake Storage Gen2 form `abfs://CONTAINER@ACCOUNT.dfs.core.windows.net/PREFIX` is accepted as an object store target.
+- Object store uploads by the `parquet` and `arrow-ipc` sinks take `request-timeout`, `connect-timeout`, `max-retries` and `retry-timeout` as `--sink-opt` keys, `FLX-3505` says how to shorten the wait for an endpoint that never answers, and a failed upload deletes, best effort, the data objects it had written and names any that remain, unless the manifest of the stream is in place or its state cannot be checked.
+- When a sink delivery fails partway, the error names the stream that failed and says how many streams were delivered.
+- Under `--json`, every `story` refusal carries its code in `artifacts.code`, as the refusals of the other commands do.
+- Refusals read "1 child" and "1 bin" in the singular, `FLX-3403` names key and bridge columns as plain text, a links `when` error names its `links[...].when` key, `fluxsim verify --help` names the `counts:` rule lines and the `childrenPerParent` row, and SEAM-FIDELITY-SPEC lists every namespace key the engine reads.
+- Under a `parentWhen`, the `FLX-3403` note below `--scale 1` is decided from the eligible parents, and is given only when scale 1 would not fall short the same way.
+- A generator plugin whose import or factory raises ends in a coded refusal, `FLX-3124`, that names the expose, the plugin, the phase and the error, and a missing module is named, with whether it is the own module of the plugin; an entry point that cannot be imported moves from `FLX-3118` to `FLX-3124`.
+- A T-SQL date part that the query parser reads differently from T-SQL (`w` and `y` in every date function, `m` in `DATETRUNC`, `dy` in `DATENAME`) is refused with `FLX-3622` however it is quoted or commented, and a day count too long for any date is refused rather than raised.
+- `validate` refuses a profile overlay that names a table or column the pinned contract does not have, with the `FLX-3105` that `plan` gives; a name the contract has but the profile lacks is still refused by `plan`.
+- `fluxsim` no longer ends in a `BrokenPipeError` traceback and exit 1 when the reader of its output closes the pipe early (`fluxsim plan ... | head -1`): it stops writing and exits quietly, with the status of the command when its work was done and with 141 when the pipe broke while it was still working.
+- The text a generator plugin supplies to a refusal is scrubbed before it is quoted: what an import or a factory raised (`FLX-3124`), the name of a module it lacks and what it stated (`FLX-3120`). A URL is written as its label, and the value of a credential-named environment variable and the secret of a `password=` or `token=` pair or of `user:PW@host` become `***`, in the whole message before its first line is picked and cut, so a secret across the cut leaves no piece of itself.
+
 
 ## 0.10.0 - 2026-11-23
 

@@ -21,7 +21,7 @@ import shutil
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pytest
 
@@ -525,6 +525,57 @@ def test_fluxsim_forecast_score_refuses_an_observation_before_the_registration(
     )
     out = json.loads(capsys.readouterr().out)
     assert code == 1 and out["error"]["code"] == "FLX-7001"
+
+
+def _score_command(state: Path, following: Path, observed_at: str) -> List[str]:
+    return [
+        "forecast",
+        "score",
+        str(BUNDLE),
+        "--profile",
+        str(PROFILE),
+        "--next",
+        str(following),
+        "--observed-at",
+        observed_at,
+        "--state-dir",
+        str(state),
+        "--json",
+    ]
+
+
+def test_fluxsim_forecast_score_refuses_an_observation_before_the_horizon_end(
+    state: Path, tmp_path: Path, capsys: Any
+) -> None:
+    following = next_state(tmp_path)
+    code = main(_score_command(state, following, "2026-09-30T23:59:58Z"))
+    out = json.loads(capsys.readouterr().out)
+    assert code == 1 and out["error"]["code"] == "FLX-7013", out
+    assert AccuracyStore.for_state_dir(state).read_verdict(PREMIUM) is None
+    assert AccuracyStore.for_state_dir(state).read_verdict(BASIC) is None
+
+
+def test_fluxsim_forecast_score_accepts_an_observation_at_the_horizon_end(
+    state: Path, tmp_path: Path, capsys: Any
+) -> None:
+    code = main(_score_command(state, next_state(tmp_path), HORIZON))
+    assert code == 0, capsys.readouterr()
+
+
+def test_fluxsim_forecast_score_refuses_a_stored_record_with_a_reversed_interval(
+    state: Path, tmp_path: Path, capsys: Any
+) -> None:
+    path = AccuracyStore.for_state_dir(state).prediction_path(PREMIUM)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["interval_low"], record["interval_high"] = (
+        record["interval_high"],
+        record["interval_low"],
+    )
+    path.write_text(json.dumps(record), encoding="utf-8")
+    code = main(_score_command(state, next_state(tmp_path), OBSERVED))
+    out = json.loads(capsys.readouterr().out)
+    assert code == 1 and out["error"]["code"] == "FLX-7012", out
+    assert PREMIUM in out["error"]["message"]
 
 
 def test_forecast_score_as_a_stage_result_names_the_refusal(tmp_path: Path) -> None:

@@ -15,6 +15,7 @@ make`` on the fixture.
 from __future__ import annotations
 
 import json
+import shutil
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
@@ -440,6 +441,40 @@ def test_accuracy_register_accepts_the_two_members(tmp_path: Path, capsys: Any) 
     assert record is not None and record["stateDigest"] == document["stateDigest"]
 
 
+def _interval_document(low: str, high: str) -> Dict[str, Any]:
+    return {
+        "prediction_id": "p-1",
+        "run_digest": "sha256:" + "ab" * 32,
+        "metric_id": "m",
+        "statement": "s",
+        "predicted": "0.5",
+        "interval_low": low,
+        "interval_high": high,
+        "horizon_end": "2026-09-30T23:59:59Z",
+        "registered_at": "2026-06-30T09:00:00Z",
+    }
+
+
+def test_accuracy_register_refuses_an_interval_whose_low_is_above_its_high(
+    tmp_path: Path, capsys: Any
+) -> None:
+    path = tmp_path / "prediction.json"
+    path.write_text(json.dumps(_interval_document("0.8", "0.2")), encoding="utf-8")
+    code = main(
+        ["accuracy", "register", "--file", str(path), "--state-dir", str(tmp_path / "s"), "--json"]
+    )
+    out = json.loads(capsys.readouterr().out)
+    assert code == 1 and out["error"]["code"] == "FLX-7012", out
+    assert AccuracyStore.for_state_dir(tmp_path / "s").read_prediction("p-1") is None
+
+
+def test_accuracy_register_accepts_a_point_interval(tmp_path: Path, capsys: Any) -> None:
+    path = tmp_path / "prediction.json"
+    path.write_text(json.dumps(_interval_document("0.5", "0.5")), encoding="utf-8")
+    code = main(["accuracy", "register", "--file", str(path), "--state-dir", str(tmp_path / "s")])
+    assert code == 0, capsys.readouterr()
+
+
 # ------------------------------------------------------------------ registering again
 
 
@@ -473,6 +508,22 @@ def test_another_forecast_under_a_used_id_is_refused(made: Any) -> None:
         path.name: path.read_bytes() for path in (state / "accuracy" / "predictions").iterdir()
     }
     assert after == before
+
+
+def test_a_conflict_on_a_later_item_registers_nothing(made: Any, tmp_path: Path) -> None:
+    """The second item's id is taken by another claim, so the first is not registered either."""
+    state, _result = made
+    copy = tmp_path / "state"
+    shutil.copytree(state, copy)
+    first, second = list(PINNED)  # the order the items are registered in
+    # The store holds only the second item's forecast, sealed at another instant.
+    (copy / "accuracy" / "predictions" / f"{first}.json").unlink()
+    ids = sorted(path.name for path in (copy / "accuracy" / "predictions").iterdir())
+    assert ids == [f"{second}.json"]
+    refused = _make(copy, registered_at="2026-07-03T00:00:00Z")
+    assert refused.error_code == "FLX-7007"
+    assert "Nothing was written" in refused.stderr
+    assert sorted(path.name for path in (copy / "accuracy" / "predictions").iterdir()) == ids
 
 
 def test_a_used_id_from_another_bundle_says_so_and_names_both_bundles(

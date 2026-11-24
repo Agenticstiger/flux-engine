@@ -209,9 +209,10 @@ def _is_staged_leftover(name: str) -> bool:
     :func:`flux_engine.safeio.write_bytes_atomic` stages every file under such a
     name and renames it. A crash between the two leaves the staged file behind;
     it is the engine's own litter, not a record of the run, and it never goes
-    into a pack.
+    into a pack. A ``.DS_Store`` file, which a file manager writes into any folder it
+    opens, is left out the same way.
     """
-    return name.startswith(".") and name.endswith(".tmp")
+    return (name.startswith(".") and name.endswith(".tmp")) or name == ".DS_Store"
 
 
 def _skip_verified_files(

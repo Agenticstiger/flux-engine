@@ -8,6 +8,7 @@ module facts live. It draws as EXPR-SPEC-2 section 6 specifies a bounds draw rel
 (`distribution`) and as section 7 specifies the shares below 100 %, on the rule stream section 7 names,
 so the bounds form over a relationship of [ADR 0011](./0011-rows-follow-their-key-entity-and-parent.md)
 step 3b draws the same way when it comes. That form itself stays `FLX-6210`.
+**Amended 2026-11-23:** profile format `1-3-0` and request format `1-1-0` shipped in 0.10.0.
 
 ## Context
 
@@ -254,7 +255,7 @@ regenerating hidden rows inside it would check the generator against itself.
 
 ### 9. Profile format 1-3-0 and request format 1-1-0
 
-Profile format `1-3-0` is not released yet, so it gains two optional members rather than a new format:
+Profile format `1-3-0` was not released when this record was written and shipped in 0.10.0, so it gains two optional members rather than a new format:
 
 - **`tables.<id>.datePairs`**: `{start, end, statistics, order}` for two DATE or TIMESTAMP columns of one
   table, over the rows where both are known. `statistics` are of `DAYS_BETWEEN(start, end)`
@@ -313,3 +314,21 @@ below the bar with the share it holds on.
   contract.
 - A contract bounds form over a relationship (ADR 0011 step 3b) generates through the same draw when it
   comes; a bundle that writes a date order both ways would then have to choose one.
+
+## Amendment of 2026-11-23: a period end's NULL share under closed parents
+
+Section 5 cuts a period's end at a closed parent's end: an end that is later, or open, becomes the parent's
+end. So a period's end is NULL only on a row whose parent is open, and a `nullFraction` declared on the
+end column is met only among the rows under open parents. When a share of the parents has closed, the
+share of NULL ends the run generates is lower than the declared one, in proportion to the parents that
+closed. A declared 0.048 over parents of which about a third are open generates about 1.6 %. This is a
+property of the rule and not a defect in a draw, and it is documented rather than changed: a different
+cut would move the bytes of every existing bundle with a period, which kernel `0.2.0` and its replays
+(KERNEL-SPEC-2 section 12) do not allow.
+
+`plan` and `run` now print one note on stderr for each such end: a `lifetime: true` entry whose emit
+declares a `nullFraction` on its end column and whose parent's lifetime names an end. The note names the
+emit, the column and the declared share. It is not part of `plan.json`, a digest or a receipt, and `plan
+--json` lists it under `period_end_notes` in its artifacts. A bundle that wants a given share of NULL ends
+overall declares the share among open parents, which is the declared share divided by the share of
+open parents.

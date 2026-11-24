@@ -10,7 +10,8 @@ move too, as `flux_stats.exact_yaml` and `flux_stats.canonical`, with PyYAML
 as the optional `yaml` extra, and a bundle's files are held to size caps
 before they are read. **Amended 2026-11-21:** flux-stats is versioned by its own
 format and API, and the engine requires a range of it, not one release. This
-replaces decision 5 (see the last amendment).
+replaces decision 5 (see the last amendment). **Amended 2026-11-23:** the validator's tightened
+input bounds (flux#37) were released in flux-spec 0.5.4, which the engine now requires.
 
 ## Context
 
@@ -282,7 +283,7 @@ only, and an optional extra brings PyYAML.
    counts the digits its scale spells, since the canonical form keeps the
    scale (`digits_written_out`, which the fidelity block's readers share). The
    main branch of the FLUX validator holds a document to the same bounds since
-   2026-11-19 (Agenticstiger/flux#37, not yet released), counting a number as
+   2026-11-19 (Agenticstiger/flux#37, released in flux-spec 0.5.4), counting a number as
    its text.
 5. **The validator's read.** The FLUX reference validator reads a bundle with
    a plain SafeLoader, which bounds nothing in any release so far. So before

@@ -116,8 +116,8 @@ The namespace carries five keys and no others: `emits`, keyed by `exposeId` as b
 profile document by its digest (PROFILE-SPEC.md §6); `scorecard`, which declares thresholds on the scores that
 profile gives the run (SCORECARD-SPEC.md §4); `parameters`, the parameter register, which says what each number the
 run reads rests on (PARAMETER-REGISTER-SPEC.md); and `strictCoverage`, a boolean (§1). Any other key is refused
-(`FLX-3105`). The keys the later records add, `facts`, `links`, `bridges`, `counts`, `copies`, `generators`, `overlay`, `history`, `asOf`, `snapshots`, `events`, `periods`, `lifetimes`, `within`, `rates`, `privacy` and `unused`, are described where
-they apply (§3 for the fifteen that change a run's rows, its tolerances, or the profile it is scored against). A new block starts at
+(`FLX-3105`). The keys the later records add, `facts`, `links`, `bridges`, `counts`, `copies`, `generators`, `overlay`, `history`, `asOf`, `snapshots`, `events`, `periods`, `lifetimes`, `within`, `rates`, `privacy`, `unused`, `consumers`, `responses`, `forecasts` and `conditions`, are described where
+they apply (`consumers` in CONSUMER-QUERIES-SPEC.md, `responses` and `forecasts` in ADR 0029 and `conditions` in ADR 0028 section 10; §3 for the fifteen that change a run's rows, its tolerances, or the profile it is scored against). A new block starts at
 the top level of the namespace when what it declares belongs to the Simulation rather than to one expose.
 An emit's block carries eight keys and no others: `rows`, `mapping`, `fidelity`, `invariants`, `rules`, `reference`, `hidden` and `hiddenColumns`. `invariants`
 holds FLUX settings for the rules of the emit's contract (`exposes[].contract.invariants[]`), each keyed by the
@@ -263,7 +263,7 @@ other entry is malformed (`FLX-3105`).
 - A period. For `lifetime: true` the start is drawn as above, and the end is drawn as the lifetime says, then cut at
   `p.end`: when `p` has ended, an end after `p.end`, or an open one, becomes `p.end`, so a child ends with its parent. An
   end that this cut puts below the end column's declared minimum is `infeasible`: the row keeps the end its own cell drew,
-  inside the range, and is counted for the period entry whose parent ended first. Past the window an end follows the lifetime's `endPastWindow` only while `p` is still active there. The order is
+  inside the range, and is counted for the period entry whose parent ended first. Past the window an end follows the lifetime's `endPastWindow` only while `p` is still active there. Since an end is cut at a closed parent's end, a `nullFraction` declared on the end column is met only among rows whose parent is open, and the share generated overall can be lower than the declared one; `plan` and `run` note it on stderr (ADR 0024, amendment of 2026-11-23). The order is
   fixed: the end is drawn without the window rule (the duration's end, NULL for its `open` slot, or the end column's own
   value); on a row whose parent has ended it is cut at the parent's end, in the child's units; and only where no parent
   has ended does an end after the window become NULL under `open`. The cut draws nothing and moves no position, the

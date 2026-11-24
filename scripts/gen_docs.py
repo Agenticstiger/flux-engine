@@ -279,6 +279,10 @@ _EXIT_CODES = (
     ),
     ("2", "A usage error: the command line itself was wrong, so nothing ran."),
     ("3", "`fluxsim gate decide` only: the request was decided, and the policy said no."),
+    (
+        "141",
+        "The reader of the output closed the pipe (`fluxsim ... | head -1`) while the command was still working, so its work was cut short.",
+    ),
 )
 
 #: The environment variables the command line reads.
@@ -404,6 +408,11 @@ def _cli_index(
         "|---|---|",
     ]
     lines += [f"| `{code}` | {_cell(meaning)} |" for code, meaning in _EXIT_CODES]
+    lines += [
+        "",
+        "When the reader closes the pipe after the command has finished its work, fluxsim stops writing and "
+        "exits quietly with the command's own status. In both cases nothing is printed on stderr.",
+    ]
     lines += ["", "## Environment", "", "| Variable | Effect |", "|---|---|"]
     lines += [f"| `{name}` | {_cell(effect)} |" for name, effect in _ENVIRONMENT]
     lines += ["", "[All error codes](../errors/README.md)", ""]

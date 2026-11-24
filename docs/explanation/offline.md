@@ -12,7 +12,7 @@ FLUX is built for people who care where their data goes and which model reads it
 - FLUX needs no internet to produce results. `init`, `validate`, `plan`, `apply`, `run`, `verify`, `ship`, `replay`, `story`, `calibrate`, `forecast`, `explain`, `describe` and `plugins` are all local.
 - No socket, HTTP client or LLM library is used outside tests, other than the places listed in the next section. Schema validation never fetches a remote reference.
 - There is no telemetry and no update check.
-- There is no LLM inside FLUX. Any AI help uses the model you choose, for example the one in your IDE. The [agent skills](../../skills/README.md) are plain text that runs on that model, a local one included.
+- There is no LLM inside FLUX. Any AI help uses the model you choose, for example the one in your IDE. The [agent skills](https://github.com/Agenticstiger/flux-engine/blob/main/skills/README.md) are plain text that runs on that model, a local one included.
 - Consumer queries (the `sql` extra) run DuckDB in a child process with external access, extension install and load, and community extensions all off, and its configuration locked.
 
 ## Every place the network can be touched
@@ -54,7 +54,7 @@ fluxsim run . --sink parquet:s3://my-bucket/simulations/run-a --sink-opt instanc
 
 `instance-identity` is a true or false option, like `verify`. The `parquet`, `arrow-ipc` and `delta` sinks accept it. With it, the run behaves as it did before this rule. Without it and without explicit credentials, `fluxsim explain FLX-3505` prints the cause and the remedy: set explicit credentials in your environment, or pass the opt-in.
 
-The `adbc` sink and Iceberg catalogues are configured by your own settings and are unchanged by this rule.
+The `adbc` sink and Iceberg catalogues are configured by your own settings and are unchanged by this rule: FLUX hands the database driver and the catalogue loader only what you configured, and neither offers one setting that stops a client from asking a metadata service, so the rule does not cover them. To control what they contact, set it where they read their own configuration: the driver options of the `adbc` sink (`--sink-opt db.KEY=VALUE`), and the catalogue's configuration for `iceberg` (the `.pyiceberg.yaml` in your home directory or the `PYICEBERG_*` variables).
 
 ## Plugins
 
@@ -64,7 +64,7 @@ So allow only plugins you trust, and run a bundle you did not write in a contain
 
 ## AI help
 
-There is no LLM inside FLUX, and the engine never sends a prompt or a row to a model. The [agent skills](../../skills/README.md) in the `skills/` directory are plain text. Your agent reads them and runs the `fluxsim` commands on whichever model you chose, a local one included. They pre-approve nothing, so the agent asks before each command.
+There is no LLM inside FLUX, and the engine never sends a prompt or a row to a model. The [agent skills](https://github.com/Agenticstiger/flux-engine/blob/main/skills/README.md) in the `skills/` directory are plain text. Your agent reads them and runs the `fluxsim` commands on whichever model you chose, a local one included. They pre-approve nothing, so the agent asks before each command.
 
 ## How it is checked
 

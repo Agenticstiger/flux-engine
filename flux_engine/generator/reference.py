@@ -399,12 +399,12 @@ def check_reference_exposes(plans: Mapping[str, "_rows.GeneratorPlan"], keys: Co
                 value = _key_of(plan, key, row)
                 if any(part is None for part in value):
                     raise _refuse(
-                        f"reference expose {expose_id!r} key {list(key)} is NULL on row {row}; a "
+                        f"reference expose {expose_id!r} key ({', '.join(key)}) is NULL on row {row}; a "
                         "published key holds a value on every row"
                     )
                 if value in seen:
                     raise _refuse(
-                        f"reference expose {expose_id!r} key {list(key)} repeats on row {row}; a "
+                        f"reference expose {expose_id!r} key ({', '.join(key)}) repeats on row {row}; a "
                         "published key is unique over the rows"
                     )
                 seen.add(value)

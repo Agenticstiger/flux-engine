@@ -9,6 +9,7 @@ replaces. It builds on [ADR 0022](./0022-rows-read-their-linked-rows.md), whose 
 [ADR 0018](./0018-module-facts-live-in-the-flux-bundle.md)'s rule that module facts live in the FLUX bundle, and
 extends profile format `1-3-0` of [ADR 0023](./0023-a-catalogue-and-the-rows-that-follow-it.md), which is not yet
 released. Everything below generates under kernel `0.2.0` only, as ADR 0022 section 1 says of the module facts.
+**Amended 2026-11-23:** profile format `1-3-0` (flux-stats) shipped in 0.10.0.
 
 ## Context
 
@@ -299,7 +300,7 @@ additive.
 
 ### 9. Format changes
 
-- **Profile format `1-3-0`** (flux-stats, unreleased, ADR 0023): a `relationships` entry may carry `structural`.
+- **Profile format `1-3-0`** (flux-stats, released with 0.10.0, ADR 0023): a `relationships` entry may carry `structural`.
   Optional and additive; the format's other keys keep their meaning.
 - **The fidelity block** (flux-stats): the column key `allocation` and the tolerance key `sampling`. Both were
   refused as unknown before, so a block that does not use them reads as it did.

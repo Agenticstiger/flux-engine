@@ -28,7 +28,7 @@ from flux_engine.evidence.report import EVIDENCE_SECTIONS, render_evidence_repor
 
 pytestmark = pytest.mark.unit
 
-ALLOWED = re.compile(r"[A-Za-z0-9 _.,:;/()+=\-]*")
+ALLOWED = re.compile(r"[\w .,:;/()+=\-]*")
 
 
 def _property(
@@ -182,14 +182,16 @@ def test_hostile_text_is_flattened_and_cannot_break_out() -> None:
     assert all(ALLOWED.fullmatch(name) for name in names)
     rows = [line for line in text.splitlines() if line.startswith("| ") and "---" not in line]
     assert all(row.count("|") == 4 for row in rows), "no cell adds a column"
-    assert any("caf_ __" in row for row in rows), "a non-ASCII character becomes an underscore"
+    assert any(row.startswith("| café _") for row in rows), "the bidi control becomes an underscore"
 
 
 def test_text_keeps_only_the_allowed_characters_and_is_cut_at_forty() -> None:
     assert safe_text("aZ09 _.,:;/()+=-") == "aZ09 _.,:;/()+=-"
-    assert safe_text("\"'`%<>|\\[]{}#*&!?@$^~\n\t") == "_" * len("\"'`%<>|\\[]{}#*&!?@$^~\n\t")
-    assert safe_text("x" * 100) == "x" * 40
-    assert safe_text("é" * 100) == "_" * 40
+    hostile = "\"'`%<>|\\[]{}#*&!?@$^~\n\t"
+    assert re.fullmatch("_" * len(hostile) + "_[0-9a-f]{8}", safe_text(hostile))
+    assert safe_text("x" * 40) == "x" * 40
+    assert len(safe_text("x" * 100)) == 40
+    assert len(safe_text("é" * 100)) == 40
 
 
 def test_more_cells_than_a_chart_holds_is_listed_with_its_score_and_not_drawn() -> None:
@@ -266,8 +268,8 @@ def test_a_group_label_and_a_prefix_cannot_carry_a_reserved_word_either() -> Non
 
 def test_labels_without_a_reserved_word_are_written_as_before() -> None:
     section = render_population_section([_property([("DE", 1, 1), ("née", 1, 3)])])
-    assert 'x-axis ["DE", "n_e"]' in section
-    assert "| n_e | 50.0 | 75.0 |" in section
+    assert 'x-axis ["DE", "née"]' in section
+    assert "| née | 50.0 | 75.0 |" in section
 
 
 def _children(*, outside: bool, charted: bool = True) -> PopulationProperty:
@@ -322,3 +324,84 @@ def test_no_sentence_claims_that_nothing_scores_children_per_parent() -> None:
     assert "No property scores children per parent" not in render_population_section(
         [_property([("a", 1, 1)])]
     )
+
+
+def test_labels_of_any_script_keep_their_letters_and_stay_distinct() -> None:
+    labels = [safe_text(name) for name in ("東京", "大阪", "京都")]
+    assert labels == ["東京", "大阪", "京都"]
+    assert safe_text("Ελλάδα 2026") == "Ελλάδα 2026"
+    assert safe_text("e\u0301") == "\u00e9", "the label is written in NFC"
+    assert safe_text("क्षि") == "क्षि", "combining marks stay with their letter"
+
+
+_IGNORABLE_SAMPLES = [
+    "\u00ad",
+    "\u034f",
+    "\u061c",
+    "\u115f",
+    "\u1160",
+    "\u17b4",
+    "\u17b5",
+    "\u180b",
+    "\u180f",
+    "\u200b",
+    "\u200f",
+    "\u202a",
+    "\u202e",
+    "\u2060",
+    "\u206f",
+    "\u3164",
+    "\ufe00",
+    "\ufe0f",
+    "\ufeff",
+    "\uffa0",
+    "\ufff0",
+    "\ufff8",
+    "\U0001bca0",
+    "\U0001bca3",
+    "\U0001d173",
+    "\U0001d17a",
+    "\U000e0000",
+    "\U000e0fff",
+]
+
+
+@pytest.mark.parametrize("character", _IGNORABLE_SAMPLES)
+def test_a_default_ignorable_character_is_replaced_so_no_label_prints_blank(
+    character: str,
+) -> None:
+    for given in (character, character * 2, "a" + character, "a" + character + "b"):
+        printed = safe_text(given)
+        assert character not in printed
+        assert re.fullmatch(r"[a-b]?_*[a-b]?_[0-9a-f]{8}", printed), repr(printed)
+    assert safe_text("\u3164\u3164") != safe_text("\uffa0\uffa0")
+    assert safe_text("e" + character) != "e"
+
+
+def test_a_label_of_hangul_fillers_never_prints_blank() -> None:
+    printed = safe_text("\u3164\u3164")
+    assert re.fullmatch(r"_{3}[0-9a-f]{8}", printed), printed
+
+
+def test_a_label_with_a_hostile_character_is_neutralised_and_marked() -> None:
+    printed = safe_text("a\u202eb\nc#[<`|d\u200be")
+    assert re.fullmatch(r"a_b_c_{5}d_e_[0-9a-f]{8}", printed)
+    assert ALLOWED.fullmatch(printed)
+    assert not set(printed) & set("\n\r#[<`|\u202e\u200b")
+
+
+def test_two_labels_that_print_alike_or_share_their_first_forty_characters_stay_distinct() -> None:
+    long_a = "東京" * 30 + "a"
+    long_b = "東京" * 30 + "b"
+    assert safe_text(long_a) != safe_text(long_b)
+    assert len(safe_text(long_a)) == 40 == len(safe_text(long_b))
+    assert safe_text("a|b") != safe_text("a#b") != safe_text("a_b")
+    assert safe_text("ok_12345678") != "ok_12345678"
+    assert safe_text("x" * 41) != safe_text("x" * 42)
+    assert safe_text("a|b") == safe_text("a|b"), "the same label prints the same"
+
+
+def test_a_chart_of_japanese_cities_names_each_one() -> None:
+    text = render_population_section([_property([("東京", 3, 3), ("大阪", 2, 2), ("京都", 1, 1)])])
+    assert 'x-axis ["東京", "大阪", "京都"]' in text
+    assert "| 大阪 | 33.3 | 33.3 |" in text or "| 大阪 |" in text

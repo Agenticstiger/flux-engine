@@ -1390,8 +1390,9 @@ def _decimal_from_units(units: int, exponent: int) -> Decimal:
     ``scaleb`` or a multiplication, because those consult the ambient
     context's precision and would round a value wider than it.
     """
-    digits = tuple(int(character) for character in str(abs(units)))
-    return Decimal((0 if units >= 0 else 1, digits, exponent))
+    # The constructor reads coefficient and exponent from the text exactly, as the
+    # tuple form does (same sign, digits and exponent), without a Python loop per digit.
+    return Decimal(f"{units}E{exponent}")
 
 
 def _grid_point_count(low: Decimal, high: Decimal, step: Decimal) -> int:
@@ -1669,6 +1670,12 @@ def _renormalised(weights: Mapping[str, Decimal]) -> Mapping[str, Decimal]:
     return adjusted
 
 
+@lru_cache(maxsize=None)
+def _grid_quantum(scale: int) -> Decimal:
+    """``Decimal('1E-scale')``: the exponent a value at *scale* carries."""
+    return Decimal((0, (1,), -scale))
+
+
 def _quantise(value: Decimal, column: CompiledColumn) -> Decimal:
     """Round *value* onto the column's declared scale.
 
@@ -1688,8 +1695,14 @@ def _quantise(value: Decimal, column: CompiledColumn) -> Decimal:
     """
     scale = column.logical_type.scale or 0
     precision = column.logical_type.precision or 0
+    width = max(_KERNEL_CONTEXT.prec, precision + scale + 40)
+    if value.same_quantum(_grid_quantum(scale)) and value.adjusted() + scale + 1 <= width:
+        # Already at the declared exponent (so ``adjusted() + scale + 1`` is its digit
+        # count) and within the widened precision: quantize would hand back the same
+        # sign, digits and exponent, so skip the context.
+        return value
     with localcontext(_KERNEL_CONTEXT) as context:
-        context.prec = max(_KERNEL_CONTEXT.prec, precision + scale + 40)
+        context.prec = width
         return value.quantize(Decimal(1).scaleb(-scale))
 
 

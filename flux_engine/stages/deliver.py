@@ -129,14 +129,11 @@ def deliver(
     sinks = _sinks_for(target, contexts)
     receipts: List[SinkReceipt] = []
     for outcome, context, sink in zip(result.emits, contexts, sinks, strict=True):
-        _write_stream(target, sink, _header(outcome), context, stream_rows(outcome))
-        receipt = sink.receipt
-        if receipt is None:
-            raise FluxError(
-                FLX_3505,
-                f"the {target.name} sink did not publish expose {context.expose_id!r} "
-                f"({context.rows} rows)",
-            )
+        try:
+            _write_stream(target, sink, _header(outcome), context, stream_rows(outcome))
+            receipt = _published(target, sink, context)
+        except FluxError as error:
+            raise _partial(error, context, len(receipts), len(contexts)) from None
         receipts.append(receipt)
         if record is not None:
             record(receipt)
@@ -239,18 +236,42 @@ def deliver_run(
     sinks = _sinks_for(target, [context for _, _, context in streams])
     receipts: List[SinkReceipt] = []
     for (header, data, context), sink in zip(streams, sinks, strict=True):
-        _write_stream(target, sink, header, context, _rows_of(data))
-        receipt = sink.receipt
-        if receipt is None:
-            raise FluxError(
-                FLX_3505,
-                f"the {target.name} sink did not publish expose {context.expose_id!r} "
-                f"({context.rows} rows)",
-            )
+        try:
+            _write_stream(target, sink, header, context, _rows_of(data))
+            receipt = _published(target, sink, context)
+        except FluxError as error:
+            raise _partial(error, context, len(receipts), len(streams)) from None
         receipts.append(receipt)
         if record is not None:
             record(receipt)
     return tuple(receipts)
+
+
+def _published(target: "SinkTarget", sink: Any, context: StreamContext) -> SinkReceipt:
+    """The receipt of a stream the sink closed; ``FLX-3505`` when it published nothing."""
+    receipt = sink.receipt
+    if receipt is None:
+        raise FluxError(
+            FLX_3505,
+            f"the {target.name} sink did not publish expose {context.expose_id!r} "
+            f"({context.rows} rows)",
+        )
+    return receipt
+
+
+def _partial(error: FluxError, context: StreamContext, delivered: int, total: int) -> FluxError:
+    """*error* with the stream that failed and how many streams were delivered before it.
+
+    The delivered streams keep their receipts in ``sink-receipts.json``; the later ones are
+    never attempted.
+    """
+    kept = (
+        f"{delivered} of {total} streams were delivered (their receipts are kept in "
+        "sink-receipts.json)"
+        if delivered
+        else f"none of the {total} stream{'' if total == 1 else 's'} was delivered"
+    )
+    return FluxError(error.code, f"{error.detail}; the stream {context.expose_id!r} failed, {kept}")
 
 
 def _rows_of(data: bytes) -> Iterator[List[Any]]:
@@ -311,24 +332,29 @@ def _sinks_for(target: "SinkTarget", contexts: Sequence[StreamContext]) -> List[
         try:
             sinks.append(target.sink_for(context))
         except Exception as exc:  # noqa: BLE001
-            raise _surfaced(exc, target, context) from None
+            raise _partial(_surfaced(exc, target, context), context, 0, len(contexts)) from None
     return sinks
 
 
-def _key(entry: Dict[str, Any]) -> Tuple[str, str, str, str]:
-    """Where a receipt's rows went: one entry per sink, target, table and expose."""
+def _key(entry: Dict[str, Any]) -> Tuple[str, str, str, str, str]:
+    """Where a receipt's rows went: one entry per sink, target, table and expose.
+
+    ``targetId`` is part of it, so two targets that print alike (two databases read from
+    one environment variable name) keep two entries. An entry written before it existed has none.
+    """
     return (
         str(entry.get("sink")),
         str(entry.get("target")),
         str(entry.get("table") or ""),
         str(entry.get("exposeId")),
+        str(entry.get("targetId") or ""),
     )
 
 
 def write_receipts(layout: RunLayout, receipts: Sequence[SinkReceipt]) -> Path:
     """Merge *receipts* into ``<run>/sink-receipts.json``; returns its path."""
     path = layout.sink_receipts_path
-    entries: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
+    entries: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
     try:
         existing = json.loads(read_text_nofollow(path)) if is_regular_file(path) else None
     except (OSError, ValueError):

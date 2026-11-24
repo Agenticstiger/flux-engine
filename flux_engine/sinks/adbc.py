@@ -87,7 +87,7 @@ from flux_engine.api.emit import EmitHeader
 from flux_engine.core.credentials import credential_dsn
 from flux_engine.core.digest import digest_of_bytes
 from flux_engine.core.errors import FluxError
-from flux_engine.core.target_label import target_label
+from flux_engine.core.target_label import WITHHELD, target_label
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.emit import FLX_3301
 from flux_engine.sinks._columnar import positive_int
@@ -143,6 +143,8 @@ _DECIMAL_TEXT_ABOVE = 38
 _MAX_IDENTIFIER = 63
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+#: A value that starts ``scheme://``: only such a value gets a ``targetId``.
+_SCHEME_URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://\S")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 #: Characters a column name may not hold on its way to a database.
 _UNSAFE_IN_NAME = re.compile(r'["`\\\x00-\x1f\x7f]')
@@ -391,6 +393,27 @@ class AdbcSink:
             return shown
         return f"{self.dialect.name}:{shown}"
 
+    def _target_id(self) -> Optional[str]:
+        """A short digest of the uri's label, when a variable holds it.
+
+        The target prints as ``sqlite:$NAME`` whatever the variable holds, so this is what
+        tells two deliveries through one name apart. It is made of the label the receipt would
+        show for a uri given outright (:func:`~flux_engine.core.target_label.target_label`),
+        never of the credentials, and never of the variable. Only a value that starts
+        ``scheme://`` and whose label shows more than its scheme gets one: a string the label
+        reduces to a digest or to ``scheme://…`` has nothing to tell it apart by, and an
+        unsalted digest of anything built from the secret itself would let anyone with the
+        receipt guess that secret offline.
+        """
+        if not (self.uri and self.uri_env):
+            return None
+        if not _SCHEME_URL.match(self.uri):
+            return None
+        shown = target_label("adbc", self.uri)
+        if shown.endswith("://" + WITHHELD) or " target sha256:" in shown:
+            return None
+        return digest_of_bytes(shown.encode("utf-8"), subject="target").hex[:12]
+
     def _label(self) -> str:
         from flux_engine import __version__
 
@@ -619,6 +642,7 @@ class AdbcSink:
             output_digest=self.context.output_digest.value,
             rows=builder.rows,
             target=self.target,
+            target_id=self._target_id(),
             table=self.table if self.schema is None else f"{self.schema}.{self.table}",
             writer={
                 "library": "adbc-driver-manager",

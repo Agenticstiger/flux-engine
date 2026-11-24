@@ -196,6 +196,14 @@ def test_a_condition_that_reads_beyond_the_row_is_refused() -> None:
     assert caught.value.code.code == "FLX-6210"
 
 
+def test_a_condition_that_names_no_column_carries_the_key_it_came_from() -> None:
+    with pytest.raises(Expr2Error) as caught:
+        plans_of(shared_contract(), links={"d": [entry("d", "owner", "no_such_col > 1")]})
+    message = str(caught.value)
+    assert message.startswith("FLX-6113") or "FLX-6113" in message
+    assert "links[d.owner].when 'no_such_col > 1': " in message and "no_such_col" in message
+
+
 def test_kernel_0_1_0_refuses_a_condition_and_names_the_kernel() -> None:
     with pytest.raises(FluxError) as caught:
         plans_of(shared_contract(), counter_based=False, links=D_LINK)

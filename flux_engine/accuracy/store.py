@@ -73,7 +73,12 @@ from flux_engine.accuracy._entries import (
     replace_entry,
 )
 from flux_engine.accuracy.records import FLX_7007, FLX_7008, FLX_7009, seal_prediction
-from flux_engine.api.accuracy import AccuracyVerdict, PredictionRecord, require_identifier
+from flux_engine.api.accuracy import (
+    FLX_7012,
+    AccuracyVerdict,
+    PredictionRecord,
+    require_identifier,
+)
 from flux_engine.core.digest import DigestDomain, DigestRef
 from flux_engine.core.errors import FluxError
 
@@ -257,6 +262,30 @@ class AccuracyStore:
             "registered; run the command again",
         )
 
+    def check_registrable(self, prediction: PredictionRecord, document: Mapping[str, Any]) -> None:
+        """Raise what :meth:`register` would raise before it writes, and write nothing.
+
+        The same refusals in the same order: the identifier and path, a document that is not the
+        claim (``ValueError``), a record under the id that does not verify (``FLX-7008``,
+        ``FLX-7009``) and a registered record of another claim (``FLX-7007``). A caller that
+        registers several records checks all of them first, so a refusal leaves none written.
+        What it cannot foresee is a write that fails (a full disk).
+        """
+        path = self.prediction_path(prediction.prediction_id)
+        seal = seal_prediction(prediction)
+        _require_same_claim(document, seal)
+        directory = _open_kind(self.root, self._base, _PREDICTIONS, create=False)
+        if directory is None:
+            return
+        try:
+            raw = read_entry(directory, path.name)
+        except EntryRefused as refused:
+            raise FluxError(FLX_7009, _not_followed(path, str(refused))) from None
+        finally:
+            os.close(directory)
+        if raw is not None:
+            _registered_again(path, raw, prediction.prediction_id, seal, document)
+
     def read_prediction(self, prediction_id: str) -> Optional[Dict[str, Any]]:
         """The sealed record for *prediction_id*, verified, or ``None`` when none is registered.
 
@@ -414,6 +443,12 @@ def _verified(path: Path, raw: bytes, prediction_id: str) -> Dict[str, Any]:
     try:
         prediction = prediction_from_document(document)
         recomputed = seal_prediction(prediction).value
+    except FluxError as error:
+        if error.code is FLX_7012:
+            raise FluxError(
+                FLX_7012, f"the sealed record of {prediction_id!r} at {path}: {error.detail}"
+            ) from None
+        raise refusal(f"is not a sealed PredictionRecord: {_why_not_a_prediction(error)}") from None
     except _NOT_A_PREDICTION as error:
         raise refusal(f"is not a sealed PredictionRecord: {_why_not_a_prediction(error)}") from None
     if prediction.prediction_id != prediction_id:

@@ -719,3 +719,78 @@ def test_a_clique_selection_is_accounting_and_never_makes_a_profile_not_p3() -> 
     # an unknown member beside it is still not graded as noisy
     document["tables"]["subscriber"]["cliqueSelectionX"] = {}
     assert grade_profile(document, pinned=True).pattern is Pattern.P1
+
+
+def _noisy_stat_on(
+    document: Dict[str, Any], column: str, change: Callable[[Dict[str, Any]], None]
+) -> None:
+    """Add a noisy histogram of ``region`` that *change* then edits."""
+    columns = document["tables"]["subscriber"]["columns"]
+    columns.setdefault(column, {"domain": "number"})
+    statistic = _noisy_histogram(["east", "north", "west"])
+    change(statistic)
+    columns["region"]["statistics"] = [statistic]
+
+
+def _fixed_reasons(graded: ProfileGrade) -> str:
+    return "\n".join(graded.reasons)
+
+
+def test_a_noisy_statistic_grouped_by_a_number_column_is_p1() -> None:
+    def number_group(document: Dict[str, Any]) -> None:
+        _noisy_stat_on(document, "tenure", lambda s: s.update(groupBy="tenure"))
+
+    graded = _graded(number_group)
+    assert graded.pattern is Pattern.P1
+    assert "grouped by a column whose keys are data values" in _fixed_reasons(graded)
+    assert "tenure" not in _fixed_reasons(graded)
+
+
+def test_a_noisy_statistic_grouped_by_a_timestamp_column_is_p1() -> None:
+    def timestamp_group(document: Dict[str, Any]) -> None:
+        _noisy_stat_on(document, "joined_at", lambda s: s.update(groupBy="joined_at"))
+        document["tables"]["subscriber"]["columns"]["joined_at"] = {"domain": "timestamp"}
+
+    assert _graded(timestamp_group).pattern is Pattern.P1
+
+
+def test_a_noisy_statistic_grouped_by_a_column_the_profile_does_not_hold_is_p1() -> None:
+    graded = _graded(lambda d: _noisy_stat_on(d, "plan", lambda s: s.update(groupBy="nowhere")))
+    assert graded.pattern is Pattern.P1
+
+
+def test_a_noisy_statistic_grouped_through_a_link_is_p1() -> None:
+    link = {
+        "parent": {"table": "account", "columns": ["id"]},
+        "columns": ["account_id"],
+        "column": "opened_at",
+    }
+    graded = _graded(lambda d: _noisy_stat_on(d, "plan", lambda s: s.update(groupByLink=link)))
+    assert graded.pattern is Pattern.P1
+    assert "grouped through a link" in _fixed_reasons(graded)
+    assert "opened_at" not in _fixed_reasons(graded)
+
+
+def test_a_noisy_statistic_with_an_exact_sample_size_band_is_p1() -> None:
+    graded = _graded(
+        lambda d: _noisy_stat_on(
+            d, "plan", lambda s: s.update(sampleSize={"min": 9195, "max": 9195})
+        )
+    )
+    assert graded.pattern is Pattern.P1
+    assert "sampleSize band whose min equals its max" in _fixed_reasons(graded)
+    assert "9195" not in _fixed_reasons(graded)
+
+
+def test_an_enumerated_group_and_a_real_sample_size_band_keep_p3() -> None:
+    def keep(document: Dict[str, Any]) -> None:
+        def grouped(statistic: Dict[str, Any]) -> None:
+            statistic["groupBy"] = "plan"
+            statistic["groups"][0]["group"] = "basic"
+
+        _noisy_stat_on(document, "plan", grouped)
+        document["tables"]["subscriber"]["columns"]["plan"] = {"domain": "category"}
+
+    graded = _graded(keep)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
+    assert _graded(lambda d: _noisy_stat_on(d, "plan", lambda s: None)).pattern is Pattern.P3

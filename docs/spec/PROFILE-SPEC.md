@@ -499,6 +499,12 @@ follows and names the tables the unit does not reach, which the guarantee treats
 statistic and a `datePairs` or `calendar` histogram without noise keep a profile from P3, as before. A member
 the grade does not know counts as released without noise.
 
+In a profile of an earlier format, a noisy statistic that still states data is graded P1 too, because the declaration covers levels,
+bin edges and bands and not these: a `groupBy` on a column that is not categorical (a number or
+timestamp column, or a column the profile does not hold), whose group keys are data values; a
+`groupByLink`, whose keys are values of another table; and a `sampleSize` band whose `min` equals
+its `max`, which is an exact size.
+
 ## 4. Column metrics
 
 `tables.<exposeId>.columns.<name>.metrics` carries OpenLineage's

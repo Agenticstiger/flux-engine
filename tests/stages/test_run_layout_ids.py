@@ -153,9 +153,9 @@ def test_update_golden_refuses_a_receipt_whose_simulation_id_traverses(
     """The proof of concept: ``../../../victim`` overwrote a file outside ``golden/``.
 
     Run through the CLI, as the reader did: the exit code is not 0 and nothing is
-    written. Resolving the receipt's simulation against the bundle may refuse first
-    (``FLX-3105``, the bundle declares no such Simulation); otherwise the run layout
-    refuses the id itself (``FLX-2112``). The builders' own refusal is pinned below.
+    written. The comparison of the receipt's simulation with the plan's refuses first
+    (``FLX-2122``); the run layout's own refusal of the id (``FLX-2112``) stays behind it.
+    The builders' own refusal is pinned below.
     """
     victim = tmp_path / "victim.json"
     victim.write_text("untouched\n", encoding="utf-8")
@@ -179,7 +179,7 @@ def test_update_golden_refuses_a_receipt_whose_simulation_id_traverses(
 
         captured = capsys.readouterr()
         assert code != 0
-        assert "FLX-2112" in captured.err or "FLX-3105" in captured.err
+        assert any(code in captured.err for code in ("FLX-2112", "FLX-2122", "FLX-3105"))
         assert "golden baseline updated" not in captured.out
         assert victim.read_text(encoding="utf-8") == "untouched\n"
         after = sorted(p.relative_to(tmp_path.parent) for p in tmp_path.parent.rglob("*"))
@@ -218,9 +218,13 @@ def _traversing_emits(layout: RunLayout) -> None:
 
 def test_verify_refuses_a_receipt_whose_expose_id_traverses(applied: RunLayout) -> None:
     _traversing_emits(applied)
-    with pytest.raises(FluxError) as raised:
-        verify(FIXTURE_BUNDLE, run_id=applied.run_id, state_dir=applied.state_dir)
-    assert raised.value.code.code == "FLX-2112"
+    try:
+        result = verify(FIXTURE_BUNDLE, run_id=applied.run_id, state_dir=applied.state_dir)
+    except FluxError as error:
+        assert error.code.code in ("FLX-2112", "FLX-2122")
+    else:
+        assert not result.success
+        assert result.error_code in ("FLX-2112", "FLX-2122")
     assert not (applied.run_dir.parent.parent / "escaped.ndjson").exists()
 
 
@@ -232,8 +236,8 @@ def test_ship_refuses_a_receipt_whose_expose_id_traverses(applied: RunLayout) ->
             FIXTURE_BUNDLE, run_id=applied.run_id, out_dir=out_dir, state_dir=applied.state_dir
         )
     except FluxError as error:
-        assert error.code.code == "FLX-2112"
+        assert error.code.code in ("FLX-2112", "FLX-2122")
     else:
         assert not result.success
-        assert result.error_code == "FLX-2112"
+        assert result.error_code in ("FLX-2112", "FLX-2122")
     assert not (out_dir / "EVIDENCE.md").exists()
