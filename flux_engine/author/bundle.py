@@ -3394,6 +3394,8 @@ def _author_bundle(
     )
     contract_path = planned.contract_path
     files = _starter_files(
+    if given_window is not None:
+        _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
         contract_path,
         Path(inputs.profile_path),
         planned.contract_bytes,
@@ -3571,6 +3573,61 @@ def _check_declared_entries(planned: _Planned, declared: DeclaredHistory) -> Non
             {expose.expose_id for expose in written},
             {expose.expose_id for expose in written if keys.expose(expose.expose_id).versioned},
         )
+def _refuse_a_window_that_misses_ranges(
+    planned: _Planned,
+    window: Tuple[str, str],
+    inputs: AuthorInputs,
+    declared: Optional[DeclaredHistory],
+) -> None:
+    """Refuse a given window that does not hold the range a date column declares.
+
+    A range (published, widened to a parent's lifetime, or declared by the contract) is not cut:
+    a property's bins partition it. A window that leaves it would put rows outside
+    ``spec.timeBounds``, so it is refused, naming each column, its range and the window.
+    """
+    low, high = instant_ms(window[0]), instant_ms(window[1])
+    if low is None or high is None:
+        return
+    given_by = "--window" if inputs.window is not None else (declared.name if declared else "")
+    missed: List[str] = []
+    for expose in planned.authored:
+        for column in expose.columns:
+            if expose.kinds.get(column.name) not in DATE_KINDS:
+                continue
+            for first, last in _declared_ranges_of(expose, column, planned.contract):
+                if first < low or last > high:
+                    missed.append(
+                        f"{expose.expose_id}.{column.name} ranges "
+                        f"{format_rfc3339_ms(first)} to {format_rfc3339_ms(last)}"
+                    )
+    if missed:
+        raise AuthorError(
+            f"the window {window[0]} to {window[1]} given by {given_by} does not hold "
+            f"{'; '.join(missed)}; give a window that holds each range"
+        )
+
+
+def _declared_ranges_of(
+    expose: AuthoredExpose, column: ColumnPlan, contract: Optional[Mapping[str, Any]]
+) -> List[Tuple[int, int]]:
+    """The ranges (milliseconds) a date column declares: its own ``range`` and its contract's."""
+    found: List[Tuple[int, int]] = []
+    declared = column.declaration.get("range")
+    if isinstance(declared, Mapping):
+        ends = (instant_ms(declared.get("min")), instant_ms(declared.get("max")))
+        if ends[0] is not None and ends[1] is not None:
+            found.append((ends[0], ends[1]))
+    context = expose.contexts.get(column.name)
+    try:
+        schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
+        contract_range = declared_instants(schema[context.schema_index]) if context else None
+    except (KeyError, IndexError, TypeError):
+        contract_range = None
+    if contract_range is not None:
+        found.append(contract_range)
+    return found
+
+
     except DeclaredHistoryError as error:
         raise AuthorError(str(error)) from None
 

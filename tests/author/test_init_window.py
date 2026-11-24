@@ -278,3 +278,56 @@ def test_the_option_is_on_the_command_line(tmp_path: Path) -> None:
     )
     assert code == 0
     assert _simulation(tmp_path / "b")["spec"]["timeBounds"]["start"] == "2024-01-01T00:00:00.000Z"
+
+
+# -- a window that does not hold a date column's range --------------------------------------------
+
+JOURNEY = REPO_ROOT / "tests" / "fixtures" / "init-verifies" / "journey-d"
+
+
+def test_a_window_that_does_not_hold_a_published_range_is_refused(tmp_path: Path) -> None:
+    result = run_init(
+        str(tmp_path / "b"),
+        contract=str(JOURNEY / "contract.fluid.yaml"),
+        profile=str(JOURNEY / "profile.json"),
+        window=("2024-03-01", "2025-10-01"),
+    )
+    assert result.exit_code == 1, result.stdout
+    message = result.stderr or ""
+    assert message.startswith("init: ")
+    assert "account.signed_up" in message
+    assert "2024-01-01" in message and "2025-03-01" in message
+    assert "2024-03-01" in message and "2025-10-01" in message
+    assert "give a window that holds" in message
+    assert not (tmp_path / "b").exists()
+
+
+def test_a_window_that_holds_every_range_is_kept(tmp_path: Path) -> None:
+    result = run_init(
+        str(tmp_path / "b"),
+        contract=str(JOURNEY / "contract.fluid.yaml"),
+        profile=str(JOURNEY / "profile.json"),
+        window=("2023-01-01", "2026-01-01"),
+    )
+    assert result.exit_code == 0, result.stderr
+
+
+def test_a_window_that_does_not_hold_a_declared_contract_range_is_refused(tmp_path: Path) -> None:
+    text = CONTRACT.read_text(encoding="utf-8").replace(
+        "      type: timestamp\n      required: false\n",
+        "      type: timestamp\n      required: false\n      validationRules:\n"
+        "      - type: range\n"
+        "        constraint: \"between '2020-02-01' and '2021-02-01'\"\n",
+    )
+    contract = tmp_path / "orders.fluid.yaml"
+    contract.write_text(text, encoding="utf-8")
+    result = run_init(
+        str(tmp_path / "b"),
+        contract=str(contract),
+        profile=str(PROFILE),
+        window=("2020-06-01", "2021-02-01"),
+    )
+    assert result.exit_code == 1, result.stdout
+    message = result.stderr or ""
+    assert "2020-02-01" in message and "2021-02-01" in message and "2020-06-01" in message
+    assert "give a window that holds" in message
