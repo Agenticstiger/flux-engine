@@ -41,6 +41,13 @@ _DECLARED_FIDELITY = re.compile(r"(?ms)^(        fidelity:).*?^(agentPolicy:)")
 _SIMULATION = "simulation.flux.yml"
 
 
+def edit_flux(bundle: Path, edit: Callable[[Dict[str, Any]], None]) -> Path:
+    """``edit`` the simulation's ``com.agentics.flux/1`` extension in place; the bundle."""
+    return edit_simulation(
+        bundle, lambda document: edit(document["extensions"]["com.agentics.flux/1"])
+    )
+
+
 def by_file(directory: Path, value: Callable[[Path], Any]) -> Dict[str, Any]:
     """``value`` of every regular file of ``directory``, by file name."""
     return {path.name: value(path) for path in sorted(directory.iterdir()) if path.is_file()}

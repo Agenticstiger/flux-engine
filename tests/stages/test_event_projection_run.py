@@ -32,8 +32,13 @@ from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.verify import verify
+from tests.bundles import edit_flux
 
-from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
+from ._same_run import (
+    assert_same_run_at_one_and_four_jobs,
+    assert_shares_join_to_the_run,
+    assert_the_run_repeats,
+)
 from .test_projection_plan_run import (
     HISTORY,
     NAMESPACE,
@@ -99,10 +104,14 @@ def _fields(rows: List[Dict[str, Any]], *, lagged: bool = False) -> List[Dict[st
 
 def _declare(bundle: Path, **options: Any) -> None:
     """Change the events entry of *bundle*."""
-    path = bundle / "simulation.flux.yml"
-    document = yaml.safe_load(path.read_text("utf-8"))
-    document["extensions"][NAMESPACE]["events"][0].update(options)
-    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    edit_flux(bundle, lambda flux: flux["events"][0].update(options))
+
+
+def _lagged(tmp_path: Path) -> Path:
+    """A bundle whose events lag their change by ``LAG``, its history ended by ``closeLast``."""
+    bundle = _bundle(tmp_path, end=CLOSE)
+    _declare(bundle, lag=LAG)
+    return bundle
 
 
 # --- plan, apply, verify ----------------------------------------------------------------------
@@ -126,10 +135,7 @@ def test_a_run_writes_one_event_per_change_and_verify_holds_the_line(
 
 
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path)
-    first = _run(bundle, tmp_path / "a")
-    second = _run(bundle, tmp_path / "b")
-    assert first.emit_path(EVENTS).read_bytes() == second.emit_path(EVENTS).read_bytes()
+    assert_the_run_repeats(_bundle(tmp_path), tmp_path, _run, EVENTS)
 
 
 def test_on_keeps_the_listed_ops(tmp_path: Path) -> None:
@@ -168,15 +174,12 @@ def test_a_lag_dates_each_event_after_its_change_and_before_until(
 def test_the_shares_of_a_lagged_run_joined_are_the_bytes_of_one_run(
     tmp_path: Path, count: int
 ) -> None:
-    bundle = _bundle(tmp_path, end=CLOSE)
-    _declare(bundle, lag=LAG)
-    whole = _run(bundle, tmp_path / "whole")
-    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (EVENTS,))
+    bundle = _lagged(tmp_path)
+    assert_shares_join_to_the_run(bundle, tmp_path, _run, count, (EVENTS,))
 
 
 def test_two_jobs_are_not_one_job_apart_with_a_lag(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path, end=CLOSE)
-    _declare(bundle, lag=LAG)
+    bundle = _lagged(tmp_path)
     assert_same_run_at_one_and_four_jobs(bundle, plan=False, kernel=KERNEL_V2)
 
 
@@ -250,8 +253,7 @@ def test_a_scale_above_one_follows_the_scaled_history(tmp_path: Path) -> None:
 @pytest.mark.parametrize("count", [1, 3, 7])
 def test_the_shares_joined_in_order_are_the_bytes_of_one_run(tmp_path: Path, count: int) -> None:
     bundle = _bundle(tmp_path, end=CLOSE)
-    whole = _run(bundle, tmp_path / "whole")
-    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (EVENTS,))
+    assert_shares_join_to_the_run(bundle, tmp_path, _run, count, (EVENTS,))
 
 
 # --- the window -------------------------------------------------------------------------------

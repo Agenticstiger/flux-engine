@@ -26,7 +26,7 @@ import yaml
 
 from flux_engine.core.kernels import KERNEL_V2
 
-from ._fleet import EVENTS, HISTORY, NAMESPACE, PERIODIC, plan_module, run_bundle
+from ._fleet import EVENTS, HISTORY, NAMESPACE, PERIODIC, plan_module, plan_refused, run_bundle
 from ._fleet import bundle as fleet_bundle
 from ._fleet import rows as read_rows
 
@@ -87,10 +87,7 @@ def test_a_kind_when_that_reads_a_drawn_level_is_refused_naming_the_kind_and_the
     tmp_path: Path,
 ) -> None:
     bundle = _with_when(fleet_bundle(tmp_path, end=FINAL), "periods", "status = 'active'")
-    planned = plan_module.plan(
-        bundle, state_dir=tmp_path / "state", kernel=KERNEL_V2.version, stage=False
-    )
-    assert not planned.success
+    planned = plan_refused(bundle, tmp_path / "state")
     assert planned.error_code == "FLX-3403"
     assert "kinds[0].when" in planned.stderr and "'status'" in planned.stderr
     assert "depends on a drawn value" in planned.stderr

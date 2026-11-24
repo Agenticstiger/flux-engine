@@ -31,7 +31,7 @@ from flux_engine.stages.plan import plan
 from flux_engine.stages.validate import validate
 from tests.bundles import repin_contract
 
-from ._jobs import plan_apply_verify
+from ._same_run import rules_alike_at_one_and_four_jobs
 from .conftest import REPO_ROOT
 from .test_rules_over_links_run import _BINDING, _EMITS, _FIDELITY
 
@@ -238,16 +238,14 @@ def test_kernel_0_1_0_lists_every_declaration_and_copies_nothing(tmp_path: Path)
 def test_plan_apply_and_verify_score_each_copy_and_give_the_same_digests_for_any_jobs(
     bundle: Path, tmp_path: Path
 ) -> None:
-    digests, rules = plan_apply_verify(bundle, tmp_path)
-    assert digests[0] == digests[1]
-    assert rules[0] == rules[1]
-    by_rule = {entry["rule"]: entry for entry in rules[0]["invoice"]}
+    rules = rules_alike_at_one_and_four_jobs(bundle, tmp_path)
+    by_rule = {entry["rule"]: entry for entry in rules["invoice"]}
     assert {"account.region", "account.a_score"} <= set(by_rule)
     for rule_id in ("account.region", "account.a_score"):
         entry = by_rule[rule_id]
         assert entry["origin"] == "shared" and entry["enforced"] is True
         assert entry["satisfied"] == entry["total"] and entry["total"] > 0, rule_id
-    assert {entry["rule"] for entry in rules[0]["account"]} == {"customer.region"}
+    assert {entry["rule"] for entry in rules["account"]} == {"customer.region"}
 
 
 @pytest.mark.integration

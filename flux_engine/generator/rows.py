@@ -466,6 +466,10 @@ class GeneratorPlan:
     #: The emit's copula, planned (ADR 0035 decision 5), or ``None`` for an emit that declares none;
     #: the document then has no ``copula`` entry.
     copula: Optional[CopulaDraw] = None
+    #: Whether every column's values are a history's (a snapshot, ADR 0027), so no column needs a
+    #: draw of its own. Set by :func:`build_plan`; no part of the document, which ``projection``
+    #: already describes.
+    projected: bool = False
 
     @property
     def counter_based(self) -> bool:
@@ -594,6 +598,7 @@ def build_plan(
     rules: Optional["RulePlan"] = None,
     generator_version: str = GENERATOR_VERSION,
     plugin: Optional["PluginExpose"] = None,
+    projected: bool = False,
 ) -> GeneratorPlan:
     """Resolve every column to a family and its parameters, before any draw.
 
@@ -621,6 +626,9 @@ def build_plan(
     ``plugin`` says which columns a generator plugin generates (ADR 0032 section 5). Such a column
     gets no family and draws nothing: whatever it declares is what its values are held to, and the
     plugin's values are put into the rows before any rule is applied.
+
+    ``projected`` says every column's values are the history's (a snapshot, ADR 0027): none needs a
+    draw of its own, so none is refused for declaring no statistics.
     """
     # generator_version is the run's (generator_version_for its seed tree).
     if generator_version not in (GENERATOR_VERSION, GENERATOR_VERSION_2):
@@ -631,6 +639,8 @@ def build_plan(
     bounds = _time_bounds_ms(time_bounds)
 
     exempt = related | (frozenset() if rules is None else rules.covers_every_row)
+    if projected:
+        exempt = exempt | frozenset(column.name for column in expose.columns)
     plans: List[ColumnPlan] = []
     made_by_plugin = frozenset(plugin.names) if plugin is not None else frozenset()
     for column in expose.columns:
@@ -694,6 +704,7 @@ def build_plan(
         generator_version=generator_version,
         plugin=plugin,
         copula=copula,
+        projected=projected,
     )
 
 

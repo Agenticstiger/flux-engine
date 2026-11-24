@@ -425,6 +425,13 @@ against, `verify` adds a note naming it and does not fail, so an empty list cann
 have only order statistics, and says the table has nothing to verify; it writes no property the profile has no
 statistic for, since `verify` would refuse it (`FLX-5037`).
 
+**A snapshot may declare no column.** `columns` declares at least one column (`FLX-5034`), except on an emit a
+`snapshots` entry names (ADR 0027 section 3): its rows are its history's last versions, every cell the history's final
+value, so it draws no column of its own and an empty `columns` is legal. A property that names a column still needs
+that column's declaration (`FLX-5034`). Such an emit's columns are exempt from the check that a drawn column declares a
+range, support, levels, rate or bins (`FLX-3402`), and from the related-tables check that a key column declares a draw
+(`FLX-3403`); every other emit keeps both.
+
 **A DATE column's bounds are days.** A `range` bound or a `bins` edge of a column whose declared type is DATE is
 spelled `YYYY-MM-DD`, or as a whole number of days since 1970-01-01 (the two spell the same bound: `2026-01-01`
 is `20454`). Every bound of the column is in days: its range, its bins, a mean's absolute tolerance and the

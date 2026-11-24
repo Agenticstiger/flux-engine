@@ -32,7 +32,11 @@ from flux_engine.stages import _parallel as parallel
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.verify import verify
 
-from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
+from ._same_run import (
+    assert_same_run_at_one_and_four_jobs,
+    assert_shares_join_to_the_run,
+    assert_the_run_repeats,
+)
 from .test_projection_plan_run import (
     HISTORY,
     SNAPSHOT,
@@ -77,10 +81,7 @@ def test_a_run_writes_one_row_per_entity_and_verify_holds_the_snapshot_line(
 
 
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path)
-    first = _run(bundle, tmp_path / "a")
-    second = _run(bundle, tmp_path / "b")
-    assert first.emit_path(SNAPSHOT).read_bytes() == second.emit_path(SNAPSHOT).read_bytes()
+    assert_the_run_repeats(_bundle(tmp_path), tmp_path, _run, SNAPSHOT)
 
 
 # --- the derived count ------------------------------------------------------------------------
@@ -155,8 +156,7 @@ def test_the_shares_joined_in_order_are_the_bytes_of_one_run(
 ) -> None:
     end = {"mode": "finalVersion", "share": "0.25", "column": "status", "value": "cancelled"}
     bundle = _bundle(tmp_path, ended=ended, end=end if ended else None)
-    whole = _run(bundle, tmp_path / "whole")
-    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (HISTORY, SNAPSHOT))
+    assert_shares_join_to_the_run(bundle, tmp_path, _run, count, (HISTORY, SNAPSHOT))
 
 
 # --- the window -------------------------------------------------------------------------------

@@ -3957,6 +3957,13 @@ def _check_copy_source(held: Optional[Driver], expose_id: str, copied: PickCopy)
     )
 
 
+def _projected_columns(plan: "_rows.GeneratorPlan") -> FrozenSet[str]:
+    """The columns of a snapshot, which are its history's last versions (ADR 0027 section 3): none is drawn."""
+    if not plan.projected:
+        return frozenset()
+    return frozenset(column_plan.column.name for column_plan in plan.columns)
+
+
 def _refuse_on_counts(
     expose_id: str, relationship: str, on_counts: Mapping[str, bool], gives: str, why: str
 ) -> None:
@@ -5424,6 +5431,7 @@ class _Resolver:
         ruled = frozenset() if shape.plan.rules is None else shape.plan.rules.covers_every_row
         # A column a generator plugin generates is produced by the plugin (ADR 0032 section 5).
         made = frozenset() if shape.plan.plugin is None else frozenset(shape.plan.plugin.names)
+        projected = _projected_columns(shape.plan)
         for column_plan in shape.plan.columns:
             name = column_plan.column.name
             if (
@@ -5432,6 +5440,7 @@ class _Resolver:
                 and name not in drivers
                 and name not in ruled
                 and name not in made
+                and name not in projected
             ):
                 raise _refuse(
                     f"expose {expose_id!r} column {name!r} is part of a key that a smaller "

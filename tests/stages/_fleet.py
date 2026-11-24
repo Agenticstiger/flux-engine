@@ -151,6 +151,13 @@ def run_bundle(target: Path, state: Path, **options: Any) -> RunLayout:
     return RunLayout.for_state_dir(state, run_id)
 
 
+def plan_refused(target: Path, state: Path) -> Any:
+    """Plan a bundle under kernel 0.2.0, which refuses it; the refused outcome."""
+    planned = plan_module.plan(target, state_dir=state, kernel=KERNEL_V2.version, stage=False)
+    assert not planned.success
+    return planned
+
+
 def group_by(
     rows: Iterable[Mapping[str, Any]], column: str, keys: Optional[Iterable[Any]] = None
 ) -> Dict[Any, List[Any]]:

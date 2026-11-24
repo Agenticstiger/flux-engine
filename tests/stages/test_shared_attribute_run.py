@@ -23,7 +23,7 @@ from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
 from flux_engine.stages import pipeline
 from flux_engine.stages.validate import validate
 
-from ._jobs import plan_apply_verify
+from ._same_run import rules_alike_at_one_and_four_jobs
 from .test_shared_columns_run import _CONTRACT_TEXT, INVOICES, _bundle
 
 _ATTRIBUTES = re.sub(r"\n *sharedColumns: \[[^\]]*\]", "", _CONTRACT_TEXT)
@@ -119,10 +119,8 @@ def test_validate_accepts_the_bundle_as_plan_reads_it(bundle: Path) -> None:
 def test_plan_apply_and_verify_score_each_copy_for_any_number_of_jobs(
     bundle: Path, tmp_path: Path
 ) -> None:
-    digests, rules = plan_apply_verify(bundle, tmp_path)
-    assert digests[0] == digests[1]
-    assert rules[0] == rules[1]
-    by_rule = {entry["rule"]: entry for entry in rules[0]["invoice"]}
+    rules = rules_alike_at_one_and_four_jobs(bundle, tmp_path)
+    by_rule = {entry["rule"]: entry for entry in rules["invoice"]}
     assert {"region", "score"} <= set(by_rule)
     for rule_id in ("region", "score"):
         entry = by_rule[rule_id]

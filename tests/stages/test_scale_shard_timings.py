@@ -25,6 +25,8 @@ from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.scaling import key_space_note, scale_emit
 
+from ._fleet import run_bundle
+
 apply_module = import_module("flux_engine.stages.apply")
 plan_module = import_module("flux_engine.stages.plan")
 
@@ -185,11 +187,7 @@ def test_a_scale_below_one_cuts_the_bin_edges_inside_the_span_it_cuts_the_range_
 @pytest.mark.integration
 @pytest.mark.parametrize("scale", ["0.25", "0.05"])
 def test_a_scale_below_one_plans_and_applies_a_valid_bundle(tmp_path: Path, scale: str) -> None:
-    state = tmp_path / "state"
-    planned = plan_module.plan(FIXTURE, state_dir=state, kernel="0.2.0", scale=scale, stage=False)
-    assert planned.exit_code == 0, planned.stderr
-    applied = apply_module.apply(FIXTURE, run_id=planned.artifacts["run_id"], state_dir=state)
-    assert applied.success, applied.stderr
+    run_bundle(FIXTURE, tmp_path / "state", scale=scale)
 
 
 @pytest.mark.integration

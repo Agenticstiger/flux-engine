@@ -50,7 +50,7 @@ from typing import (
     Union,
 )
 
-from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity
+from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity, names_a_snapshot
 from flux_engine.concordance.predicate import (
     DeclaredExpose,
     FidelityBlock,
@@ -1707,10 +1707,16 @@ def parse_declared_fidelity(resolved: ResolvedEmit) -> Optional[FidelityBlock]:
     the code and the message ``verify`` gives it. Nothing here forms a
     statistic.
     """
-    if resolved.fidelity is None:
-        return None
-    _, expose = _declared_contract(resolved)
-    return parse_fidelity_block(canonicalise(resolved.written_fidelity), expose=expose)
+    return None if resolved.fidelity is None else _parsed_fidelity(resolved)
+
+
+def _parsed_fidelity(resolved: ResolvedEmit) -> FidelityBlock:
+    """*resolved*'s declared fidelity block, parsed; a snapshot's may declare no column."""
+    return parse_fidelity_block(
+        canonicalise(resolved.written_fidelity),
+        expose=_declared_contract(resolved)[1],
+        allow_no_columns=names_a_snapshot(resolved.extension),
+    )
 
 
 def compile_declared_fidelity(resolved: ResolvedEmit) -> Optional[CompiledFidelity]:
@@ -3259,6 +3265,7 @@ def _plan_emit(
             rules=rules,
             generator_version=generator_version,
             plugin=plugin,
+            projected=names_a_snapshot(resolved.extension),
         )
         refuse_conditions(resolved, plan, rules, simulation, where=cast.simulation_id)
         refuse_copula_combinations(resolved, where=cast.simulation_id)

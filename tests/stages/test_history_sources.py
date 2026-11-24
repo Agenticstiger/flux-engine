@@ -24,6 +24,7 @@ from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.stages import pipeline
 from flux_engine.stages.validate import validate
 from flux_engine.stages.verify import verify
+from tests.bundles import edit_flux
 from tests.stages.test_history_run import EMIT, NAMESPACE, _bundle, _rows, _run
 
 pytestmark = pytest.mark.integration
@@ -34,18 +35,11 @@ WITHIN = {"emit": EMIT, "relationship": "customer", "date": "started_on"}
 
 def _declare(bundle: Path, **blocks: List[Dict[str, Any]]) -> Path:
     """*bundle* with each key of *blocks* set as an extension key of the Simulation."""
-    path = bundle / "simulation.flux.yml"
-    document = yaml.safe_load(path.read_text("utf-8"))
-    document["extensions"][NAMESPACE].update(blocks)
-    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
-    return bundle
+    return edit_flux(bundle, lambda flux: flux.update(blocks))
 
 
 def _history(bundle: Path, **changes: Any) -> None:
-    path = bundle / "simulation.flux.yml"
-    document = yaml.safe_load(path.read_text("utf-8"))
-    document["extensions"][NAMESPACE]["history"][0].update(changes)
-    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    edit_flux(bundle, lambda flux: flux["history"][0].update(changes))
 
 
 def _refused_twice(bundle: Path, *fragments: str) -> None:

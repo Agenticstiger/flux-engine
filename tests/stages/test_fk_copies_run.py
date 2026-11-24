@@ -34,7 +34,7 @@ from flux_engine.stages import pipeline
 from tests.bundles import repin_contract
 from tests.generator.test_rules_over_links import _by_both_paths
 
-from ._jobs import plan_apply_verify
+from ._same_run import rules_alike_at_one_and_four_jobs
 from .conftest import REPO_ROOT
 from .test_rules_over_links_run import _BINDING, _FIDELITY
 
@@ -287,10 +287,8 @@ def test_the_shares_joined_are_the_whole_runs_bytes(bundle: Path, count: int) ->
 def test_plan_apply_and_verify_hold_the_copy_and_give_the_same_digests_for_any_jobs(
     bundle: Path, tmp_path: Path
 ) -> None:
-    digests, emits = plan_apply_verify(bundle, tmp_path)
-    assert digests[0] == digests[1]
-    assert emits[0] == emits[1]
-    by_rule = {entry["rule"]: entry for entry in emits[0]["trip"]}
+    emits = rules_alike_at_one_and_four_jobs(bundle, tmp_path)
+    by_rule = {entry["rule"]: entry for entry in emits["trip"]}
     copy = by_rule["vehicle.depot_id"]
     assert copy["origin"] == "shared" and copy["enforced"] is True
     assert copy["satisfied"] == copy["total"] and copy["total"] > 0

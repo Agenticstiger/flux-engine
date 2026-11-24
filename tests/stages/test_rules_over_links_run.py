@@ -33,7 +33,7 @@ from flux_engine.stages import pipeline
 from flux_engine.stages.validate import validate
 from tests.bundles import repin_contract
 
-from ._jobs import plan_apply_verify
+from ._same_run import rules_alike_at_one_and_four_jobs
 from .conftest import REPO_ROOT
 
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "related-star"
@@ -280,11 +280,8 @@ def test_validate_refuses_a_path_through_an_expose_the_simulation_does_not_gener
 def test_plan_apply_and_verify_give_the_same_digests_for_any_number_of_jobs(
     bundle: Path, tmp_path: Path
 ) -> None:
-    digests, emits = plan_apply_verify(bundle, tmp_path)
-    rules = [emit["invoice"] for emit in emits]
-    assert digests[0] == digests[1]
-    assert rules[0] == rules[1]
-    by_rule = {entry["rule"]: entry for entry in rules[0]}
+    rules = rules_alike_at_one_and_four_jobs(bundle, tmp_path)["invoice"]
+    by_rule = {entry["rule"]: entry for entry in rules}
     assert {"region_copy", "band_copy", "due_of_opened", "segment_copy"} <= set(by_rule)
     for rule_id in ("region_copy", "band_copy", "segment_copy"):
         entry = by_rule[rule_id]

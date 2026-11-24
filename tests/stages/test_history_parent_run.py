@@ -30,11 +30,24 @@ from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.verify import verify
 
-from ._fleet import DEPOT, NAMESPACE, UNTIL, apply_module, by_vehicle, plan_module, run_bundle
+from ._fleet import (
+    DEPOT,
+    NAMESPACE,
+    UNTIL,
+    apply_module,
+    by_vehicle,
+    plan_module,
+    plan_refused,
+    run_bundle,
+)
 from ._fleet import HISTORY as EMIT
 from ._fleet import bundle as fleet_bundle
 from ._fleet import rows as read_rows
-from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
+from ._same_run import (
+    assert_same_run_at_one_and_four_jobs,
+    assert_shares_join_to_the_run,
+    assert_the_run_repeats,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -128,16 +141,12 @@ def test_a_run_keeps_every_entity_to_its_depots_lifetime_and_verify_holds_it(
 
 
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path)
-    first = run_bundle(bundle, tmp_path / "one")
-    second = run_bundle(bundle, tmp_path / "two")
-    assert first.emit_path(EMIT).read_bytes() == second.emit_path(EMIT).read_bytes()
+    assert_the_run_repeats(_bundle(tmp_path), tmp_path, run_bundle, EMIT)
 
 
 def test_the_shares_joined_are_the_bytes_of_onerun_bundle(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path, end={"mode": "closeLast", "share": "0.1"})
-    whole = run_bundle(bundle, tmp_path / "whole")
-    assert_shares_join_to_the_run(bundle, tmp_path, whole, 3, (EMIT,))
+    assert_shares_join_to_the_run(bundle, tmp_path, run_bundle, 3, (EMIT,))
 
 
 @pytest.mark.slow
@@ -172,10 +181,7 @@ def test_a_smaller_scale_keeps_the_bound(tmp_path: Path) -> None:
 
 def test_the_key_without_a_lifetimes_entry_on_the_parent_is_refused(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path, lifetimes=False)
-    planned = plan_module.plan(
-        bundle, state_dir=tmp_path / "state", kernel=KERNEL_V2.version, stage=False
-    )
-    assert not planned.success
+    planned = plan_refused(bundle, tmp_path / "state")
     assert "FLX-3403" in planned.stderr and "parent.lifetime" in planned.stderr
 
 

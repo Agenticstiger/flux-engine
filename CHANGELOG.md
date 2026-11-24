@@ -139,6 +139,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   sets is now `FLX-6203` at plan, and a rule that reads through a relationship whose foreign-key column the
   projection sets (a derive over `relationship.column`, a copy, a conditional link) is `FLX-3403` at plan, since
   it would read the row the relationship drew rather than the row the cell names.
+- A snapshot emit whose `fidelity.columns` declares no column validates and plans. Its rows are its history's last
+  versions, so it draws no column; `validate` and `plan` refused it with `FLX-5034`, and a key column with no
+  statistics with `FLX-3403`. flux-stats' `parse_fidelity_block` takes `allow_no_columns`, which the engine sets for
+  an emit a `snapshots` entry names. Every other emit keeps both refusals.
 
 ## 0.11.1 - 2026-11-24
 

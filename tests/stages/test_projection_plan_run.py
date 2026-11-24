@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from flux_engine.core.errors import FluxError
-from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
+from flux_engine.core.kernels import KERNEL_V1
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
 
@@ -82,15 +82,7 @@ def _rows(layout: RunLayout, expose_id: str) -> List[Dict[str, Any]]:
     ]
 
 
-def _run(bundle: Path, state: Path, **options: Any) -> RunLayout:
-    planned = plan_module.plan(
-        bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False, **options
-    )
-    assert planned.success, planned.stderr
-    run_id = planned.artifacts["run_id"]
-    applied = apply_module.apply(bundle, run_id=run_id, state_dir=state)
-    assert applied.success, applied.stderr
-    return RunLayout.for_state_dir(state, run_id)
+_run = fleet.run_bundle
 
 
 def _plan_document(layout: RunLayout) -> Dict[str, Any]:
@@ -144,10 +136,7 @@ def test_the_count_leaves_the_entry_for_h_alone(tmp_path: Path) -> None:
 
 def test_a_declared_rows_on_a_projected_emit_is_still_refused(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path, snapshot_rows=120)
-    planned = plan_module.plan(
-        bundle, state_dir=tmp_path / "state", kernel=KERNEL_V2.version, stage=False
-    )
-    assert not planned.success
+    planned = fleet.plan_refused(bundle, tmp_path / "state")
     assert planned.error_code == "FLX-3403" and SNAPSHOT in planned.stderr
 
 

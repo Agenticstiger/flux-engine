@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from importlib import import_module
 from pathlib import Path
-from typing import Any, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.plan import build_plan_document
+
+from .test_hidden_columns_run import _loop
 
 apply_module = import_module("flux_engine.stages.apply")
 plan_module = import_module("flux_engine.stages.plan")
@@ -23,6 +25,19 @@ def execute_at_one_and_four_jobs(bundle: Path, **options: Any) -> Tuple[Any, Any
     one = pipeline.execute(bundle, jobs=1, **options)
     four = pipeline.execute(bundle, jobs=4, **options)
     return one, four
+
+
+def rules_alike_at_one_and_four_jobs(bundle: Path, tmp_path: Path) -> Dict[str, Any]:
+    """Plan, apply and verify in one job and in four: the digests and every emit's rules agree.
+
+    Returns the verified rules of every emit.
+    """
+    runs = [_loop(bundle, tmp_path / f"state-{jobs}", jobs) for jobs in (1, 4)]
+    digests = [(run["plan"], run["digests"]) for run in runs]
+    emits: List[Dict[str, Any]] = [run["verify"].artifacts["rules"]["emits"] for run in runs]
+    assert digests[0] == digests[1]
+    assert emits[0] == emits[1]
+    return emits[0]
 
 
 def assert_same_emits(four: Any, one: Any, *, plan: bool = True, result: bool = False) -> None:
@@ -44,16 +59,26 @@ def assert_same_run_at_one_and_four_jobs(
     return one, four
 
 
+def assert_the_run_repeats(
+    bundle: Path, tmp_path: Path, run: Callable[[Path, Path], RunLayout], expose_id: str
+) -> None:
+    """Run twice, ``run(bundle, state)`` each time: the emit's bytes are the same."""
+    first = run(bundle, tmp_path / "a")
+    second = run(bundle, tmp_path / "b")
+    assert first.emit_path(expose_id).read_bytes() == second.emit_path(expose_id).read_bytes()
+
+
 def assert_shares_join_to_the_run(
     bundle: Path,
     tmp_path: Path,
-    whole: RunLayout,
+    run: Callable[[Path, Path], RunLayout],
     count: int,
     expose_ids: Sequence[str],
     *,
     kernel: str = "0.2.0",
 ) -> None:
-    """Applied in ``count`` shares, the bundle's emits joined in order are ``whole``'s bytes."""
+    """Applied in ``count`` shares, the bundle's emits joined in order are one run's bytes."""
+    whole = run(bundle, tmp_path / "whole")
     state = tmp_path / "shards"
     planned = plan_module.plan(bundle, state_dir=state, kernel=kernel, stage=False)
     run_id = planned.artifacts["run_id"]

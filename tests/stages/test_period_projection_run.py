@@ -40,8 +40,13 @@ from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.verify import verify
+from tests.bundles import edit_flux
 
-from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
+from ._same_run import (
+    assert_same_run_at_one_and_four_jobs,
+    assert_shares_join_to_the_run,
+    assert_the_run_repeats,
+)
 from .test_projection_plan_run import (
     HISTORY,
     NAMESPACE,
@@ -96,11 +101,7 @@ KINDS = [
 
 
 def _with_kinds(bundle: Path) -> Path:
-    path = bundle / "simulation.flux.yml"
-    document = yaml.safe_load(path.read_text("utf-8"))
-    document["extensions"][NAMESPACE]["periods"][0]["kinds"] = KINDS
-    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
-    return bundle
+    return edit_flux(bundle, lambda flux: flux["periods"][0].update(kinds=KINDS))
 
 
 # --- the rows ---------------------------------------------------------------------------------
@@ -130,10 +131,7 @@ def test_the_end_match_holds_fewer_rows_than_overlap(tmp_path: Path) -> None:
 
 
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
-    bundle = _periodic(tmp_path)
-    first = _run(bundle, tmp_path / "a")
-    second = _run(bundle, tmp_path / "b")
-    assert first.emit_path(PERIODIC).read_bytes() == second.emit_path(PERIODIC).read_bytes()
+    assert_the_run_repeats(_periodic(tmp_path), tmp_path, _run, PERIODIC)
 
 
 def test_a_declared_rows_on_the_periodic_emit_is_refused(tmp_path: Path) -> None:
@@ -188,12 +186,7 @@ def test_verify_holds_the_period_lines_with_kinds_and_a_quarterly_grain(tmp_path
 
 def _ranged(tmp_path: Path, name: str, **keys: str) -> Path:
     """The fixture with *keys* (``from``, ``through``) added to its periods entry."""
-    bundle = _periodic(tmp_path, name)
-    path = bundle / "simulation.flux.yml"
-    document = yaml.safe_load(path.read_text("utf-8"))
-    document["extensions"][NAMESPACE]["periods"][0].update(keys)
-    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
-    return bundle
+    return edit_flux(_periodic(tmp_path, name), lambda flux: flux["periods"][0].update(keys))
 
 
 def test_a_range_equal_to_the_window_leaves_the_rows_unchanged(tmp_path: Path) -> None:
@@ -275,8 +268,7 @@ def test_the_shares_of_a_run_with_kinds_joined_are_the_bytes_of_one_run(
     tmp_path: Path, count: int
 ) -> None:
     bundle = _with_kinds(_periodic(tmp_path, end=CLOSE))
-    whole = _run(bundle, tmp_path / "whole")
-    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (PERIODIC,))
+    assert_shares_join_to_the_run(bundle, tmp_path, _run, count, (PERIODIC,))
 
 
 def test_one_job_and_four_jobs_make_the_same_run_with_kinds(tmp_path: Path) -> None:
@@ -307,8 +299,7 @@ def test_a_scale_below_one_follows_the_scaled_history(
 @pytest.mark.parametrize("count", [1, 3, 7])
 def test_the_shares_joined_in_order_are_the_bytes_of_one_run(tmp_path: Path, count: int) -> None:
     bundle = _periodic(tmp_path, end=CLOSE)
-    whole = _run(bundle, tmp_path / "whole")
-    assert_shares_join_to_the_run(bundle, tmp_path, whole, count, (PERIODIC,))
+    assert_shares_join_to_the_run(bundle, tmp_path, _run, count, (PERIODIC,))
 
 
 # --- the window -------------------------------------------------------------------------------

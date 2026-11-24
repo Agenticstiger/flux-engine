@@ -35,7 +35,7 @@ from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.stages import _parallel as parallel
 from flux_engine.stages.layout import RunLayout
 
-from ._same_run import assert_same_run_at_one_and_four_jobs
+from ._same_run import assert_same_run_at_one_and_four_jobs, assert_the_run_repeats
 from .test_history_run import _rows, _subscriptions
 
 pytestmark = pytest.mark.integration
@@ -187,10 +187,7 @@ def test_a_written_row_that_breaks_the_rule_fails_verify(tmp_path: Path) -> None
 
 
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path)
-    first = run_cli(bundle, tmp_path / "a")
-    second = run_cli(bundle, tmp_path / "b")
-    assert first.emit_path("invoice").read_bytes() == second.emit_path("invoice").read_bytes()
+    assert_the_run_repeats(_bundle(tmp_path), tmp_path, run_cli, "invoice")
 
 
 # --- size -------------------------------------------------------------------------------------
