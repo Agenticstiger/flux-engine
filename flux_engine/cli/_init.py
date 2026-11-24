@@ -152,6 +152,7 @@ def run_init(
     request: Optional[str] = None,
     overlays: Tuple[str, ...] = (),
     consumers: Optional[str] = None,
+    window: Optional[Tuple[str, str]] = None,
 ) -> StageResult:
     """Scaffold *directory* and report it as a :class:`StageResult`.
 
@@ -223,6 +224,9 @@ def run_init(
     refused = _overlays_need_inputs(overlays, contract, profile)
     if refused is not None:
         return refused
+    given = _window_given(window, contract, profile)
+    if isinstance(given, StageResult):
+        return given
     if contract is not None and profile is not None:
         if overlays:
             return run_author_overlays(
@@ -233,9 +237,16 @@ def run_init(
                 strict=strict,
                 allow=allow,
                 consumers=consumers,
+                window=given,
             )
         return run_author(
-            directory, contract, profile, strict=strict, allow=allow, consumers=consumers
+            directory,
+            contract,
+            profile,
+            strict=strict,
+            allow=allow,
+            consumers=consumers,
+            window=given,
         )
     if contract is not None:
         from flux_engine.cli._request import run_request
@@ -263,6 +274,32 @@ def run_init(
         _artifacts={"directory": directory, "files": list(names), "next": steps},
         stdout="\n".join(lines),
     )
+
+
+def _window_given(
+    window: Optional[Tuple[str, str]], contract: Optional[str], profile: Optional[str]
+) -> Any:
+    """The window ``--window`` gives as RFC 3339 texts, ``None`` without it, or the refusal (exit ``2``)."""
+    from flux_engine.author.window import WindowError, parse_window
+    from flux_engine.seam.coverage import printable
+
+    if window is None:
+        return None
+    if contract is None or profile is None:
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --window sets the run window of a bundle written from --contract and "
+                "--profile; pass both, for example `fluxsim init bundle --contract "
+                "contract.orders.fluid.yaml --profile orders.profile.json --window 2025-01-01 "
+                "2025-12-31`"
+            ),
+        )
+    try:
+        return parse_window(window[0], window[1])
+    except WindowError as error:
+        return StageResult(stage="init", exit_code=2, stderr=f"init: {printable(str(error))}")
 
 
 def _overlays_need_inputs(
@@ -509,6 +546,7 @@ def _authored(
     strict: bool,
     allow: Tuple[str, ...],
     consumers: Optional[str] = None,
+    window: Optional[Tuple[str, str]] = None,
 ) -> Any:
     """The checked bundle for *contract* and *profile* (with *overlay*), or the refusal to report.
 
@@ -522,7 +560,11 @@ def _authored(
 
     try:
         bundle = author_bundle(
-            Path(contract), Path(profile), overlay, consumers_path=_maybe_path(consumers)
+            Path(contract),
+            Path(profile),
+            overlay,
+            consumers_path=_maybe_path(consumers),
+            window=window,
         )
     except AuthorError as error:
         # A refusal can quote the contract (a column name, a FLUX message about it): no
@@ -587,6 +629,7 @@ def run_author(
     strict: bool = False,
     allow: Tuple[str, ...] = (),
     consumers: Optional[str] = None,
+    window: Optional[Tuple[str, str]] = None,
 ) -> StageResult:
     """Write a bundle for the data *contract* and *profile* describe into *directory*.
 
@@ -598,7 +641,9 @@ def run_author(
     """
     from flux_engine.starter import ScaffoldError, write_project
 
-    bundle = _authored(contract, profile, None, strict=strict, allow=allow, consumers=consumers)
+    bundle = _authored(
+        contract, profile, None, strict=strict, allow=allow, consumers=consumers, window=window
+    )
     if isinstance(bundle, StageResult):
         return bundle
     asked = _request_path(directory, bundle)
@@ -716,12 +761,19 @@ def _authored_each(
     strict: bool,
     allow: Tuple[str, ...],
     consumers: Optional[str] = None,
+    window: Optional[Tuple[str, str]] = None,
 ) -> Any:
     """The checked bundle of each overlay, or the first refusal, which names the overlay."""
     bundles: List[Any] = []
     for overlay in overlays:
         bundle = _authored(
-            contract, profile, overlay, strict=strict, allow=allow, consumers=consumers
+            contract,
+            profile,
+            overlay,
+            strict=strict,
+            allow=allow,
+            consumers=consumers,
+            window=window,
         )
         if isinstance(bundle, StageResult):
             if bundle.stderr:
@@ -792,6 +844,7 @@ def run_author_overlays(
     strict: bool = False,
     allow: Tuple[str, ...] = (),
     consumers: Optional[str] = None,
+    window: Optional[Tuple[str, str]] = None,
 ) -> StageResult:
     """Write one bundle per overlay of *overlay_files* into *directory*, each in a directory named after it.
 
@@ -807,7 +860,13 @@ def run_author_overlays(
     if isinstance(overlays, StageResult):
         return overlays
     bundles = _authored_each(
-        contract, profile, overlays, strict=strict, allow=allow, consumers=consumers
+        contract,
+        profile,
+        overlays,
+        strict=strict,
+        allow=allow,
+        consumers=consumers,
+        window=window,
     )
     if isinstance(bundles, StageResult):
         return bundles

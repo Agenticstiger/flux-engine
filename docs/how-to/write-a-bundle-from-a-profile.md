@@ -371,6 +371,15 @@ assumed time window is in the command's output and nowhere else. Here no time co
 publishes its range, because no single instant is held by ten orders, and `created_at`
 is drawn within the run's `timeBounds`.
 
+When some columns do publish a range, the run's `timeBounds` span all of them: the earliest start
+to the latest end of every date column's published range, of the date range its contract column
+declares (a `range` rule such as `between '2020-01-01' and '2026-12-31'` or `>= '2020-01-01' and
+<= '2026-12-31'`), and of the bins, levels and range the column itself is drawn from. No column's
+bins are cut. To choose the window yourself, pass `--window START END`, two dates
+(`YYYY-MM-DD`, midnight UTC) or RFC 3339 timestamps with START before END. The Simulation's
+`timeBounds` are exactly those, a date column's bins that leave them are cut at them (and the
+column says so), and the output notes the window under "time window".
+
 The register is the `parameters` list in `simulation.flux.yml`. Each entry names a
 number by a JSON Pointer and gives its source: a pointer into the profile and the
 statistic it lands in, a pointer into the contract, or a reason:
@@ -565,7 +574,8 @@ needs kernel 0.2.0.
 Nothing is written when:
 
 - the directory holds anything, or cannot be written;
-- `--contract` comes without `--profile`, or the reverse, or `--overlay` comes without both (exit 2);
+- `--contract` comes without `--profile`, or the reverse, or `--overlay` or `--window` comes without both (exit 2);
+- a `--window` value is not a date or an RFC 3339 timestamp in the years 1 to 9999, or START is not before END (exit 2);
 - an overlay file is refused by the reader, two files name one overlay, an overlay names a table the profile does not hold, or an overlay gives a table with a history another `rowCount`;
 - the profile cannot be read ([FLX-3109](../reference/errors/FLX-3109.md)) or is not a
   profile ([FLX-5036](../reference/errors/FLX-5036.md));

@@ -142,6 +142,19 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "accepts nothing"
         ),
     )
+    init_p.add_argument(
+        "--window",
+        nargs=2,
+        default=None,
+        metavar=("START", "END"),
+        help=(
+            "the run's window, written as the Simulation's spec.timeBounds: two dates "
+            "(YYYY-MM-DD, read as midnight UTC) or RFC 3339 timestamps, START before END; "
+            "without it the window spans every date column's published range, the contract's "
+            "declared date ranges and each date column's own bins; a date column's bins that "
+            "leave a window given here are cut at it (needs --contract and --profile)"
+        ),
+    )
     _add_json_flag(init_p)
 
     init_p.set_defaults(stage_name="init")
@@ -160,6 +173,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
             request=args.request,
             overlays=tuple(args.overlay or ()),
             consumers=args.consumers,
+            window=tuple(args.window) if args.window else None,
         ),
         as_json=args.json,
     )

@@ -116,6 +116,7 @@ from flux_engine.author.projection import (
 )
 from flux_engine.author.ranges import column_range
 from flux_engine.author.replace import replacements_for
+from flux_engine.author.window import declared_instants, instant_ms
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
@@ -1105,13 +1106,22 @@ def _choose_properties(
 
 def _time_bounds(
     exposes: Sequence[AuthoredExpose],
+    contract: Optional[Mapping[str, Any]] = None,
+    given: Optional[Tuple[str, str]] = None,
 ) -> Tuple[Tuple[str, str], Optional[Tuple[str, str]]]:
-    """The run window: the span of every published date or timestamp range, or an assumed year."""
+    """The run window: *given*, or the hull of every date or timestamp range, or an assumed year.
+
+    The hull runs from the earliest start to the latest end of each column's published range
+    (``time_span``), of its own bins, levels and range as declared, and of the range its contract
+    column declares, so no column's bins leave it. With nothing to go on, a year is assumed.
+    """
+    if given is not None:
+        return given, None
     spans = [
-        column.time_span
+        span
         for expose in exposes
         for column in expose.columns
-        if column.time_span is not None
+        for span in _spans_of(expose, column, contract)
     ]
     if spans:
         start = min(span[0] for span in spans)
@@ -1125,6 +1135,41 @@ def _time_bounds(
         "span your data covers."
     )
     return ASSUMED_WINDOW, ("time window", note)
+
+
+def _spans_of(
+    expose: AuthoredExpose, column: ColumnPlan, contract: Optional[Mapping[str, Any]]
+) -> List[Tuple[int, int]]:
+    """The spans (milliseconds) a column gives the window: its range, its declaration, its contract."""
+    found: List[Tuple[int, int]] = []
+    if column.time_span is not None:
+        found.append(column.time_span)
+    if expose.kinds.get(column.name) not in DATE_KINDS:
+        return found
+    declaration = column.declaration
+    instants: List[int] = []
+    for key in ("bins", "levels"):
+        listed = declaration.get(key)
+        if isinstance(listed, list):
+            instants.extend(moment for moment in map(instant_ms, listed) if moment is not None)
+    declared = declaration.get("range")
+    if isinstance(declared, Mapping):
+        instants.extend(
+            moment
+            for moment in (instant_ms(declared.get("min")), instant_ms(declared.get("max")))
+            if moment is not None
+        )
+    if instants:
+        found.append((min(instants), max(instants)))
+    context = expose.contexts.get(column.name)
+    try:
+        schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
+        contract_range = declared_instants(schema[context.schema_index]) if context else None
+    except (KeyError, IndexError, TypeError):
+        contract_range = None
+    if contract_range is not None:
+        found.append(contract_range)
+    return found
 
 
 def _owner(contract: Mapping[str, Any]) -> Tuple[str, Optional[Tuple[str, str]]]:
@@ -2320,6 +2365,7 @@ def author_bundle(
     profile_path: Path,
     overlay: Optional[Overlay] = None,
     consumers_path: Optional[Path] = None,
+    window: Optional[Tuple[str, str]] = None,
 ) -> AuthoredBundle:
     """Read *contract_path* and *profile_path*, and return the checked files of a bundle.
 
@@ -2330,6 +2376,10 @@ def author_bundle(
 
     With *consumers_path*, the consumers' questions it holds are embedded in the Simulation and
     their levels are declared (:mod:`flux_engine.author.consumers`, ADR 0028 section 5).
+
+    With *window*, two RFC 3339 texts, the Simulation's ``spec.timeBounds`` is exactly it and a
+    date column's bins that leave it are cut at it. Without it the window is the hull of every
+    date column's range, so no column's bins are cut.
 
     An enforced ``within`` date whose declared range the plan would refuse (``FLX-6204``) is
     written with the range widened just enough to meet the plan's check, and the column's used
@@ -2358,6 +2408,7 @@ def author_bundle(
                 declined,
                 undated,
                 unrated,
+                window,
             )
         except _WithinDeclined as fewer_dates:
             last_was_trial = True
@@ -2407,18 +2458,19 @@ def _author_with_fallbacks(
     declined: Mapping[Tuple[str, str], str] = {},
     undated: Mapping[Tuple[str, str], str] = {},
     unrated: Mapping[Tuple[str, str], str] = {},
+    window: Optional[Tuple[str, str]] = None,
 ) -> AuthoredBundle:
     """:func:`author_bundle` once, writing without the projections or the history the plan refuses."""
     inputs = (contract_path, profile_path, overlay, consumers_path)
     more = (widened, declined, undated, unrated)
     try:
-        return _author_bundle(*inputs, None, None, *more)
+        return _author_bundle(*inputs, None, None, *more, given_window=window)
     except _ProjectionRefused as refused:
         projection = str(refused)
     try:
-        return _author_bundle(*inputs, None, projection, *more)
+        return _author_bundle(*inputs, None, projection, *more, given_window=window)
     except _HistoryRefused as refused:
-        return _author_bundle(*inputs, str(refused), projection, *more)
+        return _author_bundle(*inputs, str(refused), projection, *more, given_window=window)
 
 
 @dataclass(frozen=True)
@@ -2804,6 +2856,7 @@ def _author_bundle(
     declined_exposures: Mapping[Tuple[str, str], str] = {},
     undated: Mapping[Tuple[str, str], str] = {},
     unrated: Mapping[Tuple[str, str], str] = {},
+    given_window: Optional[Tuple[str, str]] = None,
 ) -> AuthoredBundle:
     """:func:`author_bundle`, writing no history when *declined_history* is why plan refuses the bundle.
 
@@ -2843,10 +2896,16 @@ def _author_bundle(
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
 
     team, owner_note = _owner(contract)
-    window, window_note = _time_bounds(authored)
-    for expose in authored:
-        for column in expose.columns:
-            bound_to_window(column, expose.kinds[column.name], window)
+    window, window_note = _time_bounds(authored, contract, given_window)
+    if given_window is not None:
+        # Without a given window it is the hull, and no column's bins leave it.
+        for expose in authored:
+            for column in expose.columns:
+                bound_to_window(column, expose.kinds[column.name], window)
+        window_note = (
+            "time window",
+            f"The run covers {window[0]} to {window[1]}, as --window gives.",
+        )
     _widen_ranges(authored, widened)
     histories = _histories(
         authored,
@@ -2948,7 +3007,7 @@ def _author_bundle(
         profile_digest=pinned.digest.value,
         simulation_id=simulation_id,
         ledger=ledger,
-        gaps=_gaps(exposes, window_note),
+        gaps=_gaps(exposes, None if given_window is not None else window_note),
         overlay=overlay,
         assumptions_request=asked,
         consumers=report,
