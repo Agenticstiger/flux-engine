@@ -328,3 +328,27 @@ def test_a_committed_slice_names_the_property_and_compares_nothing(tmp_path: Pat
     assert "not compared with a committed slice" in leg["detail"]
     # The comparison with the pinned profile is still made, and still scores both rows.
     assert {row["outcome"] for row in case.rows(result).values()} == {"within"}
+
+
+def test_a_scorecard_whose_only_1_5_0_row_is_censored_names_1_5_0_and_validates(
+    tmp_path: Path,
+) -> None:
+    # A rank correlation the profile withheld has no `rank` member, and used to leave the scorecard
+    # at 1-4-0, whose schema does not allow the row's other members.
+    def withheld(case: Pinned) -> List[Dict[str, Any]]:
+        return [
+            _statistic("kendallTau/1", groups=[{"group": "", "status": "S"}]),
+            _statistic("spearmanRho/1", groups=[{"group": "", "status": "S"}]),
+        ]
+
+    case = Pinned(tmp_path, withheld)
+    result = case.verify()
+    # Nothing was scored, which is what the leg says; the scorecard is still formed and still formatted.
+    assert len(result.artifacts["fidelity"]["accounts"]["censored"]) == 2
+    document = result.artifacts["scorecard"]["document"]
+    rows = case.rows(result)
+    assert {row["outcome"] for row in rows.values()} == {"censored"}
+    assert all("rank" not in row for row in rows.values())
+    assert document["_schemaURL"].endswith("/scorecard/1-5-0/FluxScorecard.json")
+    schema = json.loads((SPEC / "scorecard-1-5.schema.json").read_text("utf-8"))
+    Draft202012Validator(schema).validate(document)
