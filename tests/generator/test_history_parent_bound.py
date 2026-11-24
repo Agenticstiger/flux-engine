@@ -22,7 +22,6 @@ end, a NULL end, or an end before its start), what is pinned, on kernel 0.2.0:
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import date
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -40,15 +39,11 @@ from flux_engine.generator.history import (
     plan_history,
     unit_of,
 )
-from flux_engine.generator.relations import relate_plans, related_columns
 from flux_engine.generator.rows import (
-    GENERATOR_VERSION_2,
     GeneratorPlan,
-    build_plan,
     generate_row_slice,
 )
-from flux_engine.generator.rules import plan_rules
-from flux_engine.seam.contract import LogicalKind, compile_expose
+from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.counts import ChildShape
 from flux_engine.seam.history import (
     Histogram,
@@ -56,10 +51,11 @@ from flux_engine.seam.history import (
     HistoryEntry,
     HistoryParent,
 )
-from flux_engine.seam.keys import compile_keys, mark_key_columns
 
-from .test_history_layout import BOUNDS, LEVELS, SIM_ID, UNTIL, root_for
-from .test_relations import _column, _expose, _h, _primary, _rel
+from ._history_plans import by_entity, plans_of
+from .test_history_layout import BOUNDS, SIM_ID, UNTIL, root_for
+from .test_history_layout import entry as layout_entry
+from .test_relations import _column, _expose, _primary, _rel
 from .test_rules_over_links import _by_both_paths
 
 pytestmark = pytest.mark.unit
@@ -125,22 +121,9 @@ def contract() -> Dict[str, Any]:
 
 
 def entry(
-    *,
-    entities: int = 40,
-    versions: Optional[ChildShape] = LEVELS,
-    parent: Optional[HistoryParent] = BOUND_PARENT,
-    end: Optional[HistoryEnd] = None,
-    until: str = UNTIL,
+    *, entities: int = 40, parent: Optional[HistoryParent] = BOUND_PARENT, **rest: Any
 ) -> HistoryEntry:
-    return HistoryEntry(
-        emit=EMIT,
-        entities=entities,
-        length=LENGTH,
-        until=until,
-        parent=parent,
-        versions=versions,
-        end=end,
-    )
+    return layout_entry(entities=entities, parent=parent, **rest)
 
 
 def plans_for(
@@ -152,9 +135,6 @@ def plans_for(
     closed: Optional[Mapping[str, Any]] = None,
     lifetime: Optional[Tuple[str, Optional[str]]] = LIFETIME,
 ) -> Dict[str, GeneratorPlan]:
-    document = contract()
-    keys = compile_keys(document)
-    assert keys is not None
     declared: Dict[str, Tuple[Dict[str, Any], int]] = {
         "customer": (
             {"opened": dict(opened or OPENED), "closed": dict(closed or CLOSED)},
@@ -162,39 +142,6 @@ def plans_for(
         ),
         EMIT: ({"status": {"levels": dict(STATUS)}}, rows),
     }
-    plans: Dict[str, GeneratorPlan] = {}
-    for expose in document["exposes"]:
-        expose_id = expose["exposeId"]
-        expose_keys = keys.expose(expose_id)
-        compiled = mark_key_columns(compile_expose(expose), expose_keys)
-        columns, count = declared[expose_id]
-        related = related_columns(expose_keys) | ({"sub_id"} if expose_id == EMIT else set())
-        plans[expose_id] = build_plan(
-            compiled,
-            sim_id=SIM_ID,
-            seam_digest=_h(expose_id),
-            rows=count,
-            fidelity={"columns": columns},
-            time_bounds=BOUNDS,
-            related=related,
-            rules=plan_rules(
-                contract_document=document,
-                expose_id=expose_id,
-                settings=None,
-                related=related,
-                mapping=None,
-                has_fidelity=True,
-                strict=False,
-                flux_rules=None,
-                keys=expose_keys,
-                rows=count,
-                null_fractions={},
-                counter_based=True,
-                links=(),
-                copies=False,
-            ),
-            generator_version=GENERATOR_VERSION_2,
-        )
     binding = HistoryBinding(
         held,
         held.entities,
@@ -202,7 +149,7 @@ def plans_for(
         "valid_to",
         lifetime if held.parent is not None and held.parent.lifetime else None,
     )
-    return relate_plans(plans, keys, None, None, None, document, None, {EMIT: binding})
+    return plans_of(contract(), declared, {EMIT: binding}, emit=EMIT)
 
 
 @pytest.fixture(autouse=True)
@@ -238,13 +185,6 @@ def lifetimes_of(plans: Mapping[str, GeneratorPlan], seed: int = 5) -> Dict[Any,
         row["customer_id"]: (row["opened"], row["closed"])
         for row in rows_of(plans["customer"], seed)
     }
-
-
-def by_entity(data: List[Dict[str, Any]]) -> Dict[Any, List[Dict[str, Any]]]:
-    found: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
-    for row in data:
-        found[row["sub_id"]].append(row)
-    return found
 
 
 def chains(
@@ -318,12 +258,14 @@ def test_the_forced_entities_count_towards_the_end_share() -> None:
     plans = plans_for(entry(end=FINAL))
     layout = layout_of(plans)
     assert layout.cut is not None and layout.ended is not None
-    assert int(layout.cut.forced.sum()) > 0
-    # 25 % of every eligible entity, the forced ones included, end; the rest are the permutation's.
-    eligible = int(((layout.versions.counts >= 2) | layout.cut.forced).sum())
-    assert int(layout.ended.sum()) == max(eligible // 4, int(layout.cut.forced.sum())) or (
-        abs(int(layout.ended.sum()) - eligible / 4) < 1
-    )
+    assert FINAL.share is not None
+    forced = int(layout.cut.forced.sum())
+    assert forced > 0
+    # n = min(LRM(E, share), E'): a share of every entity, capped at those that can end (the
+    # eligible ones and the forced ones), and the forced ones end whatever n is.
+    can_end = int(((layout.versions.counts >= 2) | layout.cut.forced).sum())
+    asked = min(history.declared_ended(layout.entities, FINAL.share), can_end)
+    assert int(layout.ended.sum()) == max(asked, forced)
 
 
 def test_forced_entities_beyond_the_share_all_end_and_no_other_does() -> None:

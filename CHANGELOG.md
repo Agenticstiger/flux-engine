@@ -63,6 +63,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `flux_engine.calibrate.fit.run_fit` raises `HeldOutNeeded`, a usage error with no `FLX` code, when the bundle
   declares a held-out query and the request names no held-out profile. `calibrate --fit` reports it with exit status
   2, as it reported a missing `--held-out` before.
+- A history's `end.share` is now a share of every entity. It was a share of the eligible ones, so a declared share
+  on a history whose `end` has a column (entities of two versions or more) ended fewer entities than it named.
+  The ended entities are still chosen among the eligible ones; when fewer are eligible than the share asks for,
+  every eligible entity ends and `plan` notes the share yielded (ADR 0017, the amendment of 2026-11-24).
+  **The bytes of such a history and of every projection of it move**; a history with no `end`, and a `closeLast`
+  end without a column, keep theirs.
 
 ### Fixed
 

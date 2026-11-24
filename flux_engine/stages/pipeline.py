@@ -116,7 +116,13 @@ from flux_engine.generator.dwell import (
     family_span,
 )
 from flux_engine.generator.families import ColumnType, Family
-from flux_engine.generator.history import HistoryBinding, parent_bound_notes
+from flux_engine.generator.history import (
+    HistoryBinding,
+    HistoryPick,
+    HistoryPlan,
+    end_share_note,
+    parent_bound_notes,
+)
 from flux_engine.generator.plugin import PluginExpose, check_rows, generate_values, request_of
 from flux_engine.generator.projections import chain_of, derived_rows, project_plan, projection_of
 from flux_engine.generator.rates import Rates
@@ -302,7 +308,9 @@ from flux_engine.world import (
 __all__ = [
     "EmitOutcome",
     "PipelineResult",
+    "advice_notes",
     "compile_declared_fidelity",
+    "end_share_notes",
     "execute",
     "parent_bound_history_notes",
     "input_digest_of",
@@ -683,17 +691,55 @@ def period_end_null_notes(resolved: Sequence[ResolvedEmit]) -> Tuple[str, ...]:
     return tuple(notes)
 
 
+def end_share_notes(plans: Sequence[GeneratorPlan], root: SeedTreeRoot) -> Tuple[str, ...]:
+    """One sentence for each history whose declared end share yields less than it declares.
+
+    The share is a share of every entity, and an ``end`` with a column ends only entities of two
+    versions or more, so a history with too few of them ends every one that can and the share
+    generated is lower than the share declared (ADR 0017, the amendment of 2026-11-24). Advice
+    only: no plan document or digest carries it.
+    """
+    notes = (
+        end_share_note(expose_id, pick.entry, chain)
+        for expose_id, pick, chain in _history_chains(
+            plans, root, lambda pick: pick.entry.end is not None
+        )
+    )
+    return tuple(note for note in notes if note is not None)
+
+
 def parent_bound_history_notes(
     plans: Sequence[GeneratorPlan], root: SeedTreeRoot
 ) -> Tuple[str, ...]:
     """The notes of each history that keeps to its parent's lifetime (:func:`parent_bound_notes`)."""
-    notes: List[str] = []
+    return tuple(
+        note
+        for expose_id, _, chain in _history_chains(
+            plans, root, lambda pick: pick.parent_lifetime is not None
+        )
+        for note in parent_bound_notes(expose_id, chain)
+    )
+
+
+def _history_chains(
+    plans: Sequence[GeneratorPlan], root: SeedTreeRoot, wanted: Callable[[HistoryPick], bool]
+) -> Iterator[Tuple[str, HistoryPick, HistoryPlan]]:
+    """The exposeId, pick and layout of each history among *plans* that *wanted* names."""
     for plan in plans:
         pick = history_pick_of(plan)
-        if pick is None or pick.parent_lifetime is None:
-            continue
-        notes.extend(parent_bound_notes(plan.expose.expose_id, chain_of(plan, root)))
-    return tuple(notes)
+        if pick is not None and wanted(pick):
+            yield plan.expose.expose_id, pick, chain_of(plan, root)
+
+
+def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
+    """The advice a plan prints, one sentence each: period ends, end shares and parent bounds."""
+    outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*result.emits, *result.hidden_emits]
+    plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
+    return (
+        period_end_null_notes([outcome.resolved for outcome in outcomes])
+        + end_share_notes(plans, result.root)
+        + parent_bound_history_notes(plans, result.root)
+    )
 
 
 def _nullable_period_end(emit: ResolvedEmit) -> Optional[Tuple[str, Any]]:

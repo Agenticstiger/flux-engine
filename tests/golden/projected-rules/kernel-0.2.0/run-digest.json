@@ -6,10 +6,10 @@
     "emits": {
       "depot": "sha256:289635e361ced85e9d711e417452f0c4d1e16ae78ec0a7d335a73ee4c807af37",
       "service_visit": "sha256:01920d1bf13f02dd39cbdf7356417451c8909b858d417c5a94a9f2dcbd4339a9",
-      "vehicle_change": "sha256:39d5ad453c183fa1c76f98ff1706e6282cf441ebb0fdd5b64988661dd8251206",
-      "vehicle_current": "sha256:c822531b2524395e854ff5f55821d4898f3d697d6950cb11b88495ed7762cd7c",
+      "vehicle_change": "sha256:280bde05cd80767935a068e5702903fcf7578b30c2fcca0198b9a0a654213161",
+      "vehicle_current": "sha256:bb123fb7e245d3a17f5ba4b6f7dd4327e346742b3105d174bfc60bdb56e7b4d7",
       "vehicle_month": "sha256:b7cb1568a6192e52a1af4277ad739ada12952904806725a5f25f98aa31cc7732",
-      "vehicle_version": "sha256:85c7010cdc1e781fc3393162838cd38b2ac9d3eaa6707a7c49d08c480602e848"
+      "vehicle_version": "sha256:8f33ab7eb63dfb2c3e7a708d45dd36c4bc1f1841184b2a21b86f1a3f2666e407"
     },
     "events": "sha256:a45bfe9c75c6ee09b0cf0f1ff539d40e10d5d001072b5590e1b48c63df511dff",
     "journeys": "sha256:4ab92b80ec8618957b41e9d08a1da8d107af13afba037bd3c4dcc53c7a5561b3",

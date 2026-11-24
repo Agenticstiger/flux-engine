@@ -38,7 +38,7 @@ from flux_engine.generator.history import (
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.history import Histogram, HistoryEntry
 
-from .test_history_layout import BOUNDS, root_for
+from .test_history_layout import BOUNDS, entry, root_for
 
 DAY0 = date(2023, 1, 1)
 
@@ -114,12 +114,8 @@ def test_a_timestamp_chain_cuts_the_same_table() -> None:
 
 
 def _entry(histogram: Optional[Histogram]) -> HistoryEntry:
-    return HistoryEntry(
-        emit="thing",
-        entities=1,
-        length=Histogram(("30", "90"), ("1",)),
-        until="2030-12-31",
-        start=histogram,
+    return entry(
+        emit="thing", entities=1, parent=None, versions=None, until="2030-12-31", start=histogram
     )
 
 

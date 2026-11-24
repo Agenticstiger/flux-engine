@@ -591,14 +591,15 @@ length another way there, given the version's state, without moving any position
 
 **The ended allocation.** With an `end`, the eligible entities are, under `closeLast`, every entity, or with a
 `column` every entity with at least two versions, and under `finalVersion` the entities with at least two versions.
-Let `E'` be their number and `share` the entry's decimal:
+Let `E'` be their number, `E` the number of all entities and `share` the entry's decimal. The share is a share
+of every entity, and the entities that end are chosen among the eligible ones:
 
 ```text
-n = LRM(E', [share, 1 - share])[0]       keyed "0" and "1"
+n = min(LRM(E, [share, 1 - share])[0], E')       keyed "0" and "1"
 entity of eligible rank r ends  <=>  permute/2(K_end, E', r) < n
 ```
 
-With no eligible entity, none ends. Under `closeLast` an ended entity's last
+With no eligible entity, none ends, and when fewer than the share's `n` are eligible every eligible entity ends. Under `closeLast` an ended entity's last
 version is closed, with its own drawn length inside the fit, at `s_last + d_last` under `nextStart` and at the day
 before, `s_last + d_last - 1` day, under `dayBefore`. Under `finalVersion` its last version
 is a final version that carries the entry's `value` in `column` and stays open. The ending change is forced and draws

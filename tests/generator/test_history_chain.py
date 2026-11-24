@@ -21,7 +21,6 @@ lengths when they overrun the room before ``until``, and the ends. What is pinne
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import date, timedelta
 from typing import Any, Dict, Iterator, List, Mapping, Tuple
 
@@ -46,6 +45,7 @@ from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.history import Histogram, HistoryEntry
 
 from . import test_history_layout as layout_tests
+from ._history_plans import by_entity
 from .test_history_layout import (  # noqa: F401  (fresh_layouts is an autouse fixture)
     BOUNDS,
     EMIT,
@@ -96,15 +96,6 @@ def timestamped() -> Dict[str, Any]:
     return document
 
 
-def versions_by_entity(
-    data: List[Dict[str, Any]],
-) -> Dict[Any, List[Dict[str, Any]]]:
-    found: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
-    for row in data:
-        found[row["sub_id"]].append(row)
-    return found
-
-
 def days(value: Any) -> int:
     return (value - EPOCH).days
 
@@ -113,7 +104,7 @@ def assert_chain_holds(
     data: List[Dict[str, Any]], until: int, *, day_before: bool = False, unit: Any = days
 ) -> None:
     """Per entity no gap and no overlap, one open end, every start and closed end before *until*."""
-    for rows in versions_by_entity(data).values():
+    for rows in by_entity(data).values():
         starts = [unit(row["valid_from"]) for row in rows]
         assert starts == sorted(starts) and len(set(starts)) == len(starts)
         assert all(start < until for start in starts)
@@ -139,7 +130,7 @@ def test_every_entity_has_a_chain_with_no_gap_no_overlap_and_one_open_end(
     held = entry(versions=layout_tests.LEVELS if shaped else None)
     plans = plans_of(history_entry=held, rows=60, entities=12, customers=6)
     data = run_of(plans, seed)
-    assert len(data) == 60 and len(versions_by_entity(data)) == 12
+    assert len(data) == 60 and len(by_entity(data)) == 12
     assert_chain_holds(data, unit_of(UNTIL, LogicalKind.DATE))
 
 
@@ -156,7 +147,7 @@ def test_the_first_version_starts_at_the_first_start_and_lengths_sit_in_their_bi
     plans = plans_of(history_entry=entry(versions=None), rows=60, entities=12, customers=6)
     layout = layout_of(plans)[0]
     until = unit_of(UNTIL, LogicalKind.DATE)
-    for entity, rows in enumerate(versions_by_entity(run_of(plans)).values()):
+    for entity, rows in enumerate(by_entity(run_of(plans)).values()):
         assert days(rows[0]["valid_from"]) in layout.first_starts.tolist()
         # A chain that was not compressed keeps its drawn lengths, which sit in the bin.
         low = 1 if days(rows[-1]["valid_from"]) == until - 1 else 30
@@ -260,7 +251,7 @@ def test_day_before_ends_a_version_the_day_before_the_next_starts() -> None:
     plans = plans_of(history_entry=held, rows=60, entities=12, customers=6)
     data = run_of(plans)
     assert_chain_holds(data, unit_of(UNTIL, LogicalKind.DATE), day_before=True)
-    assert any(len(rows) > 1 for rows in versions_by_entity(data).values())
+    assert any(len(rows) > 1 for rows in by_entity(data).values())
 
 
 def test_a_compressed_day_before_chain_may_start_and_end_on_one_day() -> None:
@@ -298,7 +289,7 @@ def test_a_timestamp_chain_runs_at_the_millisecond() -> None:
     assert_chain_holds(data, until, unit=int)
     gaps = [
         rows[j]["valid_to"] - rows[j]["valid_from"]
-        for rows in versions_by_entity(data).values()
+        for rows in by_entity(data).values()
         for j in range(len(rows) - 1)
     ]
     assert gaps and all(30 * DAY_MS <= gap < 90 * DAY_MS for gap in gaps)
@@ -453,7 +444,7 @@ def test_the_last_start_is_before_until_by_a_day_at_most_when_compressed() -> No
     held = with_changes(entry(), length=LONG)
     plans = plans_of(history_entry=held, rows=60, entities=12, customers=6)
     until = unit_of(UNTIL, LogicalKind.DATE)
-    for rows in versions_by_entity(run_of(plans)).values():
+    for rows in by_entity(run_of(plans)).values():
         assert days(rows[-1]["valid_from"]) <= until - 1
         assert rows[-1]["valid_from"] <= date(2025, 12, 30)
     assert date(2025, 12, 31) - timedelta(days=1) == date(2025, 12, 30)

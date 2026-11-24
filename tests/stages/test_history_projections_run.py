@@ -103,9 +103,8 @@ def test_ended_drop_leaves_out_the_ended_entities(tmp_path: Path, mode: str) -> 
     for row in versions:
         held.setdefault(row["subscription_id"], []).append(row)
     eligible = sum(1 for chain in held.values() if len(chain) >= 2)
-    ended = ended_count(
-        eligible, "0.25"
-    )  # an end with a column ends entities of two versions or more
+    # An end with a column ends entities of two versions or more, of a share of every entity.
+    ended = ended_count(len(held), eligible, "0.25")
     assert ended > 0
     assert len(snapshot) == 60 - ended
     assert all(row["status"] != "cancelled" for row in snapshot)

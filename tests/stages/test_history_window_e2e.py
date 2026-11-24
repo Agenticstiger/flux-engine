@@ -261,13 +261,13 @@ def test_both_end_modes_end_the_share_of_entities_they_declare(whole: Run) -> No
     ended = [
         versions for versions in subscriptions.values() if versions[-1]["status"] == "cancelled"
     ]
-    assert len(ended) == ended_count(eligible, "0.25") > 0
+    assert len(ended) == ended_count(60, eligible, "0.25") > 0
     # A final version stays open, so every subscription has one open version, its last.
     assert all(versions[-1]["valid_to"] is None for versions in subscriptions.values())
     assert all(row["status"] == "active" for versions in ended for row in versions[:-1])
     devices = _by_entity(_rows(whole.layout, DEVICES), "device_id")
     retired = [versions for versions in devices.values() if versions[-1]["status"] == "retired"]
-    assert len(retired) == ended_count(len(devices), "0.3") > 0
+    assert len(retired) == ended_count(len(devices), len(devices), "0.3") > 0
     # A closed last version has an end, and the others stay open.
     assert all(versions[-1]["valid_to"] is not None for versions in retired)
     others = [versions for versions in devices.values() if versions[-1]["status"] != "retired"]

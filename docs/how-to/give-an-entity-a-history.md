@@ -283,8 +283,7 @@ for chain in by_subscription.values():
     assert all(row[8] == chain[0][3] for row in chain)  # activation
 
 ended = [chain for chain in by_subscription.values() if chain[-1][7] == "cancelled"]
-eligible = [chain for chain in by_subscription.values() if len(chain) >= 2]
-assert abs(len(ended) - 0.2 * len(eligible)) < 1  # the share of 0.2 of the eligible entities
+assert abs(len(ended) - 0.2 * 60) < 1  # the share of 0.2 of every entity
 ```
 
 Seven things hold, whatever the seed:
@@ -293,7 +292,7 @@ Seven things hold, whatever the seed:
 - **One open version.** The last version of an entity that has not ended has no end, or the text `openEnd` gives, such as `"9999-12-31"`.
 - **One change at each step.** A later version differs from the one before it in one tracked column, the change reason. An ending version is the exception: it changes `status` and no tracked column. With several tracked columns, `reasons` gives the share of the changes each makes, exact up to the largest remainder.
 - **Every other column is carried.** A column that the history does not set takes, on every version, the value drawn for the entity's first version, so a customer's region does not change from one version to the next.
-- **The ended share is exact.** With an `end`, `share` of the entities end, up to the largest remainder, and which ones is a permutation's choice, not a draw. Under `finalVersion` an ended entity gains a last version that holds `value` in `column` and stays open; under `closeLast` its last version is closed instead. The ending version is no change reason, so `value` appears on no other version.
+- **The ended share is exact.** With an `end`, `share` of all the entities end, up to the largest remainder (fewer when too few have two versions to end on, and `plan` says what the share yields), and which ones is a permutation's choice, not a draw. Under `finalVersion` an ended entity gains a last version that holds `value` in `column` and stays open; under `closeLast` its last version is closed instead. The ending version is no change reason, so `value` appears on no other version.
 - **The number of versions comes from a shape.** The versions per entity follow `versions` class for class, as the children per parent follow `children` in [Give every parent its children](./give-every-parent-its-children.md). An entity that has more room before `until` takes more of them. Without `versions` the versions are spread as evenly as whole counts allow.
 - **A history stops changing at `until`.** Every version starts before `until`, every closed version ends before it, and nothing in a history reads `spec.timeBounds.end`. A longer window rewrites no row of the history, and what you project from it keeps its earlier rows too (see [Project a history](./project-a-history.md)).
 

@@ -388,7 +388,7 @@ def _chain_vector(
 
 
 def _reference_ended(case: Dict[str, Any], counts: Sequence[int]) -> Dict[str, Any]:
-    """Which entities end: ``n = LRM(E', [share, 1 - share])[0]`` and ``permute/2(K_end, E', r) < n``."""
+    """Which entities end: ``n = min(LRM(E, [share, 1 - share])[0], E')`` and ``permute/2(K_end, E', r) < n``."""
     end = case["end"]
     eligible = [
         e
@@ -396,7 +396,8 @@ def _reference_ended(case: Dict[str, Any], counts: Sequence[int]) -> Dict[str, A
         if (end["mode"] == "closeLast" and end["column"] is None) or held >= 2
     ]
     share = Fraction(end["share"])
-    count = k2._lrm(len(eligible), [share, 1 - share])[0] if eligible else 0
+    of_all = k2._lrm(len(counts), [share, 1 - share])[0] if counts else 0
+    count = min(of_all, len(eligible))
     key = _digest(ended_path(SIM, EXPOSE), ())
     ended = sorted(
         eligible[rank]
@@ -1141,9 +1142,9 @@ def test_the_ended_entities_are_the_vectors(vector: Dict[str, Any]) -> None:
     assert plan.ended is not None
     assert np.nonzero(plan.ended)[0].tolist() == ended["ended"]
     assert len(ended["ended"]) == ended["count"] <= ended["eligible"]
-    assert ended_count(ended["eligible"], vector["end"]["share"]) == ended["count"]
-    # Only an eligible entity ends.
     counts = vector["versionCounts"]
+    assert ended_count(len(counts), ended["eligible"], vector["end"]["share"]) == ended["count"]
+    # Only an eligible entity ends.
     if vector["end"]["mode"] == "finalVersion" or vector["end"]["column"] is not None:
         assert all(counts[entity] >= 2 for entity in ended["ended"])
 

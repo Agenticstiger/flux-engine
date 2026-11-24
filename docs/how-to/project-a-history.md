@@ -261,13 +261,13 @@ $ fluxsim validate .
 $ fluxsim run .
 plan written to ...
 applied to ...
-emitted subscription_version: 200 rows (generator); subscription_current: 60 rows (generator); subscription_change: 200 rows (generator); subscription_month: 1876 rows (generator)
+emitted subscription_version: 200 rows (generator); subscription_current: 60 rows (generator); subscription_change: 200 rows (generator); subscription_month: 1891 rows (generator)
 run ... complete
 $ fluxsim verify . --run-id $(ls .flux/runs)
 ...
-  rules subscription_change: event:matches_transition 60 of 60 (100.00%); event:transition_matches 133 of 133 (100.00%)
+  rules subscription_change: event:matches_transition 60 of 60 (100.00%); event:transition_matches 128 of 128 (100.00%)
   rules subscription_current: snapshot:equals_last_version 60 of 60 (100.00%)
-  rules subscription_month: period:within_validity 1876 of 1876 (100.00%); period:matches_valid_version 1876 of 1876 (100.00%)
+  rules subscription_month: period:within_validity 1891 of 1891 (100.00%); period:matches_valid_version 1891 of 1891 (100.00%)
   rules subscription_version: history:no_gaps_no_overlap 60 of 60 (100.00%); history:one_current 60 of 60 (100.00%); history:ended_is_last 60 of 60 (100.00%)
 ...
 ```
@@ -400,7 +400,7 @@ open("simulation.flux.yml", "w").write(text)
 $ fluxsim run .
 plan written to ...
 applied to ...
-emitted subscription_version: 200 rows (generator); subscription_current: 60 rows (generator); subscription_change: 200 rows (generator); subscription_month: 2728 rows (generator)
+emitted subscription_version: 200 rows (generator); subscription_current: 60 rows (generator); subscription_change: 200 rows (generator); subscription_month: 2743 rows (generator)
 run ... complete
 ```
 

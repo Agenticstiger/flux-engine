@@ -310,7 +310,7 @@ def test_a_run_with_an_end_mode_holds_the_history_lines_and_verify_passes(
     if column:
         eligible = sum(1 for versions in held.values() if len(versions) >= 2)
         ending = [row for row in rows if row["status"] == "cancelled"]
-        assert len(ending) == ended_count(eligible, "0.25")
+        assert len(ending) == ended_count(len(held), eligible, "0.25")
         for versions in held.values():
             assert [row["status"] for row in versions[:-1]].count("cancelled") == 0
 

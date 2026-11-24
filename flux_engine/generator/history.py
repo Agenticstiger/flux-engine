@@ -98,6 +98,8 @@ __all__ = [
     "chain_columns",
     "check_layout",
     "drawn_length",
+    "declared_ended",
+    "end_share_note",
     "ended_count",
     "ended_entities",
     "ended_key",
@@ -519,7 +521,7 @@ def parent_bound_notes(expose_id: str, chain: "HistoryPlan") -> List[str]:
     if cut is not None and int(cut.infeasible.sum()):
         found = int(cut.infeasible.sum())
         notes.append(
-            f"history ({expose_id}): {found} of {chain.entities} entities have a parent whose "
+            f"note: history ({expose_id}): {found} of {chain.entities} entities have a parent whose "
             "lifetime leaves no room for their versions; each keeps the first start it would "
             "draw without the bound"
         )
@@ -527,7 +529,7 @@ def parent_bound_notes(expose_id: str, chain: "HistoryPlan") -> List[str]:
         single = int((cut.forced & (chain.versions.counts == 1)).sum())
         if single:
             notes.append(
-                f"history ({expose_id}): {single} entities end with their parent and have one "
+                f"note: history ({expose_id}): {single} entities end with their parent and have one "
                 "version, which is their ending version: it takes the end value from its start"
             )
     return notes
@@ -634,17 +636,42 @@ def _eligible(entry: HistoryEntry, counts: "np.ndarray") -> "np.ndarray":
     return counts >= 2
 
 
-def ended_count(eligible: int, share: str) -> int:
-    """``n = LRM(E', [share, 1 - share])[0]``: the entities that end, of the *eligible* ones.
+def declared_ended(entities: int, share: str) -> int:
+    """``n = LRM(E, [share, 1 - share])[0]``: the entities the declared share asks to end, of *all* of them.
 
-    The classes are keyed ``"0"`` and ``"1"``. None end when none is eligible.
+    The classes are keyed ``"0"`` and ``"1"``. Whether that many are eligible is :func:`ended_count`'s.
     """
-    if eligible == 0:
+    if entities == 0:
         return 0
     weight = _weight(share, "history.end.share")
     if not 0 <= weight <= 1:
         raise _refuse(f"history.end.share is a decimal from 0 to 1, not {share!r}")
-    return largest_remainder(eligible, {"0": weight, "1": 1 - weight})["0"]  # type: ignore[dict-item]
+    return largest_remainder(entities, {"0": weight, "1": 1 - weight})["0"]  # type: ignore[dict-item]
+
+
+def ended_count(entities: int, eligible: int, share: str) -> int:
+    """The entities that end: ``n`` of all *entities*, or every eligible one when fewer are eligible."""
+    return min(declared_ended(entities, share), eligible)
+
+
+def end_share_note(expose_id: str, entry: HistoryEntry, plan: "HistoryPlan") -> Optional[str]:
+    """One sentence when fewer entities are eligible to end than the share of every entity asks for.
+
+    Every eligible entity then ends and the share yielded is lower than the one declared (ADR 0017,
+    the amendment of 2026-11-24). It names the emit, the declared share and the yielded share as a
+    decimal. It is advice only: nothing here changes a value, and no plan document carries it.
+    """
+    end = entry.end
+    if end is None or plan.ended is None or plan.entities == 0:
+        return None
+    if int(plan.ended.sum()) >= declared_ended(plan.entities, end.share):
+        return None
+    yielded = Fraction(int(plan.ended.sum()), plan.entities)
+    return (
+        f"note: {expose_id} declares a history end share of {end.share}, a share of every "
+        f"entity, and only {int(plan.ended.sum())} of {plan.entities} entities can end, so every "
+        f"eligible entity ends and the share yielded is {float(yielded):.4f}"
+    )
 
 
 def ended_entities(
@@ -657,11 +684,11 @@ def ended_entities(
 ) -> "np.ndarray":
     """Which entities end, as a flag per entity: the eligible entity of rank ``r`` ends when ``permute/2(K_end, E', r) < n``.
 
-    *forced* flags the entities whose parent ended inside the horizon (ADR 0017, amendment of
-    2026-11-24). They are eligible whatever their versions, they end, and they count towards
-    ``n``: the others end by the same permutation over the eligible entities that are not forced,
-    ``n`` less the forced ones of them, and when the forced ones are more than ``n`` they all end
-    and no other does.
+    ``n`` is the share of every entity (:func:`ended_count`), chosen among the entities that can
+    end. *forced* flags the entities whose parent ended inside the horizon (ADR 0017, amendment of
+    2026-11-24). They can end whatever their versions, they end, and they count towards ``n``: the
+    others end by the same permutation over the eligible entities that are not forced, ``n`` less
+    the forced ones, and when the forced ones are more than ``n`` they all end and no other does.
     """
     end = entry.end
     assert end is not None
@@ -674,8 +701,8 @@ def ended_entities(
         eligible_flags = eligible_flags & ~forced
     eligible = np.nonzero(eligible_flags)[0]
     ranks = int(eligible.shape[0])
-    count = max(ended_count(ranks + held, end.share) - held, 0)
-    if count == 0 or ranks == 0:
+    count = max(ended_count(int(counts.shape[0]), ranks + held, end.share) - held, 0)
+    if count == 0:
         return ended
     images = np.array(
         kernel2.permute2_array(

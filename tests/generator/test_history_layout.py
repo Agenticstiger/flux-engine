@@ -99,22 +99,23 @@ PARENT = HistoryParent("customer", min_children=1)
 
 def entry(
     *,
+    emit: str = EMIT,
     entities: int = ENTITIES,
+    length: Histogram = LENGTH,
     versions: Optional[ChildShape] = LEVELS,
     parent: Optional[HistoryParent] = PARENT,
-    start: Optional[Histogram] = None,
     until: str = UNTIL,
-    end: Optional[HistoryEnd] = None,
+    **rest: Any,
 ) -> HistoryEntry:
+    """A history entry: eight entities under ``customer``, with the other fields as ``rest`` names."""
     return HistoryEntry(
-        emit=EMIT,
+        emit=emit,
         entities=entities,
-        length=LENGTH,
+        length=length,
         until=until,
         parent=parent,
         versions=versions,
-        start=start,
-        end=end,
+        **rest,
     )
 
 

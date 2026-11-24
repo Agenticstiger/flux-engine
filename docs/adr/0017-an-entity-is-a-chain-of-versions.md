@@ -528,8 +528,9 @@ parent's end (the entity is ended once its parent is) needs it, and `plan` says 
 note naming the emit, so the count is no surprise. A parent that ended after `until` bounds the room only, and forces
 nothing.
 
-**The share.** Forced entities are eligible and count towards the entities that end: `n` is `LRM(E', [share, 1 - share])[0]`
-over the `E'` entities that are eligible or forced, as in section 5. The other entities end by the permutation
+**The share.** Forced entities can end whatever their versions and count towards the entities that end. As the
+amendment below says, `n` is `min(LRM(E, [share, 1 - share])[0], E')`, a share of every entity `E`, capped at the `E'`
+entities that can end, which are the eligible ones and the forced ones. The other entities end by the permutation
 `permute/2(K_end, E'', r) < n - f` over the `E''` eligible entities that are not forced, with `f` the forced ones. When `f`
 is more than `n`, all forced entities end and no other does. The permutation, and so the bytes, are what they were
 when `f` is zero.
@@ -569,3 +570,19 @@ for a history with this key and no `end`. An entity left with an empty intersect
 **When the forced entities are more than the share.** All of them end, and the share the run reaches is higher than the
 declared one, by the forced entities beyond it. Nothing is printed: `history:within_parent` and the count of ended
 entities in the rows are where it shows.
+
+## Amendment of 2026-11-24: the end share is a share of every entity
+
+Section 5 took `share` of the eligible entities, so a declared share ended fewer entities than it named in a
+bundle whose eligible entities were fewer than all of them (an `end` with a `column` needs two versions). A reader
+who writes a `share` means that share of the histories, so the share is now a share of every entity:
+
+- `n = min(LRM(E, [share, 1 - share])[0], E')`, with `E` the number of entities and `E'` the number of eligible
+  ones, the classes keyed `"0"` and `"1"`. The ended entities are still chosen among the eligible ones, the entity
+  of eligible rank `r` ending when `permute/2(K_end, E', r) < n`, so which entities end is the same permutation.
+- When fewer entities are eligible than the share asks for, every eligible entity ends, and `plan` says so in a
+  note on its text output that names the emit, the declared share and the share yielded, as a decimal. It is advice
+  only: no plan document or digest carries it. No bundle is refused for it.
+- With `closeLast` and no `column` every entity is eligible, so `E' = E` and the count is the one section 5 gave.
+  Every other `end` ends a different set of entities when the eligible ones are fewer than `E`, so **the bytes of
+  such a history and of every projection of it move**. A history without an `end` keeps its bytes.
