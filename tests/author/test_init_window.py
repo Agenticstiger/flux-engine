@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pytest
-import yaml
 
 from flux_engine.author.bundle import AuthoredExpose, _time_bounds
 from flux_engine.author.columns import ColumnContext, ColumnPlan, bound_to_window
@@ -23,6 +22,8 @@ from flux_engine.author.window import (
 from flux_engine.cli._init import run_init
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
+
+from .test_init_from_profile import _simulation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = REPO_ROOT / "tests" / "fixtures" / "author" / "orders.fluid.yaml"
@@ -192,10 +193,6 @@ def test_no_range_anywhere_keeps_the_assumed_year() -> None:
 
 
 # -- init --------------------------------------------------------------------------------------------
-
-
-def _simulation(directory: Path) -> Dict[str, Any]:
-    return yaml.safe_load((directory / "simulation.flux.yml").read_text(encoding="utf-8"))
 
 
 def test_init_writes_exactly_the_window_it_is_given(tmp_path: Path) -> None:

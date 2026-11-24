@@ -32,7 +32,7 @@ from flux_engine.cli import main
 from flux_engine.cli._init import run_init
 from flux_engine.stages.ship import ship
 from flux_stats.request import load_request_text
-from tests.overlays import ORDERS_CONTRACT, ORDERS_MEAN_PROFILE, ORDERS_PROFILE
+from tests.overlays import ORDERS_CONTRACT, ORDERS_MEAN_PROFILE, ORDERS_PROFILE, init_orders
 
 pytestmark = pytest.mark.integration
 
@@ -148,8 +148,7 @@ def test_an_assumed_row_count_is_replaced_by_the_tables_row_count(tmp_path: Path
             column["metrics"].pop("count", None)
 
     profile = _write_profile(tmp_path, without_rows)
-    result = run_init(str(tmp_path / "bundle"), contract=str(ORDERS_CONTRACT), profile=str(profile))
-    assert result.exit_code == 0, result.stderr
+    init_orders(tmp_path / "bundle", profile)
     (rows,) = [e for e in _entries(tmp_path / "bundle") if e["pointer"].endswith("/orders/rows")]
     assert rows["source"] == "assumption"
     assert rows["replacedBy"] == {"pointer": "/tables/orders/rowCount"}
@@ -357,18 +356,12 @@ def test_init_plan_apply_verify_and_ship_with_the_replacements(
 
 
 def test_init_again_after_the_bundle_was_moved_away_succeeds(tmp_path: Path) -> None:
-    first = run_init(
-        str(tmp_path / "bundle"), contract=str(ORDERS_CONTRACT), profile=str(ORDERS_PROFILE)
-    )
-    assert first.exit_code == 0, first.stderr
+    init_orders(tmp_path / "bundle")
     assert (tmp_path / "bundle" / REQUEST).is_file()
     (tmp_path / "bundle").rename(tmp_path / "kept")
     # Nothing is left beside the directory to refuse the second run.
     assert sorted(path.name for path in tmp_path.iterdir()) == ["kept"]
-    second = run_init(
-        str(tmp_path / "bundle"), contract=str(ORDERS_CONTRACT), profile=str(ORDERS_PROFILE)
-    )
-    assert second.exit_code == 0, second.stderr
+    init_orders(tmp_path / "bundle")
     assert (tmp_path / "bundle" / REQUEST).is_file()
 
 
@@ -388,8 +381,7 @@ def test_the_request_is_not_read_as_a_bundle_document_nor_hashed(
     import shutil
 
     bundle = tmp_path / "bundle"
-    result = run_init(str(bundle), contract=str(ORDERS_CONTRACT), profile=str(ORDERS_MEAN_PROFILE))
-    assert result.exit_code == 0, result.stderr
+    init_orders(bundle, ORDERS_MEAN_PROFILE)
     assert (bundle / REQUEST).is_file()
     bare = tmp_path / "bare"
     shutil.copytree(bundle, bare)

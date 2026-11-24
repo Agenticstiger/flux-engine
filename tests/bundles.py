@@ -13,10 +13,11 @@ copy it and write one line otherwise. This is the one place that knows how.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from pathlib import Path
-from typing import Callable, Sequence, Tuple, Union
+from typing import Any, Callable, Mapping, Sequence, Tuple, Union
 
 from flux_engine.core.digest import digest_of_document
 from flux_engine.seam.resolve import load_documents_exact
@@ -54,6 +55,19 @@ def _rewritten(
     assert count == 1, f"the fixture's {what} moved"
     document.write_text(text)
     return target
+
+
+def init_from_texts(root: Path, contract_text: str, profile: Mapping[str, Any]) -> Any:
+    """Write a contract and a profile under *root*, run ``init`` on them into *root*/``bundle``, return its result."""
+    from flux_engine.cli._init import run_init
+
+    (root / "c.fluid.yaml").write_text(contract_text, encoding="utf-8")
+    (root / "p.profile.json").write_text(json.dumps(profile), encoding="utf-8")
+    return run_init(
+        str(root / "bundle"),
+        contract=str(root / "c.fluid.yaml"),
+        profile=str(root / "p.profile.json"),
+    )
 
 
 def bundle_with_rows(fixture: Path, target: Path, rows: int) -> Path:

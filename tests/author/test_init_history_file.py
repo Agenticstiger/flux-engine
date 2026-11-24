@@ -35,6 +35,7 @@ from flux_engine.stages.apply import apply
 from flux_engine.stages.plan import plan
 
 from .test_history_init import NAMESPACE, _bins, _levels, _namespace, _profile
+from .test_init_from_profile import _simulation
 from .test_projection_init import CONTRACT, _profile_with
 
 pytestmark = pytest.mark.integration
@@ -160,13 +161,6 @@ def _declared(tmp_path: Path, document: Any = HISTORY_FILE) -> Any:
     return result
 
 
-def _simulation(tmp_path: Path) -> Dict[str, Any]:
-    loaded: Dict[str, Any] = yaml.safe_load(
-        (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
-    )
-    return loaded
-
-
 # --- what the bundle holds ------------------------------------------------------------------
 
 
@@ -177,7 +171,7 @@ def test_the_bundle_holds_the_files_keys_and_its_window(tmp_path: Path) -> None:
     assert namespace[SNAPSHOTS_KEY] == HISTORY_FILE["snapshots"]
     assert namespace[EVENTS_KEY] == HISTORY_FILE["events"]
     assert namespace[PERIODS_KEY] == HISTORY_FILE["periods"]
-    assert _simulation(tmp_path)["spec"]["timeBounds"] == {
+    assert _simulation(tmp_path / "bundle")["spec"]["timeBounds"] == {
         "start": "2024-01-01T00:00:00.000Z",
         "end": "2025-12-31T00:00:00.000Z",
     }
@@ -228,12 +222,6 @@ def test_no_counts_entry_lays_out_a_projected_emit_or_the_historys_parent(tmp_pa
         assert "projected from the declared history, whose layout places its rows" in (
             state["note"]
         )
-
-
-def _counts_of(directory: Path) -> List[Dict[str, Any]]:
-    text = (directory / "simulation.flux.yml").read_text(encoding="utf-8")
-    found: List[Dict[str, Any]] = yaml.safe_load(text)["extensions"][NAMESPACE].get(COUNTS_KEY, [])
-    return found
 
 
 def _with_relationships(profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -333,7 +321,7 @@ def test_a_declared_history_cites_no_statistic_of_the_profiles_history(tmp_path:
         stage=False,
     )
     assert planned.success, planned.stderr
-    namespace = _simulation(tmp_path)["extensions"][NAMESPACE]
+    namespace = _simulation(tmp_path / "bundle")["extensions"][NAMESPACE]
     written = namespace[HISTORY_KEY]
     assert written
     register = namespace["parameters"]

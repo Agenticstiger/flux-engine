@@ -35,6 +35,7 @@ from tests.author import rank_profile as rp
 from tests.author.test_history_init import CONTRACT as HISTORY_CONTRACT
 from tests.author.test_history_init import _profile as history_profile
 from tests.author.test_init_cliques_binned import _document as clique_document
+from tests.bundles import init_from_texts
 
 pytestmark = pytest.mark.integration
 
@@ -87,13 +88,7 @@ def _beside_emits(register: Any) -> List[Any]:
 
 
 def _write(tmp_path: Path, contract_text: str, profile: Dict[str, Any]) -> Path:
-    (tmp_path / "c.fluid.yaml").write_text(contract_text, encoding="utf-8")
-    (tmp_path / "p.profile.json").write_text(json.dumps(profile), encoding="utf-8")
-    result = run_init(
-        str(tmp_path / "bundle"),
-        contract=str(tmp_path / "c.fluid.yaml"),
-        profile=str(tmp_path / "p.profile.json"),
-    )
+    result = init_from_texts(tmp_path, contract_text, profile)
     assert result.exit_code == 0, result.stderr
     return tmp_path / "bundle"
 

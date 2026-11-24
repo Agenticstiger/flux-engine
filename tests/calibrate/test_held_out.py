@@ -39,7 +39,12 @@ from flux_engine.cli import main  # noqa: E402
 from flux_engine.core.errors import FluxError  # noqa: E402
 from flux_engine.evidence.grades import grade_profile  # noqa: E402
 from flux_engine.seam.profile import load_profile  # noqa: E402
-from tests.calibrate._fit_bundle import NAMESPACE, SIMULATION, copy_fit_bundle  # noqa: E402
+from tests.calibrate._fit_bundle import (  # noqa: E402
+    NAMESPACE,
+    SIMULATION,
+    copy_fit_bundle,
+    edit_simulation,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -51,15 +56,14 @@ HELD_OUT = FIXTURES / "subscriptions.held-out-profile.json"
 
 def make(root: Path, *, tolerance: Optional[str] = "0.1", evaluations: int = 6) -> Path:
     """The fit bundle, with a held-out tolerance and a small budget (the gate does not need more)."""
-    bundle = copy_fit_bundle(root)
-    path = bundle / SIMULATION
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    block = document["extensions"][NAMESPACE]["consumers"]["calibration"]
-    block["evaluations"] = evaluations
-    if tolerance is not None:
-        block["heldOutTolerance"] = tolerance
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    return bundle
+
+    def change(document: Dict[str, Any]) -> None:
+        block = document["extensions"][NAMESPACE]["consumers"]["calibration"]
+        block["evaluations"] = evaluations
+        if tolerance is not None:
+            block["heldOutTolerance"] = tolerance
+
+    return edit_simulation(copy_fit_bundle(root), change)
 
 
 def held_out_profile(root: Path, name: str, change: Any) -> Path:
@@ -351,13 +355,12 @@ def test_an_unreadable_held_out_profile_leaves_no_patch_and_the_rerun_is_not_ref
 
 
 def without_held_out_query(root: Path) -> Path:
-    bundle = make(root)
-    path = bundle / SIMULATION
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    for query in document["extensions"][NAMESPACE]["consumers"]["queries"]:
-        query.pop("heldOut", None)
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    return bundle
+
+    def change(document: Dict[str, Any]) -> None:
+        for query in document["extensions"][NAMESPACE]["consumers"]["queries"]:
+            query.pop("heldOut", None)
+
+    return edit_simulation(make(root), change)
 
 
 def fit_command(bundle: Path, root: Path, *more: str) -> int:

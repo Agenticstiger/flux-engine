@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 import yaml
 
@@ -49,12 +49,19 @@ def _assume_nulls(namespace: Dict[str, Any], simulation_id: str) -> None:
     ]
 
 
+def edit_simulation(bundle: Path, change: Callable[[Dict[str, Any]], None]) -> Path:
+    """Apply *change* to the Simulation document of *bundle*, write it back, and return *bundle*."""
+    path = bundle / SIMULATION
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    change(document)
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return bundle
+
+
 def copy_fit_bundle(root: Path) -> Path:
     """A copy of the fixture bundle under *root* that a fit can move, as described above."""
     bundle = root / "bundle"
     shutil.copytree(FIXTURES / "bundle", bundle)
-    path = bundle / SIMULATION
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    _assume_nulls(document["extensions"][NAMESPACE], document["id"])
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    return bundle
+    return edit_simulation(
+        bundle, lambda document: _assume_nulls(document["extensions"][NAMESPACE], document["id"])
+    )
