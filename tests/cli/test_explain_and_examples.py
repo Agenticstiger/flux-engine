@@ -46,6 +46,23 @@ def test_surrounding_whitespace_is_not_a_different_code() -> None:
     assert main(["explain", "  FLX-3105 "]) == 0
 
 
+def test_the_explanation_of_flx_5036_covers_the_refusals_of_format_1_4_0(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["explain", "FLX-5036"]) == 0
+    text = capsys.readouterr().out
+    # Followed relationships that are no tree, estimated cliques, and the clique work limit.
+    for phrase in (
+        "two followed relationships lead into one table",
+        "a table the unit does not reach",
+        "form a cycle",
+        "estimate on a clique",
+        "measurements or published: estimated",
+        "clique work limit",
+    ):
+        assert phrase in text, phrase
+
+
 def test_list_prints_every_registered_code(capsys: pytest.CaptureFixture[str]) -> None:
     from flux_engine.core.errors import catalog, ensure_core_codes_loaded
 
