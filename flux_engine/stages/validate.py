@@ -47,7 +47,7 @@ directory, which is the difference between it and ``plan``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Set, Union
+from typing import Any, Dict, List, Mapping, Set, Tuple, Union
 
 from flux_engine.api.stages import StageResult
 from flux_engine.core.clock import declared_time_bounds
@@ -163,6 +163,91 @@ def _check_overlay_names(resolved: Any, simulation: Mapping[str, Any], *, where:
     require_in_contract(contract, overlay, code=FLX_3105)
 
 
+def _validate_simulation(
+    loaded: Any, simulation_id: str, profile: Union[str, Path, None], warnings: List[str]
+) -> Tuple[Dict[str, Any], bool]:
+    """Check one Simulation of the bundle; its summary, and whether its consumers' queries went unchecked.
+
+    The warnings its checks give are added to *warnings*. A refusal is raised as the
+    :class:`FluxError` it is.
+    """
+    cast = resolve_cast(loaded.flux_documents, simulation_id=simulation_id)
+    fidelity = str(cast.simulation.get("spec", {}).get("fidelity", "deterministic"))
+    require_supported_fidelity(fidelity)
+    pack_of_world(cast.world)
+    declared_time_bounds(cast.simulation)
+    resolved = resolve_all_emits(
+        loaded, simulation_id=simulation_id, counter_based=new_plan_is_counter_based()
+    )
+    strict = strict_coverage_declared(cast.simulation, where=simulation_id)
+    check_flux_side_rule_ids(resolved, where=simulation_id)
+    check_copies_declared(
+        cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
+    )
+    check_generators_declared(
+        cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
+    )
+    check_hidden_declared(resolved, where=simulation_id, counter_based=new_plan_is_counter_based())
+    check_overlay_declared(
+        cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
+    )
+    _check_overlay_names(resolved, cast.simulation, where=simulation_id)
+    plugins = plugin_exposes(resolved, declared_generators(cast.simulation, where=simulation_id))
+    check_conditions_declared(
+        cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
+    )
+    for entry in resolved:
+        warnings.extend(
+            _check_emit(
+                entry,
+                resolved,
+                cast.simulation,
+                plugins,
+                simulation_id=simulation_id,
+                strict=strict,
+            )
+        )
+    # The counts and weights `plan` refuses when it lays the relationships out.
+    check_relations_declared(
+        resolved, cast.simulation, sim_id=simulation_id, strict=strict, plugins=plugins
+    )
+    # Consumer queries: every view and query is checked against the exposes' schema, as
+    # `plan` checks them, so a text `verify` would refuse is refused before any apply.
+    check_consumer_sql(cast.simulation, resolved, where=simulation_id)
+    is_unchecked = consumers_unchecked(cast.simulation, where=simulation_id)
+    # Parameter register: every register entry has to name numbers of this run.
+    register = parameter_register_of(loaded, cast)
+    _check_pinned_profile(cast.simulation, simulation_id, register, profile)
+    summary = {
+        "fidelity": fidelity,
+        "documents": len(cast.documents),
+        "emits": [entry.expose_id for entry in resolved],
+        "emitsWithFidelity": [entry.expose_id for entry in resolved if entry.fidelity is not None],
+        **(
+            {"parameters": {"declared": len(register.numbers), "counts": register.counts()}}
+            if register is not None
+            else {}
+        ),
+    }
+    return summary, is_unchecked
+
+
+def _check_pinned_profile(
+    simulation: Any, simulation_id: str, register: Any, profile: Union[str, Path, None]
+) -> None:
+    """Read the Simulation against the profile it pins, as ``plan`` reads it; nothing without a profile."""
+    if profile is None:
+        return
+    pin = profile_reference(simulation, where=simulation_id)
+    if pin is not None:
+        check_simulation_against_profile(
+            simulation,
+            simulation_id,
+            register,
+            require_profile(pin, Path(profile), where=simulation_id),
+        )
+
+
 def validate(
     bundle_directory: Union[str, Path],
     *,
@@ -194,79 +279,11 @@ def validate(
     unchecked: List[str] = []
     for simulation_id in sorted(loaded.simulation_ids()):
         try:
-            cast = resolve_cast(loaded.flux_documents, simulation_id=simulation_id)
-            fidelity = str(cast.simulation.get("spec", {}).get("fidelity", "deterministic"))
-            require_supported_fidelity(fidelity)
-            pack_of_world(cast.world)
-            declared_time_bounds(cast.simulation)
-            resolved = resolve_all_emits(
-                loaded, simulation_id=simulation_id, counter_based=new_plan_is_counter_based()
+            simulations[simulation_id], is_unchecked = _validate_simulation(
+                loaded, simulation_id, profile, warnings
             )
-            strict = strict_coverage_declared(cast.simulation, where=simulation_id)
-            check_flux_side_rule_ids(resolved, where=simulation_id)
-            check_copies_declared(
-                cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
-            )
-            check_generators_declared(
-                cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
-            )
-            check_hidden_declared(
-                resolved, where=simulation_id, counter_based=new_plan_is_counter_based()
-            )
-            check_overlay_declared(
-                cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
-            )
-            _check_overlay_names(resolved, cast.simulation, where=simulation_id)
-            plugins = plugin_exposes(
-                resolved, declared_generators(cast.simulation, where=simulation_id)
-            )
-            check_conditions_declared(
-                cast.simulation, where=simulation_id, counter_based=new_plan_is_counter_based()
-            )
-            for entry in resolved:
-                warnings.extend(
-                    _check_emit(
-                        entry,
-                        resolved,
-                        cast.simulation,
-                        plugins,
-                        simulation_id=simulation_id,
-                        strict=strict,
-                    )
-                )
-            # The counts and weights `plan` refuses when it lays the relationships out.
-            check_relations_declared(
-                resolved, cast.simulation, sim_id=simulation_id, strict=strict, plugins=plugins
-            )
-            # Consumer queries: every view and query is checked against the exposes' schema, as
-            # `plan` checks them, so a text `verify` would refuse is refused before any apply.
-            check_consumer_sql(cast.simulation, resolved, where=simulation_id)
-            if consumers_unchecked(cast.simulation, where=simulation_id):
+            if is_unchecked:
                 unchecked.append(simulation_id)
-            # Parameter register: every register entry has to name numbers of this run.
-            register = parameter_register_of(loaded, cast)
-            if profile is not None:
-                pin = profile_reference(cast.simulation, where=simulation_id)
-                if pin is not None:
-                    check_simulation_against_profile(
-                        cast.simulation,
-                        simulation_id,
-                        register,
-                        require_profile(pin, Path(profile), where=simulation_id),
-                    )
-            simulations[simulation_id] = {
-                "fidelity": fidelity,
-                "documents": len(cast.documents),
-                "emits": [entry.expose_id for entry in resolved],
-                "emitsWithFidelity": [
-                    entry.expose_id for entry in resolved if entry.fidelity is not None
-                ],
-                **(
-                    {"parameters": {"declared": len(register.numbers), "counts": register.counts()}}
-                    if register is not None
-                    else {}
-                ),
-            }
         except FluxError as error:
             problems.append(f"{simulation_id}: {error}")
             codes.add(error.code.code)
