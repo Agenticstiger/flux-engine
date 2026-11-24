@@ -31,14 +31,14 @@ a single value:
    refusal here is the one ``verify`` would give. A tolerance its margin
    cannot meet is §3's, refused by ``plan``.
 
-7. With ``profile`` (``--profile``), the profile the Simulation pins is read as ``plan`` reads
-   it, so what ``plan`` refuses about it is refused here with the same code: a profile that is
-   not the pinned one (``FLX-3109``, ``FLX-3110``), an overlay that names a table or column it
-   lacks (``FLX-3105``), and a parameter that cites a table or column the profile does not
-   describe (``FLX-3113``). A Simulation that pins no profile is not read against one.
-   Without ``profile`` there is nothing to read, so a profile that lacks a table or column the
-   contract has is not found: ``validate`` says valid for it, as it always has, and ``plan``
-   refuses it.
+7. With ``profile`` (``--profile``), the profile a Simulation pins is read, and ``validate`` refuses
+   what ``plan`` refuses about it with the same code: a profile that is not the one pinned or
+   cannot be read (``FLX-3109``, ``FLX-3110``), an overlay that names a table or column the
+   profile lacks (``FLX-3105``), and a parameter of the register that cites a table or column the
+   profile does not describe (``FLX-3113``). That is all it checks about a profile. It leaves to
+   ``plan`` a profile given to a Simulation that pins none, and the grade floor (``FLX-4005``).
+   Without ``profile`` there is nothing to read, so none of these is found: ``validate`` says valid
+   for a bundle ``plan`` refuses on one of them.
 
 Nothing here is written to disk; ``validate`` never creates a run
 directory, which is the difference between it and ``plan``.

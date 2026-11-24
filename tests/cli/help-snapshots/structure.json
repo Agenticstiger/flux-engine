@@ -413,7 +413,7 @@
       },
       {
         "command": "fluxsim validate ./bundle --profile profile.json",
-        "note": "also check the bundle against the profile it pins, as plan does"
+        "note": "also refuse what plan refuses about the profile the bundle pins (FLX-3105, 3109, 3110, 3113)"
       }
     ],
     "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/validate.html",
@@ -459,7 +459,7 @@
         "default": "None",
         "type": null,
         "required": false,
-        "help": "the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, as plan does, an overlay or a parameter that names a table or column it does not describe, and a profile whose digest is not the pinned one; without it no profile is read",
+        "help": "the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, as plan does, an overlay or a parameter of the register that names a table or column it does not describe, and a profile that is not the pinned one (FLX-3105, 3109, 3110, 3113); a profile given to a Simulation that pins none and the grade floor (FLX-4005) are left to plan; without it no profile is read",
         "metavar": "PATH",
         "choices": null
       },

@@ -18,7 +18,7 @@ EXAMPLES: Dict[str, Tuple[Example, ...]] = {
         Example("fluxsim validate ./bundle", "check a bundle; nothing is written"),
         Example(
             "fluxsim validate ./bundle --profile profile.json",
-            "also check the bundle against the profile it pins, as plan does",
+            "also refuse what plan refuses about the profile the bundle pins (FLX-3105, 3109, 3110, 3113)",
         ),
     ),
 }
@@ -40,9 +40,11 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         default=None,
         metavar="PATH",
         help=(
-            "the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, as "
-            "plan does, an overlay or a parameter that names a table or column it does not "
-            "describe, and a profile whose digest is not the pinned one; without it no profile is read"
+            "the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, "
+            "as plan does, an overlay or a parameter of the register that names a table or column "
+            "it does not describe, and a profile that is not the pinned one (FLX-3105, 3109, "
+            "3110, 3113); a profile given to a Simulation that pins none and the grade floor "
+            "(FLX-4005) are left to plan; without it no profile is read"
         ),
     )
     _add_json_flag(validate_p)
