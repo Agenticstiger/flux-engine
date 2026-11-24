@@ -331,3 +331,28 @@ def test_a_window_that_does_not_hold_a_declared_contract_range_is_refused(tmp_pa
     message = result.stderr or ""
     assert "2020-02-01" in message and "2021-02-01" in message and "2020-06-01" in message
     assert "give a window that holds" in message
+
+
+@pytest.mark.parametrize(
+    "constraint",
+    [
+        ">= '2020-01-01'" + " " * 200_000 + "and <= '2020-12-31'",
+        ">= '2020-01-01' and" + " " * 200_000 + "<= '2020-12-31' and" + " " * 200_000,
+        "between '2020-01-01'" + " " * 200_000 + "and '2020-12-31'",
+        ">= '2020-01-01'" + " " * 200_000 + "x",
+    ],
+)
+def test_a_long_run_of_spaces_in_a_constraint_is_read_in_linear_time(constraint: str) -> None:
+    import time
+
+    started = time.monotonic()
+    found = declared_instants(_rule(constraint))
+    assert time.monotonic() - started < 1.0
+    assert found in (None, (_ms("2020-01-01"), _ms("2020-12-31")))
+
+
+def test_the_split_at_and_reads_an_ordinary_constraint_as_before() -> None:
+    assert declared_instants(_rule(">= '2020-01-01'   AND\t<= '2020-12-31'")) == (
+        _ms("2020-01-01"),
+        _ms("2020-12-31"),
+    )

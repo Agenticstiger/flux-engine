@@ -21,6 +21,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, List, Mapping, Optional, Tuple
 
+from flux_engine.author.ranges import _and_parts
 from flux_engine.core.clock import format_rfc3339_ms
 
 __all__ = ["WindowError", "declared_instants", "instant_ms", "parse_window"]
@@ -88,7 +89,7 @@ def declared_instants(column: Any) -> Optional[Tuple[int, int]]:
             second = next(text for text in between.groups()[3:] if text is not None)
             pairs = [(">=", instant_ms(first)), ("<=", instant_ms(second))]
         else:
-            for part in re.split(r"\s+and\s+", constraint.strip(), flags=re.IGNORECASE):
+            for part in _and_parts(constraint):
                 bound = _BOUND.match(part)
                 if not bound:
                     return None
