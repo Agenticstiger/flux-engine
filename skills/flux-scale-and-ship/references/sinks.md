@@ -1,6 +1,6 @@
 # Sinks
 
-Offline first: `fluxsim plugins` and `fluxsim apply --help`. The page: [Load a simulation into a database](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/load-a-simulation-into-a-database.md).
+Offline first: `fluxsim plugins` and `fluxsim apply --help`. The page: [Load a simulation into a database](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/load-a-simulation-into-a-database.md).
 
 A sink writes the rows of a whole run as typed columns, in addition to the NDJSON the run directory already holds. `--sink NAME:TARGET` works on `apply` and `run`; `--sink-opt KEY=VALUE` is repeatable. A run writes to one sink per command; to deliver to a second place, run `apply` again with the other `--sink`. The stream's `outputDigest` is computed before a sink sees a row, so a sink changes where rows land and nothing about what they are. A share (`--shard`) is refused by `--sink`.
 

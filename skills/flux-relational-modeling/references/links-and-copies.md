@@ -1,6 +1,6 @@
 # Links, copies, sentinels, bridges and the codes
 
-Read this when you declare a copy, a conditional link, a sentinel or a bridge, or when a plan refuses one. The record is [ADR 0022](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/adr/0022-rows-read-their-linked-rows.md); the installed engine's help and `fluxsim explain` are the authority for the installed version.
+Read this when you declare a copy, a conditional link, a sentinel or a bridge, or when a plan refuses one. The record is [ADR 0022](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/adr/0022-rows-read-their-linked-rows.md); the installed engine's help and `fluxsim explain` are the authority for the installed version.
 
 ## What a link is
 
@@ -9,7 +9,7 @@ A relationship of the contract names, for each row of a child table, one row of 
 Where a declaration lives:
 
 - the contract (the owner's) holds the relationships, `sharedColumns`, `sharedAttribute` and a `derive` over a path;
-- the bundle holds the module facts, in the Simulation's `extensions` under the namespace `com.agentics.flux/1` ([ADR 0018](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/adr/0018-module-facts-live-in-the-flux-bundle.md)): `copies`, `links` and `bridges`.
+- the bundle holds the module facts, in the Simulation's `extensions` under the namespace `com.agentics.flux/1` ([ADR 0018](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/adr/0018-module-facts-live-in-the-flux-bundle.md)): `copies`, `links` and `bridges`.
 
 The namespace's keys are closed: a key nothing reads is refused. No page that the docs tests run shows `copies`, `links` or `bridges`, so write them only from the record's text, key for key, and say so to the user.
 
@@ -78,7 +78,7 @@ Run `fluxsim explain` on each before you act on it.
 - a sentinel, as `sentinel:<relationship>.<column>`: of the rows whose path reaches no row, the share whose column is the sentinel;
 - a bridge, as `bridge:<a>,<b>`: of every row, the share whose pair of parent keys occurs once.
 
-All four are enforced, so one violating row fails the run. A copy the run did not make is reported `(not enforced)` and fails nothing, so read that mark before you tell the user a copy holds. Each key is also checked for integrity: each child key is found in its parent, parent keys are unique, and NULLs appear only where `joinType: left` allows them. The page that shows these lines is [score a run against a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/score-a-run-against-a-profile.md), and the `flux-run-and-verify` skill reads the results.
+All four are enforced, so one violating row fails the run. A copy the run did not make is reported `(not enforced)` and fails nothing, so read that mark before you tell the user a copy holds. Each key is also checked for integrity: each child key is found in its parent, parent keys are unique, and NULLs appear only where `joinType: left` allows them. The page that shows these lines is [score a run against a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/score-a-run-against-a-profile.md), and the `flux-run-and-verify` skill reads the results.
 
 ## When a check fails
 

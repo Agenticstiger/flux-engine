@@ -20,7 +20,7 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.11.1 - 2026-11-24
 
 Fixes for the findings of the 0.11.0 inspection. No digest moves, except for a bundle that hit the copula overflow
 described first under Fixed, whose outputs were wrong before.

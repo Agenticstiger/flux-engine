@@ -1,8 +1,8 @@
 # Making and scoring forecasts
 
 The two commands, their options and what each leaves behind. The pages are
-[forecast the next state](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/forecast-the-next-state.md)
-and [the command reference](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/reference/cli/forecast.md).
+[forecast the next state](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/forecast-the-next-state.md)
+and [the command reference](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/reference/cli/forecast.md).
 For the options of the installed engine, `fluxsim forecast make --help` and `fluxsim forecast score --help` are the authority.
 
 ## `fluxsim forecast make`
@@ -23,7 +23,7 @@ What it does: it runs the sweep as replicates, and for each item registers the m
 - Nothing is registered for any item when one cannot give its interval (`FLX-7140`). A Simulation that declares no forecasts has nothing to make (`FLX-7141`); a horizon that ends before its registration is refused (`FLX-7142`).
 
 After `make`, tell the user to publish each seal where others can see it before the next state is released. That publication, with the time given, is what makes the later score a test the forecast could fail. The page on sealing a prediction is
-[seal and score a prediction](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/seal-and-score-a-prediction.md).
+[seal and score a prediction](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/seal-and-score-a-prediction.md).
 
 ## `fluxsim forecast score`
 

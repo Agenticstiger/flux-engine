@@ -1,9 +1,9 @@
 # Response families and forecasts
 
 Two keys of the Simulation's namespace (`extensions['com.agentics.flux/1']`), neither read by an engine before this feature. A bundle that declares neither has the bytes and outputs it had. Both are kernel 0.2.0 only; kernel 0.1.0 refuses them (`FLX-3105`, naming the kernel). The keys are closed: a key nothing reads is refused. The page that shows both declarations in a bundle is
-[forecast the next state](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/forecast-the-next-state.md);
+[forecast the next state](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/forecast-the-next-state.md);
 copy its shape from there and do not invent a key. The design is
-[ADR 0029](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/adr/0029-response-families-forecast-the-next-state-and-every-forecast-is-scored.md).
+[ADR 0029](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/adr/0029-response-families-forecast-the-next-state-and-every-forecast-is-scored.md).
 
 ## A state is a profile release
 

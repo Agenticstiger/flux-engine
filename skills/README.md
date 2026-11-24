@@ -56,7 +56,7 @@ Copy each `skills/<name>/` folder into `.agents/skills/` in a project, or into `
 
 ## Offline and on your model
 
-FLUX needs no internet to produce results and has no LLM inside it. These skills are plain text that runs on the model you choose, a local one included. The network is touched only by a `--sink` target you name and by an OpenLineage emitter your own code builds with a URL. See [Runs offline](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/explanation/offline.md).
+FLUX needs no internet to produce results and has no LLM inside it. These skills are plain text that runs on the model you choose, a local one included. The network is touched only by a `--sink` target you name and by an OpenLineage emitter your own code builds with a URL. See [Runs offline](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/explanation/offline.md).
 
 ## What the skills never tell an agent to do
 
@@ -72,4 +72,4 @@ FLUX needs no internet to produce results and has no LLM inside it. These skills
 
 ## More
 
-The guides are listed in the [how-to index](https://github.com/Agenticstiger/flux-engine/blob/v0.11.0/docs/how-to/README.md). Report a problem with a skill in the [issue tracker](https://github.com/Agenticstiger/flux-engine/issues).
+The guides are listed in the [how-to index](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/README.md). Report a problem with a skill in the [issue tracker](https://github.com/Agenticstiger/flux-engine/issues).

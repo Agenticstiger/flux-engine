@@ -31,7 +31,7 @@ describe](../README.md#which-version-these-pages-describe).
 
 ```console
 $ fluxsim --version
-0.11.0
+0.11.1
 ```
 
 ## 2. Create a project
