@@ -22,8 +22,8 @@ rankCorrelation and any property grouped by the bins of another column
 rule lines counts:<relationship>.minChildren and
 counts:<relationship>.parentWhen to the child's rules, both enforced, and a
 profile that publishes the children per parent of a relationship adds a
-childrenPerParent row to the scorecard; a row of a relationship that has a
-counts entry fails the run when it is outside the entry's tolerance.
+childrenPerParent row to the scorecard; a row of a relationship whose counts
+entry has given fails the run when it is outside the entry's tolerance.
 
 examples:
   # plan, apply, verify and ship in one command

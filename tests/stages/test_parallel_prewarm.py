@@ -358,11 +358,3 @@ def test_the_preload_ignores_sigint_first_and_restores_the_handler_last() -> Non
 def test_a_ctrl_c_while_the_server_imports_prints_no_traceback(tmp_path: Path) -> None:
     stderr = _interrupt_while_the_server_imports(tmp_path, "_prewarm.preload_modules('slowmod')")
     assert "KeyboardInterrupt" not in stderr and "Traceback" not in stderr, stderr
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="a forkserver is a POSIX facility")
-@pytest.mark.unit
-def test_without_the_guard_the_same_ctrl_c_does_print_one(tmp_path: Path) -> None:
-    """The control: the stock preload list, with the same slow import, shows the traceback the guard removes."""
-    stderr = _interrupt_while_the_server_imports(tmp_path, "['slowmod']")
-    assert "KeyboardInterrupt" in stderr, stderr

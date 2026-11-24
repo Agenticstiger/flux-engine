@@ -77,7 +77,7 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "entry of the bundle adds the rule lines counts:<relationship>.minChildren and "
             "counts:<relationship>.parentWhen to the child's rules, both enforced, and a profile "
             "that publishes the children per parent of a relationship adds a childrenPerParent row "
-            "to the scorecard; a row of a relationship that has a counts entry fails the run when "
+            "to the scorecard; a row of a relationship whose counts entry has given fails the run when "
             "it is outside the entry's tolerance."
         ),
     )

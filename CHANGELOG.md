@@ -35,10 +35,10 @@ described first under Fixed, whose outputs were wrong before.
   `OverflowError`. Such a column is located in Python integers, as the row path always did.
 - The grid cache of a copula column no longer grows without bound (about 20 entries per row for a wide column, about
   30 GB at 10 million rows). It is a least-recently-used cache of fixed size over a pure function, so no value moves.
-- `verify` and `run --verify` exit 1 when a children-per-parent row of a relationship that has a `counts` entry is
-  outside the entry's tolerance, in the whole or in one class of a `given` column, which is what the assertion for the
-  row (`success: false`) already said. The text names the failing group by its ordinal. `ship` withholds the emit for
-  the same row. A relationship with no `counts` entry keeps a row that informs and fails nothing.
+- `verify` and `run --verify` exit 1 when a children-per-parent row of a relationship whose `counts` entry has `given`
+  is outside the entry's tolerance, in the whole or in one class of the `given` column, which is what the assertion for
+  the row (`success: false`) already said. The text names the failing group by its ordinal. `ship` withholds the emit
+  for the same row. The row of any other relationship informs and fails nothing, as before.
 - A `BrokenPipeError` from a sink socket, an upload or a plugin is an error with its message on stderr, not a silent
   exit 141. Only a stdout that fails to flush is treated as a closed stdout.
 - A refusal is written to stderr when stdout has already gone, so `fluxsim validate DIR --json 2>err | true` leaves

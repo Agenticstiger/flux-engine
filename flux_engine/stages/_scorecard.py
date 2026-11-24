@@ -106,18 +106,18 @@ def children_failures(
 ) -> List[LineFailure]:
     """The children-per-parent rows of *scorecard* that are outside their tolerance, as lines that fail a run.
 
-    A ``counts`` entry lays a relationship out and declares the tolerance of its row, so a row of a
-    relationship that has an entry and is outside it (in the whole, or in a class of the parent
-    column it is given) is a failed check, as the assertion for it (``success: false``) says. A
-    relationship with no entry has a row too, read against the default tolerance, and that row
-    informs and fails nothing. A group is named by its ordinal, never by its key.
+    A ``counts`` entry that lays a relationship out *given* a parent column declares the tolerance of
+    the row's classes, so a row of such a relationship that is outside it (in a class, or in the
+    whole) is a failed check, as the assertion for the row (``success: false``) says. Any other row,
+    a relationship with no entry or one with no ``given``, informs and fails nothing. A group is
+    named by its ordinal, never by its key.
     """
     from flux_engine.concordance.module_scores import CHILDREN_PER_PARENT
     from flux_engine.concordance.verifier import OUTSIDE
 
-    if module is None or scorecard is None or not module.counts:
+    if module is None or scorecard is None or not any(entry.given for entry in module.counts):
         return []
-    declared = {(entry.emit, entry.relationship) for entry in module.counts}
+    declared = {(entry.emit, entry.relationship) for entry in module.counts if entry.given}
     found: List[LineFailure] = []
     for table in scorecard.tables:
         for row in table.properties:
