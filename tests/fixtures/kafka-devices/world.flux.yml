@@ -1,0 +1,11 @@
+fluxVersion: "0.5.0"
+kind: World
+id: world-devices
+name: World for Devices
+metadata:
+  owner:
+    team: fleet
+spec:
+  seed: 42
+  vertical: telco
+  population: { size: 1, lifecycleMix: { active: 1 } }

@@ -103,7 +103,14 @@ def _deliver_step(
         record = lambda receipt: write_receipts(layout, [receipt])  # noqa: E731
         pipeline_result = applied.artifacts.get("pipeline")
         if pipeline_result is not None:
-            receipts = deliver(pipeline_result, run_id=run_id, target=target, record=record)
+            receipts = deliver(
+                pipeline_result,
+                run_id=run_id,
+                target=target,
+                record=record,
+                layout=layout,
+                bundle_directory=Path(bundle_directory),
+            )
         else:
             # A committed run that was kept holds no execution in memory: its files are delivered.
             receipts = deliver_run(layout, Path(bundle_directory), target=target, record=record)

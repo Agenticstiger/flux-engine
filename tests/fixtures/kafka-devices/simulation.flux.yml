@@ -1,0 +1,169 @@
+# A history of 200 device versions under 60 devices and 50 sites, with its projections:
+# device_current (the snapshot of each device's last version), device_change (a change event for
+# each change) and device_month (a row for each month a version is valid). The rows of a
+# projection are not declared: plan derives them from the history. Used by tests/sinks/test_kafka_*.py.
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-devices
+name: Devices
+metadata:
+  owner:
+    team: fleet
+spec:
+  worldRef: world-devices
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2023-01-01T00:00:00Z"
+    end: "2026-01-01T00:00:00Z"
+  personaRefs: [persona-devices]
+  emits:
+    - productRef: fleet.devices
+      exposeId: site
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:5b3dc6ba24a38fdcbe7d0cd3fcd1ddddfcaf1874a400111a92502220963bcdfa" }
+    - productRef: fleet.devices
+      exposeId: device_version
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:5b3dc6ba24a38fdcbe7d0cd3fcd1ddddfcaf1874a400111a92502220963bcdfa" }
+    - productRef: fleet.devices
+      exposeId: reading
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:5b3dc6ba24a38fdcbe7d0cd3fcd1ddddfcaf1874a400111a92502220963bcdfa" }
+    - productRef: fleet.devices
+      exposeId: device_current
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:5b3dc6ba24a38fdcbe7d0cd3fcd1ddddfcaf1874a400111a92502220963bcdfa" }
+    - productRef: fleet.devices
+      exposeId: device_change
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:5b3dc6ba24a38fdcbe7d0cd3fcd1ddddfcaf1874a400111a92502220963bcdfa" }
+    - productRef: fleet.devices
+      exposeId: device_month
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:5b3dc6ba24a38fdcbe7d0cd3fcd1ddddfcaf1874a400111a92502220963bcdfa" }
+extensions:
+  com.agentics.flux/1:
+    profile:
+      digest: sha256:7716a97db17142ffc32bb0f76a69f8906aea29cf844a801eed1c6d078a170298
+    history:
+      - emit: device_version
+        entities: 60
+        parent: { relationship: site, minChildren: 1 }
+        versions: { bins: ["1", "2", "4", "9"], binWeights: ["0.45", "0.35", "0.20"] }
+        start: { bins: ["2023-01-01", "2024-01-01", "2025-07-01"], binWeights: ["0.55", "0.45"] }
+        length: { bins: ["30", "90", "365", "1096"], binWeights: ["0.30", "0.45", "0.25"], closed: lower }
+        until: "2025-12-31"
+        chain: nextStart
+        end: { mode: closeLast, share: '0.3', column: status, value: retired }
+    snapshots:
+      - { emit: device_current, of: device_version }
+    events:
+      - emit: device_change
+        of: device_version
+        at: changed_at
+        date: recorded_at
+        op: op
+        before: { before_firmware: firmware }
+        after: { after_firmware: firmware }
+    periods:
+      - { emit: device_month, of: device_version, column: month, grain: month, match: overlap }
+    emits:
+      site:
+        rows: 50
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            site_id: { range: { min: '1', max: '50' } }
+            region: { levels: { eu: '0.6', us: '0.4' } }
+            opened_on: { range: { min: '2023-01-01', max: '2025-12-31' } }
+          properties:
+            - property: mean
+              column: site_id
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      device_version:
+        rows: 200
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            device_sk: { range: { min: '1', max: '200' } }
+            device_id: { range: { min: '1', max: '200' } }
+            valid_from: { range: { min: '2023-01-01', max: '2025-12-31' } }
+            valid_to: { range: { min: '2023-01-01', max: '2025-12-31' } }
+            firmware: { levels: { v1: '0.5', v2: '0.3', v3: '0.2' } }
+            status: { levels: { active: '1', retired: '0' } }
+            installed_on: { range: { min: '2023-01-01', max: '2025-12-31' } }
+          properties:
+            - property: mean
+              column: device_sk
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      reading:
+        rows: 600
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            reading_id: { range: { min: '1', max: '600' } }
+            device_id: { range: { min: '1', max: '200' } }
+            read_on: { range: { min: '2023-01-01', max: '2025-12-31' } }
+            value: { range: { min: '5', max: '500' } }
+          properties:
+            - property: mean
+              column: value
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      device_current:
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            device_id: { range: { min: '1', max: '200' } }
+            firmware: { levels: { v1: '0.5', v2: '0.3', v3: '0.2' } }
+            status: { levels: { active: '0.8', retired: '0.2' } }
+            installed_on: { range: { min: '2023-01-01', max: '2025-12-31' } }
+          properties:
+            - property: mean
+              column: device_id
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      device_change:
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            event_id: { range: { min: '1', max: '1000000000' } }
+            device_id: { range: { min: '1', max: '200' } }
+            op: { levels: { c: '1' } }
+            changed_at: { range: { min: '2023-01-01', max: '2025-12-31' } }
+            recorded_at: { range: { min: '2023-01-01', max: '2025-12-31' } }
+            before_firmware: { levels: { v1: '0.5', v2: '0.3', v3: '0.2' } }
+            after_firmware: { levels: { v1: '0.5', v2: '0.3', v3: '0.2' } }
+          properties:
+            - property: mean
+              column: event_id
+              tolerance: { type: absolute, value: "1000000000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      device_month:
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            period_id: { range: { min: '1', max: '1000000000' } }
+            device_id: { range: { min: '1', max: '200' } }
+            month: { range: { min: '2023-01-01', max: '2025-12-31' } }
+            firmware: { levels: { v1: '0.5', v2: '0.3', v3: '0.2' } }
+          properties:
+            - property: mean
+              column: period_id
+              tolerance: { type: absolute, value: "1000000000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle

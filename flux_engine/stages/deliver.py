@@ -52,7 +52,7 @@ from flux_engine.safeio import is_regular_file, read_text_nofollow
 from flux_engine.sinks._objects import is_object_target
 from flux_engine.sinks._secrets import scrub
 from flux_engine.sinks.errors import FLX_3505
-from flux_engine.sinks.receipts import SinkReceipt, StreamContext
+from flux_engine.sinks.receipts import RecordedGrade, SinkReceipt, StreamContext
 from flux_engine.stages.errors import FLX_2109
 from flux_engine.stages.layout import (
     RUN_FILE_REMEDY,
@@ -70,6 +70,7 @@ __all__ = [
     "deliver",
     "deliver_run",
     "open_sink",
+    "privacy_grade_of",
     "receipt_line",
     "stream_rows",
     "write_receipts",
@@ -98,12 +99,49 @@ def _header(outcome: "EmitOutcome") -> EmitHeader:
     )
 
 
+def privacy_grade_of(layout: RunLayout) -> RecordedGrade:
+    """The privacy grade the run's own plan records, read after the checks ``apply`` runs on it.
+
+    The plan must still digest to its ``planDigest`` and be this run directory's plan
+    (:func:`~flux_engine.stages.apply.load_recorded_plan`), and ``run-digest.json`` must name that
+    plan (:func:`~flux_engine.stages.apply.require_run_digest_binds_plan`). The grade is the one
+    that plan records under ``privacyGrade``, which ``plan`` writes as the weakest of the pinned
+    profile's grade and every generator plugin's (ADR 0020, ADR 0032). It is read from the run's
+    record alone and never worked out again from a bundle, so a sink is told the grade the run is
+    bound to. When the checks fail, or the plan records no grade (it pins no profile and declares
+    no plugin, or an engine that did not grade wrote it), there is no grade and ``problem`` says
+    which; a sink that needs the grade refuses the stream, and any other sink is unaffected.
+    """
+    from flux_engine.core.grades import Pattern
+    from flux_engine.stages._grades import GRADE_KEY
+    from flux_engine.stages.apply import load_recorded_plan, require_run_digest_binds_plan
+
+    try:
+        plan_document = load_recorded_plan(layout)
+        run_digest = read_json_object(layout.run_digest_path, code=FLX_2109, remedy=RUN_FILE_REMEDY)
+        require_run_digest_binds_plan(layout, plan_document, run_digest)
+    except FluxError as error:
+        first = (error.detail.strip().splitlines() or [""])[0][:300]
+        return RecordedGrade(
+            problem=f"the run's plan does not check ({error.code.code}{': ' + first if first else ''})"
+        )
+    recorded = plan_document.get(GRADE_KEY)
+    if recorded not in {pattern.value for pattern in Pattern}:
+        return RecordedGrade(
+            problem="the run's plan records no privacy grade; a plan records one when the "
+            "Simulation pins a profile or declares a generator plugin"
+        )
+    return RecordedGrade(grade=str(recorded))
+
+
 def deliver(
     result: "PipelineResult",
     *,
     run_id: str,
     target: "SinkTarget",
     record: Optional[Callable[[SinkReceipt], object]] = None,
+    layout: Optional[RunLayout] = None,
+    bundle_directory: Optional[Path] = None,
 ) -> Tuple[SinkReceipt, ...]:
     """Write every stream of *result* to a sink from *target*; return the receipts.
 
@@ -114,8 +152,11 @@ def deliver(
     long for one expose, two exposes landing in one table) stops the
     delivery before anything lands. *record* is called with each receipt
     as soon as its stream is published, so a later stream's failure leaves
-    the earlier ones on record.
+    the earlier ones on record. With the run's *layout*, each stream's context carries the grade
+    the run's plan records (:func:`privacy_grade_of`); with *bundle_directory*, the bundle and the
+    Simulation, so a sink can find a stream's declarations. Neither changes a row.
     """
+    grade = privacy_grade_of(layout) if layout is not None else None
     contexts = [
         StreamContext(
             run_id=run_id,
@@ -123,6 +164,9 @@ def deliver(
             rows=outcome.result.rows,
             output_digest=outcome.result.output_digest,
             declared_types=tuple(column.declared_type for column in outcome.expose.columns),
+            privacy_grade=grade,
+            bundle_directory=bundle_directory,
+            simulation_id=getattr(outcome.resolved, "simulation_id", None),
         )
         for outcome in result.emits
     ]
@@ -193,6 +237,7 @@ def deliver_run(
         for entry in resolve_all_emits(load_bundle(bundle_directory), simulation_id=simulation_id)
     }
     reported = run_receipt["emits"]
+    grade = privacy_grade_of(layout)
     streams = []
     for expose_id in sorted(reported):
         entry = resolved.get(expose_id)
@@ -231,6 +276,9 @@ def deliver_run(
                 value=claimed, domain=found.domain, subject=f"outputDigest:{expose_id}"
             ),
             declared_types=tuple(column.declared_type for column in expose.columns),
+            privacy_grade=grade,
+            bundle_directory=bundle_directory,
+            simulation_id=simulation_id,
         )
         streams.append((header, data, context))
     sinks = _sinks_for(target, [context for _, _, context in streams])

@@ -24,12 +24,26 @@ types without loading any optional extra.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 from flux_engine.core.digest import DigestRef
 from flux_engine.core.target_label import target_label
 
-__all__ = ["FileEntry", "SinkReceipt", "StreamContext"]
+__all__ = ["FileEntry", "RecordedGrade", "SinkReceipt", "StreamContext"]
+
+
+@dataclass(frozen=True)
+class RecordedGrade:
+    """The privacy grade a run's own plan records, read after the plan's binding checks.
+
+    ``grade`` is ``P0``, ``P1``, ``P3``, ``P4`` or ``P5`` (ADR 0020) when the run's record
+    states one, else ``None``, and ``problem`` then names what is missing or does not check:
+    a plan that records no grade, or a plan or ``run-digest.json`` that does not bind to the run.
+    """
+
+    grade: Optional[str] = None
+    problem: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -54,6 +68,18 @@ class StreamContext:
         header (``smallint``, ``decimal(18, 4)``), or empty when the caller has none. The
         header carries the closed set's ``INT`` alone, so this is where a file sink learns
         an integer column's width. No digest covers it.
+    privacy_grade
+        The grade the run's own plan records, read after the plan's binding checks
+        (:class:`RecordedGrade`, :func:`flux_engine.stages.deliver.privacy_grade_of`), or
+        ``None`` when the caller did not read the run's record. A sink whose destination
+        declares an audience compares it with that audience's minimum (ADR 0038). No digest
+        covers it.
+    bundle_directory
+        The bundle the run was planned from, or ``None``. A sink that needs the declarations
+        behind a stream (its keys, its history, the topic the contract binds it to) reads
+        them there. It never says what grade the run has. No digest covers it.
+    simulation_id
+        The Simulation the run realises, or ``None`` when the caller does not say.
     """
 
     run_id: str
@@ -61,6 +87,9 @@ class StreamContext:
     rows: int
     output_digest: DigestRef
     declared_types: Tuple[str, ...] = ()
+    privacy_grade: Optional[RecordedGrade] = None
+    bundle_directory: Optional[Path] = None
+    simulation_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         if isinstance(self.rows, bool) or not isinstance(self.rows, int) or self.rows < 0:
