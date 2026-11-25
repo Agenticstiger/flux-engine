@@ -53,8 +53,9 @@ stream (`StreamContext.privacy_grade`).
 
 An internal audience is held to that grade. An external audience is held to a grade worked out from the pinned
 profile itself, as `ship` works it out, so `--profile` must be given to `run` and to `apply --run-id`, and must be the
-profile the Simulation pins (`FLX-3109`, `FLX-3110`). The receipt's writer records it as `profileGrade`, next to
-`privacyGrade`. A plan alone never unlocks an external target.
+profile the Simulation pins (`FLX-3109`, `FLX-3110`). The receipt's writer records it as `profileGrade`, and its
+`privacyGrade` is then the weaker of the run's grade and that one, so a receipt never records a better grade than
+the profile gives, for either audience. A plan alone never unlocks an external target.
 
 The gate fails closed: a run that pins no profile and declares no plugin has no grade and goes to no Kafka target; a
 plan, run digest or receipt that does not check, a bundle that is not the plan's, or a stream handed no grade at all
@@ -233,15 +234,21 @@ and a partial one resumes after its last committed record. A read-committed cons
 failure, a forced abort and a second delivery of the same run.
 
 The brokers drop that progress: it is a memberless group's committed offset, and the brokers expire it after
-`offsets.retention.minutes` (7 days by default). Without it a re-run would send every finished stream again and the
-fingerprint guard below would be gone too, so the engine hands each stream the receipts the run's own
-`sink-receipts.json` already holds for it (`StreamContext.delivered`; only the sink that needs it reads them). When
-the brokers hold no progress for a stream and a receipt of the same sink, target and topic counts records committed or
-skipped there, on the same cluster (the receipt names the cluster's id, `clusterId`; a receipt of another cluster says
-nothing about this one), the stream is refused with `FLX-3514` before anything is sent. The message says the brokers
-no longer hold the progress, that sending again would duplicate what was delivered, and the two ways to do that on
-purpose: another `topic-prefix`, or removing that stream's entry from `sink-receipts.json`. The bound that remains:
-without the local receipts (another machine, or a removed run directory) a re-send after the retention duplicates.
+`offsets.retention.minutes` (7 days by default). Without it a re-run would send every finished stream again, resend
+the committed part of an unfinished one, and lose the fingerprint guard below, so the run keeps a record of its own in
+`sink-receipts.json`. It holds the receipt of each stream delivered and, after every commit of a stream sent in parts
+(with `commit-every` or a pace), a receipt of the stream so far under `progress`, counting the records committed;
+the sink hands that receipt to the engine (`StreamContext.record_committed`) once the brokers have committed the
+part, and the stream's own receipt replaces it when the stream finishes. The engine hands each stream what the record
+holds for it (`StreamContext.delivered` and `StreamContext.committed`; only the sink that needs them reads them). When
+the brokers hold no progress for a stream and an entry of the same sink and topic counts records sent, skipped or
+committed there, on the same cluster, the stream is refused with `FLX-3514` before anything is sent. An entry is about
+the same cluster when it names the cluster id the brokers name (`clusterId`), however the target was written; when the
+entry or the brokers name none, when it names the same target. The message says the brokers no longer hold the
+progress, that sending again would duplicate what reached the topic, and the two ways to do that on purpose: another
+`topic-prefix`, or removing that stream's entry from `sink-receipts.json`. The bounds that remain: without the local
+record (another machine, or a removed run directory) a re-send after the retention duplicates, and a part is recorded
+just after the brokers commit it, so a delivery stopped between the two leaves that last part out of the record.
 
 The progress also records a fingerprint (16 hex digits of a digest) of the settings that decide a record's bytes
 beside its row: the key columns and the key format, the event-time column and its default, and the value form
@@ -276,7 +283,9 @@ Every record carries headers that label it synthetic and name its stream: `flux.
 `flux.expose`, `flux.output-digest` and `flux.row`, the row's position in the stream. The receipt names the topic,
 its partition count, the shape (`debezium` or `row`), the value format and subject, the key format, the pace, the
 compression, the transactions, the records sent and skipped as already delivered, the audience, the grade and, when
-the command was given the pinned profile, the grade worked out from it (`profileGrade`). It holds no credential.
+the command was given the pinned profile, the grade worked out from it (`profileGrade`); the grade is then the weaker
+of the run's and that one. A stream that stopped after committing part of itself has, under `progress` instead, a
+receipt of the stream so far that counts the records `committed`. Neither holds a credential.
 
 ### 12. Credentials and options
 

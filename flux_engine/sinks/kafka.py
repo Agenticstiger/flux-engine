@@ -49,10 +49,13 @@ so a retried delivery resumes after its last committed record and a second deliv
 stream sends nothing. The producer is opened (which fences an earlier one) before the progress is
 read. A read committed consumer sees each record once.
 
-The brokers drop that progress after ``offsets.retention.minutes`` (7 days by default). A stream
-the run's own receipts (``sink-receipts.json``, handed over in ``StreamContext.delivered``) say
-was delivered to this topic of this cluster is then refused (``FLX-3514``) rather than sent again;
-without those receipts (another machine, a removed run directory) a re-send after the retention
+The brokers drop that progress after ``offsets.retention.minutes`` (7 days by default), so the run
+keeps its own record in ``sink-receipts.json``: each stream's receipt, and after every commit a
+receipt of the stream so far (handed over in ``StreamContext.delivered`` and
+``StreamContext.committed``). A stream that record says reached this topic of this cluster, whole
+or in part, is then refused (``FLX-3514``) rather than sent again. An entry is about this cluster
+when it names the cluster id the brokers name, or, when either names none, the same target.
+Without that record (another machine, a removed run directory) a re-send after the retention
 duplicates.
 
 **Pace.** ``pace=realtime`` or ``pace=xN`` sends each record when the wall clock reaches its event
@@ -82,7 +85,7 @@ from urllib.parse import urlsplit
 from flux_engine.api.emit import EmitHeader
 from flux_engine.core.canonical import canonical_bytes, sha256_hex
 from flux_engine.core.errors import FluxError
-from flux_engine.core.grades import Pattern
+from flux_engine.core.grades import Pattern, weakest
 from flux_engine.core.target_label import target_label
 from flux_engine.seam.emit import FLX_3301
 from flux_engine.sinks._kafka_broker import (
@@ -836,39 +839,65 @@ class KafkaSink:
             producer.close()
 
     def _refuse_lost_progress(self, broker: Broker) -> None:
-        """``FLX-3514`` when the run's receipts say this stream was delivered and the brokers no
-        longer hold its progress.
+        """``FLX-3514`` when the run's record says this stream reached this topic, whole or in
+        part, and the brokers no longer hold its progress.
 
         The progress is a consumer group's committed offset, which the brokers drop after
         ``offsets.retention.minutes`` (7 days by default); sending the stream again then would
-        duplicate it. A receipt of another cluster says nothing about this one.
+        duplicate what reached the topic. The record is the run's ``sink-receipts.json``: the
+        stream's receipt (``StreamContext.delivered``), or the receipt of the stream so far that
+        each commit keeps (``StreamContext.committed``).
         """
         shape = self.shape
         label = target_label(self.name, self._settings.target)
         cluster = broker.cluster_id()
+        said = ""
         for entry in self.context.delivered:
-            writer = entry.get("writer")
-            if (
-                entry.get("sink") != self.name
-                or entry.get("target") != label
-                or entry.get("table") != shape.topic
-                or not isinstance(writer, Mapping)
-            ):
-                continue
-            counts = [writer.get(name) for name in ("records", "skipped")]
-            if not any(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in counts):
-                continue
-            then = writer.get("clusterId")
-            if isinstance(then, str) and cluster is not None and then != cluster:
-                continue
+            if self._reached(entry, cluster, label):
+                said = f"this run's receipts say expose {shape.expose_id!r} was delivered to it"
+                break
+        else:
+            for entry in self.context.committed:
+                count = self._reached(entry, cluster, label)
+                if count:
+                    said = (
+                        f"this run's sink-receipts.json says {count} "
+                        f"record{'' if count == 1 else 's'} of expose {shape.expose_id!r} "
+                        "were committed to it"
+                    )
+                    break
+        if said:
             raise FluxError(
                 FLX_3514,
-                f"topic {shape.topic!r}: this run's receipts say expose {shape.expose_id!r} was "
-                "delivered to it, and the brokers no longer hold the stream's progress (it "
-                "expires after offsets.retention.minutes, 7 days by default); sending the stream "
-                "again would duplicate what was delivered. To deliver it again on purpose, use "
-                "another topic-prefix, or remove this stream's entry from sink-receipts.json",
+                f"topic {shape.topic!r}: {said}, and the brokers no longer hold the stream's "
+                "progress (it expires after offsets.retention.minutes, 7 days by default); "
+                "sending the stream again would duplicate what reached the topic. To deliver it "
+                "again on purpose, use another topic-prefix, or remove this stream's entry from "
+                "sink-receipts.json",
             )
+
+    def _reached(self, entry: Mapping[str, Any], cluster: Optional[str], label: str) -> int:
+        """How many records *entry*, a receipt document, says reached this topic of this cluster.
+
+        An entry of another sink or topic says nothing. When the entry and the brokers both name a
+        cluster id, the entry is about this cluster when the ids are the same, however the target
+        was written; when either names none, when it names the same target.
+        """
+        writer = entry.get("writer")
+        if (
+            entry.get("sink") != self.name
+            or entry.get("table") != self.shape.topic
+            or not isinstance(writer, Mapping)
+        ):
+            return 0
+        then = writer.get("clusterId")
+        if isinstance(then, str) and cluster is not None:
+            if then != cluster:
+                return 0
+        elif entry.get("target") != label:
+            return 0
+        counts = [writer.get(name) for name in ("records", "skipped", "committed")]
+        return sum(n for n in counts if isinstance(n, int) and not isinstance(n, bool) and n > 0)
 
     def write(self, row: Sequence[object]) -> None:
         """Take one rendered row: send its records now (unpaced) or keep them for ``close``."""
@@ -1072,6 +1101,34 @@ class KafkaSink:
         )
         self._txn_open = False
         self._transactions += 1
+        self._keep_committed(records, complete)
+
+    def _keep_committed(self, records: int, complete: bool) -> None:
+        """Hand the run a receipt of the stream so far, which outlives the brokers' progress."""
+        keep = self.context.record_committed
+        if keep is None:
+            return
+        writer: Dict[str, Any] = {
+            "topic": self.shape.topic,
+            "committed": records,
+            "complete": complete,
+            "order": self._order,
+        }
+        cluster = self._owner.broker.cluster_id()
+        if cluster is not None:
+            writer["clusterId"] = cluster
+        keep(
+            SinkReceipt(
+                sink=self.name,
+                run_id=self.context.run_id,
+                expose_id=self.context.expose_id,
+                output_digest=self.context.output_digest.value,
+                rows=self.context.rows,
+                target=self._settings.target,
+                table=self.shape.topic,
+                writer=writer,
+            )
+        )
 
     def _send_paced(self) -> None:
         records = [record for record, _ in self._buffer]
@@ -1149,6 +1206,24 @@ class KafkaSink:
 
     # -- the receipt -------------------------------------------------------------
 
+    def _receipt_grade(self) -> Pattern:
+        """The grade the receipt records: the gate's, or the weaker of the run's and the profile's.
+
+        The run's grade is read from files whoever runs the engine can rewrite; the profile's is
+        worked out from the pinned profile itself. When there is one, the receipt never records
+        more than the weaker of the two.
+        """
+        held = self.context.privacy_grade
+        if held is None or held.profile_grade is None:
+            return self.grade
+        grades = [self.grade]
+        for value in (held.grade, held.profile_grade):
+            try:
+                grades.append(Pattern(value))
+            except ValueError:
+                continue
+        return weakest(grades)
+
     def _make_receipt(self) -> SinkReceipt:
         shape, settings = self.shape, self._settings
         writer: Dict[str, Any] = {
@@ -1163,7 +1238,7 @@ class KafkaSink:
             "records": self._sent,
             "skipped": self._skipped,
             "audience": settings.audience,
-            "privacyGrade": self.grade.value,
+            "privacyGrade": self._receipt_grade().value,
             "partitioner": "murmur2_random",
         }
         cluster = self._owner.broker.cluster_id()

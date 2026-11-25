@@ -1912,6 +1912,17 @@ def test_a_forged_p0_plan_is_read_as_p1_for_an_internal_target(
     assert all("profileGrade" not in writer for writer in writers)
 
 
+def test_an_internal_receipt_records_the_profiles_grade_when_the_plans_is_better(
+    kept: Kept, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = FakeBroker()
+    result = _through_apply(_forged(kept, tmp_path, "P3"), broker, monkeypatch, INTERNAL, PROFILE)
+    assert result.success, result.stderr
+    writers = [receipt["writer"] for receipt in result.artifacts["sinks"]["receipts"]]
+    assert {writer["profileGrade"] for writer in writers} == {"P1"}
+    assert {writer["privacyGrade"] for writer in writers} == {"P1"}
+
+
 def _other_run(root: Path) -> RunLayout:
     """A run of the devices bundle under another seed, with no pinned profile."""
     bundle = root / "bundle-b"
@@ -1996,7 +2007,8 @@ def test_an_external_target_takes_a_run_the_pinned_profile_grades_p3(
     assert len(receipts) == 6 and any(broker.logs.values())
     for receipt in receipts:
         assert receipt.writer["audience"] == "external"
-        assert receipt.writer["privacyGrade"] == "P3" and receipt.writer["profileGrade"] == "P3"
+        # The plan records P1 and the profile grades P3: the receipt records the weaker.
+        assert receipt.writer["privacyGrade"] == "P1" and receipt.writer["profileGrade"] == "P3"
 
 
 def test_a_bundle_that_is_not_the_plans_has_no_grade(kept: Kept, tmp_path: Path) -> None:
@@ -2233,15 +2245,256 @@ def test_the_receipt_of_a_stream_that_sent_nothing_does_not_guard_it(recorded: K
     assert deliver(recorded, broker)
 
 
-def test_a_receipt_of_another_target_or_topic_does_not_guard_the_stream(recorded: Kept) -> None:
+def _at(broker: FakeBroker, bootstrap: str) -> KafkaTarget:
+    """A target that reaches *broker*'s cluster through *bootstrap*."""
+    settings = KafkaSettings.parse(bootstrap, INTERNAL)
+    clock = FakeClock(WALL_2026).clock()
+    return KafkaTarget(settings, broker=broker, serdes=FakeSerdes(), clock=clock)
+
+
+def test_another_spelling_of_the_same_cluster_is_still_guarded(recorded: Kept) -> None:
+    broker = FakeBroker()
+    _delivered_and_recorded(recorded, broker)
+    sent = {topic: len(broker.read(topic)) for topic in broker.logs}
+    calls = len(broker.calls)
+    broker.drop_progress()
+    with pytest.raises(FluxError) as caught:
+        deliver_run(recorded.layout, recorded.bundle, target=_at(broker, "127.0.0.2:9092"))
+    assert caught.value.code.code == "FLX-3514"
+    _nothing_sent_since(broker, calls, sent)
+
+
+def _without_cluster_ids(layout: RunLayout) -> None:
+    path = layout.sink_receipts_path
+    document = json.loads(path.read_text(encoding="utf-8"))
+    for entry in document["receipts"]:
+        entry["writer"].pop("clusterId")
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+
+def test_a_receipt_that_names_no_cluster_guards_its_own_target_only(recorded: Kept) -> None:
+    broker = FakeBroker()
+    _delivered_and_recorded(recorded, broker)
+    _without_cluster_ids(recorded.layout)
+    broker.drop_progress()
+    with pytest.raises(FluxError) as caught:
+        deliver(recorded, broker)
+    assert caught.value.code.code == "FLX-3514"
+    assert deliver_run(recorded.layout, recorded.bundle, target=_at(broker, "127.0.0.2:9092"))
+
+
+def test_brokers_that_name_no_cluster_are_guarded_by_the_target(recorded: Kept) -> None:
     broker = FakeBroker()
     _delivered_and_recorded(recorded, broker)
     broker.drop_progress()
-    other = KafkaSettings.parse("127.0.0.2:9092", INTERNAL)
-    target = KafkaTarget(
-        other, broker=broker, serdes=FakeSerdes(), clock=FakeClock(WALL_2026).clock()
+    broker.cluster = None
+    with pytest.raises(FluxError) as caught:
+        deliver(recorded, broker)
+    assert caught.value.code.code == "FLX-3514"
+    assert deliver_run(recorded.layout, recorded.bundle, target=_at(broker, "127.0.0.2:9092"))
+
+
+def _keeping(
+    kept: Kept, broker: FakeBroker, options: Optional[Mapping[str, str]] = None, **more: Any
+) -> Sequence[SinkReceipt]:
+    """A delivery that keeps what ``run --sink`` keeps: each receipt, and how far each stream was
+    committed."""
+    from flux_engine.stages.deliver import write_progress
+
+    return deliver_run(
+        kept.layout,
+        kept.bundle,
+        target=target_of(broker, options, **more),
+        record=lambda receipt: write_receipts(kept.layout, [receipt]),
+        record_committed=lambda receipt: write_progress(kept.layout, receipt),
     )
-    assert deliver_run(recorded.layout, recorded.bundle, target=target)
+
+
+_IN_PARTS = [
+    pytest.param({"commit-every": "1"}, lambda: _TickingClock(0.25), id="commit-every"),
+    pytest.param({"pace": "x86400", "commit-every": "1"}, lambda: FakeClock(WALL_2026), id="paced"),
+]
+
+
+@pytest.mark.parametrize(("options", "clock"), _IN_PARTS)
+def test_a_stream_committed_in_part_is_refused_after_the_brokers_drop_its_progress(
+    recorded: Kept, monkeypatch: pytest.MonkeyPatch, options: Mapping[str, str], clock: Any
+) -> None:
+    monkeypatch.setattr(kafka, "_AGE_EVERY", 8)
+    broker = FakeBroker()
+    broker.failures = [Failure("raise", after=100)]
+    with pytest.raises(FluxError):
+        _keeping(recorded, broker, options, clock=clock())
+    group = broker.producers[0].group
+    committed = json.loads(broker.committed[(group, "sim.device_change")])["records"]
+    assert 0 < committed <= 100
+    document = json.loads(recorded.layout.sink_receipts_path.read_text(encoding="utf-8"))
+    [entry] = document["progress"]
+    assert (entry["sink"], entry["exposeId"], entry["table"]) == (
+        "kafka",
+        "device_change",
+        "sim.device_change",
+    )
+    assert entry["writer"]["committed"] == committed and entry["writer"]["complete"] is False
+    assert entry["writer"]["clusterId"] == "fake-cluster" and document["receipts"] == []
+    sent = {topic: len(broker.read(topic)) for topic in broker.logs}
+    calls = len(broker.calls)
+    broker.drop_progress()
+    with pytest.raises(FluxError) as caught:
+        _keeping(recorded, broker, options, clock=clock())
+    assert caught.value.code.code == "FLX-3514"
+    text = str(caught.value)
+    assert f"{committed} record" in text and "duplicate" in text
+    assert "offsets.retention.minutes" in text
+    assert "topic-prefix" in text and "sink-receipts.json" in text
+    _nothing_sent_since(broker, calls, sent)
+
+
+def test_a_stream_that_committed_nothing_is_sent_after_the_drop(recorded: Kept) -> None:
+    broker = FakeBroker()
+    broker.failures = [Failure("commit")]
+    with pytest.raises(FluxError):
+        _keeping(recorded, broker)
+    assert not recorded.layout.sink_receipts_path.exists()
+    broker.drop_progress()
+    receipts = _keeping(recorded, broker)
+    assert len(receipts) == 6 and all(r.writer["records"] > 0 for r in receipts)
+
+
+def test_a_streams_receipt_replaces_how_far_it_was_committed(
+    recorded: Kept, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kafka, "_AGE_EVERY", 8)
+    options = {"commit-every": "1"}
+    broker = FakeBroker()
+    broker.failures = [Failure("raise", after=100)]
+    with pytest.raises(FluxError):
+        _keeping(recorded, broker, options, clock=_TickingClock(0.25))
+    receipts = _keeping(recorded, broker, options, clock=_TickingClock(0.25))
+    document = json.loads(recorded.layout.sink_receipts_path.read_text(encoding="utf-8"))
+    assert "progress" not in document
+    assert len(document["receipts"]) == len(receipts) == 6
+
+
+def test_a_finished_stream_whose_receipt_was_not_kept_is_still_guarded(recorded: Kept) -> None:
+    from flux_engine.stages.deliver import write_progress
+
+    broker = FakeBroker()
+    # No receipt is written, as when a delivery stops right after a stream's last commit.
+    deliver_run(
+        recorded.layout,
+        recorded.bundle,
+        target=target_of(broker),
+        record_committed=lambda receipt: write_progress(recorded.layout, receipt),
+    )
+    document = json.loads(recorded.layout.sink_receipts_path.read_text(encoding="utf-8"))
+    assert document["receipts"] == [] and len(document["progress"]) == 6
+    assert all(entry["writer"]["complete"] for entry in document["progress"])
+    broker.drop_progress()
+    with pytest.raises(FluxError) as caught:
+        deliver(recorded, broker)
+    assert caught.value.code.code == "FLX-3514"
+
+
+def test_another_cluster_is_not_guarded_by_how_far_a_stream_was_committed(
+    recorded: Kept, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kafka, "_AGE_EVERY", 8)
+    options = {"commit-every": "1"}
+    broker = FakeBroker()
+    broker.failures = [Failure("raise", after=100)]
+    with pytest.raises(FluxError):
+        _keeping(recorded, broker, options, clock=_TickingClock(0.25))
+    other = FakeBroker()
+    other.cluster = "another-cluster"
+    receipts = _keeping(recorded, other, options, clock=_TickingClock(0.25))
+    assert len(receipts) == 6 and all(r.writer["records"] > 0 for r in receipts)
+
+
+def test_apply_keeps_how_far_a_stream_was_committed_and_refuses_it_after_the_drop(
+    kept: Kept, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copied = _copy_of(kept, tmp_path)
+    copied.layout.sink_receipts_path.unlink(missing_ok=True)
+    options = {**INTERNAL, "pace": "x86400", "commit-every": "1"}
+    broker = FakeBroker()
+    broker.failures = [Failure("raise", after=100)]
+    failed = _through_apply(copied, broker, monkeypatch, options, None)
+    assert failed.exit_code == 1, failed.stderr
+    sent = {topic: len(broker.read(topic)) for topic in broker.logs}
+    assert 0 < sent["sim.device_change"] <= 100
+    calls = len(broker.calls)
+    broker.drop_progress()
+    again = _through_apply(copied, broker, monkeypatch, options, None)
+    assert again.exit_code == 1 and again.error_code == "FLX-3514", again.stderr
+    assert f"{sent['sim.device_change']} record" in again.stderr
+    _nothing_sent_since(broker, calls, sent)
+
+
+def test_run_keeps_how_far_a_stream_was_committed_and_refuses_it_after_the_drop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(DEVICES, bundle)
+    broker = FakeBroker()
+    broker.failing_topics = {"sim.device_change": Failure("raise", after=100)}
+
+    def factory(target: str, given: Mapping[str, str]) -> KafkaTarget:
+        return KafkaTarget(
+            KafkaSettings.parse(target, given),
+            broker=broker,
+            serdes=FakeSerdes(),
+            clock=FakeClock(WALL_2026).clock(),
+        )
+
+    monkeypatch.setattr(registry, "load_factory", lambda name: factory)
+    options = {**INTERNAL, "pace": "x86400", "commit-every": "1"}
+    state = tmp_path / "state"
+    first = run(
+        bundle, state_dir=state, profile=PROFILE, sink=f"kafka:{BOOTSTRAP}", sink_options=options
+    )
+    assert first.exit_code == 1, first.stderr
+    [run_dir] = list((state / "runs").iterdir())
+    kept_path = run_dir / "sink-receipts.json"
+    document = json.loads(kept_path.read_text(encoding="utf-8"))
+    [entry] = document["progress"]
+    committed = entry["writer"]["committed"]
+    assert entry["table"] == "sim.device_change"
+    assert committed == len(broker.read("sim.device_change")) > 0
+    # The streams delivered before it keep receipts, which would refuse them first; without them
+    # the refusal is the one the partial stream's entry makes.
+    kept_path.write_text(json.dumps({**document, "receipts": []}), encoding="utf-8")
+    broker.drop_progress()
+    again = run(
+        bundle, state_dir=state, profile=PROFILE, sink=f"kafka:{BOOTSTRAP}", sink_options=options
+    )
+    assert again.exit_code == 1 and again.error_code == "FLX-3514", again.stderr
+    assert f"{committed} record" in again.stderr and "'device_change'" in again.stderr
+
+
+def test_a_delivery_from_the_run_directory_reads_the_runs_receipt_once(
+    kept: Kept, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flux_engine.stages import deliver as stage
+
+    real = stage.read_json_object
+    read: List[Path] = []
+
+    def counted(path: Path, **kwargs: Any) -> Dict[str, Any]:
+        read.append(Path(path))
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(stage, "read_json_object", counted)
+    assert deliver(kept, FakeBroker())
+    assert read.count(kept.layout.receipt_path) == 1
+
+
+def test_the_grade_is_worked_out_from_the_receipt_it_is_handed(kept: Kept) -> None:
+    document = json.loads(kept.layout.receipt_path.read_text(encoding="utf-8"))
+    assert privacy_grade_of(kept.layout, kept.bundle, receipt=document).grade == "P1"
+    other = {**document, "planDigest": "sha256:" + "0" * 64}
+    graded = privacy_grade_of(kept.layout, kept.bundle, receipt=other)
+    assert graded.grade is None and "planDigest" in str(graded.problem)
 
 
 def test_the_context_carries_the_receipts_of_its_run_and_of_its_expose_only(
