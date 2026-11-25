@@ -1,8 +1,9 @@
 usage: fluxsim apply [-h] [--run-id RUN_ID] [--simulation-id SIMULATION_ID]
                      [--zone ZONE] [--shard I/N] [--sink NAME:TARGET]
                      [--sink-opt KEY=VALUE] [--allow-generator NAME]
-                     [--scale F] [--timings] [--jobs N] [--strict-coverage]
-                     [--profile PATH] [--state-dir STATE_DIR] [-j]
+                     [--scale F] [--max-rows N] [--timings] [--jobs N]
+                     [--strict-coverage] [--profile PATH]
+                     [--state-dir STATE_DIR] [-j]
                      bundle
 
 Write every run artifact of a recorded plan: the population, the events, the
@@ -73,6 +74,12 @@ options:
                         from the run's events is left as it is; read only when
                         a fresh plan is taken, since the plan of --run-id
                         records its own
+  --max-rows N          the rows each periodic emit may be estimated to derive
+                        when the plan is made, checked before its periods are
+                        laid out (default 50000000, at most 10000000000). A
+                        plan above it is refused (FLX-3403); plan.json records
+                        another budget as maxRows; read only when a fresh plan
+                        is taken, since the plan of --run-id states its rows
   --timings             print where the time went (load, compile, each emit,
                         framing, attestation); the numbers are wall-clock
                         seconds, reported and recorded nowhere in a run's

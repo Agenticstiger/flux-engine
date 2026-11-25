@@ -296,10 +296,10 @@ def plan_range_setters(plan_document: Mapping[str, Any]) -> bool:
 def plan_max_rows(plan_document: Mapping[str, Any]) -> Optional[int]:
     """The periodic rows' budget a recorded plan names, or the refusal (``FLX-2102``).
 
-    A plan with ``maxRows`` was made with ``fluxsim plan --max-rows`` (ADR 0027 section 5, the
-    amendment of 2026-11-25), and replays under the same budget. A plan without it takes the
-    default. A value that is not a count from 1 to ``MOST_ROWS`` is refused as an unknown
-    ``historyEndShare`` is.
+    A plan with ``maxRows`` was made with ``--max-rows`` (ADR 0027 section 5, the amendment of
+    2026-11-25); a plan without it took the default. A run of a recorded plan makes no estimate,
+    since the plan states its rows, so the value is read to check the plan. One that is not a
+    count from 1 to ``MOST_ROWS`` is refused as an unknown ``historyEndShare`` is.
     """
     if MAX_ROWS_PLAN_KEY not in plan_document:
         return None
@@ -479,6 +479,11 @@ def _register_the_plan_does_not_name(
     )
 
 
+#: Why ``apply --run-id`` refuses ``--max-rows``: the plan states the rows it derives.
+_MAX_ROWS_NEEDS_A_FRESH_PLAN = (
+    "--max-rows is read only when apply takes a fresh plan: the plan of --run-id states the rows "
+    "it derives, and is applied with no estimate"
+)
 #: Why ``apply --run-id`` refuses ``--scale``: the plan records the size it was made at.
 _SCALE_NEEDS_A_FRESH_PLAN = (
     "--scale is read only when apply takes a fresh plan: the plan of --run-id records the "
@@ -513,6 +518,7 @@ def apply(
     sink: Optional[str] = None,
     sink_options: Optional[Mapping[str, str]] = None,
     allow_generators: Sequence[str] = (),
+    max_rows: Optional[int] = None,
 ) -> StageResult:
     """Apply the plan at ``<state_dir>/runs/<run_id>/plan.json``.
 
@@ -521,7 +527,8 @@ def apply(
     execute the plan again.
 
     *scale* sizes the fresh plan (:mod:`flux_engine.stages.scaling`); with *run_id* it is
-    refused, because the plan records its own. *shard* is ``(I, N)`` or ``"I/N"``: only
+    refused, because the plan records its own, and so is *max_rows*, the fresh plan's periodic
+    rows' budget (:func:`flux_engine.stages.plan.plan`), since a recorded plan states its rows. *shard* is ``(I, N)`` or ``"I/N"``: only
     that share of every generated emit's rows is made and written, as
     ``emits/<exposeId>.shard-I-of-N.ndjson`` beside ``shard-I-of-N.json``, which joined in
     order are the bytes of the run's own emit streams. A shard writes no run digest and no
@@ -607,6 +614,7 @@ def apply(
                 scale=scale,
                 shard=shard,
                 allow_generators=allow_generators,
+                max_rows=max_rows,
             ),
         ),
     )
@@ -678,11 +686,14 @@ def _apply(
     scale: Any,
     shard: Any,
     allow_generators: Sequence[str],
+    max_rows: Optional[int] = None,
 ) -> StageResult:
     if run_id is not None and profile is not None:
         return StageResult(stage="apply", exit_code=2, stderr=_PROFILE_NEEDS_A_FRESH_PLAN)
     if run_id is not None and scale is not None:
         return StageResult(stage="apply", exit_code=2, stderr=_SCALE_NEEDS_A_FRESH_PLAN)
+    if run_id is not None and max_rows is not None:
+        return StageResult(stage="apply", exit_code=2, stderr=_MAX_ROWS_NEEDS_A_FRESH_PLAN)
     try:
         shares = None if shard is None else parse_shard(shard)
         optional_scale(scale)  # refused here when it names no usable size
@@ -713,6 +724,7 @@ def _apply(
             shard=shares,
             allow_generators=allow_generators,
             reuse_committed=shares is None,
+            max_rows=max_rows,
         )
         if not planned.success:
             return StageResult(
@@ -840,6 +852,7 @@ def _apply(
                     tracked_levels=plan_scale_floors(plan_document),
                     periodic_rows=plan_max_rows(plan_document),
                     hold_ranges=plan_range_setters(plan_document),
+                    estimate_rows=False,
                 ),
                 shard=shares,
                 references=plan_document.get(REFERENCES_PLAN_KEY),

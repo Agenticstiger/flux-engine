@@ -390,10 +390,17 @@ check saw the count.
   times the most rows a pair takes, over the kinds a count or the high end of the largest class. Spark's `sequence`
   sizes its array the same way, in exact arithmetic before it allocates. The estimate is never below the rows the
   layout makes.
+- **A rare high count.** Since the estimate never counts fewer rows than the layout makes, a count class's high
+  level is taken for every pair, however rare the class: a kind whose count is 1 almost always and 100,000 once in
+  a hundred thousand pairs is estimated at 100,000 rows a pair. The refusal then names the kind and that level.
 - **The budget.** An estimate above the budget is `FLX-3403`, naming the emit, the grain, the window, the periods,
-  the estimate and the budget, and the two ways out: a narrower window or a coarser grain, or a larger budget. The
-  budget is 50,000,000 rows a periodic emit; `fluxsim plan --max-rows N` sets another, up to `MOST_ROWS`.
-- **What moves.** Nothing a plan makes. A budget other than the default is recorded in `plan.json` as `maxRows`, so
-  `apply --run-id` and `replay` hold the run to the budget it was planned under; a plan with the default carries no
-  key and keeps its bytes and its planDigest.
+  the pairs, the estimate, the rows a pair takes and the budget, and the two ways out: a smaller estimate (a lower
+  high level where a count class sets it, else a narrower window or a coarser grain), or a larger budget. The budget
+  is 50,000,000 rows a periodic emit; `--max-rows N` on `plan`, `run` or an `apply` that takes a fresh plan sets
+  another, up to `MOST_ROWS`.
+- **When it runs.** Only while a plan is made. A recorded plan states the rows it derives, so `apply --run-id` and
+  `replay` run it with no estimate, and `MOST_ROWS` alone bounds its rows; `apply --run-id` refuses `--max-rows`.
+- **What moves.** Nothing a plan makes. A budget other than the default is recorded in `plan.json` as `maxRows`; a
+  plan with the default carries no key and keeps its bytes and its planDigest. A plan recorded before the budget
+  replays as it did.
 

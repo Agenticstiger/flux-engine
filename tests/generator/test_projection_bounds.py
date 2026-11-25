@@ -17,7 +17,7 @@ from flux_engine.core.errors import FluxError
 from flux_engine.core.sizing import MOST_ROWS
 from flux_engine.generator import periods as periods_module
 from flux_engine.generator.periods import MOST_PERIODS, estimated_pairs, period_count, period_grid
-from flux_engine.generator.projections import refuse_rows, sources_of
+from flux_engine.generator.projections import RunBounds, refuse_rows, sources_of
 from flux_engine.generator.rows import GeneratorPlan
 from flux_engine.seam.projections import PeriodKind
 
@@ -153,4 +153,17 @@ def test_the_estimate_counts_the_most_rows_a_pair_takes(
     kinds = (PeriodKind(count=3), PeriodKind(count=LEVELS))
     with pytest.raises(FluxError) as caught:
         periods_plan(plans, grain="month", kinds=kinds)
-    assert "rows, above the budget" in str(caught.value)
+    assert "rows at up to 6 rows a pair, above the budget" in str(caught.value)
+    assert "kinds[1]'s count reaches 3 rows a pair" in str(caught.value)
+
+
+def test_a_run_of_a_recorded_plan_makes_no_estimate(
+    plans: Dict[str, GeneratorPlan], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recorded plan states its rows: no estimate is made, however small the budget."""
+    planned = periods_plan(plans, grain="month")
+    monkeypatch.setattr(periods_module, "DEFAULT_PERIODIC_ROWS", 1)
+    recorded = periods_plan(plans, grain="month", run_bounds=RunBounds(ranges=True))
+    assert recorded.rows == planned.rows
+    with pytest.raises(FluxError):
+        periods_plan(plans, grain="month")

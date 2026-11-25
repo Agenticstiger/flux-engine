@@ -1917,6 +1917,8 @@ class PlanEra:
     changes no row.
     *hold_ranges* is false for a plan without ``rangeSetters`` (ADR 0024, the amendment of
     2026-11-25): its history and periods entries replay without keeping to the columns' ranges.
+    *estimate_rows* is false for every recorded plan: it states its rows, so it runs with no
+    estimate against *periodic_rows*, and ``MOST_ROWS`` alone bounds them.
     """
 
     end_share: str = END_SHARE_OF_ENTITIES
@@ -1925,6 +1927,7 @@ class PlanEra:
     scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
     periodic_rows: Optional[int] = None
     hold_ranges: bool = True
+    estimate_rows: bool = True
 
 
 def _execute_with_parent_kept(
@@ -2465,7 +2468,7 @@ def execute(
                 replicate=replicate,
                 end_share=era.end_share,
                 cut_ranges=era.cut_ranges,
-                bounds=RunBounds(era.periodic_rows, era.hold_ranges),
+                bounds=RunBounds(era.periodic_rows, era.hold_ranges, era.estimate_rows),
                 scale_widened=widened,
                 scale_floors=era.scale_floors,
             )
@@ -3548,7 +3551,7 @@ def _planned_with_projections(
     """
     namespace = _flux_namespace(simulation)
     projected = _projected_emits(resolved_emits)
-    bounds = RunBounds(era.periodic_rows, era.hold_ranges)
+    bounds = RunBounds(era.periodic_rows, era.hold_ranges, era.estimate_rows)
 
     def plan_at(index: int, rows: Optional[int]) -> _PlannedEmit:
         return _plan_emit(

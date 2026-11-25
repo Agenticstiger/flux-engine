@@ -246,16 +246,23 @@ def _refuse_many_periods(entry: PeriodsEntry, grain: str, window: Tuple[int, int
         )
 
 
-def _most_per_pair(entry: PeriodsEntry) -> int:
-    """The most rows one held (version, period) pair takes: over the kinds, a count or a class's high."""
-    most = 0
+def _most_per_pair(entry: PeriodsEntry) -> Tuple[int, Optional[Tuple[int, int]]]:
+    """The most rows one held (version, period) pair takes, and the count class that sets most of it.
+
+    Over the kinds, a count or the high level of its largest class. The second member is the kind
+    whose classes reach the highest level and that level, or ``None`` for whole counts alone.
+    """
+    most, highest = 0, None
     for index, kind in enumerate(entry.kinds or (PeriodKind(),)):
         if isinstance(kind.count, int):
             most += kind.count
-        else:
-            where = f"periods ({entry.emit}).kinds[{index}].count"
-            most += max(found.high for found in classes_of(kind.count.as_member(), where))
-    return most
+            continue
+        where = f"periods ({entry.emit}).kinds[{index}].count"
+        high = max(found.high for found in classes_of(kind.count.as_member(), where))
+        most += high
+        if highest is None or high > highest[1]:
+            highest = (index, high)
+    return most, highest
 
 
 def estimated_pairs(
@@ -288,12 +295,16 @@ def _refuse_above_budget(
     """Refuse (``FLX-3403``) an entry estimated to derive more rows than the plan's budget.
 
     The estimate is the pairs :func:`estimated_pairs` bounds times the most rows a pair takes, so
-    the refusal comes before the periods, the layout or a row is made.
+    the refusal comes before the periods, the layout or a row is made. It never counts fewer rows
+    than the layout makes, so a count class's high level is taken for every pair, however rare the
+    class: the refusal then names that level. It runs while a plan is made; a recorded plan states
+    its rows, and ``apply`` and ``replay`` run it with no estimate (``budget`` is ``None``).
     """
-    assert projection.window is not None
-    budget = DEFAULT_PERIODIC_ROWS if projection.budget is None else projection.budget
+    assert projection.window is not None and projection.budget is not None
+    budget = projection.budget
     pairs = estimated_pairs(entry, projection.window, valid)
-    estimate = pairs * _most_per_pair(entry)
+    per_pair, highest = _most_per_pair(entry)
+    estimate = pairs * per_pair
     if estimate <= budget:
         return
     grain = str(entry.grain)
@@ -307,10 +318,21 @@ def _refuse_above_budget(
     raise _refuse(
         f"periods ({entry.emit}): grain {grain} over the window {start} to {end}{ranged} makes "
         f"{periods} periods, and the {entities} entities' versions are estimated to hold {pairs} "
-        f"(version, period) pairs, {estimate} rows, above the budget of {budget} rows a periodic "
-        "emit; narrow the window (timeBounds, or the entry's from and through) or take a coarser "
-        f"grain, or raise the budget with fluxsim plan --max-rows N (at most {MOST_ROWS})"
+        f"(version, period) pairs, {estimate} rows at up to {per_pair} rows a pair, above the "
+        f"budget of {budget} rows a periodic emit; {_ways_out(highest)}, or raise the budget with "
+        f"--max-rows N (at most {MOST_ROWS})"
     )
+
+
+def _ways_out(highest: Optional[Tuple[int, int]]) -> str:
+    """What brings the estimate down: a count class's high level when one sets it, else the periods."""
+    if highest is not None and highest[1] > 1:
+        index, level = highest
+        return (
+            f"kinds[{index}]'s count reaches {level} rows a pair and the estimate takes that level "
+            "for every pair, however rare its class: lower that level"
+        )
+    return "narrow the window (timeBounds, or the entry's from and through) or take a coarser grain"
 
 
 def period_grid(
@@ -524,7 +546,8 @@ def _build(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
     view = view_of(projection.history, chain, projection.root)
     _refuse_many_periods(entry, str(entry.grain), projection.window)
     valid_from, valid_to = view.valid_ms(projection.window[1])
-    _refuse_above_budget(entry, projection, (valid_from, valid_to), chain.entities)
+    if projection.budget is not None:
+        _refuse_above_budget(entry, projection, (valid_from, valid_to), chain.entities)
     days, begins, ends = period_grid(
         str(entry.grain), projection.window, entry.from_day, entry.through_day
     )

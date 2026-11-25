@@ -13,17 +13,22 @@ from __future__ import annotations
 
 import json
 import tracemalloc
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from flux_engine.cli import main
-from flux_engine.cli.commands.plan import DEFAULT_MAX_ROWS, MOST_MAX_ROWS
+from flux_engine.cli._args import DEFAULT_MAX_ROWS, MOST_MAX_ROWS
+from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
 from flux_engine.core.sizing import MOST_ROWS
+from flux_engine.generator import periods as periods_module
 from flux_engine.generator.periods import DEFAULT_PERIODIC_ROWS
 from flux_engine.stages.layout import RunLayout
+from flux_engine.stages.replay import replay
 
 from . import _fleet
 
@@ -142,3 +147,84 @@ def test_a_budget_outside_1_to_the_most_rows_is_a_usage_error(
         main(["plan", str(tmp_path), "--max-rows", asked])
     assert exited.value.code == 2
     assert "--max-rows" in capsys.readouterr().err
+
+
+def _heavy_tailed(tmp_path: Path) -> Path:
+    """The fleet with one periodic kind whose count is almost always 1 and rarely 100,000."""
+    target = _fleet.bundle(tmp_path)
+    simulation = target / "simulation.flux.yml"
+    document = yaml.safe_load(simulation.read_text("utf-8"))
+    entry = document["extensions"][_fleet.NAMESPACE]["periods"][0]
+    entry["kinds"] = [
+        {"count": {"levels": ["1", "100000"], "levelWeights": ["0.99999", "0.00001"]}}
+    ]
+    simulation.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    return target
+
+
+def test_a_heavy_tailed_count_names_its_high_level_and_the_two_ways_out(tmp_path: Path) -> None:
+    refused = _plan(_heavy_tailed(tmp_path), tmp_path / "state")
+    assert not refused.success
+    words = refused.stderr
+    assert "FLX-3403" in words
+    assert "kinds[0]'s count reaches 100000 rows a pair" in words
+    assert "lower that level" in words and "--max-rows N" in words
+
+
+def test_a_plan_recorded_before_the_budget_replays_with_no_estimate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recorded plan states its rows: apply and replay run it without the plan-time estimate."""
+    target = _heavy_tailed(tmp_path)
+    state = tmp_path / "state"
+    with monkeypatch.context() as patched:
+        # The engine before the budget: no estimate, and no maxRows in the plan.
+        patched.setattr(periods_module, "DEFAULT_PERIODIC_ROWS", MOST_ROWS)
+        layout = _fleet.run_bundle(target, state)
+    assert "maxRows" not in json.loads(layout.plan_path.read_text("utf-8"))
+    recorded = layout.emit_path(_fleet.PERIODIC).read_bytes()
+    digest = digest_of_document(
+        json.loads((state / "runs" / layout.run_id / "run-digest.json").read_text("utf-8")),
+        subject="runDigest",
+    ).value
+    replayed = replay(target, run_id=layout.run_id, assert_digest=digest, state_dir=state)
+    assert replayed.success, replayed.stderr
+    assert layout.emit_path(_fleet.PERIODIC).read_bytes() == recorded
+    applied = apply_module.apply(target, run_id=layout.run_id, state_dir=state)
+    assert applied.success, applied.stderr
+
+
+def test_run_and_a_fresh_apply_take_the_budget_and_record_it(tmp_path: Path) -> None:
+    target = _fleet.bundle(tmp_path)
+    run_module = import_module("flux_engine.stages.run")
+    for name, call in (
+        ("run", lambda state, rows: run_module.run(target, state_dir=state, max_rows=rows)),
+        ("apply", lambda state, rows: apply_module.apply(target, state_dir=state, max_rows=rows)),
+    ):
+        state = tmp_path / name
+        refused = call(state, 100)
+        assert not refused.success and "above the budget of 100 rows" in refused.stderr, name
+        done = call(state, 2_000_000)
+        assert done.success, (name, done.stderr)
+        plans = list((state / "runs").glob("*/plan.json"))
+        assert [json.loads(plan.read_text("utf-8"))["maxRows"] for plan in plans] == [2_000_000]
+
+
+def test_apply_of_a_recorded_plan_refuses_a_budget(tmp_path: Path) -> None:
+    target = _fleet.bundle(tmp_path)
+    state = tmp_path / "state"
+    planned = _plan(target, state)
+    assert planned.success, planned.stderr
+    applied = apply_module.apply(
+        target, run_id=planned.artifacts["run_id"], state_dir=state, max_rows=1000
+    )
+    assert applied.exit_code == 2 and "--max-rows is read only when apply takes a fresh plan" in (
+        applied.stderr
+    )
+
+
+@pytest.mark.parametrize("command", ["run", "apply"])
+def test_the_flag_is_on_run_and_apply(command: str, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main([command, "--help"])
+    assert "--max-rows N" in capsys.readouterr().out

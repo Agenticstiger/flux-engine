@@ -111,9 +111,9 @@ class ProjectionPlan:
     entry: Any = None
     root: Optional[SeedTreeRoot] = field(default=None, compare=False, repr=False)
     window: Optional[Tuple[int, int]] = None
-    #: The rows a periodic emit may be estimated to derive (``None`` for the default,
-    #: :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`). An acceptance bound, no
-    #: part of the rows, so the plan records it apart (``maxRows``) and not in this member.
+    #: The rows a periodic emit may be estimated to derive, checked while a plan is made; ``None``
+    #: for a recorded plan, which states its rows and is run with no estimate. An acceptance bound,
+    #: no part of the rows, so the plan records it apart (``maxRows``) and not in this member.
     budget: Optional[int] = field(default=None, compare=False)
     #: A periods entry's first and last period day, from the contract's range on the period column
     #: (:func:`~flux_engine.generator.periods.period_range`); ``None`` where the range cuts nothing
@@ -139,17 +139,21 @@ class ProjectionPlan:
 class RunBounds:
     """What a run holds its projections to: the periodic rows' budget, and the period column's range.
 
-    ``budget`` is :attr:`ProjectionPlan.budget`; ``ranges`` cuts a periods entry's periods at the
-    period column's contract range (ADR 0024, the amendment of 2026-11-25), which a recorded plan
-    without ``rangeSetters`` does not.
+    With ``estimate``, a run that makes a plan, a periods entry is refused when it is estimated to
+    derive more rows than ``budget`` (``None`` for
+    :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`); a run of a recorded plan makes
+    no estimate. ``ranges`` cuts a periods entry's periods at the period column's contract range
+    (ADR 0024, the amendment of 2026-11-25), which a recorded plan without ``rangeSetters`` does
+    not.
     """
 
     budget: Optional[int] = None
     ranges: bool = False
+    estimate: bool = False
 
 
-#: What a new plan holds its projections to: the default budget, and the columns' ranges.
-NEW_PLAN_BOUNDS = RunBounds(ranges=True)
+#: What a new plan holds its projections to: the default budget, estimated, and the columns' ranges.
+NEW_PLAN_BOUNDS = RunBounds(ranges=True, estimate=True)
 
 
 @dataclass(frozen=True)
@@ -277,6 +281,13 @@ def _entry_of_key(
 # -- the plan -----------------------------------------------------------------------------------
 
 
+def _budget_of(bounds: RunBounds) -> Optional[int]:
+    """The budget a projection is estimated against, or ``None`` for a run with no estimate."""
+    if not bounds.estimate:
+        return None
+    return _periods.DEFAULT_PERIODIC_ROWS if bounds.budget is None else bounds.budget
+
+
 def _projection(
     found: Tuple[str, str, Any], history: GeneratorPlan, plan: GeneratorPlan, bounds: RunBounds
 ) -> ProjectionPlan:
@@ -304,7 +315,7 @@ def _projection(
         history,
         entry=options,
         window=plan.time_bounds,
-        budget=bounds.budget,
+        budget=_budget_of(bounds),
         clip=clip,
     )
 

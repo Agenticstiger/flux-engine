@@ -355,9 +355,10 @@ def _date_range_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
 
 
 #: ``plan.json``'s key for the rows a periodic emit may be estimated to derive (ADR 0027 section 5,
-#: the amendment of 2026-11-25): the budget ``fluxsim plan --max-rows`` set. Present only for a
-#: budget other than :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`, so every other
-#: plan keeps its bytes and its planDigest, and ``apply --run-id`` holds the run to the same budget.
+#: the amendment of 2026-11-25): the budget ``--max-rows`` set. Present only for a budget other
+#: than :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`, so every other plan keeps its
+#: bytes and its planDigest. The estimate runs while the plan is made; a run of the recorded plan
+#: makes none.
 MAX_ROWS_PLAN_KEY = "maxRows"
 
 

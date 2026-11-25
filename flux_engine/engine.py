@@ -154,6 +154,7 @@ async def apply(
     sink: Optional[str] = None,
     sink_options: Optional[Mapping[str, str]] = None,
     allow_generators: Sequence[str] = (),
+    max_rows: Optional[int] = None,
     timeout: Optional[float] = None,
 ) -> StageResult:
     """``fluxsim apply``, off the event loop.
@@ -180,6 +181,7 @@ async def apply(
         sink=sink,
         sink_options=sink_options,
         allow_generators=allow_generators,
+        max_rows=max_rows,
     )
 
 
@@ -208,6 +210,7 @@ async def run(
     timings: bool = False,
     allow_generators: Sequence[str] = (),
     most_rows: Optional[int] = None,
+    max_rows: Optional[int] = None,
     timeout: Optional[float] = None,
 ) -> StageResult:
     """``fluxsim run`` (``plan`` + ``apply``, with ``--verify``/``--sink``/``--ship`` sugar), off the event loop.
@@ -243,6 +246,7 @@ async def run(
         timings=timings,
         allow_generators=allow_generators,
         most_rows=most_rows,
+        max_rows=max_rows,
     )
 
 
