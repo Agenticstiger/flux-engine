@@ -1,8 +1,8 @@
 ---
 name: flux-scale-and-ship
-description: "Sizes, splits and delivers a FLUX run: `--scale` for more or fewer rows, `--shard` for one share of them, `--jobs` for parallel generation with the same digests, sinks that write Parquet, Arrow IPC, a database through ADBC, or an Iceberg or Delta Lake table (also to an object store), and fluxsim ship for the evidence pack with its EVIDENCE.md and signed fidelity records. Use when the user wants a bigger, smaller, faster or split run, output in Parquet, Arrow or a database, or a run handed over with its evidence."
+description: "Sizes, splits and delivers a FLUX run: `--scale` for more or fewer rows, `--shard` for one share of them, `--jobs` for parallel generation with the same digests, sinks that write Parquet, Arrow IPC, a database through ADBC, an Iceberg or Delta Lake table (also to an object store), or Kafka topics, and fluxsim ship for the evidence pack with its EVIDENCE.md and signed fidelity records. Use when the user wants a bigger, smaller, faster or split run, output in Parquet, Arrow or a database, or a run handed over with its evidence."
 license: Apache-2.0
-compatibility: "Needs the fluxsim command line (the flux-sim-engine package) on PATH and a FLUX bundle. The Parquet and Arrow IPC sinks need its arrow extra, the database sink its adbc extra, and the Iceberg and Delta sinks and object store targets its publish extra; fluxsim plugins says which are installed."
+compatibility: "Needs the fluxsim command line (the flux-sim-engine package) on PATH and a FLUX bundle. The Parquet and Arrow IPC sinks need its arrow extra, the database sink its adbc extra, the Iceberg and Delta sinks and object store targets its publish extra, and the Kafka sink its kafka extra; fluxsim plugins says which are installed."
 ---
 
 # Scale, split and ship a FLUX run
@@ -46,7 +46,7 @@ fluxsim apply bundle --run-id RUN_ID
 
 ## 4. Sinks
 
-`--sink NAME:TARGET` writes every stream of a whole run as typed columns after the run is written: `parquet:DIR`, `arrow-ipc:DIR`, `adbc:DRIVER`, `iceberg:CATALOG/NAMESPACE` or `delta:URL-OR-DIRECTORY`. Settings go in `--sink-opt KEY=VALUE`, repeatable. The stream's `outputDigest` does not change with a sink. Run `fluxsim plugins` first: it lists the sinks and whether each one's extra is installed (FLX-3501 means it is not; ask the user to install it).
+`--sink NAME:TARGET` writes every stream of a whole run as typed columns after the run is written: `parquet:DIR`, `arrow-ipc:DIR`, `adbc:DRIVER`, `iceberg:CATALOG/NAMESPACE`, `delta:URL-OR-DIRECTORY` or `kafka:HOST:PORT[,HOST:PORT...]`. Settings go in `--sink-opt KEY=VALUE`, repeatable. The stream's `outputDigest` does not change with a sink. Run `fluxsim plugins` first: it lists the sinks and whether each one's extra is installed (FLX-3501 means it is not; ask the user to install it).
 
 ```bash
 fluxsim plugins
@@ -54,7 +54,7 @@ fluxsim apply bundle --run-id RUN_ID --sink parquet:OUT/parquet
 fluxsim apply bundle --run-id RUN_ID --sink arrow-ipc:OUT/arrow --sink-opt compression=zstd
 ```
 
-A database sink takes its driver as the target, for example `--sink adbc:duckdb`. A URI reaches a sink only as `--sink-opt uri-env=VAR`: ask the user to set the environment variable themselves (a file path or a server URI) and pass only its name. A secret is never written into a command line. Never set, print or echo that variable. Run a `--sink` to a database, `ship` or any other hand-over only when the user asked for it and named the destination. Settings and rules: [sinks](references/sinks.md).
+A database sink takes its driver as the target, for example `--sink adbc:duckdb`. A URI reaches a sink only as `--sink-opt uri-env=VAR`: ask the user to set the environment variable themselves (a file path or a server URI) and pass only its name. A secret is never written into a command line. Never set, print or echo that variable. Run a `--sink` to a database, `ship` or any other hand-over only when the user asked for it and named the destination. The `kafka` sink sends records to the brokers the user names and needs the `kafka` extra; name brokers only when the user gave them, and see its page for keys, schemas and credentials. Settings and rules: [sinks](references/sinks.md).
 
 The `iceberg` and `delta` sinks write one table per stream and need the `publish` extra, as does an object store target: `parquet:` and `arrow-ipc:` also take an `s3://`, `gs://`, `az://` or `abfs://` prefix, and `delta:` takes such a URL. Credentials come only from the user's own environment or platform; no `--sink-opt` carries one, and a target with user information, a query or a fragment is refused. Name such a destination only when the user gave it. An object store target with no credentials is refused (`FLX-3505`) unless the user passes `--sink-opt instance-identity=true`; do not add it on your own judgement.
 
