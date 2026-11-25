@@ -609,6 +609,21 @@
         "choices": null
       },
       {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-rows"
+        ],
+        "dest": "max_rows",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_max_rows_type",
+        "required": false,
+        "help": "the rows each periodic emit may be estimated to derive, checked before its periods are laid out (default 50000000, at most 10000000000). A plan above it is refused (FLX-3403); plan.json records another budget as maxRows, and apply --run-id holds the run to it",
+        "metavar": "N",
+        "choices": null
+      },
+      {
         "class": "_AppendAction",
         "option_strings": [
           "--allow-generator"

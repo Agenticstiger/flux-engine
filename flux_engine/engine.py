@@ -108,11 +108,13 @@ async def plan(
     scale: Any = None,
     timings: bool = False,
     allow_generators: Sequence[str] = (),
+    max_rows: Optional[int] = None,
     timeout: Optional[float] = None,
 ) -> StageResult:
     """``fluxsim plan``, off the event loop.
 
     *allow_generators* names the generator plugins the person allows to be imported (``--allow-generator``).
+    *max_rows* is the rows each periodic emit may be estimated to derive (``--max-rows``).
     """
     return await _call(
         _plan_stage,
@@ -130,6 +132,7 @@ async def plan(
         scale=scale,
         timings=timings,
         allow_generators=allow_generators,
+        max_rows=max_rows,
     )
 
 

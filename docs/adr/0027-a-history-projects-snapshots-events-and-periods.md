@@ -377,3 +377,23 @@ had a different number of rows per parent than the history had entities. `init` 
   has children of its own. Where two snapshots of one history could give, the one whose emit id sorts first does,
   so the result does not depend on the order of the exposes. The ledger says which statistic moved where and why.
 - **What moves.** A bundle for a contract with such an expose. Every other bundle keeps its bytes.
+
+## Amendment of 2026-11-25: a budget on the rows of a periodic emit
+
+`MOST_PERIODS` bounds the periods of an entry, but not its rows, and `plan` generates every row it plans: a monthly
+entry over five thousand years for a thousand entities derives sixty million rows, which took gigabytes before any
+check saw the count.
+
+- **The estimate.** Before it lists a period, `plan` bounds the entry's pairs from the versions alone: a version valid
+  over `[a, b)` inside the periods' span meets at most `(b - a) // shortest + 2` periods, `shortest` the fewest days
+  a period of the grain spans (1, 7, 28, 89 or 365), and never more than there are periods. The estimate is that sum
+  times the most rows a pair takes, over the kinds a count or the high end of the largest class. Spark's `sequence`
+  sizes its array the same way, in exact arithmetic before it allocates. The estimate is never below the rows the
+  layout makes.
+- **The budget.** An estimate above the budget is `FLX-3403`, naming the emit, the grain, the window, the periods,
+  the estimate and the budget, and the two ways out: a narrower window or a coarser grain, or a larger budget. The
+  budget is 50,000,000 rows a periodic emit; `fluxsim plan --max-rows N` sets another, up to `MOST_ROWS`.
+- **What moves.** Nothing a plan makes. A budget other than the default is recorded in `plan.json` as `maxRows`, so
+  `apply --run-id` and `replay` hold the run to the budget it was planned under; a plan with the default carries no
+  key and keeps its bytes and its planDigest.
+

@@ -43,6 +43,7 @@ from flux_engine.core.digest import (
 )
 from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import Kernel
+from flux_engine.core.sizing import MOST_ROWS
 from flux_engine.core.trace import TraceOp, build_run_digest_document, component_of
 from flux_engine.evidence.provenance import PROVENANCE_DIGEST_KEY, provenance_digest
 from flux_engine.evidence.register import REGISTER_DIGEST_KEY, register_digest
@@ -98,6 +99,7 @@ from flux_engine.stages.plan import (
     DATE_RANGES_CUT,
     DATE_RANGES_PLAN_KEY,
     END_SHARE_PLAN_KEY,
+    MAX_ROWS_PLAN_KEY,
     REFERENCES_PLAN_KEY,
     SCALE_FLOORS_PLAN_KEY,
     SCALE_FLOORS_TRACKED,
@@ -120,6 +122,7 @@ __all__ = [
     "load_recorded_plan",
     "plan_date_ranges",
     "plan_scale_floors",
+    "plan_max_rows",
     "plan_end_share",
     "plan_kernel",
     "require_plan_shortfalls",
@@ -193,6 +196,7 @@ def load_recorded_plan(layout: RunLayout) -> Dict[str, Any]:
     plan_end_share(document)
     plan_date_ranges(document)
     plan_scale_floors(document)
+    plan_max_rows(document)
     require_plan_shortfalls(document)
     return document
 
@@ -271,6 +275,26 @@ def plan_scale_floors(plan_document: Mapping[str, Any]) -> bool:
     return _marker_named(
         plan_document, SCALE_FLOORS_PLAN_KEY, SCALE_FLOORS_TRACKED, "checks no tracked level"
     )
+
+
+def plan_max_rows(plan_document: Mapping[str, Any]) -> Optional[int]:
+    """The periodic rows' budget a recorded plan names, or the refusal (``FLX-2102``).
+
+    A plan with ``maxRows`` was made with ``fluxsim plan --max-rows`` (ADR 0027 section 5, the
+    amendment of 2026-11-25), and replays under the same budget. A plan without it takes the
+    default. A value that is not a count from 1 to ``MOST_ROWS`` is refused as an unknown
+    ``historyEndShare`` is.
+    """
+    if MAX_ROWS_PLAN_KEY not in plan_document:
+        return None
+    named = plan_document[MAX_ROWS_PLAN_KEY]
+    if not _is_count(named) or not 1 <= named <= MOST_ROWS:
+        raise FluxError(
+            FLX_2102,
+            f"the recorded plan names {MAX_ROWS_PLAN_KEY} {_short_repr(named)}, which is not a "
+            f"budget of rows from 1 to {MOST_ROWS}; plan again with this engine",
+        )
+    return named
 
 
 def _marker_named(plan_document: Mapping[str, Any], key: str, known: str, without: str) -> bool:
@@ -798,6 +822,7 @@ def _apply(
                     end_share=plan_end_share(plan_document),
                     cut_ranges=plan_date_ranges(plan_document),
                     tracked_levels=plan_scale_floors(plan_document),
+                    periodic_rows=plan_max_rows(plan_document),
                 ),
                 shard=shares,
                 references=plan_document.get(REFERENCES_PLAN_KEY),

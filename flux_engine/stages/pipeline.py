@@ -491,6 +491,9 @@ class PipelineResult:
     end_share: str = END_SHARE_OF_ENTITIES
     #: Whether a column may be cut at its contract's range (ADR 0024); false replays a plan as it was.
     cut_ranges: bool = True
+    #: The rows a periodic emit may be estimated to derive, as the plan set it (``--max-rows``);
+    #: ``None`` for :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`.
+    periodic_rows: Optional[int] = None
     #: The key columns ``--scale`` widened, by exposeId: their contract range is not verified.
     scale_widened: Mapping[str, FrozenSet[str]] = field(default_factory=dict)
     #: The drawn parents ``--scale`` kept at the rows their children's tracked levels need.
@@ -1880,12 +1883,18 @@ class PlanEra:
     the scale gives it. Otherwise a ``--scale`` below 1 that cuts a drawn parent below a key a
     history's tracked level names runs again with that parent kept at the fewest rows that hold
     every level; *scale_floors* is what that has settled so far.
+    *periodic_rows* is the rows a periodic emit may be estimated to derive before its periods are
+    laid out (ADR 0027 section 5, the amendment of 2026-11-25): ``fluxsim plan --max-rows``, or a
+    recorded plan's ``maxRows``; ``None`` takes
+    :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`. It refuses (``FLX-3403``) and
+    changes no row.
     """
 
     end_share: str = END_SHARE_OF_ENTITIES
     cut_ranges: bool = True
     tracked_levels: bool = True
     scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
+    periodic_rows: Optional[int] = None
 
 
 def _execute_with_parent_kept(
@@ -2426,6 +2435,7 @@ def execute(
                 replicate=replicate,
                 end_share=era.end_share,
                 cut_ranges=era.cut_ranges,
+                periodic_rows=era.periodic_rows,
                 scale_widened=widened,
                 scale_floors=era.scale_floors,
             )
@@ -3547,21 +3557,26 @@ def _planned_with_projections(
             _history_plan_of(resolved_emits, related, found[1]),
             _plan_of(related[index]),
             root,
+            budget=era.periodic_rows,
         )
         for index, found in projected.items()
     }
     if any(counts[index] != guesses[index] for index in counts):
         related = replan({**shrunk, **counts})
-    return _with_projected_plans(resolved_emits, related, projected, root)
+    return _with_projected_plans(resolved_emits, related, projected, (root, era.periodic_rows))
 
 
 def _with_projected_plans(
     resolved_emits: Sequence[ResolvedEmit],
     related: Sequence[_PlannedEmit],
     projected: Mapping[int, Tuple[str, str, str]],
-    root: SeedTreeRoot,
+    run: Tuple[SeedTreeRoot, Optional[int]],
 ) -> Tuple[_PlannedEmit, ...]:
-    """Each emit in *projected* with the plan derived from its history's layouts, and the others as they are."""
+    """Each emit in *projected* with the plan derived from its history's layouts, and the others as they are.
+
+    *run* is the run root and the periodic rows' budget (:func:`_planned_with_projections`').
+    """
+    root, budget = run
     return tuple(
         (
             replace(
@@ -3572,6 +3587,7 @@ def _with_projected_plans(
                         *projected[index],
                         _history_plan_of(resolved_emits, related, projected[index][1]),
                         root,
+                        budget=budget,
                     )
                 ),
                 coverage=coverage_of_plan(projected_plan),

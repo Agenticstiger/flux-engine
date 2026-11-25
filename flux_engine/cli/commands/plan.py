@@ -21,6 +21,7 @@ from flux_engine.cli._args import (
     _add_state_dir,
     _add_strict_coverage,
     _add_timings,
+    _whole_number_type,
 )
 from flux_engine.cli._output import _finish
 from flux_engine.cli._parser import Example
@@ -42,6 +43,36 @@ EXAMPLES: Dict[str, Tuple[Example, ...]] = {
 #: written out so that building the parser imports no kernel code.
 #: ``tests/cli/test_plan_kernel.py`` holds the two to each other.
 KERNEL_CHOICES = ("0.1.0", "0.2.0")
+
+#: ``--max-rows``' default and its ceiling: :data:`flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`
+#: and :data:`flux_engine.core.sizing.MOST_ROWS`, written out so that building the parser imports
+#: no generator code. ``tests/stages/test_periodic_rows_budget.py`` holds them to each other.
+DEFAULT_MAX_ROWS = 50_000_000
+MOST_MAX_ROWS = 10**10
+
+
+def _max_rows_type(text: str) -> int:
+    """``argparse`` ``type=`` callable for ``--max-rows``: a whole number from 1 to :data:`MOST_MAX_ROWS`."""
+    value = _whole_number_type(1)(text)
+    if value > MOST_MAX_ROWS:
+        raise argparse.ArgumentTypeError(f"expected at most {MOST_MAX_ROWS}, got {text!r}")
+    return value
+
+
+def _add_max_rows(plan_p: argparse.ArgumentParser) -> None:
+    """``--max-rows``: the periodic rows' budget (ADR 0027 section 5, the amendment of 2026-11-25)."""
+    plan_p.add_argument(
+        "--max-rows",
+        type=_max_rows_type,
+        default=None,
+        metavar="N",
+        help=(
+            "the rows each periodic emit may be estimated to derive, checked before its periods "
+            f"are laid out (default {DEFAULT_MAX_ROWS}, at most {MOST_MAX_ROWS}). A plan above it "
+            "is refused (FLX-3403); plan.json records another budget as maxRows, and apply "
+            "--run-id holds the run to it"
+        ),
+    )
 
 
 def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -89,6 +120,7 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "declares generator plugins, whose bytes are stored and never generated again)"
         ),
     )
+    _add_max_rows(plan_p)
     _add_allow_generator(plan_p, when="when the plan generates the rows")
     _add_scale(plan_p)
     _add_timings(plan_p)
@@ -118,5 +150,6 @@ def _cmd_plan(args: argparse.Namespace) -> int:
             scale=args.scale,
             timings=args.timings,
             allow_generators=tuple(args.allow_generator or ()),
+            max_rows=args.max_rows,
         )
     return _finish(args, result)

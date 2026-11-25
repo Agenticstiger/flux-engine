@@ -109,6 +109,10 @@ class ProjectionPlan:
     entry: Any = None
     root: Optional[SeedTreeRoot] = field(default=None, compare=False, repr=False)
     window: Optional[Tuple[int, int]] = None
+    #: The rows a periodic emit may be estimated to derive (``None`` for the default,
+    #: :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`). An acceptance bound, no
+    #: part of the rows, so the plan records it apart (``maxRows``) and not in this member.
+    budget: Optional[int] = field(default=None, compare=False)
 
     def as_document(self) -> Dict[str, Any]:
         """The ``projection`` member of the plan's document: where the rows come from."""
@@ -431,10 +435,20 @@ def _count(key: str, chain: Any, projection: ProjectionPlan, plan: GeneratorPlan
 
 
 def derived_rows(
-    key: str, of: str, options: Any, history: GeneratorPlan, plan: GeneratorPlan, root: SeedTreeRoot
+    key: str,
+    of: str,
+    options: Any,
+    history: GeneratorPlan,
+    plan: GeneratorPlan,
+    root: SeedTreeRoot,
+    *,
+    budget: Optional[int] = None,
 ) -> int:
-    """The number of rows *plan*'s emit takes from *history*, worked out from the plan alone."""
-    projection = replace(_projection(key, of, options, history, plan), root=root)
+    """The number of rows *plan*'s emit takes from *history*, worked out from the plan alone.
+
+    *budget* bounds the rows a periodic emit is estimated to derive (:attr:`ProjectionPlan.budget`).
+    """
+    projection = replace(_projection(key, of, options, history, plan), root=root, budget=budget)
     return _count(key, chain_of(history, root), projection, plan)
 
 
@@ -445,9 +459,14 @@ def project_plan(
     options: Any,
     history: GeneratorPlan,
     root: SeedTreeRoot,
+    *,
+    budget: Optional[int] = None,
 ) -> GeneratorPlan:
-    """*plan* as a projected emit's: its ``rows`` the derived count, and the projection attached."""
-    projection = _projection(key, of, options, history, plan)
+    """*plan* as a projected emit's: its ``rows`` the derived count, and the projection attached.
+
+    *budget* is :func:`derived_rows`' and stays on the projection, so the rows' pass reads it too.
+    """
+    projection = replace(_projection(key, of, options, history, plan), budget=budget)
     count = _count(key, chain_of(history, root), replace(projection, root=root), plan)
     return replace(plan, rows=count, projection=projection)
 

@@ -311,6 +311,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - A history's `until` in the year 9999 is now refused at `plan` (`FLX-3403`): a day in that year is the open-end
   spelling, which a contract's range reads as an open end, and a periodic step past it leaves the calendar. The
   message says to set `until` to the last instant a version may start and to write the open end with `openEnd`.
+- A periodic emit over a long window made `plan` generate every row before any bound applied: five thousand years
+  of months for a thousand entities took gigabytes. `plan` now estimates each periods entry's rows from its versions
+  before it lists a period (at most two periods more than a version's span holds, times the most rows a pair takes)
+  and refuses (`FLX-3403`) an estimate above the budget, 50,000,000 rows a periodic emit by default, naming the emit,
+  the grain, the window, the estimate and the budget. `fluxsim plan --max-rows N` sets another budget, up to
+  10,000,000,000; `plan.json` records it as `maxRows` and `apply --run-id` holds the run to it. A plan with the
+  default budget keeps its bytes (ADR 0027, the amendment of 2026-11-25).
 
 ## 0.11.1 - 2026-11-24
 

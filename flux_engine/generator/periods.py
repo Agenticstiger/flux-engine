@@ -39,9 +39,10 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Un
 import numpy as np
 
 from flux_engine.core import kernel2
-from flux_engine.core.clock import parse_rfc3339_ms
+from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
 from flux_engine.core.errors import FluxError
 from flux_engine.core.seedtree import SeedTreeRoot
+from flux_engine.core.sizing import MOST_ROWS
 from flux_engine.expr2.check import Checked
 from flux_engine.expr2.functions import add_months
 from flux_engine.generator import rows as _rows
@@ -57,9 +58,11 @@ if TYPE_CHECKING:
     from flux_engine.generator.projections import ProjectionPlan
 
 __all__ = [
+    "DEFAULT_PERIODIC_ROWS",
     "PeriodLayout",
     "clear_layouts",
     "count",
+    "estimated_pairs",
     "layout_of",
     "period_grid",
     "periods_rows",
@@ -74,6 +77,12 @@ _LAYOUTS_KEPT = 4
 _LAYOUTS: Dict[Tuple[Any, ...], "PeriodLayout"] = {}
 #: The most periods an entry may have; more is refused before any period is worked out.
 MOST_PERIODS = 1_000_000
+#: The rows a periodic emit may be estimated to derive before its periods are laid out, unless the
+#: plan sets another budget (``fluxsim plan --max-rows``, which ``plan.json`` records as ``maxRows``).
+DEFAULT_PERIODIC_ROWS = 50_000_000
+#: The fewest days a period of each grain spans: a month from the 31st of January ends on the 28th
+#: of February, and a quarter from the 1st of February spans 89 days.
+_SHORTEST_DAYS = {"day": 1, "week": 7, "month": 28, "quarter": 89, "year": 365}
 
 
 def _refuse(message: str) -> FluxError:
@@ -165,6 +174,73 @@ def _refuse_many_periods(entry: PeriodsEntry, grain: str, window: Tuple[int, int
             f"periods ({entry.emit}): grain {grain} over the range makes {number} periods; "
             f"at most {MOST_PERIODS}"
         )
+
+
+def _most_per_pair(entry: PeriodsEntry) -> int:
+    """The most rows one held (version, period) pair takes: over the kinds, a count or a class's high."""
+    most = 0
+    for index, kind in enumerate(entry.kinds or (PeriodKind(),)):
+        if isinstance(kind.count, int):
+            most += kind.count
+        else:
+            where = f"periods ({entry.emit}).kinds[{index}].count"
+            most += max(found.high for found in classes_of(kind.count.as_member(), where))
+    return most
+
+
+def estimated_pairs(
+    entry: PeriodsEntry, window: Tuple[int, int], valid: Tuple["np.ndarray", "np.ndarray"]
+) -> int:
+    """An upper bound on the held pairs, worked out from the versions alone, before any period is listed.
+
+    Spark's ``sequence`` sizes its array as ``1 + (stop - start) / step`` in exact arithmetic before
+    it allocates; here a version valid over ``[a, b)`` inside the periods' span meets at most
+    ``(b - a) // shortest + 2`` periods, ``shortest`` the fewest days a period of the grain spans,
+    and never more than there are periods.
+    """
+    grain = str(entry.grain)
+    periods = period_count(grain, window, entry.from_day, entry.through_day)
+    if periods == 0:
+        return 0
+    anchor, _stop = _span(window, entry.from_day, entry.through_day)
+    low = np.maximum(valid[0], (anchor.toordinal() - _EPOCH_ORDINAL) * DAY_MS)
+    high = np.minimum(valid[1], window[1])
+    met = (high - low) // (_SHORTEST_DAYS[grain] * DAY_MS) + 2
+    return int(np.minimum(np.where(high >= low, met, 0), periods).sum())
+
+
+def _refuse_above_budget(
+    entry: PeriodsEntry,
+    projection: "ProjectionPlan",
+    valid: Tuple["np.ndarray", "np.ndarray"],
+    entities: int,
+) -> None:
+    """Refuse (``FLX-3403``) an entry estimated to derive more rows than the plan's budget.
+
+    The estimate is the pairs :func:`estimated_pairs` bounds times the most rows a pair takes, so
+    the refusal comes before the periods, the layout or a row is made.
+    """
+    assert projection.window is not None
+    budget = DEFAULT_PERIODIC_ROWS if projection.budget is None else projection.budget
+    pairs = estimated_pairs(entry, projection.window, valid)
+    estimate = pairs * _most_per_pair(entry)
+    if estimate <= budget:
+        return
+    grain = str(entry.grain)
+    start, end = (format_rfc3339_ms(instant) for instant in projection.window)
+    periods = period_count(grain, projection.window, entry.from_day, entry.through_day)
+    ranged = "".join(
+        f", {word} {day}"
+        for word, day in (("from", entry.from_day), ("through", entry.through_day))
+        if day is not None
+    )
+    raise _refuse(
+        f"periods ({entry.emit}): grain {grain} over the window {start} to {end}{ranged} makes "
+        f"{periods} periods, and the {entities} entities' versions are estimated to hold {pairs} "
+        f"(version, period) pairs, {estimate} rows, above the budget of {budget} rows a periodic "
+        "emit; narrow the window (timeBounds, or the entry's from and through) or take a coarser "
+        f"grain, or raise the budget with fluxsim plan --max-rows N (at most {MOST_ROWS})"
+    )
 
 
 def period_grid(
@@ -377,10 +453,11 @@ def _build(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
     assert projection.root is not None and projection.window is not None
     view = view_of(projection.history, chain, projection.root)
     _refuse_many_periods(entry, str(entry.grain), projection.window)
+    valid_from, valid_to = view.valid_ms(projection.window[1])
+    _refuse_above_budget(entry, projection, (valid_from, valid_to), chain.entities)
     days, begins, ends = period_grid(
         str(entry.grain), projection.window, entry.from_day, entry.through_day
     )
-    valid_from, valid_to = view.valid_ms(projection.window[1])
     first, last = _runs(entry.match, begins, ends, valid_from, valid_to)
     where = f"periods ({entry.emit})"
     declared = entry.kinds or (PeriodKind(),)
@@ -428,6 +505,7 @@ def layout_of(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
         projection.history.digest().value,
         repr(entry),
         projection.window,
+        projection.budget,
     )
     found = _LAYOUTS.get(held)
     if found is None:
