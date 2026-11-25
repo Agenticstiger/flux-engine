@@ -213,8 +213,10 @@ FLX_3403 = register(
     "when its emit has no validity window (one natural entity with a start and an end of one "
     "DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no room inside "
     "timeBounds for an entity's versions, when a tracked column is not categorical, names an "
-    "undeclared level or has no transition row for a level a chain can reach, or when its parent "
-    "is not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
+    "undeclared level or has no transition row for a level a chain can reach, when a tracked "
+    "column that is a foreign key has a level that is no key its parent holds in the plan (a "
+    "--scale below 1 cuts the parent's keys and leaves the levels), or when its parent is not a "
+    "to-one relationship. A history's parent.lifetime is refused when the parent emit "
     "declares no lifetimes entry, or declares a history of its own that sets a lifetime column "
     "(a validity, activation, tracked, end or rule-set column), which then differs between a "
     "parent's versions; when the parent's lifetime leaves no room for one version of an entity "
@@ -563,6 +565,14 @@ class KeyGrid:
             return low
         below, above = units - self.units_at(low), self.units_at(high) - units
         return low if below <= above else high
+
+    def holds(self, value: Any) -> bool:
+        """Whether some row's key is *value*: the nearest row's key is the value itself."""
+        try:
+            units = _units_of_value(self.kind, self.exponent, value)
+        except (ArithmeticError, AttributeError, TypeError, ValueError):
+            return False
+        return self.units_at(self.row_near(value)) == units
 
     def as_document(self) -> Dict[str, Any]:
         return {
@@ -5434,6 +5444,18 @@ def _plain_part(plan: "_rows.GeneratorPlan", column_plan: "_rows.ColumnPlan") ->
     )
 
 
+def _key_span(parent: Union[KeyGrid, ReferenceColumn]) -> str:
+    """The keys a parent holds in a plan, for a refusal: ``keys 101 to 107, 7 rows``."""
+    rows = parent.rows
+    noun = "row" if rows == 1 else "rows"
+    if isinstance(parent, KeyGrid):  # an ordered layout: the first row's key is the lowest
+        return f"keys {parent.value_at(0)} to {parent.value_at(rows - 1)}, {rows} {noun}"
+    held = [value for value in parent.values if value is not None]
+    if not held:
+        return f"no key, {rows} {noun}"
+    return f"keys {min(held)} to {max(held)}, {rows} {noun}"
+
+
 def _check_declared_keys(
     plan: "_rows.GeneratorPlan",
     first: "_rows.ColumnPlan",
@@ -5464,6 +5486,48 @@ def _check_declared_keys(
                     f"{where} points at {relationship.target!r}, a reference expose, and column "
                     f"{first.column.name!r} declares a level that is no key it publishes; every "
                     "declared level is a key of the reference expose"
+                )
+
+
+def _check_tracked_keys(
+    shape: _Shape, column: str, view: Callable[[str, Sequence[str]], ParentView]
+) -> None:
+    """Refuse (``FLX-3403``) a tracked foreign key one of whose levels is no key its parent holds.
+
+    A tracked column writes the level it is at as the cell and takes no parent row, so the cell
+    is a key of the parent only while the parent's rows hold that level. The parent's keys are
+    the ones in this plan: a ``--scale`` below 1 cuts the parent's rows and its key range and
+    leaves the levels, so the refusal shows the cut in the span it names. A pick that takes the
+    nearest key (``declared``) never writes a level, so it holds at any scale and is not asked.
+    """
+    relationship = shape.owners.get(column)
+    if (
+        relationship is None
+        or relationship.name in shape.absorbed
+        or len(relationship.from_columns) != 1
+    ):
+        return
+    parent = view(relationship.target, relationship.to_columns).driver(relationship.to_columns[0])
+    if not isinstance(parent, (KeyGrid, ReferenceColumn)):
+        return
+    statistics = shape.plan.column_plan(column).statistics
+    with localcontext(_rows._KERNEL_CONTEXT):
+        for level in _rows._level_names(statistics):
+            try:
+                held = parent.holds(
+                    _rows._level_to_value(level, shape.plan.column_plan(column).column)
+                )
+            except (ArithmeticError, ValueError, FluxError):
+                held = False
+            if not held:
+                raise _refuse(
+                    f"expose {shape.plan.expose.expose_id!r} column {column!r} is tracked by "
+                    f"its history over levels and points at {relationship.target!r}, but level "
+                    f"{level!r} is no key {relationship.target!r} holds in this plan "
+                    f"({_key_span(parent)}); a tracked foreign key writes its "
+                    "level as the key, so every level is a key of its parent: plan without "
+                    "--scale, which cuts the parent's keys, or stop tracking the column so "
+                    "its foreign key takes the nearest key the parent holds"
                 )
 
 
@@ -5575,6 +5639,7 @@ class _Resolver:
             if column == getattr(history, role):
                 return ChainColumn(role, history.pick)
         if column in history.tracked:
+            _check_tracked_keys(shape, column, self.view)
             return self._tracked(shape, history.tracked.index(column))
         return None
 

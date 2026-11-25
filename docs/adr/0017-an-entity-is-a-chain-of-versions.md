@@ -667,3 +667,22 @@ legal.
   the layout does not set, and one whose `to` column declares a `nullFraction`, as any dependency on a counted
   relationship (`FLX-3403`).
 - **What moves.** Nothing already accepted: a bundle with no such dependency keeps its bytes.
+
+## Amendment of 2026-11-25: a tracked foreign key's levels are keys its parent holds
+
+A tracked column writes the level it is at as the cell and takes no parent row. For a foreign key that makes every
+level a value of the parent's key only while the parent's rows hold it, which nothing checked: `--scale` below 1 cuts
+a drawn catalogue's rows and its key range and leaves the levels, so a link the bundle held at scale 1 broke at
+scale 0.25 with the plan still exiting 0.
+
+- **The check.** `plan` refuses (`FLX-3403`) a tracked column that is the one column of a to-one relationship when a
+  level it declares is no key of the parent's column in this plan: for a drawn parent, a value its ordered key
+  layout does not take; for a reference expose, a value it does not publish. The message names the expose, the
+  column, the first such level and the keys the parent holds (`keys 101 to 107, 7 rows`), so a scaled plan shows
+  the cut, and says to plan without `--scale` or to stop tracking the column.
+- **What is not refused.** A foreign key that is not tracked: a `declared` pick takes the nearest key the parent
+  holds (`KeyGrid.row_near`), so its link holds at any scale. A parent whose key is an identifier or a several-column
+  key, and a relationship of several columns, are not asked.
+- **What moves.** Nothing for a bundle whose levels are all keys of the parent, at any scale, and nothing for a
+  bundle with no tracked foreign key. A bundle with a level that is no key is refused at plan where it ran before
+  with a link below 100 %.

@@ -11,7 +11,10 @@ so a related set of tables grows together and its keys still fit its rows. A spa
 grows from its low end: ``min`` stays, and ``max`` becomes ``min + (max - min + 1) * F - 1``
 for an integer column; a bin edge moves in proportion to its distance from ``min``, rounded
 as that end is and held to it. A table whose rows come from the run's own events (it is not
-drawn from statistics) has no declared size to multiply, and is left as it is.
+drawn from statistics) has no declared size to multiply, and is left as it is. A column's
+declared levels are not scaled: a foreign key that takes the nearest key its parent holds follows the
+parent's cut keys, and a history's tracked foreign key, which writes its level as the key, is refused at
+plan (``FLX-3403``, naming the parent's keys in the scaled plan) when a level is no key the cut parent holds.
 ``F = 1`` changes nothing, and writes nothing to the plan, so every digest of a bundle
 planned without it is the one it was. Any other value is recorded in ``plan.json`` as
 ``scale``, and ``apply`` and ``replay`` read it back from there, as they read the kernel.
