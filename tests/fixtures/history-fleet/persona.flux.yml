@@ -1,0 +1,9 @@
+fluxVersion: "0.5.0"
+kind: Persona
+id: persona-fleet
+name: Persona for Fleet
+metadata:
+  owner:
+    team: fleet
+spec:
+  traits: { digitalFluency: 0.5 }

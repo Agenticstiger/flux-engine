@@ -72,6 +72,8 @@ from fractions import Fraction
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, Sequence, Tuple
 
+import numpy as np
+
 from flux_engine.generator.statistics import DATE_EPOCH_ORDINAL, ColumnStatistics
 from flux_engine.seam.dates import Histogram
 
@@ -108,6 +110,7 @@ __all__ = [
     "interval_of",
     "intersect",
     "lifetime_in_units",
+    "lifetimes_in_units",
     "lifetimes_meet",
     "offset_table",
     "offsets_reach_forward",
@@ -386,6 +389,35 @@ def lifetime_in_units(
     if end is None or end < start:
         return low, None
     return low, bound_in_units(end, from_kind, to_kind, end=True)
+
+
+def lifetimes_in_units(
+    starts: "np.ndarray",
+    ends: "np.ndarray",
+    has_start: "np.ndarray",
+    has_end: "np.ndarray",
+    from_kind: str,
+    to_kind: str,
+) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray", "np.ndarray"]:
+    """:func:`lifetime_in_units` for arrays of parent rows: ``(starts, has_start, ends, has_end)``.
+
+    A row without a start has neither; a row whose end is missing, or before its start (both in
+    *from_kind*'s units), has a start and no end. Where a flag is false the value is 0.
+    """
+    open_end = ~has_end | (ends < starts)
+    has_end = has_start & ~open_end
+    if from_kind == to_kind:
+        low, high = starts, ends
+    elif from_kind == KIND_DATE:
+        low, high = starts * DAY_MS, (ends + 1) * DAY_MS - 1
+    else:
+        low, high = starts // DAY_MS, ends // DAY_MS
+    return (
+        np.where(has_start, low, 0).astype(np.int64),
+        has_start,
+        np.where(has_end, high, 0).astype(np.int64),
+        has_end,
+    )
 
 
 def intersect(lifetimes: Sequence[Lifetime]) -> Lifetime:

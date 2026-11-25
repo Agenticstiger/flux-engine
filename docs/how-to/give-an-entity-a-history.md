@@ -283,8 +283,7 @@ for chain in by_subscription.values():
     assert all(row[8] == chain[0][3] for row in chain)  # activation
 
 ended = [chain for chain in by_subscription.values() if chain[-1][7] == "cancelled"]
-eligible = [chain for chain in by_subscription.values() if len(chain) >= 2]
-assert abs(len(ended) - 0.2 * len(eligible)) < 1  # the share of 0.2 of the eligible entities
+assert abs(len(ended) - 0.2 * 60) < 1  # the share of 0.2 of every entity
 ```
 
 Seven things hold, whatever the seed:
@@ -293,11 +292,43 @@ Seven things hold, whatever the seed:
 - **One open version.** The last version of an entity that has not ended has no end, or the text `openEnd` gives, such as `"9999-12-31"`.
 - **One change at each step.** A later version differs from the one before it in one tracked column, the change reason. An ending version is the exception: it changes `status` and no tracked column. With several tracked columns, `reasons` gives the share of the changes each makes, exact up to the largest remainder.
 - **Every other column is carried.** A column that the history does not set takes, on every version, the value drawn for the entity's first version, so a customer's region does not change from one version to the next.
-- **The ended share is exact.** With an `end`, `share` of the entities end, up to the largest remainder, and which ones is a permutation's choice, not a draw. Under `finalVersion` an ended entity gains a last version that holds `value` in `column` and stays open; under `closeLast` its last version is closed instead. The ending version is no change reason, so `value` appears on no other version.
+- **The ended share is exact.** With an `end`, `share` of all the entities end, up to the largest remainder (fewer when too few have two versions to end on, and `plan` says what the share yields), and which ones is a permutation's choice, not a draw. Under `finalVersion` an ended entity gains a last version that holds `value` in `column` and stays open; under `closeLast` its last version is closed instead. The ending version is no change reason, so `value` appears on no other version.
 - **The number of versions comes from a shape.** The versions per entity follow `versions` class for class, as the children per parent follow `children` in [Give every parent its children](./give-every-parent-its-children.md). An entity that has more room before `until` takes more of them. Without `versions` the versions are spread as evenly as whole counts allow.
 - **A history stops changing at `until`.** Every version starts before `until`, every closed version ends before it, and nothing in a history reads `spec.timeBounds.end`. A longer window rewrites no row of the history, and what you project from it keeps its earlier rows too (see [Project a history](./project-a-history.md)).
 
 The rows of a history's emit are grouped by parent, then by entity, then by version, and an entity's versions are consecutive rows. A consumer that needs another order sorts the table.
+
+## Keep the history inside its parent's lifetime
+
+A vehicle should not start before its depot opened, nor outlive the depot. Declare the depot's lifetime
+with a [`lifetimes` entry](./keep-dates-inside-their-parents-lifetime.md) and ask the history to keep to it:
+
+```yaml
+lifetimes:
+  - { emit: depot, start: opened_on, end: closed_on }
+history:
+  - emit: vehicle_version
+    parent: { relationship: depot, minChildren: 1, lifetime: true }
+```
+
+An entity's first start is then drawn inside its depot's lifetime, with room for its versions before the depot's
+last day, and its versions end by that day. An entity whose depot closed ends: under `finalVersion` its final version
+starts, and under `closeLast`, or with no `end`, its last version closes, by the depot's last day. Those entities
+count towards the `share` of the `end`. A depot with no end, a NULL end, or an end before its start cuts nothing.
+The key needs a `lifetimes` entry on the emit the relationship reaches, or the plan refuses it with `FLX-3403`.
+A history never writes a version it knows breaks the bound:
+
+- An entity whose depot leaves room for fewer versions than it was given is capped at that room, and the versions it
+  loses go, one at a time, to the entities with the most room left, so the emit keeps its declared `rows`. Only when
+  no entity has room left does the history hold fewer rows, and `plan`, `apply` and `verify` count the rows it has.
+  `plan` says how many entities were capped, how many versions moved and any shortfall.
+- An entity whose depot leaves room for no version at all (it closed before the window, or opened in the last days
+  before `until`) is `FLX-3403` at plan, naming `history(<emit>).parent.lifetime`, how many entities it is and the range
+  of their depots' lifetimes. An entity whose depot has room for one version is not refused: its first start is drawn
+  with room for that one.
+- When the depot's emit declares a history of its own, a lifetime column it sets can differ between its versions, and
+  the bound would hold an entity to an arbitrary one. The depot's history must carry the lifetime columns, or the plan
+  refuses the key with `FLX-3403`, naming the emit and the columns.
 
 ## The `history` key
 
@@ -307,7 +338,7 @@ The rows of a history's emit are grouped by parent, then by entity, then by vers
 |---|---|
 | `emit` | The expose that holds the versions. Its contract declares one `natural` entity and two time dimensions with `validityParams`, `isStart` and `isEnd`, both DATE or both TIMESTAMP. Required. |
 | `entities` | A whole number above zero: how many entities. `--scale` scales it as it scales `rows`; the emit's `rows` is the number of versions. Required. |
-| `parent` | Optional: `{relationship, minChildren, parentWhen, children}`. A to-one relationship of the emit whose parent holds each entity, with the three layout keys of a [`counts` entry](./give-every-parent-its-children.md#the-counts-key), read over entities instead of rows. |
+| `parent` | Optional: `{relationship, minChildren, parentWhen, children, lifetime}`. A to-one relationship of the emit whose parent holds each entity, with the three layout keys of a [`counts` entry](./give-every-parent-its-children.md#the-counts-key), read over entities instead of rows. `lifetime: true` keeps the history to its parent's lifetime: see below. |
 | `versions` | Optional: the shape of the number of versions per entity, `levels` with `levelWeights` or `bins` with `binWeights` over whole counts of at least 1. |
 | `start` | Optional: a histogram of an entity's first start, `bins` and `binWeights` over values of the start column's type, with edges inside the window and not after `until`. Without it the first start is spread evenly over what the entity has room for. |
 | `length` | Required: a version's length, a histogram whose edges are whole days of at least one, in the spelling of a fidelity `distribution` (`bins`, `binWeights`, `closed`). A TIMESTAMP chain draws whole milliseconds inside its day bins. |
@@ -382,6 +413,7 @@ Each line is enforced, so one violating entity fails the run, except the `asOf:`
 | `history:no_gaps_no_overlap` | an entity's versions meet end to start, as the chain says. |
 | `history:one_current` | an entity has one open version, its last, unless it ended under `closeLast`, when it has none. |
 | `history:ended_is_last` | with an `end.column` and `end.value`, the value appears only on an entity's last version. |
+| `history:within_parent` | with `parent.lifetime: true`: an entity's first start is not before its parent's start, no version starts after the parent's last day, every closed end is at or before it, and an entity whose parent ended by `until` has ended. With no `end` column, a closed last version is allowed only when the parent's last day is at most `until`; any other entity keeps its last version open. It covers the entities whose parent row has a start. |
 | `asOf:<relationship>.<date>` | how many rows read a version. Not enforced. |
 
 A rule that reads `previous` is checked like any other rule, on every row.
@@ -404,6 +436,7 @@ Every refusal comes before a row exists.
   - a `versions` class is below 1, or there are more entities than versions, which names `--scale` when a scale caused it;
   - `until` is outside the window, a `start` bin lies outside it, or a `length` bin edge is below one day;
   - the first starts have no room for the most versions an entity takes;
+  - with `parent.lifetime: true`, a parent whose lifetime leaves room for not even one version of an entity, and a parent emit that declares a history without carrying the lifetime columns;
   - `dayBefore` on TIMESTAMP columns;
   - a primary key other than one column, or the natural entity's columns and the start;
   - an `activation`, tracked or end column that is a key, a validity column or a column a rule sets, a tracked column that is not categorical, and an `end.value` that appears anywhere but the last version;

@@ -41,6 +41,50 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - Register format `1-4-0`. A register that counts a new position, or cites a rank correlation or the
   `cliqueMarginal/2` clique definition, names `1-4-0`; any other register keeps the format it had, from `1-0-0` to
   `1-3-0`, and every digest it had. See `PARAMETER-REGISTER-SPEC.md`.
+- A history can keep to its parent's lifetime: `history[].parent.lifetime: true` (kernel 0.2.0, ADR 0017, the
+  amendment of 2026-11-24). It needs a `lifetimes` entry on the emit the `parent` relationship reaches. An entity's
+  first start is drawn inside its parent's lifetime with room for the versions it takes, its versions are fitted to
+  end by the parent's last day, and an entity whose parent ended ends: its final version starts, or its last version
+  closes, by that day. Those entities count towards the end `share`. `fluxsim verify` adds `history:within_parent`;
+  for a history with no `end` it holds a closed last version only when the parent's last day is at most `until`. A
+  generated run never writes a version it knows breaks it. An entity whose parent leaves room for fewer
+  versions than it was given is capped at that room, and the versions it loses go one at a time to the entities
+  with the most room left (the allotment `one_to_one` uses, with a cap for each entity), so the emit keeps its
+  declared rows; only when no entity has room left does the history hold fewer rows, and plan, apply and verify
+  count the rows it has; a history under such a history is laid out after it. A parent that leaves no room for even one version is `FLX-3403` at plan, naming
+  `history(<emit>).parent.lifetime`, how many entities it is and their parents' lifetimes. A history without the
+  key keeps every byte. A parent that declares a history of its own must carry the lifetime columns (a column its
+  history sets, or a rule sets, can differ between versions): `FLX-3403` at plan names the emit and the columns.
+  `plan` notes how many entities were capped, how many versions moved, any shortfall and how many entities end in
+  one version with their parent, and the plan-time work of the bound grows linearly with the entities.
+- A periods kind's `when` and an events `when` can read the history's end column (`history[].end.column`, such as
+  `status`), so a kind can leave out the ending versions: `status <> 'retired'`. On an ending version the column
+  holds the end value and on any other a drawn level, so the predicate is known at plan time only where every level
+  the column can draw gives the same answer; where they differ it is `FLX-3403`, naming the kind and the column
+  (ADR 0027, the amendment of 2026-11-24). A contract rule that sets the end column is `FLX-6203` at `plan`, as a
+  rule on a column the projection sets is: the history writes the end value there, and the rows are held to it. A
+  `when` that does not name the column keeps its bytes.
+- A `sharedColumns` copy into the foreign key of another relationship sets that relationship's pick, under
+  `copies: true` on kernel 0.2.0. A trip that copies `depot_id` through its vehicle takes the
+  depot the vehicle has, so the two agree on every row and a rule over `depot.<column>` reads that
+  depot's row. The copied column must be the source's own foreign key to the same keys, which keeps the
+  value a key of the target; what cannot hold is refused before a row is drawn, among it a copy through a table
+  that declares a history or is projected from one (a snapshot, events or periods emit), which is `FLX-3403`
+  naming the relationship (ADR 0022, the amendment of 2026-11-24). A bundle without `copies: true` keeps every byte.
+- `from` and `through` on a `periods` entry (kernel 0.2.0). Both are `YYYY-MM-DD` texts: `from` is the day the first
+  period starts on, the anchor every period is counted from; `through` is the last day a period may start on,
+  inclusive. The count, the layout, the slices and the kinds follow, a longer window appends no period past
+  `through`, and a range outside `timeBounds` is `FLX-3403` at `validate` and `plan` (ADR 0027, the amendment of
+  2026-11-24). An entry without the keys keeps its bytes. A period that would start past the calendar (a window or
+  a `through` at the end of year 9999) ends the list, in `plan` and in `verify`, where it raised a raw error.
+- `fluxsim init` writes a history's `parent` from the history's many-to-one relationship: the relationship, `minChildren`
+  and the `children` classes, read from the version rows per parent the profile counts and kept as the shape of
+  entities per parent (ADR 0017, the amendment of 2026-11-24). The entities are then grouped under their parent, so
+  a projection copies the parent's key consistently. A bundle for a contract without such a relationship is unchanged.
+- `fluxsim init` tracks a foreign key into a table the profile releases whole: the column declares the table's keys
+  as its levels and takes its `initial` and `transitions` from the history statistic. A key that is not published, or
+  a change that names no key, leaves the column carried, with the reason in the ledger (ADR 0017, the amendment of
+  2026-11-24).
 - A Kafka sink: `fluxsim run --sink kafka:HOST:PORT[,HOST:PORT...]` (and `fluxsim apply --sink`) delivers every stream
   to Kafka topics, from the optional `flux-sim-engine[kafka]` extra. Records are keyed by their entity and partitioned
   as a Java producer would, carry the event's time as their timestamp, and are written as rows or, for a history's
@@ -78,9 +122,35 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `flux_engine.calibrate.fit.run_fit` raises `HeldOutNeeded`, a usage error with no `FLX` code, when the bundle
   declares a held-out query and the request names no held-out profile. `calibrate --fit` reports it with exit status
   2, as it reported a missing `--held-out` before.
+- A history's `end.share` is now a share of every entity. It was a share of the eligible ones, so a declared share
+  on a history whose `end` has a column (entities of two versions or more) ended fewer entities than it named.
+  The ended entities are still chosen among the eligible ones; when fewer are eligible than the share asks for,
+  every eligible entity ends and `plan` notes the share yielded (ADR 0017, the amendment of 2026-11-24).
+  A plan that allots it so says with `historyEndShare: "entities"` in `plan.json`, which the plan digest covers, and
+  a recorded plan without the key replays the old allocation: **a plan made by 0.11.1 or earlier replays to the run
+  digest it recorded, and planning the same bundle again moves the plan digest, the run id and the bytes of such a
+  history and of every projection of it**. A history with no `end`, and a `closeLast` end without a column, whose
+  every entity is eligible, keep their bytes, their plan digest and their run id, since their plan carries no key.
+  Kernel 0.2.0 is unchanged, so an engine without this change ignores the key and replays a plan that carries it
+  to other bytes.
+- Under `copies: true` on kernel 0.2.0, a `sharedColumns` entry that names a foreign-key column of another
+  relationship was listed as declared and not generated. It now sets that relationship's pick, so **the bytes of
+  that foreign-key column move** and a rule that reads through the relationship reads the copied row, or the plan is
+  refused (`FLX-3403` or `FLX-6210`, naming the column and the relationship) where the copy cannot be carried out
+  (ADR 0022, the amendment of 2026-11-24). A bundle without `copies: true`, and kernel 0.1.0, keep their bytes.
+- `fluxsim init` projects a snapshot, events or periodic table that is also a counted child of a parent: the table's own
+  `counts` entry is dropped. For a snapshot, which has one row per entity, its children per parent are entities per
+  parent and go to the history's `parent` when the history has none of its own; for an events or periodic table they
+  count events or periods, so the statistic is unused, with that reason, whatever the order of the exposes (ADR 0027,
+  the amendment of 2026-11-24). The ledger names where each statistic went. A table whose foreign
+  key the history holds without writing a `parent` over the same parent stays unprojected, with the reason in the
+  ledger, since it would copy values that are no keys of the parent.
 
 ### Fixed
 
+- A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
+  the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
+  plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
 - The run's window now covers the whole range of every date column, the date range the contract declares, and the
   bins the column is drawn from, so `init` no longer cuts a column at a window that other columns imply. A column's
   bins are cut only at a window you pass with `--window`. A contract range that ends in the year 9999 says only that
@@ -104,6 +174,18 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   so it is created and removed with the bundle. The loader and `inputDigest` do not read it, and `ship` packs it.
 - The ledger records a published end that a window or a range cut relies on (the last edge of a quantile ladder, for
   example) as read, not as unused.
+- The rules of a change-events or periodic emit run after the projection has set its cells. A derive that read the
+  period column, a column of the version the row carries, a kind's override, or an event's `op`, `at`, `date` or
+  image read the drawn value that the row then lost, so `fluxsim verify` failed a run that `plan` and `apply` had
+  made (ADR 0027, the amendment of 2026-11-24). **The rows of such an emit change, because they were wrong
+  before**; an emit without rules, and every other emit, keeps its bytes. A rule that sets a column the projection
+  sets is now `FLX-6203` at plan, and a rule that reads through a relationship whose foreign-key column the
+  projection sets (a derive over `relationship.column`, a copy, a conditional link) is `FLX-3403` at plan, since
+  it would read the row the relationship drew rather than the row the cell names.
+- A snapshot emit whose `fidelity.columns` declares no column validates and plans. Its rows are its history's last
+  versions, so it draws no column; `validate` and `plan` refused it with `FLX-5034`, and a key column with no
+  statistics with `FLX-3403`. flux-stats' `parse_fidelity_block` takes `allow_no_columns`, which the engine sets for
+  an emit a `snapshots` entry names. Every other emit keeps both refusals.
 
 ## 0.11.1 - 2026-11-24
 

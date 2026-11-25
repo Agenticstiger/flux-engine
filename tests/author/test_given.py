@@ -30,6 +30,8 @@ import yaml
 from flux_engine.cli._init import run_init
 from flux_engine.stages.run import run
 
+from ._written import assert_state
+
 pytestmark = pytest.mark.integration
 
 NAMESPACE = "com.agentics.flux/1"
@@ -312,9 +314,9 @@ def test_a_tree_keeps_every_link_that_makes_no_cycle(tmp_path: Path) -> None:
 def test_of_two_groupings_of_a_leaf_the_more_informative_one_is_kept(tmp_path: Path) -> None:
     result = _init(tmp_path, _profile(spend_by_segment=True, spend_by_region=True))
     assert _fidelity(tmp_path)["columns"]["spend"]["given"] == "segment"
-    region = _states(result)["/tables/customer/columns/spend/statistics/2"]
-    assert region["state"] == "unused"
-    assert "drawn given segment" in region["note"]
+    assert_state(
+        result, "/tables/customer/columns/spend/statistics/2", "unused", "drawn given segment"
+    )
 
 
 def test_a_column_with_nulls_is_never_the_one_another_is_given(tmp_path: Path) -> None:
@@ -412,9 +414,9 @@ def test_a_column_drawn_from_a_table_grouped_by_it_checks_its_own_histogram(
     # sizes of that table's groups (600 and 400, as segment counts them).
     result = _init(tmp_path, _profile(region_tier=True))
     assert _fidelity(tmp_path)["columns"]["segment"]["given"] == "tier"
-    state = _states(result)[SEGMENT_STATISTIC]
-    assert state["state"] == "used"
-    assert "checked: its counts are the sizes of the groups" in state["note"]
+    assert_state(
+        result, SEGMENT_STATISTIC, "used", "checked: its counts are the sizes of the groups"
+    )
 
 
 def test_a_column_s_histogram_the_groups_it_is_drawn_from_contradict_is_unused(

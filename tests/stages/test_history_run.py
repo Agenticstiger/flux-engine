@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections import defaultdict
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -35,8 +34,15 @@ from flux_engine.generator.history import ended_count
 from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
-from flux_engine.stages.plan import build_plan_document
 from flux_engine.stages.verify import verify
+
+from ._fleet import group_by
+from ._fleet import run_bundle as _run
+from ._same_run import (
+    assert_same_run_at_one_and_four_jobs,
+    assert_shares_join_to_the_run,
+    assert_the_run_repeats,
+)
 
 apply_module = import_module("flux_engine.stages.apply")
 plan_module = import_module("flux_engine.stages.plan")
@@ -93,22 +99,8 @@ def _rows(layout: RunLayout, expose_id: str) -> List[Dict[str, Any]]:
     ]
 
 
-def _run(bundle: Path, state: Path, **options: Any) -> RunLayout:
-    planned = plan_module.plan(
-        bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False, **options
-    )
-    assert planned.success, planned.stderr
-    run_id = planned.artifacts["run_id"]
-    applied = apply_module.apply(bundle, run_id=run_id, state_dir=state)
-    assert applied.success, applied.stderr
-    return RunLayout.for_state_dir(state, run_id)
-
-
 def _subscriptions(rows: List[Dict[str, Any]]) -> Dict[Any, List[Dict[str, Any]]]:
-    found: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
-    for row in rows:
-        found[row["subscription_id"]].append(row)
-    return found
+    return group_by(rows, "subscription_id")
 
 
 def _check_chains(rows: List[Dict[str, Any]], *, entities: int, customers: int) -> None:
@@ -152,10 +144,7 @@ def test_the_exposes_that_read_the_natural_key_name_a_subscription_that_exists(
 
 
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path)
-    first = _run(bundle, tmp_path / "a")
-    second = _run(bundle, tmp_path / "b")
-    assert first.emit_path(EMIT).read_bytes() == second.emit_path(EMIT).read_bytes()
+    assert_the_run_repeats(_bundle(tmp_path), tmp_path, _run, EMIT)
 
 
 def test_kernel_010_refuses_the_history(tmp_path: Path) -> None:
@@ -172,12 +161,7 @@ def test_kernel_010_refuses_the_history(tmp_path: Path) -> None:
 def test_four_jobs_make_the_run_one_job_makes(tmp_path: Path) -> None:
     versions = 3 * parallel.MIN_ROWS_PER_JOB + 11
     bundle = _bundle(tmp_path, versions=versions, entities=2500, customers=1200)
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.result == theirs.result
-        assert mine.writer.lines() == theirs.writer.lines()
+    _, four = assert_same_run_at_one_and_four_jobs(bundle, result=True, kernel=KERNEL_V2)
     generated = [e for e in four.emits if e.plan is not None and e.plan.rows == versions]
     assert generated and all(e.processes > 1 for e in generated)
 
@@ -228,21 +212,7 @@ def test_a_scale_that_leaves_the_parents_too_few_for_the_entities_names_the_scal
 @pytest.mark.parametrize("count", [1, 3, 5])
 def test_the_shares_joined_in_order_are_the_bytes_of_one_run(tmp_path: Path, count: int) -> None:
     bundle = _bundle(tmp_path)
-    whole = _run(bundle, tmp_path / "whole")
-    state = tmp_path / "shards"
-    planned = plan_module.plan(bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False)
-    run_id = planned.artifacts["run_id"]
-    assert run_id == whole.run_id
-    for index in range(1, count + 1):
-        part = apply_module.apply(bundle, run_id=run_id, state_dir=state, shard=(index, count))
-        assert part.success, part.stderr
-    shards = RunLayout.for_state_dir(state, run_id)
-    for expose_id in ("customer", EMIT, "invoice"):
-        joined = b"".join(
-            shards.shard_emit_path(expose_id, index, count).read_bytes()
-            for index in range(1, count + 1)
-        )
-        assert joined == whole.emit_path(expose_id).read_bytes(), expose_id
+    assert_shares_join_to_the_run(bundle, tmp_path, _run, count, ("customer", EMIT, "invoice"))
 
 
 # --- the window -------------------------------------------------------------------------------
@@ -310,7 +280,7 @@ def test_a_run_with_an_end_mode_holds_the_history_lines_and_verify_passes(
     if column:
         eligible = sum(1 for versions in held.values() if len(versions) >= 2)
         ending = [row for row in rows if row["status"] == "cancelled"]
-        assert len(ending) == ended_count(eligible, "0.25")
+        assert len(ending) == ended_count(len(held), eligible, "0.25")
         for versions in held.values():
             assert [row["status"] for row in versions[:-1]].count("cancelled") == 0
 
@@ -326,16 +296,7 @@ def test_a_run_with_an_end_mode_is_the_same_run_at_any_jobs_and_shard(
     tmp_path: Path, mode: str
 ) -> None:
     bundle = _bundle(tmp_path, **_end(mode))
-    whole = _run(bundle, tmp_path / "whole")
-    state = tmp_path / "shards"
-    planned = plan_module.plan(bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False)
-    run_id = planned.artifacts["run_id"]
-    for index in range(1, 4):
-        part = apply_module.apply(bundle, run_id=run_id, state_dir=state, shard=(index, 3))
-        assert part.success, part.stderr
-    shards = RunLayout.for_state_dir(state, run_id)
-    joined = b"".join(shards.shard_emit_path(EMIT, index, 3).read_bytes() for index in range(1, 4))
-    assert joined == whole.emit_path(EMIT).read_bytes()
+    assert_shares_join_to_the_run(bundle, tmp_path, _run, 3, (EMIT,))
 
 
 def test_kernel_010_refuses_an_end_with_the_history(tmp_path: Path) -> None:
@@ -350,11 +311,7 @@ def test_kernel_010_refuses_an_end_with_the_history(tmp_path: Path) -> None:
 def test_four_jobs_make_the_run_one_job_makes_under_an_end_mode(tmp_path: Path, mode: str) -> None:
     versions = 3 * parallel.MIN_ROWS_PER_JOB + 11
     bundle = _bundle(tmp_path, versions=versions, entities=2500, customers=1200, **_end(mode))
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.result == theirs.result
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_run_at_one_and_four_jobs(bundle, plan=False, result=True, kernel=KERNEL_V2)
 
 
 # --- tracked columns --------------------------------------------------------------------------
@@ -429,28 +386,14 @@ def test_four_jobs_make_the_run_one_job_makes_with_tracked_columns(tmp_path: Pat
     bundle = _bundle(
         tmp_path, versions=versions, entities=2500, customers=1200, **_tracked(**_end("closeLast"))
     )
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.result == theirs.result
-        assert mine.writer.lines() == theirs.writer.lines()
+    _, four = assert_same_run_at_one_and_four_jobs(bundle, result=True, kernel=KERNEL_V2)
     generated = [e for e in four.emits if e.plan is not None and e.plan.rows == versions]
     assert generated and all(e.processes > 1 for e in generated)
 
 
 def test_the_shares_of_a_tracked_run_joined_are_the_bytes_of_one_run(tmp_path: Path) -> None:
     bundle = _bundle(tmp_path, **_tracked())
-    whole = _run(bundle, tmp_path / "whole")
-    state = tmp_path / "shards"
-    planned = plan_module.plan(bundle, state_dir=state, kernel=KERNEL_V2.version, stage=False)
-    run_id = planned.artifacts["run_id"]
-    for index in range(1, 6):
-        part = apply_module.apply(bundle, run_id=run_id, state_dir=state, shard=(index, 5))
-        assert part.success, part.stderr
-    shards = RunLayout.for_state_dir(state, run_id)
-    joined = b"".join(shards.shard_emit_path(EMIT, index, 5).read_bytes() for index in range(1, 6))
-    assert joined == whole.emit_path(EMIT).read_bytes()
+    assert_shares_join_to_the_run(bundle, tmp_path, _run, 5, (EMIT,))
 
 
 def test_a_scale_below_one_keeps_every_tracked_change_exact(tmp_path: Path) -> None:

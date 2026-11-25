@@ -92,6 +92,7 @@ from typing import (
     Iterator,
     List,
     Mapping,
+    NoReturn,
     Optional,
     Sequence,
     Set,
@@ -215,6 +216,7 @@ __all__ = [
     "ORIGIN_SHARED",
     "Band",
     "ParentCondition",
+    "PickCopy",
     "PlannedRule",
     "RulePlan",
     "apply_rules",
@@ -728,6 +730,9 @@ class RulePlan:
     #: The as-of links of the emit (kernel 0.2.0, ADR 0017 section 8): a path through the relationship
     #: reads the version of the linked entity valid on the row's date.
     asof: Tuple[AsOfEntry, ...] = ()
+    #: The copies into a foreign key of another relationship (kernel 0.2.0, ADR 0022 section 4
+    #: amendment of 2026-11-24): each sets that relationship's pick instead of a rule's cell.
+    pick_copies: Tuple["PickCopy", ...] = ()
     _cache: Dict[str, Any] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def __getstate__(self) -> Dict[str, Any]:
@@ -2402,11 +2407,14 @@ def plan_rules(
         reader.flux_rule(flux_entry) for flux_entry in entries
     )
     copy_rules: Tuple[PlannedRule, ...] = ()
+    pick_copies: Tuple[PickCopy, ...] = ()
     if shared_declared:
         assert entry is not None
-        copy_rules = _shared_rules(reader, contract_document, entry, model, target, related)
+        copy_rules, pick_copies = _shared_rules(
+            reader, contract_document, entry, model, target, related
+        )
     planned_links = _plan_links(model, target, links, f"{prefix}emit {target!r}")
-    if _no_source(invariants, entries, copy_rules, planned_links, duration, within):
+    if _no_source(invariants, entries, copy_rules or pick_copies, planned_links, duration, within):
         return None  # every declared copy is one a copy cannot set: the emit has no rule
     rules = _with_sentinels(rules + copy_rules, links, model, target, f"{prefix}emit {target!r}")
     if period is not None:
@@ -2416,13 +2424,14 @@ def plan_rules(
     if within:
         rules = rules + _within_rules(model, target, within, windowed, f"{prefix}emit {target!r}")
     determining = [rule for rule in rules if rule.determines]
+    rates, asof = tuple(rates), tuple(asof)
     contract_id = _contract_id(contract_document)
     _refuse_links_without_fidelity(planned_links, has_fidelity, prefix, target)
     if not determining:
         if not has_fidelity:
             return None
         placed = _order(rules, [], frozenset(), planned_links)[1]
-        return RulePlan(contract_id, target, model, rules, (), placed, tuple(rates), tuple(asof))
+        return RulePlan(contract_id, target, model, rules, (), placed, rates, asof, pick_copies)
     _refuse_two_sources(rules, mapping)
     _refuse_targets_on_windows(rules, f"{prefix}emit {target!r}")
     _refuse_undeliverable(determining, related, has_fidelity, f"{prefix}emit {target!r}")
@@ -2433,7 +2442,7 @@ def plan_rules(
     order, placed = _order(
         rules, list(model.exposes[target].columns), determined, planned_links, asof
     )
-    return RulePlan(contract_id, target, model, rules, order, placed, tuple(rates), tuple(asof))
+    return RulePlan(contract_id, target, model, rules, order, placed, rates, asof, pick_copies)
 
 
 def _no_source(
@@ -2627,16 +2636,39 @@ def _shared_rules(
     model: Any,
     target: str,
     related: FrozenSet[str],
-) -> Tuple[PlannedRule, ...]:
-    """The rules of the columns the expose's shared columns and attributes copy."""
-    return tuple(
-        reader.shared_rule(copy)
-        for copy in _copies_of(contract_document, entry, model, target, related)[0]
+) -> Tuple[Tuple[PlannedRule, ...], Tuple["PickCopy", ...]]:
+    """The rules of the columns the expose's shared columns and attributes copy, and its pick copies.
+
+    A copy into the foreign key of another relationship sets that relationship's pick and makes no
+    rule (ADR 0022 section 4).
+    """
+    copies = _copies_of(contract_document, entry, model, target, related)[0]
+    return (
+        tuple(reader.shared_rule(copy) for copy in copies if copy.pick is None),
+        tuple(copy.pick for copy in copies if copy.pick is not None),
     )
 
 
 #: The ways a read crosses a relationship; ``previous`` stays on the entity's own rows.
 _LINK_REACHES = frozenset({"link", "children", "siblings"})
+
+
+@dataclass(frozen=True)
+class PickCopy:
+    """A ``sharedColumns`` copy into the foreign key of another relationship (ADR 0022 section 4).
+
+    ``column`` is the child's foreign key column and ``relationship`` the relationship it belongs
+    to (the one whose pick is set). ``through`` is the relationship the column is copied through
+    and ``reach`` its target. ``source`` is the relationship of ``reach`` that holds ``column`` as
+    its own foreign key to the same keys: the row ``relationship`` reaches is the row ``source``
+    reaches from the row ``through`` reaches.
+    """
+
+    column: str
+    relationship: str
+    through: str
+    reach: str
+    source: str
 
 
 @dataclass(frozen=True)
@@ -2653,6 +2685,9 @@ class _Copy:
     rule_id: str
     source: str
     blame: str = ""
+    #: Set when the copy is into the foreign key of another relationship: it sets that
+    #: relationship's pick and makes no rule.
+    pick: Optional["PickCopy"] = None
 
     @property
     def text(self) -> str:
@@ -2685,13 +2720,110 @@ def _shared_lists(entry: Mapping[str, Any]) -> List[Tuple[str, Tuple[str, ...]]]
     return found
 
 
+def _pick_copy(
+    contract_document: Optional[Mapping[str, Any]],
+    expose_id: str,
+    reached_by: Tuple[str, Any],
+    column: str,
+    model: Model,
+    related: FrozenSet[str],
+) -> Optional[PickCopy]:
+    """The copy of *column* through *through* into another relationship's pick, or ``None``.
+
+    ``None`` when *column* is no one-column foreign key of a relationship of the expose other than
+    *through* (a key, a key part, or the foreign key of *through* itself stays listed as before).
+    Otherwise the copy is accepted only when the value is known to be a key of that relationship's
+    target: *column* is itself the one-column foreign key, in the expose *through* reaches, of a
+    relationship to the same target over the same keys. Anything else is ``FLX-6210``. A
+    relationship that is ``inner`` while the copy may be NULL is also ``FLX-6210``.
+    """
+    through, link = reached_by
+    if contract_document is None or column not in related or link is None:
+        return None
+    if link.target == expose_id or column not in model.exposes[link.target].columns:
+        return None
+    keys = compile_keys(contract_document)
+    if keys is None:
+        return None
+    mine = keys.expose(expose_id).relationships
+    held = [r for r in mine if r.from_columns == (column,) and r.name != through]
+    if not held or any(r.name == through for r in mine if column in r.from_columns):
+        return None
+    relationship = held[0]
+    reached = next((r for r in mine if r.name == through), None)
+    if reached is None:
+        return None
+    source = next(
+        (
+            r
+            for r in keys.expose(link.target).relationships
+            if r.from_columns == (column,)
+            and r.target == relationship.target
+            and r.to_columns == relationship.to_columns
+        ),
+        None,
+    )
+    where = (
+        f"sharedColumns {column!r} of relationship {through!r} of {expose_id!r} copies into "
+        f"{column!r}, the foreign key of relationship {relationship.name!r} to "
+        f"{relationship.target!r}"
+    )
+    if source is None:
+        _refuse_unknown_source(where, link.target, relationship, column)
+    if relationship.join_type == "inner" and (
+        reached.join_type != "inner" or source.join_type != "inner"
+    ):
+        _refuse_nullable_copy(where, (through, source.name), link.target)
+    return PickCopy(column, relationship.name, through, link.target, source.name)
+
+
+def _refuse_unknown_source(where: str, reached: str, relationship: Any, column: str) -> NoReturn:
+    """``FLX-6210``: the table a copy goes through does not hold the column as a key of the target."""
+    raise Expr2Error(
+        FLX_6210,
+        f"{where}: {reached!r} does not hold {column!r} as a foreign key to "
+        f"{relationship.target!r} on the same keys, so the copied value is not known to be a "
+        f"key of {relationship.target!r}; declare that relationship on {reached!r}, or "
+        "remove the column from sharedColumns",
+    )
+
+
+def _refuse_nullable_copy(where: str, relationships: Tuple[str, str], reached: str) -> NoReturn:
+    """``FLX-6210``: an inner relationship's copy may be NULL through a left one."""
+    through, source = relationships
+    raise Expr2Error(
+        FLX_6210,
+        f"{where}, which has joinType inner, but the copy may be NULL: relationship "
+        f"{through!r} or relationship {source!r} of {reached!r} is a left join; "
+        "make them inner, or make the joinType left",
+    )
+
+
+def _left_out(
+    column: str, link: Any, expose_id: str, model: Model, related: FrozenSet[str]
+) -> Optional[str]:
+    """Why a ``sharedColumns`` column stays declared and not generated, or ``None`` when it is copied."""
+    if column in related:
+        return REASON_KEY_COLUMN
+    if link is not None and link.target == expose_id:
+        return REASON_SELF_LINK
+    held = model.exposes[expose_id].columns
+    if link is None or column not in held or column not in model.exposes[link.target].columns:
+        return ""
+    return None
+
+
 def _shared_columns_copies(
     entry: Mapping[str, Any],
     model: Model,
     expose_id: str,
     related: FrozenSet[str],
+    contract_document: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[List[_Copy], List[NotGenerated]]:
     """The copies kernel 0.2.0 makes of an expose's ``sharedColumns``, and what stays listed.
+
+    With the *contract_document*, a column that is the one-column foreign key of another
+    relationship of the expose is a copy into that relationship's pick (:func:`_pick_copy`).
 
     Each listed column is the copy ``derive: <column>``, ``expr: <relationship>.<column>``. A column
     that is a key or a foreign key of the expose stays declared and not generated, with its reason
@@ -2699,37 +2831,31 @@ def _shared_columns_copies(
     which would read a row of its own expose, and one the relationship's two exposes do not both hold.
     """
     links = model.exposes[expose_id].links
-    columns = model.exposes[expose_id].columns
     copies: List[_Copy] = []
     left: List[NotGenerated] = []
     for name, listed in _shared_lists(entry):
         link = links.get(name)
-        keys: List[str] = []
-        others: List[str] = []
-        selves: List[str] = []
+        stays: Dict[str, List[str]] = {REASON_KEY_COLUMN: [], REASON_SELF_LINK: [], "": []}
         for column in dict.fromkeys(listed):
-            if column in related:
-                keys.append(column)
-            elif link is not None and link.target == expose_id:
-                selves.append(column)
-            elif (
-                link is None
-                or column not in columns
-                or column not in model.exposes[link.target].columns
-            ):
-                others.append(column)
-            else:
-                copies.append(
-                    _Copy(
-                        column=column,
-                        path=(name,),
-                        read=column,
-                        rule_id=f"{name}.{column}",
-                        source=f"{SOURCE_RELATIONSHIP_PREFIX}{name}.sharedColumns.{column}",
-                    )
+            picked = _pick_copy(contract_document, expose_id, (name, link), column, model, related)
+            reason = (
+                None if picked is not None else _left_out(column, link, expose_id, model, related)
+            )
+            if reason is not None:
+                stays[reason].append(column)
+                continue
+            copies.append(
+                _Copy(
+                    column=column,
+                    path=(name,),
+                    read=column,
+                    rule_id=f"{name}.{column}",
+                    source=f"{SOURCE_RELATIONSHIP_PREFIX}{name}.sharedColumns.{column}",
+                    pick=picked,
                 )
+            )
         locator = f"semantics.relationships.{name}.sharedColumns"
-        for names, reason in ((keys, REASON_KEY_COLUMN), (selves, REASON_SELF_LINK), (others, "")):
+        for reason, names in stays.items():
             if names:
                 left.append(
                     NotGenerated(expose_id, KIND_SHARED_COLUMNS, locator, tuple(names), reason)
@@ -2897,7 +3023,7 @@ def _copies_of(
     related: FrozenSet[str],
 ) -> Tuple[List[_Copy], List[NotGenerated]]:
     """Every copy kernel 0.2.0 makes in *expose_id*, and every declaration of it that stays listed."""
-    columns, left = _shared_columns_copies(entry, model, expose_id, related)
+    columns, left = _shared_columns_copies(entry, model, expose_id, related, contract_document)
     attributes, kept = _shared_attribute_copies(contract_document, model, expose_id, related)
     return [*columns, *attributes], [*left, *kept]
 

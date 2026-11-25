@@ -35,27 +35,23 @@ from flux_engine.generator.history import (
     instant_ms,
     version_valid_on,
 )
-from flux_engine.generator.relations import relate_plans, related_columns
+from flux_engine.generator.relations import related_columns
 from flux_engine.generator.rows import (
-    GENERATOR_VERSION_2,
     GeneratorPlan,
-    build_plan,
     generate_row_slice,
     generate_rows,
 )
 from flux_engine.generator.rules import plan_rules
 from flux_engine.seam.asof import AsOfEntry
-from flux_engine.seam.contract import LogicalKind, compile_expose
+from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.counts import ChildShape, CountsEntry
 from flux_engine.seam.history import Histogram, HistoryEnd, HistoryEntry, HistoryTracked
-from flux_engine.seam.keys import compile_keys, mark_key_columns
+from flux_engine.seam.keys import compile_keys
 
+from ._history_plans import plans_of
 from .test_history_layout import (
-    BOUNDS,
-    SIM_ID,
     _column,
     _expose,
-    _h,
     _primary,
     _rel,
     root_for,
@@ -218,8 +214,6 @@ def plans_with(
     held = held if held is not None else entry_of()
     if kind == "TIMESTAMP" and "T" not in held.until:
         held = HistoryEntry(**{**held.__dict__, "until": held.until + "T00:00:00Z"})
-    keys = compile_keys(document)
-    assert keys is not None
     statistics: Dict[str, Tuple[Dict[str, Any], int]] = {
         EMIT: (
             {
@@ -235,42 +229,24 @@ def plans_with(
         ),
         "invoice": ({"i_date": dict(invoice_range or date_range(date_kind))}, INVOICES),
     }
-    plans: Dict[str, GeneratorPlan] = {}
-    for expose in document["exposes"]:
-        expose_id = expose["exposeId"]
-        expose_keys = keys.expose(expose_id)
-        compiled = mark_key_columns(compile_expose(expose), expose_keys)
-        fidelity, count = statistics[expose_id]
-        related = related_columns(expose_keys) | ({"sub_id"} if expose_id == EMIT else set())
-        plans[expose_id] = build_plan(
-            compiled,
-            sim_id=SIM_ID,
-            seam_digest=_h(expose_id),
-            rows=count,
-            fidelity={"columns": fidelity},
-            time_bounds=BOUNDS,
-            related=related,
-            rules=plan_rules(
-                contract_document=document,
-                expose_id=expose_id,
-                settings=None,
-                related=related,
-                mapping=None,
-                has_fidelity=True,
-                strict=False,
-                flux_rules=None,
-                keys=expose_keys,
-                rows=count,
-                null_fractions={},
-                counter_based=counter_based,
-                history=(held,) if expose_id == EMIT else (),
-                asof=tuple(asof or ()) if expose_id == "invoice" else (),
-                history_emits=(EMIT,),
-            ),
-            generator_version=GENERATOR_VERSION_2,
-        )
     binding = {EMIT: HistoryBinding(held, ENTITIES, "valid_from", "valid_to")}
-    return relate_plans(plans, keys, None, None, counts, document, None, binding)
+
+    def plan_rules_of(expose_id: str) -> Dict[str, Any]:
+        return {
+            "history": (held,) if expose_id == EMIT else (),
+            "asof": tuple(asof or ()) if expose_id == "invoice" else (),
+            "history_emits": (EMIT,),
+        }
+
+    return plans_of(
+        document,
+        statistics,
+        binding,
+        emit=EMIT,
+        counter_based=counter_based,
+        counts=counts,
+        rules_for=plan_rules_of,
+    )
 
 
 def rows_of(

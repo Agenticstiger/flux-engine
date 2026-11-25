@@ -203,7 +203,9 @@ FLX_5034: ErrorCode = register(
     "itself may be empty: a block that lists no property declares a table with "
     "nothing to score, which `verify` reports as not scored and never as "
     "verified. A missing `properties` section, or one that is not a list, is "
-    "still refused.",
+    "still refused. `columns` declares at least one column, except on an emit a "
+    "`snapshots` entry names: its rows are a history's last versions, so it draws "
+    "no column of its own.",
 )
 
 
@@ -1841,7 +1843,9 @@ def _parse_budget(raw: Any) -> Budget:
     )
 
 
-def parse_fidelity_block(raw: Any, *, expose: ExposeSchema) -> FidelityBlock:
+def parse_fidelity_block(
+    raw: Any, *, expose: ExposeSchema, allow_no_columns: bool = False
+) -> FidelityBlock:
     """Parse and validate one ``emits[].fidelity`` block against *expose*.
 
     Implements every offline rule of SEAM-FIDELITY-SPEC §2, in the order
@@ -1849,6 +1853,11 @@ def parse_fidelity_block(raw: Any, *, expose: ExposeSchema) -> FidelityBlock:
     first, then column membership, then per-property parameters. The
     result is fully immutable and ordered, and no statistic, digest or
     margin has been computed -- that is the compiler's work.
+
+    ``fidelity.columns`` must declare a column (``FLX-5034``) unless
+    *allow_no_columns* is set, which the caller does for an emit whose rows
+    follow from another emit's history and so draws no column of its own.
+    A property that names a column is still refused when none is declared.
     """
     mapping = _require_mapping(raw, "fidelity")
     _known_keys(mapping, _BLOCK_KEYS, "fidelity")
@@ -1860,7 +1869,7 @@ def parse_fidelity_block(raw: Any, *, expose: ExposeSchema) -> FidelityBlock:
     records = _parse_records(mapping["records"])
 
     raw_columns = _require_mapping(mapping["columns"], "fidelity.columns")
-    if not raw_columns:
+    if not raw_columns and not allow_no_columns:
         raise FluxError(FLX_5034, "fidelity.columns declares no column")
     expose_columns = tuple(nfc(name) for name in expose.column_names)
     relationships = tuple(nfc(name) for name in getattr(expose, "relationship_names", ()))

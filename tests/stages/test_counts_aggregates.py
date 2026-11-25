@@ -44,6 +44,7 @@ from tests.bundles import repin_contract
 from tests.generator.test_rules_over_links import _by_both_paths
 from tests.stages.test_counts_run import _flow, _shares
 
+from ._fleet import group_by
 from .conftest import REPO_ROOT
 
 pytestmark = pytest.mark.integration
@@ -169,10 +170,7 @@ def _table(outcome: Any, expose_id: str) -> List[Dict[str, Any]]:
 
 
 def _lines_of(invoices: Sequence[Mapping[str, Any]], lines: Sequence[Mapping[str, Any]]) -> Any:
-    held: Dict[Any, List[Mapping[str, Any]]] = {row["invoice_id"]: [] for row in invoices}
-    for line in lines:
-        held[line["invoice_id"]].append(line)
-    return held
+    return group_by(lines, "invoice_id", [row["invoice_id"] for row in invoices])
 
 
 def _sum(values: Sequence[Optional[Decimal]]) -> Optional[Decimal]:

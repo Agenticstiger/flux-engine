@@ -260,6 +260,9 @@ class RuleJob:
     time_bounds: Optional[Mapping[str, Any]] = None
     #: The history of each emit that declares one, which an as-of link reads as versions.
     histories: Tuple[HistoryEntry, ...] = ()
+    #: The start and end column of each emit's ``lifetimes`` entry, read by a history that keeps to
+    #: its parent's lifetime (ADR 0017, amendment of 2026-11-24).
+    lifetimes: Mapping[str, Tuple[str, Optional[str]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -435,6 +438,7 @@ def _plan_rule_job(
     dates: Tuple[DateLine, ...] = (),
     time_bounds: Optional[Mapping[str, Any]] = None,
     histories: Tuple[HistoryEntry, ...] = (),
+    lifetimes: Optional[Mapping[str, Tuple[str, Optional[str]]]] = None,
 ) -> None:
     """Plan one expose's rule job into *rule_jobs*, or add the note saying what keeps it from running."""
     expose_id = emit.expose_id
@@ -473,6 +477,7 @@ def _plan_rule_job(
             dates,
             time_bounds,
             histories,
+            dict(lifetimes or {}),
         )
     except (FluxError, Expr2Error) as error:
         notes.append(f"{expose_id}: {type(error).__name__} {getattr(error, 'code', '')}")
@@ -649,6 +654,11 @@ def plan_module_checks(
     histories = tuple(
         found for emit in resolved for found in history_entries_of(emit.extension, emit.expose_id)
     )
+    lifetimes = {
+        emit.expose_id: (held[0].start, held[0].end)
+        for emit in resolved
+        if (held := lifetime_entries_of(emit.extension, emit.expose_id)[:1])
+    }
     for emit in resolved:
         expose_id = emit.expose_id
         if emit.is_hidden_table:
@@ -676,6 +686,7 @@ def plan_module_checks(
                 dates,
                 time_bounds,
                 histories,
+                lifetimes,
             )
         _plan_links(emit, emitted, notes, links, key_columns_of)
     jobs = {
@@ -733,6 +744,7 @@ def module_pass(reader: Any, expose_id: str, job: ModuleJob) -> EmitModule:
                     counts=job.rules.counts,
                     time_bounds=job.rules.time_bounds,
                     histories=job.rules.histories,
+                    lifetimes=job.rules.lifetimes,
                 ),
             )
             if job.rules.dates:

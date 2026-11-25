@@ -591,18 +591,30 @@ length another way there, given the version's state, without moving any position
 
 **The ended allocation.** With an `end`, the eligible entities are, under `closeLast`, every entity, or with a
 `column` every entity with at least two versions, and under `finalVersion` the entities with at least two versions.
-Let `E'` be their number and `share` the entry's decimal:
+Let `E'` be their number, `E` the number of all entities and `share` the entry's decimal. The share is a share
+of every entity, and the entities that end are chosen among the eligible ones:
 
 ```text
-n = LRM(E', [share, 1 - share])[0]       keyed "0" and "1"
+n = min(LRM(E, [share, 1 - share])[0], E')       keyed "0" and "1"
 entity of eligible rank r ends  <=>  permute/2(K_end, E', r) < n
 ```
 
-With no eligible entity, none ends. Under `closeLast` an ended entity's last
+With no eligible entity, none ends, and when fewer than the share's `n` are eligible every eligible entity ends. Under `closeLast` an ended entity's last
 version is closed, with its own drawn length inside the fit, at `s_last + d_last` under `nextStart` and at the day
 before, `s_last + d_last - 1` day, under `dayBefore`. Under `finalVersion` its last version
 is a final version that carries the entry's `value` in `column` and stays open. The ending change is forced and draws
 nothing.
+
+**Plans written before the share moved.** Engine 0.11.1 and earlier took `share` of the eligible entities alone,
+`n = LRM(E', [share, 1 - share])[0]`, with the same permutation. A plan states which count it was made with: `plan`
+writes `historyEndShare: "entities"` into `plan.json` when an emit declares a history with an `end` that leaves an
+entity ineligible (a `column`, or `finalVersion`), so the plan digest covers it. Every other plan has no key, since
+with every entity eligible `E' = E` and the two counts are one. A recorded plan without the key replays the earlier
+count, so a run id made before the change replays to the run digest it recorded; planning the same bundle again
+carries the key, and moves the plan digest, the run id and the bytes of the history and of every table that reads
+it. Any other value of the key is refused (`FLX-2102`). Kernel `0.2.0` did not change: the key is read only for a
+bundle that declares such an `end`, and an engine without this paragraph ignores it, so it replays a plan that
+carries the key to the earlier count and so to other bytes (section 12).
 
 **Change reasons.** The ordinary changes are every version after an entity's first except an ending version,
 numbered `t` in row order, `T` of them. With one tracked column it is the reason of every change. Otherwise the
@@ -621,6 +633,39 @@ version's key, the parent's key, a validity column, the activation, a tracked co
 rule sets takes, on every version, the value its own cell draws on the entity's first version row. The later rows'
 cells are never drawn, which moves no draw, since every cell has its own counter. A foreign key other than the
 parent's is picked on the first version row and carried too. Rules run on each version row after these values.
+
+**The parent bound.** An entry with `parent.lifetime: true` keeps each entity to the lifetime `[ps, pe]` of its parent
+row (ADR 0017, amendment of 2026-11-24). `ps` and `pe` are the parent's start and last-day cells in the chain's unit
+(a DATE end covers its whole day, so a millisecond chain reads it to the last millisecond of that day); `ps` is absent
+for a NULL start, and `pe` when there is no end, the end is NULL or it is before `ps`, and an absent bound cuts
+nothing. The parents' lifetimes are final cells read at plan time, so the entities per parent (above) are worked out
+first. Every array below is a plan-time array over the entities, which a slice, `--jobs`, `--shard`, the column path and
+the per-row path read alike. A bundle that does not declare the key keeps every byte.
+
+- *The limit.* The chain of entity `e` must end at `limit = min(until, pe)`, which is `until` when `pe` is absent.
+  With `z = 1` when an ended entity's last version is closed (`closeLast`, or no `end`, where only the forced
+  entities below end), and `z = 0` otherwise, the entity's chain holds `room - z - 1` versions at most, where
+  `room = limit - a` and `a` is its first start.
+- *The interval.* The first start is drawn as above, at position 0 of its `history` path, from the part of `start`
+  inside `[max(first, ps), limit - (c + z) - 1]` when that is not empty, with `first` the window's first unit,
+  so an entity whose parent cuts nothing draws what it draws without the key. Otherwise it is drawn inside
+  `[max(first, ps), limit - z - 2]`, the room for one version. When that too is empty for any entity, the plan is
+  `FLX-3403`, naming `history(<emit>).parent.lifetime`, the number of such entities and the ranges of their parents'
+  starts and last days. An empty `J` for the whole history is refused as it is without the key.
+- *The room.* `V` is worked out as above, with `expected` each entity's `limit - a`, so the rank coupling reads the
+  limit. Each count is then capped at `room - z - 1`, and the `L` versions above the caps go one at a time to the
+  entities under their cap, in rounds: a round gives one to each entity still under its cap, in order of
+  `room` descending and entity index ascending, until the `L` are placed or no entity is under its cap
+  (the allotment `counts._capped` makes for a `one_to_one` relationship, with a cap for each entity). The `L'` that
+  found none are the shortfall, and the layout holds `N - L'` rows: the emit is planned at them, so its plan, its
+  rows and its verification count the rows it has, and `V` is always worked out from the declared `N`.
+- *The forced entities.* An entity whose `pe` is at or before `until` is forced to end whatever its count: under
+  `finalVersion` its final version starts the day before `pe` at the latest and carries `value`, under `closeLast` or
+  with no `end` its last version closes the day before `pe` at the latest. With `f` forced entities and `n` as in
+  the ended allocation (`E'` counting the forced entities too), the others end by
+  `permute/2(K_end, E'', r) < n - f`, with `E''` the eligible entities that are not forced and `r` the rank among
+  them, and when `f` is at least `n` every forced entity ends and no other does. Without a forced entity this is the
+  ended allocation unchanged.
 
 **The paths.** The counter of the `history` path is `(entity, 0, draw, attempt)` and of the `change` path
 `(entity, version, draw, attempt)`, by section 2's ordinal parts.

@@ -56,6 +56,12 @@ and the parent table is never held). Which row:
   every version of ``e``. It draws nothing. The natural entity's column is laid out over the
   entities and not over the rows (:class:`EntityColumn`).
 
+* ``copied`` (kernel 0.2.0): a ``sharedColumns`` copy through another relationship ``R`` into this
+  relationship's one foreign key column (ADR 0022 section 4 amendment of 2026-11-24). The parent row
+  is the one the parent of ``R`` reaches through the relationship that holds the same column as its
+  own foreign key, so the copied value is a key the target holds by construction. It draws nothing
+  and costs two picks, with no index and no search over keys.
+
 A foreign key column keeps its declared ``nullFraction`` when the relationship's
 ``joinType`` is ``left`` (FLUID's default): a null references no row. An
 ``inner`` relationship joins every row, so a ``nullFraction`` on its columns is
@@ -118,6 +124,7 @@ from flux_engine.generator.counts import (
 from flux_engine.generator.families import ColumnType, Family
 from flux_engine.generator.history import (
     Chain,
+    DeferredBound,
     HistoryBinding,
     HistoryPick,
     HistoryPlan,
@@ -136,6 +143,7 @@ from flux_engine.generator.history import (
     unit_of,
     version_valid_on,
 )
+from flux_engine.generator.parent_bounds import deferred_bound
 from flux_engine.generator.paths import CellStreams
 from flux_engine.generator.reference import (
     ReferenceColumn,
@@ -143,11 +151,18 @@ from flux_engine.generator.reference import (
     is_reference_plan,
     reference_levels,
 )
-from flux_engine.generator.rules import FORM_DEPENDENCY, ParentCondition, parent_condition
+from flux_engine.generator.rules import (
+    FORM_DEPENDENCY,
+    ParentCondition,
+    PickCopy,
+    RulePlan,
+    parent_condition,
+)
 from flux_engine.generator.statistics import DATE_EPOCH_ORDINAL
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
 from flux_engine.seam.counts import CountsEntry
 from flux_engine.seam.keys import ContractKeys, ExposeKeys, Relationship
+from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
 
 __all__ = [
     "FLX_3403",
@@ -173,49 +188,60 @@ __all__ = [
 FLX_3403 = register(
     "FLX-3403",
     "the related tables cannot be generated as declared",
-    "FLUX generates the exposes of one contract together: every key the contract "
-    "declares is laid out from the row index and never repeats, and every foreign key "
-    "takes a key its parent's rows hold. A relationship whose target the Simulation "
-    "does not generate from statistics, a key whose declared range or bins hold fewer "
-    "values than its rows, a one_to_one child with more rows than its parent, a "
-    "nullFraction on a key column or on a relationship whose joinType is inner, a key "
-    "declared with a draw that would repeat values, column types that differ between "
-    "a foreign key and its target, a key column nothing produces, and two relationships "
-    "that set one column without one implying the other are refused before any row is "
-    "drawn. So are the declarations that shape how children are placed: a counts entry "
-    "whose minChildren the child rows or the shape cannot meet (too few child rows for "
-    "the eligible parents, or a minimum above the most children the shape allows), whose "
-    "parentWhen leaves no parent eligible or reads beyond the parent's own row, or that "
-    "sits on a relationship the layout cannot place (a key, a bridge side, an implied or "
-    "weighted relationship); a required sum, min or max over the children with no ifNone "
-    "where a parent can have no children, which would leave it NULL; a link condition on "
-    "an inner relationship, on a key, or on a relationship another one implies; a bridge "
-    "whose side is named twice, is one_to_one, carries a nullFraction or has more rows "
-    "than the pairs of its parents; and a weight on a relationship that cannot pick its "
-    "parents by one, on a parent column that is not a number, or whose published values "
-    "are negative or all zero. A reference expose is refused when a cell its profile "
-    "publishes does not fit its column, as a decimal with more digits than its precision "
-    "or a number outside the range its type holds. The message names the expose, the "
-    "column or relationship, and the change to make; a parentWhen that leaves no parent "
-    "eligible also names the relationship and the condition. A history is refused when its "
-    "emit has no validity window (one natural entity with a start and an end of one DATE or "
-    "TIMESTAMP type), when its until, openEnd, chain or start bins leave no room inside "
-    "timeBounds for the versions an entity takes, when a tracked column is not categorical, "
-    "names a level it does not declare or has no transition row for a level a chain can "
-    "reach, or when its parent is not a to-one relationship. An asOf entry is refused when "
-    "its relationship does not reach the natural entity of an emit that declares a history, "
-    "its date is not a DATE or TIMESTAMP column, or a rule sets a column the contract "
-    "requires from a row read as of a date where its entity has no version, which would "
-    "write NULL. A snapshots, events or periods entry is "
-    "refused when its of names no emit with a history (or the projected emit itself), when a "
-    "column it names is missing from the history's emit or has another type, when the "
-    "projected emit declares rows of its own, when an events type has no text for a reason "
-    "its events carry, when a before or after column maps a column the contract requires "
-    "that the kept ops would leave NULL, when a when reads a column the version does not "
-    "hold, or when a periods entry has no grain, no timeBounds, or more periods than a run "
-    "holds. A DATE or TIMESTAMP column of a history's emit is refused when it declares no "
-    "range or bins, or a range or bins outside timeBounds, and so is a relationship whose "
-    "parent is a periodic emit, whose rows grow with the window.",
+    "FLUX generates the exposes of one contract together: every key the contract declares is "
+    "laid out from the row index and never repeats, and every foreign key takes a key its "
+    "parent's rows hold. A relationship whose target the Simulation does not generate from "
+    "statistics, a key whose declared range or bins hold fewer values than its rows, a "
+    "one_to_one child with more rows than its parent, a nullFraction on a key column or on a "
+    "relationship whose joinType is inner, a key declared with a draw that would repeat values, "
+    "column types that differ between a foreign key and its target, a key column nothing "
+    "produces, and two relationships that set one column without one implying the other are "
+    "refused before any row is drawn. So are the declarations that shape how children are "
+    "placed: a counts entry whose minChildren the child rows or the shape cannot meet (too few "
+    "child rows for the eligible parents, or above what the shape allows), whose parentWhen "
+    "leaves no parent eligible or reads beyond the parent's own row, or sits on a relationship "
+    "the layout cannot place (a key, a bridge side, an implied or weighted relationship); a "
+    "required sum, min or max over the children with no ifNone where a parent can have no "
+    "children, which would leave it NULL; a link condition on an inner relationship, on a key, "
+    "or on a relationship another one implies; a bridge whose side is named twice, is "
+    "one_to_one, carries a nullFraction or has more rows than the pairs of its parents; and a "
+    "weight on a relationship that cannot pick parents by one, on a non-numeric parent column, "
+    "or with negative or all-zero published values. A reference expose is refused when a "
+    "published cell does not fit its column (a decimal with too many digits, a number outside "
+    "its type's range). The message names the expose, the column or relationship, and the change "
+    "to make (for a parentWhen with no eligible parent, the condition too). A history is refused "
+    "when its emit has no validity window (one natural entity with a start and an end of one "
+    "DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no room inside "
+    "timeBounds for an entity's versions, when a tracked column is not categorical, names an "
+    "undeclared level or has no transition row for a level a chain can reach, or when its parent "
+    "is not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
+    "declares no lifetimes entry, or declares a history of its own that sets a lifetime column "
+    "(a validity, activation, tracked, end or rule-set column), which then differs between a "
+    "parent's versions; when the parent's lifetime leaves no room for one version of an entity "
+    "(the message names `history(<emit>).parent.lifetime`, the entity count and the parents' "
+    "lifetimes); or when the rows of the histories that keep to their parent's lifetime still "
+    "move after one pass for every emit (a history under a history that holds fewer rows than it "
+    "declares is laid out after it). An asOf entry is refused when its relationship does not "
+    "reach the natural entity of an emit that declares a history, its date is not a DATE or "
+    "TIMESTAMP column, or a rule sets a column the contract requires from a row read as of a "
+    "date where its entity has no version, which would write NULL. A snapshots, events or "
+    "periods entry is refused when its of names no emit with a history (or the emit itself), "
+    "when a column it names is missing from the history's emit or differs in type, when the "
+    "projected emit has rows of its own, when an events type has no reason text, when a before "
+    "or after column maps a column the contract requires and the kept ops leave NULL, when a "
+    "when reads a column the version does not hold, or reads the history's end column where the "
+    "history does not carry it (a rule, link or the history sets it), or when a periods entry "
+    "has no grain, no timeBounds, or more periods than a run holds, a `from` before "
+    "`timeBounds.start`'s day, a `from` or `through` not before `timeBounds.end` or not a "
+    "`YYYY-MM-DD` text, or a `through` before the `from`. A DATE or TIMESTAMP column of a "
+    "history's emit is refused when it declares no range or bins, or a range or bins outside "
+    "timeBounds, as is a relationship whose parent is a periodic emit. A copy through a "
+    "sharedColumns entry into another relationship's foreign key is refused when the "
+    "relationship it goes through reaches an emit that declares a history or is projected from "
+    "one, whose rows hold a version's cells, not the pick the copy follows; the message names "
+    "both relationships. An events or periods entry is also refused when a column of its emit is "
+    "drawn given a column the entry sets, which the draw would read as the level it drew; the "
+    "message names both columns.",
 )
 
 #: Domain-separation label of a key layout's permutation key.
@@ -743,6 +769,8 @@ class ForeignKey:
     counted: Optional[CountedPick] = None
     #: A ``history`` pick's chain; ``None`` for every other pick.
     history: Optional[HistoryPick] = None
+    #: A ``copied`` pick's source; ``None`` for every other pick.
+    copied: Optional[PickCopy] = None
 
     def target_of(self, column: str) -> str:
         return self.to_columns[self.from_columns.index(column)]
@@ -761,6 +789,11 @@ class ForeignKey:
             document["counts"] = self.counted.as_document()
         if self.history is not None:
             document["history"] = self.history.as_document()
+        if self.copied is not None:
+            document["copiedThrough"] = {
+                "relationship": self.copied.through,
+                "source": self.copied.source,
+            }
         return document
 
 
@@ -1098,6 +1131,8 @@ class RelationReader:
         The null draw first, then the pick: the draws :meth:`_cell` has always made, in the
         same order on the same streams.
         """
+        if driver.pick == "copied":
+            return _copied_parent(self, self._plans[owner.expose_id], driver, row)
         # A foreign key's columns are null together: the first column's null
         # draw, on its own stream, decides for all of them (only the first may
         # declare one: _check_key_columns refuses one on any other).
@@ -1211,11 +1246,8 @@ class RelationReader:
         column this way, once per key (EXPR-SPEC-2 section 8). A ``distinct`` pick is a
         function of the row, not a draw, and is not taken here.
         """
-        if driver.pick in ("counted", "history"):
-            raise _refuse(
-                f"relationship {driver.relationship!r} is on a counted layout, which no draw "
-                "makes, so a dependency cannot draw its key; let the layout set it"
-            )
+        if driver.pick in ("counted", "history", "copied"):
+            raise _has_no_draw(driver)
         if driver.pick not in ("declared", "uniform") or len(driver.from_columns) != 1:
             raise _refuse(
                 f"relationship {driver.relationship!r} is not a one-column foreign key with a draw"
@@ -1366,6 +1398,8 @@ class RelationReader:
         It reads no parent: which entity a version row belongs to does not depend on who the
         entity's parent is, so the natural entity's column needs nothing else.
         """
+        if pick.parent_lifetime is not None:
+            return self._history_of(owner, _bound_driver(self._plans.get(owner.expose_id), pick))
         address = (owner.sim_id, owner.expose_id, "")
         found = self._histories.get(address)
         if found is None:
@@ -1406,7 +1440,7 @@ class RelationReader:
             owner.expose_id,
             driver.history.entry,
             kind=driver.history.kind,
-            rows=driver.history.rows,
+            rows=driver.history.laid_rows,
             entities=driver.history.entities,
             time_bounds=(driver.history.window_start,),
             outer=OuterInputs(
@@ -1418,6 +1452,7 @@ class RelationReader:
                 expected=expected,
                 identity=(None if parent is None else parent.digest().value, hook),
             ),
+            bound=_deferred_bound(self, owner, driver),
         )
         self._histories[address] = found
         return found
@@ -2033,8 +2068,8 @@ class RelationReader:
         rows: "np.ndarray",
     ) -> None:
         """:meth:`_cell`'s foreign key draws for *rows*: the first column's null, then the pick."""
-        if driver.pick == "weighted":
-            return  # a weighted pick reads its parent's rows: the per-row code takes it
+        if driver.pick in ("weighted", "copied"):
+            return  # these read other rows' picks or final rows: the per-row code takes them
         ready = self._ready.setdefault((owner.sim_id, owner.expose_id, driver.relationship), {})
         rows = _missing(rows, ready)
         if rows.shape[0] == 0:
@@ -2187,6 +2222,32 @@ def _foreign_driver(plan: "_rows.GeneratorPlan", relationship: str) -> Optional[
     return None
 
 
+def _bound_driver(plan: Optional["_rows.GeneratorPlan"], pick: HistoryPick) -> ForeignKey:
+    """The ``parent`` relationship's driver of a history that keeps to its parent's lifetime.
+
+    Such a history's layout reads the parents, so it is :meth:`RelationReader._history_of`'s.
+    """
+    assert pick.entry.parent is not None
+    driver = None if plan is None else _foreign_driver(plan, pick.entry.parent.relationship)
+    if driver is None:
+        raise _refuse(
+            f"history ({pick.entry.emit}) keeps to its parent's lifetime, whose plan this pass "
+            "does not read"
+        )
+    return driver
+
+
+def _deferred_bound(
+    reader: "RelationReader", owner: _Owner, driver: ForeignKey
+) -> Optional[DeferredBound]:
+    """The lifetimes of *driver*'s parent rows when its history keeps to them (ADR 0017), else ``None``."""
+    history = driver.history
+    if history is None or history.parent_lifetime is None:
+        return None
+    parent = reader._parent_plan(owner, driver)
+    return deferred_bound(reader.root, parent, history.parent_lifetime, history.kind)
+
+
 def _composite_part(
     plan: "_rows.GeneratorPlan", relationship: str
 ) -> Optional[Tuple[CompositeKey, int, ParentPart]]:
@@ -2209,6 +2270,20 @@ def history_pick_of(plan: "_rows.GeneratorPlan") -> Optional[HistoryPick]:
         if isinstance(driver, (EntityColumn, ChainColumn, TrackedColumn)):
             return driver.history
     return None
+
+
+def bound_history_of(plan: "_rows.GeneratorPlan", root: SeedTreeRoot) -> HistoryPlan:
+    """The layout of *plan*'s history emit, which keeps to its parent's lifetime, for a reader with no reader.
+
+    A projection reads the chain of its history without a pass of its own, so the layout that reads
+    the parents' lifetimes is worked out here, on a reader of its own; the plans and the parents'
+    lifetimes are kept by their digests, so the work is done once per process.
+    """
+    pick = history_pick_of(plan)
+    assert pick is not None and pick.parent_lifetime is not None
+    reader = RelationReader(root)
+    reader.know(plan)
+    return reader._chain_of(owner_of(plan), pick)
 
 
 def carried_columns(plan: "_rows.GeneratorPlan") -> FrozenSet[str]:
@@ -2341,6 +2416,8 @@ class _Shape:
     hooked: Mapping[str, Tuple[ExpectedCountHook, Mapping[str, Any]]] = field(default_factory=dict)
     #: The emit's history, when the Simulation declares one (ADR 0017).
     history: Optional[_HistoryShape] = None
+    #: The copy that sets each relationship's pick, by relationship (ADR 0022 section 4).
+    copied: Mapping[str, PickCopy] = field(default_factory=dict)
 
     @property
     def columns(self) -> Tuple[str, ...]:
@@ -2447,9 +2524,64 @@ def relate_plans(
         )
         for expose_id in sorted(plans)
     }
+    _refuse_copies_into_histories(shapes, histories, _projected_emits(namespace or {}))
     related = _with_drivers(plans, _Resolver(shapes))
     _check_asof_reads(related, keys)
     return _attach_sums(_attach_reads(_link_givens(related, keys), keys))
+
+
+def _refuse_copies_into_histories(
+    shapes: Mapping[str, _Shape],
+    histories: Mapping[str, HistoryBinding],
+    projected: Mapping[str, str],
+) -> None:
+    """Refuse (``FLX-3403``) a copy through a relationship whose target declares a history or is projected from one (ADR 0022 section 4).
+
+    A history's emit holds the foreign keys of an entity's first version on every later version, so
+    the row a copy reaches from a later version, followed through the relationship that holds the
+    copied column, is not the row the copied cell names there: a relationship into a slowly
+    changing target is out of reach of a copy, as it is of a one_to_one pick. An emit projected
+    from a history (a snapshot, events or periods, ADR 0027) holds the history's cells on the row
+    it reads, not the pick of a draw of its own, so the row its relationship names is not the
+    row the copy reaches either. *projected* maps each such emit, in NFC, to the kind of its
+    entry.
+    """
+    held = {nfc(expose_id) for expose_id in histories}
+    for expose_id in sorted(shapes):
+        for copied in shapes[expose_id].copied.values():
+            reach = nfc(copied.reach)
+            where = (
+                f"expose {expose_id!r} copies {copied.column!r} through relationship "
+                f"{copied.through!r} into relationship {copied.relationship!r}"
+            )
+            if reach in held:
+                raise _refuse(
+                    f"{where}, but {copied.reach!r} declares a history, whose foreign keys are "
+                    "those of an entity's first version on each of its versions, so the copy "
+                    f"would not equal the row {copied.relationship!r} names on a later version; "
+                    "read the column from a table with no history, or leave the copy out"
+                )
+            if reach in projected:
+                raise _refuse(
+                    f"{where}, but {copied.reach!r} is projected from a history ({projected[reach]} "
+                    f"entry), so each of its rows holds the cells of a version, not the pick of a "
+                    f"draw of its own, and the copy would not equal the row "
+                    f"{copied.relationship!r} names there; read the column from a table that is "
+                    "no projection, or leave the copy out"
+                )
+
+
+def _projected_emits(namespace: Mapping[str, Any]) -> Dict[str, str]:
+    """The emits a ``snapshots``, ``events`` or ``periods`` entry of the namespace names, in NFC, with the entry's kind."""
+    found: Dict[str, str] = {}
+    for kind in (SNAPSHOTS_KEY, EVENTS_KEY, PERIODS_KEY):
+        entries = namespace.get(kind)
+        if not isinstance(entries, (list, tuple)):
+            continue
+        for entry in entries:
+            if isinstance(entry, Mapping) and isinstance(entry.get("emit"), str):
+                found.setdefault(nfc(entry["emit"]), kind)
+    return found
 
 
 def _periodic_emits(namespace: Mapping[str, Any]) -> FrozenSet[str]:
@@ -2500,6 +2632,37 @@ def _check_histories(
         except FluxError:
             raise _refuse(f"{where}: {expose_id!r} has no start column {binding.start!r}") from None
         chain_unit_kind(kind)
+        _refuse_rules_on_end_column(where, binding, plan)
+
+
+def _refuse_rules_on_end_column(
+    where: str, binding: HistoryBinding, plan: "_rows.GeneratorPlan"
+) -> None:
+    """Refuse (``FLX-6203``) a rule that sets the column ``end.column`` names (ADR 0017, ADR 0027).
+
+    The history writes ``end.value`` into the column on an ending version and a drawn level on the
+    others, and the rows are held to that, so a rule on the column, whatever its ``when``, would be
+    a second source for it.
+    """
+    end = binding.entry.end
+    rules = plan.rules
+    if end is None or end.column is None or rules is None:
+        return
+    setters: Dict[str, str] = {}
+    for rule in rules.rules:
+        for column in (*rule.determines, *rule.to_columns):
+            setters.setdefault(column, f"the rule {rule.id!r}")
+    for column in rules.determined:
+        setters.setdefault(column, "a rule")
+    if end.column in setters:
+        from flux_engine.expr2.errors import FLX_6203
+
+        raise FluxError(
+            FLX_6203,
+            f"column {end.column!r} has more than one source: {where} sets it as its end column "
+            f"(end.column), and {setters[end.column]} sets it too; leave the column to the "
+            "history, or name another column in end.column",
+        )
 
 
 def _refuse_history_targets(
@@ -2764,9 +2927,12 @@ def _history_shape_of(
         rows=plan.rows,
         entities=binding.entities,
         window_start=plan.time_bounds[0],
+        parent_lifetime=binding.parent_lifetime,
+        declared_rows=binding.declared_rows,
     )
     # The refusals that follow from declared values alone, before any layout is worked out.
     declared = binding.entry.parent
+    _check_parent_lifetime(expose_id, binding, plans, keys)
     target = None
     if declared is not None:
         target = next(
@@ -2780,7 +2946,7 @@ def _history_shape_of(
     check_layout(
         pick.entry,
         pick.kind,
-        pick.rows,
+        pick.laid_rows,
         pick.entities,
         pick.window_start,
         target,
@@ -2794,6 +2960,36 @@ def _history_shape_of(
         start=binding.start,
         end=binding.end,
     )
+
+
+def _check_parent_lifetime(
+    expose_id: str,
+    binding: HistoryBinding,
+    plans: Mapping[str, "_rows.GeneratorPlan"],
+    keys: ContractKeys,
+) -> None:
+    """Refuse (``FLX-3403``) a ``parent.lifetime`` whose parent emit gives no lifetime columns to read.
+
+    The entry needs a ``lifetimes`` entry on the emit its ``parent.relationship`` reaches, and that
+    emit must be generated in the Simulation, with the entry's start and end among its columns.
+    """
+    declared = binding.entry.parent
+    if declared is None or not declared.lifetime:
+        return
+    where = f"history ({expose_id}).parent.lifetime"
+    reached = next(
+        (r for r in keys.expose(expose_id).relationships if r.name == declared.relationship), None
+    )
+    lifetime = binding.parent_lifetime
+    if reached is None or lifetime is None or reached.target not in plans:
+        raise _refuse(
+            f"{where} needs a lifetimes entry on the emit {declared.relationship!r} reaches, and "
+            "that emit generated in this Simulation"
+        )
+    named = {column_plan.column.name for column_plan in plans[reached.target].columns}
+    for column in (lifetime[0], *(() if lifetime[1] is None else (lifetime[1],))):
+        if column not in named:
+            raise _refuse(f"{where}: {reached.target!r} has no column {column!r}")
 
 
 def _declared_relationships(keys: ContractKeys) -> FrozenSet[_Declared]:
@@ -2847,6 +3043,12 @@ def _paths_of(plan: "_rows.GeneratorPlan") -> List[Tuple[str, ...]]:
             and driver.pick == "weighted"
             and driver.weight_values is None
         )
+        # A copied pick reads the pick of the row its relationship reaches.
+        paths.update(
+            (driver.copied.through,)
+            for _, driver in plan.relations.drivers
+            if isinstance(driver, ForeignKey) and driver.copied is not None
+        )
         # A parentWhen, a given column and an expected-count hook read the parent's final rows, and the child's
         # digest holds the parent's.
         paths.update(
@@ -2858,9 +3060,26 @@ def _paths_of(plan: "_rows.GeneratorPlan") -> List[Tuple[str, ...]]:
                 driver.counted.parent_when is not None
                 or driver.counted.hook is not None
                 or driver.counted.given is not None
+                or (driver.history is not None and driver.history.parent_lifetime is not None)
             )
         )
+        # A foreign key into a history that keeps to its parent's lifetime reads that history's cells,
+        # whose layout needs the history's own plan and its parent's.
+        paths.update(
+            (driver.relationship,)
+            for _, driver in plan.relations.drivers
+            if isinstance(driver, ForeignKey) and _reaches_bound_history(driver)
+        )
     return sorted(paths)
+
+
+def _reaches_bound_history(driver: ForeignKey) -> bool:
+    """Whether *driver*'s parent is the emit of a history that keeps to its parent's lifetime."""
+    return any(
+        isinstance(held, (EntityColumn, ChainColumn, TrackedColumn))
+        and held.history.parent_lifetime is not None
+        for _, held in driver.parent.drivers
+    )
 
 
 def _refuse_given(message: str) -> FluxError:
@@ -3570,11 +3789,251 @@ def _shape(
         conditions=conditions,
         hooked=hooked,
         history=history,
+        copied=_check_copied(
+            plan,
+            plans,
+            relationships,
+            key_tuples,
+            owners,
+            (distinct, absorbed, on_counts, weights, bridges, history),
+        ),
     )
     _check_key_columns(
         shape, by_name, relationships, _entity_keys(expose_id, keys, declared), key_tuples
     )
     return shape
+
+
+def _first_pick(
+    shape: _Shape, relationship: Relationship, parent: ParentView, first: Any
+) -> Tuple[str, Optional[Any], Optional[Union[KeyGrid, ReferenceColumn]]]:
+    """How the parent is first picked: its pick, the key of a distinct layout, a declared grid."""
+    plan = shape.plan
+    if relationship.name in shape.distinct:
+        return "distinct", _layout_key(plan, "rel", relationship.name), None
+    if len(relationship.from_columns) == 1:
+        target = parent.driver(relationship.to_columns[0])
+        if isinstance(target, (KeyGrid, ReferenceColumn)) and _declares_draw(first):
+            if isinstance(target, ReferenceColumn):
+                _check_declared_keys(plan, first, relationship, target)
+            return "declared", None, target
+    return "uniform", None, None
+
+
+def _check_copied(
+    plan: "_rows.GeneratorPlan",
+    plans: Mapping[str, "_rows.GeneratorPlan"],
+    relationships: Sequence[Relationship],
+    key_tuples: Sequence[Tuple[str, ...]],
+    owners: Mapping[str, Relationship],
+    layouts: Tuple[
+        FrozenSet[str],
+        FrozenSet[str],
+        Mapping[str, bool],
+        Mapping[str, str],
+        Sequence[Tuple[str, str]],
+        Optional[_HistoryShape],
+    ],
+) -> Dict[str, PickCopy]:
+    """The copies that set a relationship's pick, each refused (``FLX-3403``) when it cannot (ADR 0022 section 4).
+
+    A copy of a column into the foreign key of another relationship ``S`` makes ``S``'s pick
+    follow the relationship it is copied through, so ``S`` may be nothing that picks or lays its
+    parents out on its own: not one that references each parent once, is part of a key or a bridge,
+    is counted, weighted or a history's parent, and its column declares no draw, ``nullFraction``,
+    ``allocation`` or ``given``, and no rule sets it. The relationship it is copied through
+    sets its pick on a draw of its own, with no conditional link that clears it and no rule that
+    sets its columns, and its target is generated from statistics (not a reference expose); the
+    source relationship of that target is read the same way. A cycle of such copies is
+    ``FLX-6210``, found when the plans read each other.
+    """
+    rules = plan.rules
+    found: Dict[str, PickCopy] = {}
+    if rules is None or not rules.pick_copies:
+        return found
+    by_name = {relationship.name: relationship for relationship in relationships}
+    for copy in rules.pick_copies:
+        where = (
+            f"expose {plan.expose.expose_id!r} copies {copy.column!r} through relationship "
+            f"{copy.through!r} into relationship {copy.relationship!r}"
+        )
+        reasons = _copy_layout_reasons(copy, key_tuples, layouts) + _copy_column_reasons(
+            copy, plan, by_name[copy.relationship], owners
+        )
+        if reasons:
+            raise _refuse(f"{where}, but " + " and ".join(reasons) + "; a copy sets the pick alone")
+        through = _copy_through(where, copy, by_name, owners)
+        if _sets_columns(rules, copy.through, through.from_columns):
+            raise _refuse(
+                f"{where}, but a conditional link or a rule sets the columns of "
+                f"{copy.through!r}, so the row it reaches is not the pick; drop it, or the copy"
+            )
+        reached = plans.get(copy.reach)
+        if reached is None or is_reference_plan(reached):
+            raise _refuse(
+                f"{where}, but {copy.reach!r} is not generated from statistics with rows of its "
+                "own to read a pick from"
+            )
+        _check_copy_givens(where, copy, (plan, through.from_columns), (reached, (copy.column,)))
+        if _sets_columns(reached.rules, copy.source, (copy.column,)):
+            raise _refuse(
+                f"{where}, but a conditional link or a rule of {copy.reach!r} sets the columns of "
+                f"{copy.source!r}, so the row it reaches is not the pick"
+            )
+        found[copy.relationship] = copy
+    return found
+
+
+def _copy_layout_reasons(
+    copy: PickCopy,
+    key_tuples: Sequence[Tuple[str, ...]],
+    layouts: Tuple[
+        FrozenSet[str],
+        FrozenSet[str],
+        Mapping[str, bool],
+        Mapping[str, str],
+        Sequence[Tuple[str, str]],
+        Optional[_HistoryShape],
+    ],
+) -> List[str]:
+    """What in the layout of the relationship a copy sets keeps it from setting the pick."""
+    distinct, absorbed, counted, weights, bridges, history = layouts
+    reasons: List[str] = []
+    if copy.relationship in distinct:
+        reasons.append("it references each parent row at most once")
+    if copy.relationship in absorbed or any(copy.column in key for key in key_tuples):
+        reasons.append(f"{copy.column!r} is part of a key")
+    if copy.relationship in {name for pair in bridges for name in pair}:
+        reasons.append("it is a side of a bridge")
+    if copy.relationship in counted:
+        reasons.append("it is on the counted layout")
+    if copy.relationship in weights:
+        reasons.append("a links entry weights it")
+    if history is not None and (
+        history.parent is not None and history.parent.relationship == copy.relationship
+    ):
+        reasons.append("it is the history's parent")
+    return reasons
+
+
+def _copy_column_reasons(
+    copy: PickCopy,
+    plan: "_rows.GeneratorPlan",
+    mine: Relationship,
+    owners: Mapping[str, Relationship],
+) -> List[str]:
+    """What the copied column declares, or another relationship or a rule sets, that a copy cannot keep."""
+    assert plan.rules is not None
+    first = plan.column_plan(copy.column)
+    statistics = first.statistics
+    reasons: List[str] = []
+    if owners.get(copy.column) is not mine:
+        reasons.append(f"another relationship sets {copy.column!r}")
+    if statistics.null_fraction is not None:
+        reasons.append(f"{copy.column!r} declares a nullFraction")
+    if _declares_draw(first) or statistics.allocation is not None or statistics.parents:
+        reasons.append(f"{copy.column!r} declares a draw, an allocation or a given")
+    if copy.column in plan.rules.determined:
+        reasons.append(f"a rule sets {copy.column!r}")
+    return reasons
+
+
+def _copy_through(
+    where: str,
+    copy: PickCopy,
+    by_name: Mapping[str, Relationship],
+    owners: Mapping[str, Relationship],
+) -> Relationship:
+    """The relationship a copy goes through, which sets its columns' pick on a draw of its own."""
+    through = by_name.get(copy.through)
+    if through is None or owners.get(through.from_columns[0]) is not through:
+        raise _refuse(
+            f"{where}, but another relationship sets the columns of {copy.through!r}, so it "
+            "has no pick of its own to follow"
+        )
+    return through
+
+
+def _sets_columns(rules: Optional[RulePlan], relationship: str, columns: Sequence[str]) -> bool:
+    """Whether a conditional link on *relationship* or a rule of *rules* sets any of *columns*."""
+    return rules is not None and (
+        any(link.relationship == relationship for link in rules.links)
+        or any(column in rules.determined for column in columns)
+    )
+
+
+def _check_copy_givens(
+    where: str,
+    copy: PickCopy,
+    *sources: Tuple["_rows.GeneratorPlan", Sequence[str]],
+) -> None:
+    """Refuse a copy whose pick is another column's level or is read as one (neither source may be)."""
+    for held_plan, columns in sources:
+        given = _rows._given_columns(held_plan)
+        for column in columns:
+            if held_plan.column_plan(column).statistics.parents or column in given:
+                raise _refuse(
+                    f"{where}, but {column!r} of {held_plan.expose.expose_id!r} is drawn given "
+                    "another column or another column is drawn given it, so its pick is not "
+                    "read from the row alone; drop the given, or the copy"
+                )
+
+
+def _copied_parent(
+    reader: "RelationReader", child: "_rows.GeneratorPlan", driver: ForeignKey, row: int
+) -> Optional[int]:
+    """The parent row a ``copied`` pick takes: the row its source relationship reaches.
+
+    The row ``through`` reaches at *row* is read as a link reads it, and the row the source
+    relationship of that row's expose reaches there is this relationship's parent. ``None``
+    when either reaches no row. A pure function of the two plans and the seed tree.
+    """
+    copied = driver.copied
+    assert copied is not None  # relate_plans sets it for this pick
+    held = reader.parent_row(child, copied.through, row)
+    if held is None:
+        return None
+    reached = next(read for expose_id, read in child.reads if expose_id == copied.reach)
+    return reader.parent_row(reached, copied.source, held)
+
+
+def _has_no_draw(driver: ForeignKey) -> FluxError:
+    """A dependency cannot draw the key of a relationship that a layout or a copy sets (``FLX-3403``)."""
+    if driver.copied is not None:
+        return _refuse(
+            f"relationship {driver.relationship!r} takes its parent from a copy through "
+            f"{driver.copied.through!r}, so a dependency cannot draw its key"
+        )
+    return _refuse(
+        f"relationship {driver.relationship!r} is on a counted layout, which no draw "
+        "makes, so a dependency cannot draw its key; let the layout set it"
+    )
+
+
+def _check_copy_source(held: Optional[Driver], expose_id: str, copied: PickCopy) -> None:
+    """Refuse (``FLX-3403``) a copy whose source relationship has no pick of its own to follow.
+
+    A copy follows the pick of the relationship of ``reach`` that holds the copied column as
+    its foreign key (:class:`~flux_engine.generator.rules.PickCopy`), so that relationship
+    needs a foreign key or a part of a key it is laid out as in ``reach``'s plan.
+    """
+    if isinstance(held, CompositeMember) or (
+        isinstance(held, ForeignKey) and held.relationship == copied.source
+    ):
+        return
+    raise _refuse(
+        f"expose {expose_id!r} copies {copied.column!r} through relationship "
+        f"{copied.through!r} into relationship {copied.relationship!r}, but relationship "
+        f"{copied.source!r} of {copied.reach!r} has no foreign key of its own to follow "
+        f"({copied.column!r} is laid out another way there)"
+    )
+
+
+def _projected_columns(plan: "_rows.GeneratorPlan") -> FrozenSet[str]:
+    """The columns of a snapshot, which are its history's last versions (ADR 0027 section 3): none is drawn."""
+    if not plan.projected:
+        return frozenset()
+    return frozenset(column_plan.column.name for column_plan in plan.columns)
 
 
 def _refuse_on_counts(
@@ -5044,6 +5503,7 @@ class _Resolver:
         ruled = frozenset() if shape.plan.rules is None else shape.plan.rules.covers_every_row
         # A column a generator plugin generates is produced by the plugin (ADR 0032 section 5).
         made = frozenset() if shape.plan.plugin is None else frozenset(shape.plan.plugin.names)
+        projected = _projected_columns(shape.plan)
         for column_plan in shape.plan.columns:
             name = column_plan.column.name
             if (
@@ -5052,6 +5512,7 @@ class _Resolver:
                 and name not in drivers
                 and name not in ruled
                 and name not in made
+                and name not in projected
             ):
                 raise _refuse(
                     f"expose {expose_id!r} column {name!r} is part of a key that a smaller "
@@ -5161,7 +5622,7 @@ class _Resolver:
         parent = self.view(relationship.target, relationship.to_columns)
         first = plan.column_plan(relationship.from_columns[0])
         weight = shape.weights.get(relationship.name)
-        pick, key, grid = self._first_pick(shape, relationship, parent, first)
+        pick, key, grid = _first_pick(shape, relationship, parent, first)
         counted = self._counted(shape, relationship, self.shapes[relationship.target].plan)
         history: Optional[HistoryPick] = None
         if counted is not None:
@@ -5169,6 +5630,10 @@ class _Resolver:
             history = self._history_pick(shape, relationship)
             if history is not None:
                 pick = "history"
+        copied = shape.copied.get(relationship.name)
+        if copied is not None:
+            pick, grid, key = "copied", None, None
+            _check_copy_source(self.driver(copied.reach, copied.column), expose_id, copied)
         weight_values: Optional[ReferenceColumn] = None
         if weight is not None:
             weight_values = self._weighted(shape, relationship, pick, first, weight)
@@ -5187,25 +5652,10 @@ class _Resolver:
             weight_values=weight_values,
             counted=counted,
             history=history,
+            copied=copied,
         )
         self._foreign[(expose_id, relationship.name)] = foreign
         return foreign
-
-    @staticmethod
-    def _first_pick(
-        shape: _Shape, relationship: Relationship, parent: ParentView, first: Any
-    ) -> Tuple[str, Optional[Any], Optional[Union[KeyGrid, ReferenceColumn]]]:
-        """How the parent is first picked: its pick, the key of a distinct layout, a declared grid."""
-        plan = shape.plan
-        if relationship.name in shape.distinct:
-            return "distinct", _layout_key(plan, "rel", relationship.name), None
-        if len(relationship.from_columns) == 1:
-            target = parent.driver(relationship.to_columns[0])
-            if isinstance(target, (KeyGrid, ReferenceColumn)) and _declares_draw(first):
-                if isinstance(target, ReferenceColumn):
-                    _check_declared_keys(plan, first, relationship, target)
-                return "declared", None, target
-        return "uniform", None, None
 
     @staticmethod
     def _history_pick(shape: _Shape, relationship: Relationship) -> Optional[HistoryPick]:

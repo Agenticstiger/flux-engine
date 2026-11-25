@@ -45,7 +45,7 @@ from flux_engine.core.rng import bounded_uint, uniform53
 from flux_engine.core.seedtree import SeedTreeRoot, counter_stream, key_label, path_key
 from flux_engine.generator.history import HistoryPlan, _StartTable, _table_over, unit_of
 from flux_engine.generator.paths import LAG_PATH_SHAPE, lag_path
-from flux_engine.generator.rows import GeneratorPlan, generate_row_slice
+from flux_engine.generator.rows import GeneratorPlan, cells_before_rules, generate_row_slice
 from flux_engine.generator.versionview import (
     DAY_MS,
     VersionView,
@@ -164,7 +164,7 @@ def layout_of(chain: HistoryPlan, projection: "ProjectionPlan") -> EventLayout:
         mask = np.isin(found.op, [OPS.index(code) for code in entry.on])
         if entry.when is not None:
             checked = view.compile_when(entry.when)
-            mask[mask] = view.holds(checked, found.about[mask])
+            mask[mask] = view.holds(checked, found.about[mask], where=f"events ({entry.emit}).when")
         found = _kept(found, mask)
         if len(_LAYOUTS) >= _LAYOUTS_KEPT:
             _LAYOUTS.clear()
@@ -419,7 +419,7 @@ def _image(
 def events_rows(
     plan: GeneratorPlan, layout: EventLayout, start: int, stop: int, root: SeedTreeRoot
 ) -> Tuple[Tuple[Any, ...], ...]:
-    """Rows *start* to *stop* - 1 of the events emit *plan*."""
+    """Rows *start* to *stop* - 1 of the events emit *plan*, before the emit's rules run."""
     projection = plan.projection
     assert projection is not None and isinstance(projection.entry, EventsEntry)
     entry = projection.entry
@@ -436,7 +436,9 @@ def events_rows(
     before_map, after_map = dict(entry.before), dict(entry.after)
     names = [column.column.name for column in plan.columns]
     free = _free_columns(names, entry, before_map, after_map, position)
-    own = generate_row_slice(replace(plan, projection=None), start, stop, root=root) if free else ()
+    # The emit's own cells, before its rules: they run over the row once every column the
+    # event takes from the history is set (projections.projection_rows).
+    own = cells_before_rules(replace(plan, projection=None), start, stop, root=root) if free else ()
     columns: List[List[Any]] = []
     for index, name in enumerate(names):
         if name == entry.op:

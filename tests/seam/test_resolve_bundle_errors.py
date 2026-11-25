@@ -32,6 +32,7 @@ from flux_engine.seam import resolve as resolve_module
 from flux_engine.seam.resolve import SeamBundle, flux_schema_validator, load_bundle
 from flux_engine.spec.validate import Bundle
 from flux_stats.exact_yaml import FLX_3105
+from tests.bundles import by_file
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_BUNDLE = REPO_ROOT / "tests" / "fixtures" / "telco-fidelity-small"
@@ -444,7 +445,7 @@ def test_the_exact_read_holds_every_file_of_a_bundle_to_one_budget(
 
 def _sizes(bundle: Path) -> Dict[str, int]:
     """Every regular file of *bundle* by name, with its size."""
-    return {path.name: path.stat().st_size for path in sorted(bundle.iterdir()) if path.is_file()}
+    return by_file(bundle, lambda path: path.stat().st_size)
 
 
 def test_the_size_caps_are_4_mib_a_file_and_flux_specs_archive_cap_a_bundle() -> None:

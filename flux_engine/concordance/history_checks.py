@@ -25,7 +25,7 @@ link (ADR 0017 section 8), each reading the version of the linked entity valid o
 from __future__ import annotations
 
 from bisect import bisect_right
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.concordance.shares import Holds
@@ -41,17 +41,20 @@ __all__ = [
     "HISTORY_RULE_IDS",
     "NO_GAPS_NO_OVERLAP",
     "ONE_CURRENT",
+    "WITHIN_PARENT",
     "chain_ended",
     "entity_chains",
     "history_shares",
     "is_open",
     "open_sentinel",
+    "within_parent_share",
 ]
 
 NO_GAPS_NO_OVERLAP = "history:no_gaps_no_overlap"
 ONE_CURRENT = "history:one_current"
 ENDED_IS_LAST = "history:ended_is_last"
-HISTORY_RULE_IDS = (NO_GAPS_NO_OVERLAP, ONE_CURRENT, ENDED_IS_LAST)
+WITHIN_PARENT = "history:within_parent"
+HISTORY_RULE_IDS = (NO_GAPS_NO_OVERLAP, ONE_CURRENT, ENDED_IS_LAST, WITHIN_PARENT)
 
 _Row = Mapping[str, Any]
 
@@ -144,10 +147,13 @@ def _current_holds(
         return True
     if opened:
         return False
-    declared = entry.end is not None and entry.end.mode == "closeLast"
-    if not declared:
+    if entry.end is None:
+        # A history that keeps to its parent's lifetime closes the last version of an entity
+        # whose parent ended, though it declares no end (ADR 0017, amendment of 2026-11-24).
+        return bool(entry.parent is not None and entry.parent.lifetime)
+    if entry.end.mode != "closeLast":
         return False
-    return entry.end is None or entry.end.column is None or _carries(ordered[-1], entry)
+    return entry.end.column is None or _carries(ordered[-1], entry)
 
 
 def _ended_holds(ordered: Sequence[_Row], entry: HistoryEntry) -> bool:
@@ -170,7 +176,15 @@ def chain_ended(
     the end value.
     """
     end = entry.end
-    if end is None or not ordered:
+    if end is None:
+        bound = entry.parent is not None and entry.parent.lifetime
+        return bool(
+            bound
+            and ordered
+            and versions.end is not None
+            and not is_open(ordered[-1].get(versions.end), sentinel)
+        )
+    if not ordered:
         return False
     if end.mode == "closeLast":
         return versions.end is not None and not is_open(ordered[-1].get(versions.end), sentinel)
@@ -217,6 +231,112 @@ def history_shares(
         held = sum(1 for chain in ordered.values() if _ended_holds(chain, entry))
         lines.append((ENDED_IS_LAST, Holds(held, total)))
     return tuple(lines)
+
+
+def _facts() -> Any:
+    """The date facts, imported when first read: ``date_facts`` imports ``rule_shares``, which imports this module."""
+    from flux_engine.concordance import date_facts
+
+    return date_facts
+
+
+def _last_instant(end: Any, like: Any) -> Any:
+    """A DATE lifetime *end* as the last millisecond of its day when *like* is a timestamp.
+
+    The generator forces an entity to end when its parent's last day, to the last millisecond, is
+    not after ``until``; the day alone would call a parent that ends on ``until``'s day an ended one
+    whatever the time of day ``until`` falls at.
+    """
+    if isinstance(like, datetime) and not isinstance(end, datetime):
+        return datetime.combine(end, time(23, 59, 59, 999000), like.tzinfo)
+    return end
+
+
+def _within_parent_holds(
+    ordered: Sequence[_Row],
+    parent: _Row,
+    lifetime: Tuple[str, Optional[str]],
+    versions: Versions,
+    entry: HistoryEntry,
+    sentinel: Any,
+) -> Optional[bool]:
+    """Whether one entity keeps to its parent's lifetime, or ``None`` when its parent has no start.
+
+    Its first start is not before the parent's start. When the parent has ended (an end not before
+    its start), no version starts after the parent's last day, every closed end is at or before it,
+    and an entity whose parent ended by ``until`` has ended: its last version is closed, or under
+    ``finalVersion`` carries the end value. Any other entity of a history with no ``end`` keeps its
+    last version open: nothing but the parent's end closes it.
+    """
+    start = parent.get(lifetime[0])
+    if start is None or versions.end is None:
+        return None
+    first = ordered[0].get(versions.start)
+    if first is None or not _facts().at_or_after_start(first, start):
+        return False
+    stop = None if lifetime[1] is None else parent.get(lifetime[1])
+    if stop is None or _facts().is_open(start, stop):
+        return _open_last_kept(ordered, versions, entry, sentinel)
+    if not _ends_by(ordered, (versions.start, versions.end), stop, sentinel):
+        return False
+    until = _instant(entry.until, first)
+    if until is not None and not _facts().at_or_before_end(_last_instant(stop, until), until):
+        # The parent ended after the horizon: nothing forces the entity to end.
+        return _open_last_kept(ordered, versions, entry, sentinel)
+    return chain_ended(ordered, versions, entry, sentinel)
+
+
+def _open_last_kept(
+    ordered: Sequence[_Row], versions: Versions, entry: HistoryEntry, sentinel: Any
+) -> bool:
+    """Whether an entity nothing forces to end keeps its last version open, when the history has no ``end``.
+
+    A history with no ``end`` closes a last version only to end with its parent, when the parent's
+    last day is at most ``until``; with an ``end`` declared the history's own end mode may close it.
+    """
+    if entry.end is not None or versions.end is None:
+        return True
+    return is_open(ordered[-1].get(versions.end), sentinel)
+
+
+def _ends_by(ordered: Sequence[_Row], columns: Tuple[str, str], stop: Any, sentinel: Any) -> bool:
+    """Whether no version starts after *stop* and every closed end is at or before it."""
+    for row in ordered:
+        begun, closed = row.get(columns[0]), row.get(columns[1])
+        if begun is None or not _facts().at_or_before_end(begun, stop):
+            return False
+        if not is_open(closed, sentinel) and not _facts().at_or_before_end(closed, stop):
+            return False
+    return True
+
+
+def within_parent_share(
+    entry: HistoryEntry,
+    rows: Sequence[_Row],
+    versions: Versions,
+    parents: Mapping[Tuple[Any, ...], _Row],
+    key: Sequence[str],
+    lifetime: Tuple[str, Optional[str]],
+) -> Holds:
+    """``history:within_parent``: the entities that keep to their parent's lifetime (ADR 0017, amendment of 2026-11-24).
+
+    *parents* are the parent's rows by the columns they are joined on, *key* the columns of an
+    entity's versions that name its parent, and *lifetime* the parent's start and end columns.
+    An entity whose parent has no start, or is not reached, is not covered.
+    """
+    sentinel = open_sentinel(entry, rows, versions)
+    covered = held = 0
+    for chain in entity_chains(rows, versions, sentinel).values():
+        point = tuple(chain[0].get(column) for column in key)
+        parent = parents.get(point)
+        if parent is None or None in point:
+            continue
+        found = _within_parent_holds(chain, parent, lifetime, versions, entry, sentinel)
+        if found is None:
+            continue
+        covered += 1
+        held += bool(found)
+    return Holds(held, covered)
 
 
 # ---------------------------------------------------------------------------

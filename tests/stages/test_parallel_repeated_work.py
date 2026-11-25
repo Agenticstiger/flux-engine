@@ -25,6 +25,8 @@ from flux_engine.generator import relations, rows
 from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
 
+from ._same_run import assert_same_emits
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HISTORY = REPO_ROOT / "tests" / "fixtures" / "history-window"
 TEMPORAL = REPO_ROOT / "tests" / "fixtures" / "temporal"
@@ -114,5 +116,4 @@ def test_four_jobs_give_the_digests_one_job_gives(tmp_path: Path, source: Path, 
 
     assert _digests(four) == _digests(one)
     assert any(emit.processes > 1 for emit in four.emits)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_emits(four, one, plan=False)

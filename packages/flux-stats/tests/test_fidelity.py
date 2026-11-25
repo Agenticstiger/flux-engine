@@ -147,6 +147,16 @@ def test_a_well_formed_block_parses() -> None:
     assert {declaration.kind for declaration in block.properties} == set(PropertyKind)
 
 
+def test_no_declared_column_is_refused_unless_the_caller_allows_it() -> None:
+    raw = {**_block(), "columns": {}, "properties": []}
+    _refuses(raw, "FLX-5034")
+    block = parse_fidelity_block(raw, expose=EXPOSE, allow_no_columns=True)
+    assert block.columns == {} or len(block.columns) == 0
+    # A property that names a column is still refused: no column is declared for it.
+    with pytest.raises(FluxError):
+        parse_fidelity_block({**_block(), "columns": {}}, expose=EXPOSE, allow_no_columns=True)
+
+
 def test_an_empty_property_list_is_a_block_with_nothing_to_score() -> None:
     block = _parse({**_block(), "properties": []})
     assert block.properties == ()

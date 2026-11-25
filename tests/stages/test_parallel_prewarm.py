@@ -23,6 +23,7 @@ from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import _prewarm, pipeline
 from tests.bundles import bundle_with_rows
 
+from ._same_run import assert_same_emits
 from .conftest import FIXTURE_BUNDLE, REPO_ROOT
 
 
@@ -251,16 +252,12 @@ def test_the_command_line_starts_the_server_before_the_stage_runs(
 def test_a_run_with_the_server_started_early_gives_the_bytes_one_job_gives(
     tmp_path: Path,
 ) -> None:
-    from flux_engine.stages.plan import build_plan_document
-
     rows = 3 * parallel.MIN_ROWS_PER_JOB + 5
     bundle = bundle_with_rows(FIXTURE_BUNDLE, tmp_path / "bundle", rows)
     assert _prewarm.start_forkserver_early(4) is True
     four = pipeline.execute(bundle, jobs=4)
     one = pipeline.execute(bundle, jobs=1)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.writer.lines() == theirs.writer.lines()
+    assert_same_emits(four, one)
 
 
 # ---------------------------------------------------------------------------

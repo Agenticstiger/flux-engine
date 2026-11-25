@@ -4,12 +4,13 @@
 
 """How a history ends, and the activation (ADR 0017 section 5, KERNEL-SPEC-2 section 8.4).
 
-An ``end`` ends a share of the entities by ``until``: ``n = LRM(E', [share, 1 - share])[0]`` of the
-``E'`` eligible ones, the entity of eligible rank ``r`` ending when ``permute/2(K_end, E', r) < n``.
+An ``end`` ends a share of every entity by ``until``: ``n = LRM(E, [share, 1 - share])[0]``, chosen
+among the ``E'`` eligible ones, the entity of eligible rank ``r`` ending when
+``permute/2(K_end, E', r) < n``; when fewer than ``n`` are eligible every eligible entity ends.
 What is pinned, on kernel 0.2.0:
 
-* **The count.** The ended entities are exactly ``n`` of the eligible ones, from the layout alone,
-  and which ones is the permutation's.
+* **The count.** The ended entities are exactly ``n`` of all the entities (or every eligible one
+  when fewer are eligible), from the layout alone, and which ones is the permutation's.
 * **The eligibility.** ``closeLast`` ends any entity, or with a ``column`` those with at least two
   versions; ``finalVersion`` ends those with at least two versions. A share with no eligible
   entity is refused at plan time.
@@ -25,7 +26,6 @@ What is pinned, on kernel 0.2.0:
 
 from __future__ import annotations
 
-from collections import defaultdict
 from fractions import Fraction
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -47,16 +47,12 @@ from flux_engine.generator.history import (
     plan_history,
     unit_of,
 )
-from flux_engine.generator.relations import relate_plans, related_columns
 from flux_engine.generator.rows import (
-    GENERATOR_VERSION_2,
     GeneratorPlan,
-    build_plan,
     generate_row_slice,
     generate_rows,
 )
-from flux_engine.generator.rules import plan_rules
-from flux_engine.seam.contract import LogicalKind, compile_expose
+from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.counts import ChildShape
 from flux_engine.seam.history import (
     Histogram,
@@ -64,18 +60,17 @@ from flux_engine.seam.history import (
     HistoryEntry,
     HistoryParent,
 )
-from flux_engine.seam.keys import compile_keys, mark_key_columns
 
+from ._history_plans import by_entity, plans_of
 from .test_history_layout import (
     BOUNDS,
-    LEVELS,
     SIM_ID,
     UNTIL,
     _column,
     _expose,
-    _h,
     _primary,
     _rel,
+    entry,
     root_for,
     table,
 )
@@ -194,68 +189,11 @@ def plans_for(
     status: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, GeneratorPlan]:
     """The plans of the contract above with *held* declared on the versioned emit."""
-    document = contract(priced)
-    keys = compile_keys(document)
-    assert keys is not None
     declarations = declared(rows, customers, plan)
     if status is not None:
         declarations[EMIT][0]["status"] = {"levels": dict(status)}
-    version = GENERATOR_VERSION_2
-    plans: Dict[str, GeneratorPlan] = {}
-    for expose in document["exposes"]:
-        expose_id = expose["exposeId"]
-        expose_keys = keys.expose(expose_id)
-        compiled = mark_key_columns(compile_expose(expose), expose_keys)
-        columns, count = declarations[expose_id]
-        related = related_columns(expose_keys) | ({"sub_id"} if expose_id == EMIT else set())
-        plans[expose_id] = build_plan(
-            compiled,
-            sim_id=SIM_ID,
-            seam_digest=_h(expose_id),
-            rows=count,
-            fidelity={"columns": columns},
-            time_bounds=BOUNDS,
-            related=related,
-            rules=plan_rules(
-                contract_document=document,
-                expose_id=expose_id,
-                settings=None,
-                related=related,
-                mapping=None,
-                has_fidelity=True,
-                strict=False,
-                flux_rules=None,
-                keys=expose_keys,
-                rows=count,
-                null_fractions={},
-                counter_based=counter_based,
-                links=(),
-                copies=False,
-            ),
-            generator_version=version,
-        )
     binding = {EMIT: HistoryBinding(held, entities, "valid_from", "valid_to")}
-    return relate_plans(plans, keys, None, None, None, document, None, binding)
-
-
-def entry(
-    *,
-    entities: int = 8,
-    versions: Optional[ChildShape] = LEVELS,
-    parent: Optional[HistoryParent] = PARENT,
-    end: Optional[HistoryEnd] = None,
-    **rest: Any,
-) -> HistoryEntry:
-    return HistoryEntry(
-        emit=EMIT,
-        entities=entities,
-        length=rest.pop("length", LENGTH),
-        until=rest.pop("until", UNTIL),
-        parent=parent,
-        versions=versions,
-        end=end,
-        **rest,
-    )
+    return plans_of(contract(priced), declarations, binding, emit=EMIT, counter_based=counter_based)
 
 
 @pytest.fixture(autouse=True)
@@ -289,13 +227,6 @@ def run_of(
     )
 
 
-def by_entity(data: List[Dict[str, Any]]) -> Dict[Any, List[Dict[str, Any]]]:
-    found: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
-    for row in data:
-        found[row["sub_id"]].append(row)
-    return found
-
-
 def ending_rows(data: List[Dict[str, Any]], value: str = "gone") -> List[Dict[str, Any]]:
     return [row for row in data if row["status"] == value]
 
@@ -309,7 +240,7 @@ FINAL = HistoryEnd("finalVersion", "0.25", "status", "gone")
 
 
 @pytest.mark.parametrize("share", ["0", "0.1", "0.25", "0.33", "0.5", "0.9", "1"])
-def test_the_ended_entities_are_exactly_the_largest_remainder_count_of_the_eligible_ones(
+def test_the_ended_entities_are_the_largest_remainder_count_of_every_entity_up_to_the_eligible(
     share: str,
 ) -> None:
     for end in (
@@ -321,10 +252,11 @@ def test_the_ended_entities_are_exactly_the_largest_remainder_count_of_the_eligi
         assert layout.ended is not None
         counts = layout.versions.counts
         eligible = int((counts >= 2).sum()) if end.mode == "finalVersion" else 32
-        wanted = largest_remainder(
-            eligible, {"0": Fraction(share), "1": 1 - Fraction(share)}  # type: ignore[dict-item]
+        of_all = largest_remainder(
+            32, {"0": Fraction(share), "1": 1 - Fraction(share)}  # type: ignore[dict-item]
         )["0"]
-        assert int(layout.ended.sum()) == wanted == ended_count(eligible, share)
+        wanted = min(of_all, eligible)
+        assert int(layout.ended.sum()) == wanted == ended_count(32, eligible, share)
         # Only eligible entities end.
         if end.mode == "finalVersion":
             assert bool(((counts >= 2) | ~layout.ended).all())
@@ -348,7 +280,7 @@ def test_the_ended_entities_follow_the_rank_among_the_eligible_ones_only() -> No
     eligible = np.nonzero(layout.versions.counts >= 2)[0]
     key = ended_key(root_for(), SIM_ID, EMIT)
     ranks = len(eligible)
-    wanted = ended_count(ranks, "0.25")
+    wanted = ended_count(32, ranks, "0.25")
     expected = sorted(int(eligible[r]) for r in range(ranks) if permute2(key, ranks, r) < wanted)
     assert np.nonzero(layout.ended)[0].tolist() == expected
 
@@ -395,6 +327,20 @@ def test_final_version_ends_only_entities_of_two_versions() -> None:
     held = entry(end=HistoryEnd("finalVersion", "1", "status", "gone"))
     layout = history_plan(held, rows=24, entities=8)
     assert layout.ended is not None
+    assert layout.ended.tolist() == (layout.versions.counts >= 2).tolist()
+
+
+def test_a_share_of_every_entity_ends_every_eligible_one_when_fewer_are_eligible() -> None:
+    # Half the entities hold one version, so a share of 0.75 of all 32 asks for 24 and only about
+    # 16 can end: every eligible entity ends, and the share yielded is lower than the declared one.
+    held = entry(
+        versions=ChildShape("levels", ("1", "3"), ("0.5", "0.5")),
+        end=HistoryEnd("finalVersion", "0.75", "status", "gone"),
+    )
+    layout = history_plan(held, rows=64, entities=32)
+    assert layout.ended is not None
+    eligible = int((layout.versions.counts >= 2).sum())
+    assert eligible < 24
     assert layout.ended.tolist() == (layout.versions.counts >= 2).tolist()
 
 

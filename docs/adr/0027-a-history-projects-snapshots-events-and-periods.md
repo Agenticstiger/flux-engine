@@ -284,3 +284,96 @@ scored, with that reason.
 - Debezium's `r`, a snapshot read at the start of a stream, if a source publishes its stream from a snapshot.
 - A history that grows past `until` (ADR 0017's "What would change this decision"), after which events would
   append too, and periods would hold new versions.
+
+## Amendment of 2026-11-24: a projected row's rules run after its projected cells
+
+Sections 4 and 5 say which cells an events or a periodic row takes from the history and which it draws, and said
+nothing of when the emit's own rules run. The generator ran them over the drawn cells and set the projected cells
+afterwards, so a derive that read the period column, a column of the version, a kind's override, `op`, `at`, `date`
+or an image read a drawn value that the row no longer held, and `fluxsim verify` failed the run on its own rule
+lines. This amendment fixes the order:
+
+- **The order.** An events or a periodic row is its emit's drawn cells, then the cells the entry sets (section 4's
+  `op`, `at`, `date`, `type`, images and columns of the version; section 5's period column, columns of the version
+  and the kind's overrides), then the emit's rules: a contract's derives and checks, the FLUX-side rules, the
+  copies and the links, in the order the plan sets their columns. A rule reads a cell the entry set as it reads any
+  other cell of its own row. An emit whose rules hold a window over siblings is made whole first, as any such emit is.
+- **One source per column.** A rule that sets a column the entry sets is `FLX-6203` at plan, naming the column, the
+  entry and the rule: the entry is the column's source. A derive on a foreign key stays `FLX-6210`, as on any emit.
+- **A path through a relationship is refused when the entry sets its key.** A rule that reads through a
+  relationship (a derive over `relationship.column`, a copy, a path under an as-of link) or a conditional link
+  reads the row's drawn pick of that relationship, not the value in the foreign-key cell. When the entry sets the
+  relationship's foreign-key column (a column of the version the row carries), the cell and the pick name different
+  rows, so such a rule would read another row's value. It is `FLX-3403` at plan in this version, naming the rule,
+  the relationship and the column; a rule over the row's own cells is not affected.
+- **A `given` draw over a set cell is refused.** A column drawn `given` another is drawn from the level the
+  other column's own draw made in the row, which the entry then replaces. A column of an events or periodic emit
+  drawn `given` a column the entry sets (`model` on a month, an image on a change) follows a level the row does
+  not hold, so it is `FLX-3403` at plan, naming both columns and the entry. A column the entry sets itself may
+  declare a `given`, which its cell then replaces.
+- **What moves.** The rows of an events or a periodic emit whose rules read a cell the entry sets, and so their
+  digests. Every other emit, and every such emit without rules, keeps its bytes. A snapshot is unchanged: its rows
+  are the history's, rules included.
+
+## Amendment of 2026-11-24: a `when` reads the history's end column
+
+Sections 4 and 5 let an events `when` and a periods kind's `when` read the version's tracked columns, validity,
+activation and `previous.`, and no other column. A history's end column (`history[].end.column`, such as `status`)
+was one of the others, so a kind could not leave out the ending versions by name. It is readable now, and only a
+`when` that names it changes:
+
+- **The value.** On an ending version the column holds `end.value`. On any other version its cell is drawn, from
+  the levels its statistics give a weight above zero; the end value is never one of them, which the history already
+  refuses (ADR 0017 section 5). A column that the history tracks holds the tracked level and needs no more.
+- **At plan time, with no cell.** The `when` is evaluated over each level the column can draw on a version, with the
+  version before it, through `previous.`, holding the same level (a carried column keeps the entity's first value).
+  It is known at plan time where every level gives one result, as `status <> 'retired'` does: false on an
+  ending version, true on every other. Where the results differ for some version, the `when` is `FLX-3403`, naming
+  the kind (or the events entry) and the column and saying that the result depends on a drawn value.
+- **One source.** A rule that sets the end column (a `derive`, a dependency's `to`, a FLUX-side rule or a copy) is
+  `FLX-6203` at plan, naming the column and the rule, whatever its `when`: the history writes `end.value` there and
+  a drawn level elsewhere, and `history:ended_is_last` holds the rows to it, so the rule would be a second source and
+  a `when` would read the draw, not the rule. A column the history does not carry (and does not track) is `FLX-3403`
+  where a `when` reads it.
+- **Opt-in.** A `when` that does not name the end column is as section 4 and 5 say, and keeps its bytes.
+
+## Amendment of 2026-11-24: from and through on a periods entry
+
+Section 5 lays a periods entry's periods from `timeBounds.start`'s day while they start before `timeBounds.end`, so
+an entry could not hold fewer periods than its window. Two optional keys, kernel 0.2.0 only, both DATE texts
+`YYYY-MM-DD`, bound the range:
+
+- **`from`.** The first period starts on this day: the anchor every period is counted from, as `timeBounds.start`'s
+  day is without it. Refused (`FLX-3403`, naming the entry and the key) before `timeBounds.start`'s day or not
+  before `timeBounds.end`.
+- **`through`.** The last period is the last one that starts on or before this day. It is inclusive on purpose, as
+  the word reads; the window's end stays excluded. Without it, every period that starts before `timeBounds.end`.
+  Refused before `from` (or before `timeBounds.start`'s day without one) or not before `timeBounds.end`.
+- **Ends.** A period's end is the next period's start, or the window's end for the last period of the window,
+  unchanged: a `through` inside a period leaves that period whole.
+- **What follows.** A version holds no period outside the range, so the count, the layout, the slices and the kinds
+  follow, and the period column's values lie in `[from, through]`.
+- **Section 7.** With `through` declared, a longer window appends no period past `through`; without it, as before.
+- **What moves.** An entry that declares either key is a different entry for `H` and the plan. An entry that
+  declares neither writes the member it wrote, so every other bundle keeps its bytes.
+
+## Amendment of 2026-11-24: `init` projects a table that is also a counted child
+
+Section 9 left an expose that a `counts` entry lays out as a counted child unprojected, since a `counts` entry over
+a relationship of a projected emit is `FLX-3403`. The table then kept its own rows, and a snapshot of the history
+had a different number of rows per parent than the history had entities. `init` now writes the projection:
+
+- **The projection.** An expose that meets a rule whole is projected whether or not the profile counts its children
+  per parent. For a snapshot, an events or a periodic emit, a foreign key that a `counts` entry would have set must
+  be a column of the history, from which the emit takes it, and the history must write a `parent` under the same
+  parent expose, so that the column holds that parent's keys on every version. A history with no `parent` holds
+  drawn values in the column, which are no keys of the parent, so a table that would copy them stays unprojected,
+  with that as the part of the rule it misses, and keeps its own rows and its own `counts` entry.
+- **The statistic.** The emit's own `counts` entry is not written. A snapshot has one row per entity, so its children
+  per parent are entities per parent: when the history has a `parent` under the same parent expose and no `children`
+  of its own, the entry's `children` become the parent's, and so does its `minChildren` when the parent has none.
+  An events or periodic emit counts events or periods per parent, which is another unit, so its statistic is never
+  given to the parent: it is unused, with that reason. A statistic is unused with its reason too when the history
+  has children of its own. Where two snapshots of one history could give, the one whose emit id sorts first does,
+  so the result does not depend on the order of the exposes. The ledger says which statistic moved where and why.
+- **What moves.** A bundle for a contract with such an expose. Every other bundle keeps its bytes.

@@ -19,7 +19,6 @@ Pinned here, through ``fluxsim init`` and the seam:
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from datetime import date
 from fractions import Fraction
@@ -35,8 +34,8 @@ from flux_engine.cli._init import run_init
 from flux_engine.seam.contract import compile_expose
 from flux_engine.seam.history import history_entries_of
 from flux_engine.seam.keys import compile_keys
-from flux_engine.seam.resolve import load_bundle, resolve_all_emits
-from flux_engine.stages.validate import validate
+
+from ._written import bundle_digests, resolved_emits
 
 pytestmark = pytest.mark.integration
 
@@ -250,6 +249,7 @@ def test_the_entry_is_written_from_the_published_history(tmp_path: Path) -> None
             },
             "until": "2025-10-01",
             "chain": "nextStart",
+            "parent": {"relationship": "account"},
             "tracked": [
                 {
                     "column": "tier",
@@ -429,11 +429,7 @@ def test_a_profile_without_a_history_writes_no_history_and_the_bytes_it_always_d
 ) -> None:
     _init(tmp_path, _profile(history=False))
     assert "history" not in _namespace(tmp_path)
-    digests = {
-        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted((tmp_path / "bundle").iterdir())
-        if path.is_file()
-    }
+    digests = bundle_digests(tmp_path)
     # Pinned from the files `fluxsim init` wrote for this contract and profile before histories,
     # but for the check of `account`, which the profile has no statistic to score: it is left out.
     assert digests == WITHOUT_HISTORY
@@ -450,13 +446,7 @@ WITHOUT_HISTORY: Dict[str, str] = {
 
 def test_a_written_bundle_resolves_through_the_seam(tmp_path: Path) -> None:
     _init(tmp_path, _profile())
-    bundle = tmp_path / "bundle"
-    assert validate(bundle).exit_code == 0
-    loaded = load_bundle(bundle)
-    (simulation_id,) = loaded.simulation_ids()
-    emits = {
-        emit.expose_id: emit for emit in resolve_all_emits(loaded, simulation_id=simulation_id)
-    }
+    emits = resolved_emits(tmp_path)
     entries = history_entries_of(emits["plan_version"].extension, "plan_version")
     assert [entry.entities for entry in entries] == [1000]
     assert entries[0].chain == "nextStart" and entries[0].until == "2025-10-01"
@@ -490,17 +480,13 @@ def _source(contract: str, table: Dict[str, Any]) -> HistorySource:
 
 def test_no_parent_is_written_when_a_relationship_is_on_the_natural_entity() -> None:
     # A to-one relationship whose fromColumns are the natural entity's column would make the natural
-    # key a foreign key, which the generator refuses, so init writes no parent, ever.
+    # key a foreign key, which the generator refuses, so init writes no parent for it.
     contract = CONTRACT.read_text(encoding="utf-8").replace("expr: plan_id }", "expr: account_id }")
     table = _profile()["tables"]["plan_version"]
     table["history"]["entity"] = ["account_id"]
     written = write_history(_source(contract, table))
     assert written.entry is not None
     assert "parent" not in written.entry
-    plain = write_history(
-        _source(CONTRACT.read_text(encoding="utf-8"), _profile()["tables"]["plan_version"])
-    )
-    assert plain.entry is not None and "parent" not in plain.entry
 
 
 def test_a_history_the_plan_refuses_is_not_written(tmp_path: Path) -> None:

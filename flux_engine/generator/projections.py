@@ -43,7 +43,7 @@ from flux_engine.core.sizing import FLX_3405, MOST_ROWS
 from flux_engine.generator import events as _events
 from flux_engine.generator import periods as _periods
 from flux_engine.generator.history import HistoryPlan, plan_history
-from flux_engine.generator.rows import GeneratorPlan, generate_row_slice
+from flux_engine.generator.rows import GeneratorPlan, generate_row_slice, with_rules
 from flux_engine.generator.versionview import clear_views
 from flux_engine.seam.projections import (
     EVENTS_KEY,
@@ -73,6 +73,9 @@ __all__ = [
 #: How many sources a process keeps (each holds an array over the projection's rows).
 _SOURCES_KEPT = 4
 _SOURCES: Dict[Tuple[Any, ...], "np.ndarray"] = {}
+#: The projected emits a process made whole for a window over siblings, newest last.
+_WHOLE_KEPT = 4
+_WHOLE: Dict[Tuple[Any, ...], Tuple[Tuple[Any, ...], ...]] = {}
 
 
 def _code() -> Any:
@@ -151,6 +154,10 @@ def chain_of(history: GeneratorPlan, root: SeedTreeRoot) -> HistoryPlan:
         raise _refuse(
             f"projection of {history.expose.expose_id!r}: the emit has no history to project"
         )
+    if pick.parent_lifetime is not None:
+        from flux_engine.generator.relations import bound_history_of
+
+        return bound_history_of(history, root)
     return plan_history(
         root,
         history.sim_id,
@@ -254,7 +261,144 @@ def _projection(
                 f"{key} ({plan.expose.expose_id}): {missing[0]!r} is not a column of {of!r}"
             )
         return ProjectionPlan(key, of, history, options)
+    _refuse_rules_on_projected_cells(key, options, history, plan)
     return ProjectionPlan(key, of, history, entry=options, window=plan.time_bounds)
+
+
+def projected_cells(
+    key: str, entry: Any, history: GeneratorPlan, plan: GeneratorPlan
+) -> Dict[str, str]:
+    """The columns an events or a periods entry sets on its emit's rows, each with the role it sets it in.
+
+    Periods set the period column, each kind's overrides and every column that names a column of the
+    history's emit; events set ``op``, ``at``, ``date``, the ``type`` column, the before and after
+    images and every column that names a column of the history's emit (ADR 0027 sections 4 and 5).
+    """
+    found, about = _period_cells(entry) if key == PERIODS_KEY else _event_cells(entry)
+    version = {column.column.name for column in history.columns}
+    for column in plan.columns:
+        if column.column.name in version:
+            found.setdefault(column.column.name, about)
+    return found
+
+
+def _period_cells(entry: Any) -> Tuple[Dict[str, str], str]:
+    """The columns a periods entry sets besides the history's own, and what the others are."""
+    found = {entry.column: "its period column"}
+    for index, kind in enumerate(entry.kinds):
+        for name, _ in kind.overrides:
+            found.setdefault(name, f"an override of kinds[{index}]")
+    return found, "a column of the version the row carries"
+
+
+def _event_cells(entry: Any) -> Tuple[Dict[str, str], str]:
+    """The columns an events entry sets besides the history's own, and what the others are."""
+    found: Dict[str, str] = {}
+    for name, role in (
+        (entry.op, "its op column"),
+        (entry.at, "its at column"),
+        (entry.date, "its date column"),
+        (entry.type_column, "its type column"),
+    ):
+        if name is not None:
+            found.setdefault(name, role)
+    for name, _ in entry.before:
+        found.setdefault(name, "a before image")
+    for name, _ in entry.after:
+        found.setdefault(name, "an after image")
+    return found, "a column of the version the event is about"
+
+
+def _refuse_rules_on_projected_cells(
+    key: str, entry: Any, history: GeneratorPlan, plan: GeneratorPlan
+) -> None:
+    """Refuse (``FLX-6203``) a rule of the emit that sets a column the projection sets.
+
+    The emit's rules run over its rows once the projection has set its cells, so a rule that set
+    one of them would be a second source for it.
+    """
+    sets = projected_cells(key, entry, history, plan)
+    _refuse_given_over_projected_cells(key, sets, plan)
+    rules = plan.rules
+    if rules is None:
+        return
+    from flux_engine.expr2.errors import FLX_6203
+
+    setters: Dict[str, str] = {}
+    for rule in rules.rules:
+        for column in (*rule.determines, *rule.to_columns):
+            setters.setdefault(column, f"the rule {rule.id!r}")
+    for column in rules.determined:
+        setters.setdefault(column, "a rule")
+    for rate in rules.rates:
+        setters.setdefault(rate.column, "its seasonal rates")
+    for column, role in sets.items():
+        if column in setters:
+            raise FluxError(
+                FLX_6203,
+                f"column {column!r} has more than one source: the {key} entry "
+                f"({plan.expose.expose_id}) sets it as {role}, and {setters[column]} sets it too",
+            )
+    _refuse_reads_through_projected_keys(key, sets, plan)
+
+
+def _refuse_given_over_projected_cells(
+    key: str, sets: Mapping[str, str], plan: GeneratorPlan
+) -> None:
+    """Refuse (``FLX-3403``) a column the emit draws given a column the projection sets.
+
+    A column drawn ``given`` another is drawn from the level the other column's own draw made in
+    the row. The projection then replaces that cell with the version's, so the column would
+    follow a level the row does not hold. A column the entry sets itself is replaced as well and
+    is no source of a disagreement.
+    """
+    for column_plan in plan.columns:
+        name = column_plan.column.name
+        if name in sets:
+            continue
+        for parent in column_plan.statistics.parents:
+            if parent in sets:
+                raise _refuse(
+                    f"{key} entry ({plan.expose.expose_id}): column {name!r} is drawn given "
+                    f"{parent!r}, which the entry sets as {sets[parent]}, so {name!r} would "
+                    f"follow the level the draw of {parent!r} made, not the one the row holds; "
+                    f"draw {name!r} given a column the entry does not set, or on its own"
+                )
+
+
+def _refuse_reads_through_projected_keys(
+    key: str, sets: Mapping[str, str], plan: GeneratorPlan
+) -> None:
+    """Refuse (``FLX-3403``) a rule that reads through a relationship whose key the projection sets.
+
+    A path through a relationship (a derive's ``relationship.column``, a copy, an as-of path) and a
+    conditional link are read from the row's drawn pick of that relationship. When the entry sets
+    the relationship's foreign-key columns the cell holds the version's value, not the pick, so
+    the rule would read another row's value.
+    """
+    rules = plan.rules
+    if rules is None:
+        return
+    links = rules.model.exposes[rules.expose_id].links
+    reached: Dict[str, str] = {}
+    for rule in rules.rules:
+        for path in rule.paths:
+            reached.setdefault(path[0], f"the rule {rule.id!r}")
+    for step in rules.links:
+        reached.setdefault(step.relationship, "a conditional link")
+    for relationship, reader in reached.items():
+        link = links.get(relationship)
+        if link is None:
+            continue
+        for column in link.from_columns:
+            if column in sets:
+                raise _refuse(
+                    f"{key} entry ({plan.expose.expose_id}): {reader} reads through the "
+                    f"relationship {relationship!r}, and the entry sets its foreign-key column "
+                    f"{column!r} as {sets[column]}, so the rule would read the row the relationship "
+                    "drew, not the row the cell names; read the column on the row itself, or leave "
+                    "the foreign key to the relationship"
+                )
 
 
 def refuse_rows(label: str, rows: int) -> None:
@@ -317,8 +461,9 @@ def sources_of(plan: GeneratorPlan, root: SeedTreeRoot) -> Any:
 
 
 def clear_sources() -> None:
-    """Drop the sources, the event layouts and the version views this process keeps."""
+    """Drop the sources, the whole emits, the event layouts and the version views this process keeps."""
     _SOURCES.clear()
+    _WHOLE.clear()
     _events.clear_layouts()
     _periods.clear_layouts()
     clear_views()
@@ -330,7 +475,9 @@ def projection_rows(
     """Rows *start* to *stop* - 1 of the projected *plan*, each its source row's columns.
 
     The history's rows come as its own pass writes them, over the range its sources span, so a
-    column holds its final value with the rules applied.
+    column holds its final value with the rules applied. An events or a periods emit builds its
+    rows from its own cells and the history's, and its own rules then run over them, so a rule
+    reads the cells the projection set (ADR 0027, the amendment of 2026-11-24).
     """
     projection = plan.projection
     assert projection is not None  # the caller routes a projected plan only
@@ -342,7 +489,12 @@ def projection_rows(
         return ()
     made = KINDS[projection.kind].rows
     if made is not None:
-        return made(plan, sources_of(plan, root), start, stop, root)
+        own = replace(plan, projection=None)
+        if own.rules is not None and own.rules.windowed:
+            return _whole(plan, own, made, root)[start:stop]
+        return with_rules(
+            own, made(plan, sources_of(plan, root), start, stop, root), start, root=root
+        )
     sources = sources_of(plan, root)[start:stop]
     low, high = int(sources[0]), int(sources[-1]) + 1
     rows = generate_row_slice(projection.history, low, high, root=root)
@@ -353,3 +505,23 @@ def projection_rows(
     return tuple(
         tuple(rows[int(source) - low][index] for index in taken) for source in sources.tolist()
     )
+
+
+def _whole(
+    plan: GeneratorPlan,
+    own: GeneratorPlan,
+    made: Callable[[GeneratorPlan, Any, int, int, SeedTreeRoot], Tuple[Tuple[Any, ...], ...]],
+    root: SeedTreeRoot,
+) -> Tuple[Tuple[Any, ...], ...]:
+    """Every row of a projected emit whose rules hold a window over siblings, kept per process.
+
+    The window reads rows of every slice, so the emit is made whole and its rules applied over
+    all of it, as :func:`~flux_engine.generator.rows.generate_row_slice` makes any such emit.
+    """
+    held = (root.digest, root.seed_tree_version, plan.digest().value)
+    if held not in _WHOLE:
+        if len(_WHOLE) >= _WHOLE_KEPT:
+            _WHOLE.clear()
+        sources = sources_of(plan, root)
+        _WHOLE[held] = with_rules(own, made(plan, sources, 0, plan.rows, root), 0, root=root)
+    return _WHOLE[held]

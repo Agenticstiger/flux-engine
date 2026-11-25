@@ -261,13 +261,13 @@ $ fluxsim validate .
 $ fluxsim run .
 plan written to ...
 applied to ...
-emitted subscription_version: 200 rows (generator); subscription_current: 60 rows (generator); subscription_change: 200 rows (generator); subscription_month: 1876 rows (generator)
+emitted subscription_version: 200 rows (generator); subscription_current: 60 rows (generator); subscription_change: 200 rows (generator); subscription_month: 1891 rows (generator)
 run ... complete
 $ fluxsim verify . --run-id $(ls .flux/runs)
 ...
-  rules subscription_change: event:matches_transition 60 of 60 (100.00%); event:transition_matches 133 of 133 (100.00%)
+  rules subscription_change: event:matches_transition 60 of 60 (100.00%); event:transition_matches 128 of 128 (100.00%)
   rules subscription_current: snapshot:equals_last_version 60 of 60 (100.00%)
-  rules subscription_month: period:within_validity 1876 of 1876 (100.00%); period:matches_valid_version 1876 of 1876 (100.00%)
+  rules subscription_month: period:within_validity 1891 of 1891 (100.00%); period:matches_valid_version 1891 of 1891 (100.00%)
   rules subscription_version: history:no_gaps_no_overlap 60 of 60 (100.00%); history:one_current 60 of 60 (100.00%); history:ended_is_last 60 of 60 (100.00%)
 ...
 ```
@@ -357,7 +357,10 @@ A `periods` entry writes one row for each entity and period while a version is v
 | `match` | Which versions a period holds. `overlap`, the default, holds every version valid at some instant of the period, so a period with a change holds both versions. `end` holds the version valid at the period's last instant inside the window, one for each entity at most, a periodic snapshot at the period's close. `start` holds the one valid at its first instant. |
 | `kinds` | A list of `{count, when, overrides}`. Without it there is one kind, one row for each held pair. |
 
-Period `p` runs from the window's first day plus `p` grains to the day `p + 1` grains on, for as long as it starts before the window's end, which is excluded, as dbt-utils' `date_spine` lays its periods. Each period's first day is counted from the window's start, and a month added to a day the month lacks lands on the month's last day. An open version is valid up to the window's end, and an entity holds no period before its first start or after a closed end. A version and a period it holds are a **pair**.
+| `from` | A DATE text `YYYY-MM-DD` (quote it in YAML). The first period starts on this day, the anchor every period is counted from. It defaults to the day of `timeBounds.start`, and is refused (`FLX-3403`) before that day or when it is not before `timeBounds.end`. |
+| `through` | A DATE text `YYYY-MM-DD`. The last period is the last one that starts on or before this day, the day included. It defaults to every period that starts before `timeBounds.end`, and is refused before `from` or when it is not before `timeBounds.end`. A longer window appends no period past it. |
+
+Period `p` runs from the window's first day (or `from`) plus `p` grains to the day `p + 1` grains on, for as long as it starts before the window's end, which is excluded, and on or before `through`, as dbt-utils' `date_spine` lays its periods. Each period's first day is counted from the window's start, and a month added to a day the month lacks lands on the month's last day. An open version is valid up to the window's end, and an entity holds no period before its first start or after a closed end. A version and a period it holds are a **pair**.
 
 A kind gives a count of rows for each pair: `count` is a whole number, or `levels` with `levelWeights` over whole counts. In each period the pairs the kind holds take their counts as the layout of children per parent does, so every period meets the kind's shares exactly, up to the largest remainder, and no period's allotment reads another period. `when` is a FLUID SQL/1 predicate over the pair's version and the period column: a pair the kind does not hold has none of its rows. `overrides` maps a column to a text written as the column's type on the kind's rows, such as the kind's own label. In the bundle above every pair has one `base` row, and a pair whose plan is `team` has none, one or two `usage` rows.
 
@@ -400,7 +403,7 @@ open("simulation.flux.yml", "w").write(text)
 $ fluxsim run .
 plan written to ...
 applied to ...
-emitted subscription_version: 200 rows (generator); subscription_current: 60 rows (generator); subscription_change: 200 rows (generator); subscription_month: 2728 rows (generator)
+emitted subscription_version: 200 rows (generator); subscription_current: 60 rows (generator); subscription_change: 200 rows (generator); subscription_month: 2743 rows (generator)
 run ... complete
 ```
 

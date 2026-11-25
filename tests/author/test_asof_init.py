@@ -18,9 +18,8 @@ import pytest
 import yaml
 
 from flux_engine.seam.asof import ASOF_KEY, asof_entries_of
-from flux_engine.seam.resolve import load_bundle, resolve_all_emits
-from flux_engine.stages.validate import validate
 
+from ._written import resolved_emits
 from .test_history_init import CONTRACT, _init, _metrics, _ms, _namespace, _profile
 
 pytestmark = pytest.mark.integration
@@ -89,11 +88,7 @@ def test_a_relationship_into_a_history_from_an_expose_with_a_default_time_dimens
 
 def test_the_written_bundle_resolves_and_the_plan_accepts_the_entry(tmp_path: Path) -> None:
     written(tmp_path, profile_with_invoice())
-    bundle = tmp_path / "bundle"
-    assert validate(bundle).exit_code == 0
-    loaded = load_bundle(bundle)
-    (simulation_id,) = loaded.simulation_ids()
-    emits = {e.expose_id: e for e in resolve_all_emits(loaded, simulation_id=simulation_id)}
+    emits = resolved_emits(tmp_path)
     (entry,) = asof_entries_of(emits["invoice"].extension, "invoice")
     assert (entry.relationship, entry.date) == ("plan", "invoiced_on")
     assert asof_entries_of(emits["plan_version"].extension, "plan_version") == ()
