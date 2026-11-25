@@ -1225,19 +1225,22 @@ def _time_bounds(
     as a contract range that ends there gives nothing. A contract range that reaches beyond every
     span the profile and the bundle give, or the hull of contract ranges alone, is a ``time
     window`` note, which is a gap at ``/spec/timeBounds``; one that makes the window longer than
-    :data:`PLAUSIBLE_WINDOW_YEARS` is refused (:func:`_refuse_a_stretching_contract_range`). With
-    nothing to go on, a year is assumed.
+    :data:`PLAUSIBLE_WINDOW_YEARS` is refused (:func:`_refuse_a_stretching_contract_range`). A
+    window the profile and the bundle make that long is a ``time window`` note too, naming the
+    columns that reach its ends (:func:`_a_long_window`). With nothing to go on, a year is
+    assumed.
     """
     if given is not None:
         return given, None
-    own: List[Tuple[int, int]] = list(declared)
+    named: List[Tuple[str, Tuple[int, int]]] = [("the --history file", span) for span in declared]
     contract_ranges: List[Tuple[str, Tuple[int, int]]] = []
     for expose in exposes:
         for column in expose.columns:
             found, from_contract = _spans_of(expose, column, contract)
-            own += found
+            named += [(f"{expose.expose_id}.{column.name}", span) for span in found]
             if from_contract is not None:
                 contract_ranges.append((f"{expose.expose_id}.{column.name}", from_contract))
+    own = [span for _, span in named]
     spans = own + [span for _, span in contract_ranges]
     if spans:
         start = min(span[0] for span in spans)
@@ -1255,25 +1258,30 @@ def _time_bounds(
                 or span[1] > max(item[1] for item in own)
             }
         )
-        if not widening:
+        reasons: List[str] = []
+        if widening:
+            columns = ", ".join(widening)
+            if own:
+                given_span = (
+                    f"{format_rfc3339_ms(min(item[0] for item in own))} to "
+                    f"{format_rfc3339_ms(max(item[1] for item in own))}"
+                )
+                reasons.append(
+                    f"the contract range of {columns} reaches beyond the span the profile and "
+                    f"the bundle give, {given_span}"
+                )
+            else:
+                reasons.append(
+                    f"it comes only from the contract range of {columns}: nothing the profile or "
+                    "the bundle gives holds a span"
+                )
+        long_window = _a_long_window(named)
+        if long_window is not None:
+            reasons.append(long_window)
+        if not reasons:
             return window, None
-        columns = ", ".join(widening)
-        if own:
-            given_span = (
-                f"{format_rfc3339_ms(min(item[0] for item in own))} to "
-                f"{format_rfc3339_ms(max(item[1] for item in own))}"
-            )
-            reason = (
-                f"the contract range of {columns} reaches beyond the span the profile and the "
-                f"bundle give, {given_span}"
-            )
-        else:
-            reason = (
-                f"it comes only from the contract range of {columns}: nothing the profile or "
-                "the bundle gives holds a span"
-            )
         note = (
-            f"The run covers {window[0]} to {window[1]}, since {reason}. "
+            f"The run covers {window[0]} to {window[1]}, since {'; and '.join(reasons)}. "
             "Set spec.timeBounds to the span your data covers."
         )
         return window, ("time window", note)
@@ -1285,13 +1293,42 @@ def _time_bounds(
     return ASSUMED_WINDOW, ("time window", note)
 
 
-#: The longest run window a contract's declared date range may make. A few hundred years holds
-#: the dates a data product records; a longer window comes from a range that marks no data, such
-#: as an open end spelled before the year 9999 or a placeholder.
+#: The longest run window that is not remarked on. A few hundred years holds the dates a data
+#: product records; a longer window comes from what marks no data: a contract range with an open
+#: end spelled before the year 9999 or a placeholder, which is refused, or a published span that
+#: reaches that far, which is a ``time window`` note and a gap.
 PLAUSIBLE_WINDOW_YEARS = 300
 
 #: A Gregorian year of 365.2425 days, in milliseconds.
 _YEAR_MS = 31_556_952_000
+
+
+#: How many columns a time window note names before it counts the rest.
+_NAMED_COLUMNS = 5
+
+
+def _a_long_window(named: Sequence[Tuple[str, Tuple[int, int]]]) -> Optional[str]:
+    """Why the spans the profile and the bundle give make a window past :data:`PLAUSIBLE_WINDOW_YEARS`.
+
+    *named* is each span with what gives it (a column, or the history file). ``None`` when their
+    hull is no longer than that. Otherwise the reason names what reaches either end of the hull, so
+    a person can see which column, or which noise in a column, stretches the window.
+    """
+    if not named:
+        return None
+    low = min(first for _, (first, _) in named)
+    high = max(last for _, (_, last) in named)
+    if high - low <= PLAUSIBLE_WINDOW_YEARS * _YEAR_MS:
+        return None
+    reaching = sorted({name for name, (first, last) in named if first == low or last == high})
+    listed = ", ".join(reaching[:_NAMED_COLUMNS])
+    if len(reaching) > _NAMED_COLUMNS:
+        listed += f" and {len(reaching) - _NAMED_COLUMNS} more"
+    return (
+        f"the span the profile and the bundle give runs longer than {PLAUSIBLE_WINDOW_YEARS} "
+        f"years, from {format_rfc3339_ms(low)[:10]} to {format_rfc3339_ms(high)[:10]}: {listed} "
+        "reach its ends"
+    )
 
 
 def _refuse_a_stretching_contract_range(

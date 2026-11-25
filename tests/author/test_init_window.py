@@ -499,6 +499,98 @@ def test_a_window_the_profile_stretches_is_not_refused_for_a_contract_range() ->
     assert note is not None and "t.d" in note[1]
 
 
+# -- a window the profile stretches past 300 years is a gap ----------------------------------------
+
+
+def test_a_published_span_past_300_years_is_a_note_naming_what_reaches_its_ends() -> None:
+    opened = ColumnPlan(name="opened", time_span=(_ms("0001-01-01"), _ms("2026-09-01")))
+    closed = ColumnPlan(name="closed", time_span=(_ms("2001-01-01"), _ms("2096-01-01")))
+    middle = ColumnPlan(name="middle", time_span=(_ms("2001-01-01"), _ms("2020-01-01")))
+    window, note = _time_bounds([_expose(opened, closed, middle)])
+    assert window == (format_rfc3339_ms(_ms("0001-01-01")), format_rfc3339_ms(_ms("2096-01-01")))
+    assert note == (
+        "time window",
+        "The run covers 0001-01-01T00:00:00.000Z to 2096-01-01T00:00:00.000Z, since the span "
+        "the profile and the bundle give runs longer than 300 years, from 0001-01-01 to "
+        "2096-01-01: t.closed, t.opened reach its ends. "
+        "Set spec.timeBounds to the span your data covers.",
+    )
+
+
+def test_a_published_span_of_300_years_or_less_gives_no_note() -> None:
+    column = ColumnPlan(name="d", time_span=(_ms("1900-01-01"), _ms("2026-09-01")))
+    assert _time_bounds([_expose(column)])[1] is None
+
+
+def test_a_long_window_note_names_five_columns_and_counts_the_rest() -> None:
+    columns = [
+        ColumnPlan(name=f"c{index}", time_span=(_ms("0001-01-01"), _ms("2026-09-01")))
+        for index in range(7)
+    ]
+    note = _time_bounds([_expose(*columns)])[1]
+    assert note is not None
+    assert "t.c0, t.c1, t.c2, t.c3, t.c4 and 2 more reach its ends" in note[1]
+
+
+def test_a_contract_range_and_a_long_published_span_give_one_note_with_both_reasons() -> None:
+    column = ColumnPlan(name="d", time_span=(_ms("0001-01-01"), _ms("2026-09-01")))
+    expose = _expose(column)
+    expose.index = 0
+    context = ColumnContext.__new__(ColumnContext)
+    object.__setattr__(context, "schema_index", 0)
+    expose.contexts = {"d": context}
+    contract = {
+        "exposes": [{"contract": {"schema": [_rule("between '2020-01-01' and '2030-01-01'")]}}]
+    }
+    note = _time_bounds([expose], contract)[1]
+    assert note is not None
+    assert "the contract range of t.d reaches beyond the span" in note[1]
+    assert "; and the span the profile and the bundle give runs longer than 300 years" in note[1]
+
+
+SUBSCRIPTIONS = REPO_ROOT / "tests" / "fixtures" / "consumers"
+
+
+def _stretched_profile(tmp_path: Path) -> Path:
+    """One table whose renewals the profile says began in the year 1, as a placeholder date would."""
+    document = json.loads(
+        (SUBSCRIPTIONS / "subscriptions.profile.json").read_text(encoding="utf-8")
+    )
+    metrics = document["tables"]["subscriptions"]["columns"]["renewed_at"]["metrics"]
+    metrics["min"]["value"] = str(_ms("0001-01-01"))
+    path = tmp_path / "subscriptions.profile.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+def test_init_writes_a_long_published_window_with_a_gap_that_strict_refuses(
+    tmp_path: Path,
+) -> None:
+    profile = _stretched_profile(tmp_path)
+    contract = SUBSCRIPTIONS / "subscriptions.fluid.yaml"
+    result = run_init(str(tmp_path / "b"), contract=str(contract), profile=str(profile))
+    assert result.exit_code == 0, result.stderr
+    assert _simulation(tmp_path / "b")["spec"]["timeBounds"]["start"].startswith("0001-01-01")
+    notes = [(item["subject"], item["assumption"]) for item in result.artifacts["notes"]]
+    (window_note,) = [text for subject, text in notes if subject == "time window"]
+    assert "runs longer than 300 years" in window_note
+    assert "subscriptions.renewed_at" in window_note
+    strict = run_init(
+        str(tmp_path / "s"), contract=str(contract), profile=str(profile), strict=True
+    )
+    assert strict.exit_code != 0
+    assert "gap /spec/timeBounds" in (strict.stderr or "")
+    # --allow accepts the window's gap by its pointer; the fixture's other findings remain.
+    allowed = run_init(
+        str(tmp_path / "a"),
+        contract=str(contract),
+        profile=str(profile),
+        strict=True,
+        allow=("/spec/timeBounds",),
+    )
+    assert "gap /spec/timeBounds" not in (allowed.stderr or "")
+
+
 def test_init_refuses_a_contract_range_past_300_years_before_writing(tmp_path: Path) -> None:
     contract = _loose_contract(tmp_path, "between '1900-01-01' and '2999-12-31'")
     result = run_init(str(tmp_path / "b"), contract=str(contract), profile=str(PROFILE))

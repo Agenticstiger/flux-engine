@@ -241,6 +241,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the column, its range and the window, before writing anything. Such a range marks no data (an open end spelled
   before the year 9999, or a placeholder such as 0001-01-01); write an open end in the year 9999, which no window
   reads. A shorter range that widens the window is still a note and a gap at `/spec/timeBounds`.
+- A run window that the profile's own spans make longer than 300 years is now a `time window` note, naming the
+  columns that reach its ends, and a gap at `/spec/timeBounds` that `--strict` refuses. Before, `init` wrote such
+  a window without a word.
 - `init --window` refuses an END in the year 9999, and `init --history FILE` refuses a file whose `timeBounds` end,
   an entry's `until` or a `start` bin falls there, naming the value and its place. The year 9999 spells an open
   end, which gives the window nothing, as in a declared range; before, the window reached the end of the calendar,
