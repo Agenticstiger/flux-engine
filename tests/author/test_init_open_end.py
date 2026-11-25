@@ -13,8 +13,10 @@ stations, versions of a station's line and the readings taken on a line:
 
 * an ordinary one-value date (``2025-10-01``) is written, and every row drawn holds exactly it;
 * the same value as a timestamp (``9999-12-31T00:00:00``, a sentinel open end) is the same;
-* a DATE that is ``9999-12-31`` cannot be written on every row yet: ``init`` refuses before it writes
-  anything, names the table and the column, and says what to change;
+* a DATE that is ``9999-12-31`` cannot be written on every row yet: the table is left out and its
+  statistics are listed unused with the reason, unless something the bundle writes needs it (a
+  relationship, or a history file naming it), when ``init`` refuses before it writes anything,
+  names the table and the column, and says what to change;
 * the bundle of each that is written plans and applies, and the table that refers to the versions
   is written.
 * a column that holds one date at or after 9999-01-01T00:00:00 gives the window nothing, and a date
@@ -24,6 +26,7 @@ stations, versions of a station's line and the readings taken on a line:
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -41,6 +44,7 @@ from flux_engine.stages.apply import apply
 from flux_engine.stages.plan import plan
 
 from .test_history_init import NAMESPACE, _bins, _levels, _metrics, _ms, _profile
+from .test_init_history_file import HISTORY_FILE
 
 pytestmark = pytest.mark.integration
 
@@ -298,6 +302,72 @@ def test_a_required_end_that_holds_the_last_day_is_refused_before_anything_is_wr
     assert not (tmp_path / "bundle").exists()
 
 
+def _init_without_readings(tmp_path: Path, last_end: str, history: Optional[str] = None) -> Any:
+    """``init`` on the library with no table of readings: nothing refers to the versions."""
+    document = yaml.safe_load(_contract(True))
+    document["exposes"] = [e for e in document["exposes"] if e["exposeId"] != "reading"]
+    found = _profile_of(last_end)
+    found["tables"].pop("reading")
+    (tmp_path / "library.fluid.yml").write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    (tmp_path / "library.profile.json").write_text(json.dumps(found), encoding="utf-8")
+    return run_init(
+        str(tmp_path / "bundle"),
+        contract=str(tmp_path / "library.fluid.yml"),
+        profile=str(tmp_path / "library.profile.json"),
+        history=history,
+    )
+
+
+def test_a_table_nothing_refers_to_is_left_out_when_its_end_holds_only_the_last_day(
+    tmp_path: Path,
+) -> None:
+    result = _init_without_readings(tmp_path, "9999-12-31")
+    assert result.exit_code == 0, result.stderr
+    emits = _emits(tmp_path)
+    assert set(emits) == {"region", "station"}
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    unused = yaml.safe_load(text)["extensions"][NAMESPACE]["unused"]
+    held = [
+        entry
+        for entry in unused
+        if str(entry["statistic"]["pointer"]).startswith("/tables/line_version/")
+    ]
+    assert held
+    for entry in held:
+        reason = " ".join(str(entry["reason"]).split())
+        assert reason.startswith("the expose was not written: line_version.valid_to publishes")
+        assert "cannot yet write a DATE of exactly 9999-12-31 on every row" in reason
+        assert "write its open end as NULL, or make the column a TIMESTAMP" in reason
+    assert "line_version: not written" in " ".join(result.stdout.split())
+    # The bundle that is written plans and applies.
+    _plans(tmp_path)
+
+
+def test_a_history_file_that_names_the_table_is_refused_with_the_reason_it_is_left_out(
+    tmp_path: Path,
+) -> None:
+    named = copy.deepcopy(HISTORY_FILE)
+    named["history"][0].update({"emit": "line_version", "tracked": []})
+    named["history"][0].pop("parent")
+    for key in ("snapshots", "events", "periods"):
+        named.pop(key, None)
+    (tmp_path / "history.json").write_text(json.dumps(named), encoding="utf-8")
+    result = _init_without_readings(tmp_path, "9999-12-31", history=str(tmp_path / "history.json"))
+    assert result.exit_code == 1
+    assert "line_version.valid_to publishes one value" in " ".join(result.stderr.split())
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_a_table_something_refers_to_is_still_refused_before_anything_is_written(
+    tmp_path: Path,
+) -> None:
+    # The readings name a line of the versions: left out, plan would refuse them (FLX-3403).
+    result = _init(tmp_path, required_end=True, last_end="9999-12-31")
+    assert result.exit_code == 1
+    assert "line_version.valid_to publishes one value" in " ".join(result.stderr.split())
+    assert not (tmp_path / "bundle").exists()
+
+
 def test_a_required_timestamp_end_at_the_start_of_the_last_day_is_drawn_exactly(
     tmp_path: Path,
 ) -> None:
@@ -398,13 +468,17 @@ def test_a_value_exactly_at_the_start_of_the_year_9999_gives_the_window_nothing(
 
 
 def test_a_value_just_before_the_year_9999_is_a_span_the_window_holds(tmp_path: Path) -> None:
-    # The last day of 9998 is a date the window can hold: the column keeps its span, which ends at
-    # the edge that closes its one value, two days later.
+    # The last day of 9998 is a date the window can hold: the column keeps its span, which ends
+    # the day after its one value. The edge that closes the value's bin carries no weight and
+    # reaches no further.
     result = _init(tmp_path, required_end=False, last_end="9998-12-31")
     assert result.exit_code == 0, result.stderr
+    ended = _emits(tmp_path)["line_version"]["fidelity"]["columns"]["valid_to"]
+    assert ended["bins"] == ["9998-12-31", "9999-01-01", "9999-01-02"]
+    assert ended["binWeights"] == ["1", "0"]
     assert _time_bounds(tmp_path) == {
         "start": "2025-01-01T00:00:00.000Z",
-        "end": "9999-01-02T00:00:00.000Z",
+        "end": "9999-01-01T00:00:00.000Z",
     }
     _plans(tmp_path)
 
@@ -427,12 +501,16 @@ def test_an_ordinary_one_value_date_is_drawn_exactly(tmp_path: Path) -> None:
 
 
 def _spans(
-    time_span: Optional[Tuple[int, int]], bins: Optional[List[str]] = None
+    time_span: Optional[Tuple[int, int]],
+    bins: Optional[List[str]] = None,
+    weights: Optional[List[str]] = None,
 ) -> List[Tuple[int, int]]:
     """The spans :func:`_spans_of` gives the window for a date column with a published range and bins."""
     column = ColumnPlan("opened_on", time_span=time_span)
     if bins is not None:
         column.declaration["bins"] = bins
+    if weights is not None:
+        column.declaration["binWeights"] = weights
     expose = AuthoredExpose("visit", kinds={"opened_on": LogicalKind.DATE})
     found, _ = _spans_of(expose, column, None)
     return found
@@ -471,3 +549,32 @@ def test_a_span_that_starts_exactly_at_9999_01_01_gives_the_window_nothing() -> 
     assert _spans(None, ["9998-12-31T23:59:59.999Z", "9999-01-02"]) == [
         (WINDOW_END_LIMIT_MS - 1, WINDOW_END_LIMIT_MS + 86_400_000)
     ]
+
+
+def test_a_bin_that_carries_no_weight_at_either_end_gives_the_window_nothing() -> None:
+    # The edge that closes a one-value date's bin reaches a day further and draws nothing.
+    edges = ["2025-10-01", "2025-10-02", "2025-10-03"]
+    assert _spans(None, edges, ["1", "0"]) == [(_at("2025-10-01"), _at("2025-10-02"))]
+    assert _spans(None, edges, ["0", "1"]) == [(_at("2025-10-02"), _at("2025-10-03"))]
+    # Without weights, or with none positive, every edge counts.
+    assert _spans(None, edges) == [(_at("2025-10-01"), _at("2025-10-03"))]
+    assert _spans(None, edges, ["0", "0"]) == [(_at("2025-10-01"), _at("2025-10-03"))]
+
+
+def test_a_bin_that_carries_no_weight_between_weighted_bins_stays_in_the_span() -> None:
+    edges = ["2025-10-01", "2025-10-02", "2025-10-03", "2025-10-04", "2025-10-05"]
+    assert _spans(None, edges, ["0", "1", "0", "2"]) == [(_at("2025-10-02"), _at("2025-10-05"))]
+    assert _spans(None, edges, ["1", "0", "0", "2"]) == [(_at("2025-10-01"), _at("2025-10-05"))]
+
+
+def test_a_one_value_date_ends_the_window_where_the_one_value_does(tmp_path: Path) -> None:
+    # Versions that all end on 2025-10-01, after the last start (2025-09-01): the window's end is
+    # the day after the value, and not the edge that closes the value's bin, two days after it.
+    result = _init(tmp_path, required_end=False, last_end="2025-10-01")
+    assert result.exit_code == 0, result.stderr
+    ended = _emits(tmp_path)["line_version"]["fidelity"]["columns"]["valid_to"]
+    assert ended["bins"] == ["2025-10-01", "2025-10-02", "2025-10-03"]
+    assert _time_bounds(tmp_path) == {
+        "start": "2025-01-01T00:00:00.000Z",
+        "end": "2025-10-02T00:00:00.000Z",
+    }

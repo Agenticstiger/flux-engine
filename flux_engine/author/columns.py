@@ -2479,10 +2479,16 @@ def _one_value_bins(kind: LogicalKind, value: Decimal) -> Tuple[List[str], List[
     return edges, ["1", "0"]
 
 
+class UnspellableOneValue(ValueError):
+    """A date or timestamp that publishes one value too near the last the column holds.
+
+    The expose of the column cannot be written, and the message says why. The bundle leaves the
+    expose out, and refuses with this message only when something it writes needs the expose.
+    """
+
+
 def _unspellable_one_value(ctx: ColumnContext, point: _Point) -> Exception:
     """The refusal of a date or timestamp that publishes one value too near the last the column holds."""
-    from flux_engine.author.bundle import AuthorError
-
     kind = ctx.column.logical_type.kind
     table = ctx.profile_tokens[1] if len(ctx.profile_tokens) > 1 else "the table"
     last = _spell(kind, Decimal(_LAST_MS))
@@ -2494,7 +2500,7 @@ def _unspellable_one_value(ctx: ColumnContext, point: _Point) -> Exception:
     ways = "write its open end as NULL, or make the column a TIMESTAMP"
     if kind is not LogicalKind.DATE:
         ways = "write its open end as NULL, or as an earlier instant"
-    return AuthorError(
+    return UnspellableOneValue(
         f"{printable(table)}.{printable(ctx.column.name)} publishes {one} on every row, and the "
         f"engine cannot yet write a {kind_name} of {exactly} on every row; {ways}"
     )

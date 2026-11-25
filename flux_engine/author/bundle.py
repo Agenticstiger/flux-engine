@@ -68,6 +68,7 @@ from flux_engine.author.columns import (
     ColumnPlan,
     PerEntity,
     PropertyPlan,
+    UnspellableOneValue,
     assumed_check,
     bound_to_window,
     copy_column,
@@ -241,6 +242,9 @@ class AuthoredExpose:
     #: The history a projected emit takes the values of some columns from, which are not scored.
     carries: Optional[str] = None
     skipped: Optional[str] = None
+    #: The refusal to give when something the bundle writes needs this expose, which is left out
+    #: because a column publishes one date or instant the engine cannot yet write on every row.
+    needed_refusal: Optional[str] = None
     #: Each planned column's logical type, for the one assumed check a table may need.
     kinds: Dict[str, LogicalKind] = field(default_factory=dict)
     #: The columns a contract ``derive`` sets: column -> (invariant index, expr text).
@@ -1201,6 +1205,24 @@ def _time_bounds(
     return ASSUMED_WINDOW, ("time window", note)
 
 
+def _weighted_edges(edges: List[Any], weights: Any) -> List[Any]:
+    """The edges of the bins that carry weight: the weightless bins at either end do not count.
+
+    A bin of no weight draws nothing, so an edge only it reaches is no part of the column's span
+    (the edge that closes a one-value date, say). A weightless bin between weighted ones lies inside
+    the span anyway. The edges are all of them when no weight is given or none is positive.
+    """
+    if not isinstance(weights, list) or len(weights) != len(edges) - 1:
+        return edges
+    try:
+        positive = [position for position, weight in enumerate(weights) if Decimal(str(weight)) > 0]
+    except (ArithmeticError, ValueError):
+        return edges
+    if not positive:
+        return edges
+    return edges[positive[0] : positive[-1] + 2]
+
+
 def _spans_of(
     expose: AuthoredExpose, column: ColumnPlan, contract: Optional[Mapping[str, Any]]
 ) -> Tuple[List[Tuple[int, int]], Optional[Tuple[int, int]]]:
@@ -1214,6 +1236,8 @@ def _spans_of(
     instants: List[int] = []
     for key in ("bins", "levels"):
         listed = declaration.get(key)
+        if key == "bins" and isinstance(listed, list):
+            listed = _weighted_edges(listed, declaration.get("binWeights"))
         if isinstance(listed, list):
             instants.extend(moment for moment in map(instant_ms, listed) if moment is not None)
     declared = declaration.get("range")
@@ -3020,6 +3044,8 @@ def _plan_guarded(
         )
     except FluxError as error:
         return AuthoredExpose(expose_id=expose_id, skipped=printable(str(error)))
+    except UnspellableOneValue as error:
+        return AuthoredExpose(expose_id=expose_id, skipped=str(error), needed_refusal=str(error))
     except (ArithmeticError, ValueError) as error:
         return AuthoredExpose(expose_id=expose_id, skipped=_beyond_note(error))
 
@@ -3587,6 +3613,7 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
     held_back = _held_back(declared) if declared is not None else None
     spread = _draw_and_link(reading, keys, exposes, drawn, held_back)
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
+    _refuse_a_needed_one_value(exposes, keys)
     return _Planned(
         contract_path,
         contract,
@@ -3601,6 +3628,30 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
         spread,
         authored,
     )
+
+
+def _refuse_a_needed_one_value(
+    exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys]
+) -> None:
+    """Refuse a one-value date when a written expose points at its table, which is then not written.
+
+    A table whose column publishes one date or instant the engine cannot yet write is left out. It
+    is refused, with the reason it was left out, only when a relationship of an expose the bundle
+    writes targets it: plan would refuse that bundle (``FLX-3403``). Nothing is written then.
+    """
+    left_out = {
+        expose.expose_id: expose.needed_refusal
+        for expose in exposes
+        if expose.needed_refusal is not None
+    }
+    if not left_out or keys is None:
+        return
+    for expose in exposes:
+        if expose.skipped is not None:
+            continue
+        for relationship in keys.expose(expose.expose_id).relationships:
+            if relationship.target in left_out:
+                raise AuthorError(left_out[relationship.target])
 
 
 def _bundle_window(
@@ -3702,6 +3753,15 @@ def _check_declared_entries(planned: _Planned, declared: DeclaredHistory) -> Non
             "validity window for a history"
         )
     written = [expose for expose in planned.authored if not expose.reference]
+    left_out = {
+        expose.expose_id: expose.needed_refusal
+        for expose in planned.exposes
+        if expose.needed_refusal is not None
+    }
+    for entry in (*declared.history, *declared.snapshots, *declared.events, *declared.periods):
+        for name in (entry.get("emit"), entry.get("of")):
+            if isinstance(name, str) and name in left_out:
+                raise AuthorError(left_out[name])
     try:
         check_entries(
             declared,
