@@ -24,6 +24,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Added
 
+- `init --json` carries `ledger.unused`, the list an owner can leave out of the profile: an entry the profile reader
+  holds whole (a calendar entry with none of its histograms read, say) is named by its own pointer, so dropping
+  exactly that list leaves a profile the reader accepts. `ledger.statistics` still names each statistic on its own,
+  with its state; dropping every one it calls unused can leave an entry the reader refuses (`FLX-5036`).
+- `FLX-3125`, the refusal of a date or timestamp column that publishes one value the engine cannot yet write on every
+  row, when something the bundle writes needs its table.
 - `init --window START END` sets the run's time window yourself. The dates are `YYYY-MM-DD` (midnight UTC) or RFC 3339
   timestamps, with START before END, and the output names the window under "time window".
 - `init --history FILE` merges a declared history into the bundle: the file's histories, snapshots, events and
@@ -173,8 +179,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   was drawn within the day that starts there, so its rows took that day and the next. The register says every row
   takes it. A DATE column whose one value is 9999-12-30 or 9999-12-31 (the end of every open version, say), or a
   TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet. When a relationship, a
-  history or a projection needs its table, `init` refuses before it writes anything, names the table and the
-  column, and says to write the open end as NULL, or to make the column a TIMESTAMP; before, it left the table out
+  history or a projection needs its table, `init` refuses before it writes anything (`FLX-3125`), names the table and
+  the column, and says to write the open end as NULL, or to make the column a TIMESTAMP; before, it left the table out
   and wrote a bundle the plan refused with `FLX-3403`. When nothing needs the table, it is left out, as before, and
   its statistics are listed unused with the reason.
 - `init` no longer writes a bundle the plan refuses with `FLX-6204` when an enforced `within` date's parent has a
