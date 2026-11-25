@@ -134,6 +134,7 @@ from flux_engine.generator.projections import (
     RunBounds,
     chain_of,
     derived_rows,
+    fallback_notes,
     project_plan,
     projection_of,
 )
@@ -791,6 +792,7 @@ def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
         period_end_null_notes(emits)
         + end_share_notes(plans, result.root)
         + parent_bound_history_notes(plans, result.root)
+        + tuple(note for plan in plans for note in fallback_notes(plan))
         + tuple(
             note for plan in plans for note in range_cut_notes(plan.expose.expose_id, plan.columns)
         )
@@ -1900,7 +1902,8 @@ class PlanEra:
     """What a recorded plan was made under, so that ``apply`` and ``replay`` run it as it was.
 
     A new plan takes the defaults; a recorded plan takes what its keys say
-    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges`` and ``plan_scale_floors``).
+    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges``, ``plan_scale_floors`` and
+    ``plan_projected_givens``).
 
     *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
     2026-11-24): every entity, or the entities that can end for a plan without ``historyEndShare``.
@@ -1919,6 +1922,9 @@ class PlanEra:
     2026-11-25): its history and periods entries replay without keeping to the columns' ranges.
     *estimate_rows* is false for every recorded plan: it states its rows, so it runs with no
     estimate against *periodic_rows*, and ``MOST_ROWS`` alone bounds them.
+    *projected_givens* is false for a plan without ``projectedGivens`` (ADR 0027, the amendment of
+    2026-11-25): a column of an events or periods emit drawn given a column of the version replays
+    the draw it was made with, given the level the column's own draw made.
     """
 
     end_share: str = END_SHARE_OF_ENTITIES
@@ -1928,6 +1934,7 @@ class PlanEra:
     periodic_rows: Optional[int] = None
     hold_ranges: bool = True
     estimate_rows: bool = True
+    projected_givens: bool = True
 
 
 def _execute_with_parent_kept(
@@ -2468,7 +2475,9 @@ def execute(
                 replicate=replicate,
                 end_share=era.end_share,
                 cut_ranges=era.cut_ranges,
-                bounds=RunBounds(era.periodic_rows, era.hold_ranges, era.estimate_rows),
+                bounds=RunBounds(
+                    era.periodic_rows, era.hold_ranges, era.estimate_rows, era.projected_givens
+                ),
                 scale_widened=widened,
                 scale_floors=era.scale_floors,
             )
@@ -3551,7 +3560,7 @@ def _planned_with_projections(
     """
     namespace = _flux_namespace(simulation)
     projected = _projected_emits(resolved_emits)
-    bounds = RunBounds(era.periodic_rows, era.hold_ranges, era.estimate_rows)
+    bounds = RunBounds(era.periodic_rows, era.hold_ranges, era.estimate_rows, era.projected_givens)
 
     def plan_at(index: int, rows: Optional[int]) -> _PlannedEmit:
         return _plan_emit(

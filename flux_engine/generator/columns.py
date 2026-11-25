@@ -57,12 +57,18 @@ CHUNK_ROWS = 1 << 14
 
 
 def column_rows(
-    plan: "_rows.GeneratorPlan", start: int, stop: int, streams: CellStreams
+    plan: "_rows.GeneratorPlan",
+    start: int,
+    stop: int,
+    streams: CellStreams,
+    held: Optional["_rows.HeldLevels"] = None,
 ) -> Optional[Rows]:
     """Rows *start* to *stop* - 1 of a kernel 0.2.0 *plan*, a column at a time.
 
     ``None`` when the slice is the per-row path's: a conditional plan, a slice in which
-    anything is refused or raised, or rows past what an int64 array holds.
+    anything is refused or raised, or rows past what an int64 array holds. *held* gives the
+    level each row holds for a column a projection sets, which a column drawn given it reads
+    (:func:`flux_engine.generator.rows.cells_before_rules`).
     """
     if stop > kernel2.ARRAY_ROWS or _related_given(plan) or _carried_given(plan):
         return None
@@ -71,7 +77,7 @@ def column_rows(
         rows = np.arange(first, min(stop, first + CHUNK_ROWS), dtype=np.int64)
         try:
             with localcontext(_rows._KERNEL_CONTEXT):
-                columns = _chunk(plan, streams, rows)
+                columns = _chunk(plan, streams, rows, _held_chunk(held, first - start, rows))
         except Exception:
             # The per-row path works row by row and this one column by column, so the two
             # can meet an error in another order. Whatever this path meets, the slice is
@@ -126,11 +132,28 @@ def _carried_given(plan: "_rows.GeneratorPlan") -> bool:
     )
 
 
+def _held_chunk(
+    held: Optional["_rows.HeldLevels"], offset: int, rows: "np.ndarray"
+) -> Dict[str, List[str]]:
+    """The held levels of the chunk *rows*, which starts *offset* rows into the slice."""
+    if not held:
+        return {}
+    stop = offset + rows.shape[0]
+    return {name: list(levels[offset:stop]) for name, levels in held.items()}
+
+
 def _chunk(
-    plan: "_rows.GeneratorPlan", streams: CellStreams, rows: "np.ndarray"
+    plan: "_rows.GeneratorPlan",
+    streams: CellStreams,
+    rows: "np.ndarray",
+    held: Optional[Dict[str, List[str]]] = None,
 ) -> List[List[Any]]:
-    """Every column of *plan* over *rows*: drawn as arrays, or read from the relations."""
-    levels: Dict[str, List[str]] = {}
+    """Every column of *plan* over *rows*: drawn as arrays, or read from the relations.
+
+    A column *held* names is given by the levels *held* gives it: they stand in the chunk's
+    levels, which every column drawn given it reads, in place of the levels its own draw makes.
+    """
+    levels: Dict[str, List[str]] = dict(held or {})
     if plan.relations is None:
         return [_column(column_plan, plan, streams, rows, levels) for column_plan in plan.columns]
     from flux_engine.generator.relations import carried_columns, history_pick_of, owner_of

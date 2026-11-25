@@ -337,19 +337,21 @@ def _scale_floor_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     return {SCALE_FLOORS_PLAN_KEY: SCALE_FLOORS_TRACKED} if result.scale_floors else {}
 
 
-def _date_range_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
-    """``dateRanges``, only for a plan in which some column was cut at its contract's range."""
-    if not result.cut_ranges:
-        return {}
+def _emit_plans(result: "_pipeline.PipelineResult") -> List[Any]:
+    """The generator plan of every emit of *result*, written and hidden, that has one."""
     outcomes: List[Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"]] = [
         *result.emits,
         *result.hidden_emits,
     ]
+    return [outcome.plan for outcome in outcomes if outcome.plan is not None]
+
+
+def _date_range_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``dateRanges``, only for a plan in which some column was cut at its contract's range."""
+    if not result.cut_ranges:
+        return {}
     cut = any(
-        column.range_cut is not None
-        for outcome in outcomes
-        if outcome.plan is not None
-        for column in outcome.plan.columns
+        column.range_cut is not None for plan in _emit_plans(result) for column in plan.columns
     )
     return {DATE_RANGES_PLAN_KEY: DATE_RANGES_CUT} if cut else {}
 
@@ -405,6 +407,22 @@ def _periodic_budget(max_rows: Optional[int]) -> Optional[int]:
     ):
         raise ValueError(f"max_rows is a whole number from 1 to {MOST_ROWS}, not {max_rows!r}")
     return max_rows
+
+
+#: ``plan.json``'s key for a column of an events or periods emit drawn given a column of the version
+#: (ADR 0027, the amendment of 2026-11-25): ``"afterProjection"``, the column is drawn given the
+#: level the version holds. Present only when an emit holds such a column, so every other plan
+#: keeps its bytes and its planDigest. A recorded plan without it replays the draw engine 0.11.1
+#: made, given the level the column's own draw made
+#: (:func:`flux_engine.stages.apply.plan_projected_givens`).
+PROJECTED_GIVENS_PLAN_KEY = "projectedGivens"
+PROJECTED_GIVENS_AFTER = "afterProjection"
+
+
+def _projected_given_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``projectedGivens``, only for a plan with a column drawn given a column of the version."""
+    held = any(plan.projection is not None and plan.projection.held for plan in _emit_plans(result))
+    return {PROJECTED_GIVENS_PLAN_KEY: PROJECTED_GIVENS_AFTER} if held else {}
 
 
 def _end_share_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
@@ -499,6 +517,7 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
         **_scale_floor_entries(result),
         **_max_rows_entries(result),
         **_range_setter_entries(result),
+        **_projected_given_entries(result),
         **(
             {
                 REFERENCES_PLAN_KEY: {

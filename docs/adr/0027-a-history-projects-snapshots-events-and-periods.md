@@ -404,3 +404,53 @@ check saw the count.
   plan with the default carries no key and keeps its bytes and its planDigest. A plan recorded before the budget
   replays as it did.
 
+## Amendment of 2026-11-25: a `given` over a column of the version is drawn after the projection
+
+The first amendment of 2026-11-24 refused a column of an events or periodic emit drawn `given` a column the entry
+sets, because the draw read the level the other column's own draw made, which the entry then replaced. A bundle
+that projects a column of the version (`model` on a month, or on a change) and draws another column given it
+(`tier` given `model`) is a plain shape, and the refusal left it no way to say so. This amendment draws it:
+
+- **The order.** The entry's cells are set first. A column of the version the entry sets, which some column of the
+  emit is drawn `given`, gives each row the level the version holds, and the emit then draws its own cells: the
+  column drawn `given` it, and every column drawn `given` that one, reads the held level in place of the level its
+  own draw made. Each cell is still drawn once from its own stream, so the order changes no other value, and the
+  column path, the per-row path, `--jobs` and `--shard` give the same bytes. A categorical column's level is the
+  one that renders to the version's value; a column drawn from bins takes the bin that holds it.
+- **What stays refused**, `FLX-3403` at plan, naming both columns and the entry. A column drawn `given` a cell the
+  entry sets that is not a column of the version: the `op`, `at`, `date` and `type` columns, the period column, a
+  kind's override, and the before and after images (an image is NULL where the event has no such version). These
+  are not drawn from the column's levels, so a held level would name a level the column's table is not keyed by.
+  A column with `allocation: exact` drawn `given` a column of the version, whose classes are allotted over the
+  rows by the draw of that column, not by the level a row holds.
+- **A value no level names.** The history may fill a column of the version with a value no level of the emit's
+  column names: it declares a `nullFraction` on it, a rule, a relationship or the history's `end` sets it (an `end`
+  value that is a level of the emit's column is served), it draws levels the emit's column does not hold, or, for a
+  column drawn from bins, it is of another type. A row that holds such a value has no row in the given-table of a
+  column drawn `given` it, so that column is drawn from the marginal the declarations imply: `P(D = d)` is the sum
+  over the levels `c` of the parent `C` of `w_c * P(D = d | C = c)`, with `w` the level weights `C` declares for the
+  levels `D`'s table is keyed by and `P(D | C = c)` the table's row for `c`, taken as shares. It needs no declaration
+  of its own and fits nothing to data. The weights are read from the emit's `C`, and from the history's `C` where
+  the emit's declares none (the emit's wins where both declare, since the table is keyed by its levels). The sum is
+  exact (`Fraction`, the levels in sorted order, normalised), and the plan records the shares (`fallbackMarginals` in
+  the generator document, beside `fallbackGivens`), so the digest covers them. Where `C` declares no level weights
+  (a `support` or nothing), `D` is drawn from the `support` it declares, equal weights, which must name exactly the
+  levels the table names, with a `maxCardinality` (a declared support is a checked property); a column that has
+  neither, or draws from bins, which have no weights apart from the table's, is refused at plan, `FLX-3403` naming
+  both columns and what to declare (level weights for `C`, or a support for `D`). Each cell is still drawn once from
+  its own stream, and only the distribution read for that row changes, so the column path, the per-row path,
+  `--jobs` and `--shard` give the same bytes. Rows whose value is a level of the emit's column are drawn from the
+  given-table as before. The `end` source cannot be reached end to end today (every level the history ends in is one
+  of its own levels, and every level of the history is a level of the emit's), so it is pinned at the plan alone.
+  `plan` prints one note for each such column, naming the column, its parent, what sets the parent's unnamed values
+  and which distribution is drawn. A `conditions` group cannot read such a column: conditions on a projected emit
+  are refused at plan (`FLX-3643`).
+- **Recorded plans.** A plan with such a column says `projectedGivens: "afterProjection"`, which the plan digest
+  covers; plan.json states only that key. The generator document the plan's digest covers (its `generatorDigest`)
+  names the held columns, as `heldGivens` in the projection member of the emit, and those of them that fall back
+  to the column's own distribution, as `fallbackGivens` (absent when none does), with the shares of each marginal
+  as `fallbackMarginals` (absent when none has one). A recorded plan without
+  the key replays the draw engine 0.11.1 made, given the level the column's own draw made, so its rows and its run
+  id keep their bytes. Any other value is `FLX-2102`.
+- **What moves.** Only a bundle the first amendment refused: its plan is now accepted. Every other plan writes no
+  key and keeps its bytes.

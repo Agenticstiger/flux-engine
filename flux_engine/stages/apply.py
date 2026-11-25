@@ -100,6 +100,8 @@ from flux_engine.stages.plan import (
     DATE_RANGES_PLAN_KEY,
     END_SHARE_PLAN_KEY,
     MAX_ROWS_PLAN_KEY,
+    PROJECTED_GIVENS_AFTER,
+    PROJECTED_GIVENS_PLAN_KEY,
     RANGE_SETTERS_HELD,
     RANGE_SETTERS_PLAN_KEY,
     REFERENCES_PLAN_KEY,
@@ -127,6 +129,7 @@ __all__ = [
     "plan_max_rows",
     "plan_range_setters",
     "plan_end_share",
+    "plan_projected_givens",
     "plan_kernel",
     "require_plan_shortfalls",
     "require_run_digest_binds_plan",
@@ -201,6 +204,7 @@ def load_recorded_plan(layout: RunLayout) -> Dict[str, Any]:
     plan_scale_floors(document)
     plan_max_rows(document)
     plan_range_setters(document)
+    plan_projected_givens(document)
     require_plan_shortfalls(document)
     return document
 
@@ -311,6 +315,22 @@ def plan_max_rows(plan_document: Mapping[str, Any]) -> Optional[int]:
             f"budget of rows from 1 to {MOST_ROWS}; plan again with this engine",
         )
     return named
+
+
+def plan_projected_givens(plan_document: Mapping[str, Any]) -> bool:
+    """Whether a recorded plan draws a column given a column of the version after the projection.
+
+    A plan with ``projectedGivens`` says ``"afterProjection"`` (ADR 0027, the amendment of
+    2026-11-25). A plan without it holds no such column, or was written by engine 0.11.1, which drew
+    the column given the level the column's own draw made; it replays that draw, so its rows keep
+    their bytes. Any other value is refused as ``historyEndShare`` is.
+    """
+    return _marker_named(
+        plan_document,
+        PROJECTED_GIVENS_PLAN_KEY,
+        PROJECTED_GIVENS_AFTER,
+        "draws given the level the column's own draw made",
+    )
 
 
 def _marker_named(plan_document: Mapping[str, Any], key: str, known: str, without: str) -> bool:
@@ -859,6 +879,7 @@ def _apply(
                     periodic_rows=plan_max_rows(plan_document),
                     hold_ranges=plan_range_setters(plan_document),
                     estimate_rows=False,
+                    projected_givens=plan_projected_givens(plan_document),
                 ),
                 shard=shares,
                 references=plan_document.get(REFERENCES_PLAN_KEY),
