@@ -251,9 +251,6 @@ dev = [
 [project.scripts]
 fluxsim = "flux_engine.cli:main"
 
-[project.entry-points."flux_engine.sinks"]
-kafka = "flux_engine.sinks.kafka:target"
-
 [project.urls]
 Documentation = "https://agenticstiger.github.io/flux/engine/"
 Repository = "https://github.com/Agenticstiger/flux-engine"
