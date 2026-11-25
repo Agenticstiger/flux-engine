@@ -1135,13 +1135,25 @@ class ParameterRegister:
 
 
 def _adds_1_4(register: ParameterRegister) -> bool:
-    """Whether *register* counts a number at a position format 1-4-0 added, or cites a definition it added."""
+    """Whether *register* uses what format 1-4-0 added.
+
+    That is a number counted at a position the format added, a citation of a definition it added,
+    or an ``unused`` item that names a whole entry of the profile (a calendar entry, a date pair,
+    an exposure, a history or a tracked column of one).
+    """
     citations = [entry.citation for entry in register.entries]
     citations.extend(entry.replaced_by for entry in register.entries)
     citations.extend(item.citation for item in register.unused or ())
-    return any(registered.number.added_1_4 for registered in register.numbers) or any(
-        citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
-        for citation in citations
+    return (
+        any(registered.number.added_1_4 for registered in register.numbers)
+        or any(
+            citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
+            for citation in citations
+        )
+        or any(
+            item.citation.definition is None and _names_whole_entry(item.citation.tokens)
+            for item in register.unused or ()
+        )
     )
 
 
@@ -1632,13 +1644,18 @@ _WHOLE_ENTRIES: Tuple[Tuple[Optional[str], ...], ...] = (
 )
 
 
-def _is_whole_entry(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> bool:
-    """Whether *tokens* name an entry of format 1-3-0 that holds statistics, as a whole."""
+def _names_whole_entry(tokens: Tuple[str, ...]) -> bool:
+    """Whether *tokens* have the shape of a pointer at an entry of :data:`_WHOLE_ENTRIES`."""
     return any(
         len(tokens) == len(shape)
         and all(want is None or want == token for want, token in zip(shape, tokens, strict=True))
         for shape in _WHOLE_ENTRIES
-    ) and isinstance(_resolve(profile, tokens), Mapping)
+    )
+
+
+def _is_whole_entry(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> bool:
+    """Whether *tokens* name an entry of format 1-3-0 that holds statistics, as a whole."""
+    return _names_whole_entry(tokens) and isinstance(_resolve(profile, tokens), Mapping)
 
 
 def _published(chain: Sequence[Tuple[Any, Tuple[str, ...]]]) -> bool:

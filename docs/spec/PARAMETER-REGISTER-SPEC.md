@@ -317,7 +317,9 @@ A citation may name the definitions of the rank correlations, `kendallTau/1` and
 and of a clique marginal, `cliqueMarginal/1` and `cliqueMarginal/2`, as it names any other
 registered definition (section 3). A record that cites `kendallTau/1`, `spearmanRho/1` or
 `cliqueMarginal/2`, in an entry, a `replacedBy` or an `unused` item, is format `1-4-0`; one that
-cites only `cliqueMarginal/1`, which an earlier format already allowed, keeps its format.
+cites only `cliqueMarginal/1`, which an earlier format already allowed, keeps its format. A record
+whose `unused` items name a whole entry of the profile (a calendar entry, a date pair, an exposure,
+a history or a tracked column of one; see `definition` below) is format `1-4-0` too.
 
 The record lists the numbers by document, documents in NFC order of their ids,
 and within a document in key order (Unicode code points, mapping by mapping;
@@ -331,7 +333,7 @@ come from, and an `overlay` entry's where in the overlaid profile:
 | Key | Holds |
 |---|---|
 | `pointer` | An RFC 6901 JSON Pointer into the pinned profile. |
-| `definition` | The registered definition the pointer lands in: a statistic (`mean/1`, `marginalHistogram/1`, `levelHistogram/1`, `support/1`, `correlation/1`, `quantile/1`, `quantile/2`, `kendallTau/1`, `spearmanRho/1`, `cliqueMarginal/1`, `cliqueMarginal/2`) or a column metric (`count/1`, `nullCount/1`, `distinctCount/1`, `sum/1`, `min/1`, `max/1`, `quantiles/1`). A table's `rowCount` has none, and neither has an entry of `references` (`/references/<expose>`, a table published whole), which an `unused` item may name. An `unused` item may also name a whole entry of format 1-3-0 that holds statistics, which has no definition either: a calendar entry (`/tables/<expose>/calendar/<i>`), a date pair (`/tables/<expose>/datePairs/<i>` or `/relationships/<i>/dates/<j>`), an exposure (`/relationships/<i>/exposure/<j>`), a history (`/tables/<expose>/history`) or a tracked column of one (`/tables/<expose>/history/columns/<name>`). The profile reader refuses such an entry without some of its members, so a Simulation names it whole when none of its statistics is read. |
+| `definition` | The registered definition the pointer lands in: a statistic (`mean/1`, `marginalHistogram/1`, `levelHistogram/1`, `support/1`, `correlation/1`, `quantile/1`, `quantile/2`, `kendallTau/1`, `spearmanRho/1`, `cliqueMarginal/1`, `cliqueMarginal/2`) or a column metric (`count/1`, `nullCount/1`, `distinctCount/1`, `sum/1`, `min/1`, `max/1`, `quantiles/1`). A table's `rowCount` has none, and neither has an entry of `references` (`/references/<expose>`, a table published whole), which an `unused` item may name. An `unused` item may also name, whole, an entry that holds statistics in a profile of format 1-3-0, which has no definition either (register format 1-4-0, section 7): a calendar entry (`/tables/<expose>/calendar/<i>`), a date pair (`/tables/<expose>/datePairs/<i>` or `/relationships/<i>/dates/<j>`), an exposure (`/relationships/<i>/exposure/<j>`), a history (`/tables/<expose>/history`) or a tracked column of one (`/tables/<expose>/history/columns/<name>`). The profile reader refuses such an entry without some of its members, so a Simulation names it whole when none of its statistics is read. |
 
 `plan` is always handed the profile a Simulation pins (PROFILE-SPEC.md
 section 6), and it reads every citation in it, or in the overlaid profile for an
@@ -385,7 +387,7 @@ handed the profile, write the same bytes.
 | Key | Holds |
 |---|---|
 | `_producer` | A URI naming the tool that wrote the record. |
-| `_schemaURL` | The schema's `$id`. The format version is part of it: format 1-4-0 when the register counts a number at a position of the table of the namespace's other keys or of the copula (section 2), or an entry cites `kendallTau/1`, `spearmanRho/1` or `cliqueMarginal/2` (section 7), format 1-3-0 when an entry cites an overlay, names a replacement or is a calibrated value, or the register holds a response estimate (sections 1.2, 1.3 and 8), format 1-2-0 when the Simulation lists unused statistics, format 1-1-0 when an entry names the contract, and format 1-0-0 otherwise, so a register that uses none of a later format's additions is recorded as it was before, with its bytes. |
+| `_schemaURL` | The schema's `$id`. The format version is part of it: format 1-4-0 when the register counts a number at a position of the table of the namespace's other keys or of the copula (section 2), or an entry cites `kendallTau/1`, `spearmanRho/1` or `cliqueMarginal/2`, or an `unused` item names a whole entry of the profile (section 7), format 1-3-0 when an entry cites an overlay, names a replacement or is a calibrated value, or the register holds a response estimate (sections 1.2, 1.3 and 8), format 1-2-0 when the Simulation lists unused statistics, format 1-1-0 when an entry names the contract, and format 1-0-0 otherwise, so a register that uses none of a later format's additions is recorded as it was before, with its bytes. |
 | `simulationId` | The Simulation. |
 | `profile` | `{"digest": ...}`, the pinned profile's digest, or `null`. |
 | `declared` | How many numbers the register counts. |
@@ -485,11 +487,12 @@ predates it refuses the record rather than reads it as something else.
   formats too.
 - **Format 1-4-0** adds no source and no member, and its counts name the six sources of 1-3-0. It
   counts the numbers at the positions of the table of the namespace's other keys and of the
-  copula (section 2), and a citation may name `kendallTau/1`, `spearmanRho/1` and
-  `cliqueMarginal/2`. A record names 1-4-0 only when it counts a number at one of those positions
-  or an entry, a `replacedBy` or an `unused` item names one of those definitions, so every other
-  register keeps the format and the bytes it had, with its digests. A reader of 1-4-0 reads the
-  earlier formats too.
+  copula (section 2), a citation may name `kendallTau/1`, `spearmanRho/1` and
+  `cliqueMarginal/2`, and an `unused` item may name a whole entry of the profile (section 7). A
+  record names 1-4-0 only when it counts a number at one of those positions, an entry, a
+  `replacedBy` or an `unused` item names one of those definitions, or an `unused` item names a
+  whole entry, so every other register keeps the format and the bytes it had, with its digests.
+  A reader of 1-4-0 reads the earlier formats too.
 - A source added later follows the same rule. Moving the block from the
 extension namespace into the FLUX specification is a change of where it is
 declared, not of what it means.
