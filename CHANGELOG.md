@@ -171,6 +171,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Fixed
 
+- `verify` no longer refuses (`FLX-5037`) a histogram of a DATE column whose profile grid ends at the calendar's last
+  instant, 253402300799999 milliseconds. A profile spells the last edge of a year grid there and a declaration spells
+  it as the day 9999-12-31; they are one edge. An edge that is not a whole day still matches no declared edge.
+- `verify` no longer refuses (`FLX-5005`, "the two sides group into different sets") a property grouped by a column
+  because a noisy profile lists a level whose noisy counts project to no record and the generated rows hold none of
+  it. A level the profile holds no record of is left out on both sides, as a suppressed group is, and the other groups
+  are compared. A level the profile holds records of that the rows lack is still refused.
 - A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
   the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
   plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
