@@ -8,14 +8,16 @@
 With ``P = [ps, pe]`` the lifetime of an entity's parent row (``pe`` absent when the parent has no
 end, a NULL end, or an end before its start), what is pinned, on kernel 0.2.0:
 
-* **The first start** lies in ``J`` and in ``[ps, pe - c')``, drawn by the same draw on the same
-  path and position as without the bound, so an entity whose interval is ``J`` draws what it drew.
+* **The first start** lies in ``J`` and in ``[ps, pe - c')``, or, where that is empty, in the room for
+  one version, drawn by the same draw on the same path and position as without the bound, so an
+  entity whose interval is ``J`` draws what it drew.
 * **The room** ends at ``min(until, pe)``: every closed version ends before the parent's last day.
 * **The parent that ended** inside the horizon forces its entities to end: the last version of
   an entity is closed (``closeLast``, or no ``end``) or is the ending version (``finalVersion``),
   at the latest on the parent's last day, and they count towards the end share.
-* **An empty intersection** leaves the entity the draw it would have without the bound, with no
-  parent bound on its room, and counts it ``infeasible``.
+* **The room.** An entity whose parent leaves no room for one version is ``FLX-3403``; one with
+  room for fewer versions than it was given is capped at that room, and what it loses moves to
+  entities with room to spare.
 * **Two paths, one answer**: the column path's rows equal the per-row path's, and a slice is the
   slice of the run.
 """
@@ -134,6 +136,7 @@ def plans_for(
     opened: Optional[Mapping[str, Any]] = None,
     closed: Optional[Mapping[str, Any]] = None,
     lifetime: Optional[Tuple[str, Optional[str]]] = LIFETIME,
+    declared_rows: Optional[int] = None,
 ) -> Dict[str, GeneratorPlan]:
     declared: Dict[str, Tuple[Dict[str, Any], int]] = {
         "customer": (
@@ -148,6 +151,7 @@ def plans_for(
         "valid_from",
         "valid_to",
         lifetime if held.parent is not None and held.parent.lifetime else None,
+        **({} if declared_rows is None else {"declared_rows": declared_rows}),
     )
     return plans_of(contract(), declared, {EMIT: binding}, emit=EMIT)
 
@@ -211,7 +215,7 @@ def last_day(closed: Optional[date], opened: date) -> Optional[date]:
 def test_every_version_keeps_to_its_parents_lifetime(end: Optional[HistoryEnd]) -> None:
     plans = plans_for(entry(end=end))
     layout = layout_of(plans)
-    assert layout.cut is not None and not bool(layout.cut.infeasible.any())
+    assert layout.cut is not None and layout.cut.shortfall == 0
     seen_closed = 0
     for (opened, closed), versions in chains(plans):
         stop = last_day(closed, opened)
@@ -372,19 +376,6 @@ def test_a_parent_with_no_end_cuts_nothing() -> None:
     assert int(layout.first_starts.min()) >= unit_of("2023-01-01", LogicalKind.DATE)
 
 
-def test_an_empty_intersection_keeps_the_draw_without_the_bound_and_is_infeasible() -> None:
-    # Every parent opens in the last days before until, where no chain has room for its versions.
-    late = {"range": {"min": "2025-12-25", "max": "2025-12-30"}}
-    never = {"nullFraction": "1", "range": {"min": "2025-12-30", "max": "2025-12-30"}}
-    end = HistoryEnd("closeLast", "0")
-    bound = layout_of(plans_for(entry(end=end), opened=late, closed=never))
-    plain = layout_of(plans_for(entry(end=end, parent=PLAIN_PARENT), opened=late, closed=never))
-    assert bound.cut is not None and bool(bound.cut.infeasible.all())
-    assert bound.cut is not None and not bool(bound.cut.forced.any())
-    assert np.array_equal(bound.first_starts, plain.first_starts)
-    assert bound.cut is not None and bool((bound.cut.limits == bound.until).all())
-
-
 # -- the plan -----------------------------------------------------------------------------------
 
 
@@ -458,18 +449,109 @@ def test_plan_is_silent_when_the_end_carries_no_value_to_set() -> None:
     assert history.parent_bound_notes(EMIT, layout_of(plans_for(entry(end=CLOSE)))) == []
 
 
-def test_plan_counts_the_entities_whose_parent_leaves_no_room() -> None:
-    late = {"range": {"min": "2025-12-25", "max": "2025-12-30"}}
-    never = {"nullFraction": "1", "range": {"min": "2025-12-30", "max": "2025-12-30"}}
-    layout = layout_of(
-        plans_for(entry(end=HistoryEnd("closeLast", "0")), opened=late, closed=never)
-    )
-    notes = history.parent_bound_notes(EMIT, layout)
-    assert len(notes) == 1 and f"{layout.entities} of {layout.entities} entities" in notes[0]
-
-
 def test_the_refusal_for_a_bound_history_with_no_end_does_not_name_closelast() -> None:
     early = {"range": {"min": "2025-12-30", "max": "2025-12-30"}}
     with pytest.raises(Exception, match="parent ended") as caught:
         plans_for(entry(end=None, until="2023-01-02"), opened=early)
     assert "closeLast" not in str(caught.value)
+
+
+# -- the room an entity's parent leaves it ----------------------------------------------------------
+
+#: Parents that open on one of two days and, four fifths of them, never close; the others close
+#: within a few days. With no shape every entity is given three versions.
+SHORT_OPENED = {"range": {"min": "2024-03-01", "max": "2024-03-02"}}
+SHORT_CLOSED = {"nullFraction": "0.8", "range": {"min": "2024-03-05", "max": "2024-03-12"}}
+#: Parents that all close three to five days after they open.
+TIGHT_CLOSED = {"range": {"min": "2024-03-05", "max": "2024-03-06"}}
+#: With no closing unit to keep, a parent can close a day earlier and still leave room for a version.
+SHORT_FINAL_CLOSED = {"nullFraction": "0.5", "range": {"min": "2024-03-04", "max": "2024-03-07"}}
+
+
+def fitted(end: Optional[HistoryEnd] = None, **options: Any) -> Dict[str, GeneratorPlan]:
+    options.setdefault("opened", SHORT_OPENED)
+    options.setdefault("closed", SHORT_FINAL_CLOSED if end is FINAL else SHORT_CLOSED)
+    return plans_for(entry(end=end, versions=None), **options)
+
+
+def room_of(layout: HistoryPlan, held: HistoryEntry) -> "np.ndarray":
+    """What an entity's chain holds: its room less the unit the first start and a closed end take."""
+    return layout.rooms - (2 if layout.closes_last else 1)
+
+
+@pytest.mark.parametrize("end", [None, CLOSE, FINAL])
+def test_an_entity_is_capped_at_its_room_and_its_versions_move_to_entities_with_room(
+    end: Optional[HistoryEnd],
+) -> None:
+    plans = fitted(end)
+    layout = layout_of(plans)
+    held = entry(end=end, versions=None)
+    for (opened, closed), versions in chains(plans):
+        stop = last_day(closed, opened)
+        assert versions[0]["valid_from"] >= opened
+        for row in versions:
+            assert stop is None or row["valid_from"] <= stop
+            if row["valid_to"] is not None and stop is not None:
+                assert row["valid_to"] <= stop
+    cap = room_of(layout, held)
+    assert bool((layout.versions.counts <= cap).all())
+    assert int(layout.versions.counts.sum()) == layout.rows == 120
+    assert int(layout.versions.counts.max()) > 3  # the entities with room took what the others lost
+    assert layout.cut is not None
+    assert layout.cut.capped > 0 and layout.cut.moved > 0 and layout.cut.shortfall == 0
+
+
+def test_the_versions_an_entity_loses_go_one_at_a_time_to_the_entities_with_the_most_room() -> None:
+    layout = layout_of(fitted())
+    counts, cap = layout.versions.counts, room_of(layout, entry(versions=None))
+    taken = int((3 - counts[counts < 3]).sum())
+    gained = counts - 3
+    assert int(gained[gained > 0].sum()) == taken > 0
+    # One at a time, the largest room first: an entity that gained has at least the room of one
+    # that has room left and did not, and no entity gained two while another with as much room gained none.
+    rooms = layout.rooms
+    losers_free = np.flatnonzero((counts < cap) & (gained == 0))
+    winners = np.flatnonzero(gained > 0)
+    assert losers_free.shape[0] == 0 or int(rooms[winners].min()) >= int(rooms[losers_free].max())
+
+
+def test_the_capped_layout_is_the_same_by_the_column_path_and_the_per_row_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = fitted(FINAL)[EMIT]
+    by_columns, by_rows, taken = _by_both_paths(
+        monkeypatch, lambda: generate_row_slice(plan, 0, plan.rows, root=root_for())
+    )
+    assert by_columns == by_rows and any(taken)
+    assert generate_row_slice(plan, 17, 71, root=root_for()) == by_rows[17:71]
+
+
+def test_a_parent_with_no_room_for_one_version_is_refused_naming_the_key() -> None:
+    # Lifetimes of one or two days: the first start is at the latest the third day before the last.
+    short = {"nullFraction": "0.5", "range": {"min": "2024-03-02", "max": "2024-03-03"}}
+    with pytest.raises(Exception, match=r"FLX-3403") as caught:
+        layout_of(fitted(closed=short))
+    assert f"history ({EMIT}).parent.lifetime" in str(caught.value)
+    assert "of 40 entities" in str(caught.value)
+
+
+def test_the_rows_shrink_only_when_no_entity_has_room_and_a_plan_at_those_rows_agrees() -> None:
+    layout = layout_of(fitted(closed=TIGHT_CLOSED))
+    assert layout.cut is not None
+    assert layout.rows < 120 and layout.cut.shortfall == 120 - layout.rows
+    assert bool((layout.versions.counts == room_of(layout, entry())).all())
+    notes = history.parent_bound_notes(EMIT, layout)
+    assert len(notes) == 1 and f"{layout.rows} rows" in notes[0] and "120 declared" in notes[0]
+    # Laid out again at the rows it has, the layout is the same one.
+    again = layout_of(fitted(closed=TIGHT_CLOSED, rows=layout.rows, declared_rows=120))
+    assert np.array_equal(again.versions.counts, layout.versions.counts)
+    assert np.array_equal(again.first_starts, layout.first_starts)
+
+
+def test_plan_counts_the_entities_capped_and_the_versions_moved() -> None:
+    layout = layout_of(fitted())
+    assert layout.cut is not None
+    notes = history.parent_bound_notes(EMIT, layout)
+    assert len(notes) == 1
+    assert f"{layout.cut.capped} of {layout.entities} entities" in notes[0]
+    assert f"{layout.cut.moved} versions moved" in notes[0]

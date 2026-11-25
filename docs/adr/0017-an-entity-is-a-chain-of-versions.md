@@ -502,16 +502,31 @@ weights (ADR 0023 section 4). The plan grows with the parents' rows for a histor
 other. Which parent an entity has is the entity layout's (section 3), so that layout is worked out first, and the
 first starts, rooms, version counts and ended entities after it.
 
-**1. The first start.** It is drawn in `J ∩ [ps, pe - c')` instead of `J`, with `c'` as section 4 says, so the entity
-has the room its versions need before its parent's last day: from the part of `start` inside that interval with one
-`uniform53`, or uniformly over it with one `bounded`, at position 0 of the same `history` path as before. Entities
-that share an interval draw by the same table, so an entity whose interval is `J` draws what it drew without the key.
-A history with the key and no `end` reserves one unit more, `c' = c + 1`, since an entity whose parent ended has a
-closed last version (point 3).
+**1. The first start.** The chain of entity `e` must end at `limit = min(until, pe)`, its parent's last day when that
+is before `until`. The first start is drawn at `s` in `[max(a0, ps), limit - c' - 1]`, with `a0` the window's first
+unit and `c'` as section 4 says (`c` and one more under `closeLast` or for a history with this key and no `end`,
+since an entity whose parent ended has a closed last version, point 3), so the entity has the room its `c`
+versions need. Where that interval is empty, the first start is drawn in `[max(a0, ps), limit - k - 1]`, with
+`k = 1` and one more for a closing unit: the room for one version, the least an entity has. From the part of `start`
+inside the interval with one `uniform53`, or uniformly over it with one `bounded`, at position 0 of the same
+`history` path as before. Entities that share an interval draw by the same table, so an entity whose parent cuts
+nothing draws what it drew without the key. An entity for which even the room for one version is empty is
+`FLX-3403` at plan time, naming `history(<emit>).parent.lifetime`, how many entities it is and the range of their
+parents' lifetimes: the bound is never written knowing it will be violated.
 
-**2. The room.** Entity `e`'s chain must end at `min(until, pe)`: the rank coupling reads that room, and the fit
-(section 4, point 4) compresses the closed lengths into it, so every closed version ends before the parent's last
-day and every start does too. The room is at least `c' + 1` units by point 1, so the fit never fails.
+**2. The room and the counts.** Entity `e`'s room is `r = limit - s`, and its chain holds `r - z - 1` versions at most,
+with `z` one when an ended entity's last version is closed (point 1) and zero otherwise: the first start and a closed last version each take a unit
+(section 4, item 4), and by point 1 that is at least one. The versions per entity are assigned as section 3 says,
+the rank coupling reading the rooms, and each entity's count is then capped at what its room holds. The versions
+an entity loses go to other entities, one at a time, in rounds: each round gives one to every entity that is
+still under its own cap, the entity with the most room first and a tie to the lower entity index, until none is left.
+This is the cap-and-pass of `counts._capped`, the allotment of a `one_to_one` relationship, with a cap for each
+entity in place of one (`counts.pass_excess` is both), so the emit keeps its declared rows and the shape's order is the
+rooms' order. An entity that takes more than the shape's largest count does so only for the versions another entity
+lost. Only when no entity has room left do the rows shrink: the history then has fewer rows than declared, the
+shortfall. `plan`, `apply` and `verify` count the rows it has: the emit is planned again at them, and a layout is
+always worked out from the declared rows. Since the count never exceeds the room, the fit (section 4, item 4) never
+fails and the chain ends by `limit`.
 
 **3. The ending.** An entity whose parent's last day `pe` is at or before `until` is *forced* to end:
 
@@ -541,19 +556,13 @@ already holds is found without reading them. Each entity draws inside its own in
 a table inside almost every entity's interval (a TIMESTAMP chain makes most intervals distinct); the table is not built
 bin by bin but read on demand, in whole numbers, by bisection over the bins that meet the interval, with the values the
 full table gives for every draw. Plan time therefore grows linearly with the entities and logarithmically with the
-bins, and does not grow with the number of distinct parent lifetimes beyond that. `plan` also notes the number of
-entities whose parent leaves no room (the empty intersection below).
+bins, and does not grow with the number of distinct parent lifetimes beyond that. The cap-and-pass costs one sort per
+round, and a round that finds no entity under its cap ends it. `plan` also notes how many entities were capped, how many versions moved and any
+shortfall (the room, point 2).
 
 **4. The `activation` column** holds the first start, as section 5 says, so it keeps to the same bound.
 
-**An empty intersection.** When `J ∩ [ps, pe - c')` is empty, the parent leaves the entity no room for a chain
-(it ended before the window, or opened too late for `c'` units before `until`). The entity then keeps the draw it
-would have had without the key, in `J`, its room is `until`, and it is not forced: nothing more is drawn and the
-entity breaks the bound, as ADR 0024 keeps the draw of a row whose interval is empty. A bundle whose declared ranges
-leave such parents sees them as the entities that violate the bound under `verify`; a bundle that wants none declares
-parents' lifetimes the history can keep to.
-
-**Deterministic everywhere.** The first starts, the rooms and the ended entities are plan-time arrays over the
+**Deterministic everywhere.** The first starts, the rooms, the capped counts and the ended entities are plan-time arrays over the
 entities, so a slice, `--jobs`, `--shard`, the column path and the per-row path read the same values; `--scale`
 scales the entities and parents as before. The projections (ADR 0027) read the same layout, since a projection's
 history is the bound history. `plan` keeps the history's digest apart through the member in `H` and the parent
@@ -565,7 +574,7 @@ first start is not before the parent's start; and, when the parent has ended, no
 last day, every closed end is at or before it, and an entity whose parent ended by `until` has ended (its last version
 is closed, or under `finalVersion` carries `value`). A parent's DATE end is its last day to the last millisecond,
 so with a TIMESTAMP `until` the parent ended by `until` when that millisecond is not after it, not when its day is. `history:one_current` reads a closed last version as allowed
-for a history with this key and no `end`. An entity left with an empty intersection counts as a violation there.
+for a history with this key and no `end`.
 
 **When the forced entities are more than the share.** All of them end, and the share the run reaches is higher than the
 declared one, by the forced entities beyond it. Nothing is printed: `history:within_parent` and the count of ended

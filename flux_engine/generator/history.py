@@ -36,7 +36,7 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from functools import lru_cache
@@ -62,6 +62,7 @@ from flux_engine.generator.counts import (
     check_minimum,
     counted_layout,
     digest_key,
+    pass_excess,
 )
 from flux_engine.generator.paths import (
     CHANGE_PATH_SHAPE,
@@ -229,6 +230,15 @@ class HistoryPick:
     entities: int
     window_start: int
     parent_lifetime: Optional[Tuple[str, Optional[str]]] = None
+    #: The rows the contract declares for a history that keeps to its parent's lifetime, after
+    #: ``--scale``. The layout is worked out from them and may hold fewer (ADR 0017, amendment of
+    #: 2026-11-24), when ``rows`` is what it holds.
+    declared_rows: Optional[int] = None
+
+    @property
+    def laid_rows(self) -> int:
+        """The rows the layout is worked out from: the declared ones for a bound history, else ``rows``."""
+        return self.rows if self.declared_rows is None else self.declared_rows
 
     def as_document(self) -> Dict[str, Any]:
         """The ``history`` member of a driver's plan document: what the entry declares."""
@@ -242,6 +252,9 @@ class HistoryPick:
         if self.parent_lifetime is not None:
             # Only a history bound by its parent's lifetime lists the columns it reads.
             document["parentLifetime"] = list(self.parent_lifetime)
+        if self.declared_rows is not None and self.declared_rows != self.rows:
+            # The layout holds fewer rows than the contract declares.
+            document["declaredRows"] = self.declared_rows
         return document
 
 
@@ -336,13 +349,17 @@ class ParentCut:
     """What a parent's lifetime does to the entities of a history (ADR 0017, amendment of 2026-11-24).
 
     ``limits[e]`` is where entity ``e``'s chain must end, in the chain's unit. ``forced`` flags the
-    entities whose parent ended inside the horizon (they end) and ``infeasible`` those whose parent
-    leaves no room for a chain (they keep the draw they would have without the bound).
+    entities whose parent ended inside the horizon (they end). ``capped`` is the number of entities
+    whose version count was cut to the room their parent leaves them, ``moved`` the versions they
+    lost that went to entities with room to spare, and ``shortfall`` the versions no entity had
+    room for, which the layout does not hold (its rows are the declared ones less the shortfall).
     """
 
     limits: "np.ndarray"
     forced: "np.ndarray"
-    infeasible: "np.ndarray"
+    capped: int = 0
+    moved: int = 0
+    shortfall: int = 0
 
 
 @dataclass(frozen=True)
@@ -511,20 +528,26 @@ def largest_count(entities: int, rows: int, versions: Optional[ChildShape]) -> i
 def parent_bound_notes(expose_id: str, chain: "HistoryPlan") -> List[str]:
     """What ``plan`` says of a history that keeps to its parent's lifetime, one sentence each.
 
-    An entity whose parent leaves no room for its versions keeps the start it would draw without
-    the bound, and one version of an entity forced to end by its parent's end is the ending version
-    itself, which carries the end value from its start (ADR 0017, amendment of 2026-11-24). Advice
-    only: no plan document or digest carries it.
+    The entities whose parent's lifetime leaves room for fewer versions than they were given, and
+    the versions that moved to entities with room to spare (a shortfall too, the declared rows the
+    parents leave no room for), and the count of entities forced to end with their parent in one
+    version, whose one version is the ending version itself and carries the end value from its
+    start (ADR 0017, amendment of 2026-11-24). Advice only: no plan document or digest carries it.
     """
     notes: List[str] = []
     cut = chain.cut
-    if cut is not None and int(cut.infeasible.sum()):
-        found = int(cut.infeasible.sum())
-        notes.append(
-            f"note: history ({expose_id}): {found} of {chain.entities} entities have a parent whose "
-            "lifetime leaves no room for their versions; each keeps the first start it would "
-            "draw without the bound"
+    if cut is not None and cut.capped:
+        said = (
+            f"note: history ({expose_id}): the parents' lifetimes leave {cut.capped} of "
+            f"{chain.entities} entities room for fewer versions than they were given; "
+            f"{cut.moved} versions moved to entities with room to spare"
         )
+        if cut.shortfall:
+            said += (
+                f", and {cut.shortfall} found none, so the history has {chain.rows} rows "
+                f"of the {chain.rows + cut.shortfall} declared"
+            )
+        notes.append(said)
     if chain.forces_ending and cut is not None:
         single = int((cut.forced & (chain.versions.counts == 1)).sum())
         if single:
@@ -1039,25 +1062,30 @@ def _bounded_each(
 def _parent_interval(
     bound: ParentBound,
     parents: "np.ndarray",
-    interval: Tuple[int, int],
-    reserved: int,
-) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray"]:
-    """Each entity's interval ``J`` cut to its parent's lifetime, and which entities have none left.
+    span: Tuple[int, int, int, int],
+    closing: int,
+) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray", "np.ndarray"]:
+    """Each entity's first-start interval, where its chain must end, and which entities have no room.
 
-    The first start lies in ``J`` and in ``[ps, pe - reserved)``, so the entity has the room its
-    versions need before its parent's last day. An entity with no such start keeps ``J`` and is
-    ``infeasible``: nothing is bounded for it.
+    *span* is the window's first unit, ``J``'s last, the horizon and the largest count ``c`` of
+    versions an entity takes; *closing* is ``1`` when an ended entity's last version is closed. The
+    chain must end at ``limit = min(until, pe)``. The first start lies in ``[max(first, ps),
+    limit - c' - 1]`` when that is not empty, so the entity has the room for ``c`` versions
+    (``c' = c + closing``), and so draws what it would draw without the bound where its parent cuts
+    nothing; otherwise in ``[max(first, ps), limit - closing - 2]``, the room for one version.
+    An entity with no such start is the third array's ``True``.
     """
-    first, last = interval
-    low = np.full(parents.shape[0], first, dtype=np.int64)
-    high = np.full(parents.shape[0], last, dtype=np.int64)
-    started = bound.has_start[parents]
-    low = np.where(started, np.maximum(low, bound.starts[parents]), low)
-    ended = bound.has_end[parents]
-    high = np.where(ended, np.minimum(high, bound.ends[parents] - reserved - 1), high)
-    infeasible = low > high
-    low[infeasible], high[infeasible] = first, last
-    return low, high, infeasible
+    first, _last, until, c = span
+    low = np.where(
+        bound.has_start[parents], np.maximum(first, bound.starts[parents]), first
+    ).astype(np.int64)
+    limit = np.where(bound.has_end[parents], np.minimum(until, bound.ends[parents]), until).astype(
+        np.int64
+    )
+    full = limit - (c + closing) - 1
+    one = limit - (1 + closing) - 1
+    high = np.where(low <= full, full, one)
+    return low, high, limit, low > one
 
 
 def first_start_at(
@@ -1077,18 +1105,22 @@ def first_start_at(
     The one ``uniform53`` over the part of ``start`` inside ``J`` when a bin meets it, else one
     ``bounded`` over ``J``, at draw index 0 of ``("sim", sim_id, "gen", exposeId, "history",
     entity)``. *parent* is the entity's parent lifetime in the chain's unit, its start and its last
-    day (``None`` for no bound): ``J`` is cut to it as the planner cuts it.
+    day (``None`` for no bound): ``J`` is cut to it as the planner cuts it, to the room for ``c``
+    versions, else for one (:func:`_parent_interval`).
     """
-    first, last, _until = _first_start_interval(entry, kind, window_start(time_bounds), c)
+    first, last, until = _first_start_interval(entry, kind, window_start(time_bounds), c)
     if parent is not None:
-        reserved = c + (1 if _closes_last(entry) else 0)
+        closing = 1 if _closes_last(entry) else 0
         low, high = first, last
         if parent[0] is not None:
             low = max(low, parent[0])
-        if parent[1] is not None:
-            high = min(high, parent[1] - reserved - 1)
-        if low <= high:
-            first, last = low, high
+        limit = until if parent[1] is None else min(until, parent[1])
+        high = limit - (c + closing) - 1
+        if low > high:
+            high = limit - (1 + closing) - 1
+        if low > high:
+            raise _refuse(f"history ({entry.emit}).parent.lifetime: the parent leaves no room")
+        first, last = low, high
     table = _start_table(entry.start, kind, first, last, entry.emit)
     stream = counter_stream(root, history_path(sim_id, expose_id, entity), HISTORY_PATH_SHAPE)
     if table is not None:
@@ -1115,6 +1147,9 @@ class HistoryBinding:
     #: The start and the end column of the parent emit's ``lifetimes`` entry, read by an entry that
     #: declares ``parent.lifetime`` (ADR 0017, amendment of 2026-11-24).
     parent_lifetime: Optional[Tuple[str, Optional[str]]] = None
+    #: The emit's rows as declared (after ``--scale``), for an entry that declares
+    #: ``parent.lifetime``: the layout is worked out from them and may hold fewer.
+    declared_rows: Optional[int] = None
 
 
 def plan_history(
@@ -1260,9 +1295,11 @@ def _chain(
             f"history ({entry.emit}): an entity takes {int(versions.counts.max())} versions, "
             f"more than the {c} the first starts leave room for"
         )
+    if cut is not None:
+        versions, cut = _fitted_counts(versions, starts, cut, 1 if _closes_last(entry) else 0)
     plan = HistoryPlan(
         entities=entities,
-        rows=rows,
+        rows=versions.children,
         c=c,
         until=until,
         first_starts=starts,
@@ -1285,20 +1322,87 @@ def _bounded_chain(
     """Every entity's first start inside its parent's lifetime, and what the lifetimes do to it.
 
     *span* is the first starts' interval, the horizon and the largest count of versions an entity
-    takes.
+    takes. A parent that leaves an entity no room for even one version is ``FLX-3403``.
     """
     entry, kind = declared
-    first, last, until, c = span
+    until = span[2]
     per_parent, bound = bound_by
     lifetimes = bound.get()
     parents = per_parent.parents_of(np.arange(per_parent.children, dtype=np.int64))
-    reserved = c + (1 if _closes_last(entry) else 0)
-    low, high, infeasible = _parent_interval(lifetimes, parents, (first, last), reserved)
+    low, high, limits, short = _parent_interval(
+        lifetimes, parents, span, 1 if _closes_last(entry) else 0
+    )
+    if bool(short.any()):
+        raise _no_room(entry, kind, lifetimes, parents[short], int(parents.shape[0]), until)
     starts = _bounded_first_starts(root, sim_id, expose_id, entry, kind, low, high)
-    closing = lifetimes.has_end[parents] & ~infeasible
-    last_day = lifetimes.ends[parents]
-    limits = np.where(closing, np.minimum(last_day, until), until).astype(np.int64)
-    return starts, ParentCut(limits, closing & (last_day <= until), infeasible)
+    closing = lifetimes.has_end[parents]
+    forced = closing & (lifetimes.ends[parents] <= until)
+    return starts, ParentCut(limits, forced)
+
+
+def _no_room(
+    entry: HistoryEntry,
+    kind: LogicalKind,
+    bound: ParentBound,
+    parents: "np.ndarray",
+    entities: int,
+    until: int,
+) -> FluxError:
+    """``FLX-3403`` for the entities whose parent leaves no room for one version: how many, and their parents' lifetimes."""
+    opened = bound.starts[parents][bound.has_start[parents]]
+    closed = bound.ends[parents][bound.has_end[parents]]
+
+    def spread(found: "np.ndarray") -> str:
+        return (
+            "none"
+            if found.shape[0] == 0
+            else f"{_unit_text(int(found.min()), kind)} to {_unit_text(int(found.max()), kind)}"
+        )
+
+    return _refuse(
+        f"history ({entry.emit}).parent.lifetime: {int(parents.shape[0])} of {entities} entities "
+        "have a parent whose lifetime leaves no room for one version before "
+        f"until ({_unit_text(until, kind)}){_closing_words(entry)}; the parents of those entities "
+        f"open {spread(opened)} and close {spread(closed)}; give the parents longer lifetimes, "
+        "move until later, or drop parent.lifetime"
+    )
+
+
+def _unit_text(value: int, kind: LogicalKind) -> str:
+    """An instant in the chain's unit as the date or timestamp a contract writes."""
+    if kind is LogicalKind.DATE:
+        return date.fromordinal(value + _EPOCH_ORDINAL).isoformat()
+    moment = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=value)
+    return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _fitted_counts(
+    versions: CountedLayout, starts: "np.ndarray", cut: ParentCut, closing: int
+) -> Tuple[CountedLayout, ParentCut]:
+    """The version counts held to each entity's room, and the versions that lost their place passed on.
+
+    An entity's chain holds ``room - closing - 1`` versions, the first start and a closed last
+    version each taking a unit (ADR 0017 section 4, item 4), and at least one by the first start's
+    interval. Each count is capped at that; the versions above it go one at a time, in rounds, to
+    the entities still under their own cap, the most room first and a tie to the lower entity: the
+    cap-and-pass of :func:`~flux_engine.generator.counts.pass_excess` (``counts._capped``'s
+    allotment, with a cap for each entity and the room as the weight, which is the order the rank
+    coupling gives the counts by). Versions no entity has room for are the ``shortfall``: the
+    layout holds fewer rows than it was asked for.
+    """
+    rooms = cut.limits - starts
+    caps = rooms - closing - 1
+    counts = versions.counts
+    kept = np.minimum(counts, caps)
+    lost = int((counts - kept).sum())
+    if lost == 0:
+        return versions, cut
+    fitted, left = pass_excess(kept, caps, rooms, lost)
+    layout = CountedLayout(
+        counts=fitted, offsets=np.cumsum(fitted) - fitted, children=int(fitted.sum())
+    )
+    held = replace(cut, capped=int((counts > caps).sum()), moved=lost - left, shortfall=left)
+    return layout, held
 
 
 def _rooms_of(

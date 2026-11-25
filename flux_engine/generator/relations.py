@@ -1435,7 +1435,7 @@ class RelationReader:
             owner.expose_id,
             driver.history.entry,
             kind=driver.history.kind,
-            rows=driver.history.rows,
+            rows=driver.history.laid_rows,
             entities=driver.history.entities,
             time_bounds=(driver.history.window_start,),
             outer=OuterInputs(
@@ -2892,6 +2892,7 @@ def _history_shape_of(
         entities=binding.entities,
         window_start=plan.time_bounds[0],
         parent_lifetime=binding.parent_lifetime,
+        declared_rows=binding.declared_rows,
     )
     # The refusals that follow from declared values alone, before any layout is worked out.
     declared = binding.entry.parent
@@ -2909,7 +2910,7 @@ def _history_shape_of(
     check_layout(
         pick.entry,
         pick.kind,
-        pick.rows,
+        pick.laid_rows,
         pick.entities,
         pick.window_start,
         target,

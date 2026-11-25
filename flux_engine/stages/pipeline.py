@@ -3342,7 +3342,8 @@ def _planned_with_projections(
     guesses = {index: _most_rows(resolved_emits, found) for index, found in projected.items()}
     planned = tuple(plan_at(index, guesses.get(index)) for index in range(len(resolved_emits)))
     related = _relate_emits(resolved_emits, planned, namespace)
-    if not projected:
+    shrunk = _shrunk_histories(related, root)
+    if not projected and not shrunk:
         return related
     counts = {
         index: derived_rows(
@@ -3353,9 +3354,12 @@ def _planned_with_projections(
         )
         for index, found in projected.items()
     }
-    if any(counts[index] != guesses[index] for index in counts):
+    if shrunk or any(counts[index] != guesses[index] for index in counts):
+        counts.update(shrunk)
         replanned = tuple(plan_at(index, counts.get(index)) for index in range(len(resolved_emits)))
         related = _relate_emits(resolved_emits, replanned, namespace)
+    if not projected:
+        return related
     return tuple(
         (
             replace(
@@ -3375,6 +3379,24 @@ def _planned_with_projections(
         )
         for index, planned_emit in enumerate(related)
     )
+
+
+def _shrunk_histories(related: Sequence[_PlannedEmit], root: SeedTreeRoot) -> Dict[int, int]:
+    """The rows of each history that keeps to its parent's lifetime and holds fewer than it declares.
+
+    The parents' lifetimes can leave no entity room for a version the layout was asked for, and the
+    layout then holds fewer rows (ADR 0017, amendment of 2026-11-24). Its emit is planned again at
+    the rows it holds, so that plan, apply and verify count the same rows.
+    """
+    found: Dict[int, int] = {}
+    for index, planned in enumerate(related):
+        plan = planned.plan
+        pick = None if plan is None else history_pick_of(plan)
+        if plan is not None and pick is not None and pick.parent_lifetime is not None:
+            held = chain_of(plan, root).rows
+            if held != plan.rows:
+                found[index] = held
+    return found
 
 
 def _plan_of(planned: _PlannedEmit) -> GeneratorPlan:
@@ -3516,7 +3538,8 @@ def _histories_of(resolved: Sequence[ResolvedEmit]) -> Dict[str, HistoryBinding]
             entries[0].entities,
             ends["start"],
             ends.get("end"),
-            _parent_lifetime_of(emit, entries[0], resolved),
+            parent_lifetime := _parent_lifetime_of(emit, entries[0], resolved),
+            None if parent_lifetime is None else emit.declared_row_count,
         )
     return found
 
