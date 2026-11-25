@@ -497,7 +497,9 @@ class Ledger:
         member the bundle reads, a member is listed alone only if the reader lets it leave alone,
         and one it needs is not listed. A profile with exactly the listed pointers dropped is one
         the reader accepts. The inventory (:meth:`__iter__`) still holds each statistic, with the
-        state the rules gave it.
+        state the rules gave it, so the unused ones of it are not this list: an entry the reader
+        holds whole has each of its members there. ``init --json`` carries this list as
+        ``ledger.unused``.
         """
         listing: Dict[Tuple[str, ...], Optional[LedgerEntry]] = dict(self._entries)
         for group in self._groups:

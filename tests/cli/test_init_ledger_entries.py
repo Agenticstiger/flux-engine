@@ -21,6 +21,7 @@ Pinned here, from small hand-written profiles of a lending library:
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,8 +43,10 @@ from flux_engine.seam.parameters import (
 )
 from flux_engine.stages.plan import plan as plan_stage
 from flux_stats.errors import FluxError
-from flux_stats.profile import load_profile_text
+from flux_stats.profile import SCHEMA_URL_1_4_0, load_profile_text
 from tests.author import test_history_init as history_init
+from tests.author.test_noisy_profile import _noise
+from tests.author.test_noisy_profile import _noisy as _noisy_levels
 from tests.cli.test_init_dates import (
     HOLDS,
     SCHEMA_URL,
@@ -633,6 +636,202 @@ def test_every_member_of_an_entry_unused_or_withheld_is_listed_whole() -> None:
         "disclosure": "none",
     }
     assert "/relationships/0/exposure/1" in _unused(profile)
+
+
+# -- a calendar entry of a date column, and what is left of it once its list is dropped -----------
+
+#: The members' contract with the renewal date a DATE, which has no hour of the week.
+DATE_CONTRACT = CONTRACT.replace(
+    "    - name: renewed_on\n      type: TIMESTAMP\n", "    - name: renewed_on\n      type: DATE\n"
+)
+_ENTRY = "/tables/member/calendar/0"
+
+
+def _date_profile() -> Dict[str, Any]:
+    """The library with one calendar entry, of the DATE ``renewed_on``: a month and a weekday."""
+    profile = _profile()
+    profile["tables"]["member"]["calendar"] = [
+        _calendar(
+            "renewed_on",
+            month=_stat("month", _months(m3=300, m10=100, m1=40)),
+            dayOfWeek=_stat("dayOfWeek", [10, 10, 10, 10, 10, 1, 1]),
+        )
+    ]
+    return profile
+
+
+def _withheld(histogram: Dict[str, Any]) -> Dict[str, Any]:
+    """*histogram* as a profile that suppresses its cells publishes it: a status, and no counts."""
+    found = copy.deepcopy(histogram)
+    group = found["groups"][0]
+    group["status"] = "C"
+    del group["levelCounts"], group["k"]
+    return found
+
+
+def _released(histogram: Dict[str, Any]) -> Dict[str, Any]:
+    """*histogram* as a profile released under differential privacy publishes it: noisy counts."""
+    found = copy.deepcopy(histogram)
+    group = found["groups"][0]
+    group["noisyCounts"] = [str(count) for count in group.pop("levelCounts")]
+    del group["k"]
+    found["disclosure"] = "noisy"
+    found["noise"] = _noise(rho="0.1")
+    return found
+
+
+def test_a_date_calendar_none_of_which_is_read_is_listed_whole_and_dropping_it_is_read(
+    tmp_path: Path,
+) -> None:
+    profile = _date_profile()
+    first = Authored(tmp_path / "first", profile, DATE_CONTRACT)
+    assert first.result.exit_code == 0, first.result.stderr
+    assert _ENTRY in first.pointers
+    assert not [pointer for pointer in first.pointers if pointer.startswith(_ENTRY + "/")]
+    dropped = _drop(profile, first.pointers)
+    _read(dropped)
+    second = Authored(tmp_path / "second", dropped, DATE_CONTRACT)
+    assert second.result.exit_code == 0, second.result.stderr
+    assert second.comparable() == first.comparable()
+
+
+def _released_library(month: str, weekday: str) -> Dict[str, Any]:
+    """The library as a profile released for its loans: each histogram of a DATE's calendar as given.
+
+    *month* and *weekday* are ``exact``, ``released`` (noisy counts) or ``withheld``. The loans'
+    region is released too, and a bundle reads it, so the profile's privacy loss is spent.
+    """
+    forms = {"exact": lambda each: each, "released": _released, "withheld": _withheld}
+    profile = _profile()
+    profile["_schemaURL"] = SCHEMA_URL_1_4_0
+    profile["disclosureRules"] = {"none": {}, "noisy": {}}
+    profile["privacy"] = {
+        "measure": "zeroConcentratedDP",
+        "privacyLoss": {"rho": "0.5"},
+        "privacyUnit": {"expose": "loan"},
+    }
+    profile["tables"]["loan"]["columns"]["region"] = {
+        "domain": "category",
+        "statistics": [_noisy_levels(["east", "north", "west"], ["520", "500", "300"])],
+    }
+    profile["tables"]["loan"]["calendar"] = [
+        _calendar(
+            "borrowed_at",
+            month=forms[month](_stat("month", _months(m3=300, m10=100, m1=40))),
+            dayOfWeek=forms[weekday](_stat("dayOfWeek", [10, 10, 10, 10, 10, 1, 1])),
+        )
+    ]
+    return profile
+
+
+_RELEASED_CONTRACT = CONTRACT.replace(
+    "    - name: borrowed_at\n      type: TIMESTAMP\n",
+    "    - name: borrowed_at\n      type: DATE\n",
+).replace(
+    "    - name: returned_at\n      type: TIMESTAMP\n",
+    "    - name: returned_at\n      type: TIMESTAMP\n"
+    "    - name: region\n      type: \"enum('east','north','west')\"\n",
+)
+
+
+@pytest.mark.parametrize(
+    ("month", "weekday"), list(itertools.product(("exact", "released", "withheld"), repeat=2))
+)
+def test_a_released_date_calendar_dropped_by_its_list_keeps_a_histogram_the_reader_accepts(
+    tmp_path: Path, month: str, weekday: str
+) -> None:
+    profile = _released_library(month, weekday)
+    _read(profile)
+    first = Authored(tmp_path / "first", profile, _RELEASED_CONTRACT)
+    assert first.result.exit_code == 0, first.result.stderr
+    entry = "/tables/loan/calendar/0"
+    members = [pointer for pointer in first.pointers if pointer.startswith(entry + "/")]
+    # An entry no histogram of which is read is named whole, never member by member; one that is
+    # read leaves a histogram, whichever others are listed beside it.
+    if entry in first.pointers:
+        assert not members
+    else:
+        assert len(members) < 2
+    dropped = _drop(profile, first.pointers)
+    _read(dropped)
+    second = Authored(tmp_path / "second", dropped, _RELEASED_CONTRACT)
+    assert second.result.exit_code == 0, second.result.stderr
+
+
+_STATES = ("absent", "used", "unused", "withheld")
+
+
+@pytest.mark.parametrize(
+    "states",
+    [
+        states
+        for states in itertools.product(_STATES, repeat=3)
+        if any(state != "absent" for state in states)
+    ],
+)
+def test_no_member_of_a_calendar_entry_leaves_the_entry_with_none_of_its_histograms(
+    states: Tuple[str, str, str],
+) -> None:
+    # Whatever the entry holds of its three histograms, and whichever the rules read or the
+    # profile withheld, the pointers the ledger lists leave a calendar entry the reader accepts.
+    keys = ("month", "dayOfWeek", "hourOfWeek")
+    made = {
+        "month": _stat("month", _months(m3=300, m10=100, m1=40)),
+        "dayOfWeek": _stat("dayOfWeek", [10, 10, 10, 10, 10, 1, 1]),
+        "hourOfWeek": _stat("hourOfWeek", [1] * 168),
+    }
+    entry: Dict[str, Any] = {"column": "renewed_on"}
+    for key, state in zip(keys, states, strict=True):
+        if state != "absent":
+            entry[key] = _withheld(made[key]) if state == "withheld" else made[key]
+    profile = _profile()
+    profile["tables"]["member"]["calendar"] = [entry]
+    ledger = Ledger(profile)
+    for key, state in zip(keys, states, strict=True):
+        if state == "used":
+            ledger.use(("tables", "member", "calendar", "0", key), "read")
+    everything = [item.pointer for item in ledger.unused_entries()]
+    _read(_drop(profile, everything))
+    listed = [pointer for pointer in everything if "/calendar/" in pointer]
+    if "used" in states:
+        assert _ENTRY not in listed
+    elif "unused" in states:
+        assert listed == [_ENTRY]
+
+
+# -- the ledger of ``init --json`` ---------------------------------------------------------------
+
+
+def test_the_json_ledger_lists_what_an_owner_can_leave_out_as_the_register_does(
+    tmp_path: Path,
+) -> None:
+    profile = _date_profile()
+    written = Authored(tmp_path, profile, DATE_CONTRACT)
+    assert written.result.exit_code == 0, written.result.stderr
+    ledger = written.result.artifacts["ledger"]
+    assert [item["pointer"] for item in ledger["unused"]] == written.pointers
+    assert [item["reason"] for item in ledger["unused"]] == [
+        item["reason"] for item in written.unused
+    ]
+    _read(_drop(profile, [item["pointer"] for item in ledger["unused"]]))
+
+
+def test_the_statistics_of_the_json_ledger_name_each_member_of_a_whole_entry_on_its_own(
+    tmp_path: Path,
+) -> None:
+    # The inventory is per statistic, with the state each was given. An entry the reader holds
+    # whole is not droppable by those pointers: that is what ``ledger.unused`` is for.
+    profile = _date_profile()
+    written = Authored(tmp_path, profile, DATE_CONTRACT)
+    assert written.result.exit_code == 0, written.result.stderr
+    members = [
+        entry["pointer"]
+        for entry in written.result.artifacts["ledger"]["statistics"]
+        if entry["state"] == "unused" and entry["pointer"].startswith(_ENTRY + "/")
+    ]
+    assert members == [f"{_ENTRY}/month", f"{_ENTRY}/dayOfWeek"]
+    with pytest.raises(FluxError, match="holds at least one of its three histograms"):
+        _read(_drop(profile, members))
 
 
 # -- a pointer of the register at a whole entry ------------------------------------------------

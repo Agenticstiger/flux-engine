@@ -1130,6 +1130,12 @@ def _described(
             "ledger": {
                 "counts": bundle.ledger.counts(),
                 "statistics": [entry.as_document() for entry in bundle.ledger],
+                # What an owner can leave out: the register's list, an entry whose members are
+                # all unused named whole (the statistics above name each member on its own).
+                "unused": [
+                    {"pointer": entry.pointer, "definition": entry.definition, "reason": entry.note}
+                    for entry in bundle.ledger.unused_entries()
+                ],
                 "replacedBy": [
                     {"pointer": pointer, "definition": definition, "assumptions": count}
                     for pointer, definition, count in bundle.ledger.replacements
