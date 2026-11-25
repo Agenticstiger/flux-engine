@@ -30,8 +30,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   count table over that table, L1 = L2 = `m_T`, and its share adds to the budget. A column of any domain may state
   `nullCount/2`, a noisy count of its known and NULL rows, charged the same way. A history whose every member is noisy
   no longer keeps a profile from P3. A request may ask for `history: {}` and for `nullCount/2`. The schema is
-  `docs/spec/profile-1-5.schema.json`; documents of format 1-4-0 and earlier read as before. The readers follow in the
-  next changes.
+  `docs/spec/profile-1-5.schema.json`; documents of format 1-4-0 and earlier read as before.
+- flux-stats reads profile format 1-5-0: a noisy history member is charged `m_T` and refused outside a table the unit
+  follows into, a column's `nullCount/2` is read into `ColumnEntry.null_counts`, and a history whose every member is
+  noisy no longer keeps a run from P3. Before, a `noise` block on any history member was refused in every format.
 - `init --json` carries `ledger.unused`, the list an owner can leave out of the profile: an entry the profile reader
   holds whole (a calendar entry with none of its histograms read, say) is named by its own pointer, so dropping
   exactly that list leaves a profile the reader accepts. `ledger.statistics` still names each statistic on its own,

@@ -58,7 +58,7 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Set,
 from flux_engine.core.grades import ORDER, Pattern, at_least, weakest
 from flux_engine.evidence.provenance import quoted_name
 from flux_stats.errors import FluxError
-from flux_stats.profile import SCHEMA_URL_1_4_0, Profile, parse_profile
+from flux_stats.profile import SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0, Profile, parse_profile
 
 __all__ = [
     "Accounting",
@@ -286,7 +286,7 @@ def _account(profile: Optional[Mapping[str, Any]]) -> Tuple[Optional[Accounting]
         parts=len(parts or ()),
         spent={key: _decimal(value) for key, value in spent.items()},
         public_structure=block.get("publicStructure") is True,
-        from_1_4=profile.get("_schemaURL") == SCHEMA_URL_1_4_0,
+        from_1_4=profile.get("_schemaURL") in (SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0),
         follows=follows,
         reached=reach,
         fixed=fixed,
@@ -458,6 +458,32 @@ def _table_structure_reasons(
             )
 
 
+def _history_released_exact(history: Any) -> bool:
+    """Whether a table's ``history`` holds a member released without noise (format 1-5-0 allows it).
+
+    A history with no member that carries a ``noise`` block is exact, as is one that has any member
+    without one; an empty or absent history holds nothing. A member the grade does not recognise
+    counts as released without noise.
+    """
+    if not history:
+        return False
+    if not isinstance(history, Mapping):
+        return True
+    members: List[Any] = [
+        history.get(key)
+        for key in ("versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion")
+    ]
+    if "reasons" in history:
+        members.append(history["reasons"])
+    columns = history.get("columns")
+    for column in columns.values() if isinstance(columns, Mapping) else ():
+        if isinstance(column, Mapping):
+            members += [column.get("initial"), column.get("transitions")]
+        else:
+            members.append(None)
+    return any(not (isinstance(member, Mapping) and "noise" in member) for member in members)
+
+
 def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> ProfileGrade:
     """Grade a run from the document of the profile it pins (``None`` when it pins none).
 
@@ -516,7 +542,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             for index, pair in enumerate(table.get("columnPairs") or ())
             if not _pair_is_noisy(pair)
         ]
-        exact["history"] |= bool(table.get("history"))
+        exact["history"] |= _history_released_exact(table.get("history"))
         if any(
             isinstance(pair, Mapping)
             and (
@@ -599,8 +625,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
         reasons.append("the profile holds a statistic released without noise")
     if exact["history"]:
         reasons.append(
-            "the profile holds a history of versions, whose statistics are released without noise "
-            "because one row can move an entity between cells"
+            "the profile holds a history of versions with a member released without noise"
         )
     if exact["other"]:
         reasons.append(

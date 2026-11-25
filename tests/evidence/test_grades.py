@@ -377,6 +377,36 @@ def test_a_noisy_profile_that_holds_an_exact_history_is_p1_and_names_the_history
     assert accounting.spent == {"rho": "0.2"}
 
 
+def _noisy_history_example() -> Dict[str, Any]:
+    document = json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8"))
+    version = document["tables"]["card_version"]["history"]["versionLength"]
+    version["noise"] = {"mechanism": "gaussian", "scale": "8", "privacyLoss": {"rho": "0.125"}}
+    version["groups"] = [{"group": "", "status": "F", "noisyCounts": ["251.5", "348.2", "250.6"]}]
+    document["privacy"]["privacyLoss"]["rho"] = "1.125"
+    return document
+
+
+def test_a_history_whose_every_member_is_noisy_no_longer_keeps_a_profile_from_p3() -> None:
+    graded = grade_profile(_noisy_history_example(), pinned=True)
+    assert graded.pattern is Pattern.P3, graded.reasons
+
+
+def test_a_history_with_one_member_without_noise_keeps_a_profile_from_p1() -> None:
+    graded = grade_profile(
+        json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8")),
+        pinned=True,
+    )
+    assert graded.pattern is Pattern.P1
+    assert any("history" in reason and "without noise" in reason for reason in graded.reasons)
+
+
+def test_a_noisy_null_count_does_not_keep_a_profile_from_p3() -> None:
+    document = _noisy_history_example()
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3
+    assert graded.accounting is not None and graded.accounting.parts == 9
+
+
 # ---------------------------------------------------------------------------
 # Calendar and date-pair statistics, relationship dates, and members the grade does not know
 # ---------------------------------------------------------------------------

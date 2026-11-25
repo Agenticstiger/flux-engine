@@ -80,6 +80,7 @@ from flux_stats.column_metrics import (
     QUANTILES,
     TIMESTAMP,
 )
+from flux_stats.definitions import LEVEL_HISTOGRAM as _LEVEL_HISTOGRAM
 from flux_stats.definitions import QUANTILE_BINNED, level_order
 from flux_stats.fixedpoint import MAX_FRACTIONAL_BITS
 from flux_stats.noise import (
@@ -141,6 +142,8 @@ __all__ = [
     "MAX_DATE_PAIRS",
     "MAX_EXPOSURES",
     "MetricEntry",
+    "NULL_COUNT_LEVELS",
+    "NullCountEntry",
     "Accounting",
     "Noise",
     "PairEntry",
@@ -156,6 +159,7 @@ __all__ = [
     "SCHEMA_URL_1_2_0",
     "SCHEMA_URL_1_3_0",
     "SCHEMA_URL_1_4_0",
+    "SCHEMA_URL_1_5_0",
     "SEVERAL",
     "STRUCTURAL_CLASSES",
     "SampleSize",
@@ -193,6 +197,26 @@ SCHEMA_URL_1_3_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-3
 #: :data:`_FORMS_OF_1_4_0` names it.
 SCHEMA_URL_1_4_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json"
 
+#: Format ``1-5-0``, the ``$id`` of ``docs/spec/profile-1-5.schema.json``. It adds ``nullCount/2`` of a
+#: column and a ``noise`` block on a member of a table's ``history``, both released only under the
+#: account. :data:`_FORMS_OF_1_5_0` names them.
+SCHEMA_URL_1_5_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-5-0/FluxProfile.json"
+
+#: Every form that only format ``1-5-0`` holds, by the key the reader names it with, and what the
+#: refusal calls it (:meth:`_Reader.require_1_5_0`).
+_FORMS_OF_1_5_0: Mapping[str, str] = MappingProxyType(
+    {
+        "nullCount": "a nullCount/2 statistic",
+        "noisyHistory": "a noise block on a member of a history",
+    }
+)
+
+#: The two cells of a ``nullCount/2``, in order: the rows where the column is known, then NULL.
+NULL_COUNT_LEVELS: Tuple[str, ...] = ("known", "null")
+
+#: The identifier of the statistic that states how many rows of a column are known and NULL.
+_NULL_COUNT = "nullCount/2"
+
 #: Every form that only format ``1-4-0`` holds, by the key the reader names it with, and what the
 #: refusal calls it. A document that names an earlier format and holds one is refused
 #: (:meth:`_Reader.require_1_4_0`). A later form of the format is one more entry here and one call at
@@ -223,8 +247,8 @@ CHAIN_LEVELS: Tuple[str, ...] = ("dayBefore", "gap", "nextStart", "overlap")
 #: How an entity's last version ends (format 1-3-0, ``history.lastVersion``), in code point order.
 LAST_VERSION_LEVELS: Tuple[str, ...] = ("closed", "open")
 
-#: Why a ``noise`` block is refused beside ``per`` and in a history: one changed row can move an
-#: entity between two cells, and this reader charges a sensitivity of 1 for a noisy statistic.
+#: Why a ``noise`` block is refused beside ``per``: one changed row can move an entity between two
+#: cells, and this reader charges a sensitivity of 1 for a noisy statistic.
 _MOVES_AN_ENTITY = (
     "is not read: one changed row can move an entity between two cells, and this reader charges "
     "a sensitivity of 1 for a noisy statistic"
@@ -241,13 +265,17 @@ _READ_FORMATS = (
     SCHEMA_URL_1_2_0,
     SCHEMA_URL_1_3_0,
     SCHEMA_URL_1_4_0,
+    SCHEMA_URL_1_5_0,
 )
 
 #: The formats that hold the sections of format ``1-2-0`` (``invariants``, ``privacy``).
-_FROM_1_2_0 = (SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0)
+_FROM_1_2_0 = (SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0)
 
 #: The formats that hold the forms of format ``1-3-0``.
-_FROM_1_3_0 = (SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0)
+_FROM_1_3_0 = (SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0)
+
+#: The formats that hold the forms of format ``1-4-0``.
+_FROM_1_4_0 = (SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0)
 
 #: The most columns a ``per`` names (PROFILE-SPEC.md section 3).
 MAX_PER_COLUMNS = 8
@@ -501,6 +529,9 @@ class ColumnEntry:
     #: answers too (:func:`_derived`): the draw of a column in a clique rests on these, so a
     #: comparison against the document's own statistic carries both noises (SCORECARD-SPEC.md 9).
     clique_statistics: Tuple[StatisticEntry, ...] = ()
+    #: The column's ``nullCount/2`` statistic (format 1-5-0), at most one, kept apart from
+    #: ``statistics`` as the cliques are.
+    null_counts: Tuple[NullCountEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -596,6 +627,21 @@ class HistoryColumn:
 
     initial: StatisticEntry
     transitions: StatisticEntry
+
+
+@dataclass(frozen=True)
+class NullCountEntry:
+    """A ``nullCount/2`` statistic of a column (format 1-5-0): two noisy cells, known then NULL.
+
+    ``group`` is the one noisy group, read as any noisy group is: its ``noisy`` values are the
+    published cells and its statistic is their point estimate, whose ``k`` is the estimated number
+    of rows and whose two counts are the rows where the column is known and where it is NULL.
+    """
+
+    sample_size: SampleSize
+    disclosure: str
+    noise: Noise
+    group: ProfileGroup
 
 
 @dataclass(frozen=True)
@@ -1099,6 +1145,7 @@ class _Reader:
         accounting: Optional[Accounting] = None,
         from_1_3: bool = False,
         from_1_4: bool = False,
+        from_1_5: bool = False,
         allow_empty_calendar_entries: bool = False,
     ) -> None:
         self.rules = rules
@@ -1111,6 +1158,9 @@ class _Reader:
         #: Whether the document names format ``1-4-0``, the only one that holds the forms of
         #: :data:`_FORMS_OF_1_4_0`.
         self.from_1_4 = from_1_4
+        #: Whether the document names format ``1-5-0``, the only one that holds the forms of
+        #: :data:`_FORMS_OF_1_5_0`.
+        self.from_1_5 = from_1_5
         #: Every statistic grouped by a link, with the place it was read at and its own table,
         #: checked against the tables once all of them are read (:meth:`check_links`).
         self.links: List[Tuple[str, str, StatisticEntry]] = []
@@ -1130,6 +1180,17 @@ class _Reader:
             raise refuse(
                 where,
                 f"{_FORMS_OF_1_4_0[form]} is a form of format 1-4-0, and this document names an "
+                "earlier format",
+            )
+
+    def require_1_5_0(self, form: str, where: str) -> None:
+        """Refuse (``FLX-5036``) a form of format 1-5-0 in a document that names an earlier one."""
+        if form not in _FORMS_OF_1_5_0:
+            raise KeyError(f"{form!r} is no form of format 1-5-0")
+        if not self.from_1_5:
+            raise refuse(
+                where,
+                f"{_FORMS_OF_1_5_0[form]} is a form of format 1-5-0, and this document names an "
                 "earlier format",
             )
 
@@ -1592,11 +1653,17 @@ class _Reader:
             )
         return reach
 
-    def statistics(self, value: Any, where: str, **section: Any) -> Tuple[StatisticEntry, ...]:
-        """Read a section's list of statistics; no two may answer one question."""
+    def statistics(
+        self, value: Any, where: str, *, skip: FrozenSet[int] = frozenset(), **section: Any
+    ) -> Tuple[StatisticEntry, ...]:
+        """Read a section's list of statistics; no two may answer one question.
+
+        The positions in *skip* are read by the caller (a column's ``nullCount/2``).
+        """
         read = tuple(
             self.statistic(item, f"{where}[{index}]", **section)
             for index, item in enumerate(_list(value, where))
+            if index not in skip
         )
         self._no_repeats(read, where)
         return read
@@ -1854,9 +1921,22 @@ class _Reader:
                 f"{where}.metrics.{metric_name}",
                 domain=domain,
             )
+        listed = _list(raw.get("statistics", []), f"{where}.statistics")
+        null_at = frozenset(
+            index
+            for index, item in enumerate(listed)
+            if isinstance(item, Mapping) and item.get("definition") == _NULL_COUNT
+        )
+        null_counts = tuple(
+            self._null_count(listed[index], f"{where}.statistics[{index}]", expose_id)
+            for index in sorted(null_at)
+        )
+        if len(null_counts) > 1:
+            raise refuse(f"{where}.statistics", "repeats a statistic already in this list")
         statistics = self.statistics(
-            raw.get("statistics", []),
+            listed,
             f"{where}.statistics",
+            skip=null_at,
             kinds=_COLUMN_KINDS,
             grouped_by=categorical - {name},
             domain=domain,
@@ -1874,6 +1954,57 @@ class _Reader:
             domain=domain,
             metrics=MappingProxyType(found_metrics),
             statistics=statistics,
+            null_counts=null_counts,
+        )
+
+    def _null_count(self, value: Any, where: str, expose_id: Optional[str]) -> NullCountEntry:
+        """A column's ``nullCount/2`` (format 1-5-0): two noisy cells, charged as a count table.
+
+        One row lands in exactly one cell (known or NULL), so a unit that contributes ``m_T`` rows
+        of the column's table moves the cells by ``m_T`` in L1 and in L2 (PROFILE-SPEC.md section
+        3a). It is released with noise only, ungrouped, and in a table the unit changes.
+        """
+        self.require_1_5_0("nullCount", f"{where}.definition")
+        if isinstance(value, Mapping) and "noise" not in value:
+            raise refuse(where, "a nullCount/2 is released with a noise block only")
+        raw = _mapping(
+            value,
+            where,
+            required=("definition", "sampleSize", "disclosure", "levels", "noise", "groups"),
+        )
+        if expose_id is None:
+            raise refuse(where, "a nullCount/2 lies in a column of a table of the profile")
+        disclosure = raw["disclosure"]
+        if not isinstance(disclosure, str) or disclosure not in self.rules:
+            raise refuse(f"{where}.disclosure", "names no rule in disclosureRules")
+        if tuple(read_texts(raw["levels"], f"{where}.levels")) != NULL_COUNT_LEVELS:
+            raise refuse(f"{where}.levels", f"are exactly {list(NULL_COUNT_LEVELS)}")
+        at = f"{where}.noise"
+        accounting = self._require_account(at)
+        reach = self._reach(expose_id, at, accounting)
+        noise = read_noise(
+            raw["noise"],
+            at,
+            accounting,
+            l1=Fraction(reach),
+            l2_squared=Fraction(reach * reach),
+        )
+        groups = _list(raw["groups"], f"{where}.groups")
+        if len(groups) != 1:
+            raise refuse(f"{where}.groups", "an ungrouped statistic has one group")
+        group = self._noisy_group(
+            groups[0], f"{where}.groups[0]", _LEVEL_HISTOGRAM, cells=len(NULL_COUNT_LEVELS)
+        )
+        if group.key != "":
+            raise refuse(
+                f"{where}.groups[0]", "a nullCount/2 is ungrouped, keyed by the empty string"
+            )
+        self.parts.append((where, noise))
+        return NullCountEntry(
+            sample_size=_sample_size(raw["sampleSize"], f"{where}.sampleSize"),
+            disclosure=disclosure,
+            noise=noise,
+            group=group,
         )
 
     def table(self, expose_id: str, value: Any, where: str) -> TableEntry:
@@ -2146,15 +2277,23 @@ class _Reader:
         It is ungrouped, unless *grouped_by* names the column it is grouped by, and a history
         statistic holds no ``groupByLink`` and no ``per``.
         """
-        if isinstance(value, Mapping) and "noise" in value:
-            raise refuse(f"{where}.noise", _MOVES_AN_ENTITY + " in a history statistic")
+        noisy = isinstance(value, Mapping) and "noise" in value
+        if noisy:
+            self._noisy_history_allowed(f"{where}.noise", expose_id)
         statistic = self.statistic(
             value,
             where,
             kinds=frozenset({kind}),
             grouped_by=None if grouped_by is None else {grouped_by},
-            noisy_in=None,
+            noisy_in=expose_id if noisy else None,
         )
+        if noisy and grouped_by is not None:
+            if [group.key for group in statistic.groups] != list(statistic.levels):
+                raise refuse(
+                    f"{where}.groups",
+                    "a noisy transitions statistic publishes every current-value group, one for "
+                    "each of its levels",
+                )
         if levels is not None and statistic.levels != levels:
             raise refuse(f"{where}.levels", f"are exactly {list(levels)}")
         if statistic.group_by != grouped_by:
@@ -2162,6 +2301,22 @@ class _Reader:
         if statistic.group_by_link is not None or statistic.per:
             raise refuse(where, "a history statistic holds no groupByLink and no per")
         return statistic
+
+    def _noisy_history_allowed(self, where: str, expose_id: str) -> None:
+        """A history member carries noise (format 1-5-0) only in a table the unit follows into.
+
+        The table is reached by the unit through ``follows`` (``m_T >= 1``) and is not the unit's
+        own expose: one unit is one row there, and an entity's versions are several rows, so one
+        unit would not hold a whole entity (PROFILE-SPEC.md section 3a).
+        """
+        self.require_1_5_0("noisyHistory", where)
+        accounting = self._require_account(where)
+        if expose_id == accounting.unit or accounting.reach(expose_id) < 1:
+            raise refuse(
+                where,
+                "a history member carries noise only in a table the unit of privacy follows into, "
+                "which is not the unit's own expose",
+            )
 
     def _history_columns(
         self,
@@ -2876,7 +3031,8 @@ def parse_profile(document: Any, *, allow_empty_calendar_entries: bool = False) 
         first_format=raw["_schemaURL"] == SCHEMA_URL,
         accounting=accounting,
         from_1_3=raw["_schemaURL"] in _FROM_1_3_0,
-        from_1_4=raw["_schemaURL"] == SCHEMA_URL_1_4_0,
+        from_1_4=raw["_schemaURL"] in _FROM_1_4_0,
+        from_1_5=raw["_schemaURL"] == SCHEMA_URL_1_5_0,
         allow_empty_calendar_entries=allow_empty_calendar_entries,
     )
     if accounting is not None and accounting.follows:
