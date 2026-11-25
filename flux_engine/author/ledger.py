@@ -135,16 +135,16 @@ class _Group:
 
     *members* are the statistics and metrics the ledger holds of it, by their tokens. *needed* are
     the ones the reader requires of the entry (a date pair's ``order``, an exposure's two counts),
-    so one of them leaves only with the whole entry. *any_of* says the reader requires at least
-    one member, whichever (a calendar's three histograms). *held_by* is a member that has to leave
-    with this entry or not be there: a history lists its ``reasons`` over its tracked columns, and
-    one of those cannot leave while the reasons are kept.
+    so one of them leaves only with the whole entry. An entry with none needed requires at least
+    one member, whichever (a calendar's three histograms): the members of one that is all unused
+    leave as the whole entry. *held_by* is a member that has to leave with this entry or not be
+    there: a history lists its ``reasons`` over its tracked columns, and one of those cannot leave
+    while the reasons are kept.
     """
 
     tokens: Tuple[str, ...]
     members: Tuple[Tuple[str, ...], ...]
     needed: Tuple[Tuple[str, ...], ...] = ()
-    any_of: bool = False
     held_by: Optional[Tuple[str, ...]] = None
 
 
@@ -338,7 +338,7 @@ class Ledger:
                     )
                     held.append(tokens)
             # The reader needs one of the three histograms, whichever.
-            self._group(base + ("calendar", str(index)), tuple(held), any_of=True)
+            self._group(base + ("calendar", str(index)), tuple(held))
 
     def _pair(
         self, base: Tuple[str, ...], item: Mapping[str, Any], reason: str, *, dated: bool = False
@@ -405,7 +405,6 @@ class Ledger:
         members: Tuple[Tuple[str, ...], ...],
         *,
         needed: Tuple[Tuple[str, ...], ...] = (),
-        any_of: bool = False,
         held_by: Optional[Tuple[str, ...]] = None,
     ) -> None:
         """Note an entry of the profile at *tokens* the reader refuses without some of *members*."""
@@ -416,7 +415,6 @@ class Ledger:
                     tokens,
                     held,
                     tuple(member for member in needed if member in self._entries),
-                    any_of,
                     held_by,
                 )
             )
@@ -510,9 +508,8 @@ class Ledger:
         """Replace the members of *group* in *listing* by what an owner can leave out of it."""
         members = [self._entries[tokens] for tokens in group.members]
         if any(member.state == USED for member in members):
-            if not group.any_of:
-                for tokens in group.needed:
-                    listing[tokens] = None
+            for tokens in group.needed:
+                listing[tokens] = None
             return
         unused = [member for member in members if member.state == UNUSED]
         if not unused:
