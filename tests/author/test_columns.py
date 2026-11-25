@@ -357,9 +357,10 @@ def test_a_value_too_near_the_last_the_column_holds_is_refused(
     declared: str, value: str, named: str
 ) -> None:
     # The value, a step and a second step must all be spelled. A sentinel open end such as
-    # 9999-12-31 cannot be, so the column cannot be drawn exactly: init refuses it, naming the
-    # table and the column, rather than leaving the table out or drawing a neighbouring value.
-    from flux_engine.author import AuthorError
+    # 9999-12-31 cannot be, so the column cannot be drawn exactly. Its plan says so, naming the
+    # table and the column: the bundle then leaves the table out, or refuses the whole init when
+    # something it writes needs the table (tests/author/test_init_open_end.py).
+    from flux_engine.author.columns import UnspellableOneValue
     from flux_engine.core.clock import parse_rfc3339_ms
 
     milliseconds = str(parse_rfc3339_ms(value))
@@ -367,7 +368,7 @@ def test_a_value_too_near_the_last_the_column_holds_is_refused(
         "domain": "timestamp",
         "metrics": {"min": _metric("min/1", milliseconds), "max": _metric("max/1", milliseconds)},
     }
-    with pytest.raises(AuthorError) as raised:
+    with pytest.raises(UnspellableOneValue) as raised:
         _plan(declared, entry)
     message = str(raised.value)
     assert message.startswith("orders.c publishes one value")
