@@ -1109,6 +1109,84 @@ def _declares_a_column(authored: AuthoredExpose) -> bool:
     return bool(authored.linked) or any(column.declaration for column in authored.columns)
 
 
+#: The properties that compare their columns over declared levels; every other kind compares
+#: them over a declared range (``flux_stats.fidelity``).
+_LEVEL_PROPERTIES = ("support", "levelHistogram")
+
+
+def _property_columns(document: Mapping[str, Any]) -> List[str]:
+    """The columns a property is over, not the ones it groups by."""
+    named = [str(name) for name in document.get("columns") or ()]
+    if "column" in document:
+        named.append(str(document["column"]))
+    return named
+
+
+def _kept_declarations(authored: AuthoredExpose) -> Dict[str, str]:
+    """What the fidelity compiler keeps of each column the block declares: ``range`` or ``support``.
+
+    A declaration with neither (a draw's parameters alone), or with both, is kept as nothing.
+    """
+    declared = [(plan.name, plan.declaration) for plan in authored.columns]
+    declared += [(name, linked.declaration) for name, linked in authored.linked.items()]
+    return {
+        name: "range" if "range" in declaration else "support"
+        for name, declaration in declared
+        if ("range" in declaration) != ("support" in declaration)
+    }
+
+
+def _unmet_columns(document: Mapping[str, Any], kept: Mapping[str, str]) -> List[str]:
+    """The columns a property needs a declaration of, as a range or as levels, that the block lacks."""
+    own = "support" if document.get("property") in _LEVEL_PROPERTIES else "range"
+    needs = [(name, own) for name in _property_columns(document)]
+    if "groupBy" in document:
+        needs.append((str(document["groupBy"]), "support"))
+    grouped = document.get("groupByBins")
+    if isinstance(grouped, Mapping) and "column" in grouped:
+        needs.append((str(grouped["column"]), "range"))
+    return [name for name, wanted in needs if kept.get(name) != wanted]
+
+
+def _drop_unkept_properties(authored: AuthoredExpose) -> None:
+    """Leave out each property that names a column the fidelity block declares no range or levels for.
+
+    ``verify`` refuses such a property (``FLX-5034``), and init never writes a bundle its own
+    validation refuses. This is the last place the properties are chosen before the documents
+    are drafted, so a writer that made one for a column the declarations do not cover cannot
+    leave it in: it is dropped, and the column's notes say which declaration it needed. An expose
+    left with no property takes the first column's assumed check, as :func:`_finish_expose` does.
+    """
+    kept = _kept_declarations(authored)
+    unmet = {id(prop): _unmet_columns(prop.document, kept) for prop in authored.properties}
+    dropped = [prop for prop in authored.properties if unmet[id(prop)]]
+    if not dropped:
+        return
+    authored.properties = [prop for prop in authored.properties if not unmet[id(prop)]]
+    plans = {plan.name: plan for plan in authored.columns}
+    for prop in dropped:
+        over = _property_columns(prop.document)
+        sentence = (
+            f"No {prop.document.get('property')} property is written for "
+            f"{', '.join(printable(name) for name in over)}: the fidelity block declares "
+            f"no range or levels of {', '.join(printable(name) for name in unmet[id(prop)])} "
+            "for it to compare over (FLX-5034)."
+        )
+        plan = next((plans[name] for name in over if name in plans), None)
+        if plan is not None and sentence not in plan.choices:
+            plan.assumptions.append(sentence)
+            plan.choices.append(sentence)
+            authored.assumptions.append((plan.name, sentence))
+    if not authored.properties:
+        for plan in authored.columns:
+            before = len(plan.assumptions)
+            fallback = assumed_check(plan, authored.kinds[plan.name], scorable_only=True)
+            if fallback is not None:
+                authored.properties = [fallback]
+                authored.assumptions.extend((plan.name, text) for text in plan.assumptions[before:])
+                break
+
+
 def _histogram_of_two_edges(prop: PropertyPlan) -> bool:
     """Whether *prop* is a histogram of one bin, over a column's published minimum and maximum."""
     document = prop.document
@@ -4075,6 +4153,9 @@ def _draft_documents(
     )
     simulation_id = f"sim-{product_ref}"
     world, persona = _world_and_persona(contract, team)
+    for expose in planned.authored:
+        if not expose.reference:
+            _drop_unkept_properties(expose)
     namespace = _namespace_block(
         contract,
         reading,
