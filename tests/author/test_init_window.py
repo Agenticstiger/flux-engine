@@ -387,3 +387,83 @@ def test_a_window_is_not_refused_for_a_contract_range_that_ends_in_year_9999(
         window=("2024-01-01", "2024-03-31"),
     )
     assert result.exit_code == 0, result.stderr
+
+
+# -- a contract range that stretches the window is a gap --------------------------------------------
+
+
+def _contracted(range_text: str, **kinds: Any) -> Any:
+    column = ColumnPlan(name="d", time_span=(_ms("2025-10-01"), _ms("2026-09-01")))
+    expose = _expose(column)
+    expose.index = 0
+    context = ColumnContext.__new__(ColumnContext)
+    object.__setattr__(context, "schema_index", 0)
+    expose.contexts = {"d": context}
+    contract = {"exposes": [{"contract": {"schema": [_rule(range_text)]}}]}
+    return _time_bounds([expose], contract)
+
+
+def test_a_contract_range_beyond_the_published_span_is_a_time_window_note() -> None:
+    window, note = _contracted("between '1900-01-01' and '2100-12-31'")
+    assert window == (format_rfc3339_ms(_ms("1900-01-01")), format_rfc3339_ms(_ms("2100-12-31")))
+    assert note == (
+        "time window",
+        "The run covers 1900-01-01T00:00:00.000Z to 2100-12-31T00:00:00.000Z, since the "
+        "contract range of t.d reaches beyond the span the profile and the bundle give, "
+        "2025-10-01T00:00:00.000Z to 2026-09-01T00:00:00.000Z. "
+        "Set spec.timeBounds to the span your data covers.",
+    )
+
+
+def test_a_contract_range_inside_the_published_span_gives_no_note() -> None:
+    window, note = _contracted("between '2025-11-01' and '2026-08-01'")
+    assert window == (format_rfc3339_ms(_ms("2025-10-01")), format_rfc3339_ms(_ms("2026-09-01")))
+    assert note is None
+
+
+def test_a_contract_range_alone_gives_the_window_and_a_note_that_says_so() -> None:
+    column = ColumnPlan(name="d")
+    expose = _expose(column)
+    expose.index = 0
+    context = ColumnContext.__new__(ColumnContext)
+    object.__setattr__(context, "schema_index", 0)
+    expose.contexts = {"d": context}
+    contract = {
+        "exposes": [{"contract": {"schema": [_rule("between '2020-01-01' and '2021-01-01'")]}}]
+    }
+    window, note = _time_bounds([expose], contract)
+    assert window == (format_rfc3339_ms(_ms("2020-01-01")), format_rfc3339_ms(_ms("2021-01-01")))
+    assert note is not None and note[0] == "time window"
+    assert "only from the contract range of t.d" in note[1]
+    assert "nothing the profile or the bundle gives holds a span" in note[1]
+    assert note[1].endswith("Set spec.timeBounds to the span your data covers.")
+
+
+def _loose_contract(tmp_path: Path, range_text: str) -> Path:
+    text = CONTRACT.read_text(encoding="utf-8").replace(
+        "      type: timestamp\n      required: false\n",
+        "      type: timestamp\n      required: false\n      validationRules:\n"
+        "      - type: range\n"
+        f'        constraint: "{range_text}"\n',
+    )
+    contract = tmp_path / "orders.fluid.yaml"
+    contract.write_text(text, encoding="utf-8")
+    return contract
+
+
+def test_a_loose_contract_range_is_the_window_and_a_gap_that_strict_refuses(
+    tmp_path: Path,
+) -> None:
+    contract = _loose_contract(tmp_path, "between '1900-01-01' and '2100-12-31'")
+    result = run_init(str(tmp_path / "b"), contract=str(contract), profile=str(PROFILE))
+    assert result.exit_code == 0, result.stderr
+    bounds = _simulation(tmp_path / "b")["spec"]["timeBounds"]
+    assert bounds["start"].startswith("1900-01-01") and bounds["end"].startswith("2100-12-31")
+    notes = [(item["subject"], item["assumption"]) for item in result.artifacts["notes"]]
+    (window_note,) = [text for subject, text in notes if subject == "time window"]
+    assert "orders.created_at" in window_note
+    strict = run_init(
+        str(tmp_path / "s"), contract=str(contract), profile=str(PROFILE), strict=True
+    )
+    assert strict.exit_code != 0
+    assert "gap /spec/timeBounds" in (strict.stderr or "")

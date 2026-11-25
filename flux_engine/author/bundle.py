@@ -1133,23 +1133,58 @@ def _time_bounds(
     The hull runs from the earliest start to the latest end of each column's published range
     (``time_span``), of its own bins, levels and range as declared, of the range its contract
     column declares, and of each *declared* span (a history file's start bins and ``until``), so
-    no column's bins leave it. With nothing to go on, a year is assumed.
+    no column's bins leave it. A contract range that reaches beyond every span the profile and the
+    bundle give, or the hull of contract ranges alone, is a ``time window`` note, which is a gap
+    at ``/spec/timeBounds``. With nothing to go on, a year is assumed.
     """
     if given is not None:
         return given, None
-    spans = [
-        span
-        for expose in exposes
-        for column in expose.columns
-        for span in _spans_of(expose, column, contract)
-    ]
-    spans += list(declared)
+    own: List[Tuple[int, int]] = list(declared)
+    contract_ranges: List[Tuple[str, Tuple[int, int]]] = []
+    for expose in exposes:
+        for column in expose.columns:
+            found, from_contract = _spans_of(expose, column, contract)
+            own += found
+            if from_contract is not None:
+                contract_ranges.append((f"{expose.expose_id}.{column.name}", from_contract))
+    spans = own + [span for _, span in contract_ranges]
     if spans:
         start = min(span[0] for span in spans)
         end = max(span[1] for span in spans)
         if end <= start:
             end = start + 1
-        return (format_rfc3339_ms(start), format_rfc3339_ms(end)), None
+        window = (format_rfc3339_ms(start), format_rfc3339_ms(end))
+        widening = sorted(
+            {
+                name
+                for name, span in contract_ranges
+                if not own
+                or span[0] < min(item[0] for item in own)
+                or span[1] > max(item[1] for item in own)
+            }
+        )
+        if not widening:
+            return window, None
+        columns = ", ".join(widening)
+        if own:
+            given_span = (
+                f"{format_rfc3339_ms(min(item[0] for item in own))} to "
+                f"{format_rfc3339_ms(max(item[1] for item in own))}"
+            )
+            reason = (
+                f"the contract range of {columns} reaches beyond the span the profile and the "
+                f"bundle give, {given_span}"
+            )
+        else:
+            reason = (
+                f"it comes only from the contract range of {columns}: nothing the profile or "
+                "the bundle gives holds a span"
+            )
+        note = (
+            f"The run covers {window[0]} to {window[1]}, since {reason}. "
+            "Set spec.timeBounds to the span your data covers."
+        )
+        return window, ("time window", note)
     note = (
         "No date or timestamp column publishes its range, so the run covers "
         f"{ASSUMED_WINDOW[0][:10]} to {ASSUMED_WINDOW[1][:10]}. Set spec.timeBounds to the "
@@ -1160,13 +1195,13 @@ def _time_bounds(
 
 def _spans_of(
     expose: AuthoredExpose, column: ColumnPlan, contract: Optional[Mapping[str, Any]]
-) -> List[Tuple[int, int]]:
-    """The spans (milliseconds) a column gives the window: its range, its declaration, its contract."""
+) -> Tuple[List[Tuple[int, int]], Optional[Tuple[int, int]]]:
+    """The spans (ms) a column gives the window: its range and declaration, and its contract's range."""
     found: List[Tuple[int, int]] = []
     if column.time_span is not None:
         found.append(column.time_span)
     if expose.kinds.get(column.name) not in DATE_KINDS:
-        return found
+        return found, None
     declaration = column.declaration
     instants: List[int] = []
     for key in ("bins", "levels"):
@@ -1188,9 +1223,7 @@ def _spans_of(
         contract_range = declared_instants(schema[context.schema_index]) if context else None
     except (KeyError, IndexError, TypeError):
         contract_range = None
-    if contract_range is not None:
-        found.append(contract_range)
-    return found
+    return found, contract_range
 
 
 def _owner(contract: Mapping[str, Any]) -> Tuple[str, Optional[Tuple[str, str]]]:
