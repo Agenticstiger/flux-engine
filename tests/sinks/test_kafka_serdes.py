@@ -671,3 +671,73 @@ def test_the_json_writer_writes_the_bytes_it_always_wrote() -> None:
     ]
     for sample in samples:
         assert _json_dumps(sample) == _old_json_dumps(sample)
+
+
+# -- wide decimals, integer ranges and the registry client ------------------------------
+
+
+def test_a_wide_decimal_that_fits_is_written_and_one_that_does_not_is_refused() -> None:
+    def amount(precision: int, scale: int) -> Any:
+        return avro_converter(
+            _avro(
+                [
+                    {
+                        "name": "amount",
+                        "type": {
+                            "type": "bytes",
+                            "logicalType": "decimal",
+                            "precision": precision,
+                            "scale": scale,
+                        },
+                    }
+                ]
+            )
+        )
+
+    wide = "1234567890123456789.1234567890"
+    assert amount(38, 10)({"amount": wide}) == {"amount": Decimal(wide)}
+    with pytest.raises(FluxError) as caught:
+        amount(5, 2)({"amount": "1000.00"})
+    assert caught.value.code.code == "FLX-3515" and "'amount'" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("kind", "low", "high"),
+    [("int", -(2**31), 2**31 - 1), ("long", -(2**63), 2**63 - 1)],
+)
+def test_an_integer_outside_the_range_of_its_avro_type_is_refused(
+    kind: str, low: int, high: int
+) -> None:
+    convert = avro_converter(_avro([{"name": "n", "type": kind}]))
+    assert convert({"n": low}) == {"n": low} and convert({"n": high}) == {"n": high}
+    for bad in (low - 1, high + 1):
+        with pytest.raises(FluxError) as caught:
+            convert({"n": bad})
+        assert caught.value.code.code == "FLX-3515"
+        assert "'n'" in str(caught.value) and str(bad) not in str(caught.value)
+
+
+def test_the_registry_client_gets_the_timeout_and_one_client_serves_the_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import confluent_kafka.schema_registry as registry_module
+
+    made: List[Any] = []
+
+    class _Client:
+        def __init__(self, conf: Dict[str, Any]) -> None:
+            self.conf, self.closed = conf, False
+            made.append(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(registry_module, "SchemaRegistryClient", _Client)
+    serdes = ConfluentSerdes()
+    access = RegistryAccess(url="http://registry.invalid", timeout=7.5)
+    first = serdes._client(access)
+    assert serdes._client(access) is first and len(made) == 1
+    assert made[0].conf["timeout"] == 7.5 and made[0].conf["url"] == "http://registry.invalid"
+    serdes.close()
+    assert made[0].closed
+    assert serdes._client(access) is not first and len(made) == 2

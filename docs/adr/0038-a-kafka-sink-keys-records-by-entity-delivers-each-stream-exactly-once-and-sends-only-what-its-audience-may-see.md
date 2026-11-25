@@ -24,7 +24,10 @@ those readers need.
 
 `fluxsim run BUNDLE --sink kafka:HOST:PORT[,HOST:PORT...]` delivers every stream of the run to the Kafka cluster
 those bootstrap servers name. The sink is the optional `[kafka]` extra, on confluent-kafka-python 2.16 (Apache-2.0,
-over librdkafka), registered under the `flux_engine.sinks` entry-point group. Its settings are `--sink-opt
+over librdkafka), a built-in sink of `flux_engine.sinks.registry` that needs the extra the way the Delta sink needs
+`[publish]`: its factory is imported only when it is selected, so listing sinks and every run without it load none of
+confluent-kafka, and selecting it without the extra is `FLX-3501`, naming `pip install 'flux-sim-engine[kafka]'`.
+Its settings are `--sink-opt
 KEY=VALUE`, a closed set (section 12); an unknown one is `FLX-3504`, as for every sink. Nothing is contacted until
 every check that needs no network has passed: the options when the target is opened, before the run, and the gate
 (section 2) and each stream's declarations (sections 4 to 7) when the sink is built for a stream, before any row.
@@ -67,7 +70,10 @@ A stream's topic is a prefix and a name. The name is `--sink-opt topic.EXPOSE=NA
 `binding.location.topic` when the expose is bound to Kafka, else the expose id. The prefix is `topic-prefix`, `sim.`
 by default, and it may not be empty, so a synthetic topic never has the name of the topic the contract declares.
 The whole name must be a legal Kafka topic name, and two streams of one delivery may not share a topic
-(`FLX-3513`).
+(`FLX-3513`). A synthetic topic may not be the topic any expose's contract binding names (`FLX-3513`), and the
+`<topic>-value` subject a derived schema is registered under may not be a subject any binding names (`FLX-3515`):
+the refusal names both exposes and the option (`topic-prefix` or `topic.EXPOSE`) that gives one of them another
+name.
 
 A missing topic is created with the broker's default partitions and replication unless `partitions` and
 `replication-factor` say otherwise; a snapshot's topic is created with `cleanup.policy=compact`. An existing topic
@@ -104,9 +110,10 @@ midnight):
 
 An expose with no timestamp column is `FLX-3513`, naming the option. Before each record is sent, its timestamp is
 checked against the topic's `message.timestamp.before.max.ms` and `message.timestamp.after.max.ms` (KIP-937; the
-latter is one hour by default from Kafka 4.0) and against zero, since brokers refuse a negative timestamp; a record
-outside them stops the stream with `FLX-3514`, naming the limit and the remedy: a topic configured for a backfill,
-or a run window nearer the present. The record's bytes never move to fit a limit.
+latter is one hour by default from Kafka 4.0) and against the epoch: a timestamp at or before
+1970-01-01T00:00:00Z is refused, since brokers refuse a negative timestamp and a producer reads 0 as "the current
+time". A record outside them stops the stream with `FLX-3514`, naming the limit and the remedy: a topic configured
+for a backfill, or a run window nearer the present (after the epoch). The record's bytes never move to fit a limit.
 
 ### 7. Values: rows, Debezium's envelope and tombstones
 
@@ -146,6 +153,11 @@ With `--sink-opt registry=URL`, values go through confluent-kafka's registry ser
   forge's registry derivation: a DATE is `int` with `logicalType: date`, a TIMESTAMP is `long` with
   `timestamp-millis`, a DECIMAL is `bytes` with `logicalType: decimal`; every field is nullable.
 
+Values are converted exactly. A decimal is checked against `decimal(precision, scale)` in a context wide enough for
+any value that fits (`decimal(38, s)` included), so only a value that does not fit is refused. An Avro `int` holds
+-2^31 to 2^31-1 and a `long` -2^63 to 2^63-1; a value outside the range is `FLX-3515`, naming the field and never
+the value.
+
 How the bytes are written does not change what they are. A derived Avro schema is registered once, when the
 stream opens, and each value is then written with fastavro behind the registry's framing (a zero byte and the
 schema's id), the bytes confluent-kafka's `AvroSerializer` writes for the same schema and value. A subject the
@@ -169,8 +181,21 @@ registry framing.
 
 The producer is idempotent and transactional: `enable.idempotence` (librdkafka leaves it off by default) and a
 `transactional.id` stable for the run, the stream and the topic, so a retried delivery fences an earlier one and
-aborts what it left open. A stream unpaced (`pace=max`) is one transaction, the whole horizon, committed only when
-every row arrived and every record was acknowledged, and aborted otherwise.
+aborts what it left open. The producer is opened before the stream's progress is read, so a producer of an earlier
+delivery is fenced first and nothing it still holds can commit after the read; a stream found complete closes the
+producer again and sends nothing. A stream unpaced (`pace=max`) is one transaction, the whole horizon, committed only
+when every row arrived and every record was acknowledged, and aborted otherwise.
+
+A transaction is bounded by `transaction-timeout=SECONDS` (900 by default, Kafka's default for the brokers'
+`transaction.max.timeout.ms`), which is the producer's `transaction.timeout.ms` and no longer depends on `timeout`.
+A brokers' setting below it fails the producer's `init_transactions` with `FLX-3505`, naming both
+`transaction-timeout` and `transaction.max.timeout.ms`. An unpaced stream that is not given `commit-every` must fit in
+its one transaction: when the open transaction reaches 90% of `transaction-timeout` (checked every 1,024 records and
+before the commit flushes) it is aborted and the stream refused with `FLX-3514`, nothing committed, naming
+`transaction-timeout`, the brokers' setting and `commit-every=SECONDS`. With `commit-every`, an unpaced stream also
+commits every that many seconds (the age is checked every 1,024 records), each commit recording its progress as a
+paced stream's does, so resume and exactly once hold. A `commit-every` above a third of `transaction-timeout` is
+`FLX-3504`.
 
 Each transaction also commits the stream's progress, the pattern Kafka Connect's exactly-once source support uses
 (KIP-618): an offset under a consumer group named like the `transactional.id`, on partition 0 of the topic, whose
@@ -180,6 +205,12 @@ and a partial one resumes after its last committed record. A read-committed cons
 `read_committed` by default in librdkafka and `read_uncommitted` in Java) sees each record exactly once, across a
 failure, a forced abort and a second delivery of the same run.
 
+The progress also records a fingerprint (16 hex digits of a digest) of the settings that decide a record's bytes
+beside its row: the key columns and the key format, and the value form (plain JSON, or the registry's value format and
+subject, never the schema id). A stream found complete or partial under another fingerprint is refused with
+`FLX-3504`, since resuming or skipping it would mix two shapes in one topic: deliver it to another topic
+(`topic-prefix` or `topic.EXPOSE`), or delete the topic and the consumer group.
+
 The producer's batching suits the stream. An unpaced stream waits up to 20 ms to fill a batch of up to 100,000
 records and queues up to a million, so the brokers are sent few, large requests; a paced stream keeps librdkafka's
 5 ms, so a record is not held back from its time. `compression=none|gzip|snappy|lz4|zstd` sets the codec of the
@@ -188,15 +219,15 @@ batches (`lz4` by default) and is recorded in the receipt. The producer drains i
 
 ### 10. Pacing outside the digest
 
-`pace=max` (the default) sends as fast as the brokers take, in the stream's order. `pace=realtime` and `pace=xN` (N a
-positive number, `x2` twice as fast as real time) hold the stream until its last row, put its records in event-time
-order while keeping each entity's order, and send each one when the wall clock, counted from the first record,
-reaches its offset from the first event time divided by N. A paced stream commits a transaction at least every
-`commit-every` seconds (1 by default) and before every wait longer than that, so read-committed consumers see the
-records as they are sent, and each transaction carries the progress of section 9. A delivery resumes only in the
-order it began: a paced delivery and an unpaced one of the same stream do not mix (`FLX-3504`). Keys, values,
-timestamps and headers are the same at every pace and every `--jobs`: pacing chooses when a record is sent, never
-what it holds.
+`pace=max` (the default) sends as fast as the brokers take, in the stream's order. `pace=realtime` and `pace=xN` (N
+a positive number, `x2` twice as fast as real time) hold the stream until its last row, put its records in
+event-time order while keeping each entity's order, and send each one when the wall clock, counted from the first
+record, reaches its offset from the first event time divided by N. A paced stream commits a transaction at least
+every `commit-every` seconds (1 by default; an unpaced stream commits only when `commit-every` is given) and before
+every wait longer than that, so read-committed consumers see the records as they are sent, and each transaction
+carries the progress of section 9. A delivery resumes only in the order it began: a paced delivery and an unpaced
+one of the same stream do not mix (`FLX-3504`). Keys, values, timestamps and headers are the same at every pace and
+every `--jobs`: pacing chooses when a record is sent, never what it holds.
 
 ### 11. Headers and the receipt
 
@@ -213,14 +244,26 @@ environment variables `sasl-username-env` and `sasl-password-env` name, with `se
 `sasl-mechanism` (`PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`); the registry's basic credentials come from the
 variable `registry-auth-env` names, as `USER:PASSWORD`. A credential is sent only over TLS (`SASL_SSL`, an `https`
 registry) unless every server it goes to is this machine's loopback address. `ssl-ca-location` and
-`registry-ca-location` name certificate files. A missing variable is `FLX-3504`, naming the variable and never a
+`registry-ca-location` name certificate files. When a credential goes over `SASL_PLAINTEXT` on this machine, the
+first request of every stream reads the brokers the cluster advertises, and one that is not a loopback address is
+`FLX-3504` before anything else is asked: the bootstrap servers may be local while the brokers they name are not, and
+the credential would go to them in the clear. `registry` may name several URLs, separated by commas, as the
+registry client fails over between them; each is checked by the same rules, and a credential goes over `http` only to
+URLs that are all on this machine. The registry client carries the `timeout` option, is opened once per target and
+closed when the target's streams are done, and every client is told not to send the brokers metrics of its own
+(`enable.metrics.push` off, KIP-714). A missing variable is `FLX-3504`, naming the variable and never a
 value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to
 the `flux_engine.sinks.kafka` logger, never to the terminal directly.
 
 The options are `audience`, `registry`, `registry-auth-env`, `registry-ca-location`, `topic-prefix`,
 `topic.EXPOSE`, `key.EXPOSE`, `key-format`, `timestamp.EXPOSE`, `value-format`, `pace`, `commit-every`,
-`compression`, `partitions`, `replication-factor`, `timeout`, `security-protocol`, `sasl-mechanism`,
-`sasl-username-env`, `sasl-password-env` and `ssl-ca-location`.
+`transaction-timeout`, `compression`, `partitions`, `replication-factor`, `timeout`, `security-protocol`,
+`sasl-mechanism`, `sasl-username-env`, `sasl-password-env` and `ssl-ca-location`.
+
+Metadata that is not yet settled is waited out, up to `timeout`: a retriable error on a topic or a partition (a leader
+not yet elected) and a topic the configuration read does not yet know right after it was created. A flush that still
+holds unacknowledged records is repeated while their number falls, and is a failure only after a whole `timeout`
+with no progress. A progress read that a partition error answers is `FLX-3505`, never "no progress".
 
 ## Consequences
 

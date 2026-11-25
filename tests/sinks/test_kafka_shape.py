@@ -471,3 +471,19 @@ def test_a_serialization_that_is_not_known_is_refused(tmp_path: Path) -> None:
 
 def test_the_shape_does_not_change_between_calls(plain: Path) -> None:
     assert shapes(plain) == shapes(plain)
+
+
+def test_a_stream_is_never_written_to_a_topic_a_contract_names(tmp_path: Path) -> None:
+    binding = (KAFKA_BINDING % ("avro", "latest")).replace("topic: sites", "topic: sim.reading")
+    directory = bundle(tmp_path, contract=swap(GLUE_BINDING, binding))
+    message = refused("FLX-3513", directory)
+    assert "'reading'" in message and "'site'" in message and "sim.reading" in message
+
+
+def test_a_derived_subject_is_never_one_a_contract_names(tmp_path: Path) -> None:
+    binding = (KAFKA_BINDING % ("avro", "latest")).replace(
+        "subject: site-value", "subject: sim.reading-value"
+    )
+    directory = bundle(tmp_path, contract=swap(GLUE_BINDING, binding))
+    message = refused("FLX-3515", directory)
+    assert "'reading'" in message and "'site'" in message and "sim.reading-value" in message

@@ -39,14 +39,18 @@ registered under the topic's ``-value`` subject. Without it a value is compact J
 stream's column order.
 
 **Exactly once.** One idempotent transactional producer per stream and run, under a stable
-``transactional.id``. An unpaced stream is one transaction; each transaction also commits the
-stream's progress as an offset of a consumer group of the same name, so a retried delivery resumes
-after its last committed record and a second delivery of a finished stream sends nothing. A read
-committed consumer sees each record once.
+``transactional.id``. An unpaced stream is one transaction, the whole stream, unless
+``commit-every`` is given; then it also commits every that many seconds. A transaction may stay
+open for ``transaction-timeout`` seconds (900 by default, as the brokers allow), and an unpaced
+stream that cannot finish inside it is refused rather than left to the brokers' timeout. Each
+transaction also commits the stream's progress as an offset of a consumer group of the same name,
+so a retried delivery resumes after its last committed record and a second delivery of a finished
+stream sends nothing. The producer is opened (which fences an earlier one) before the progress is
+read. A read committed consumer sees each record once.
 
 **Pace.** ``pace=realtime`` or ``pace=xN`` sends each record when the wall clock reaches its event
 time (divided by N), in event-time order within each key's order, and commits at least every
-``commit-every`` seconds. Keys, values, timestamps and headers are the same at every pace.
+``commit-every`` seconds (1 by default). Keys, values, timestamps and headers are the same at every pace.
 
 **Credentials.** Never an option: ``sasl-username-env``, ``sasl-password-env`` and
 ``registry-auth-env`` name environment variables, read when a stream starts. A credential goes
@@ -68,19 +72,21 @@ from typing import Any, Callable, ClassVar, Dict, List, Mapping, Optional, Seque
 from urllib.parse import urlsplit
 
 from flux_engine.api.emit import EmitHeader
-from flux_engine.core.canonical import canonical_bytes
+from flux_engine.core.canonical import canonical_bytes, sha256_hex
 from flux_engine.core.errors import FluxError
 from flux_engine.core.grades import Pattern
 from flux_engine.seam.emit import FLX_3301
 from flux_engine.sinks._kafka_broker import (
     COMPRESSIONS,
     DEFAULT_COMPRESSION,
+    LOGGER,
     Broker,
     ClientSettings,
     ConfluentBroker,
     Credentials,
     TopicInfo,
     TxnProducer,
+    is_loopback,
 )
 from flux_engine.sinks._kafka_gate import parse_audience, require_grade
 from flux_engine.sinks._kafka_pace import Pace, Pacer, parse_pace, scheduled_times, time_order
@@ -136,12 +142,17 @@ OPTIONS: Tuple[str, ...] = (
     "ssl-ca-location",
     "timeout",
     "topic-prefix",
+    "transaction-timeout",
     "value-format",
 )
 FAMILIES: Tuple[str, ...] = ("topic.", "key.", "timestamp.")
 
 #: How many unpaced records are sent for each read of the wall clock for the timestamp limits.
 _CLOCK_EVERY = 1024
+#: How many unpaced records are sent between two checks of the age of the open transaction.
+_AGE_EVERY = 1024
+#: The share of ``transaction-timeout`` an unpaced stream's single transaction may use up.
+_TRANSACTION_SHARE = 0.9
 
 SECURITY_PROTOCOLS: Tuple[str, ...] = ("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
 SASL_MECHANISMS: Tuple[str, ...] = ("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512")
@@ -165,15 +176,6 @@ class Clock:
 
 
 # -- reading the options -----------------------------------------------------------
-
-
-def _is_loopback(host: str) -> bool:
-    if host.lower() == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host.strip("[]")).is_loopback
-    except ValueError:
-        return False
 
 
 def _bootstrap_hosts(target: str) -> Tuple[str, ...]:
@@ -234,11 +236,17 @@ def _family(options: Mapping[str, str], prefix: str) -> Dict[str, str]:
     return found
 
 
+def _registry_urls(value: str) -> List[str]:
+    """The URLs of ``registry``: one, or several separated by commas (the client fails over)."""
+    return [_registry_url(part) for part in value.split(",")]
+
+
 def _registry_url(value: str) -> str:
     problem = FluxError(
         FLX_3504,
-        "the option registry is one http or https URL, with no user information, query or "
-        "fragment: the registry's credentials come from registry-auth-env",
+        "the option registry is an http or https URL (or several, separated by commas), each "
+        "with no user information, query or fragment: the registry's credentials come from "
+        "registry-auth-env",
     )
     try:
         parts = urlsplit(value)
@@ -254,6 +262,7 @@ def _registry_url(value: str) -> str:
         or parts.fragment
         or "?" in value
         or "#" in value
+        or any(char.isspace() for char in value)
         or (port is not None and not 1 <= port <= 65535)
     ):
         raise problem
@@ -273,7 +282,8 @@ class KafkaSettings:
     registry_ca_location: Optional[str] = None
     value_format: str = "avro"
     pace: Pace = field(default_factory=lambda: parse_pace(None))
-    commit_every: float = 1.0
+    commit_every: Optional[float] = None
+    transaction_timeout: float = 900.0
     compression: str = DEFAULT_COMPRESSION
     partitions: Optional[int] = None
     replication_factor: Optional[int] = None
@@ -288,6 +298,11 @@ class KafkaSettings:
     def uses_sasl(self) -> bool:
         return self.sasl_username_env is not None
 
+    @property
+    def commit_interval(self) -> float:
+        """The seconds between commits of a paced stream: ``commit-every``, else one."""
+        return self.commit_every if self.commit_every is not None else 1.0
+
     def client(self) -> ClientSettings:
         """The settings the broker adapter connects with."""
         return ClientSettings(
@@ -296,6 +311,8 @@ class KafkaSettings:
             security_protocol=self.security_protocol,
             sasl_mechanism=self.sasl_mechanism,
             ssl_ca_location=self.ssl_ca_location,
+            transaction_timeout=self.transaction_timeout,
+            loopback_only=self.uses_sasl and self.security_protocol == "SASL_PLAINTEXT",
         )
 
     @classmethod
@@ -328,8 +345,10 @@ class KafkaSettings:
         )
         check_settings(shape)
         registry = text_option(fixed, "registry")
+        registry_urls: List[str] = []
         if registry is not None:
-            registry = _registry_url(registry)
+            registry_urls = _registry_urls(registry)
+            registry = ",".join(registry_urls)
         auth_env = text_option(fixed, "registry-auth-env")
         ca = text_option(fixed, "registry-ca-location")
         value_format = text_option(fixed, "value-format")
@@ -342,13 +361,17 @@ class KafkaSettings:
                 if value is not None:
                     raise FluxError(FLX_3504, f"the option {name} needs --sink-opt registry=URL")
         else:
-            secure = registry.startswith("https://")
-            host = urlsplit(registry).hostname or ""
-            if auth_env is not None and not secure and not _is_loopback(host):
+            secure = all(url.startswith("https://") for url in registry_urls)
+            elsewhere = [
+                url
+                for url in registry_urls
+                if not url.startswith("https://") and not is_loopback(urlsplit(url).hostname or "")
+            ]
+            if auth_env is not None and elsewhere:
                 raise FluxError(
                     FLX_3504,
-                    "registry-auth-env sends a credential, which goes only over https unless the "
-                    "registry is on this machine",
+                    "registry-auth-env sends a credential, which goes only over https unless every "
+                    "registry URL is on this machine",
                 )
             if ca is not None and not secure:
                 raise FluxError(FLX_3504, "registry-ca-location needs an https registry")
@@ -392,7 +415,7 @@ class KafkaSettings:
                 FLX_3504,
                 f"security-protocol {protocol} needs sasl-username-env and sasl-password-env",
             )
-        if sasl and protocol != "SASL_SSL" and not all(_is_loopback(host) for host in hosts):
+        if sasl and protocol != "SASL_SSL" and not all(is_loopback(host) for host in hosts):
             raise FluxError(
                 FLX_3504,
                 "a credential goes only over TLS: use security-protocol SASL_SSL, or point the "
@@ -407,6 +430,17 @@ class KafkaSettings:
             )
         if ssl_ca is not None and protocol not in ("SSL", "SASL_SSL"):
             raise FluxError(FLX_3504, "the option ssl-ca-location needs a TLS security-protocol")
+        pace = parse_pace(text_option(fixed, "pace"))
+        commit_every = _seconds(fixed, "commit-every", 1.0) if "commit-every" in fixed else None
+        transaction_timeout = _seconds(fixed, "transaction-timeout", 900.0)
+        interval = commit_every if commit_every is not None else (1.0 if pace.paced else None)
+        if interval is not None and interval > transaction_timeout / 3:
+            raise FluxError(
+                FLX_3504,
+                f"commit-every={interval:g} s is more than a third of "
+                f"transaction-timeout={transaction_timeout:g} s; lower commit-every or raise "
+                "transaction-timeout",
+            )
         return cls(
             target=target,
             hosts=hosts,
@@ -416,8 +450,9 @@ class KafkaSettings:
             registry_auth_env=auth_env,
             registry_ca_location=ca,
             value_format=value_format or "avro",
-            pace=parse_pace(text_option(fixed, "pace")),
-            commit_every=_seconds(fixed, "commit-every", 1.0),
+            pace=pace,
+            commit_every=commit_every,
+            transaction_timeout=transaction_timeout,
             compression=compression,
             partitions=int_option(fixed, "partitions", None),
             replication_factor=int_option(fixed, "replication-factor", None),
@@ -550,15 +585,17 @@ class _Progress:
     records: int
     order: str
     complete: bool
+    settings: Optional[str]
 
 
-def _progress_text(records: int, order: str, complete: bool, digest: str) -> str:
+def _progress_text(records: int, order: str, complete: bool, digest: str, settings: str) -> str:
     document = {
         "v": PROGRESS_VERSION,
         "records": records,
         "order": order,
         "complete": complete,
         "digest": digest,
+        "settings": settings,
     }
     return canonical_bytes(document).decode("utf-8")
 
@@ -583,7 +620,13 @@ def _read_progress(text: Optional[str], digest: str) -> Optional[_Progress]:
         or order not in ("stream", "time")
     ):
         return None
-    return _Progress(records, str(order), bool(document.get("complete")))
+    settings = document.get("settings")
+    return _Progress(
+        records,
+        str(order),
+        bool(document.get("complete")),
+        settings if isinstance(settings, str) else None,
+    )
 
 
 class KafkaSink:
@@ -626,6 +669,8 @@ class KafkaSink:
         self._transactions = 0
         self._txn_open = False
         self._txn_since = 0.0
+        self._since_age = 0
+        self._fingerprint = ""
         self._info: Optional[TopicInfo] = None
         self._limits: Tuple[Tuple[str, int, bool], ...] = ()
         self._now = 0
@@ -651,6 +696,19 @@ class KafkaSink:
         if self._closed:
             raise FluxError(FLX_3301, f"expose {header.expose_id!r}: sink is closed")
         self._opened = True
+        try:
+            self._open(header)
+        except BaseException:
+            # The deliver stage closes only a sink that opened, so one that failed to open lets go
+            # of its producer and clients here. The failure that got here is the one shown.
+            self._closed = True
+            try:
+                self._release()
+            except Exception:  # noqa: BLE001
+                LOGGER.debug("releasing a sink that failed to open failed", exc_info=False)
+            raise
+
+    def _open(self, header: EmitHeader) -> None:
         shape = self.shape
         if header.expose_id != self.context.expose_id:
             raise FluxError(
@@ -678,10 +736,27 @@ class KafkaSink:
         self._info = self._topic(broker)
         self._limits = self._limits_of(self._info)
         self._serialize = self._serializer()
+        self._fingerprint = self._settings_fingerprint()
+        # The producer first: opening it fences an earlier producer of this id, so nothing it
+        # commits can land after the progress below is read.
+        self._producer = broker.transactional_producer(
+            self.transactional_id,
+            self.transactional_id,
+            compression=self._settings.compression,
+            paced=self._paced,
+        )
         found = _read_progress(
             broker.progress(self.transactional_id, shape.topic), self.context.digest_hex
         )
         if found is not None:
+            if found.settings != self._fingerprint:
+                raise FluxError(
+                    FLX_3504,
+                    f"topic {shape.topic!r} holds a delivery of this stream made with other key "
+                    "or value settings; deliver it to another topic (topic-prefix or "
+                    f"topic.{shape.expose_id}), or delete the topic and the group "
+                    f"{self.transactional_id!r}",
+                )
             if not found.complete and found.order != self._order:
                 raise FluxError(
                     FLX_3504,
@@ -692,13 +767,9 @@ class KafkaSink:
             self._done, self._complete = found.records, found.complete
             if found.complete:
                 self._skipped = found.records
-        if not self._complete:
-            self._producer = broker.transactional_producer(
-                self.transactional_id,
-                self.transactional_id,
-                compression=self._settings.compression,
-                paced=self._paced,
-            )
+        if self._complete:
+            producer, self._producer = self._producer, None
+            producer.close()
 
     def write(self, row: Sequence[object]) -> None:
         """Take one rendered row: send its records now (unpaced) or keep them for ``close``."""
@@ -718,13 +789,18 @@ class KafkaSink:
                 body = record.value
                 value = None if body is None else serialize(body, topic=topic)
                 if self._paced:
-                    self._buffer.append((record, value))
+                    # The bytes are kept; the dict they came from is not.
+                    self._buffer.append((record._replace(value=None), value))
                     continue
                 position = self._seq
                 self._seq += 1
                 if position < self._done:
                     self._skipped += 1
                     continue
+                self._since_age += 1
+                if self._since_age >= _AGE_EVERY:
+                    self._since_age = 0
+                    self._roll(position)
                 self._send(record, value)
         except BaseException:
             self._failed = True
@@ -789,6 +865,7 @@ class KafkaSink:
             url=settings.registry,
             auth=self._credentials.registry_auth,
             ca_location=settings.registry_ca_location,
+            timeout=settings.timeout,
         )
         return self._owner.serdes.serializer(
             self.shape, value_format=settings.value_format, registry=access
@@ -810,11 +887,12 @@ class KafkaSink:
 
     def _check_time(self, record: KafkaRecord) -> None:
         stamp = record.timestamp_ms
-        if stamp < 0:
+        if stamp <= 0:
             raise FluxError(
                 FLX_3514,
-                f"topic {self.shape.topic!r}: the record of row {record.row} is before 1970 and "
-                "brokers refuse a negative timestamp; run a window that starts in 1970 or later",
+                f"topic {self.shape.topic!r}: the record of row {record.row} is at or before "
+                "1970-01-01T00:00:00Z; brokers refuse a negative timestamp and a producer reads "
+                "0 as the current time; run a window that starts after it",
             )
         if not self._limits:
             return
@@ -851,13 +929,39 @@ class KafkaSink:
         producer.produce(self.shape.topic, record.key, value, record.timestamp_ms, record.headers)
         self._sent += 1
 
+    def _roll(self, position: int) -> None:
+        """Between records of an unpaced stream: commit when ``commit-every`` is due, or refuse
+        a stream that is using up its one transaction."""
+        if not self._txn_open:
+            return
+        every = self._settings.commit_every
+        if every is None:
+            self._require_time_left()
+        elif self._owner.clock.monotonic() - self._txn_since >= every:
+            self._commit(position, complete=False)
+
+    def _require_time_left(self) -> None:
+        """``FLX-3514`` when the open transaction has used up its share of ``transaction-timeout``."""
+        limit = self._settings.transaction_timeout
+        if self._owner.clock.monotonic() - self._txn_since >= _TRANSACTION_SHARE * limit:
+            raise FluxError(
+                FLX_3514,
+                f"topic {self.shape.topic!r}: the stream did not fit in one transaction of "
+                f"transaction-timeout={limit:g} s; raise transaction-timeout (and the brokers' "
+                "transaction.max.timeout.ms), or pass commit-every=SECONDS to commit it as it goes",
+            )
+
     def _commit(self, records: int, *, complete: bool) -> None:
         assert self._producer is not None
+        if self._txn_open and not self._paced and self._settings.commit_every is None:
+            self._require_time_left()
         self._begin()
         self._producer.commit(
             topic=self.shape.topic,
             records=records,
-            metadata=_progress_text(records, self._order, complete, self.context.digest_hex),
+            metadata=_progress_text(
+                records, self._order, complete, self.context.digest_hex, self._fingerprint
+            ),
         )
         self._txn_open = False
         self._transactions += 1
@@ -873,7 +977,7 @@ class KafkaSink:
             return
         pacer = Pacer(self._settings.pace, monotonic=clock.monotonic, sleep=clock.sleep)
         pacer.start(scheduled[remaining[0]])
-        every = self._settings.commit_every
+        every = self._settings.commit_interval
         position = min(self._done, len(order))
         for index in remaining:
             record, value = self._buffer[index]
@@ -902,14 +1006,32 @@ class KafkaSink:
 
     def _release(self) -> None:
         producer, self._producer = self._producer, None
-        if producer is not None:
-            try:
+        try:
+            if producer is not None:
                 producer.close()
-            finally:
+        finally:
+            try:
                 self._owner.broker.close()
-        else:
-            self._owner.broker.close()
+            finally:
+                self._owner.serdes.close()
         self._buffer = []
+
+    def _settings_fingerprint(self) -> str:
+        """The first 16 hex digits of a digest of what decides a record's bytes besides its row.
+
+        The key columns and format, and the value form: plain JSON, or the registry's value format
+        and subject (never the schema's id, which a registry hands out by its own count).
+        """
+        shape, settings = self.shape, self._settings
+        value: Any
+        if settings.registry is None:
+            value = "json"
+        elif shape.subject is not None:
+            value = [shape.subject.value_format.lower(), shape.subject.subject]
+        else:
+            value = [settings.value_format, f"{shape.topic}-value"]
+        document = {"key": list(shape.key_columns), "keyFormat": shape.key_format, "value": value}
+        return sha256_hex(canonical_bytes(document))[:16]
 
     # -- the receipt -------------------------------------------------------------
 

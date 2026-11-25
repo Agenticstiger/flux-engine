@@ -138,7 +138,8 @@ def reference(kept: Kept) -> Dict[str, List[Stored]]:
 def test_the_defaults_and_every_option_are_read() -> None:
     parsed = KafkaSettings.parse(BOOTSTRAP, INTERNAL)
     assert parsed.audience == "internal" and parsed.shape.topic_prefix == "sim."
-    assert parsed.pace.text == "max" and parsed.commit_every == 1.0 and parsed.timeout == 30.0
+    assert parsed.pace.text == "max" and parsed.commit_every is None and parsed.timeout == 30.0
+    assert parsed.commit_interval == 1.0 and parsed.transaction_timeout == 900.0
     assert parsed.registry is None and parsed.security_protocol == "PLAINTEXT"
     assert parsed.compression == "lz4"
     full = KafkaSettings.parse(
@@ -156,6 +157,7 @@ def test_the_defaults_and_every_option_are_read() -> None:
             "value-format": "json",
             "pace": "x2",
             "commit-every": "0.5",
+            "transaction-timeout": "600",
             "compression": "zstd",
             "partitions": "6",
             "replication-factor": "3",
@@ -172,6 +174,7 @@ def test_the_defaults_and_every_option_are_read() -> None:
     assert full.shape.timestamps == {"site": "opened_on"} and full.shape.key_format == "json"
     assert full.registry == "https://registry.example.com:8081"
     assert full.value_format == "json" and full.pace.text == "x2" and full.commit_every == 0.5
+    assert full.transaction_timeout == 600.0
     assert (full.partitions, full.replication_factor, full.timeout) == (6, 3, 10.0)
     assert full.compression == "zstd"
     assert full.sasl_mechanism == "SCRAM-SHA-256" and full.uses_sasl
@@ -196,6 +199,28 @@ REFUSED: Sequence[Any] = [
     (BOOTSTRAP, {"audience": "internal", "key-format": "xml"}, "key-format"),
     (BOOTSTRAP, {"audience": "internal", "pace": "fast"}, "pace"),
     (BOOTSTRAP, {"audience": "internal", "commit-every": "0"}, "commit-every"),
+    (BOOTSTRAP, {"audience": "internal", "commit-every": "301"}, "transaction-timeout"),
+    (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "0"}, "transaction-timeout"),
+    (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "abc"}, "transaction-timeout"),
+    (
+        BOOTSTRAP,
+        {"audience": "internal", "pace": "x2", "transaction-timeout": "2"},
+        "commit-every",
+    ),
+    (
+        BOOTSTRAP,
+        {
+            "audience": "internal",
+            "registry": "http://127.0.0.1:8081,http://other.example:8081",
+            "registry-auth-env": "X",
+        },
+        "only over https",
+    ),
+    (
+        BOOTSTRAP,
+        {"audience": "internal", "registry": "http://127.0.0.1:8081,ftp://other.example"},
+        "registry",
+    ),
     (BOOTSTRAP, {"audience": "internal", "timeout": "abc"}, "timeout"),
     (BOOTSTRAP, {"audience": "internal", "compression": "brotli"}, "compression"),
     (BOOTSTRAP, {"audience": "internal", "compression": ""}, "compression"),
@@ -268,6 +293,18 @@ def test_every_option_that_cannot_be_used_is_refused_with_the_option_named(
         KafkaSettings.parse(target, options)
     assert caught.value.code.code == "FLX-3504"
     assert fragment in str(caught.value)
+
+
+def test_registry_urls_are_checked_one_by_one_and_kept_as_a_list() -> None:
+    parsed = KafkaSettings.parse(
+        BOOTSTRAP,
+        {
+            "audience": "internal",
+            "registry": "http://127.0.0.1:8081/,http://localhost:8082",
+            "registry-auth-env": "R",
+        },
+    )
+    assert parsed.registry == "http://127.0.0.1:8081,http://localhost:8082"
 
 
 def test_a_credential_on_this_machine_may_travel_without_tls() -> None:
@@ -644,14 +681,17 @@ def test_a_topic_configured_for_a_backfill_takes_the_same_stream(
     assert broker.read("sim.reading") == reference["sim.reading"]
 
 
-def test_a_negative_timestamp_is_refused_without_moving_it(kept: Kept) -> None:
+@pytest.mark.parametrize("stamp", [-1, 0])
+def test_a_timestamp_at_or_before_the_epoch_is_refused_without_moving_it(
+    kept: Kept, stamp: int
+) -> None:
     target = target_of(FakeBroker())
     sink = _sink(kept, target, "reading")
-    record = KafkaRecord(b"1", {"a": 1}, -1, (), 7, b"1")
+    record = KafkaRecord(b"1", {"a": 1}, stamp, (), 7, b"1")
     with pytest.raises(FluxError) as caught:
         sink._check_time(record)
     assert caught.value.code.code == "FLX-3514"
-    assert "row 7" in str(caught.value) and "1970" in str(caught.value)
+    assert "row 7" in str(caught.value) and "1970-01-01T00:00:00Z" in str(caught.value)
 
 
 def _sink(kept: Kept, target: KafkaTarget, expose_id: str, **more: Any) -> KafkaSink:
@@ -803,7 +843,8 @@ def test_a_third_delivery_sends_nothing(kept: Kept, reference: Mapping[str, List
     deliver(kept, broker)
     producers = len(broker.producers)
     third = deliver(kept, broker)
-    assert len(broker.producers) == producers, "a finished stream opens no producer"
+    reopened = broker.producers[producers:]
+    assert reopened and all(p.closed and p.produced == 0 and p.commits == 0 for p in reopened)
     assert {t: _fingerprint(r) for t, r in visible(broker).items()} == {
         t: _fingerprint(r) for t, r in reference.items()
     }
@@ -915,7 +956,8 @@ def test_a_finished_paced_stream_is_not_sent_again_at_any_pace(kept: Kept) -> No
     deliver(kept, broker, {"pace": "x1000000000"}, clock=FakeClock(WALL_2026))
     count = len(broker.producers)
     again = deliver(kept, broker)
-    assert len(broker.producers) == count and all(r.writer["records"] == 0 for r in again)
+    assert all(p.produced == 0 and p.closed for p in broker.producers[count:])
+    assert all(r.writer["records"] == 0 and r.writer["transactions"] == 0 for r in again)
 
 
 # -- the receipt and what it must not hold -----------------------------------------------
@@ -1098,14 +1140,16 @@ class _Recorder:
         self.produced += 1
 
 
-def _producer_of(monkeypatch: pytest.MonkeyPatch, **more: Any) -> Any:
+def _producer_of(
+    monkeypatch: pytest.MonkeyPatch, options: Optional[Mapping[str, str]] = None, **more: Any
+) -> Any:
     pytest.importorskip("confluent_kafka")
     import confluent_kafka
 
     _Recorder.configs = []
     monkeypatch.setattr(confluent_kafka, "Producer", _Recorder)
     monkeypatch.setattr(confluent_kafka, "Consumer", _Recorder)
-    settings = KafkaSettings.parse(BOOTSTRAP, INTERNAL)
+    settings = KafkaSettings.parse(BOOTSTRAP, {**INTERNAL, **(options or {})})
     broker = ConfluentBroker(settings.client(), lambda: Credentials(), lambda: [])
     return broker.transactional_producer("id", "id", **more)
 
@@ -1136,3 +1180,410 @@ def test_a_producer_drains_its_reports_every_thousand_records_and_waits_when_ful
     inner.full = 2
     txn.produce("t", b"k", b"v", 0, [])
     assert inner.polls == [0.05, 0.05] and inner.produced == 2501
+
+
+# -- transactions: their timeout, and rolling an unpaced stream into several ---------------
+
+
+class _TickingClock(FakeClock):
+    """A clock that reads *tick* seconds later at every read of the monotonic time."""
+
+    def __init__(self, tick: float) -> None:
+        super().__init__(WALL_2026)
+        self.tick = tick
+
+    def monotonic(self) -> float:
+        self.now += self.tick
+        return self.now
+
+
+def test_the_producer_carries_the_transaction_timeout_and_sends_no_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _producer_of(monkeypatch)
+    producer_conf, consumer_conf = _Recorder.configs[0], _Recorder.configs[1]
+    assert producer_conf["transaction.timeout.ms"] == 900_000
+    assert producer_conf["enable.metrics.push"] is False
+    assert consumer_conf["enable.metrics.push"] is False
+    _producer_of(monkeypatch, {"transaction-timeout": "120.5", "timeout": "500"})
+    assert _Recorder.configs[0]["transaction.timeout.ms"] == 120_500
+
+
+def test_brokers_that_refuse_the_transaction_timeout_are_told_what_to_lower(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from confluent_kafka import KafkaError, KafkaException
+
+    class _Refusing(_Recorder):
+        def init_transactions(self, timeout: float) -> None:
+            raise KafkaException(KafkaError(KafkaError.INVALID_TRANSACTION_TIMEOUT))
+
+    import confluent_kafka
+
+    monkeypatch.setattr(confluent_kafka, "Producer", _Refusing)
+    settings = KafkaSettings.parse(BOOTSTRAP, {**INTERNAL, "transaction-timeout": "7200"})
+    broker = ConfluentBroker(settings.client(), lambda: Credentials(), lambda: [])
+    with pytest.raises(FluxError) as caught:
+        broker.transactional_producer("id", "id")
+    assert caught.value.code.code == "FLX-3505"
+    assert "transaction-timeout=7200" in str(caught.value)
+    assert "transaction.max.timeout.ms" in str(caught.value)
+
+
+def test_commit_every_rolls_an_unpaced_stream_into_several_transactions(
+    kept: Kept, reference: Mapping[str, List[Stored]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kafka, "_AGE_EVERY", 8)
+    broker = FakeBroker()
+    receipts = deliver(kept, broker, {"commit-every": "1"}, clock=_TickingClock(0.25))
+    assert max(r.writer["transactions"] for r in receipts) > 2
+    assert {t: _fingerprint(r) for t, r in visible(broker).items()} == {
+        t: _fingerprint(r) for t, r in reference.items()
+    }
+    for (_group, topic), text in broker.committed.items():
+        found = json.loads(text)
+        assert found["complete"] is True and found["records"] == len(broker.read(topic))
+
+
+def test_a_failure_in_a_later_transaction_resumes_after_the_last_committed_record(
+    kept: Kept, reference: Mapping[str, List[Stored]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kafka, "_AGE_EVERY", 8)
+    options = {"commit-every": "1"}
+    broker = FakeBroker()
+    broker.failures = [Failure("raise", after=100)]
+    with pytest.raises(FluxError):
+        deliver(kept, broker, options, clock=_TickingClock(0.25))
+    group = broker.producers[0].group
+    committed = json.loads(broker.committed[(group, "sim.device_change")])
+    assert committed["complete"] is False and committed["order"] == "stream"
+    assert 0 < committed["records"] <= 100
+    assert len(broker.read("sim.device_change")) == committed["records"]
+    receipts = deliver(kept, broker, options, clock=_TickingClock(0.25))
+    change = next(r for r in receipts if r.table == "sim.device_change")
+    assert change.writer["skipped"] == committed["records"]
+    assert {t: _fingerprint(r) for t, r in visible(broker).items()} == {
+        t: _fingerprint(r) for t, r in reference.items()
+    }
+
+
+@pytest.mark.parametrize(("age_every", "tick"), [(8, 5.0), (1_000_000, 100.0)])
+def test_a_stream_that_outgrows_its_one_transaction_is_refused_and_nothing_is_committed(
+    kept: Kept, monkeypatch: pytest.MonkeyPatch, age_every: int, tick: float
+) -> None:
+    monkeypatch.setattr(kafka, "_AGE_EVERY", age_every)
+    broker = FakeBroker()
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, broker, {"transaction-timeout": "10"}, clock=_TickingClock(tick))
+    assert caught.value.code.code == "FLX-3514"
+    text = str(caught.value)
+    assert "transaction-timeout=10" in text and "commit-every=SECONDS" in text
+    assert "transaction.max.timeout.ms" in text
+    assert visible(broker) == {} and broker.committed == {}
+    assert ("abort", broker.producers[0].transactional_id) in broker.calls
+
+
+def test_a_commit_every_that_is_given_lifts_the_one_transaction_limit(
+    kept: Kept, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kafka, "_AGE_EVERY", 8)
+    broker = FakeBroker()
+    deliver(
+        kept, broker, {"transaction-timeout": "30", "commit-every": "9"}, clock=_TickingClock(5)
+    )
+    assert visible(broker)
+
+
+# -- the producer fences before the progress is read; the settings are part of the progress ----
+
+
+def test_the_producer_is_opened_before_the_progress_is_read_and_a_finished_stream_sends_nothing(
+    kept: Kept,
+) -> None:
+    broker = FakeBroker()
+    deliver(kept, broker)
+    before = len(broker.calls)
+    deliver(kept, broker)
+    second = broker.calls[before:]
+    for producer in [c for c in second if c[0] == "producer"]:
+        progress = next(c for c in second if c[0] == "progress" and c[1] == producer[1])
+        assert second.index(producer) < second.index(progress)
+    assert not [c for c in second if c[0] in ("begin", "commit")]
+
+
+def test_a_stream_delivered_with_other_key_settings_is_refused(kept: Kept) -> None:
+    broker = FakeBroker()
+    deliver(kept, broker)
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, broker, {"key-format": "json"})
+    assert caught.value.code.code == "FLX-3504"
+    text = str(caught.value)
+    assert "other key or value settings" in text and "topic-prefix" in text and "group" in text
+    deliver(kept, broker)
+
+
+def test_a_sink_that_fails_to_open_lets_go_of_its_producer_and_clients(kept: Kept) -> None:
+    broker = FakeBroker()
+    deliver(kept, broker)
+    closes, producers = broker.closes, len(broker.producers)
+    with pytest.raises(FluxError):
+        deliver(kept, broker, {"key-format": "json"})
+    opened = broker.producers[producers:]
+    assert opened and all(producer.closed for producer in opened)
+    assert broker.closes > closes
+
+
+def test_a_stream_delivered_with_another_value_form_is_refused(kept: Kept) -> None:
+    broker = FakeBroker()
+    deliver(kept, broker)
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, broker, {"registry": "http://127.0.0.1:8081"})
+    assert caught.value.code.code == "FLX-3504" and "other key or value" in str(caught.value)
+
+
+def test_a_partial_stream_is_not_resumed_under_other_settings(kept: Kept) -> None:
+    broker = FakeBroker()
+    broker.failures = [Failure("commit")]
+    with pytest.raises(FluxError):
+        deliver(kept, broker)
+    plain = FakeBroker()
+    plain.failures = [Failure("raise", after=100)]
+    options = {"pace": "x86400", "commit-every": "1"}
+    with pytest.raises(FluxError):
+        deliver(kept, plain, options, clock=FakeClock(WALL_2026))
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, plain, {**options, "key-format": "json"}, clock=FakeClock(WALL_2026))
+    assert "other key or value settings" in str(caught.value)
+
+
+def test_a_paced_buffer_holds_the_bytes_and_not_the_value_objects(kept: Kept) -> None:
+    broker = FakeBroker()
+    sink = _sink(kept, target_of(broker, {"pace": "x1000000"}), "site")
+    sink.open(_header(sink))
+    sink.write([1, "eu", "2023-01-01"])
+    ((record, value),) = sink._buffer
+    assert record.value is None and value is not None and b"eu" in value
+    sink.close()
+
+
+def test_the_registry_client_gets_the_sinks_timeout_and_is_released_with_the_stream(
+    kept: Kept,
+) -> None:
+    serdes = FakeSerdes()
+    broker = FakeBroker()
+    deliver(kept, broker, {"registry": "http://127.0.0.1:8081", "timeout": "12"}, serdes=serdes)
+    assert serdes.timeouts and set(serdes.timeouts) == {12.0}
+    assert serdes.closes >= len(serdes.timeouts)
+
+
+# -- the adapter against a fake admin client and consumer -------------------------------------
+
+
+class _Future:
+    def __init__(self, value: Any = None, error: Optional[BaseException] = None) -> None:
+        self.value, self.error = value, error
+
+    def result(self, timeout: Optional[float] = None) -> Any:
+        if self.error is not None:
+            raise self.error
+        return self.value
+
+
+class _Entry:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+
+class _Admin:
+    """An admin client that answers each request from a script and notes what was asked."""
+
+    def __init__(
+        self,
+        *,
+        hosts: Sequence[str] = ("127.0.0.1",),
+        topic_errors: Sequence[Any] = (),
+        partition_errors: Sequence[Any] = (),
+        config_errors: Sequence[BaseException] = (),
+    ) -> None:
+        from types import SimpleNamespace
+
+        self.ns = SimpleNamespace
+        self.hosts = hosts
+        self.topic_errors = list(topic_errors)
+        self.partition_errors = list(partition_errors)
+        self.config_errors = list(config_errors)
+        self.requests: List[str] = []
+
+    def list_topics(self, topic: Optional[str] = None, timeout: float = 0) -> Any:
+        self.requests.append("list_topics")
+        partition_error = self.partition_errors.pop(0) if self.partition_errors else None
+        error = self.topic_errors.pop(0) if self.topic_errors else None
+        found = self.ns(
+            error=error, partitions={0: self.ns(error=partition_error), 1: self.ns(error=None)}
+        )
+        return self.ns(
+            brokers={i: self.ns(host=host) for i, host in enumerate(self.hosts)},
+            topics={topic: found},
+        )
+
+    def describe_configs(self, resources: Sequence[Any]) -> Any:
+        self.requests.append("describe_configs")
+        if self.config_errors:
+            return {resources[0]: _Future(error=self.config_errors.pop(0))}
+        return {
+            resources[0]: _Future({"cleanup.policy": _Entry("delete")}),
+        }
+
+
+def _adapter(
+    monkeypatch: pytest.MonkeyPatch, admin: _Admin, options: Optional[Mapping[str, str]] = None
+) -> ConfluentBroker:
+    pytest.importorskip("confluent_kafka")
+    from flux_engine.sinks import _kafka_broker
+
+    monkeypatch.setattr(_kafka_broker, "_METADATA_WAIT", 0.0)
+    settings = KafkaSettings.parse(BOOTSTRAP, {**INTERNAL, **(options or {})})
+    broker = ConfluentBroker(settings.client(), lambda: Credentials(), lambda: [])
+    monkeypatch.setattr(broker, "_admin_client", lambda: admin)
+    return broker
+
+
+def _kafka_error(name: str) -> Any:
+    from confluent_kafka import KafkaError
+
+    return KafkaError(getattr(KafkaError, name))
+
+
+def test_credentials_in_the_clear_are_refused_when_a_broker_is_not_on_this_machine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sasl = {
+        "sasl-username-env": "U",
+        "sasl-password-env": "P",
+        "security-protocol": "SASL_PLAINTEXT",
+    }
+    settings = KafkaSettings.parse("localhost:9092", {**INTERNAL, **sasl})
+    assert settings.client().loopback_only
+    assert not KafkaSettings.parse(BOOTSTRAP, INTERNAL).client().loopback_only
+    admin = _Admin(hosts=("127.0.0.1", "kafka-2.internal.example"))
+    broker = _adapter(monkeypatch, admin, sasl | {"security-protocol": "SASL_PLAINTEXT"})
+    with pytest.raises(FluxError) as caught:
+        broker.describe("t")
+    assert caught.value.code.code == "FLX-3504"
+    assert "kafka-2.internal.example" in str(caught.value) and "SASL_SSL" in str(caught.value)
+    assert admin.requests == ["list_topics"]
+    local = _Admin(hosts=("127.0.0.1", "localhost"))
+    ok = _adapter(monkeypatch, local, sasl | {"security-protocol": "SASL_PLAINTEXT"})
+    assert ok.describe("t") is not None
+
+
+def test_a_leader_that_is_not_yet_elected_is_waited_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    admin = _Admin(
+        partition_errors=[_kafka_error("LEADER_NOT_AVAILABLE")] * 2,
+        topic_errors=[_kafka_error("LEADER_NOT_AVAILABLE")],
+    )
+    broker = _adapter(monkeypatch, admin)
+    info = broker.describe("t")
+    assert info is not None and info.partitions == 2
+    assert admin.requests.count("list_topics") == 3
+
+
+def test_a_topic_the_configuration_read_does_not_know_yet_is_waited_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from confluent_kafka import KafkaException
+
+    admin = _Admin(config_errors=[KafkaException(_kafka_error("UNKNOWN_TOPIC_OR_PART"))])
+    info = _adapter(monkeypatch, admin).describe("t")
+    assert info is not None and info.configs == {"cleanup.policy": "delete"}
+    assert admin.requests.count("describe_configs") == 2
+
+
+def test_only_a_error_that_does_not_clear_or_the_deadline_stops_the_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hard = _Admin(topic_errors=[_kafka_error("TOPIC_AUTHORIZATION_FAILED")])
+    with pytest.raises(FluxError) as caught:
+        _adapter(monkeypatch, hard).describe("t")
+    assert caught.value.code.code == "FLX-3505" and hard.requests == ["list_topics"]
+    stuck = _Admin(partition_errors=[_kafka_error("LEADER_NOT_AVAILABLE")] * 100000)
+    with pytest.raises(FluxError) as caught:
+        _adapter(monkeypatch, stuck, {"timeout": "0.05"}).describe("t")
+    assert caught.value.code.code == "FLX-3505"
+
+
+class _Committed:
+    offsets: List[Any] = []
+
+    def __init__(self, conf: Dict[str, Any]) -> None:
+        pass
+
+    def committed(self, partitions: Any, timeout: float = 0) -> List[Any]:
+        return list(type(self).offsets)
+
+    def close(self) -> None:
+        pass
+
+
+def test_a_partition_error_reading_the_progress_is_an_error_and_no_offset_is_no_progress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    pytest.importorskip("confluent_kafka")
+    import confluent_kafka
+
+    monkeypatch.setattr(confluent_kafka, "Consumer", _Committed)
+    settings = KafkaSettings.parse(BOOTSTRAP, INTERNAL)
+    broker = ConfluentBroker(settings.client(), lambda: Credentials(), lambda: [])
+    _Committed.offsets = [
+        SimpleNamespace(error=_kafka_error("COORDINATOR_NOT_AVAILABLE"), offset=-1)
+    ]
+    with pytest.raises(FluxError) as caught:
+        broker.progress("g", "t")
+    assert caught.value.code.code == "FLX-3505" and "progress" in str(caught.value)
+    _Committed.offsets = [SimpleNamespace(error=None, offset=-1001, metadata=None)]
+    assert broker.progress("g", "t") is None
+    _Committed.offsets = [SimpleNamespace(error=None, offset=5, metadata='{"v":1}')]
+    assert broker.progress("g", "t") == '{"v":1}'
+
+
+class _Draining:
+    """A producer whose flush leaves the unacknowledged count as scripted."""
+
+    def __init__(self, counts: Sequence[int]) -> None:
+        self.counts = list(counts)
+        self.committed = False
+
+    def flush(self, timeout: float) -> int:
+        return self.counts.pop(0)
+
+    def send_offsets_to_transaction(self, *args: Any) -> None:
+        pass
+
+    def commit_transaction(self, timeout: float) -> None:
+        self.committed = True
+
+
+class _Group:
+    def consumer_group_metadata(self) -> object:
+        return object()
+
+
+def _txn_over(producer: _Draining) -> Any:
+    from flux_engine.sinks._kafka_broker import _ConfluentTxn
+
+    pytest.importorskip("confluent_kafka")
+    settings = KafkaSettings.parse(BOOTSTRAP, INTERNAL)
+    broker = ConfluentBroker(settings.client(), lambda: Credentials(), lambda: [])
+    return _ConfluentTxn(producer, _Group(), broker)
+
+
+def test_a_flush_that_drains_in_steps_commits_and_one_that_stalls_does_not() -> None:
+    draining = _Draining([5, 3, 1, 0])
+    _txn_over(draining).commit(topic="t", records=5, metadata="m")
+    assert draining.committed
+    stalled = _Draining([5, 3, 3])
+    with pytest.raises(FluxError) as caught:
+        _txn_over(stalled).commit(topic="t", records=5, metadata="m")
+    assert caught.value.code.code == "FLX-3505" and not stalled.committed

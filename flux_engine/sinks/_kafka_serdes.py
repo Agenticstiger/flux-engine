@@ -40,7 +40,7 @@ import struct
 from collections import abc as _abc
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Context, Decimal, InvalidOperation
 from functools import lru_cache
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
 
@@ -76,6 +76,8 @@ class RegistryAccess:
     url: str
     auth: Optional[str] = field(default=None, repr=False)
     ca_location: Optional[str] = None
+    #: The seconds the client waits for the registry to answer one request.
+    timeout: float = 30.0
 
 
 class ValueSerializer(Protocol):
@@ -94,6 +96,9 @@ class Serdes(Protocol):
         self, shape: StreamShape, *, value_format: str, registry: RegistryAccess
     ) -> ValueSerializer:
         """The serializer for *shape*; may fetch or register a schema."""
+
+    def close(self) -> None:
+        """Release the registry client; a later call opens it again."""
 
 
 #: Compact JSON with text as it is and no NaN: one encoder, built once.
@@ -333,6 +338,8 @@ def _refuse(at: str, why: str) -> FluxError:
 def _fit_decimal(precision: int, scale: int, at: str) -> Callable[[str], Decimal]:
     """The check of a decimal text against ``decimal(precision, scale)``, built once."""
     step = Decimal(1).scaleb(-scale)
+    # Wide enough to hold any value that fits, so only a value that does not fit is refused.
+    context = Context(prec=max(precision, 28) + 2)
 
     def fit(text: str) -> Decimal:
         try:
@@ -342,7 +349,7 @@ def _fit_decimal(precision: int, scale: int, at: str) -> Callable[[str], Decimal
         if not value.is_finite():
             raise _refuse(at, "a value is not a finite decimal number")
         try:
-            fitted = value.quantize(step)
+            fitted = value.quantize(step, context=context)
         except InvalidOperation:
             raise _refuse(at, f"a value does not fit decimal({precision},{scale})") from None
         if fitted != value or len(fitted.as_tuple().digits) > precision:
@@ -433,9 +440,13 @@ def _avro_leaf(node: Any, at: str) -> Converter:
 
             return to_millis
 
+        low, high = (-(2**31), 2**31 - 1) if base == "int" else (-(2**63), 2**63 - 1)
+
         def to_int(value: Any) -> Any:
             if type(value) is int or _is_int(value):
-                return value
+                if low <= value <= high:
+                    return value
+                raise _refuse(at, f"a value is outside the range of an Avro {base}")
             raise _refuse(at, "a value is not an integer")
 
         return to_int
@@ -726,15 +737,18 @@ def _json_field_list(schema: Mapping[str, Any]) -> List[Tuple[str, bool]]:
 # -- the serializers ---------------------------------------------------------------
 
 
-def _serializer_failure(exc: BaseException, known: Callable[[], Sequence[Known]]) -> FluxError:
-    """``FLX-3505`` for a serializer's error: one scrubbed line, the library's exception unchained."""
+def _serializer_failure(
+    exc: BaseException,
+    known: Callable[[], Sequence[Known]],
+    doing: str = "the registry serializer failed",
+) -> FluxError:
+    """``FLX-3505`` for a registry error: one scrubbed line, the library's exception unchained."""
     from flux_engine.sinks.errors import FLX_3505
 
     lines = scrub(str(exc), known(), sink="kafka").strip().splitlines()
     return FluxError(
         FLX_3505,
-        f"kafka: the registry serializer failed: {type(exc).__name__}"
-        f"{': ' + lines[0][:300] if lines else ''}",
+        f"kafka: {doing}: {type(exc).__name__}{': ' + lines[0][:300] if lines else ''}",
     )
 
 
@@ -853,13 +867,20 @@ class ConfluentSerdes:
     ) -> None:
         self._client_factory = client_factory
         self._known = known
+        self._clients: Dict[RegistryAccess, Any] = {}
 
     def _client(self, registry: RegistryAccess) -> Any:
+        """The one client of a registry, opened when first needed and kept until :meth:`close`."""
+        if registry not in self._clients:
+            self._clients[registry] = self._new_client(registry)
+        return self._clients[registry]
+
+    def _new_client(self, registry: RegistryAccess) -> Any:
         if self._client_factory is not None:
             return self._client_factory(registry)
         from confluent_kafka.schema_registry import SchemaRegistryClient
 
-        conf: Dict[str, Any] = {"url": registry.url}
+        conf: Dict[str, Any] = {"url": registry.url, "timeout": registry.timeout}
         if registry.auth:
             conf["basic.auth.user.info"] = registry.auth
         if registry.ca_location:
@@ -867,13 +888,18 @@ class ConfluentSerdes:
         return SchemaRegistryClient(conf)
 
     def _fail(self, exc: BaseException, doing: str) -> FluxError:
-        from flux_engine.sinks.errors import FLX_3505
+        return _serializer_failure(exc, self._known, doing)
 
-        lines = scrub(str(exc), self._known(), sink="kafka").strip().splitlines()
-        return FluxError(
-            FLX_3505,
-            f"kafka: {doing}: {type(exc).__name__}{': ' + lines[0][:300] if lines else ''}",
-        )
+    def close(self) -> None:
+        """Close the registry clients; the next serializer opens one again."""
+        clients, self._clients = list(self._clients.values()), {}
+        for client in clients:
+            closer = getattr(client, "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def serializer(
         self, shape: StreamShape, *, value_format: str, registry: RegistryAccess

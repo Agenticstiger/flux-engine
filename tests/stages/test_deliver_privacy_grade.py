@@ -148,6 +148,17 @@ def test_a_plan_edited_after_the_run_gives_no_grade_and_names_its_check(tmp_path
     assert "FLX-" in str(recorded.problem)
 
 
+def test_a_damaged_run_directory_gives_no_grade_and_raises_nothing(tmp_path: Path) -> None:
+    bundle, state = _bundle(tmp_path), tmp_path / "state"
+    result = run(bundle, state_dir=state, profile=PROFILE)
+    assert result.success, result.stderr
+    layout = RunLayout.for_state_dir(state, result.artifacts["plan"]["run_id"])
+    layout.run_digest_path.unlink()
+    recorded = privacy_grade_of(layout)
+    assert recorded.grade is None and recorded.problem
+    assert "run-digest.json" in recorded.problem and "FileNotFoundError" in recorded.problem
+
+
 class _Stripped:
     """A target that hands its sink the context as it was before the new fields."""
 

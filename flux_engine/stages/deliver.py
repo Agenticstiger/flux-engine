@@ -125,6 +125,13 @@ def privacy_grade_of(layout: RunLayout) -> RecordedGrade:
         return RecordedGrade(
             problem=f"the run's plan does not check ({error.code.code}{': ' + first if first else ''})"
         )
+    except (OSError, ValueError) as error:
+        filename = getattr(error, "filename", None)
+        named = Path(str(filename)).name if filename else "a run file"
+        return RecordedGrade(
+            problem=f"the run's {named} could not be read ({type(error).__name__}); "
+            "a damaged run directory records no grade"
+        )
     recorded = plan_document.get(GRADE_KEY)
     if recorded not in {pattern.value for pattern in Pattern}:
         return RecordedGrade(

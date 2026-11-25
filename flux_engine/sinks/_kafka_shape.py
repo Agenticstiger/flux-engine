@@ -179,7 +179,46 @@ def stream_shapes(
                 f"topic; pass --sink-opt topic.{expose_id}=NAME to give one of them another",
             )
         owner[shape.topic] = expose_id
+    _refuse_contract_collisions(everything, shapes)
     return shapes
+
+
+def _refuse_contract_collisions(
+    everything: Sequence[ResolvedEmit], shapes: Mapping[str, StreamShape]
+) -> None:
+    """``FLX-3513`` for a topic, ``FLX-3515`` for a subject, that is also one a contract names.
+
+    Any expose's binding counts, whether or not the run emits it: a synthetic stream must never
+    be written to the topic of the contract's own product, or registered under its subject.
+    """
+    topics: Dict[str, str] = {}
+    subjects: Dict[str, str] = {}
+    for entry in everything:
+        topic = _contract_topic(_binding_of(entry.expose))
+        if topic is not None:
+            topics.setdefault(topic, entry.expose_id)
+        try:
+            named = _subject_of(entry)
+        except FluxError:
+            continue  # a binding the sink cannot write is refused where its own stream is read
+        if named is not None:
+            subjects.setdefault(named.subject, entry.expose_id)
+    for expose_id, shape in shapes.items():
+        if shape.topic in topics:
+            raise FluxError(
+                FLX_3513,
+                f"expose {expose_id!r}: its topic {shape.topic!r} is the topic the contract of "
+                f"expose {topics[shape.topic]!r} names; pass --sink-opt topic-prefix=PREFIX or "
+                f"topic.{expose_id}=NAME so a synthetic stream never lands on it",
+            )
+        derived = f"{shape.topic}-value"
+        if shape.subject is None and derived in subjects:
+            raise FluxError(
+                FLX_3515,
+                f"expose {expose_id!r}: its schema would be registered under {derived!r}, the "
+                f"subject the contract of expose {subjects[derived]!r} names; pass --sink-opt "
+                f"topic-prefix=PREFIX or topic.{expose_id}=NAME to give it another",
+            )
 
 
 def check_settings(settings: ShapeSettings) -> None:

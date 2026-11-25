@@ -39,7 +39,16 @@ The examples use a device-telemetry bundle like the one in [Project a history](.
 fluxsim run . --sink kafka:localhost:9092 --sink-opt audience=internal
 ```
 
-The target is the bootstrap servers and nothing else. The sink connects to those brokers and to the registry you name with `registry`, and to nothing else: an address, a topic or a credential written in the contract is never contacted.
+The bundle must pin a privacy profile, or the run records no grade and the sink refuses every stream (see the audience gate below). The Simulation pins it under its extension block:
+
+```text
+extensions:
+  com.agentics.flux/1:
+    profile:
+      digest: sha256:7716a97db17142ffc32bb0f76a69f8906aea29cf844a801eed1c6d078a170298
+```
+
+Replace the digest with the one of your own profile. The target is the bootstrap servers and nothing else. The sink connects to those brokers and to the registry you name with `registry`, and to nothing else: an address, a topic or a credential written in the contract is never contacted.
 
 Everything that needs no network is checked first: the options when the target is opened, before the run, and then the audience gate and each stream's declarations before any row is sent. A refusal at that point has written nothing.
 
@@ -88,7 +97,7 @@ The record timestamp is the event's time, set explicitly, in milliseconds since 
 
 An expose with no timestamp column is refused with `FLX-3513`, naming `timestamp.EXPOSE`.
 
-A broker refuses a negative timestamp and, from Kafka 4.0, one more than an hour ahead of its clock unless the topic says otherwise, through `message.timestamp.before.max.ms` and `message.timestamp.after.max.ms`. The sink checks every record against both limits before it sends it, and a record outside them stops the stream with `FLX-3514`. The message names the limit and the remedy: a topic configured for a backfill, or a run window nearer the present. The sink never moves a record's time to fit.
+A timestamp at or before 1970-01-01T00:00:00Z is refused with `FLX-3514` (a broker refuses a negative one and a producer reads 0 as the current time); run a window that starts after it. A broker also refuses, from Kafka 4.0, a timestamp more than an hour ahead of its clock unless the topic says otherwise, through `message.timestamp.before.max.ms` and `message.timestamp.after.max.ms`. The sink checks every record against both limits before it sends it, and a record outside them stops the stream with `FLX-3514`. The message names the limit and the remedy: a topic configured for a backfill, or a run window nearer the present. The sink never moves a record's time to fit.
 
 ```text
 kafka-configs.sh --bootstrap-server localhost:9092 --alter --entity-type topics \
@@ -123,9 +132,11 @@ fluxsim run . --sink kafka:localhost:9092 --sink-opt audience=internal \
 
 ## Exactly once, and resuming
 
-The producer is idempotent and transactional, with a `transactional.id` that is stable for the run, the stream and the topic. A retried delivery therefore fences an earlier one and aborts what it left open. An unpaced stream is one transaction for the whole horizon, committed only when every row has arrived and every record has been acknowledged, and aborted otherwise.
+The producer is idempotent and transactional, with a `transactional.id` that is stable for the run, the stream and the topic. A retried delivery therefore fences an earlier one and aborts what it left open. An unpaced stream is one transaction for the whole horizon, committed only when every row has arrived and every record has been acknowledged, and aborted otherwise. A transaction may stay open for `transaction-timeout` seconds (900 by default, the most Kafka's own brokers allow unless they are set higher), so a stream that takes longer than 90% of that is aborted and refused with `FLX-3514`, nothing committed. Raise `transaction-timeout` together with the brokers' `transaction.max.timeout.ms`, or pass `commit-every=SECONDS`, which makes an unpaced stream commit every that many seconds as it goes, each commit recording its progress as below. `commit-every` may not be more than a third of `transaction-timeout`.
 
 Each transaction also commits the stream's progress: an offset, under a consumer group named like the `transactional.id`, on partition 0 of the topic, whose value and metadata count the records sent, the order they went in and whether the stream is complete. It commits with the records or not at all. A delivery that starts reads it. A complete stream is not sent again, and a partial one resumes after its last committed record, so running the same command again after a failure sends what is missing and nothing twice.
+
+To deliver a run again, to the same topics, send it with the same key and value settings. The progress also records the settings that decide a record's bytes (the key columns and format, and the value format and subject), and a stream delivered under other ones is refused with `FLX-3504`, since its topic would hold two shapes. Deliver it to another topic with `topic-prefix` or `topic.EXPOSE`, or delete the topic and the consumer group the message names.
 
 Read with `isolation.level=read_committed` to see each record once. Java's consumer reads `read_uncommitted` unless told otherwise, and it would see the records of an aborted attempt.
 
@@ -168,7 +179,7 @@ fluxsim run . --sink kafka:broker-1.example.org:9093 --sink-opt audience=externa
   --sink-opt ssl-ca-location=/etc/ssl/kafka-ca.pem
 ```
 
-A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless every server it goes to is this machine's loopback address. `ssl-ca-location` and `registry-ca-location` name certificate files. A missing variable is `FLX-3504`, naming the variable and never a value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to the `flux_engine.sinks.kafka` logger, never straight to the terminal.
+A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless every server it goes to is this machine's loopback address. With `SASL_PLAINTEXT` the sink also reads the brokers the cluster advertises and refuses (`FLX-3504`) one that is not on this machine. `registry` may list several URLs separated by commas, each checked the same way. `ssl-ca-location` and `registry-ca-location` name certificate files. A missing variable is `FLX-3504`, naming the variable and never a value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to the `flux_engine.sinks.kafka` logger, never straight to the terminal.
 
 ## The options
 
@@ -180,7 +191,8 @@ A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless ever
 | `key.EXPOSE`, `key-format` | the key columns, and `string` or `json` |
 | `timestamp.EXPOSE` | the timestamp column |
 | `value-format` | `json` for a derived JSON Schema instead of Avro |
-| `pace`, `commit-every` | `max`, `realtime` or `xN`, and the seconds between transactions |
+| `pace`, `commit-every` | `max`, `realtime` or `xN`; and the seconds between transactions (1 by default for a paced stream; an unpaced stream is one transaction unless `commit-every` is given) |
+| `transaction-timeout` | the seconds a transaction may stay open, 900 by default; at most the brokers' `transaction.max.timeout.ms` |
 | `compression` | `none`, `gzip`, `snappy`, `lz4` (the default) or `zstd`: the codec of the producer's batches |
 | `partitions`, `replication-factor` | for a topic the sink creates |
 | `timeout` | the time limit for a broker or registry call |

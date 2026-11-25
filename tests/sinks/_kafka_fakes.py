@@ -274,13 +274,19 @@ class FakeSerdes:
 
     def __init__(self) -> None:
         self.calls: List[Tuple[str, str, Optional[str]]] = []
+        self.timeouts: List[float] = []
+        self.closes = 0
 
     def serializer(
         self, shape: StreamShape, *, value_format: str, registry: RegistryAccess
     ) -> ValueSerializer:
         self.calls.append((shape.topic, value_format, registry.auth))
+        self.timeouts.append(registry.timeout)
         subject = shape.subject.subject if shape.subject else f"{shape.topic}-value"
         return _Labelled(f"{value_format}:{subject}@1")
+
+    def close(self) -> None:
+        self.closes += 1
 
 
 class _Labelled:
