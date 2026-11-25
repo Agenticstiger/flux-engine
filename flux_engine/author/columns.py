@@ -2463,12 +2463,19 @@ def _one_value(ctx: ColumnContext, plan: ColumnPlan, point: _Point) -> None:
     kind = ctx.column.logical_type.kind
     plan.reads.append((point.tokens, "the one value the profile publishes"))
     if _temporal(kind):
-        end = point.value + _DAY_MS
-        plan.declaration["bins"] = [_spell(kind, point.value), _spell(kind, end)]
+        try:
+            edges = [_spell(kind, point.value), _spell(kind, point.value + _DAY_MS)]
+            side = "starts"
+        except (OverflowError, ValueError):
+            # The last day a column can hold (9999-12-31, a sentinel open end) has no day after
+            # it to close the span, so the span is the day that ends there instead.
+            edges = [_spell(kind, point.value - _DAY_MS), _spell(kind, point.value)]
+            side = "ends"
+        plan.declaration["bins"] = edges
         plan.declaration["binWeights"] = ["1"]
         reason = (
             f"The profile publishes one value ({point.definition}) and no other order "
-            "statistic: the values are drawn within the day that starts there."
+            f"statistic: the values are drawn within the day that {side} there."
         )
         plan.labels.append(Label(("bins",), assumed(reason)))
         plan.labels.append(Label(("binWeights",), assumed(reason)))

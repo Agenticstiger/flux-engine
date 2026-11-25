@@ -302,6 +302,53 @@ def test_a_timestamp_range_is_rfc3339_and_spans_the_run() -> None:
     assert plan.time_span == (1782864000000, 1790812799000)
 
 
+def _one_day(day: str) -> Dict[str, Any]:
+    """The entry of a date column whose profile publishes *day* as its min and max and nothing else."""
+    from flux_engine.core.clock import parse_rfc3339_ms
+
+    milliseconds = str(parse_rfc3339_ms(f"{day}T00:00:00Z"))
+    return {
+        "domain": "timestamp",
+        "metrics": {"min": _metric("min/1", milliseconds), "max": _metric("max/1", milliseconds)},
+    }
+
+
+@pytest.mark.parametrize(
+    ("declared", "day", "bins"),
+    [
+        ("date", "2025-10-01", ["2025-10-01", "2025-10-02"]),
+        ("timestamp", "2025-10-01", ["2025-10-01T00:00:00.000Z", "2025-10-02T00:00:00.000Z"]),
+        ("date", "9999-12-30", ["9999-12-30", "9999-12-31"]),
+    ],
+)
+def test_one_published_day_is_spanned_by_the_day_that_starts_there(
+    declared: str, day: str, bins: List[str]
+) -> None:
+    plan = _plan(declared, _one_day(day))
+    assert plan.declaration["bins"] == bins
+    assert any("the day that starts there" in sentence for sentence in plan.assumptions)
+
+
+@pytest.mark.parametrize(
+    ("declared", "bins"),
+    [
+        ("date", ["9999-12-30", "9999-12-31"]),
+        ("timestamp", ["9999-12-30T00:00:00.000Z", "9999-12-31T00:00:00.000Z"]),
+    ],
+)
+def test_the_last_day_a_column_holds_is_spanned_by_the_day_that_ends_there(
+    declared: str, bins: List[str]
+) -> None:
+    # A sentinel open end such as 9999-12-31 has no day after it to close the span: the plan used
+    # to raise OverflowError here, and the whole expose was left out of the bundle.
+    plan = _plan(declared, _one_day("9999-12-31"))
+    assert plan.declaration["bins"] == bins
+    assert plan.declaration["binWeights"] == ["1"]
+    assert any("the day that ends there" in sentence for sentence in plan.assumptions)
+    assert not any("starts there" in sentence for sentence in plan.assumptions)
+    assert _sources(plan)[("bins",)] is Source.ASSUMPTION
+
+
 def test_an_integer_key_is_an_assumed_span_the_check_does_not_read() -> None:
     plan = _plan("int", {"domain": "number", "metrics": {}}, key=True, rows=50)
     assert plan.declaration["bins"] == ["1", "50"]
