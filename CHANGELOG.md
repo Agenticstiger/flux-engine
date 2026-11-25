@@ -24,6 +24,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Added
 
+- flux-stats: `noise.noise_floor(mechanism, scale, cells)`, the count a released cell must exceed to stand clear
+  of the noise among `cells` cells, a union bound at the confidence `noise.widening` uses, and `noise.ceil_ln`,
+  which it reads `ceil(ln m)` with in exact arithmetic (ADR 0019, the second amendment of 2026-11-25).
 - `init --json` carries `ledger.unused`, the list an owner can leave out of the profile: an entry the profile reader
   holds whole (a calendar entry with none of its histograms read, say) is named by its own pointer, so dropping
   exactly that list leaves a profile the reader accepts. `ledger.statistics` still names each statistic on its own,
@@ -134,6 +137,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Changed
 
+- The engine needs `flux-spec>=0.5.5,<0.6` (was `>=0.5.4`). 0.5.5's FLUID 0.7.7 preview declares a versioned
+  table's open end and version chain (`validityParams.openEnd` and `chain`), which `fluxsim init` reads into a
+  history; under 0.5.4 a contract that declared either was refused by validation.
 - The engine reads a profile in which an entry holds only the keys that name it, as when a release step drops
   every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place:
   `init` and `plan` accept it, and a citation at or under such an entry is still refused (`FLX-5036`). The entries
@@ -187,6 +193,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `1`: on Linux a TIMESTAMP cell then held no RFC 3339 instant, and `fluxsim init` failed on a run window that starts
   before 1000, such as one a profile's year grid gives when its first bin, from 0001-01-01, holds records. macOS
   wrote four digits already, so its output does not change.
+- `plan` refused (`FLX-3403`), and `validate` warned of, a date column whose declared range reaches past the run's
+  window even when its draw stays inside it, as a range read from a profile does (its full year grid, with weight only
+  in the bins inside the window). Both now read the edges the draw can reach: the weighted bins' hull, or the declared
+  range when the column has no bins. A bin outside the window that carries weight is still refused (ADR 0017, the
+  amendment of 2026-11-25).
 - `verify` no longer refuses (`FLX-5037`) a histogram of a DATE column whose profile grid ends at the calendar's last
   instant, 253402300799999 milliseconds. A profile spells the last edge of a year grid there and a declaration spells
   it as the day 9999-12-31; they are one edge. An edge that is not a whole day still matches no declared edge.
@@ -269,7 +280,37 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   unused list names a whole entry (see below) differs by that list too, and its register is format `1-4-0`. A bundle
   already written keeps its own.
 - A refused `init` reports its refusal even when a file it wrote cannot be removed while it cleans up, rather than a
-  permission error.
+  permission error, and a line after it names each file or directory left behind (a directory once, for what lies
+  in it). With `--overlay`, the directory `init` made for the bundles is removed with them.
+- `init` leaves out a history the plan refuses, and lists its statistics unused, when the bundle holds no
+  projection too. It did so only after leaving out a projection first; with none, it reported the history's
+  refusal and exited 1.
+- `init` refuses a contract's declared date range that would make the run's window longer than 300 years, naming
+  the column, its range and the window, before writing anything. Such a range marks no data (an open end spelled
+  before the year 9999, or a placeholder such as 0001-01-01); write an open end in the year 9999, which no window
+  reads. A shorter range that widens the window is still a note and a gap at `/spec/timeBounds`.
+- `init` writes the open end and the chain a contract declares on its validity window's end (FLUID 0.7.7
+  `validityParams.openEnd` and `chain`) into the table's history (ADR 0017, amendment of 2026-11-25). A required end
+  column no longer keeps the history out when the contract declares its open end, and open versions end on exactly
+  that value, `9999-12-31` included; an end column that publishes only that value is written by the history. The
+  open end gives the run's window nothing. A declared `chain` sets the entry's chain, and `none` writes no history,
+  with the reason. Without an open end, a required end column's reason says to declare one, and `FLX-3125` names
+  declaring it first.
+- `init` reads a date or timestamp histogram released with noise only where its counts stand clear of the noise,
+  above `sqrt(2v(5 + ceil(ln m)))` for Gaussian noise of variance `v` over `m` bins (ADR 0019, the second amendment
+  of 2026-11-25). A bin below that floor carries no weight in the draw, and the run's window is the hull of the
+  bins above it. When no bin is above it, the column is drawn evenly within the window, inside its range, as a
+  noted assumption; when its range and the window do not meet, it is drawn evenly over the whole range, and the
+  column's note says so. The declared range, the histogram's whole grid, and the histogram property stay, so `verify`
+  still scores the column. Before, noise in a year grid's empty bins drew dates across the calendar and stretched
+  the window to 0001-01-01 and 9999-12-31. Only bundles written from profiles released with noise change.
+- A run window that the profile's own spans make longer than 300 years is now a `time window` note, naming the
+  columns that reach its ends, and a gap at `/spec/timeBounds` that `--strict` refuses. Before, `init` wrote such
+  a window without a word.
+- `init --window` refuses an END in the year 9999, and `init --history FILE` refuses a file whose `timeBounds` end,
+  an entry's `until` or a `start` bin falls there, naming the value and its place. The year 9999 spells an open
+  end, which gives the window nothing, as in a declared range; before, the window reached the end of the calendar,
+  and a plan with periods failed past it.
 - `init` no longer turns a table's date pair into a lifetime or a `within` entry on a column the table's history sets
   (its validity start, its validity end or its activation column). With `--history FILE` it refused with `FLX-6203`
   ("has more than one source"), and a history the profile carries could be dropped, its statistics listed unused. The

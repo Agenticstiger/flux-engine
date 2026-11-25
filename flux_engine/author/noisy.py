@@ -29,7 +29,7 @@ from flux_engine.author.basis import Basis
 from flux_engine.author.forms import grouped
 from flux_stats.cliques import CLIQUE_DEFINITION
 from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM
-from flux_stats.noise import point_estimate, variance_of
+from flux_stats.noise import noise_floor, point_estimate, variance_of
 from flux_stats.spelling import render_exact
 
 __all__ = ["NoisyNote", "cite_noisy", "point_estimates"]
@@ -53,6 +53,9 @@ class NoisyNote:
     #: a whole clique.
     definition: str = ""
     records: Optional[int] = None
+    #: Of an ungrouped histogram, whether each cell's noisy count stands clear of the noise
+    #: (:func:`flux_stats.noise.noise_floor`, ADR 0019, amendment of 2026-11-25); ``None`` else.
+    clear: Optional[Tuple[bool, ...]] = None
 
     @property
     def sentence(self) -> str:
@@ -120,11 +123,16 @@ def _estimate(
     key = _COUNT_KEYS[statistic["definition"]]
     noise = statistic.pop("noise")
     records = None
+    clear = None
     for group in statistic["groups"]:
-        estimate = point_estimate([Fraction(text) for text in group.pop("noisyCounts")])
+        noisy = [Fraction(text) for text in group.pop("noisyCounts")]
+        estimate = point_estimate(noisy)
         group["k"] = estimate.records
         group[key] = list(estimate.counts)
         records = estimate.records if not grouped(statistic) else None
+        if not grouped(statistic) and statistic["definition"] == MARGINAL_HISTOGRAM.identifier:
+            floor = noise_floor(str(noise["mechanism"]), Fraction(noise["scale"]), len(noisy))
+            clear = tuple(value > floor for value in noisy)
     variance = variance_of(str(noise["mechanism"]), Fraction(noise["scale"]))
     notes[tokens] = NoisyNote(
         tokens=tokens,
@@ -133,6 +141,7 @@ def _estimate(
         variance=render_exact(variance),
         definition=str(statistic["definition"]),
         records=records,
+        clear=clear,
     )
 
 

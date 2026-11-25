@@ -113,7 +113,7 @@ def test_a_flux_spec_version_is_read_to_its_patch(version: str, parts: tuple) ->
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("version", ["9.9.0", "0.6.0", "0.5.3"])
+@pytest.mark.parametrize("version", ["9.9.0", "0.6.0", "0.5.4", "0.5.3"])
 def test_an_unsupported_flux_spec_is_refused_rather_than_used(
     monkeypatch: pytest.MonkeyPatch, version: str
 ) -> None:
@@ -126,7 +126,8 @@ def test_an_unsupported_flux_spec_is_refused_rather_than_used(
     import flux_engine.spec as shim
 
     fake = types.ModuleType("flux_spec")
-    # 0.5.3 is below the floor: it reads a bundle's files in the locale's encoding.
+    # 0.5.4 is below the floor: its FLUID 0.7.7 preview declares no validity window's open end
+    # or chain. 0.5.3 also reads a bundle's files in the locale's encoding.
     fake.__version__ = version  # type: ignore[attr-defined]
     # find_spec() reads __spec__ off an already-imported module and raises
     # ValueError when it is None, so the stand-in needs one.

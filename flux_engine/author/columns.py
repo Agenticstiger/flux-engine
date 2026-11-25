@@ -171,6 +171,14 @@ class ColumnContext:
     #: that do, sorted. A categorical column whose levels come from the profile or the contract
     #: declares them too, so a level the profile withholds still has its share (ADR 0014 section 3).
     asked_levels: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
+    #: For each statistic of the column released with noise, by its position in the column's
+    #: ``statistics``: whether each cell of its ungrouped histogram stands clear of the noise
+    #: (:func:`flux_stats.noise.noise_floor`, ADR 0019, amendment of 2026-11-25).
+    noise_clear: Tuple[Tuple[int, Tuple[bool, ...]], ...] = ()
+    #: The open end (milliseconds) the contract declares when this column is the end of a validity
+    #: window whose table publishes a history: an open version's end holds it, and the history
+    #: sets it, so a column that publishes only that value needs no draw of its own.
+    open_end: Optional[int] = None
 
     @property
     def contract_tokens(self) -> Tuple[str, ...]:
@@ -213,6 +221,16 @@ class ColumnPlan:
     published_range: Optional[Tuple[Decimal, Decimal]] = None
     #: The column's time span in milliseconds, for a date or timestamp column with a range.
     time_span: Optional[Tuple[int, int]] = None
+    #: A date or timestamp column read from a noisy histogram: its draw weighs only the bins whose
+    #: counts stand clear of the noise, ``time_span`` is their hull (``None`` when none does), and
+    #: its declared range, the histogram's whole grid, gives the run's window nothing.
+    noise_floored: bool = False
+    #: No bin of that histogram stands clear of the noise, so the column is drawn evenly within
+    #: the run's window once it is known (:func:`draw_in_window`).
+    drawn_in_window: bool = False
+    #: Every row holds the open end the contract declares, so the table's history sets the column
+    #: and it declares no draw; without a history the bundle cannot write it.
+    open_end_only: bool = False
     #: The declaration is a placeholder: the profile published nothing it could rest on.
     placeholder: bool = False
     #: A number key whose span is assumed, so the foreign keys that reference it may
@@ -1728,6 +1746,19 @@ def _from_histogram(
     weights, bases = cell_weights(
         ctx.minimum_cell, cells, stat_tokens, "binCounts", _HISTOGRAM, total=total
     )
+    clear = dict(ctx.noise_clear).get(index) if _temporal(kind) else None
+    if clear is not None and len(clear) == len(weights):
+        # A released date histogram: a bin whose count does not stand clear of the noise is read
+        # as noise, so it carries no weight (ADR 0019, amendment of 2026-11-25).
+        plan.noise_floored = True
+        plan.drawn_in_window = not any(clear)
+        weights = [
+            weight if keep else Fraction(0) for weight, keep in zip(weights, clear, strict=True)
+        ]
+        bases = [
+            basis if keep else assumed(_NOISE_FLOOR_REASON)
+            for basis, keep in zip(bases, clear, strict=True)
+        ]
     mean = _published_mean(ctx)
     shaped = None
     if mean is not None and kind in (LogicalKind.INT, LogicalKind.DECIMAL) and _shapes(ctx):
@@ -1741,7 +1772,14 @@ def _from_histogram(
                 else "checked against the histogram, which keeps it as near as its bins allow"
             ),
         )
-    if shaped is None:
+    if plan.drawn_in_window:
+        plan.how = (
+            "evenly within the run's time window, inside its range: no bin of its released "
+            "histogram stands clear of the noise"
+        )
+        plan.assumptions.append(_NOISE_EVERYWHERE)
+        plan.reads.append((stat_tokens, _NOISE_EVERYWHERE_READ))
+    elif shaped is None:
         plan.declaration["bins"] = [_spell(kind, edge) for edge in drawn]
         plan.declaration["binWeights"] = [_decimal_text(weight) for weight in weights]
         for position, basis in enumerate(drawn_bases):
@@ -1756,6 +1794,11 @@ def _from_histogram(
     high = _Point(Fraction(1), edges[-1], stat_tokens + ("bins", str(len(edges) - 1)), _HISTOGRAM)
     if low.value < high.value:
         _range(ctx, plan, low, high)
+    if plan.noise_floored and clear is not None:
+        # The range stays the histogram's whole grid, which its property's bins partition; the
+        # window reads the bins that stand clear of the noise.
+        kept = [position for position, keep in enumerate(clear) if keep]
+        plan.time_span = (int(edges[kept[0]]), int(edges[kept[-1] + 1])) if kept else None
     plan.assumptions.extend(_withheld_lines(ctx, cells, "bin count", total=total))
     if "range" in plan.declaration and _scores_order(kind):
         plan.properties.append(
@@ -1782,6 +1825,71 @@ def _from_histogram(
             )
         )
     _mean_property(ctx, plan)
+
+
+#: Why a bin of a released date histogram carries no weight.
+_NOISE_FLOOR_REASON = (
+    "its released count does not stand clear of the noise (ADR 0019, amendment of 2026-11-25), "
+    "so the bin is read as noise and carries no weight"
+)
+_NOISE_EVERYWHERE = (
+    "No bin of the column's released histogram stands clear of the noise, so the column is drawn "
+    "evenly within the run's time window (spec.timeBounds), inside its declared range."
+)
+_NOISE_EVERYWHERE_READ = (
+    "no bin's count stands clear of the noise, so the column is drawn evenly within the run's "
+    "time window, inside its range; the histogram property still scores it"
+)
+#: The same, when the column's declared range and the run's window do not meet.
+_NOISE_OUTSIDE_WINDOW = (
+    "No bin of the column's released histogram stands clear of the noise, and its declared range "
+    "does not meet the run's time window (spec.timeBounds), so the column is drawn evenly over its "
+    "whole declared range, outside the window."
+)
+_NOISE_OUTSIDE_WINDOW_READ = (
+    "no bin's count stands clear of the noise and the range does not meet the run's time window, "
+    "so the column is drawn evenly over its whole range; the histogram property still scores it"
+)
+
+
+def draw_in_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str]) -> None:
+    """Give a column whose released histogram is noise everywhere one bin over the run's window.
+
+    Only a plan with :attr:`ColumnPlan.drawn_in_window` changes. The bin is the window cut to the
+    column's declared range, the histogram's grid, since a bin stays inside the range
+    (``FLX-3402``). When the two do not meet, the bin is the whole range, outside the window, and
+    the column's assumption says so. A DATE column's bin runs over the whole days inside it, so
+    every day it draws lies inside it.
+    """
+    if not plan.drawn_in_window:
+        return
+    low, high = (parse_rfc3339_ms(text) for text in window)
+    outside = False
+    if plan.published_range is not None:
+        first, last = (int(edge) for edge in plan.published_range)
+        if max(low, first) < min(high, last):
+            low, high = max(low, first), min(high, last)
+        else:
+            low, high, outside = first, last, True
+    step = _DAY_MS if kind is LogicalKind.DATE else 1
+    if kind is LogicalKind.DATE:
+        low, high = -(-low // _DAY_MS) * _DAY_MS, high // _DAY_MS * _DAY_MS
+    if high <= low:
+        high = low + step
+    plan.declaration["bins"] = [_spell(kind, Decimal(low)), _spell(kind, Decimal(high))]
+    plan.declaration["binWeights"] = ["1"]
+    plan.labels = [label for label in plan.labels if label.tokens[:1] not in _BIN_LABELS]
+    read = _NOISE_OUTSIDE_WINDOW_READ if outside else _NOISE_EVERYWHERE_READ
+    plan.labels.append(Label(("bins",), assumed(read)))
+    plan.labels.append(Label(("binWeights",), assumed(read)))
+    if outside:
+        plan.assumptions = [
+            _NOISE_OUTSIDE_WINDOW if sentence == _NOISE_EVERYWHERE else sentence
+            for sentence in plan.assumptions
+        ]
+
+
+_BIN_LABELS = (("bins",), ("binWeights",))
 
 
 def _scores_order(kind: LogicalKind) -> bool:
@@ -2497,9 +2605,13 @@ def _unspellable_one_value(ctx: ColumnContext, point: _Point) -> Exception:
     kind_name = "DATE" if kind is LogicalKind.DATE else "TIMESTAMP"
     one = "one value, the last the calendar holds," if is_last else f"one value, {spelled},"
     exactly = f"exactly {spelled}" if kind is LogicalKind.DATE else f"{spelled}"
-    ways = "write its open end as NULL, or make the column a TIMESTAMP"
+    declare = (
+        f"when the column ends a validity window, declare {spelled} as the window's openEnd on "
+        "its end dimension, so the table's history writes it"
+    )
+    ways = f"{declare}; or write its open end as NULL, or make the column a TIMESTAMP"
     if kind is not LogicalKind.DATE:
-        ways = "write its open end as NULL, or as an earlier instant"
+        ways = f"{declare}; or write its open end as NULL, or as an earlier instant"
     return UnspellableOneValue(
         f"{printable(table)}.{printable(ctx.column.name)} publishes {one} on every row, and the "
         f"engine cannot yet write a {kind_name} of {exactly} on every row; {ways}"
@@ -2515,6 +2627,13 @@ def _one_value(ctx: ColumnContext, plan: ColumnPlan, point: _Point) -> None:
         "statistic: every row takes it."
     )
     if _temporal(kind):
+        if ctx.open_end is not None and int(point.value) >= ctx.open_end:
+            plan.open_end_only = True
+            plan.how = (
+                "the open end the contract declares, on every row: every version is open, and "
+                "the table's history sets it"
+            )
+            return
         try:
             edges, weights = _one_value_bins(kind, point.value)
         except OverflowError:
