@@ -377,3 +377,32 @@ had a different number of rows per parent than the history had entities. `init` 
   has children of its own. Where two snapshots of one history could give, the one whose emit id sorts first does,
   so the result does not depend on the order of the exposes. The ledger says which statistic moved where and why.
 - **What moves.** A bundle for a contract with such an expose. Every other bundle keeps its bytes.
+
+## Amendment of 2026-11-25: a `given` over a column of the version is drawn after the projection
+
+The first amendment of 2026-11-24 refused a column of an events or periodic emit drawn `given` a column the entry
+sets, because the draw read the level the other column's own draw made, which the entry then replaced. A bundle
+that projects a column of the version (`model` on a month, or on a change) and draws another column given it
+(`tier` given `model`) is a plain shape, and the refusal left it no way to say so. This amendment draws it:
+
+- **The order.** The entry's cells are set first. A column of the version the entry sets, which some column of the
+  emit is drawn `given`, gives each row the level the version holds, and the emit then draws its own cells: the
+  column drawn `given` it, and every column drawn `given` that one, reads the held level in place of the level its
+  own draw made. Each cell is still drawn once from its own stream, so the order changes no other value, and the
+  column path, the per-row path, `--jobs` and `--shard` give the same bytes. A categorical column's level is the
+  one that renders to the version's value; a column drawn from bins takes the bin that holds it.
+- **What stays refused**, `FLX-3403` at plan, naming both columns and the entry. A column drawn `given` a cell the
+  entry sets that is not a column of the version: the `op`, `at`, `date` and `type` columns, the period column, a
+  kind's override, and the before and after images (an image is NULL where the event has no such version). These
+  are not drawn from the column's levels, so a held level would name a level the column's table is not keyed by.
+  A column with `allocation: exact` drawn `given` a column of the version, whose classes are allotted over the
+  rows by the draw of that column, not by the level a row holds. And a column of the version the history may fill
+  with a value no level of the emit's column names: the history declares a `nullFraction` on it, a rule, a
+  relationship or the history's `end` sets it (an `end` value that is a level of the emit's column is served), it
+  is drawn from levels the emit's column does not hold, or, for a column drawn from bins, it is of another type.
+- **Recorded plans.** A plan with such a column says `projectedGivens: "afterProjection"`, which the plan digest
+  covers, and the projection member of its emit names the held columns as `heldGivens`. A recorded plan without
+  the key replays the draw engine 0.11.1 made, given the level the column's own draw made, so its rows and its run
+  id keep their bytes. Any other value is `FLX-2102`.
+- **What moves.** Only a bundle the first amendment refused: its plan is now accepted. Every other plan writes no
+  key and keeps its bytes.

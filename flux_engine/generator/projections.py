@@ -42,8 +42,16 @@ from flux_engine.core.seedtree import SeedTreeRoot
 from flux_engine.core.sizing import FLX_3405, MOST_ROWS
 from flux_engine.generator import events as _events
 from flux_engine.generator import periods as _periods
+from flux_engine.generator.families import Family
 from flux_engine.generator.history import HistoryPlan, plan_history
-from flux_engine.generator.rows import GeneratorPlan, generate_row_slice, with_rules
+from flux_engine.generator.rows import (
+    ColumnPlan,
+    GeneratorPlan,
+    generate_row_slice,
+    is_binned,
+    level_index,
+    with_rules,
+)
 from flux_engine.generator.versionview import clear_views
 from flux_engine.seam.projections import (
     EVENTS_KEY,
@@ -62,6 +70,7 @@ __all__ = [
     "ProjectionPlan",
     "chain_of",
     "derived_rows",
+    "held_givens",
     "refuse_rows",
     "projection_of",
     "projection_rows",
@@ -99,7 +108,9 @@ class ProjectionPlan:
     ``history`` is the plan of the emit the entry's ``of`` names, as the relational plan left it.
     ``ended`` is a snapshot's ``ended`` (``keep`` or ``drop``) and ``entry`` the entry of an
     events or a periods projection. ``root`` is the run root a kind's functions read; it is set
-    for the moment of a call and is no part of the plan.
+    for the moment of a call and is no part of the plan. ``held`` names the columns of the version
+    the entry sets that a column of the emit is drawn given: their levels are the version's, held
+    in the row before the emit's own cells are drawn (ADR 0027, the amendment of 2026-11-25).
     """
 
     kind: str
@@ -109,6 +120,7 @@ class ProjectionPlan:
     entry: Any = None
     root: Optional[SeedTreeRoot] = field(default=None, compare=False, repr=False)
     window: Optional[Tuple[int, int]] = None
+    held: Tuple[str, ...] = ()
 
     def as_document(self) -> Dict[str, Any]:
         """The ``projection`` member of the plan's document: where the rows come from."""
@@ -120,6 +132,8 @@ class ProjectionPlan:
         }
         if self.entry is not None:
             document["entry"] = self.entry.as_member()
+        if self.held:
+            document["heldGivens"] = list(self.held)
         return document
 
 
@@ -248,9 +262,19 @@ def _entry_of_key(
 
 
 def _projection(
-    key: str, of: str, options: Any, history: GeneratorPlan, plan: GeneratorPlan
+    key: str,
+    of: str,
+    options: Any,
+    history: GeneratorPlan,
+    plan: GeneratorPlan,
+    after: bool = True,
 ) -> ProjectionPlan:
-    """The projection of *plan*'s emit, after the checks that need the history's plan."""
+    """The projection of *plan*'s emit, after the checks that need the history's plan.
+
+    With *after* (every new plan), a column drawn given a column of the version is drawn given the
+    level the version holds; without it (a recorded plan without ``projectedGivens``) it is drawn as
+    engine 0.11.1 drew it, given the level the column's own draw made.
+    """
     if key not in KINDS:
         raise _refuse(f"{key} ({plan.expose.expose_id}) has no generator")
     if key == SNAPSHOTS_KEY:
@@ -261,8 +285,12 @@ def _projection(
                 f"{key} ({plan.expose.expose_id}): {missing[0]!r} is not a column of {of!r}"
             )
         return ProjectionPlan(key, of, history, options)
-    _refuse_rules_on_projected_cells(key, options, history, plan)
-    return ProjectionPlan(key, of, history, entry=options, window=plan.time_bounds)
+    sets = projected_cells(key, options, history, plan)
+    held = held_givens(key, options, sets, history, plan) if after else ()
+    if not after:
+        _unheld_givens(key, options, sets, plan)
+    _refuse_rules_on_projected_cells(key, sets, plan)
+    return ProjectionPlan(key, of, history, entry=options, window=plan.time_bounds, held=held)
 
 
 def projected_cells(
@@ -324,22 +352,11 @@ def _event_cells(entry: Any) -> Tuple[Dict[str, str], str]:
     return found, "a column of the version the event is about"
 
 
-def _refuse_rules_on_projected_cells(
-    key: str, entry: Any, history: GeneratorPlan, plan: GeneratorPlan
-) -> None:
-    """Refuse (``FLX-6203``) a rule of the emit that sets a column the projection sets.
-
-    The emit's rules run over its rows once the projection has set its cells, so a rule that set
-    one of them would be a second source for it.
-    """
-    sets = projected_cells(key, entry, history, plan)
-    _refuse_given_over_projected_cells(key, sets, plan)
-    rules = plan.rules
-    if rules is None:
-        return
-    from flux_engine.expr2.errors import FLX_6203
-
+def _rule_setters(rules: Any) -> Dict[str, str]:
+    """The columns a plan's rules set, each with what sets it; none for a plan with no rules."""
     setters: Dict[str, str] = {}
+    if rules is None:
+        return setters
     for rule in rules.rules:
         for column in (*rule.determines, *rule.to_columns):
             setters.setdefault(column, f"the rule {rule.id!r}")
@@ -347,6 +364,23 @@ def _refuse_rules_on_projected_cells(
         setters.setdefault(column, "a rule")
     for rate in rules.rates:
         setters.setdefault(rate.column, "its seasonal rates")
+    return setters
+
+
+def _refuse_rules_on_projected_cells(
+    key: str, sets: Mapping[str, str], plan: GeneratorPlan
+) -> None:
+    """Refuse (``FLX-6203``) a rule of the emit that sets a column the projection sets.
+
+    The emit's rules run over its rows once the projection has set its cells, so a rule that set
+    one of them would be a second source for it.
+    """
+    rules = plan.rules
+    if rules is None:
+        return
+    from flux_engine.expr2.errors import FLX_6203
+
+    setters = _rule_setters(rules)
     for column, role in sets.items():
         if column in setters:
             raise FluxError(
@@ -357,28 +391,112 @@ def _refuse_rules_on_projected_cells(
     _refuse_reads_through_projected_keys(key, sets, plan)
 
 
-def _refuse_given_over_projected_cells(
-    key: str, sets: Mapping[str, str], plan: GeneratorPlan
-) -> None:
-    """Refuse (``FLX-3403``) a column the emit draws given a column the projection sets.
+def _given_over_projected(
+    sets: Mapping[str, str], plan: GeneratorPlan
+) -> Iterable[Tuple[ColumnPlan, str]]:
+    """Each column the emit draws given a column the projection sets, with that column.
 
-    A column drawn ``given`` another is drawn from the level the other column's own draw made in
-    the row. The projection then replaces that cell with the version's, so the column would
-    follow a level the row does not hold. A column the entry sets itself is replaced as well and
-    is no source of a disagreement.
+    A column the entry sets itself is replaced as well and is no source of a disagreement.
     """
     for column_plan in plan.columns:
-        name = column_plan.column.name
-        if name in sets:
+        if column_plan.column.name in sets:
             continue
         for parent in column_plan.statistics.parents:
             if parent in sets:
-                raise _refuse(
-                    f"{key} entry ({plan.expose.expose_id}): column {name!r} is drawn given "
-                    f"{parent!r}, which the entry sets as {sets[parent]}, so {name!r} would "
-                    f"follow the level the draw of {parent!r} made, not the one the row holds; "
-                    f"draw {name!r} given a column the entry does not set, or on its own"
-                )
+                yield column_plan, parent
+
+
+def held_givens(
+    key: str, entry: Any, sets: Mapping[str, str], history: GeneratorPlan, plan: GeneratorPlan
+) -> Tuple[str, ...]:
+    """The columns of the version a column of the emit is drawn given, or the refusal (``FLX-3403``).
+
+    Such a column's level is the version's: the entry's cells are set before the emit draws its
+    own, so the column drawn given it reads the level the row holds (ADR 0027, the amendment of
+    2026-11-25). Refused, as a draw this cannot serve, is a column drawn given any other cell the
+    entry sets (an op, at, date, type or period column, a kind's override, a before or after
+    image), whose values are not drawn from the column's levels; a column with ``allocation:
+    exact``, whose classes are allotted by the draw of its parent; and a column of the version that
+    the history may fill with a value that is none of the emit's levels (:func:`_unheld_reason`).
+    """
+    own, _ = _period_cells(entry) if key == PERIODS_KEY else _event_cells(entry)
+    held: Dict[str, None] = {}
+    for column_plan, parent in _given_over_projected(sets, plan):
+        name = column_plan.column.name
+        where = (
+            f"{key} entry ({plan.expose.expose_id}): column {name!r} is drawn given {parent!r}, "
+            f"which the entry sets as {sets[parent]}"
+        )
+        if parent in own:
+            raise _refuse(
+                f"{where}; only a column of the version can be drawn given, since its level is the "
+                "version's, and this one holds no level the history draws; draw "
+                f"{name!r} given a column of the version, or on its own"
+            )
+        if column_plan.allocated_rows is not None:
+            raise _refuse(
+                f"{where}; {name!r} declares allocation: exact, whose classes are allotted by the "
+                f"draw of {parent!r}, not by the level the row holds; drop the allocation, or "
+                f"draw {name!r} on its own"
+            )
+        reason = _unheld_reason(history, plan, parent)
+        if reason is not None:
+            raise _refuse(f"{where}, and {reason}, which no level of {parent!r} names")
+        held[parent] = None
+    return tuple(sorted(held))
+
+
+def _unheld_givens(key: str, entry: Any, sets: Mapping[str, str], plan: GeneratorPlan) -> None:
+    """Refuse (``FLX-3403``), for a plan recorded before the draw after the projection, what it refuses.
+
+    Such a plan drew a column given a column of the version from the level the column's own draw
+    made, which is what it replays. A column drawn given any other cell the entry sets is refused
+    as a new plan refuses it.
+    """
+    own, _ = _period_cells(entry) if key == PERIODS_KEY else _event_cells(entry)
+    for column_plan, parent in _given_over_projected(sets, plan):
+        if parent in own:
+            raise _refuse(
+                f"{key} entry ({plan.expose.expose_id}): column {column_plan.column.name!r} is "
+                f"drawn given {parent!r}, which the entry sets as {sets[parent]}; only a column of "
+                "the version can be drawn given"
+            )
+
+
+def _unheld_reason(history: GeneratorPlan, plan: GeneratorPlan, name: str) -> Optional[str]:
+    """Why the history's column *name* may hold a value with no level of the emit's, or ``None``.
+
+    The history fills it with a value none of the emit's levels names when it declares a
+    ``nullFraction``, when a rule, a relationship or the history's ``end`` sets it, and when it is
+    drawn from levels (or bins) the emit's column does not hold.
+    """
+    from flux_engine.generator.relations import history_pick_of
+
+    source = history.column_plan(name)
+    statistics = source.statistics
+    if statistics.null_fraction is not None:
+        return "the history may leave it NULL (it declares a nullFraction)"
+    setter = _rule_setters(history.rules).get(name)
+    if setter is not None:
+        return f"{setter} of the history sets it"
+    if history.relations is not None and history.relations.driver(name) is not None:
+        return "a relationship of the history sets it"
+    target = plan.column_plan(name)
+    if is_binned(target):
+        if source.column.logical_type.kind is not target.column.logical_type.kind:
+            return f"the history's {name!r} is not of the type the emit's bins are"
+        return None
+    if source.family is not Family.CATEGORICAL:
+        return "the history does not draw it from levels"
+    index = level_index(target)
+    for value, level in level_index(source).items():
+        if value not in index:
+            return f"the history draws {level!r} in it"
+    pick = history_pick_of(history)
+    end = None if pick is None else pick.entry.end
+    if end is not None and end.column == name and end.value not in (None, *index.values()):
+        return f"the history's end writes {end.value!r} in it"
+    return None
 
 
 def _refuse_reads_through_projected_keys(
@@ -431,10 +549,16 @@ def _count(key: str, chain: Any, projection: ProjectionPlan, plan: GeneratorPlan
 
 
 def derived_rows(
-    key: str, of: str, options: Any, history: GeneratorPlan, plan: GeneratorPlan, root: SeedTreeRoot
+    key: str,
+    of: str,
+    options: Any,
+    history: GeneratorPlan,
+    plan: GeneratorPlan,
+    root: SeedTreeRoot,
+    after: bool = True,
 ) -> int:
     """The number of rows *plan*'s emit takes from *history*, worked out from the plan alone."""
-    projection = replace(_projection(key, of, options, history, plan), root=root)
+    projection = replace(_projection(key, of, options, history, plan, after), root=root)
     return _count(key, chain_of(history, root), projection, plan)
 
 
@@ -445,9 +569,13 @@ def project_plan(
     options: Any,
     history: GeneratorPlan,
     root: SeedTreeRoot,
+    after: bool = True,
 ) -> GeneratorPlan:
-    """*plan* as a projected emit's: its ``rows`` the derived count, and the projection attached."""
-    projection = _projection(key, of, options, history, plan)
+    """*plan* as a projected emit's: its ``rows`` the derived count, and the projection attached.
+
+    *after* is :func:`_projection`'s.
+    """
+    projection = _projection(key, of, options, history, plan, after)
     count = _count(key, chain_of(history, root), replace(projection, root=root), plan)
     return replace(plan, rows=count, projection=projection)
 

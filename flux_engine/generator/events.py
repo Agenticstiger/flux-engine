@@ -45,7 +45,12 @@ from flux_engine.core.rng import bounded_uint, uniform53
 from flux_engine.core.seedtree import SeedTreeRoot, counter_stream, key_label, path_key
 from flux_engine.generator.history import HistoryPlan, _StartTable, _table_over, unit_of
 from flux_engine.generator.paths import LAG_PATH_SHAPE, lag_path
-from flux_engine.generator.rows import GeneratorPlan, cells_before_rules, generate_row_slice
+from flux_engine.generator.rows import (
+    GeneratorPlan,
+    cells_before_rules,
+    generate_row_slice,
+    held_levels,
+)
 from flux_engine.generator.versionview import (
     DAY_MS,
     VersionView,
@@ -437,8 +442,14 @@ def events_rows(
     names = [column.column.name for column in plan.columns]
     free = _free_columns(names, entry, before_map, after_map, position)
     # The emit's own cells, before its rules: they run over the row once every column the
-    # event takes from the history is set (projections.projection_rows).
-    own = cells_before_rules(replace(plan, projection=None), start, stop, root=root) if free else ()
+    # event takes from the history is set (projections.projection_rows). A column drawn given
+    # a column of the version reads the version's level (ADR 0027, the amendment of 2026-11-25).
+    own_plan = replace(plan, projection=None)
+    held = held_levels(
+        own_plan,
+        {name: _image(history_rows, low, about, position[name]) for name in projection.held},
+    )
+    own = cells_before_rules(own_plan, start, stop, root=root, held=held) if free else ()
     columns: List[List[Any]] = []
     for index, name in enumerate(names):
         if name == entry.op:

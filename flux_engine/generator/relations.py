@@ -238,12 +238,12 @@ FLX_3403 = register(
     "or bins outside timeBounds, as is a relationship whose parent is a periodic emit. A copy "
     "through a sharedColumns entry into another relationship's foreign key is refused when the "
     "relationship it goes through reaches an emit that declares a history or is projected from "
-    "one, whose rows hold a version's cells, not the pick the copy follows; the message names both "
-    "relationships. An events or periods entry is also refused when a column of its emit is drawn "
-    "given a column the entry sets, which the draw would read as the level it drew; the message "
-    "names both columns. A DATE or TIMESTAMP column drawn from declared statistics is refused when "
-    "its contract's `range` rule holds none of the dates it is drawn from, or would cut the bins "
-    "of a column another column is drawn given; the message names the column and the range.",
+    "one; the message names both relationships. A column of an events or periods emit drawn given "
+    "a column of the version reads its level; one drawn given another cell the entry sets (the op, "
+    "an image), with allocation exact, or given a column the history may fill with no level of the "
+    "emit's is refused, naming both. A DATE or TIMESTAMP column drawn from declared statistics is "
+    "refused when its contract's `range` rule holds none of the dates it is drawn from, or would "
+    "cut the bins of a column another column is drawn given, naming the column and the range.",
 )
 
 #: Domain-separation label of a key layout's permutation key.

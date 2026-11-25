@@ -1918,6 +1918,7 @@ def execute(
     most_rows: Optional[int] = None,
     end_share: Optional[str] = None,
     cut_ranges: bool = True,
+    projected_givens: bool = True,
 ) -> PipelineResult:
     """Run every stage of the six-step loop's core once, in memory.
 
@@ -1966,6 +1967,9 @@ def execute(
     pinned profile's ``references`` otherwise. Neither is read for a run with no reference expose.
 
     *cut_ranges* is false for a recorded plan without ``dateRanges`` (ADR 0024): it replays uncut.
+    *projected_givens* is false for a recorded plan without ``projectedGivens`` (ADR 0027, the
+    amendment of 2026-11-25): a column drawn given a column of the version replays the draw it was
+    made with, given the level the column's own draw made.
 
     *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
     2026-11-24): the plan's ``historyEndShare`` (:func:`flux_engine.stages.apply.plan_end_share`)
@@ -2081,6 +2085,7 @@ def execute(
                 "replicate": replicate,
                 "end_share": end_share,
                 "cut_ranges": cut_ranges,
+                "projected_givens": projected_givens,
             },
         )
 
@@ -2295,6 +2300,7 @@ def execute(
                 root=root,
                 end_share=run_end_share,
                 cut_ranges=cut_ranges,
+                projected_givens=projected_givens,
             )
         _require_coverage(planned_emits, asked_by)
         lap("plan emits")
@@ -3457,6 +3463,7 @@ def _planned_with_projections(
     plugins: Optional[Mapping[str, PluginExpose]] = None,
     end_share: str = END_SHARE_OF_ENTITIES,
     cut_ranges: bool = True,
+    projected_givens: bool = True,
 ) -> Tuple[_PlannedEmit, ...]:
     """Every emit planned and related, a projected emit's rows derived from its history (ADR 0027 section 2).
 
@@ -3506,12 +3513,13 @@ def _planned_with_projections(
             _history_plan_of(resolved_emits, related, found[1]),
             _plan_of(related[index]),
             root,
+            projected_givens,
         )
         for index, found in projected.items()
     }
     if any(counts[index] != guesses[index] for index in counts):
         related = replan({**shrunk, **counts})
-    return _with_projected_plans(resolved_emits, related, projected, root)
+    return _with_projected_plans(resolved_emits, related, projected, root, projected_givens)
 
 
 def _with_projected_plans(
@@ -3519,6 +3527,7 @@ def _with_projected_plans(
     related: Sequence[_PlannedEmit],
     projected: Mapping[int, Tuple[str, str, str]],
     root: SeedTreeRoot,
+    projected_givens: bool = True,
 ) -> Tuple[_PlannedEmit, ...]:
     """Each emit in *projected* with the plan derived from its history's layouts, and the others as they are."""
     return tuple(
@@ -3531,6 +3540,7 @@ def _with_projected_plans(
                         *projected[index],
                         _history_plan_of(resolved_emits, related, projected[index][1]),
                         root,
+                        projected_givens,
                     )
                 ),
                 coverage=coverage_of_plan(projected_plan),
