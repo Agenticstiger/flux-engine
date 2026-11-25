@@ -220,7 +220,9 @@ thousands of years.
    its register entry says so. The column's span, for the run's window, is the hull of the bins
    that clear it. When none does, the column is drawn evenly within the run's window, cut to its
    declared range, as a noted assumption, the way a column that publishes no order statistic is
-   drawn. A window with no span anywhere is the assumed year, and its note says so.
+   drawn. When the range and the window do not meet, it is drawn evenly over its whole range,
+   outside the window, and the column's note says so. A window with no span anywhere is the
+   assumed year, and its note says so.
 3. **What stays.** The column's declared range stays the histogram's whole grid, which its
    histogram property's bins partition (`FLX-5032`), and the property stays, so `verify` scores
    the column against the release with the widening of point 7. Plan reads the edges the draw can

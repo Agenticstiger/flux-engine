@@ -283,7 +283,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   above `sqrt(2v(5 + ceil(ln m)))` for Gaussian noise of variance `v` over `m` bins (ADR 0019, the second amendment
   of 2026-11-25). A bin below that floor carries no weight in the draw, and the run's window is the hull of the
   bins above it. When no bin is above it, the column is drawn evenly within the window, inside its range, as a
-  noted assumption. The declared range, the histogram's whole grid, and the histogram property stay, so `verify`
+  noted assumption; when its range and the window do not meet, it is drawn evenly over the whole range, and the
+  column's note says so. The declared range, the histogram's whole grid, and the histogram property stay, so `verify`
   still scores the column. Before, noise in a year grid's empty bins drew dates across the calendar and stretched
   the window to 0001-01-01 and 9999-12-31. Only bundles written from profiles released with noise change.
 - A run window that the profile's own spans make longer than 300 years is now a `time window` note, naming the

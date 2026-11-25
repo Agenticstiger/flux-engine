@@ -4040,6 +4040,8 @@ def _bundle_window(
     for expose in authored:
         for column in expose.columns:
             draw_in_window(column, expose.kinds[column.name], window)
+        # A column drawn over its whole range, its range and the window apart, says so.
+        restate_assumptions(expose)
     if given_window is not None:
         for expose in authored:
             for column in expose.columns:
