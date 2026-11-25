@@ -116,6 +116,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill all four; `apply --run-id` takes `--profile` with
   `--sink`, for an external audience. They default to `None` (`delivered` to empty), no digest covers them, and the
   existing sinks ignore them.
+- The page [Where FLUX fits](docs/explanation/compared.md) says what FLUX is good at, where it is not, and how it
+  compares with 24 other synthetic and test data tools, with the roadmap for many-core speed, a living clone and
+  learned generators. The README gains a short Roadmap section that links to it.
 
 ### Changed
 
