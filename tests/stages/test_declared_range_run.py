@@ -23,15 +23,18 @@ range and ``verify`` said ``rows: ok``. Pinned here:
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import pytest
 import yaml
 
 from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
+from flux_engine.stages.apply import load_recorded_plan
 from flux_engine.stages.layout import RunLayout
 from tests.bundles import add_contract_columns, repin_contract
 
@@ -367,3 +370,51 @@ def test_a_range_whose_ends_meet_draws_and_verifies_that_one_day(tmp_path: Path)
     verified = _verified(target, state, layout)
     assert verified.success, verified.stderr
     assert "  ranges:" not in verified.stdout
+
+
+def test_verify_says_once_that_it_did_not_check_the_ranges_of_a_run_whose_artifacts_moved(
+    tmp_path: Path,
+) -> None:
+    target = _visits(tmp_path)
+    state = tmp_path / "state"
+    layout = run_bundle(target, state)
+    victim = layout.emit_path(VISIT)
+    victim.write_bytes(victim.read_bytes() + b"\n")
+    verified = _verified(target, state, layout)
+    assert not verified.success
+    lines = [line for line in verified.stdout.splitlines() if line.startswith("  ranges:")]
+    assert lines == [
+        "  ranges: not checked: the run's artifacts do not reproduce run-digest.json (FLX-2110)"
+    ]
+    assert verified.artifacts["rangesNotChecked"] == [lines[0][len("  ranges: ") :]]
+    assert "rangeConformance" not in verified.artifacts
+
+
+def test_a_bundle_that_is_not_the_runs_says_once_that_its_ranges_are_not_checked(
+    tmp_path: Path,
+) -> None:
+    # `verify` refuses such a bundle before the legs run (FLX-2101); the range plan still words it.
+    target = _visits(tmp_path)
+    layout = run_bundle(target, tmp_path / "state")
+    receipt = json.loads(layout.receipt_path.read_text("utf-8"))
+    moved = SimpleNamespace(
+        receipt={**receipt, "inputDigest": "sha256:" + "0" * 64},
+        recorded_plan=load_recorded_plan(layout),
+    )
+    checks = verify_module._plan_range_checks(target, moved, artifacts_ok=True)
+    assert checks.found == {}
+    assert checks.not_checked == (
+        "not checked: the bundle is not the one the plan was made from (its input digest differs)",
+    )
+
+
+def test_a_moved_run_of_a_bundle_with_no_range_says_nothing_of_ranges(tmp_path: Path) -> None:
+    target = bundle(tmp_path)
+    state = tmp_path / "state"
+    layout = run_bundle(target, state)
+    victim = layout.emit_path(VISIT)
+    victim.write_bytes(victim.read_bytes() + b"\n")
+    verified = _verified(target, state, layout)
+    assert not verified.success
+    assert "  ranges:" not in verified.stdout
+    assert "rangesNotChecked" not in verified.artifacts
