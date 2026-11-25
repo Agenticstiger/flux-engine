@@ -33,7 +33,7 @@ Every refusal is ``FLX-3403``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -274,11 +274,26 @@ def projected_cells(
     history's emit; events set ``op``, ``at``, ``date``, the ``type`` column, the before and after
     images and every column that names a column of the history's emit (ADR 0027 sections 4 and 5).
     """
+    return projected_cell_names(
+        key,
+        entry,
+        [column.column.name for column in history.columns],
+        [column.column.name for column in plan.columns],
+    )
+
+
+def projected_cell_names(
+    key: str, entry: Any, history_columns: Iterable[str], emit_columns: Iterable[str]
+) -> Dict[str, str]:
+    """:func:`projected_cells` from the names of the history's columns and of the emit's own.
+
+    Known before any plan is built, so a column the entry sets can be told from one the emit draws.
+    """
     found, about = _period_cells(entry) if key == PERIODS_KEY else _event_cells(entry)
-    version = {column.column.name for column in history.columns}
-    for column in plan.columns:
-        if column.column.name in version:
-            found.setdefault(column.column.name, about)
+    version = set(history_columns)
+    for name in emit_columns:
+        if name in version:
+            found.setdefault(name, about)
     return found
 
 

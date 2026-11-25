@@ -65,6 +65,7 @@ __all__ = [
     "scaled_rows",
     "share_of",
     "too_many_child_rows_note",
+    "widened_columns",
 ]
 
 
@@ -267,21 +268,44 @@ def _scale_fidelity(
         }
     columns = block.get("columns")
     if isinstance(columns, Mapping):
-        from flux_engine.generator.relations import related_columns
-
-        kinds: Dict[str, LogicalKind] = {
-            column.name: column.logical_type.kind for column in resolved.compile().columns
-        }
-        keyed = related_columns(resolved.keys) | _natural_columns(resolved)
-        block["columns"] = {
-            name: (
-                _scale_column(name, declared, kinds[name], scale)
-                if name in keyed and name in kinds and isinstance(declared, Mapping)
-                else declared
-            )
-            for name, declared in columns.items()
-        }
+        block["columns"] = _scaled_columns(resolved, columns, scale)
     return block
+
+
+def _scaled_columns(
+    resolved: ResolvedEmit, columns: Mapping[str, Any], scale: Decimal
+) -> Dict[str, Any]:
+    """The declarations of *columns* with each key column's range and bins grown (:func:`_scale_column`)."""
+    from flux_engine.generator.relations import related_columns
+
+    kinds: Dict[str, LogicalKind] = {
+        column.name: column.logical_type.kind for column in resolved.compile().columns
+    }
+    keyed = related_columns(resolved.keys) | _natural_columns(resolved)
+    return {
+        name: (
+            _scale_column(name, declared, kinds[name], scale)
+            if name in keyed and name in kinds and isinstance(declared, Mapping)
+            else declared
+        )
+        for name, declared in columns.items()
+    }
+
+
+def widened_columns(resolved: ResolvedEmit, scale: Decimal) -> FrozenSet[str]:
+    """The columns of *resolved* that *scale* widens: a key column whose declared range it grows.
+
+    Only above 1 (below it the scale cuts a key's range and the contract's range still holds the
+    keys), and only a key column whose fidelity declares a range that :func:`_scale_column` grows,
+    so ``plan``, which scales, and ``verify``, which reads the contract against the run, name the
+    same columns. *resolved* is the emit as the bundle declares it, before :func:`scale_emit`.
+    """
+    fidelity = (resolved.extension or {}).get("fidelity")
+    columns = fidelity.get("columns") if isinstance(fidelity, Mapping) else None
+    if scale <= 1 or not isinstance(columns, Mapping):
+        return frozenset()
+    scaled = _scaled_columns(resolved, columns, scale)
+    return frozenset(name for name, declared in columns.items() if scaled[name] != declared)
 
 
 def scale_emit(resolved: ResolvedEmit, scale: Decimal) -> ResolvedEmit:

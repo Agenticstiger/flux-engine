@@ -49,6 +49,7 @@ from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tupl
 
 from flux_engine.core.canonical import nfc
 from flux_engine.core.errors import FluxError, register
+from flux_engine.seam.range_rules import declared_range_bounds
 from flux_stats.fidelity import FLX_3001, declared_enum_values, split_type_params
 
 __all__ = [
@@ -398,6 +399,12 @@ class CompiledColumn:
         Whether the column is a hidden column of the emit (ADR 0024 section 2): planned and
         generated as a contract column is, and never written. Only a column of a plan's
         expose carries it; a compiled expose that is written never does.
+    declared_range
+        The inclusive ``(low, high)`` milliseconds a DATE or TIMESTAMP column's ``range`` rules
+        declare (:func:`~flux_engine.seam.range_rules.declared_range_bounds`), or ``None``; an end
+        not declared is ``None``, and a strict end is held one millisecond inside. Never hashed.
+    declared_range_strict
+        Which ends of ``declared_range`` the contract spells strict, for ``verify``'s text.
     """
 
     name: str
@@ -408,6 +415,8 @@ class CompiledColumn:
     tags: Tuple[str, ...] = ()
     key: bool = False
     hidden: bool = False
+    declared_range: Optional[Tuple[Optional[int], Optional[int]]] = None
+    declared_range_strict: Tuple[bool, bool] = (False, False)
 
     @property
     def type_name(self) -> str:
@@ -568,6 +577,7 @@ def compile_expose(expose: Mapping[str, Any]) -> CompiledExpose:
                 exc.code,
                 f"expose {expose_id!r} column {name!r}: {exc.detail}",
             ) from exc
+        held_range, held_strict = _declared_range(entry, logical_type)
         columns.append(
             CompiledColumn(
                 name=name,
@@ -576,9 +586,36 @@ def compile_expose(expose: Mapping[str, Any]) -> CompiledExpose:
                 declared_type=str(declared_type),
                 semantic_type=_optional_nfc(entry.get("semanticType")),
                 tags=_string_tuple(entry.get("tags")),
+                declared_range=held_range,
+                declared_range_strict=held_strict,
             )
         )
     return CompiledExpose(expose_id=nfc(expose_id), columns=tuple(columns))
+
+
+def _declared_range(
+    entry: Mapping[str, Any], logical_type: LogicalType
+) -> Tuple[Optional[Tuple[Optional[int], Optional[int]]], Tuple[bool, bool]]:
+    """The inclusive ``(low, high)`` milliseconds a DATE or TIMESTAMP column's ``range`` rules declare, and which ends are strict.
+
+    The grammar is :func:`flux_engine.seam.range_rules.declared_range_bounds`'s. A strict end is moved one
+    millisecond inward, so every consumer compares inclusively: the draw holds the instants beyond
+    the end, and a DATE's day is the one whose midnight lies beyond it.
+    """
+    none: Tuple[Optional[Tuple[Optional[int], Optional[int]]], Tuple[bool, bool]] = (
+        None,
+        (False, False),
+    )
+    if logical_type.kind not in (LogicalKind.DATE, LogicalKind.TIMESTAMP):
+        return none
+    if not entry.get("validationRules"):
+        return none
+    bounds = declared_range_bounds(entry)
+    if bounds is None:
+        return none
+    low = bounds.low + 1 if bounds.low is not None and bounds.low_strict else bounds.low
+    high = bounds.high - 1 if bounds.high is not None and bounds.high_strict else bounds.high
+    return (low, high), (bounds.low_strict, bounds.high_strict)
 
 
 def _optional_nfc(value: Any) -> Optional[str]:

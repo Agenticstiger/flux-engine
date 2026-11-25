@@ -74,8 +74,8 @@ FLX_2102: ErrorCode = register(
     "written by an incompatible version after the fact. A plan.json that cannot "
     "be read at all as the JSON object `fluxsim plan` wrote (truncated, not UTF-8 "
     "text, or not an object) is refused with this code too, and so is a recorded "
-    "plan whose `historyEndShare` value this engine does not know (one written by "
-    "a newer or incompatible version). A plan is a fixed "
+    "plan whose `historyEndShare` or `dateRanges` value this engine does not know "
+    "(one written by a newer or incompatible version). A plan is a fixed "
     "point once written; re-run `fluxsim plan` to produce a fresh one rather "
     "than editing this one by hand.",
 )

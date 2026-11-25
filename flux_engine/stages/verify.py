@@ -175,6 +175,7 @@ if TYPE_CHECKING:
     from flux_engine.concordance.scorecard import ContractShape, Scorecard, TableInput
     from flux_engine.concordance.shape import EmitSummary, ShapeReport
     from flux_engine.concordance.verifier import FidelityEvaluation, PropertyOutcome
+    from flux_engine.generator.declared_range import ColumnRange
     from flux_engine.seam.consumers import Ceilings
     from flux_engine.seam.profile import PinnedProfile
     from flux_engine.stages._module_checks import (
@@ -507,6 +508,8 @@ class _EmitTask:
     module: Optional["ModuleJob"] = None
     #: The emit's hidden columns, which its stream does not hold (ADR 0025 section 8).
     hidden_columns: Tuple[str, ...] = ()
+    #: The ranges the contract declares for the emit's columns, whose rows are counted against them.
+    ranges: Tuple["ColumnRange", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -520,6 +523,8 @@ class _EmitPass:
     module: Optional["EmitModule"] = None
     #: The emit's calendar lines, when the pinned profile publishes a calendar for it.
     calendar: Optional["CalendarChecks"] = None
+    #: A sentence for each column that holds rows outside the range the contract declares for it.
+    range_problems: List[str] = field(default_factory=list)
 
 
 def _emit_pass(task: _EmitTask) -> _EmitPass:
@@ -530,9 +535,10 @@ def _emit_pass(task: _EmitTask) -> _EmitPass:
     """
     reader = RunRows(task.layout)
     problems = _conformance_problems(task.layout, task.expose_id, task.entry, reader)
+    outside = _range_pass(task, reader) if not problems else []
     module = _module_pass(reader, task.expose_id, task.module) if task.module is not None else None
     if task.pinned is None:
-        return _EmitPass(task.expose_id, problems, module=module)
+        return _EmitPass(task.expose_id, problems, module=module, range_problems=outside)
     return _EmitPass(
         task.expose_id,
         problems,
@@ -540,7 +546,25 @@ def _emit_pass(task: _EmitTask) -> _EmitPass:
         _shape_summary(task.layout, task.expose_id, task.pinned, reader),
         module,
         _calendar_pass(task.layout, task.expose_id, task.pinned, reader, task.hidden_columns),
+        outside,
     )
+
+
+def _range_pass(task: _EmitTask, reader: "RunRows") -> List[str]:
+    """One emit's rows counted against the ranges its contract declares, on the rows already decoded.
+
+    A sentence for each column with rows outside its range, none for an emit that declares no range
+    or whose rows are all inside, so such a run is read, and reported, exactly as it was.
+    """
+    if not task.ranges:
+        return []
+    from flux_engine.generator.declared_range import range_problems
+
+    names = _declared_columns(task.layout, task.expose_id)
+    if names is None:
+        return []
+    rows, _ = reader.decoded(task.expose_id)
+    return range_problems(task.expose_id, names, rows, task.ranges)
 
 
 def _calendar_pass(
@@ -636,6 +660,10 @@ class _EmitReads:
     def row_problems(self) -> List[str]:
         return [problem for each in self.passes for problem in each.row_problems]
 
+    def range_problems(self) -> List[str]:
+        """Each column's rows outside its contract's range, in the order of the emits."""
+        return [problem for each in self.passes for problem in each.range_problems]
+
     def checks(self) -> Dict[str, ProfileCheck]:
         return {each.expose_id: each.check for each in self.passes if each.check is not None}
 
@@ -693,6 +721,7 @@ def _read_emits(
     jobs: int,
     module: Optional["ModulePlan"] = None,
     hidden_columns: Optional[Mapping[str, Tuple[str, ...]]] = None,
+    ranges: Optional[Mapping[str, Tuple["ColumnRange", ...]]] = None,
 ) -> _EmitReads:
     """Read every emit once, in parallel when *jobs* allows (see :func:`_emit_pass`)."""
     tasks = [
@@ -703,6 +732,7 @@ def _read_emits(
             pinned,
             module.jobs.get(expose_id) if module else None,
             (hidden_columns or {}).get(expose_id, ()),
+            (ranges or {}).get(expose_id, ()),
         )
         for expose_id, entry in sorted(receipt.get("emits", {}).items())
     ]
@@ -1590,6 +1620,60 @@ def _count_queries(
     )
 
 
+def _plan_range_checks(
+    bundle_directory: Union[str, Path],
+    loaded: "_Loaded",
+    *,
+    artifacts_ok: bool,
+) -> Dict[str, Tuple["ColumnRange", ...]]:
+    """The ranges the bundle's contract declares for each emit's columns, or nothing when it is not the run's.
+
+    The bundle is read as the module checks read it: it must be the run's (the same ``inputDigest``
+    under the kernel its plan names), or its contract says nothing about this run's rows. A bundle
+    that cannot be read, or whose run does not reproduce its digest, adds nothing here: the legs
+    that read it say so.
+    """
+    if not artifacts_ok:
+        return {}
+    from decimal import Decimal
+
+    from flux_engine.generator.declared_range import declared_ranges_of
+    from flux_engine.seam.resolve import load_bundle, resolve_all_emits
+    from flux_engine.stages.scaling import optional_scale, widened_columns
+
+    receipt, plan_document = loaded.receipt, loaded.recorded_plan
+    scale = optional_scale(plan_document.get("scale")) or Decimal(1)
+    emitted = receipt.get("emits")
+    simulation_id = str(receipt.get("simulationId") or plan_document.get("simulationId"))
+    try:
+        bundle = load_bundle(Path(bundle_directory))
+        if _pipeline.input_digest_of(bundle, kernel=plan_kernel(plan_document)).ref.value != str(
+            receipt.get("inputDigest")
+        ):
+            return {}
+        resolved = resolve_all_emits(bundle, simulation_id=simulation_id)
+        found: Dict[str, Tuple["ColumnRange", ...]] = {}
+        for emit in resolved:
+            if (
+                emit.is_hidden_table
+                or not isinstance(emitted, Mapping)
+                or emit.expose_id not in emitted
+            ):
+                continue
+            # A key column `--scale` widened holds keys past its contract's range by construction.
+            widened = widened_columns(emit, scale)
+            held = tuple(
+                item
+                for item in declared_ranges_of(emit.expose, emit.compile())
+                if item.column not in widened
+            )
+            if held:
+                found[emit.expose_id] = held
+    except FluxError:
+        return {}
+    return found
+
+
 def _plan_module_checks(
     bundle_directory: Union[str, Path],
     layout: RunLayout,
@@ -2045,6 +2129,7 @@ def _leg_lines(
     row_problems: Sequence[str],
     vector_failures: int,
     fidelity_outcomes: Mapping[str, Any],
+    range_problems: Sequence[str] = (),
 ) -> List[str]:
     """One human line per leg, under the headline.
 
@@ -2080,6 +2165,9 @@ def _leg_lines(
         if not row_problems
         else f"  rows: {len(row_problems)} problem(s) -- {row_problems[0]}"
     )
+    # A line only for a column with rows outside the range its contract declares: a run with none
+    # prints what it printed before the contract's ranges were read.
+    lines.extend(f"  ranges: {problem}" for problem in range_problems)
     lines.append(f"  rfc-04 vectors: {vector_failures} failure(s)")
     for expose_id, outcome in sorted(fidelity_outcomes.items()):
         status = outcome.get("status", "unknown")
@@ -2425,6 +2513,9 @@ class _Legs:
     artifact_detail: str
     artifacts_leg: Dict[str, Any]
     row_problems: List[str]
+    #: The rows outside a range the contract declares (a sentence for each column); empty for a run
+    #: whose contract declares none, or whose rows all lie inside.
+    range_problems: List[str]
     vector_failures: int
     vector_messages: List[str]
     against: "ProfileLegs"
@@ -2492,8 +2583,11 @@ def _run_legs(
         jobs=jobs,
         module=module_plan,
         hidden_columns=_hidden_columns_of(loaded.recorded_plan) if scored is not None else None,
+        ranges=_plan_range_checks(bundle_directory, loaded, artifacts_ok=not artifact_mismatches),
     )
     row_problems = emits.row_problems()
+    range_problems = emits.range_problems()
+    row_findings = row_problems or range_problems
     module = _finish_module_checks(module_plan, emits.modules(), layout)
 
     vectors = vectors_path or default_vectors_path()
@@ -2551,7 +2645,7 @@ def _run_legs(
         scorecard_failures = [*scorecard_failures, queries.failure]
     legs_ok = (
         not artifact_mismatches
-        and not row_problems
+        and not row_findings
         and vector_failures == 0
         and not fidelity_failed
         and not scorecard_failures
@@ -2561,6 +2655,7 @@ def _run_legs(
         artifact_detail=artifact_detail,
         artifacts_leg=artifacts_leg,
         row_problems=row_problems,
+        range_problems=range_problems,
         vector_failures=vector_failures,
         vector_messages=vector_messages,
         against=against,
@@ -2573,7 +2668,7 @@ def _run_legs(
         error_code=RunArtifactsMoved(components=()).code.code if artifact_mismatches else None,
         refusal_code=(
             _refusal_code(fidelity_outcomes, fidelity_failed)
-            if not (artifact_mismatches or row_problems or vector_failures or scorecard_failures)
+            if not (artifact_mismatches or row_findings or vector_failures or scorecard_failures)
             else (queries.error_code if queries is not None and queries.failure else None)
         ),
     )
@@ -2774,6 +2869,7 @@ def _update_golden_baseline(loaded: _Loaded, legs: _Legs, *, reason: Optional[st
         problems = [
             *([legs.artifact_detail] if legs.artifact_detail else []),
             *legs.row_problems,
+            *legs.range_problems,
             *legs.vector_messages[:5],
             *(
                 _failure_summary(name, legs.fidelity_outcomes[name])
@@ -2788,6 +2884,7 @@ def _update_golden_baseline(loaded: _Loaded, legs: _Legs, *, reason: Optional[st
                 "golden": {"updated": False, "problems": problems},
                 "artifactComponents": legs.artifacts_leg,
                 "rowConformance": {"ok": not legs.row_problems, "problems": legs.row_problems},
+                **_range_artifact(legs.range_problems),
                 "rfc04": {"failures": legs.vector_failures, "messages": legs.vector_messages},
                 "fidelity": legs.fidelity_outcomes,
                 **scorecard_extra,
@@ -2826,6 +2923,13 @@ def _update_golden_baseline(loaded: _Loaded, legs: _Legs, *, reason: Optional[st
     )
 
 
+def _range_artifact(range_problems: Sequence[str]) -> Dict[str, Any]:
+    """The ``rangeConformance`` artifact key: present only when rows lie outside a declared range."""
+    if not range_problems:
+        return {}
+    return {"rangeConformance": {"ok": False, "problems": list(range_problems)}}
+
+
 def _queries_artifact(queries: Optional["QueriesLeg"]) -> Dict[str, Any]:
     """The ``queries`` artifact key: the dimension's member, or nothing for a bundle with no consumers."""
     return {"queries": queries.dimension.to_document()} if queries is not None else {}
@@ -2848,7 +2952,7 @@ def _verdict(
     """Step 6b: the golden regression, then the verdict over every leg."""
     receipt, run_digest = loaded.receipt, loaded.run_digest
     artifact_mismatches, artifacts_leg = legs.artifact_mismatches, legs.artifacts_leg
-    row_problems = legs.row_problems
+    row_problems, range_problems = legs.row_problems, legs.range_problems
     vector_failures, vector_messages = legs.vector_failures, legs.vector_messages
     fidelity_outcomes, against = legs.fidelity_outcomes, legs.against
     scorecard_extra = against.artifact()
@@ -2889,6 +2993,7 @@ def _verdict(
         if legs.artifact_detail:
             stderr_parts.append(legs.artifact_detail)
         stderr_parts.extend(legs.row_problems)
+        stderr_parts.extend(range_problems)
         stderr_parts.extend(legs.vector_messages[:5])
         stderr_parts.extend(_failed_legs(legs.fidelity_outcomes, legs.fidelity_failed))
         stderr_parts.extend(legs.scorecard_failures)
@@ -2968,6 +3073,7 @@ def _verdict(
             "declaredBaselineDrift": declared_baseline_drift,
             "artifactComponents": artifacts_leg,
             "rowConformance": {"ok": not row_problems, "problems": row_problems},
+            **_range_artifact(range_problems),
             "rfc04": {"failures": vector_failures, "messages": vector_messages},
             "fidelity": fidelity_outcomes,
             **scorecard_extra,
@@ -2987,6 +3093,7 @@ def _verdict(
                     row_problems=row_problems,
                     vector_failures=vector_failures,
                     fidelity_outcomes=fidelity_outcomes,
+                    range_problems=range_problems,
                 ),
                 *([f"  {render_register_line(register.summary)}"] if register is not None else []),
                 *against.lines(),

@@ -176,6 +176,28 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the column, one such level and the keys the parent holds in that plan, and says to plan without `--scale` or to stop
   tracking the column. A foreign key that is not tracked takes the nearest key the parent holds and is not refused.
   Every bundle whose levels are all keys, at any scale, keeps its bytes, and so does every other bundle.
+- A DATE or TIMESTAMP column is drawn inside the range its contract declares (`validationRules: [{type: range,
+  constraint: "between '2001-01-01' and '2005-12-31'"}]`), and `verify` checks the range. Before, a column whose bins
+  ran past its range wrote rows outside it and `verify` said `rows: ok`. On kernel 0.2.0 the
+  column's declared statistics are cut at the range before the draw: a `range` is intersected, a bin is cut at the
+  range's ends and keeps weight in proportion to the width it keeps, and a bin outside is dropped. `plan` prints one
+  note for each cut column. A range that holds none of the column's dates is refused (`FLX-3403`), as is a cut of the
+  bins of a column another column is drawn given. A column whose statistics lie inside its range keeps its bytes, and
+  so does a run on kernel 0.1.0; a column the cut changes has a new `generatorDigest`, plan digest and `runId`. `verify`
+  counts the rows of a DATE, TIMESTAMP, INT or DECIMAL column outside the range its contract declares and fails with a
+  `ranges:` line naming the expose, the column, the rows and the range (and `rangeConformance` in `--json`). A run with
+  no declared range, or none outside it, prints exactly what it printed before (ADR 0024, the amendment of
+  2026-11-25). A strict end (`>`, `<`) is kept strict, one unit inward: `>= '2001-01-01' and < '2006-01-01'` draws
+  and accepts up to 2005-12-31, and `verify` quotes the range as the contract spells it. A strict range that holds no
+  day is refused at `plan` (`FLX-3403`). A range with one end (`>= '2024-01-01'`), and one whose high
+  end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
+  key (every plan written before this change) replays with no cut, so its rows and `replay --assert-digest` keep what
+  they were, and a plan that cut nothing keeps its bytes and its run id. A column another construct sets (a history's validity start and end, the cells
+  an events or periods entry sets, a snapshot's columns, a key, a column a rule, `lifetimes`, `within` or `rates` sets)
+  is not cut and is never `FLX-3403`: `plan` prints one note naming what sets it, and `verify` still counts its rows
+  outside the range.
+  At `--scale` above 1 `verify` does not count the contract's range of a key column the scale widens, and `plan` prints
+  one note naming the column, its range and the scale; a column the scale does not widen stays checked.
 
 ## 0.11.1 - 2026-11-24
 

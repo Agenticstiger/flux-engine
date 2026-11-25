@@ -102,6 +102,7 @@ from flux_engine.generator.copula import (
     plan_copula_draw,
     read_copula,
 )
+from flux_engine.generator.declared_range import RangeCut, cut_statistics, refuse_cut_parents
 from flux_engine.generator.families import (
     FLX_3401,
     ColumnType,
@@ -388,6 +389,10 @@ class ColumnPlan:
     #: is drawn through the copula, and its own cell path draws only its NULL draw. Like
     #: ``allocated_rows`` it is not part of the plan's document, which holds the copula once.
     copula: Optional[CopulaDraw] = None
+    #: That the column's declared statistics were cut at the contract's range (ADR 0024, the
+    #: amendment of 2026-11-25), for the note ``plan`` prints. The statistics the plan holds are the
+    #: cut ones, so the plan's document has them and nothing else of this.
+    range_cut: Optional[RangeCut] = None
 
     def as_document(self) -> Dict[str, Any]:
         """The plan for this column, as canonical-ready JSON."""
@@ -599,6 +604,7 @@ def build_plan(
     generator_version: str = GENERATOR_VERSION,
     plugin: Optional["PluginExpose"] = None,
     projected: bool = False,
+    uncut: Optional[FrozenSet[str]] = frozenset(),
 ) -> GeneratorPlan:
     """Resolve every column to a family and its parameters, before any draw.
 
@@ -629,7 +635,9 @@ def build_plan(
 
     ``projected`` says every column's values are the history's (a snapshot, ADR 0027): none needs a
     draw of its own, so none is refused for declaring no statistics.
-    """
+
+    ``uncut`` names the columns a history or projection sets, which the contract's date range does
+    not cut (ADR 0024); ``None`` cuts none, as a recorded plan without ``dateRanges`` replays."""
     # generator_version is the run's (generator_version_for its seed tree).
     if generator_version not in (GENERATOR_VERSION, GENERATOR_VERSION_2):
         raise FluxError(FLX_2202, f"no generator {generator_version!r}")
@@ -641,6 +649,7 @@ def build_plan(
     exempt = related | (frozenset() if rules is None else rules.covers_every_row)
     if projected:
         exempt = exempt | frozenset(column.name for column in expose.columns)
+    cut_off = None if uncut is None or generator_version != GENERATOR_VERSION_2 else exempt | uncut
     plans: List[ColumnPlan] = []
     made_by_plugin = frozenset(plugin.names) if plugin is not None else frozenset()
     for column in expose.columns:
@@ -655,7 +664,9 @@ def build_plan(
                 )
             )
             continue
-        column_statistics = _with_time_bounds(column, declared, bounds)
+        column_statistics, range_cut = _bounded_statistics(
+            expose.expose_id, column, declared, bounds, cut_off
+        )
         column_type = classify_column(column, column_statistics)
         family = _planned_family(column, column_statistics, column_type, column.name in exempt)
         plans.append(
@@ -669,10 +680,12 @@ def build_plan(
                 # that is a type default only when the column declared no draw.
                 defaulted=column_statistics is not declared and not _declares_a_draw(declared),
                 allocated_rows=None if column_statistics.allocation is None else rows,
+                range_cut=range_cut,
             )
         )
     if rules is not None:
         rules.refuse_given_on_determined(plans)
+    refuse_cut_parents(expose.expose_id, plans)
     _require_binned_parents(plans, generator_version, related, rules)
     _require_conditionals(plans)
     _require_allocatable(plans, generator_version, related, rules)
@@ -706,6 +719,29 @@ def build_plan(
         copula=copula,
         projected=projected,
     )
+
+
+def _bounded_statistics(
+    expose_id: str,
+    column: CompiledColumn,
+    declared: ColumnStatistics,
+    bounds: Optional[Tuple[int, int]],
+    cut_off: Optional[FrozenSet[str]],
+) -> Tuple[ColumnStatistics, Optional[RangeCut]]:
+    """A column's statistics with the run's time bounds filled in, cut at the contract's range.
+
+    The declared statistics are cut first (kernel 0.2.0, a column that is drawn); a range the bounds
+    fill is the window's, and the contract's range cuts it too (ADR 0024, amendment of 2026-11-25).
+    """
+    cutting = cut_off is not None and column.name not in cut_off
+    statistics, range_cut = declared, None
+    if cutting:
+        statistics, range_cut = cut_statistics(expose_id, column, declared)
+    filled = _with_time_bounds(column, statistics, bounds)
+    if cutting and filled is not statistics:
+        filled, windowed = cut_statistics(expose_id, column, filled, window=True)
+        range_cut = range_cut or windowed
+    return filled, range_cut
 
 
 def _require_copula(
