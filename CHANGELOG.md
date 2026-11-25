@@ -131,12 +131,17 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Changed
 
-- The engine reads a profile in which an entry holds only the keys that name it, as when a release step drops
-  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place:
-  `init` and `plan` accept it, and a citation at or under such an entry is still refused (`FLX-5036`). The entries
-  are a calendar entry, a date pair, a relationship's date pair, an exposure, a history and a tracked column of
-  one. An entry that holds some of its statistics, but not all, is refused as before. flux-stats' `parse_profile`
-  and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets.
+- The engine reads a profile that a release step cut by dropping each statistic the `init --json` inventory
+  marks unused. When one member of an entry is withheld and another unused, only the unused one leaves, and the
+  entry keeps the rest: a date pair its `order` and no statistic, an exposure one of its counts, a history or a
+  tracked column some of its members. The engine reads each member that is left, and an entry left with only the
+  keys that name it holds nothing, kept in its place. `init` and `plan` accept such a profile, and `init` writes
+  the bundle it wrote from the whole one. A citation at or under an entry that holds nothing is refused
+  (`FLX-5036`), and a citation of a member that is gone is refused as any citation of an unpublished statistic is
+  (`FLX-3113`). The entries are a calendar entry, a date pair, a relationship's date pair, an exposure, a history
+  and a tracked column of one. Before, the reader refused an entry that a release had cut in part. flux-stats'
+  `parse_profile` and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets;
+  without it each entry is read as the format writes it.
 - A profile's `privacy` block may state more loss than its noisy statistics and cliques spend, including when none
   remain; a stated loss is an upper bound, and a total below what they spend is still refused (`FLX-5036`). The grade
   comes from the statistics alone, so a block that nothing spends earns no grade, and `init` notes the stated and

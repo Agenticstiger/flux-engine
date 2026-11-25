@@ -1110,6 +1110,10 @@ _HISTORY_STATISTICS = (
     "reasons",
 )
 _TRACKED_STATISTICS = ("initial", "transitions")
+#: The members a history requires, and those of a date pair, a release can cut one by one: the
+#: engine reads such an entry with the members left (:func:`parse_profile`, ``allow_emptied_entries``).
+_HISTORY_REQUIRED = ("versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion")
+_CUT_PAIR = ("statistics", "order")
 
 
 def _exposure_window(value: Any, where: str) -> Tuple[int, int]:
@@ -2014,17 +2018,6 @@ class _Reader:
             history=self._history(raw, where, expose_id, domains),
         )
 
-    def _holds_nothing(self, entry: Any, members: Sequence[str]) -> bool:
-        """Whether *entry* holds none of *members* and the reader takes an entry that holds nothing.
-
-        A ``statistics`` list with no item holds nothing, as its items are dropped one by one.
-        """
-        if not self.allow_emptied_entries or not isinstance(entry, Mapping):
-            return False
-        return not any(
-            key in entry and not (key == "statistics" and entry[key] == []) for key in members
-        )
-
     def _calendar(
         self, raw: Mapping[str, Any], where: str, expose_id: str, domains: Mapping[str, Any]
     ) -> Tuple[CalendarEntry, ...]:
@@ -2093,12 +2086,12 @@ class _Reader:
         found = []
         for index, item in enumerate(items):
             at = f"{where}.datePairs[{index}]"
-            emptied = self._holds_nothing(item, ("statistics", "order"))
+            cut = self.allow_emptied_entries
             entry = _mapping(
                 item,
                 at,
-                required=("start", "end") if emptied else ("start", "end", "statistics", "order"),
-                optional=("statistics",) if emptied else (),
+                required=("start", "end") if cut else ("start", "end") + _CUT_PAIR,
+                optional=_CUT_PAIR if cut else (),
             )
             start, end = _name(entry["start"], f"{at}.start"), _name(entry["end"], f"{at}.end")
             if start == end:
@@ -2106,24 +2099,25 @@ class _Reader:
             for side, column in (("start", start), ("end", end)):
                 if domains.get(column) != TIMESTAMP:
                     raise refuse(f"{at}.{side}", "names no timestamp column of this table")
-            if emptied:
-                found.append(DatePairEntry(start=start, end=end, statistics=(), order=None))
-                continue
             found.append(
                 DatePairEntry(
                     start=start,
                     end=end,
-                    statistics=self.statistics(
-                        entry["statistics"],
-                        f"{at}.statistics",
-                        kinds=_DATE_GAP_KINDS,
-                        grouped_by=categorical,
-                        numeric_by=numeric,
-                        domain=NUMBER,
-                        noisy_in=expose_id,
-                        plain_group=True,
+                    statistics=self._cut_statistics(
+                        entry,
+                        at,
+                        lambda value, here: self.statistics(
+                            value,
+                            here,
+                            kinds=_DATE_GAP_KINDS,
+                            grouped_by=categorical,
+                            numeric_by=numeric,
+                            domain=NUMBER,
+                            noisy_in=expose_id,
+                            plain_group=True,
+                        ),
                     ),
-                    order=self._date_order(entry["order"], f"{at}.order", expose_id),
+                    order=self._cut_order(entry, at, expose_id),
                 )
             )
         if len({(pair.start, pair.end) for pair in found}) != len(found):
@@ -2139,6 +2133,23 @@ class _Reader:
             raise refuse(f"{where}.levels", f"an order counts the levels {list(DATE_ORDER_LEVELS)}")
         return order
 
+    @staticmethod
+    def _cut_statistics(
+        entry: Mapping[str, Any],
+        at: str,
+        read: Callable[[Any, str], Tuple[StatisticEntry, ...]],
+    ) -> Tuple[StatisticEntry, ...]:
+        """A pair's ``statistics``, or none when a release cut them (``allow_emptied_entries``)."""
+        return read(entry["statistics"], f"{at}.statistics") if "statistics" in entry else ()
+
+    def _cut_order(
+        self, entry: Mapping[str, Any], at: str, noisy_in: Optional[str]
+    ) -> Optional[StatisticEntry]:
+        """A pair's ``order``, or ``None`` when a release cut it (``allow_emptied_entries``)."""
+        if "order" not in entry:
+            return None
+        return self._date_order(entry["order"], f"{at}.order", noisy_in)
+
     def _history(
         self, raw: Mapping[str, Any], where: str, expose_id: str, domains: Mapping[str, Any]
     ) -> Optional[HistoryEntry]:
@@ -2147,25 +2158,12 @@ class _Reader:
             return None
         here = f"{where}.history"
         self._require_1_3(here, "'history'")
-        emptied = self._history_holds_nothing(raw["history"])
+        cut = self.allow_emptied_entries
         found = _mapping(
             raw["history"],
             here,
-            required=(
-                ("entity", "start", "end")
-                if emptied
-                else (
-                    "entity",
-                    "start",
-                    "end",
-                    "versionsPerEntity",
-                    "firstStart",
-                    "versionLength",
-                    "chain",
-                    "lastVersion",
-                )
-            ),
-            optional=("columns", "reasons"),
+            required=("entity", "start", "end") + (() if cut else _HISTORY_REQUIRED),
+            optional=("columns", "reasons") + (_HISTORY_REQUIRED if cut else ()),
         )
         entity = tuple(read_texts(found["entity"], f"{here}.entity"))
         start, end = (_name(found[key], f"{here}.{key}") for key in ("start", "end"))
@@ -2185,7 +2183,7 @@ class _Reader:
                 ("chain", "levelHistogram", CHAIN_LEVELS),
                 ("lastVersion", "levelHistogram", LAST_VERSION_LEVELS),
             )
-            if not emptied
+            if key in found
         }
         taken = set(entity) | {start, end}
         columns = self._history_columns(found, here, expose_id, domains, taken)
@@ -2201,15 +2199,6 @@ class _Reader:
             last_version=shapes.get("lastVersion"),
             columns=MappingProxyType(columns),
             reasons=reasons,
-        )
-
-    def _history_holds_nothing(self, value: Any) -> bool:
-        """Whether a history holds none of its statistics, nor does any tracked column it names."""
-        if not self._holds_nothing(value, _HISTORY_STATISTICS):
-            return False
-        columns = value.get("columns", {})
-        return isinstance(columns, Mapping) and all(
-            self._holds_nothing(each, _TRACKED_STATISTICS) for each in columns.values()
         )
 
     def _history_statistic(
@@ -2261,22 +2250,32 @@ class _Reader:
                 raise refuse(
                     here, "a tracked column is a categorical column that is no key or window column"
                 )
-            if self._holds_nothing(declared[name], _TRACKED_STATISTICS):
-                _mapping(declared[name], here)
-                columns[name] = HistoryColumn()
-                continue
-            raw = _mapping(declared[name], here, required=("initial", "transitions"))
+            cut = self.allow_emptied_entries
+            raw = _mapping(
+                declared[name],
+                here,
+                required=() if cut else _TRACKED_STATISTICS,
+                optional=_TRACKED_STATISTICS if cut else (),
+            )
             columns[name] = HistoryColumn(
-                initial=self._history_statistic(
-                    raw["initial"], f"{here}.initial", expose_id, "levelHistogram", None
+                initial=(
+                    self._history_statistic(
+                        raw["initial"], f"{here}.initial", expose_id, "levelHistogram", None
+                    )
+                    if "initial" in raw
+                    else None
                 ),
-                transitions=self._history_statistic(
-                    raw["transitions"],
-                    f"{here}.transitions",
-                    expose_id,
-                    "levelHistogram",
-                    None,
-                    grouped_by=name,
+                transitions=(
+                    self._history_statistic(
+                        raw["transitions"],
+                        f"{here}.transitions",
+                        expose_id,
+                        "levelHistogram",
+                        None,
+                        grouped_by=name,
+                    )
+                    if "transitions" in raw
+                    else None
                 ),
             )
         return columns
@@ -2652,14 +2651,12 @@ class _Reader:
         self, item: Any, at: str, tables: Mapping[str, TableEntry], parent: str
     ) -> ExposureEntry:
         """One ``exposure`` entry at *at*: two different timestamp columns of the parent, two counts and a window."""
-        emptied = self._holds_nothing(item, ("children", "activeDays"))
+        cut = self.allow_emptied_entries
         entry = _mapping(
             item,
             at,
-            required=(
-                ("start", "window") if emptied else ("start", "children", "activeDays", "window")
-            ),
-            optional=("end",),
+            required=("start", "window") if cut else ("start", "children", "activeDays", "window"),
+            optional=("end", "children", "activeDays") if cut else ("end",),
         )
         names = [_name(entry["start"], f"{at}.start")]
         if "end" in entry:
@@ -2671,12 +2668,14 @@ class _Reader:
             if held is None or held.domain != TIMESTAMP:
                 raise refuse(f"{at}.{side}", "names no timestamp column of its parent table")
         window_start, window_end = _exposure_window(entry["window"], f"{at}.window")
-        counts: List[Optional[MetricEntry]] = [None, None]
-        if not emptied:
-            counts = [
+        counts: List[Optional[MetricEntry]] = [
+            (
                 self.metric("count", entry[key], f"{at}.{key}", domain=TIMESTAMP)
-                for key in ("children", "activeDays")
-            ]
+                if key in entry
+                else None
+            )
+            for key in ("children", "activeDays")
+        ]
         return ExposureEntry(
             start=names[0],
             end=names[1] if len(names) > 1 else None,
@@ -2703,14 +2702,12 @@ class _Reader:
         found = []
         for index, item in enumerate(items):
             at = f"{where}.dates[{index}]"
-            emptied = self._holds_nothing(item, ("statistics", "order"))
+            cut = self.allow_emptied_entries
             entry = _mapping(
                 item,
                 at,
-                required=(
-                    ("parent", "child") if emptied else ("parent", "child", "statistics", "order")
-                ),
-                optional=("statistics",) if emptied else (),
+                required=("parent", "child") if cut else ("parent", "child") + _CUT_PAIR,
+                optional=_CUT_PAIR if cut else (),
             )
             names = []
             for side, table in (("parent", parent), ("child", child)):
@@ -2719,24 +2716,18 @@ class _Reader:
                 if held is None or held.domain != TIMESTAMP:
                     raise refuse(f"{at}.{side}", "names no timestamp column of its table")
                 names.append(name)
-            if emptied:
-                found.append(
-                    RelationshipDateEntry(
-                        parent=names[0], child=names[1], statistics=(), order=None
-                    )
-                )
-                continue
             found.append(
                 RelationshipDateEntry(
                     parent=names[0],
                     child=names[1],
-                    statistics=self.statistics(
-                        entry["statistics"],
-                        f"{at}.statistics",
-                        kinds=_DATE_GAP_KINDS,
-                        domain=NUMBER,
+                    statistics=self._cut_statistics(
+                        entry,
+                        at,
+                        lambda value, here: self.statistics(
+                            value, here, kinds=_DATE_GAP_KINDS, domain=NUMBER
+                        ),
                     ),
-                    order=self._date_order(entry["order"], f"{at}.order", None),
+                    order=self._cut_order(entry, at, None),
                 )
             )
         if len({(pair.parent, pair.child) for pair in found}) != len(found):
@@ -2944,12 +2935,11 @@ def parse_profile(document: Any, *, allow_emptied_entries: bool = False) -> Prof
 
     An entry of a table or a relationship that is listed whole (a calendar entry, a date pair, a
     relationship's date pair, an exposure, a history and a tracked column of one) holds statistics
-    its reader requires (PROFILE-SPEC section 5). With *allow_emptied_entries* an entry that holds
-    only the keys that name it, every statistic dropped, is read instead, kept in place with each
-    statistic ``None`` (``holds_nothing``), so the entries after it keep their indices and
-    pointers. An entry that holds some of its statistics, but not all, is refused as before. A
-    caller that sets it owns what an entry that holds nothing means; the default is the strict
-    reading.
+    its reader requires (PROFILE-SPEC section 5). With *allow_emptied_entries* such an entry is read
+    with the members a release left in it, each ``None`` (or no statistic) where it was cut, and
+    one with only the keys that name it holds nothing (``holds_nothing``), kept in place so the
+    entries after it keep their indices and pointers. A caller that sets it owns what a cut entry
+    means; the default is the strict reading, which refuses an entry that misses a member.
     """
     _require_nfc(document, "profile")
     raw = _mapping(

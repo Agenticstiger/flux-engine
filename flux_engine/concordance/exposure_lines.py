@@ -374,7 +374,8 @@ def _exposure_line(
     if source.hidden is not None:
         return None, source.hidden
     if entry.children is None or entry.active_days is None:
-        return None, "the profile holds neither count of children nor of active days"
+        missing = "children" if entry.children is None else "active days"
+        return None, f"the profile holds no count of {missing}, so the exposure is not compared"
     total, days = entry.children.value, entry.active_days.value
     if total is None or days is None:
         return None, "the profile withheld the count of children or of active days"
