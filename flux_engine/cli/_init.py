@@ -13,7 +13,6 @@ this process was started (see :func:`command_prefix`).
 
 from __future__ import annotations
 
-import errno
 import json
 import shlex
 import shutil
@@ -775,14 +774,14 @@ def _write_request(target: Optional[Path], bundle: Any) -> Any:
 def _rmdir_if_empty(directory: Path) -> None:
     """Remove *directory* when it is empty.
 
-    Cleanup is best effort: a directory that is already gone, or still holds something, is left as
-    it is. Any other error (a permission refused, say) is not hidden.
+    Cleanup is best effort: a directory that is already gone, still holds something or cannot be
+    removed (a permission refused, say) is left as it is, so the refusal that led here is the one
+    reported.
     """
     try:
         directory.rmdir()
-    except OSError as error:
-        if error.errno not in (errno.ENOENT, errno.ENOTEMPTY, errno.EEXIST):
-            raise
+    except OSError:
+        pass
 
 
 def _remove_request(request: Path) -> None:
