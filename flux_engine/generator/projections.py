@@ -458,35 +458,57 @@ def held_givens(
             f"{key} entry ({plan.expose.expose_id}): column {name!r} is drawn given {parent!r}, "
             f"which the entry sets as {sets[parent]}"
         )
-        if parent in own:
-            raise _refuse(
-                f"{where}; only a column of the version can be drawn given, since its level is the "
-                "version's, and this one holds no level the history draws; draw "
-                f"{name!r} given a column of the version, or on its own"
-            )
-        if column_plan.allocated_rows is not None:
-            raise _refuse(
-                f"{where}; {name!r} declares allocation: exact, whose classes are allotted by the "
-                f"draw of {parent!r}, not by the level the row holds; drop the allocation, or "
-                f"draw {name!r} on its own"
-            )
+        _refuse_unservable(where, column_plan, parent, parent in own)
         reason = _unheld_reason(history, plan, parent)
         if reason is not None:
-            shares = implied_marginal(column_plan, parent, history, plan)
-            gap = None if shares is not None else _own_distribution_gap(column_plan)
-            if gap is not None:
-                raise _refuse(
-                    f"{where}, and {reason}, which no level of {parent!r} names; {name!r} has no "
-                    f"distribution of its own to draw from there ({gap}); declare level weights "
-                    f"for {parent!r} that name the levels the table of {name!r} is keyed by, or "
-                    f"declare a support for {name!r} that names the levels its table names, or "
-                    f"draw it on its own"
-                )
+            shares = _fallback_draw(where, reason, column_plan, parent, history, plan)
             fallback[parent] = None
             if shares is not None:
-                marginals[name] = tuple((level, str(share)) for level, share in shares[0].items())
+                marginals[name] = tuple((level, str(share)) for level, share in shares.items())
         held[parent] = None
     return tuple(sorted(held)), tuple(sorted(fallback)), tuple(sorted(marginals.items()))
+
+
+def _refuse_unservable(where: str, column_plan: ColumnPlan, parent: str, is_own: bool) -> None:
+    """Refuse (``FLX-3403``) a column drawn given a cell of the entry's own, or allotted by its parent."""
+    name = column_plan.column.name
+    if is_own:
+        raise _refuse(
+            f"{where}; only a column of the version can be drawn given, since its level is the "
+            "version's, and this one holds no level the history draws; draw "
+            f"{name!r} given a column of the version, or on its own"
+        )
+    if column_plan.allocated_rows is not None:
+        raise _refuse(
+            f"{where}; {name!r} declares allocation: exact, whose classes are allotted by the "
+            f"draw of {parent!r}, not by the level the row holds; drop the allocation, or "
+            f"draw {name!r} on its own"
+        )
+
+
+def _fallback_draw(
+    where: str,
+    reason: str,
+    column_plan: ColumnPlan,
+    parent: str,
+    history: GeneratorPlan,
+    plan: GeneratorPlan,
+) -> Optional[Dict[str, Fraction]]:
+    """The marginal a column draws where its parent holds no level, ``None`` for its support, or the refusal."""
+    found = implied_marginal(column_plan, parent, history, plan)
+    if found is not None:
+        return found[0]
+    gap = _own_distribution_gap(column_plan)
+    if gap is not None:
+        name = column_plan.column.name
+        raise _refuse(
+            f"{where}, and {reason}, which no level of {parent!r} names; {name!r} has no "
+            f"distribution of its own to draw from there ({gap}); declare level weights "
+            f"for {parent!r} that name the levels the table of {name!r} is keyed by, or "
+            f"declare a support for {name!r} that names the levels its table names, or "
+            f"draw it on its own"
+        )
+    return None
 
 
 def _own_distribution_gap(column_plan: ColumnPlan) -> Optional[str]:
