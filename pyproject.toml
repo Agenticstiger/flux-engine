@@ -131,6 +131,15 @@ publish = [
   "obstore>=0.12.1,<0.13",
   "adbc-driver-manager>=1.13.0,<2",
 ]
+# The Kafka sink (flux_engine.sinks.kafka): idempotent transactional producers, the admin
+# client and the schema registry's Avro and JSON Schema serializers, over librdkafka.
+# Apache-2.0. Imported only when the sink is selected: importing the engine, its CLI or
+# its sinks package loads none of it (tests/test_startup_budget.py), and no core module may
+# import it (the "only the Kafka sink may import confluent_kafka" contract below). Servers, registry and credentials
+# come from the person's options and environment, never from the contract.
+kafka = [
+  "confluent-kafka[avro,json]>=2.16.2,<3",
+]
 # Consumer queries (the `consumers` block of a Simulation): the SQL reader
 # and the engine that runs a query over generated rows. Generation reads no
 # SQL, so none of this is on the cold path and no core module imports it.
@@ -482,6 +491,22 @@ forbidden_modules = ["pyarrow", "adbc_driver_manager"]
 # are pyarrow's annotation-only imports under TYPE_CHECKING. A plain import
 # of either anywhere else would put it on a path that runs without a sink.
 ignore_imports = ["flux_engine.sinks.* -> pyarrow"]
+allow_indirect_imports = true
+as_packages = true
+
+[[tool.importlinter.contracts]]
+name = "only the Kafka sink may import confluent_kafka"
+type = "forbidden"
+source_modules = ["flux_engine"]
+forbidden_modules = ["confluent_kafka"]
+# The sink reaches the library from its adapters alone: the broker adapter (admin client,
+# consumer and producer) and the serializers (the schema registry's serdes). Every other
+# module, kafka.py included, sees only their protocols, so a run without the extra imports
+# none of it.
+ignore_imports = [
+  "flux_engine.sinks._kafka_broker -> confluent_kafka",
+  "flux_engine.sinks._kafka_serdes -> confluent_kafka",
+]
 allow_indirect_imports = true
 as_packages = true
 

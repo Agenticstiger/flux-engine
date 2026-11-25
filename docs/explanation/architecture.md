@@ -79,7 +79,7 @@ C4 calls a separately installed piece a *container*. FLUX has five.
 | `flux-sim-engine`, this repository | The `fluxsim` command and its Python library. | Whoever generates the rows. |
 | `flux-stats`, in `packages/flux-stats/` | One definition per statistic, the profile reader, the rules for reading a value from a record, and the mechanism of the `FLX` code catalog. It needs only the standard library. | Both sides. The engine requires a range of it (`>=0.11,<0.12` for this release), and the data owner installs it next to `fluid profile`. |
 | `fluid profile`, in forge-cli | Reading records where they live, the disclosure rules, and writing the profile. | The data owner, next to the data. |
-| Sinks | Where the rows land besides the run's own NDJSON files (one JSON value per line): Parquet or Arrow IPC files (the `arrow` extra), a database through ADBC, Arrow Database Connectivity (the `adbc` extra), object stores, Iceberg tables and Delta tables (the `publish` extra), or a plug-in. | Whoever generates, by choosing an extra or a plug-in. |
+| Sinks | Where the rows land besides the run's own NDJSON files (one JSON value per line): Parquet or Arrow IPC files (the `arrow` extra), a database through ADBC, Arrow Database Connectivity (the `adbc` extra), object stores, Iceberg tables and Delta tables (the `publish` extra), Kafka topics (the `kafka` extra), or a plug-in. | Whoever generates, by choosing an extra or a plug-in. |
 
 flux-stats is on PyPI from 0.6.0, released with the engine at the same version. `fluid profile` is in data-product-forge, forge-cli's package on PyPI, from 0.31.0, and its `profile` extra installs flux-stats from PyPI. It writes column metrics, a row count and an ungrouped `mean/1` for each number column, unless the output checks withhold it.
 
@@ -255,7 +255,7 @@ Where a pattern is borrowed, a docstring or a decision record names the source. 
 - **Solution.** `flux_engine/api/` holds the ports, such as `EmitSink`. A sink is an adapter. The built-in ones are names in a table, imported only when chosen, and a third party registers one under the `flux_engine.sinks` entry point group. The digest is computed before any sink sees a row, and every delivery leaves a receipt.
 - **Where.** `flux_engine/api/emit.py`, `flux_engine/sinks/registry.py`, `flux_engine/stages/deliver.py`.
 - **Trade-off.** A built-in name always wins over a plug-in that reuses it. Some ports wait for adapters the engine does not ship: the agentic tier's model port proposes and never decides ([ADR 0004](../adr/0004-concordia-tinytroupe-adapt-the-pattern.md)), and the proof port has only a no-op.
-- **Read more.** [Load a simulation into a database](../how-to/load-a-simulation-into-a-database.md).
+- **Read more.** [Load a simulation into a database](../how-to/load-a-simulation-into-a-database.md) and [Stream a simulation into Kafka](../how-to/stream-a-simulation-into-kafka.md).
 
 ### One error catalog, typed refusals
 

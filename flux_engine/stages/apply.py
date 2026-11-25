@@ -428,11 +428,12 @@ _SCALE_NEEDS_A_FRESH_PLAN = (
     "scale it was made at, and apply runs that"
 )
 
-#: Why ``apply --run-id`` refuses ``--profile``: a recorded plan was paired
-#: with the profile its Simulation pins when the plan was taken.
+#: Why ``apply --run-id`` refuses ``--profile`` without ``--sink``: a recorded plan was paired
+#: with the profile its Simulation pins when the plan was taken. With ``--sink`` the profile is
+#: read to grade the run for the sink's audience.
 _PROFILE_NEEDS_A_FRESH_PLAN = (
-    "--profile is read only when apply takes a fresh plan: the plan of --run-id was "
-    "paired with the profile its Simulation pins when it was taken"
+    "--profile is read only when apply takes a fresh plan, or with --sink: the plan of "
+    "--run-id was paired with the profile its Simulation pins when it was taken"
 )
 
 
@@ -500,7 +501,9 @@ def apply(
     exactly as a moved bundle is.
 
     *profile* goes to the fresh plan, which pairs it with the pinned profile
-    (:func:`flux_engine.stages.plan.plan`); with *run_id* it is refused, exit 2.
+    (:func:`flux_engine.stages.plan.plan`); with *run_id* and no *sink* it is refused, exit 2.
+    With *sink* it is also the profile the sink's audience is graded from
+    (:func:`flux_engine.stages.deliver.privacy_grade_of`).
 
     *allow_generators* names the generator plugins the person allows to load
     (``--allow-generator``, ADR 0032 section 3). It is read only when this call generates rows
@@ -523,12 +526,15 @@ def apply(
     target, refused = open_sink(sink, sink_options, stage="apply")
     if refused is not None:
         return refused
+    # With a recorded plan the profile is for the sink alone, so `_apply` is not handed it.
+    planned_with = None if run_id is not None and target is not None else profile
     return timed(
         timings,
         lambda: _delivered(
             target,
             Path(bundle_directory),
             state_dir,
+            profile,
             _apply(
                 bundle_directory,
                 run_id=run_id,
@@ -539,7 +545,7 @@ def apply(
                 precomputed=precomputed,
                 jobs=jobs,
                 strict_coverage=strict_coverage,
-                profile=profile,
+                profile=planned_with,
                 use_stage=use_stage,
                 scale=scale,
                 shard=shard,
@@ -550,7 +556,11 @@ def apply(
 
 
 def _delivered(
-    target: Any, directory: Path, state_dir: Union[str, Path, None], applied: StageResult
+    target: Any,
+    directory: Path,
+    state_dir: Union[str, Path, None],
+    profile: Union[str, Path, None],
+    applied: StageResult,
 ) -> StageResult:
     """*applied*, then every stream of its run into *target* when one was asked for."""
     if target is None or not applied.success:
@@ -568,6 +578,7 @@ def _delivered(
             directory,
             target=target,
             record=lambda receipt: write_receipts(layout, [receipt]),
+            profile=profile,
         )
     except FluxError as error:
         artifacts["sinks"] = {"ran": True, "ok": False, "sink": target.name}

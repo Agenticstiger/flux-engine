@@ -88,6 +88,10 @@ ALLOWED: Dict[str, Tuple[str, ...]] = {
     "flux_engine/lineage/emitter.py": ("openlineage",),
     # url2pathname turns a file:// URL into a path; no request is made.
     "flux_engine/generators/registry.py": ("urllib.request",),
+    # getaddrinfo resolves the Kafka brokers' names, the target's and those the cluster advertises,
+    # only when a credential would go over SASL_PLAINTEXT, to check every address is this machine;
+    # it opens no connection.
+    "flux_engine/sinks/_kafka_broker.py": ("socket",),
 }
 
 #: Libraries only the sinks may import: each writes to a target named on the command line.

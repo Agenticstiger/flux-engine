@@ -22,6 +22,7 @@ FLUX is built for people who care where their data goes and which model reads it
 | A `--sink` to an object store: `s3://`, `gs://`, `az://` or `abfs://`, with the `parquet`, `arrow-ipc` or `delta` sink | Only when you name such a target | Write to a local directory instead, for example `--sink parquet:./out` |
 | A `--sink adbc:...` database target | Only when you name a driver and a database that is not local | Use a local file such as `adbc:sqlite` or `adbc:duckdb`, or no database sink |
 | An Iceberg catalogue, `--sink iceberg:...` | Only when your own pyiceberg configuration points it at a remote catalogue | Do not pass the `iceberg` sink, or configure a local catalogue |
+| A Kafka sink, `--sink kafka:HOST:PORT[,...]` | Only when you name it: it contacts the brokers you name and, if you name one, the schema registry (`--sink-opt registry=URL`). With a credential over `SASL_PLAINTEXT` it also resolves the brokers' names, to check that each is this machine | Do not pass the `kafka` sink, or name brokers and a registry on this machine |
 | `OpenLineageHttpEmitter` (the `lineage` extra) | Only when your own code builds it with a URL | Do not build it with a URL |
 
 Nothing else touches the network. To be sure for a whole session, run FLUX where there is no network: `unshare --net` on Linux, or `docker run --network none`.

@@ -52,9 +52,9 @@ def test_a_spec_without_a_sink_name_is_refused(spec: str) -> None:
 
 def test_an_unknown_sink_lists_the_known_ones() -> None:
     with pytest.raises(FluxError) as caught:
-        registry.open_target("kafka:topic")
+        registry.open_target("nonesuch:topic")
     assert caught.value.code.code == "FLX-3507"
-    assert "adbc, arrow-ipc, delta, iceberg, parquet" in str(caught.value)
+    assert "adbc, arrow-ipc, delta, iceberg, kafka, parquet" in str(caught.value)
 
 
 def test_the_built_ins_are_listed_with_their_extras() -> None:
@@ -69,13 +69,15 @@ def test_listing_the_sinks_imports_no_sink_library() -> None:
     probe = (
         "import sys\n"
         "from flux_engine.sinks.registry import available\n"
-        "names = [sink.name for sink in available()]\n"
-        "print(names, [m for m in ('pyarrow', 'adbc_driver_manager', 'pyiceberg', 'deltalake') if m in sys.modules])\n"
+        "names = [sink.name for sink in available() if sink.source == 'built-in']\n"
+        "print(names, [m for m in ('pyarrow', 'adbc_driver_manager', 'pyiceberg', 'deltalake', 'confluent_kafka') if m in sys.modules])\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
     )
-    assert result.stdout.strip() == "['adbc', 'arrow-ipc', 'delta', 'iceberg', 'parquet'] []"
+    assert (
+        result.stdout.strip() == "['adbc', 'arrow-ipc', 'delta', 'iceberg', 'kafka', 'parquet'] []"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +160,50 @@ def test_a_third_party_sink_cannot_shadow_a_built_in(monkeypatch: pytest.MonkeyP
     assert [(sink.name, sink.shadowed) for sink in shadow] == [("parquet", True)]
     pyarrow_or_skip()  # the next line loads the Parquet sink, which imports it
     assert registry.load_factory("parquet").__module__ == "flux_engine.sinks.parquet"
+
+
+def test_a_third_party_sink_named_kafka_never_loads_in_place_of_the_built_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(registry, "_entry_points", _points(("kafka", f"{__name__}:memory_factory")))
+    shadow = [sink for sink in registry.available() if sink.source != "built-in"]
+    assert [(sink.name, sink.shadowed) for sink in shadow] == [("kafka", True)]
+    assert registry.load_factory("kafka").__module__ == "flux_engine.sinks.kafka"
+
+
+def test_kafka_is_a_built_in_behind_the_kafka_extra() -> None:
+    sinks = {sink.name: sink for sink in registry.available() if sink.source == "built-in"}
+    assert sinks["kafka"].extra == "kafka"
+    assert sinks["kafka"].value == "flux_engine.sinks.kafka:target"
+    assert sinks["kafka"].as_document()["extra"] == "flux-sim-engine[kafka]"
+
+
+def test_without_confluent_kafka_the_sink_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "confluent_kafka", None)
+    with pytest.raises(FluxError) as caught:
+        registry.open_target("kafka:127.0.0.1:9092", {"audience": "internal"})
+    assert caught.value.code.code == "FLX-3501"
+    assert "pip install 'flux-sim-engine[kafka]'" in str(caught.value)
+
+
+def test_the_plugins_listing_says_whether_the_kafka_extra_is_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(registry, "is_available", lambda name: name != "confluent_kafka")
+    missing = {s.name: s for s in registry.available() if s.source == "built-in"}["kafka"]
+    assert missing.installed is False and missing.as_document()["installed"] is False
+    monkeypatch.setattr(registry, "is_available", lambda name: True)
+    present = {s.name: s for s in registry.available() if s.source == "built-in"}["kafka"]
+    assert present.installed is True
+    monkeypatch.undo()
+    listed = subprocess.run(
+        [sys.executable, "-m", "flux_engine.cli", "plugins"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    line = next(row for row in listed.splitlines() if "built-in" in row and "kafka" in row)
+    assert "needs flux-sim-engine[kafka] (" in line and "installed)" in line
 
 
 def test_a_factory_that_returns_no_target_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

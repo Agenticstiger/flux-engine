@@ -44,6 +44,8 @@ DISTRIBUTION = {
     "obstore": "obstore",
     "pyiceberg": "pyiceberg",
     "deltalake": "deltalake",
+    # The [kafka] extra: the Kafka sink's client, admin and registry serializers.
+    "confluent_kafka": "confluent-kafka",
 }
 
 

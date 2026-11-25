@@ -114,6 +114,7 @@ BUILTINS: Mapping[str, _Builtin] = {
     "adbc": _Builtin("flux_engine.sinks.adbc:target", "adbc", ("pyarrow", "adbc_driver_manager")),
     "delta": _Builtin("flux_engine.sinks.delta:target", "publish", ("pyarrow", "deltalake")),
     "iceberg": _Builtin("flux_engine.sinks.iceberg:target", "publish", ("pyarrow", "pyiceberg")),
+    "kafka": _Builtin("flux_engine.sinks.kafka:target", "kafka", ("confluent_kafka",)),
 }
 
 

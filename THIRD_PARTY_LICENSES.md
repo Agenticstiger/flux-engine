@@ -1,6 +1,6 @@
 # Third-party licenses
 
-Generated 2026-11-23T13:42:27.222180Z by `scripts/third_party_licenses.py` (documented list derived from pyproject.toml (pip-licenses not installed)).
+Generated 2026-11-25T00:53:16.869831Z by `scripts/third_party_licenses.py` (documented list derived from pyproject.toml (pip-licenses not installed)).
 Every distribution `pyproject.toml` declares appears below; the list is
 derived from those declarations rather than maintained by hand, and
 `tests/test_third_party_licenses.py` fails when one has no entry.
@@ -35,6 +35,7 @@ derived from those declarations rather than maintained by hand, and
 | adbc-driver-sqlite | Apache-2.0 | [dev]: the database sink's tests, against SQLite |
 | duckdb | MIT | [sql]: runs a consumer query over generated rows; also the database sink's tests |
 | sqlglot | MIT | [sql]: reads and checks the SQL of a consumer query |
+| confluent-kafka | Apache-2.0 | [kafka]: produces each stream to Kafka and writes values through a schema registry; its wheels bundle librdkafka (BSD-2-Clause) |
 | openlineage-python | Apache-2.0 | [lineage]: RunEvent client |
 | pyiceberg | Apache-2.0 | [publish]: writes one Iceberg table per stream through a catalogue |
 | deltalake | Apache-2.0 | [publish]: writes one Delta Lake table per stream |

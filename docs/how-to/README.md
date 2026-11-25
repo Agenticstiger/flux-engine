@@ -1,6 +1,6 @@
 ---
 title: "How-to guides"
-description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, draw a column given the bin of another, draw number columns together, ship with evidence, write a bundle from a profile, score a run against a profile, seal and score a prediction, forecast the next state and score it, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, check consumer queries and calibrate to them, fix values and seed rows, give an entity a history, project a history, keep dates inside their parent's lifetime."
+description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, draw a column given the bin of another, draw number columns together, ship with evidence, write a bundle from a profile, score a run against a profile, seal and score a prediction, forecast the next state and score it, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, check consumer queries and calibrate to them, fix values and seed rows, give an entity a history, project a history, keep dates inside their parent's lifetime, stream a simulation into Kafka."
 ---
 
 # How-to guides
@@ -30,5 +30,6 @@ from a fresh project made with `fluxsim init`.
 - [Project a history](./project-a-history.md): derive a snapshot, a change event stream and periodic rows from a history, with row counts worked out at plan time, and grow the window without rewriting a row.
 - [Keep dates inside their parent's lifetime](./keep-dates-inside-their-parents-lifetime.md): read what `fluxsim init` writes from a profile's date pairs, calendars and exposure (lifetimes, dates within a parent's lifetime, seasonal rates, exposure), see what it left unused and why, read the `lifetime:`, `within:`, `calendar:` and `exposure:` lines of `fluxsim verify`, and adjust a fact that fails.
 - [Load a simulation into a database](./load-a-simulation-into-a-database.md): write the rows to Parquet or Arrow IPC files, or into SQLite, DuckDB, PostgreSQL, Snowflake or BigQuery.
+- [Stream a simulation into Kafka](./stream-a-simulation-into-kafka.md): send each stream to Kafka topics keyed by entity, with event time in the record timestamp, a history's changes as Debezium records, exactly-once delivery, optional pacing, and a gate on who may read the topics.
 
 For why things work the way they do, see [Explanation](../explanation/README.md).

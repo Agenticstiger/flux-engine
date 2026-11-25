@@ -39,7 +39,7 @@ def test_importing_cli_does_not_load_numpy() -> None:
 
 #: The optional libraries behind the sink extras. Selecting a sink imports
 #: them; nothing on the cold path may.
-_SINK_LIBRARIES = ("pyarrow", "adbc_driver_manager")
+_SINK_LIBRARIES = ("pyarrow", "adbc_driver_manager", "confluent_kafka")
 
 _SINK_PROBE = (
     "import sys, flux_engine, flux_engine.cli, flux_engine.sinks, flux_engine.sinks.errors; "
