@@ -71,7 +71,15 @@ def test_a_key_column_the_scale_widens_is_not_checked_and_plan_says_so(tmp_path:
         "the scale widens the column's keys"
     ]
     assert verified.success, verified.stderr
-    assert not _ranges(verified.stdout)
+    # Verify says it too, in its own line, and the run still passes.
+    assert _ranges(verified.stdout) == [
+        "  ranges: depot.depot_id: not checked at --scale 2: the scale widens the column's keys "
+        "past its contract range"
+    ]
+    assert verified.artifacts["rangesNotChecked"] == [
+        _ranges(verified.stdout)[0][len("  ranges: ") :]
+    ]
+    assert "rangeConformance" not in verified.artifacts
 
 
 @pytest.mark.parametrize("scale", ["1", "0.5"])
@@ -82,6 +90,7 @@ def test_scale_one_and_below_keep_the_range_checked(tmp_path: Path, scale: str) 
     # Every key is inside 1..50 at these scales, so the check passes by counting.
     assert verified.success, verified.stdout
     assert not _ranges(verified.stdout)
+    assert "rangesNotChecked" not in verified.artifacts
 
 
 def test_a_non_key_number_column_is_still_checked_at_scale_two(tmp_path: Path) -> None:

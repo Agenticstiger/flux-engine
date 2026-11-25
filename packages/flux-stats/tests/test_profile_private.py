@@ -245,6 +245,20 @@ def test_a_privacy_block_that_nothing_spends_is_accepted() -> None:
 def test_a_total_above_what_the_parts_spend_is_accepted() -> None:
     parse_profile(_edit(lambda d: d["privacy"]["privacyLoss"].update(rho="5")))
 
+    # The same with nothing left to spend it: no noisy statistic and no clique, a positive total.
+    def nothing_noisy(document: Dict[str, Any]) -> None:
+        document["privacy"]["privacyLoss"].update(rho="5")
+        table = _table(document)
+        del table["cliques"]
+        for column in table["columns"].values():
+            column.pop("statistics", None)
+
+    document = _edit(nothing_noisy)
+    assert "noise" not in json.dumps(document)
+    profile = parse_profile(document)
+    assert profile.parts == ()
+    assert profile.accounting is not None and profile.accounting.total.rho == Fraction(5)
+
 
 def test_a_total_below_what_the_parts_spend_is_still_refused() -> None:
     assert "more than the total rho" in _refused(

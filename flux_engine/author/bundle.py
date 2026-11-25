@@ -135,7 +135,7 @@ from flux_engine.author.projection import (
 )
 from flux_engine.author.ranges import column_range
 from flux_engine.author.replace import replacements_for
-from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_instants, instant_ms
+from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_window, instant_ms
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
@@ -1109,6 +1109,84 @@ def _declares_a_column(authored: AuthoredExpose) -> bool:
     return bool(authored.linked) or any(column.declaration for column in authored.columns)
 
 
+#: The properties that compare their columns over declared levels; every other kind compares
+#: them over a declared range (``flux_stats.fidelity``).
+_LEVEL_PROPERTIES = ("support", "levelHistogram")
+
+
+def _property_columns(document: Mapping[str, Any]) -> List[str]:
+    """The columns a property is over, not the ones it groups by."""
+    named = [str(name) for name in document.get("columns") or ()]
+    if "column" in document:
+        named.append(str(document["column"]))
+    return named
+
+
+def _kept_declarations(authored: AuthoredExpose) -> Dict[str, str]:
+    """What the fidelity compiler keeps of each column the block declares: ``range`` or ``support``.
+
+    A declaration with neither (a draw's parameters alone), or with both, is kept as nothing.
+    """
+    declared = [(plan.name, plan.declaration) for plan in authored.columns]
+    declared += [(name, linked.declaration) for name, linked in authored.linked.items()]
+    return {
+        name: "range" if "range" in declaration else "support"
+        for name, declaration in declared
+        if ("range" in declaration) != ("support" in declaration)
+    }
+
+
+def _unmet_columns(document: Mapping[str, Any], kept: Mapping[str, str]) -> List[str]:
+    """The columns a property needs a declaration of, as a range or as levels, that the block lacks."""
+    own = "support" if document.get("property") in _LEVEL_PROPERTIES else "range"
+    needs = [(name, own) for name in _property_columns(document)]
+    if "groupBy" in document:
+        needs.append((str(document["groupBy"]), "support"))
+    grouped = document.get("groupByBins")
+    if isinstance(grouped, Mapping) and "column" in grouped:
+        needs.append((str(grouped["column"]), "range"))
+    return [name for name, wanted in needs if kept.get(name) != wanted]
+
+
+def _drop_unkept_properties(authored: AuthoredExpose) -> None:
+    """Leave out each property that names a column the fidelity block declares no range or levels for.
+
+    ``verify`` refuses such a property (``FLX-5034``), and init never writes a bundle its own
+    validation refuses. This is the last place the properties are chosen before the documents
+    are drafted, so a writer that made one for a column the declarations do not cover cannot
+    leave it in: it is dropped, and the column's notes say which declaration it needed. An expose
+    left with no property takes the first column's assumed check, as :func:`_finish_expose` does.
+    """
+    kept = _kept_declarations(authored)
+    unmet = {id(prop): _unmet_columns(prop.document, kept) for prop in authored.properties}
+    dropped = [prop for prop in authored.properties if unmet[id(prop)]]
+    if not dropped:
+        return
+    authored.properties = [prop for prop in authored.properties if not unmet[id(prop)]]
+    plans = {plan.name: plan for plan in authored.columns}
+    for prop in dropped:
+        over = _property_columns(prop.document)
+        sentence = (
+            f"No {prop.document.get('property')} property is written for "
+            f"{', '.join(printable(name) for name in over)}: the fidelity block declares "
+            f"no range or levels of {', '.join(printable(name) for name in unmet[id(prop)])} "
+            "for it to compare over (FLX-5034)."
+        )
+        plan = next((plans[name] for name in over if name in plans), None)
+        if plan is not None and sentence not in plan.choices:
+            plan.assumptions.append(sentence)
+            plan.choices.append(sentence)
+            authored.assumptions.append((plan.name, sentence))
+    if not authored.properties:
+        for plan in authored.columns:
+            before = len(plan.assumptions)
+            fallback = assumed_check(plan, authored.kinds[plan.name], scorable_only=True)
+            if fallback is not None:
+                authored.properties = [fallback]
+                authored.assumptions.extend((plan.name, text) for text in plan.assumptions[before:])
+                break
+
+
 def _histogram_of_two_edges(prop: PropertyPlan) -> bool:
     """Whether *prop* is a histogram of one bin, over a column's published minimum and maximum."""
     document = prop.document
@@ -1256,7 +1334,11 @@ def _spans_of(
     context = expose.contexts.get(column.name)
     try:
         schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
-        contract_range = declared_instants(schema[context.schema_index]) if context else None
+        contract_range = (
+            declared_window(schema[context.schema_index], expose.kinds.get(column.name))
+            if context
+            else None
+        )
     except (KeyError, IndexError, TypeError):
         contract_range = None
     return found, contract_range
@@ -1702,6 +1784,20 @@ class _Spreads(NamedTuple):
     notes: List[Tuple[str, str]]
     #: What each number of a ``counts`` entry rests on, by the entry (see :data:`_Cited`).
     cited: Tuple[Tuple[Dict[str, Any], "_Cited"], ...] = ()
+    #: What each laid-out relationship wrote, so one can be taken back (see :func:`_without_unwritten`).
+    laid: Tuple["_Laid", ...] = ()
+
+
+class _Laid(NamedTuple):
+    """What :func:`_spread_relationships` wrote for one relationship, by the two tables it joins."""
+
+    parent: str
+    child: str
+    #: The ``counts`` entry, when the counted layout placed the relationship.
+    entry: Optional[Dict[str, Any]]
+    #: The sentences and the decision about its structural classes that it added to the report.
+    notes: Tuple[Tuple[str, str], ...]
+    records: Tuple[_Note, ...]
 
 
 #: What a number of a written entry rests on: the member of the entry (tokens below it), the
@@ -1723,6 +1819,34 @@ class _Placed(NamedTuple):
     laid: Optional[str]
     #: What each number of the ``counts`` entry rests on.
     cited: Tuple[_Cited, ...] = ()
+    #: What :func:`_settle_given` needs to choose the entry's given column, once the parent's
+    #: columns that are drawn given a linked row are known.
+    pending: Optional["_Pending"] = None
+
+
+class _Slot(NamedTuple):
+    """One profile relationship, as :func:`_spread_relationships` laid it out."""
+
+    tokens: Tuple[str, ...]
+    entry: Mapping[str, Any]
+    declared: Any
+    child_table: str
+    #: ``None`` when the contract's relationship gave no layout.
+    placed: Optional[_Placed]
+    #: The statistics of the entry that nothing laid out, with the reason.
+    passed: List[_Note]
+
+
+class _Pending(NamedTuple):
+    """What a ``counts`` entry waits on before it can be given a column of the parent."""
+
+    #: The profile's relationship entry, with the ungrouped histogram its groups add up to.
+    relationship: Mapping[str, Any]
+    counted: Any
+    child_plan: ColumnPlan
+    parent_expose: AuthoredExpose
+    #: The relationship, as ``<child table>.<name>``, that its assumptions are said under.
+    name: str
 
 
 def _given_parent(parent: AuthoredExpose) -> GivenParent:
@@ -1817,21 +1941,15 @@ def _lay_out_children(
     if counted is not None:
         declare_counted(child_plan, counted.assumption)
         counts = {"emit": child_table, "relationship": declared.name, **counted.members}
-        used, unused = list(counted.used), list(counted.unused)
-        given = given_children(
-            entry,
-            tokens,
-            counted,
-            _given_parent(parent_expose),
-            minimum_cell=minimum_cell,
+        # Its given column is chosen by `_settle_given`, after the columns drawn given a linked
+        # row are known: the generator refuses a given column that is one.
+        pending = _Pending(
+            entry, counted, child_plan, parent_expose, f"{child_table}.{declared.name}"
         )
-        if given is not None:
-            counts.update(given.members)
-            used += given.used
-            unused += given.unused
-            _take_given(given, child_plan, parent_expose, (notes, f"{child_table}.{declared.name}"))
-        cited = _counts_cited(counted, given)
-        return _Placed(used, unused, counts, notes, True, None, cited)
+        cited = _counts_cited(counted, None)
+        return _Placed(
+            list(counted.used), list(counted.unused), counts, notes, True, None, cited, pending
+        )
     spread = spread_children(
         entry,
         tokens,
@@ -1847,6 +1965,35 @@ def _lay_out_children(
     )
     laid = held or "the histogram of children per parent is not one the layout can read"
     return _Placed(list(spread.used), list(spread.unused), None, notes, False, laid)
+
+
+def _settle_given(placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int) -> _Placed:
+    """*placed* with the given column of its ``counts`` entry chosen, when the profile groups one.
+
+    This reads which columns of the parent are drawn given a column of a linked row, so it runs
+    once those are declared. A grouping by one of them is passed over, with the reason.
+    """
+    pending = placed.pending
+    if pending is None or placed.entry is None:
+        return placed
+    given = given_children(
+        pending.relationship,
+        tokens,
+        pending.counted,
+        _given_parent(pending.parent_expose),
+        minimum_cell=minimum_cell,
+    )
+    if given is None:
+        return placed
+    placed.entry.update(given.members)
+    notes = list(placed.notes)
+    _take_given(given, pending.child_plan, pending.parent_expose, (notes, pending.name))
+    return placed._replace(
+        used=[*placed.used, *given.used],
+        unused=[*placed.unused, *given.unused],
+        notes=notes,
+        cited=_counts_cited(pending.counted, given),
+    )
 
 
 def _counts_cited(counted: Any, given: Optional[Any]) -> Tuple[_Cited, ...]:
@@ -1968,6 +2115,7 @@ def _spread_relationships(
     minimum_cell: int,
     fractional_bits: int,
     held_back: Optional[Callable[[str, str], Optional[str]]] = None,
+    declare_links: Optional[Callable[[], None]] = None,
 ) -> _Spreads:
     """Lay each relationship's children per parent out (ADR 0014 section 5, ADR 0016 section 7).
 
@@ -1979,6 +2127,10 @@ def _spread_relationships(
     was used and, with the reasons, what was not, and the ``counts`` entries, in relationship
     order. A relationship that *held_back* gives a reason for, by its child table and name, is laid
     out by no entry: every statistic of its profile entry is unused for that reason.
+
+    The given column of each ``counts`` entry is chosen last, after *declare_links* has run: it
+    declares the columns drawn given a column of a linked row, and a grouping by one of them is
+    passed over.
     """
     used: List[_Note] = []
     unused: List[_Note] = []
@@ -1986,10 +2138,12 @@ def _spread_relationships(
     records: List[_Note] = []
     notes: List[Tuple[str, str]] = []
     cited: List[Tuple[Dict[str, Any], _Cited]] = []
+    laid: List[_Laid] = []
     found = profile.get("relationships")
     found_tables = profile.get("tables")
     tables: Mapping[str, Any] = found_tables if isinstance(found_tables, Mapping) else {}
     planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
+    slots: List[_Slot] = []
     for index, entry in enumerate(found if isinstance(found, list) else ()):
         if not isinstance(entry, Mapping):
             continue
@@ -1999,7 +2153,7 @@ def _spread_relationships(
             entry, keys, planned, held_back
         )
         if why is not None or declared is None:
-            unused += [(pointer, why or "") for pointer in every]
+            slots.append(_Slot(tokens, entry, None, "", None, [(p, why or "") for p in every]))
             continue
         child_expose, parent_expose = planned[child_table], planned[parent_table]
         child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
@@ -2021,20 +2175,68 @@ def _spread_relationships(
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
         )
-        used += placed.used
-        unused += placed.unused
-        notes += placed.notes
-        if placed.entry is not None:
-            entries.append(placed.entry)
-            cited += [(placed.entry, item) for item in placed.cited]
-        classes = _structural_classes(entry)
+        slots.append(_Slot(tokens, entry, declared, child_table, placed, []))
+    if declare_links is not None:
+        declare_links()
+    for slot in slots:
+        unused += slot.passed
+        if slot.placed is None:
+            continue
+        settled = _settle_given(slot.placed, slot.tokens, minimum_cell=minimum_cell)
+        used += settled.used
+        unused += settled.unused
+        written_notes = list(settled.notes)
+        written_records: List[_Note] = []
+        if settled.entry is not None:
+            entries.append(settled.entry)
+            cited += [(settled.entry, item) for item in settled.cited]
+        classes = _structural_classes(slot.entry)
         if classes:
-            recorded, sentence = _structural_note(classes, placed.counted, placed.laid)
+            recorded, sentence = _structural_note(classes, settled.counted, settled.laid)
             if recorded:
-                records.append((tokens + ("structural",), sentence))
+                written_records.append((slot.tokens + ("structural",), sentence))
             else:
-                notes.append((f"{child_table}.{declared.name}", sentence))
-    return _Spreads(used, unused, entries, records, notes, tuple(cited))
+                written_notes.append((f"{slot.child_table}.{slot.declared.name}", sentence))
+        notes += written_notes
+        records += written_records
+        laid.append(
+            _Laid(
+                slot.declared.target,
+                slot.child_table,
+                settled.entry,
+                tuple(written_notes),
+                tuple(written_records),
+            )
+        )
+    return _Spreads(used, unused, entries, records, notes, tuple(cited), tuple(laid))
+
+
+def _without_unwritten(spread: _Spreads, written: Set[str]) -> _Spreads:
+    """*spread* without what it wrote for a relationship whose parent or child emit is not written.
+
+    The layout runs before each expose is finished, and an expose is left out at that point when
+    the layout has set its keys and nothing is left for its fidelity block to declare (a table of
+    foreign keys alone, whose ``counts`` entries set them all). A ``counts`` entry names an emit
+    the Simulation then does not write, which ``plan`` refuses (FLX-3105), so each such
+    relationship's entry, its numbers' citations and its sentences are taken back. Its
+    statistics are listed unused, with the reason, by :func:`_reset_unwritten_relationships`.
+    """
+    gone = [item for item in spread.laid if not {item.parent, item.child} <= written]
+    if not gone:
+        return spread
+    gone_ids = {id(item) for item in gone}
+    entries = {id(item.entry) for item in gone if item.entry is not None}
+    notes = {id(note) for item in gone for note in item.notes}
+    records = {id(record) for item in gone for record in item.records}
+    return _Spreads(
+        spread.used,
+        spread.unused,
+        [entry for entry in spread.entries if id(entry) not in entries],
+        [record for record in spread.records if id(record) not in records],
+        [note for note in spread.notes if id(note) not in notes],
+        tuple(pair for pair in spread.cited if id(pair[0]) not in entries),
+        tuple(item for item in spread.laid if id(item) not in gone_ids),
+    )
 
 
 class _Histories(NamedTuple):
@@ -3073,6 +3275,18 @@ def _draw_and_link(
         for expose in drawn:
             _determine(expose)
             _follow_dependencies(expose)
+        written = [expose for expose in exposes if expose.skipped is None]
+
+        def declare_links() -> None:
+            catalogue_foreign_keys(written, keys, reading.references, reading.profile)
+            link_givens(
+                written,
+                keys,
+                reading.profile,
+                reading.references,
+                minimum_cell=reading.minimum_cell,
+            )
+
         spread = _spread_relationships(
             drawn,
             keys,
@@ -3080,11 +3294,7 @@ def _draw_and_link(
             minimum_cell=reading.minimum_cell,
             fractional_bits=reading.fractional_bits,
             held_back=held_back,
-        )
-        written = [expose for expose in exposes if expose.skipped is None]
-        catalogue_foreign_keys(written, keys, reading.references, reading.profile)
-        link_givens(
-            written, keys, reading.profile, reading.references, minimum_cell=reading.minimum_cell
+            declare_links=declare_links,
         )
     except (ArithmeticError, ValueError) as error:
         raise AuthorError(_beyond_note(error)) from error
@@ -3614,6 +3824,9 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
     spread = _draw_and_link(reading, keys, exposes, drawn, held_back)
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
     _refuse_a_needed_one_value(exposes, keys)
+    spread = _without_unwritten(
+        spread, {expose.expose_id for expose in authored if not expose.reference}
+    )
     return _Planned(
         contract_path,
         contract,
@@ -3737,7 +3950,11 @@ def _declared_ranges_of(
     context = expose.contexts.get(column.name)
     try:
         schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
-        contract_range = declared_instants(schema[context.schema_index]) if context else None
+        contract_range = (
+            declared_window(schema[context.schema_index], expose.kinds.get(column.name))
+            if context
+            else None
+        )
     except (KeyError, IndexError, TypeError):
         contract_range = None
     if contract_range is not None:
@@ -3944,6 +4161,9 @@ def _draft_documents(
     )
     simulation_id = f"sim-{product_ref}"
     world, persona = _world_and_persona(contract, team)
+    for expose in planned.authored:
+        if not expose.reference:
+            _drop_unkept_properties(expose)
     namespace = _namespace_block(
         contract,
         reading,

@@ -45,7 +45,7 @@ from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.coverage import printable
 from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM
 
-__all__ = ["choose_givens"]
+__all__ = ["choose_givens", "note_no_range"]
 
 _LEVELS = LEVEL_HISTOGRAM.identifier
 _HISTOGRAM = MARGINAL_HISTOGRAM.identifier
@@ -390,18 +390,66 @@ def _declare(
     )
 
 
+#: Why a column drawn given another has no grouped histogram property.
+_NO_RANGE_REASON = (
+    "The column declares no range, since no histogram of its own is published to give one, and "
+    "a histogram property compares a column over its declared range. So no property scores the "
+    "column given another; the grouped counts still weight its draw."
+)
+
+
+def note_no_range(child: ColumnPlan) -> bool:
+    """Whether *child* declares no range; if so, say why it has no grouped histogram property.
+
+    A column drawn evenly over the range the contract declares (the profile publishes no
+    histogram of its own for it) declares bins and no range. ``verify`` refuses a histogram
+    property of a column the block declares no range for (``FLX-5034``), so such a column
+    is drawn given another without the property, and says so.
+    """
+    if "range" in child.declaration:
+        return False
+    if _NO_RANGE_REASON not in child.assumptions:
+        child.assumptions.append(_NO_RANGE_REASON)
+        child.choices.append(_NO_RANGE_REASON)
+    return True
+
+
+def note_no_levels(child: ColumnPlan, parent: ColumnPlan) -> bool:
+    """Whether *parent* declares no levels; if so, say why *child* has no property grouped by it.
+
+    A property is grouped by a column the block declares the levels of. A boolean column draws
+    its two values and declares no ``support`` (``verify`` reads a boolean as no category), so
+    ``verify`` refuses a property grouped by one (``FLX-5034``). The column is still drawn given
+    it, from the same counts; only the property is left out, and *child* says so.
+    """
+    if "support" in parent.declaration:
+        return False
+    sentence = (
+        f"The column is drawn given {printable(parent.name)}, which declares no levels for a "
+        "property to group by, so no property scores the column given it; the grouped counts "
+        "still weight its draw."
+    )
+    if sentence not in child.assumptions:
+        child.assumptions.append(sentence)
+        child.choices.append(sentence)
+    return True
+
+
 def _grouped_property(
-    child: ColumnPlan, table: _Table, parent_levels: Tuple[str, ...]
+    child: ColumnPlan, table: _Table, parent: ColumnPlan, parent_levels: Tuple[str, ...]
 ) -> Optional[PropertyPlan]:
     """The grouped property the run is scored on, when the statistic matches the declaration.
 
     A ``levelHistogram`` grouped by the parent, over the child's declared levels,
     or a grouped ``marginalHistogram`` over its bins. Written only when the
     profile's statistic lists exactly those levels and a group of every level the
-    parent draws, so ``verify`` has a statistic to compare it with.
+    parent draws, so ``verify`` has a statistic to compare it with, and only when
+    the parent declares the levels the property groups by.
     """
     statistic = table.statistic
     if set(table.counts) != set(parent_levels):
+        return None
+    if note_no_levels(child, parent):
         return None
     tolerance = {
         "type": "distance",
@@ -410,6 +458,8 @@ def _grouped_property(
         "sampling": True,
     }
     if table.numeric:
+        if note_no_range(child):
+            return None
         document: Dict[str, Any] = {
             "property": "marginalHistogram",
             "column": child.name,
@@ -523,7 +573,7 @@ def choose_givens(
         drawn: Optional[_Table]
         if found.parent == edge.parent:
             drawn = found
-            prop = _grouped_property(plans[edge.child], found, parent_levels)
+            prop = _grouped_property(plans[edge.child], found, plans[edge.parent], parent_levels)
             if not found.numeric:
                 _check_implied(
                     plans[edge.child],

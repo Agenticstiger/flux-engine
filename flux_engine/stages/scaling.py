@@ -13,8 +13,9 @@ for an integer column; a bin edge moves in proportion to its distance from ``min
 as that end is and held to it. A table whose rows come from the run's own events (it is not
 drawn from statistics) has no declared size to multiply, and is left as it is. A column's
 declared levels are not scaled: a foreign key that takes the nearest key its parent holds follows the
-parent's cut keys, and a history's tracked foreign key, which writes its level as the key, is refused at
-plan (``FLX-3403``, naming the parent's keys in the scaled plan) when a level is no key the cut parent holds.
+parent's cut keys, and a history's tracked foreign key, which writes its level as the key, keeps its drawn parent at the
+fewest rows whose keys hold every level (:func:`floored_rows`, noted by ``plan`` and recorded as ``scaleFloors``), and is refused at
+plan (``FLX-3403``, naming the parent's keys in the scaled plan) when no row count does.
 ``F = 1`` changes nothing, and writes nothing to the plan, so every digest of a bundle
 planned without it is the one it was. Any other value is recorded in ``plan.json`` as
 ``scale``, and ``apply`` and ``replay`` read it back from there, as they read the kernel.
@@ -29,9 +30,9 @@ from the run's own moments) has no row range to cut and belongs whole to the fir
 
 from __future__ import annotations
 
-from dataclasses import replace
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
-from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
+from dataclasses import dataclass, replace
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.core.errors import FluxError
 from flux_engine.core.sizing import (
@@ -55,12 +56,15 @@ __all__ = [
     "FLX_3404",
     "FLX_3405",
     "MOST_SCALE",
+    "ScaleFloor",
     "child_rows_note",
     "key_space_note",
     "optional_scale",
     "parse_scale",
     "parse_shard",
+    "floor_for_cut",
     "scale_emit",
+    "scale_emits",
     "scale_text",
     "scaled_rows",
     "share_of",
@@ -327,3 +331,204 @@ def scale_emit(resolved: ResolvedEmit, scale: Decimal) -> ResolvedEmit:
     if isinstance(fidelity, Mapping):
         extension["fidelity"] = _scale_fidelity(resolved, fidelity, scale)
     return replace(resolved, extension=extension)
+
+
+# ---------------------------------------------------------------------------
+# The keys a tracked level names (ADR 0017 section 6, the amendment of 2026-11-25)
+# ---------------------------------------------------------------------------
+
+#: The most row counts :func:`floored_rows` tries above the first that fits the widest level.
+_FLOOR_SEARCH_LIMIT = 100_000
+
+
+@dataclass(frozen=True)
+class ScaleFloor:
+    """A drawn parent kept at *rows* rows, the fewest whose key grid holds every level a history tracks.
+
+    ``tracked_by`` names each ``expose.column`` of the histories whose tracked foreign key writes
+    those levels as its cell.
+    """
+
+    expose_id: str
+    rows: int
+    tracked_by: Tuple[str, ...]
+    levels: Tuple[str, ...]
+    key: str
+
+    def note(self, scale: Decimal) -> str:
+        """The line ``plan`` prints for the floor."""
+        who = ", ".join(self.tracked_by)
+        return (
+            f"note: {self.expose_id} keeps {self.rows} rows at --scale {scale_text(scale)}, "
+            f"the fewest that hold every level {who} tracks"
+        )
+
+
+def _effective_scale(rows: int, declared: int) -> Decimal:
+    """``rows / declared`` as a scale that rounds the exact ties up, as the exact ratio does."""
+    with localcontext() as context:
+        context.prec = 60
+        context.rounding = ROUND_CEILING
+        return Decimal(rows) / Decimal(declared)
+
+
+def _grid_holds(first: int, width: int, rows: int, level: int) -> bool:
+    """Whether row ``k`` of *rows* takes ``first + k * width // rows`` for the key *level*."""
+    offset = level - first
+    if offset < 0 or offset >= width or rows > width:
+        return False
+    row = -((-offset * rows) // width)
+    return row < rows and (row * width) // rows == offset
+
+
+def _integral(text: str) -> Optional[int]:
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        return None
+    return int(value) if value == value.to_integral_value() else None
+
+
+def _declared_key_range(resolved: ResolvedEmit, column: str) -> Optional[Tuple[int, int, int]]:
+    """The low and high of a whole-number key's declared range and the emit's rows, or ``None``.
+
+    ``None`` for what a floor is not worked out for: a history's emit, an emit with no declared
+    rows, a column that is not an integer with a plain range (bins, a date, a decimal).
+    """
+    extension = resolved.extension or {}
+    fidelity = extension.get("fidelity")
+    columns = fidelity.get("columns") if isinstance(fidelity, Mapping) else None
+    declared = columns.get(column) if isinstance(columns, Mapping) else None
+    rows = resolved.declared_row_count
+    if HISTORY_KEY in extension or rows is None or rows < 1 or not isinstance(declared, Mapping):
+        return None
+    kinds = {c.name: c.logical_type.kind for c in resolved.compile().columns}
+    plain = declared.get("range")
+    if kinds.get(column) is not LogicalKind.INT or "bins" in declared:
+        return None
+    if not isinstance(plain, Mapping) or not {"min", "max"} <= set(plain):
+        return None
+    low, high = _integral(str(plain["min"])), _integral(str(plain["max"]))
+    return None if low is None or high is None or high < low else (low, high, rows)
+
+
+def _scaled_width(low: int, high: int, declared: int, rows: int) -> Optional[int]:
+    """How many values the key's range holds when the emit is scaled to *rows* rows, or ``None``."""
+    scale = _effective_scale(rows, declared)
+    if _scaled_rows(declared, scale) != rows:
+        return None
+    end = _scaled_span(Decimal(low), Decimal(high), scale, whole=True)
+    return int(end) - low + 1 if end > low else None
+
+
+def floored_rows(
+    resolved: ResolvedEmit, column: str, levels: Sequence[str], scale: Decimal
+) -> Optional[int]:
+    """The fewest rows of *resolved*, more than its rows at *scale*, whose key grid holds every level.
+
+    A floor always raises the rows: the layout at the scaled count is the one that missed a level,
+    so the search starts one row above it.
+
+    The emit is scaled to those rows (rows, key spans and records in proportion), so the rows
+    and the range the grid is laid over move together, as they do under any ``--scale``. A key
+    grid of one range over whole numbers: ``None`` for any other layout, for a level that is no
+    whole number or no key of the range at any count, and when no count within
+    :data:`_FLOOR_SEARCH_LIMIT` of the first that reaches the widest level holds them all.
+    """
+    found = _declared_key_range(resolved, column)
+    wanted = [_integral(level) for level in levels]
+    if found is None or not wanted or any(level is None for level in wanted):
+        return None
+    low, high, declared = found
+    held = [level for level in wanted if level is not None]
+    widest = max(held) - low + 1
+    start = _scaled_rows(declared, scale) + 1
+
+    def width(rows: int) -> int:
+        return _scaled_width(low, high, declared, rows) or 0
+
+    if start > declared or min(held) < low or width(declared) < widest:
+        return None
+    first, last = start, declared  # the first count whose range reaches the widest level
+    while first < last:
+        middle = (first + last) // 2
+        first, last = (first, middle) if width(middle) >= widest else (middle + 1, last)
+    for rows in range(first, min(declared, first + _FLOOR_SEARCH_LIMIT) + 1):
+        span = width(rows)
+        if span >= widest and all(_grid_holds(low, span, rows, level) for level in held):
+            return rows
+    return None
+
+
+def floor_for_cut(
+    emits: Sequence[ResolvedEmit],
+    floors: Mapping[str, ScaleFloor],
+    cut: Any,
+    scale: Decimal,
+) -> Optional[Dict[str, ScaleFloor]]:
+    """*floors* with the parent a refused tracked foreign key names kept at the rows its levels need.
+
+    *emits* are the bundle's emits before ``scale``; *cut* is the refusal
+    (:class:`~flux_engine.generator.relations.TrackedLevelsCut`). ``None`` when no floor holds:
+    the plan is refused as it was, and is also when the refusal repeats one the floor already
+    answers.
+    """
+    asked = cut.tracked
+    parent = next((emit for emit in emits if emit.expose_id == asked.parent), None)
+    named = f"{asked.child}.{asked.column}"
+    held = floors.get(asked.parent)
+    if parent is None or (held is not None and named in held.tracked_by):
+        return None
+    levels = tuple(sorted({*(held.levels if held else ()), *asked.levels}))
+    rows = floored_rows(parent, asked.key, levels, scale)
+    if rows is None:
+        return None
+    tracked = (*(held.tracked_by if held else ()), named)
+    return {**floors, asked.parent: ScaleFloor(asked.parent, rows, tracked, levels, asked.key)}
+
+
+def scale_emits(
+    emits: Sequence[ResolvedEmit], scale: Decimal, floors: Mapping[str, ScaleFloor]
+) -> Tuple[ResolvedEmit, ...]:
+    """Each of *emits* scaled by *scale*, a floored parent as if its rows were the floor's."""
+    return scale_emits_to_rows(emits, scale, {name: floor.rows for name, floor in floors.items()})
+
+
+def scale_emits_to_rows(
+    emits: Sequence[ResolvedEmit], scale: Decimal, kept: Mapping[str, int]
+) -> Tuple[ResolvedEmit, ...]:
+    """Each of *emits* scaled by *scale*, an emit named in *kept* as if its rows were those.
+
+    The one place a run's scaled emits are made: ``plan`` and ``apply`` give it the parents their
+    floors keep, and ``ship`` the rows the recorded plan holds for them.
+    """
+    return tuple(
+        scale_emit(
+            emit,
+            (
+                _effective_scale(kept[emit.expose_id], emit.declared_row_count or 1)
+                if emit.expose_id in kept
+                else scale
+            ),
+        )
+        for emit in emits
+    )
+
+
+def kept_rows_of_plan(
+    emits: Sequence[ResolvedEmit], scale: Decimal, planned: Mapping[str, Any]
+) -> Dict[str, int]:
+    """The rows a recorded plan kept for each drawn parent a floor raised above its scaled rows.
+
+    *planned* is the plan's ``emits`` member, whose ``generator.rows`` is what each drawn emit made. A floor always raises rows, so an emit whose recorded
+    rows exceed its rows at *scale* is a floored one.
+    """
+    kept: Dict[str, int] = {}
+    for emit in emits:
+        entry = planned.get(emit.expose_id)
+        generator = entry.get("generator") if isinstance(entry, Mapping) else None
+        rows = generator.get("rows") if isinstance(generator, Mapping) else None
+        declared = emit.declared_row_count
+        if isinstance(rows, int) and declared and rows > _scaled_rows(declared, scale):
+            kept[emit.expose_id] = rows
+    return kept

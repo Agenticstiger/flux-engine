@@ -224,8 +224,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet. When a relationship, a
   history or a projection needs its table, `init` refuses before it writes anything (`FLX-3125`), names the table and
   the column, and says to write the open end as NULL, or to make the column a TIMESTAMP; before, it left the table out
-  and wrote a bundle the plan refused with `FLX-3403`. When nothing needs the table, it is left out, as before, and
-  its statistics are listed unused with the reason.
+  and its own check then refused the whole init ("the bundle written from these inputs does not validate",
+  `FLX-3403`), writing no bundle. When nothing needs the table, it is left out, as before, and its statistics are
+  listed unused with the reason.
 - `init` no longer writes a bundle the plan refuses with `FLX-6204` when an enforced `within` date's parent has a
   lifetime whose start declares no range: no widening of the date's range can meet the plan's check then, so the
   entry is left out and its pair is listed unused, with the reason.
@@ -259,12 +260,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   and sets nothing, and `verify` scores it at 100 %. It was `FLX-3403` ("a dependency sets its columns, which the
   layout sets"). Any other dependency on a counted relationship is refused as before, and every emit of a bundle
   with such a dependency keeps the bytes the bundle without it has (ADR 0017, the amendment of 2026-11-25).
-- A tracked foreign key whose level is no key its parent holds is `FLX-3403` at plan. A tracked column writes its
-  level as the cell and takes no parent row, so `--scale` below 1 cut a catalogue's rows and keys and left the
-  levels: `plan --scale 0.25` exited 0 and `verify` scored the link at about a quarter. The refusal names the expose,
-  the column, one such level and the keys the parent holds in that plan, and says to plan without `--scale` or to stop
-  tracking the column. A foreign key that is not tracked takes the nearest key the parent holds and is not refused.
-  Every bundle whose levels are all keys, at any scale, keeps its bytes, and so does every other bundle.
+- A tracked foreign key's levels are keys its parent holds. A tracked column writes its level as the cell and takes
+  no parent row, so `--scale` below 1 cut a catalogue's rows and keys and left the levels: `plan --scale 0.25` exited
+  0 and `verify` scored the link at about a quarter. Below 1 a drawn parent now keeps the fewest rows whose keys hold
+  every level its children track (its key range and `records` bounds move in proportion), `plan` prints a note naming
+  the parent, the rows and the scale, and `plan.json` says `scaleFloors: "trackedLevels"`. A recorded plan with the
+  key replays floored; one without it replays with neither the check nor the floor, byte for byte as it was made, and
+  any other value is `FLX-2102`. A level that is no key of the parent at any row count (off its range, before its
+  first key), a parent that is not a drawn whole-number key over a declared range and a plan at scale 1 are
+  `FLX-3403`, naming the expose, the column, one such level and the keys the parent holds in that plan. A foreign key
+  that is not tracked takes the nearest key the parent holds and is not refused. Every bundle whose levels are all
+  keys, at any scale, keeps its bytes, and so does every other bundle. A floor always keeps more rows than the scale
+  gives the parent (the note and `scaleFloors` appear only then), and `ship`'s EVIDENCE note counts a conditioned
+  floored parent's groups at the rows the run holds.
 - A DATE or TIMESTAMP column is drawn inside the range its contract declares (`validationRules: [{type: range,
   constraint: "between '2001-01-01' and '2005-12-31'"}]`), and `verify` checks the range. Before, a column whose bins
   ran past its range wrote rows outside it and `verify` said `rows: ok`. On kernel 0.2.0 the
@@ -277,9 +285,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `ranges:` line naming the expose, the column, the rows and the range (and `rangeConformance` in `--json`). A run with
   no declared range, or none outside it, prints exactly what it printed before (ADR 0024, the amendment of
   2026-11-25). A strict end (`>`, `<`) is kept strict, one unit inward: `>= '2001-01-01' and < '2006-01-01'` draws
-  and accepts up to 2005-12-31, and `verify` quotes the range as the contract spells it. A strict range that holds no
+  and accepts up to 2005-12-31, and `verify` names each end with its own `>`, `>=`, `<` or `<=`. A strict range that holds no
   day is refused at `plan` (`FLX-3403`). A range with one end (`>= '2024-01-01'`), and one whose high
-  end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
+  end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. A range whose ends meet (`between 'A' and 'A'`) holds that one day, or one instant, and is cut and verified like any other; an empty range (the low end beyond the high end, or equal ends with one strict) is refused at `plan` (`FLX-3403`) naming the column and both ends, whatever sets the column, while a recorded plan without `dateRanges` still replays as it was written. A TIMESTAMP low end between two milliseconds rounds up to the next whole millisecond, so the cut and `verify` never accept an instant below it; a high end between two milliseconds is the millisecond at or below it, whatever its operator, so `< '10:00:00.0005'` holds 10:00:00.000. A low end past the last instant (`>= '9999-12-31T23:59:59.9995Z'`, a strict `> '9999-12-31'` on a DATE) holds no value and is refused at `plan` (`FLX-3403`) like an empty range. `init` reads a range whose ends meet as one unit for its window (one day for a DATE, one millisecond for a TIMESTAMP) instead of refusing the contract, and starts its window at a low end between two milliseconds where `plan`'s range starts. `verify` says which declared ranges it did not check: a key column the scale widens (`ranges: depot.depot_id: not checked at --scale 2: ...`), and, once, the whole run's when its artifacts do not reproduce or the bundle is not the run's (`ranges: not checked: <why>`); neither fails the run, and `--json` lists them under `rangesNotChecked` only when there is one. A run planned before the cut (a plan without `dateRanges`) or on kernel 0.1.0 whose rows lie outside a declared range now fails `verify` where it passed before. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
   key (every plan written before this change) replays with no cut, so its rows and `replay --assert-digest` keep what
   they were, and a plan that cut nothing keeps its bytes and its run id. A column another construct sets (a history's validity start and end, the cells
   an events or periods entry sets, a snapshot's columns, a key, a column a rule, `lifetimes`, `within` or `rates` sets)
@@ -287,6 +295,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   outside the range.
   At `--scale` above 1 `verify` does not count the contract's range of a key column the scale widens, and `plan` prints
   one note naming the column, its range and the scale; a column the scale does not widen stays checked.
+- `init` no longer refuses its own bundle (`FLX-3105`) when it leaves out a table made only of foreign keys, which
+  gives its fidelity block nothing to declare: the `counts` entries into that table are taken back, and the
+  statistics of those relationships are listed unused with the reason. The table is not written, and `init` says so.
+- `init` no longer places a counted child by a parent column that is itself drawn given a column of a linked row,
+  which `plan` refuses (`FLX-3403`): that grouping is listed unused with the reason, and the next usable column, or
+  none, places the child.
+- `init` no longer writes a property over a column that declares neither the range nor the levels it compares over,
+  which `verify` refuses (`FLX-5034`): a grouped histogram or a rank correlation over a number column drawn evenly
+  over its contract's range, or a histogram grouped by a boolean column. The column is drawn as before, and its notes
+  say which property is left out.
 
 ## 0.11.1 - 2026-11-24
 
