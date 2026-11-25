@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,6 +24,9 @@ from flux_engine.author.window import (
 from flux_engine.cli._init import run_init
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
+from flux_engine.stages.apply import apply
+from flux_engine.stages.plan import plan
+from flux_engine.stages.verify import verify
 
 from .test_init_from_profile import _simulation
 
@@ -467,3 +471,70 @@ def test_a_loose_contract_range_is_the_window_and_a_gap_that_strict_refuses(
     )
     assert strict.exit_code != 0
     assert "gap /spec/timeBounds" in (strict.stderr or "")
+
+
+def _written_with_created_at_rule(tmp_path: Path, constraint: str, kind: str = "timestamp") -> Any:
+    text = CONTRACT.read_text(encoding="utf-8").replace(
+        "      type: timestamp\n      required: false\n",
+        f"      type: {kind}\n      required: false\n      validationRules:\n"
+        "      - type: range\n"
+        f'        constraint: "{constraint}"\n',
+    )
+    contract = tmp_path / "orders.fluid.yaml"
+    contract.write_text(text, encoding="utf-8")
+    return run_init(str(tmp_path / "bundle"), contract=str(contract), profile=str(PROFILE))
+
+
+def test_a_timestamp_range_whose_ends_meet_is_a_one_millisecond_window(tmp_path: Path) -> None:
+    result = _written_with_created_at_rule(
+        tmp_path, "between '2020-02-01T10:00:00Z' and '2020-02-01T10:00:00Z'"
+    )
+    assert result.exit_code == 0, result.stderr
+    bounds = _simulation(tmp_path / "bundle")["spec"]["timeBounds"]
+    assert (bounds["start"], bounds["end"]) == (
+        "2020-02-01T10:00:00.000Z",
+        "2020-02-01T10:00:00.001Z",
+    )
+    state = tmp_path / "state"
+    planned = plan(tmp_path / "bundle", state_dir=state, kernel="0.2.0", profile=PROFILE)
+    assert planned.success, planned.stderr
+    run_id = str(planned.artifacts["run_id"])
+    assert apply(tmp_path / "bundle", state_dir=state, run_id=run_id).success
+    checked = verify(tmp_path / "bundle", state_dir=state, run_id=run_id)
+    assert checked.success, checked.stdout + checked.stderr
+    lines = (state / "runs" / run_id / "emits" / "orders.ndjson").read_text().splitlines()
+    held = {
+        cell
+        for line in lines
+        for cell in json.loads(line)
+        if isinstance(cell, str) and cell.startswith("2020-")
+    }
+    assert held == {"2020-02-01T10:00:00.000Z"}
+
+
+def test_a_date_range_whose_ends_meet_is_a_one_day_window(tmp_path: Path) -> None:
+    result = _written_with_created_at_rule(
+        tmp_path, "between '2020-02-01' and '2020-02-01'", "date"
+    )
+    assert result.exit_code == 0, result.stderr
+    bounds = _simulation(tmp_path / "bundle")["spec"]["timeBounds"]
+    assert (bounds["start"], bounds["end"]) == (
+        "2020-02-01T00:00:00.000Z",
+        "2020-02-02T00:00:00.000Z",
+    )
+    state = tmp_path / "state"
+    planned = plan(tmp_path / "bundle", state_dir=state, kernel="0.2.0", profile=PROFILE)
+    assert planned.success, planned.stderr
+    run_id = str(planned.artifacts["run_id"])
+    assert apply(tmp_path / "bundle", state_dir=state, run_id=run_id).success
+    checked = verify(tmp_path / "bundle", state_dir=state, run_id=run_id)
+    assert checked.success, checked.stdout + checked.stderr
+    lines = (state / "runs" / run_id / "emits" / "orders.ndjson").read_text().splitlines()
+    held = {cell for line in lines for cell in json.loads(line) if str(cell).startswith("2020-")}
+    assert held == {"2020-02-01"}
+
+
+def test_a_range_whose_strict_ends_meet_is_still_refused_by_init(tmp_path: Path) -> None:
+    result = _written_with_created_at_rule(tmp_path, "> '2020-02-01' and < '2020-02-01'", "date")
+    assert result.exit_code == 1
+    assert "FLX-3403" in (result.stderr or "")

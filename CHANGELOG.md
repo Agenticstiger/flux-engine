@@ -275,7 +275,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   2026-11-25). A strict end (`>`, `<`) is kept strict, one unit inward: `>= '2001-01-01' and < '2006-01-01'` draws
   and accepts up to 2005-12-31, and `verify` names each end with its own `>`, `>=`, `<` or `<=`. A strict range that holds no
   day is refused at `plan` (`FLX-3403`). A range with one end (`>= '2024-01-01'`), and one whose high
-  end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
+  end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. A range whose ends meet (`between 'A' and 'A'`) holds that one day, or one instant, and is cut and verified like any other; an empty range (the low end beyond the high end, or equal ends with one strict) is refused at `plan` (`FLX-3403`) naming the column and both ends, whatever sets the column, while a recorded plan without `dateRanges` still replays as it was written. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
   key (every plan written before this change) replays with no cut, so its rows and `replay --assert-digest` keep what
   they were, and a plan that cut nothing keeps its bytes and its run id. A column another construct sets (a history's validity start and end, the cells
   an events or periods entry sets, a snapshot's columns, a key, a column a rule, `lifetimes`, `within` or `rates` sets)

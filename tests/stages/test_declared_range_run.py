@@ -42,6 +42,7 @@ from ._fleet import (
     bundle,
     expose,
     plan_module,
+    plan_refused,
     repin,
     rows,
     run_bundle,
@@ -279,6 +280,23 @@ def test_a_range_that_holds_none_of_the_column_s_dates_is_refused_at_plan(tmp_pa
     assert "2012-01-01 to 2013-12-31" in planned.stderr
 
 
+@pytest.mark.parametrize(
+    ("rule", "spelled"),
+    [
+        ("between '2005-12-31' and '2001-01-01'", ">= 2005-12-31 and <= 2001-01-01"),
+        (">= '2003-01-01' and < '2003-01-01'", ">= 2003-01-01 and < 2003-01-01"),
+    ],
+)
+def test_an_empty_range_is_refused_at_plan_naming_the_column_and_both_ends(
+    tmp_path: Path, rule: str, spelled: str
+) -> None:
+    refused = plan_refused(_visits(tmp_path, rule=rule), tmp_path / "state")
+    assert f"service_visit.visited_on: the contract's range ({spelled}) holds no value" in (
+        refused.stderr
+    )
+    assert refused.error_code == "FLX-3403"
+
+
 def test_a_declared_range_wider_than_the_contract_s_is_cut_to_it(tmp_path: Path) -> None:
     target = _visits(
         tmp_path,
@@ -339,3 +357,13 @@ def test_a_run_that_draws_before_a_one_sided_range_fails_verify_with_the_end_it_
         "the declared range (>= 2001-01-01)"
     )
     assert f"  ranges: {finding}" in verified.stdout.splitlines()
+
+
+def test_a_range_whose_ends_meet_draws_and_verifies_that_one_day(tmp_path: Path) -> None:
+    target = _visits(tmp_path, rule="between '2003-05-05' and '2003-05-05'")
+    state = tmp_path / "state"
+    layout = run_bundle(target, state)
+    assert set(_dates(layout)) == {"2003-05-05"}
+    verified = _verified(target, state, layout)
+    assert verified.success, verified.stderr
+    assert "  ranges:" not in verified.stdout

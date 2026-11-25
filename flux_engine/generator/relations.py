@@ -243,7 +243,8 @@ FLX_3403 = register(
     "given a column the entry sets, which the draw would read as the level it drew; the message "
     "names both columns. A DATE or TIMESTAMP column drawn from declared statistics is refused when "
     "its contract's `range` rule holds none of the dates it is drawn from, or would cut the bins "
-    "of a column another column is drawn given; the message names the column and the range.",
+    "of a column another column is drawn given; so is a column whose `range` rule is empty (its "
+    "low end beyond its high end); the message names the column and the range.",
 )
 
 #: Domain-separation label of a key layout's permutation key.

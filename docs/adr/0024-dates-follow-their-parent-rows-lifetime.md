@@ -345,7 +345,7 @@ column outside its contract and pass. The profiler refuses the same rows (`FLX-5
 by `and`; an ISO date is midnight UTC, a timestamp RFC 3339; anything else declares nothing). Each end is
 optional: `>= '2024-01-01'` is a range, as a one-sided INT or DECIMAL range is, and a high end in the year
 9999 or later is the open-end spelling and so no high end (`between '2024-01-01' and '9999-12-31'` is
-`>= '2024-01-01'`). A rule with neither end declares nothing. `declared_instants`, which `init` reads for its window, keeps its rule: both ends, the high end
+`>= '2024-01-01'`). A rule with neither end declares nothing. A range whose ends meet and are both inclusive (`between 'A' and 'A'`) holds that one day or instant. A range that holds no instant (its low end beyond its high end, or equal ends with one strict) is `FLX-3403` at `plan`, naming the column and both ends, on every kernel and for a column something else sets; a recorded plan without `dateRanges` never read it. `declared_instants`, which `init` reads for its window, keeps its rule: both ends, the high end
 before the year 9999. A DATE holds the days from the first at or after the low end to the last at or before
 the high end.
 

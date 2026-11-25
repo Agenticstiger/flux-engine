@@ -8,7 +8,8 @@
 spelling the FLUID profiler bins a declared date range with: ``between 'A' and 'B'``, or ``>= 'A'
 and <= 'B'`` (``>`` and ``<`` too), each value an ISO date (midnight UTC) or an RFC 3339 timestamp
 (UTC when it has no offset), in single or double quotes or bare. Several rules tighten each side.
-The range is read only when both ends are declared and the low end lies before the high end;
+The range is read only when both ends are declared and the low end lies before the high end (a
+fraction of a millisecond is floored); a range that holds no instant declares nothing here;
 anything else declares nothing. A range whose high end is at or after :data:`WINDOW_END_LIMIT_MS`
 says only that the column holds a date, so it declares nothing either: a run's periods step past
 the end of its window, and a date in the year 10000 is out of range. The range only feeds the
@@ -77,11 +78,10 @@ def and_parts(text: str) -> List[str]:
     return parts
 
 
-def instant_ms(text: Any) -> Optional[int]:
-    """Milliseconds since the epoch of an ISO date or RFC 3339 timestamp, or ``None``.
+def _instant(text: Any) -> Optional[Tuple[int, bool]]:
+    """``(milliseconds, has_fraction)`` of an instant, floored to the millisecond, or ``None``.
 
-    A date is midnight UTC and a timestamp with no offset is UTC. Text that is neither, and an
-    instant outside the years 1 to 9999 in UTC, is not read.
+    ``has_fraction`` says the instant lies between two whole milliseconds, so the floor is below it.
     """
     if not isinstance(text, str):
         return None
@@ -93,12 +93,24 @@ def instant_ms(text: Any) -> Optional[int]:
             moment = datetime.fromisoformat(clean.replace("Z", "+00:00").replace("z", "+00:00"))
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=timezone.utc)
-        milliseconds = (moment - _EPOCH) // timedelta(milliseconds=1)
+        elapsed = moment - _EPOCH
+        milliseconds = elapsed // timedelta(milliseconds=1)
+        fractional = elapsed % timedelta(milliseconds=1) != timedelta(0)
     except (ValueError, OverflowError):
         return None
     if not _FIRST_MS <= milliseconds <= _LAST_MS:
         return None
-    return milliseconds
+    return milliseconds, fractional
+
+
+def instant_ms(text: Any) -> Optional[int]:
+    """Milliseconds since the epoch of an ISO date or RFC 3339 timestamp, or ``None``.
+
+    A date is midnight UTC and a timestamp with no offset is UTC. Text that is neither, and an
+    instant outside the years 1 to 9999 in UTC, is not read. A fraction of a millisecond is floored.
+    """
+    found = _instant(text)
+    return None if found is None else found[0]
 
 
 class RangeBounds(NamedTuple):
@@ -129,15 +141,8 @@ def _tighter(
     return (milliseconds, strict) if (milliseconds > kept) == above else (kept, kept_strict)
 
 
-def declared_range_bounds(column: Any) -> Optional[RangeBounds]:
-    """The range a date or timestamp column's ``range`` rules declare, each end optional, or ``None``.
-
-    The grammar is :func:`declared_instants`', but one end is enough (``>= '2024-01-01'``), and a
-    high end in the year 9999 or later is no high end, so ``between '2024-01-01' and '9999-12-31'``
-    is ``>= '2024-01-01'``. ``None`` for a rule that is not read, for a range with neither end, and
-    for one whose low end is not before its high end. An end is strict when the rule that sets it is
-    ``>`` or ``<``: the range holds the instants beyond it and not the instant itself.
-    """
+def _read_bounds(column: Any, *, round_low_up: bool) -> Optional[RangeBounds]:
+    """:func:`declared_range_bounds`, with the low end's sub-millisecond fraction rounded up or floored."""
     rules = column.get("validationRules") if isinstance(column, Mapping) else None
     low: Optional[Tuple[int, bool]] = None
     high: Optional[Tuple[int, bool]] = None
@@ -147,29 +152,31 @@ def declared_range_bounds(column: Any) -> Optional[RangeBounds]:
         constraint = rule.get("constraint")
         if not isinstance(constraint, str):
             continue
-        pairs: List[Tuple[str, Optional[int]]] = []
+        pairs: List[Tuple[str, Optional[Tuple[int, bool]]]] = []
         between = _BETWEEN.match(constraint)
         if between:
             first = next(text for text in between.groups()[:3] if text is not None)
             second = next(text for text in between.groups()[3:] if text is not None)
-            pairs = [(">=", instant_ms(first)), ("<=", instant_ms(second))]
+            pairs = [(">=", _instant(first)), ("<=", _instant(second))]
         else:
             for part in and_parts(constraint):
                 bound = _BOUND.match(part)
                 if not bound:
                     return None
                 text = next(item for item in bound.groups()[1:] if item is not None)
-                pairs.append((bound.group(1), instant_ms(text)))
-        for operator, milliseconds in pairs:
-            if milliseconds is None:
+                pairs.append((bound.group(1), _instant(text)))
+        for operator, found in pairs:
+            if found is None:
                 return None
+            milliseconds, fractional = found
             strict = operator in (">", "<")
             if operator in (">", ">="):
+                if round_low_up and fractional:
+                    # The next whole millisecond is already beyond the instant, strict or not.
+                    milliseconds, strict = milliseconds + 1, False
                 low = _tighter(low, milliseconds, strict, above=True)
             else:
                 high = _tighter(high, milliseconds, strict, above=False)
-    if low is not None and high is not None and low[0] >= high[0] and high[0] < WINDOW_END_LIMIT_MS:
-        return None
     if high is not None and high[0] >= WINDOW_END_LIMIT_MS:
         high = None
     if low is None and high is None:
@@ -182,6 +189,21 @@ def declared_range_bounds(column: Any) -> Optional[RangeBounds]:
     )
 
 
+def declared_range_bounds(column: Any) -> Optional[RangeBounds]:
+    """The range a date or timestamp column's ``range`` rules declare, each end optional, or ``None``.
+
+    The grammar is :func:`declared_instants`', but one end is enough (``>= '2024-01-01'``), and a
+    high end in the year 9999 or later is no high end, so ``between '2024-01-01' and '9999-12-31'``
+    is ``>= '2024-01-01'``. ``None`` for a rule that is not read and for a range with neither end. A
+    range that holds no instant is still a range: its low end lies after its high end, or its ends
+    meet and one is strict (the run refuses it, ``FLX-3403``); an inclusive range whose ends meet
+    holds that one instant. An end is strict when the rule that sets it is ``>`` or ``<``: the range holds the instants beyond it and not the instant itself. An end
+    between two milliseconds is read to the millisecond: a low end rounds up, so the range never holds
+    an instant below it, and a high end rounds down.
+    """
+    return _read_bounds(column, round_low_up=False)
+
+
 def declared_instants(column: Any) -> Optional[Tuple[int, int]]:
     """The ``(low, high)`` milliseconds a date or timestamp column's ``range`` rules declare, or ``None``.
 
@@ -191,7 +213,7 @@ def declared_instants(column: Any) -> Optional[Tuple[int, int]]:
     as the instant itself, as the profiler lays out bin edges; :func:`declared_range_bounds` says which
     ends are strict, and reads a range with one end as well.
     """
-    bounds = declared_range_bounds(column)
-    if bounds is None or bounds.low is None or bounds.high is None:
+    bounds = _read_bounds(column, round_low_up=False)
+    if bounds is None or bounds.low is None or bounds.high is None or bounds.low >= bounds.high:
         return None
     return bounds.low, bounds.high

@@ -54,6 +54,7 @@ __all__ = [
     "RangeCut",
     "cut_statistics",
     "range_text",
+    "refuse_empty_range",
     "declared_ranges_of",
     "range_cut_notes",
     "range_phrase",
@@ -170,6 +171,48 @@ def _range_text(column: CompiledColumn) -> Tuple[str, str]:
 def range_text(column: CompiledColumn) -> Optional[Tuple[str, str]]:
     """The ends of *column*'s declared range as its values are spelled, or ``None`` for none."""
     return None if column.declared_range is None else _range_text(column)
+
+
+def _contract_end(column: CompiledColumn, value: int, strict: bool, *, low: bool) -> str:
+    """One end of the declared range as the contract spells it: the operator and the date or instant."""
+    exact = value - 1 if strict and low else value + 1 if strict else value
+    if column.logical_type.kind is LogicalKind.DATE and exact % _DAY_MS == 0:
+        text = date.fromordinal(exact // _DAY_MS + DATE_EPOCH_ORDINAL).isoformat()
+    else:
+        text = format_rfc3339_ms(exact)
+    return f"{('>' if low else '<') + ('' if strict else '=')} {text}"
+
+
+def refuse_empty_range(expose_id: str, column: CompiledColumn, *, cutting: bool = True) -> None:
+    """Refuse (``FLX-3403``) a column whose contract range holds no instant: its low end lies beyond its high end.
+
+    The range's ends are the inclusive ``(low, high)`` milliseconds of
+    :attr:`CompiledColumn.declared_range`, with a strict end already moved inward, so an empty range
+    (``low > high``, or equal ends with one strict) is ``low > high`` here. Whatever draws the column,
+    nothing could lie inside it, and every row would fail the contract's own check. *cutting* is
+    false for a recorded plan without ``dateRanges``, which never read the range: nothing is refused.
+    """
+    declared = column.declared_range
+    if (
+        not cutting
+        or declared is None
+        or declared[0] is None
+        or declared[1] is None
+        or declared[0] <= declared[1]
+    ):
+        return
+    from flux_engine.generator.relations import FLX_3403
+
+    strict_low, strict_high = column.declared_range_strict
+    spelled = (
+        f"{_contract_end(column, declared[0], strict_low, low=True)} and "
+        f"{_contract_end(column, declared[1], strict_high, low=False)}"
+    )
+    raise FluxError(
+        FLX_3403,
+        f"{expose_id}.{column.name}: the contract's range ({spelled}) holds no value: its low end "
+        "lies beyond its high end; correct the range in the contract",
+    )
 
 
 def cut_statistics(

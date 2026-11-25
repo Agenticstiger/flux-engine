@@ -15,6 +15,7 @@ path held to the per-row path.
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -415,7 +416,6 @@ def test_a_strict_range_that_holds_no_day_is_flx_3403_at_plan_and_never_a_crash(
 @pytest.mark.parametrize(
     "text",
     [
-        "between '2005-12-31' and '2001-01-01'",
         "<= '9999-12-31'",
         ">= '2001-01-01' and < 'last spring'",
         "between 1 and 10",
@@ -604,3 +604,63 @@ def test_a_column_whose_contract_name_is_not_nfc_keeps_its_number_range() -> Non
     assert range_problems("t", [composed], [[3], [9]], held[:1]) == [
         "t.café: 1 of 2 rows are outside the declared range (>= 1 and <= 5)"
     ]
+
+
+def test_an_inclusive_range_whose_ends_meet_holds_that_one_day() -> None:
+    rule = "between '2003-05-05' and '2003-05-05'"
+    entry = {"name": "shipped_on", "type": "DATE", "validationRules": _range_rule(rule)}
+    day = _days("2003-05-05") * DAY_MS
+    assert declared_range_bounds(entry) == RangeBounds(day, day, False, False)
+    assert expose_from_schema([entry]).columns[0].declared_range == (day, day)
+    assert set(_values(_plan(PAST, rule))) == {date(2003, 5, 5)}
+    [held] = declared_ranges_of({}, expose_from_schema([entry]))
+    assert held.text == ">= 2003-05-05 and <= 2003-05-05"
+    assert range_problems("t", ["shipped_on"], [["2003-05-05"], ["2003-05-06"]], [held]) == [
+        "t.shipped_on: 1 of 2 rows are outside the declared range (>= 2003-05-05 and <= 2003-05-05)"
+    ]
+
+
+def test_an_inclusive_timestamp_range_whose_ends_meet_holds_that_one_instant() -> None:
+    rule = ">= '2003-05-05T10:00:00Z' and <= '2003-05-05T10:00:00Z'"
+    declared = {
+        "bins": ["2003-01-01T00:00:00Z", "2004-01-01T00:00:00Z"],
+        "binWeights": ["1"],
+    }
+    plan = _plan(declared, rule, column_type="TIMESTAMP")
+    moment = int(datetime(2003, 5, 5, 10, tzinfo=timezone.utc).timestamp()) * 1000
+    assert plan.columns[0].column.declared_range == (moment, moment)
+    assert len({row[0] for row in generate_rows(plan, root=_root(plan))}) == 1
+
+
+@pytest.mark.parametrize(
+    ("rule", "spelled"),
+    [
+        ("between '2005-01-02' and '2005-01-01'", ">= 2005-01-02 and <= 2005-01-01"),
+        (">= '2005-01-01' and < '2005-01-01'", ">= 2005-01-01 and < 2005-01-01"),
+        ("> '2005-01-01' and <= '2005-01-01'", "> 2005-01-01 and <= 2005-01-01"),
+        ("> '2005-01-01' and < '2005-01-01'", "> 2005-01-01 and < 2005-01-01"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("declared", "version"), [(PAST, GENERATOR_VERSION_2), ({}, GENERATOR_VERSION)]
+)
+def test_an_empty_range_is_flx_3403_at_plan_naming_the_column_and_both_ends(
+    rule: str, spelled: str, declared: Dict[str, Any], version: str
+) -> None:
+    # On both kernels, and for a column that declares no statistics.
+    held = re.escape(f"widget_stream.shipped_on: the contract's range ({spelled}) holds no value")
+    with pytest.raises(FluxError, match=f"FLX-3403.*{held}"):
+        _plan(declared, rule, version=version)
+
+
+def test_the_empty_ranges_are_ranges_to_declared_range_bounds_and_none_to_declared_instants() -> (
+    None
+):
+    for rule in (
+        "between '2005-01-02' and '2005-01-01'",
+        ">= '2005-01-01' and < '2005-01-01'",
+        "between '2005-01-01' and '2005-01-01'",
+    ):
+        entry = {"validationRules": _range_rule(rule)}
+        assert declared_range_bounds(entry) is not None
+        assert declared_instants(entry) is None
