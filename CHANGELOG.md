@@ -164,6 +164,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   versions, so it draws no column; `validate` and `plan` refused it with `FLX-5034`, and a key column with no
   statistics with `FLX-3403`. flux-stats' `parse_fidelity_block` takes `allow_no_columns`, which the engine sets for
   an emit a `snapshots` entry names. Every other emit keeps both refusals.
+- A contract `dependency` beside a history `parent` is accepted when it holds by construction: its `to` columns are
+  all foreign-key columns of the `parent` relationship and its `from` columns include the history's natural entity
+  column. The parent layout gives every version of an entity one parent, so the dependency is true, draws nothing
+  and sets nothing, and `verify` scores it at 100 %. It was `FLX-3403` ("a dependency sets its columns, which the
+  layout sets"). Any other dependency on a counted relationship is refused as before, and every emit of a bundle
+  with such a dependency keeps the bytes the bundle without it has (ADR 0017, the amendment of 2026-11-25).
 
 ## 0.11.1 - 2026-11-24
 

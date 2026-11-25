@@ -650,3 +650,20 @@ its values. `init` now tracks it:
   hold entities.
 - **What moves.** A bundle for a contract with such a foreign key in a history whose profile publishes its
   `initial` and `transitions`. Every other bundle keeps its bytes.
+
+## Amendment of 2026-11-25: a dependency beside a history parent
+
+A history with a `parent` lays its entities out over the parent's rows (ADR 0016), so every version of an entity
+carries the one parent its entity has. The relationship's foreign key is a function of the natural entity, and a
+contract `dependency` that says so is true before it is read. It was `FLX-3403`, since a dependency sets its `to`
+columns and the layout sets them too. FLUID's by-entity copy needs exactly this dependency to make a copied column
+legal.
+
+- **What is accepted.** A `dependency` on the history's emit whose `to` columns are all foreign-key columns of
+  `parent.relationship` and whose `from` columns include the natural entity's column. The layout sets the columns;
+  the rule is kept for `verify` and draws nothing, so every emit has the bytes of the same bundle without it. The
+  plan lists it as laid out by the parent layout.
+- **What stays refused.** A dependency whose `from` lacks the natural entity's column, one whose `to` adds a column
+  the layout does not set, and one whose `to` column declares a `nullFraction`, as any dependency on a counted
+  relationship (`FLX-3403`).
+- **What moves.** Nothing already accepted: a bundle with no such dependency keeps its bytes.
