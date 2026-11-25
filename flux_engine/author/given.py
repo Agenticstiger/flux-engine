@@ -45,7 +45,7 @@ from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.coverage import printable
 from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM
 
-__all__ = ["choose_givens"]
+__all__ = ["choose_givens", "note_no_range"]
 
 _LEVELS = LEVEL_HISTOGRAM.identifier
 _HISTOGRAM = MARGINAL_HISTOGRAM.identifier
@@ -390,6 +390,30 @@ def _declare(
     )
 
 
+#: Why a column drawn given another has no grouped histogram property.
+_NO_RANGE_REASON = (
+    "The column declares no range, since no histogram of its own is published to give one, and "
+    "a histogram property compares a column over its declared range. So no property scores the "
+    "column given another; the grouped counts still weight its draw."
+)
+
+
+def note_no_range(child: ColumnPlan) -> bool:
+    """Whether *child* declares no range; if so, say why it has no grouped histogram property.
+
+    A column drawn evenly over the range the contract declares (the profile publishes no
+    histogram of its own for it) declares bins and no range. ``verify`` refuses a histogram
+    property of a column the block declares no range for (``FLX-5034``), so such a column
+    is drawn given another without the property, and says so.
+    """
+    if "range" in child.declaration:
+        return False
+    if _NO_RANGE_REASON not in child.assumptions:
+        child.assumptions.append(_NO_RANGE_REASON)
+        child.choices.append(_NO_RANGE_REASON)
+    return True
+
+
 def _grouped_property(
     child: ColumnPlan, table: _Table, parent_levels: Tuple[str, ...]
 ) -> Optional[PropertyPlan]:
@@ -410,6 +434,8 @@ def _grouped_property(
         "sampling": True,
     }
     if table.numeric:
+        if note_no_range(child):
+            return None
         document: Dict[str, Any] = {
             "property": "marginalHistogram",
             "column": child.name,
