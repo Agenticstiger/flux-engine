@@ -451,6 +451,9 @@ class _Declarer:
         self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]] = []
         #: expose -> (start, end or None, the declaration)
         self.lifetimes: Dict[str, Dict[str, Any]] = {}
+        #: The exposes whose lifetime is only a start a relationship's date pair offered: one is
+        #: kept only while a within entry reads it.
+        self.start_only: set[str] = set()
         #: A written within entry's id -> (the entry, its profile relationship's index, its parent).
         self.origin: Dict[int, Tuple[Dict[str, Any], int, str]] = {}
 
@@ -1003,6 +1006,7 @@ class _Declarer:
             self._offer_starts(best, parent_table, child_table, pairs)
         for parent_table, (_, start) in best.items():
             self.lifetimes[parent_table] = {"emit": parent_table, "start": start}
+            self.start_only.add(parent_table)
 
     def _offer_starts(
         self,
@@ -1044,6 +1048,11 @@ class _Declarer:
         for pair in ends:
             if id(pair) not in read_ends:
                 self._reject_end(pair)
+        # A start a pair offered dates nothing when no within entry reads it: the pair is unused
+        # (the entry it would date was refused, with the reason), so the start goes with it.
+        read = {self.origin[id(entry)][2] for entry in entries}
+        for parent_table in sorted(self.start_only - read):
+            del self.lifetimes[parent_table]
         self._declare_exposures(entries)
         return entries
 

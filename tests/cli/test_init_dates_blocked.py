@@ -20,11 +20,13 @@ import pytest
 from flux_engine.stages.plan import plan as plan_stage
 
 from .test_init_dates import (
+    HOLDS,
     SCHEMA_URL,
     Written,
     _histogram,
     _levels,
     _link_pair,
+    _pair,
     _stamp,
 )
 
@@ -154,3 +156,32 @@ def test_a_start_is_written_from_a_pair_whose_child_date_nothing_sets(tmp_path: 
     assert written.lifetimes == {"gym_member": {"emit": "gym_member", "start": "joined_on"}}
     assert [entry["date"] for entry in written.within] == ["booked_on"]
     assert written.unused("/relationships/0/dates/0") == []
+
+
+def test_a_start_is_not_written_when_no_within_entry_reads_it(tmp_path: Path) -> None:
+    # Visits have a lifetime of their own, from booking to visit, so a within entry cannot date
+    # the visit: the start the relationship's pair offers the member is then read by nothing.
+    contract = GYM.replace(
+        "    invariants:\n"
+        "    - id: visited_the_day_after\n"
+        "      derive: visited_on\n"
+        "      expr: ADD_DAYS(booked_on, 1)\n",
+        "",
+    )
+    profile = _gym_profile("visited_on")
+    profile["tables"]["visit"]["datePairs"] = [_pair("booked_on", "visited_on", HOLDS)]
+    written = Written(tmp_path, contract, profile)
+    assert sorted(written.lifetimes) == ["visit"]
+    assert (written.lifetimes["visit"]["start"], written.lifetimes["visit"]["end"]) == (
+        "booked_on",
+        "visited_on",
+    )
+    assert written.within == []
+    reasons = written.unused("/relationships/0/dates/0")
+    assert reasons and all("is the end of the lifetime of 'visit'" in reason for reason in reasons)
+    planned = plan_stage(
+        str(written.directory),
+        state_dir=str(tmp_path / "state"),
+        profile=str(written.profile_path),
+    )
+    assert planned.exit_code == 0, planned.stderr
