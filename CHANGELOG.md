@@ -306,6 +306,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `init` no longer refuses its own bundle (`FLX-3105`) when it leaves out a table made only of foreign keys, which
   gives its fidelity block nothing to declare: the `counts` entries into that table are taken back, and the
   statistics of those relationships are listed unused with the reason. The table is not written, and `init` says so.
+  A table of two foreign keys whose relationships are both laid out by counts is now written as an association
+  instead (see Association tables under Added).
 - `init` no longer places a counted child by a parent column that is itself drawn given a column of a linked row,
   which `plan` refuses (`FLX-3403`): that grouping is listed unused with the reason, and the next usable column, or
   none, places the child.
