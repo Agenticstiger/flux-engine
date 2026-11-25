@@ -3492,7 +3492,7 @@ def _author_bundle(
         [expose for expose in planned.drawn if expose.skipped is None],
         _follows_the_entity(planned.authored, histories),
     )
-    dated = _dated_columns(planned, window, fallbacks, histories)
+    dated = _dated_columns(planned, window, fallbacks, histories, projections)
     _release_dated_columns(planned.authored, dated)
     _declare_copulas(planned.authored, planned.reading, dated, histories)
     drafted = _draft_documents(
@@ -3806,14 +3806,22 @@ def _histories_and_projections(
     return histories, projections
 
 
-def _history_columns(planned: _Planned, histories: _Histories) -> Dict[str, FrozenSet[str]]:
-    """The columns each written history sets, by emit: the validity start and end, and the ``activation``.
+def _history_columns(
+    planned: _Planned, histories: _Histories, projections: Projected
+) -> Dict[str, Dict[str, str]]:
+    """The columns each written history and its projection entries set, by emit, with who sets each.
 
-    A history that is not written (the plan refuses it, or the profile publishes none) sets none.
+    A history sets its emit's validity start and end and its ``activation`` column. An ``events``
+    entry sets the columns plan counts as its own (``op``, ``at``, ``date``, the ``type`` column,
+    the ``before`` and ``after`` images and each column that names a column of the history), a
+    ``periods`` entry its period column, the columns its kinds override and each column that names
+    a column of the history. A ``snapshots`` entry sets none that a rule could set a second time.
+    A history or a projection that is not written (the plan refuses it, or the profile publishes
+    none) sets none. Each value is what a date rule calls what sets the column.
     """
     exposes = planned.contract["exposes"]
     index = {expose.expose_id: expose.index for expose in planned.authored}
-    found: Dict[str, FrozenSet[str]] = {}
+    found: Dict[str, Dict[str, str]] = {}
     for entry in histories.entries:
         emit = str(entry["emit"])
         names = {
@@ -3823,18 +3831,70 @@ def _history_columns(planned: _Planned, histories: _Histories) -> Dict[str, Froz
         }
         if isinstance(entry.get("activation"), str):
             names.add(nfc(str(entry["activation"])))
-        found[emit] = frozenset(names)
+        found[emit] = {nfc(name): _HISTORY_LABEL for name in names}
+    for key, entries, projected in (
+        (EVENTS_KEY, projections.events, _projected_by_events),
+        (PERIODS_KEY, projections.periods, _projected_by_periods),
+    ):
+        for entry in entries:
+            emit = str(entry["emit"])
+            label = f"the history's {key} entry"
+            names = {*projected(entry), *projections.carried.get(emit, ("", ()))[1]}
+            held = found.setdefault(emit, {})
+            for name in names:
+                held.setdefault(nfc(name), label)
     return found
 
 
+#: What a date rule calls the written history of a table; a projection entry is "the history's
+#: events entry" or "the history's periods entry".
+_HISTORY_LABEL = "the table's history"
+
+
+def _projected_by_events(entry: Mapping[str, Any]) -> List[str]:
+    """The columns an ``events`` entry names as its own: its ``op``, ``at``, ``date`` and ``type`` columns, and the images' ones."""
+    names = [entry.get(key) for key in ("op", "at", "date")]
+    kind = entry.get("type")
+    if isinstance(kind, Mapping):
+        names.append(kind.get("column"))
+    for side in ("before", "after"):
+        images = entry.get(side)
+        if isinstance(images, Mapping):
+            names.extend(images)
+    return [name for name in names if isinstance(name, str)]
+
+
+def _projected_by_periods(entry: Mapping[str, Any]) -> List[str]:
+    """The columns a ``periods`` entry names as its own: its period column and the columns its kinds override."""
+    names = [entry.get("column")]
+    for kind in entry.get("kinds") or ():
+        overrides = kind.get("overrides") if isinstance(kind, Mapping) else None
+        if isinstance(overrides, Mapping):
+            names.extend(overrides)
+    return [name for name in names if isinstance(name, str)]
+
+
+def _setters(
+    expose: AuthoredExpose, history_columns: Mapping[str, Mapping[str, str]]
+) -> List[Tuple[str, str]]:
+    """Each column of *expose* that a written history or projection entry sets, with what sets it."""
+    held = history_columns.get(expose.expose_id, {})
+    return [(name, held[nfc(name)]) for name in expose.kinds if nfc(name) in held]
+
+
 def _dated_columns(
-    planned: _Planned, window: Tuple[str, str], fallbacks: _Fallbacks, histories: _Histories
+    planned: _Planned,
+    window: Tuple[str, str],
+    fallbacks: _Fallbacks,
+    histories: _Histories,
+    projections: Projected,
 ) -> Any:
     """Declare the dates of the written exposes: ``within`` entries, exposures and ``rates``.
 
-    A column a written history sets is dated by no lifetime and no ``within`` entry.
+    A column a written history, or a projection entry of it, sets is dated by no lifetime and no
+    ``within`` entry.
     """
-    history_columns = _history_columns(planned, histories)
+    history_columns = _history_columns(planned, histories, projections)
     return declare_dates(
         planned.reading.profile,
         {
@@ -3845,11 +3905,15 @@ def _dated_columns(
                 | frozenset(expose.copies)
                 | frozenset(plan.name for plan in expose.columns if plan.fixed),
                 columns=frozenset(expose.kinds),
-                history=frozenset(
-                    name
-                    for name in expose.kinds
-                    if nfc(name) in history_columns.get(expose.expose_id, frozenset())
-                ),
+                history={
+                    name: f"{label} sets {name!r}"
+                    for name, label in _setters(expose, history_columns)
+                },
+                projected_keys={
+                    name: f"{label} sets its foreign key {name!r}"
+                    for name, label in _setters(expose, history_columns)
+                    if label != _HISTORY_LABEL
+                },
             )
             for expose in planned.authored
             if not expose.reference

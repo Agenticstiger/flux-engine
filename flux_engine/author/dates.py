@@ -85,9 +85,16 @@ class DatedExpose:
     #: Every column the bundle writes for it, or ``None`` when that is not checked: a dwell
     #: family is given one of them.
     columns: Optional[FrozenSet[str]] = None
-    #: Its columns that the history written for it sets: the validity start and end, and the
-    #: ``activation`` column. A lifetime or a ``within`` entry would be a second source for them.
-    history: FrozenSet[str] = frozenset()
+    #: Its columns that the history written for it, or the projection entry (``events`` or
+    #: ``periods``) of a history written for it, sets, each with the sentence that says so: the
+    #: validity start and end and the ``activation`` column of a history, the date column, the
+    #: period column and the columns a projection entry takes from its history. A lifetime or a
+    #: ``within`` entry would be a second source for them.
+    history: Mapping[str, str] = field(default_factory=dict)
+    #: Its columns that a projection entry sets, each with the sentence that says so. A ``within``
+    #: entry reads through a relationship, and the plan refuses one whose foreign-key column the
+    #: entry sets, since the cell then holds the history's value, not the row the relationship drew.
+    projected_keys: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -517,10 +524,8 @@ class _Declarer:
         return None
 
     def _history_sets(self, expose: str, column: str) -> Optional[str]:
-        """Why a date of an expose is set by its history, or ``None``."""
-        if column in self.exposes[expose].history:
-            return f"the table's history sets {column!r}"
-        return None
+        """Why a date of an expose is set by its history or a projection of it, or ``None``."""
+        return self.exposes[expose].history.get(column)
 
     def _set_already(self, expose: str, column: str) -> Optional[str]:
         """Why a date of an expose is set by its history, a key or a rule of the contract, or ``None``."""
@@ -944,8 +949,18 @@ class _Declarer:
                 reason = "the contract declares no to-one relationship of these two exposes"
             elif parent_table == child_table:
                 reason = "a table's rows within the lifetime of its own rows are not declared"
+            else:
+                reason = self._key_set_by_projection(child_table, relationship)
             listed.append((index, parent_table, (child_table, relationship), pairs, reason))
         return listed
+
+    def _key_set_by_projection(self, child_table: str, relationship: Any) -> Optional[str]:
+        """Why a relationship cannot be read, when a projection entry sets a foreign key of its child, or ``None``."""
+        held = self.exposes[child_table].projected_keys
+        for column in relationship.from_columns:
+            if column in held:
+                return held[column]
+        return None
 
     def _dated_sides(
         self, entry: Any
