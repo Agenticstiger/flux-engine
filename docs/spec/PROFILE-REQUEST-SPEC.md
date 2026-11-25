@@ -183,7 +183,8 @@ A name that no column of its table holds is refused with `FLX-5038`, naming wher
 only when it asks for one of the keys above, and a request with none of them keeps its bytes and the format it
 named before. For each table it asks for `kendallTau/1` over the number and timestamp columns it would draw from
 histograms (at most 64, and none when the table has fewer than two), and names as `cliqueColumns` the columns a
-clique could hold (at most 1 024, and none when the table has fewer than two). For each relationship it could lay
+clique could hold that the contract requires, since a clique column holds no null (at most 1 024, and none when the
+table has fewer than two). For each relationship it could lay
 out on the counted layout, one column on each side and to another table, whose foreign key no key, other
 relationship or rule of the contract sets, it asks to be grouped by every column its parent draws (at most 64) and
 lists as `linked` the pairs of a child column and a `category` column of the parent (at most 1 024). A column that a

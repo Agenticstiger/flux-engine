@@ -214,6 +214,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the amendment of 2026-11-24). The ledger names where each statistic went. A table whose foreign
   key the history holds without writing a `parent` over the same parent stays unprojected, with the reason in the
   ledger, since it would copy values that are no keys of the parent.
+- The request `fluxsim init` writes names as `cliqueColumns` only the columns the contract requires. A clique column
+  holds no null, and a profiler releases a column the contract leaves optional over its known values, outside the
+  cliques. A request init writes for a table with optional columns now names fewer columns than before.
 
 ### Fixed
 

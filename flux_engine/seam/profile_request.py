@@ -27,7 +27,8 @@ A contract with no such pair asks for none, and its request is written as format
 A request that asks for correlations is written as format 1-2-0 (ADR 0035, ADR 0036, ADR 0037),
 and one that asks for none keeps the format and the bytes it had. A table is asked for the
 ``kendallTau/1`` of its number and timestamp columns that ``init`` would draw from histograms
-(:func:`_rank_columns`), for the columns a clique could hold (``cliqueColumns``), and each
+(:func:`_rank_columns`), for the columns a clique could hold (``cliqueColumns``: those the contract
+requires, since a clique column holds no null), and each
 relationship ``init`` would lay out on the counted layout is asked to be grouped by the columns
 of its parent that ``init`` would draw (``groupBy``), and for the child columns that a link
 grouping could draw given a parent column (``linked``). A column that a key, a relationship or a
@@ -207,6 +208,8 @@ class _Drawn(NamedTuple):
     set_elsewhere: FrozenSet[str]
     #: The columns that a rule alone sets.
     by_rule: FrozenSet[str] = frozenset()
+    #: The columns the contract does not require, which may hold NULL.
+    nullable: FrozenSet[str] = frozenset()
 
 
 def _is_identifier(column: Any) -> bool:
@@ -271,7 +274,8 @@ def _drawn(
         for column in compiled.columns
         if column.name not in set_by and not column.hidden and not _is_identifier(column)
     )
-    return _Drawn(columns=found, set_elsewhere=set_by, by_rule=by_rule)
+    nullable = frozenset(column.name for column in compiled.columns if not column.required)
+    return _Drawn(columns=found, set_elsewhere=set_by, by_rule=by_rule, nullable=nullable)
 
 
 def _rank_columns(drawn: _Drawn) -> Tuple[str, ...]:
@@ -284,11 +288,13 @@ def _rank_columns(drawn: _Drawn) -> Tuple[str, ...]:
 
 
 def _clique_columns(drawn: _Drawn) -> Tuple[str, ...]:
-    """The columns a clique could hold: every column drawn on its own, at most 1,024.
+    """The columns a clique could hold: every column drawn on its own that the contract requires.
 
-    A clique joins two or more columns, so a table with one asks for none.
+    A clique column holds no null, so a column the contract leaves optional is none, and a profiler
+    releases one over its known values outside the cliques. At most 1,024; a clique joins two or
+    more columns, so a table with one asks for none.
     """
-    names = tuple(name for name, _ in drawn.columns)
+    names = tuple(name for name, _ in drawn.columns if name not in drawn.nullable)
     return names[:MOST_CLIQUE_CANDIDATES] if len(names) >= 2 else ()
 
 
