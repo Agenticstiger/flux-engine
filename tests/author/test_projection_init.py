@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+import yaml
 
 from flux_engine.seam.history import history_entries_of
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
@@ -353,3 +354,38 @@ def test_a_refusal_with_a_given_window_is_reported_not_retried_away(
     assert "FLX-3403: the layers are refused" in (result.stderr or "")
     assert "window given with --window" in (result.stderr or "")
     assert not (tmp_path / "bundle").exists()
+
+
+# -- a contract date range that only says "a date" gives the window nothing ---------------------
+
+OPEN_ENDED = "between '1900-01-01' and '9999-12-31'"
+
+
+def _with_signed_on_range(constraint: str) -> str:
+    document = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))
+    for expose in document["exposes"]:
+        for column in expose["contract"]["schema"]:
+            if column["name"] == "signed_on":
+                column["validationRules"] = [{"type": "range", "constraint": constraint}]
+    return yaml.safe_dump(document, sort_keys=False)
+
+
+def test_a_contract_range_ending_in_year_9999_leaves_the_window_plannable(
+    tmp_path: Path,
+) -> None:
+    _init(tmp_path, _profile_with(*WRITTEN), _with_signed_on_range(OPEN_ENDED))
+    bounds = _namespace_spec(tmp_path)["timeBounds"]
+    assert int(bounds["end"][:4]) < 9999
+    outcome = plan(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "plans.profile.json",
+        stage=False,
+    )
+    assert outcome.success, outcome.stderr
+
+
+def _namespace_spec(tmp_path: Path) -> Dict[str, Any]:
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    found: Dict[str, Any] = yaml.safe_load(text)["spec"]
+    return found

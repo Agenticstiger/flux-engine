@@ -14,6 +14,7 @@ import pytest
 from flux_engine.author.bundle import AuthoredExpose, _time_bounds
 from flux_engine.author.columns import ColumnContext, ColumnPlan, bound_to_window
 from flux_engine.author.window import (
+    WINDOW_END_LIMIT_MS,
     WindowError,
     declared_instants,
     instant_ms,
@@ -41,6 +42,16 @@ def _rule(constraint: str, kind: str = "range") -> Dict[str, Any]:
 
 
 # -- the date range a contract declares ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "high, declared",
+    [("9999-12-31", False), ("9999-01-01", False), ("9998-12-31", True)],
+)
+def test_a_range_ending_in_the_last_year_declares_nothing(high: str, declared: bool) -> None:
+    found = declared_instants(_rule(f"between '1900-01-01' and '{high}'"))
+    assert found == ((_ms("1900-01-01"), _ms(high)) if declared else None)
+    assert (_ms("9998-12-31") < WINDOW_END_LIMIT_MS) and (_ms("9999-01-01") == WINDOW_END_LIMIT_MS)
 
 
 @pytest.mark.parametrize(
@@ -356,3 +367,23 @@ def test_the_split_at_and_reads_an_ordinary_constraint_as_before() -> None:
         _ms("2020-01-01"),
         _ms("2020-12-31"),
     )
+
+
+def test_a_window_is_not_refused_for_a_contract_range_that_ends_in_year_9999(
+    tmp_path: Path,
+) -> None:
+    text = CONTRACT.read_text(encoding="utf-8").replace(
+        "      type: timestamp\n      required: false\n",
+        "      type: timestamp\n      required: false\n      validationRules:\n"
+        "      - type: range\n"
+        "        constraint: \"between '1900-01-01' and '9999-12-31'\"\n",
+    )
+    contract = tmp_path / "orders.fluid.yaml"
+    contract.write_text(text, encoding="utf-8")
+    result = run_init(
+        str(tmp_path / "b"),
+        contract=str(contract),
+        profile=str(PROFILE),
+        window=("2024-01-01", "2024-03-31"),
+    )
+    assert result.exit_code == 0, result.stderr

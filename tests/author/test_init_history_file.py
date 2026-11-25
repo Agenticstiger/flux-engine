@@ -496,3 +496,34 @@ def test_every_counted_number_under_the_declared_keys_is_assumed(tmp_path: Path)
         reached["parent.children"] |= tail[:2] == ("parent", "children")
         reached["lag"] |= tail[:1] == ("lag",)
     assert all(reached.values()), reached
+
+
+def test_a_contract_range_ending_in_year_9999_leaves_the_window_of_a_file_plannable(
+    tmp_path: Path,
+) -> None:
+    document = yaml.safe_load(_contract())
+    for expose in document["exposes"]:
+        for column in expose["contract"]["schema"]:
+            if column["name"] == "signed_on":
+                column["validationRules"] = [
+                    {"type": "range", "constraint": "between '1900-01-01' and '9999-12-31'"}
+                ]
+    (tmp_path / "plans.fluid.yml").write_text(
+        yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+    )
+    (tmp_path / "plans.profile.json").write_text(
+        json.dumps(_profile_for_status()), encoding="utf-8"
+    )
+    declared = {key: value for key, value in HISTORY_FILE.items() if key != "timeBounds"}
+    result = _init(tmp_path, _write(tmp_path, declared))
+    assert result.exit_code == 0, result.stderr
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    assert int(yaml.safe_load(text)["spec"]["timeBounds"]["end"][:4]) < 9999
+    planned = plan(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "plans.profile.json",
+        kernel=KERNEL_V2.version,
+        stage=False,
+    )
+    assert planned.success, planned.stderr

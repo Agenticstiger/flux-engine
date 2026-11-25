@@ -9,8 +9,10 @@ spelling the FLUID profiler bins a declared date range with: ``between 'A' and '
 and <= 'B'`` (``>`` and ``<`` too), each value an ISO date (midnight UTC) or an RFC 3339 timestamp
 (UTC when it has no offset), in single or double quotes or bare. Several rules tighten each side.
 The range is read only when both ends are declared and the low end lies before the high end;
-anything else declares nothing. The range only feeds the run's window: the column's own
-declaration does not change.
+anything else declares nothing. A range whose high end is at or after :data:`WINDOW_END_LIMIT_MS`
+says only that the column holds a date, so it declares nothing either: a run's periods step past
+the end of its window, and a date in the year 10000 is out of range. The range only feeds the
+run's window: the column's own declaration does not change.
 
 :func:`parse_window` reads the two texts of ``init --window``.
 """
@@ -24,11 +26,17 @@ from typing import Any, List, Mapping, Optional, Tuple
 from flux_engine.author.ranges import _and_parts
 from flux_engine.core.clock import format_rfc3339_ms
 
-__all__ = ["WindowError", "declared_instants", "instant_ms", "parse_window"]
+__all__ = ["WINDOW_END_LIMIT_MS", "WindowError", "declared_instants", "instant_ms", "parse_window"]
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _FIRST_MS = (datetime(1, 1, 1, tzinfo=timezone.utc) - _EPOCH) // timedelta(milliseconds=1)
 _LAST_MS = (datetime(9999, 12, 31, 23, 59, 59, 999000, tzinfo=timezone.utc) - _EPOCH) // timedelta(
+    milliseconds=1
+)
+
+#: The first instant (9999-01-01T00:00:00Z) a run's window may not reach. A run's periods step past
+#: the window's end, and a date in the year 10000 is out of range.
+WINDOW_END_LIMIT_MS = (datetime(9999, 1, 1, tzinfo=timezone.utc) - _EPOCH) // timedelta(
     milliseconds=1
 )
 
@@ -71,7 +79,8 @@ def declared_instants(column: Any) -> Optional[Tuple[int, int]]:
     """The ``(low, high)`` milliseconds a date or timestamp column's ``range`` rules declare, or ``None``.
 
     ``None`` unless both ends are declared, each an instant that is read, and the low end lies
-    before the high end.
+    before the high end; also ``None`` when the high end is at or after
+    :data:`WINDOW_END_LIMIT_MS`, since such a range gives the window nothing.
     """
     rules = column.get("validationRules") if isinstance(column, Mapping) else None
     low: Optional[int] = None
@@ -102,7 +111,7 @@ def declared_instants(column: Any) -> Optional[Tuple[int, int]]:
                 low = milliseconds if low is None or milliseconds > low else low
             else:
                 high = milliseconds if high is None or milliseconds < high else high
-    if low is None or high is None or low >= high:
+    if low is None or high is None or low >= high or high >= WINDOW_END_LIMIT_MS:
         return None
     return low, high
 
