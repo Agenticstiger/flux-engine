@@ -129,7 +129,13 @@ from flux_engine.generator.history import (
     parent_bound_notes,
 )
 from flux_engine.generator.plugin import PluginExpose, check_rows, generate_values, request_of
-from flux_engine.generator.projections import chain_of, derived_rows, project_plan, projection_of
+from flux_engine.generator.projections import (
+    chain_of,
+    derived_rows,
+    fallback_notes,
+    project_plan,
+    projection_of,
+)
 from flux_engine.generator.rates import Rates
 from flux_engine.generator.reference import ReferenceRows, build_reference_plan
 from flux_engine.generator.relations import (
@@ -764,6 +770,7 @@ def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
         period_end_null_notes(emits)
         + end_share_notes(plans, result.root)
         + parent_bound_history_notes(plans, result.root)
+        + tuple(note for plan in plans for note in fallback_notes(plan))
         + tuple(
             note for plan in plans for note in range_cut_notes(plan.expose.expose_id, plan.columns)
         )
@@ -1870,7 +1877,8 @@ class PlanEra:
     """What a recorded plan was made under, so that ``apply`` and ``replay`` run it as it was.
 
     A new plan takes the defaults; a recorded plan takes what its keys say
-    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges`` and ``plan_scale_floors``).
+    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges``, ``plan_scale_floors`` and
+    ``plan_projected_givens``).
 
     *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
     2026-11-24): every entity, or the entities that can end for a plan without ``historyEndShare``.
@@ -1880,12 +1888,16 @@ class PlanEra:
     the scale gives it. Otherwise a ``--scale`` below 1 that cuts a drawn parent below a key a
     history's tracked level names runs again with that parent kept at the fewest rows that hold
     every level; *scale_floors* is what that has settled so far.
+    *projected_givens* is false for a plan without ``projectedGivens`` (ADR 0027, the amendment of
+    2026-11-25): a column of an events or periods emit drawn given a column of the version replays
+    the draw it was made with, given the level the column's own draw made.
     """
 
     end_share: str = END_SHARE_OF_ENTITIES
     cut_ranges: bool = True
     tracked_levels: bool = True
     scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
+    projected_givens: bool = True
 
 
 def _execute_with_parent_kept(
@@ -3547,12 +3559,13 @@ def _planned_with_projections(
             _history_plan_of(resolved_emits, related, found[1]),
             _plan_of(related[index]),
             root,
+            era.projected_givens,
         )
         for index, found in projected.items()
     }
     if any(counts[index] != guesses[index] for index in counts):
         related = replan({**shrunk, **counts})
-    return _with_projected_plans(resolved_emits, related, projected, root)
+    return _with_projected_plans(resolved_emits, related, projected, root, era.projected_givens)
 
 
 def _with_projected_plans(
@@ -3560,6 +3573,7 @@ def _with_projected_plans(
     related: Sequence[_PlannedEmit],
     projected: Mapping[int, Tuple[str, str, str]],
     root: SeedTreeRoot,
+    projected_givens: bool = True,
 ) -> Tuple[_PlannedEmit, ...]:
     """Each emit in *projected* with the plan derived from its history's layouts, and the others as they are."""
     return tuple(
@@ -3572,6 +3586,7 @@ def _with_projected_plans(
                         *projected[index],
                         _history_plan_of(resolved_emits, related, projected[index][1]),
                         root,
+                        projected_givens,
                     )
                 ),
                 coverage=coverage_of_plan(projected_plan),
