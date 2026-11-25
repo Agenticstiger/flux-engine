@@ -32,7 +32,7 @@ An event is about a version: the new version of a ``c`` or a ``u``, the final ve
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -50,6 +50,7 @@ from flux_engine.generator.rows import (
     cells_before_rules,
     generate_row_slice,
     held_levels,
+    own_plan_of,
 )
 from flux_engine.generator.versionview import (
     DAY_MS,
@@ -444,7 +445,7 @@ def events_rows(
     # The emit's own cells, before its rules: they run over the row once every column the
     # event takes from the history is set (projections.projection_rows). A column drawn given
     # a column of the version reads the version's level (ADR 0027, the amendment of 2026-11-25).
-    own_plan = replace(plan, projection=None)
+    own_plan = own_plan_of(plan)
     held = held_levels(
         own_plan,
         {name: _image(history_rows, low, about, position[name]) for name in projection.held},

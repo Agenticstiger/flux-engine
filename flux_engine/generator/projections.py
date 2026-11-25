@@ -33,6 +33,7 @@ Every refusal is ``FLX-3403``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from fractions import Fraction
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 import numpy as np
@@ -72,6 +73,7 @@ __all__ = [
     "derived_rows",
     "fallback_notes",
     "held_givens",
+    "implied_marginal",
     "refuse_rows",
     "projection_of",
     "projection_rows",
@@ -114,6 +116,9 @@ class ProjectionPlan:
     in the row before the emit's own cells are drawn (ADR 0027, the amendment of 2026-11-25).
     ``fallback`` names those of them the history may hold a value no level of the emit's column
     names in: a column drawn given such a column is drawn from its own distribution there.
+    ``marginals`` holds that distribution for each such column that has one implied by the
+    declarations (:func:`implied_marginal`): the column, then each of its levels with its exact
+    share (``"n/d"``); a fallback column with none is drawn from its declared support, evenly.
     """
 
     kind: str
@@ -125,6 +130,7 @@ class ProjectionPlan:
     window: Optional[Tuple[int, int]] = None
     held: Tuple[str, ...] = ()
     fallback: Tuple[str, ...] = ()
+    marginals: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = ()
 
     def as_document(self) -> Dict[str, Any]:
         """The ``projection`` member of the plan's document: where the rows come from."""
@@ -138,6 +144,7 @@ class ProjectionPlan:
             "entry": None if self.entry is None else self.entry.as_member(),
             "heldGivens": list(self.held) or None,
             "fallbackGivens": list(self.fallback) or None,
+            "fallbackMarginals": {name: dict(shares) for name, shares in self.marginals} or None,
         }
         document.update({key: value for key, value in optional.items() if value is not None})
         return document
@@ -292,12 +299,21 @@ def _projection(
             )
         return ProjectionPlan(key, of, history, options)
     sets = projected_cells(key, options, history, plan)
-    held, fallback = held_givens(key, options, sets, history, plan) if after else ((), ())
+    held, fallback, marginals = (
+        held_givens(key, options, sets, history, plan) if after else ((), (), ())
+    )
     if not after:
         _unheld_givens(key, options, sets, plan)
     _refuse_rules_on_projected_cells(key, sets, plan)
     return ProjectionPlan(
-        key, of, history, entry=options, window=plan.time_bounds, held=held, fallback=fallback
+        key,
+        of,
+        history,
+        entry=options,
+        window=plan.time_bounds,
+        held=held,
+        fallback=fallback,
+        marginals=marginals,
     )
 
 
@@ -416,8 +432,8 @@ def _given_over_projected(
 
 def held_givens(
     key: str, entry: Any, sets: Mapping[str, str], history: GeneratorPlan, plan: GeneratorPlan
-) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
-    """The columns of the version a column of the emit is drawn given, and which may hold no level.
+) -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...]]:
+    """The columns of the version a column of the emit is drawn given, those that may hold no level, and the draws there.
 
     Such a column's level is the version's: the entry's cells are set before the emit draws its
     own, so the column drawn given it reads the level the row holds (ADR 0027, the amendment of
@@ -427,12 +443,15 @@ def held_givens(
     ``allocation: exact``, whose classes are allotted by the draw of its parent.
 
     A column of the version the history may fill with a value that is none of the emit's levels
-    (:func:`_unheld_reason`) is the second member: where a row holds such a value, the column drawn
-    given it is drawn from its own declared support, and is refused when it declares none.
+    (:func:`_unheld_reason`) is the second member. Where a row holds such a value, the column drawn
+    given it is drawn from the marginal its parent's level weights and its own table imply
+    (:func:`implied_marginal`, the third member, one entry for each such column), else from its
+    own declared support, evenly, and is refused when it has neither.
     """
     own, _ = _period_cells(entry) if key == PERIODS_KEY else _event_cells(entry)
     held: Dict[str, None] = {}
     fallback: Dict[str, None] = {}
+    marginals: Dict[str, Tuple[Tuple[str, str], ...]] = {}
     for column_plan, parent in _given_over_projected(sets, plan):
         name = column_plan.column.name
         where = (
@@ -453,22 +472,27 @@ def held_givens(
             )
         reason = _unheld_reason(history, plan, parent)
         if reason is not None:
-            gap = _own_distribution_gap(column_plan)
+            shares = implied_marginal(column_plan, parent, history, plan)
+            gap = None if shares is not None else _own_distribution_gap(column_plan)
             if gap is not None:
                 raise _refuse(
                     f"{where}, and {reason}, which no level of {parent!r} names; {name!r} has no "
-                    f"distribution of its own to draw from there ({gap}); declare a support for "
-                    f"{name!r} that names the levels its table names, or draw it on its own"
+                    f"distribution of its own to draw from there ({gap}); declare level weights "
+                    f"for {parent!r} that name the levels the table of {name!r} is keyed by, or "
+                    f"declare a support for {name!r} that names the levels its table names, or "
+                    f"draw it on its own"
                 )
             fallback[parent] = None
+            if shares is not None:
+                marginals[name] = tuple((level, str(share)) for level, share in shares[0].items())
         held[parent] = None
-    return tuple(sorted(held)), tuple(sorted(fallback))
+    return tuple(sorted(held)), tuple(sorted(fallback)), tuple(sorted(marginals.items()))
 
 
 def _own_distribution_gap(column_plan: ColumnPlan) -> Optional[str]:
-    """Why a column drawn given another has no distribution of its own, or ``None`` when it has one.
+    """Why a column drawn given another has no support to draw from, or ``None`` when it has one.
 
-    The distribution is its declared ``support``, equal weights over it, and it must name exactly the
+    The support is its declared ``support``, equal weights over it, and it must name exactly the
     levels the column's table names, so no column given this one meets a level it has no row for.
     """
     statistics = column_plan.statistics
@@ -483,12 +507,84 @@ def _own_distribution_gap(column_plan: ColumnPlan) -> Optional[str]:
     return None
 
 
+def implied_marginal(
+    column_plan: ColumnPlan, parent: str, history: GeneratorPlan, plan: GeneratorPlan
+) -> Optional[Tuple[Dict[str, Fraction], str]]:
+    """The marginal of a column drawn given *parent*, and whose level weights gave it; ``None`` for none.
+
+    ``P(D = d) = sum over c of w_c * P(D = d | C = c)``, from the level weights ``w`` that the
+    declaration of *parent* gives the levels the column's table is keyed by, and the table's rows
+    taken as shares. It needs no declaration of its own and fits nothing to data. The emit's column
+    is read first, and the history's where the emit's declares no level weights (``"the emit's"``
+    or ``"the history's"``, the second member). Exact (:class:`~fractions.Fraction`), summed over
+    the levels in sorted order and normalised, so no run order or kernel path moves a digit.
+    ``None`` when the column is drawn from bins, from several parents or by no table, or neither
+    declaration gives a weight to every level of the table.
+    """
+    statistics = column_plan.statistics
+    table = statistics.level_weights_given
+    if (
+        table is None
+        or column_plan.family is not Family.CATEGORICAL
+        or is_binned(column_plan)
+        or tuple(statistics.parents) != (parent,)
+    ):
+        return None
+    for source, label in ((plan, "the emit's"), (history, "the history's")):
+        weights = _level_weights_of(source.column_plan(parent), table)
+        if weights is not None:
+            found = _mix(weights, table)
+            if found is not None:
+                return found, label
+    return None
+
+
+def _level_weights_of(
+    column_plan: ColumnPlan, table: Mapping[str, Mapping[str, Any]]
+) -> Optional[Dict[str, Fraction]]:
+    """The declared level weights of *column_plan* at each level *table* is keyed by, or ``None``."""
+    statistics = column_plan.statistics
+    if (
+        column_plan.family is not Family.CATEGORICAL
+        or is_binned(column_plan)
+        or statistics.levels is None
+        or statistics.level_weights_given is not None
+    ):
+        return None
+    if any(level not in statistics.levels for level in table):
+        return None
+    return {level: Fraction(statistics.levels[level]) for level in sorted(table)}
+
+
+def _mix(
+    weights: Mapping[str, Fraction], table: Mapping[str, Mapping[str, Any]]
+) -> Optional[Dict[str, Fraction]]:
+    """``sum over c of w_c * P(D | C = c)``, normalised, or ``None`` when no weight or no row is above zero."""
+    mixed: Dict[str, Fraction] = {}
+    for level in sorted(weights):
+        row = table[level]
+        total = sum((Fraction(weight) for weight in row.values()), Fraction(0))
+        if total <= 0:
+            if weights[level] > 0:
+                return None
+            continue
+        for drawn in sorted(row):
+            mixed[drawn] = (
+                mixed.get(drawn, Fraction(0)) + weights[level] * Fraction(row[drawn]) / total
+            )
+    whole = sum(mixed.values(), Fraction(0))
+    if whole <= 0:
+        return None
+    return {drawn: share / whole for drawn, share in sorted(mixed.items())}
+
+
 def fallback_notes(plan: GeneratorPlan) -> Tuple[str, ...]:
     """One sentence for each column of *plan*'s emit drawn from its own distribution where its parent holds no level.
 
-    The sentence names the column, its parent in the version and what sets the parent's unnamed
-    values. Advice only: nothing here changes how a value is drawn, and the plan document and its
-    digests carry the columns (``fallbackGivens``) rather than the sentence.
+    The sentence names the column, its parent in the version, what sets the parent's unnamed
+    values and which distribution is used. Advice only: nothing here changes how a value is drawn,
+    and the plan document and its digests carry the columns (``fallbackGivens``) and their
+    marginals (``fallbackMarginals``) rather than the sentence.
     """
     projection = plan.projection
     if projection is None or not projection.fallback:
@@ -501,9 +597,19 @@ def fallback_notes(plan: GeneratorPlan) -> Tuple[str, ...]:
             continue
         name = column_plan.column.name
         reason = _unheld_reason(projection.history, plan, parent)
+        shares = implied_marginal(column_plan, parent, projection.history, plan)
+        if shares is None:
+            drawn = f"{name} is drawn from {name}'s support, evenly"
+        elif shares[1] == "the emit's":
+            drawn = f"{name} is drawn from the marginal {parent}'s level weights and {name}'s table imply"
+        else:
+            drawn = (
+                f"{name} is drawn from the marginal the history's level weights for {parent} and "
+                f"{name}'s table imply"
+            )
         notes.append(
             f"note: {expose_id}.{name} is drawn given {parent}; where {parent} holds a value no "
-            f"level names ({reason}), {name} is drawn from its own distribution"
+            f"level names ({reason}), {drawn}"
         )
     return tuple(notes)
 

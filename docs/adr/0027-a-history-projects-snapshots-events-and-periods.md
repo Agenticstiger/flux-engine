@@ -401,20 +401,29 @@ that projects a column of the version (`model` on a month, or on a change) and d
   column names: it declares a `nullFraction` on it, a rule, a relationship or the history's `end` sets it (an `end`
   value that is a level of the emit's column is served), it draws levels the emit's column does not hold, or, for a
   column drawn from bins, it is of another type. A row that holds such a value has no row in the given-table of a
-  column drawn `given` it, so that column is drawn from its own distribution, the `support` it declares, equal
-  weights. The support must name exactly the levels the table names, so no column given this one meets a level it has
-  no row for, and a `maxCardinality` goes with it (a declared support is a checked property). Nothing is fitted: a
-  column that declares no such support, or draws from bins, which have no weights apart from the table's, is refused
-  at plan, `FLX-3403` naming both columns and what to declare. Each cell is still drawn once from its own stream,
-  and only the distribution read for that row changes, so the column path, the per-row path, `--jobs` and `--shard`
-  give the same bytes. Rows whose value is a level of the emit's column are drawn from the given-table as before. The
-  `end` source cannot be reached end to end today (every level the history ends in is one of its own levels, and
-  every level of the history is a level of the emit's), so it is pinned at the plan alone. `plan` prints one note for
-  each such column, naming the column, its parent and what sets the parent's unnamed values.
+  column drawn `given` it, so that column is drawn from the marginal the declarations imply: `P(D = d)` is the sum
+  over the levels `c` of the parent `C` of `w_c * P(D = d | C = c)`, with `w` the level weights `C` declares for the
+  levels `D`'s table is keyed by and `P(D | C = c)` the table's row for `c`, taken as shares. It needs no declaration
+  of its own and fits nothing to data. The weights are read from the emit's `C`, and from the history's `C` where
+  the emit's declares none (the emit's wins where both declare, since the table is keyed by its levels). The sum is
+  exact (`Fraction`, the levels in sorted order, normalised), and the plan records the shares (`fallbackMarginals` in
+  the generator document, beside `fallbackGivens`), so the digest covers them. Where `C` declares no level weights
+  (a `support` or nothing), `D` is drawn from the `support` it declares, equal weights, which must name exactly the
+  levels the table names, with a `maxCardinality` (a declared support is a checked property); a column that has
+  neither, or draws from bins, which have no weights apart from the table's, is refused at plan, `FLX-3403` naming
+  both columns and what to declare (level weights for `C`, or a support for `D`). Each cell is still drawn once from
+  its own stream, and only the distribution read for that row changes, so the column path, the per-row path,
+  `--jobs` and `--shard` give the same bytes. Rows whose value is a level of the emit's column are drawn from the
+  given-table as before. The `end` source cannot be reached end to end today (every level the history ends in is one
+  of its own levels, and every level of the history is a level of the emit's), so it is pinned at the plan alone.
+  `plan` prints one note for each such column, naming the column, its parent, what sets the parent's unnamed values
+  and which distribution is drawn. A `conditions` group cannot read such a column: conditions on a projected emit
+  are refused at plan (`FLX-3643`).
 - **Recorded plans.** A plan with such a column says `projectedGivens: "afterProjection"`, which the plan digest
   covers; plan.json states only that key. The generator document the plan's digest covers (its `generatorDigest`)
   names the held columns, as `heldGivens` in the projection member of the emit, and those of them that fall back
-  to the column's own distribution, as `fallbackGivens` (absent when none does). A recorded plan without
+  to the column's own distribution, as `fallbackGivens` (absent when none does), with the shares of each marginal
+  as `fallbackMarginals` (absent when none has one). A recorded plan without
   the key replays the draw engine 0.11.1 made, given the level the column's own draw made, so its rows and its run
   id keep their bytes. Any other value is `FLX-2102`.
 - **What moves.** Only a bundle the first amendment refused: its plan is now accepted. Every other plan writes no

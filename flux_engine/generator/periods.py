@@ -53,6 +53,7 @@ from flux_engine.generator.rows import (
     cells_before_rules,
     generate_row_slice,
     held_levels,
+    own_plan_of,
 )
 from flux_engine.generator.versionview import DAY_MS, VersionView, unit_value, view_of
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
@@ -508,7 +509,7 @@ def periods_rows(
     # version's columns and the kind's overrides are set (projections.projection_rows). A column
     # drawn given a column of the version reads the version's level (ADR 0027, the amendment of
     # 2026-11-25).
-    own_plan = replace(plan, projection=None)
+    own_plan = own_plan_of(plan)
     held = held_levels(
         own_plan,
         {

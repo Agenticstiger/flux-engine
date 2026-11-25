@@ -42,6 +42,7 @@ digesting stay where KERNEL-SPEC §8 and §9 put them.
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_right
 from dataclasses import dataclass, replace
 from datetime import date
@@ -2222,6 +2223,37 @@ HeldLevels = Mapping[str, Sequence[str]]
 #: weight table is keyed by it (a NUL cannot be written in a declaration), so a column drawn given
 #: such a column and declaring a ``support`` draws from that support (:func:`_categorical_levels`).
 UNNAMED_LEVEL = "\x00unnamed"
+
+
+def own_plan_of(plan: GeneratorPlan) -> GeneratorPlan:
+    """*plan*'s own cells as they are drawn: no projection, and the marginal of a column that falls back.
+
+    A column of the projection's ``marginals`` (a column drawn given a column of the version, where
+    the version holds a value no level names) gains one row in its table, keyed by
+    :data:`UNNAMED_LEVEL`: the weights its table and its parent's level weights imply, as integers
+    over the least common denominator, so the row holds the exact shares
+    (:func:`flux_engine.generator.projections.implied_marginal`). The row is added here, to the
+    draw's own copy, and not to the plan's statistics, which everything else reads.
+    """
+    projection = plan.projection
+    marginals = {} if projection is None else dict(getattr(projection, "marginals", ()))
+    if not marginals:
+        return replace(plan, projection=None)
+    columns = []
+    for column_plan in plan.columns:
+        shares = marginals.get(column_plan.column.name)
+        table = column_plan.statistics.level_weights_given
+        if shares is None or table is None:
+            columns.append(column_plan)
+            continue
+        fractions = {level: Fraction(text) for level, text in shares}
+        scale = math.lcm(*(share.denominator for share in fractions.values()))
+        row = {level: Decimal(int(share * scale)) for level, share in fractions.items()}
+        statistics = replace(
+            column_plan.statistics, level_weights_given={**table, UNNAMED_LEVEL: row}
+        )
+        columns.append(replace(column_plan, statistics=statistics))
+    return replace(plan, projection=None, columns=tuple(columns))
 
 
 def _held_row(held: Optional[HeldLevels], position: int) -> Mapping[str, str]:
