@@ -9,6 +9,7 @@ Every other emit keeps the ``FLX-5034`` refusal of an empty ``fidelity.columns``
 
 from __future__ import annotations
 
+import json
 import shutil
 from importlib import import_module
 from pathlib import Path
@@ -17,7 +18,12 @@ from typing import Any, Optional
 import pytest
 import yaml
 
+from flux_engine.concordance.compiler import EXTENSION_TRANSPORT_KEY, compile_fidelity
+from flux_engine.concordance.predicate import expose_from_contract
+from flux_engine.core.canonical import canonicalise
+from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import KERNEL_V2
+from flux_engine.seam.resolve import load_bundle, resolve_all_emits
 
 from ._fleet import DEPOT, FIXTURE, NAMESPACE, SNAPSHOT, plan_module, run_bundle
 
@@ -94,3 +100,40 @@ def test_an_unnamed_emits_column_that_declares_nothing_is_still_refused(tmp_path
     planned = _planned(_bundle(tmp_path, DEPOT, drop="region"), tmp_path)
     assert not planned.success
     assert planned.error_code == "FLX-3402" and "region" in planned.stderr
+
+
+def _compiled(bundle: Path, emit: str) -> Any:
+    """The block ``verify`` compiles for *emit*, handed over as ``apply`` records it."""
+    simulation = yaml.safe_load((bundle / "simulation.flux.yml").read_text("utf-8"))
+    for entry in resolve_all_emits(load_bundle(bundle), simulation_id=simulation["id"]):
+        if entry.expose_id != emit:
+            continue
+        carried = dict(canonicalise(entry.emit))
+        carried[EXTENSION_TRANSPORT_KEY] = canonicalise(dict(entry.extension or {}))
+        recorded = json.loads(
+            json.dumps({"contract": canonicalise(entry.contract_document), "emit": carried})
+        )
+        expose = expose_from_contract(recorded["contract"], emit)
+        return compile_fidelity(contract=recorded["contract"], emit=recorded["emit"], expose=expose)
+    raise AssertionError(emit)
+
+
+def test_verify_compiles_a_snapshots_empty_columns(tmp_path: Path) -> None:
+    assert _compiled(_bundle(tmp_path, SNAPSHOT), SNAPSHOT).block.properties == ()
+
+
+@pytest.mark.parametrize("projected", [True, False], ids=["snapshot-entry", "no-entry"])
+def test_verify_keeps_the_refusal_for_every_emit_no_snapshot_names(
+    tmp_path: Path, projected: bool
+) -> None:
+    """Only a snapshots entry makes empty ``fidelity.columns`` legal on the verify side."""
+    bundle = _bundle(tmp_path, DEPOT, projected=projected)
+    with pytest.raises(FluxError) as caught:
+        _compiled(bundle, DEPOT)
+    assert caught.value.code.code == "FLX-5034"
+
+
+def test_verify_refuses_a_snapshot_emit_once_no_entry_names_it(tmp_path: Path) -> None:
+    with pytest.raises(FluxError) as caught:
+        _compiled(_bundle(tmp_path, SNAPSHOT, projected=False), SNAPSHOT)
+    assert caught.value.code.code == "FLX-5034"
