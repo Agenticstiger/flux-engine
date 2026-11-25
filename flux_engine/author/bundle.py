@@ -1723,6 +1723,34 @@ class _Placed(NamedTuple):
     laid: Optional[str]
     #: What each number of the ``counts`` entry rests on.
     cited: Tuple[_Cited, ...] = ()
+    #: What :func:`_settle_given` needs to choose the entry's given column, once the parent's
+    #: columns that are drawn given a linked row are known.
+    pending: Optional["_Pending"] = None
+
+
+class _Slot(NamedTuple):
+    """One profile relationship, as :func:`_spread_relationships` laid it out."""
+
+    tokens: Tuple[str, ...]
+    entry: Mapping[str, Any]
+    declared: Any
+    child_table: str
+    #: ``None`` when the contract's relationship gave no layout.
+    placed: Optional[_Placed]
+    #: The statistics of the entry that nothing laid out, with the reason.
+    passed: List[_Note]
+
+
+class _Pending(NamedTuple):
+    """What a ``counts`` entry waits on before it can be given a column of the parent."""
+
+    #: The profile's relationship entry, with the ungrouped histogram its groups add up to.
+    relationship: Mapping[str, Any]
+    counted: Any
+    child_plan: ColumnPlan
+    parent_expose: AuthoredExpose
+    #: The relationship, as ``<child table>.<name>``, that its assumptions are said under.
+    name: str
 
 
 def _given_parent(parent: AuthoredExpose) -> GivenParent:
@@ -1817,21 +1845,15 @@ def _lay_out_children(
     if counted is not None:
         declare_counted(child_plan, counted.assumption)
         counts = {"emit": child_table, "relationship": declared.name, **counted.members}
-        used, unused = list(counted.used), list(counted.unused)
-        given = given_children(
-            entry,
-            tokens,
-            counted,
-            _given_parent(parent_expose),
-            minimum_cell=minimum_cell,
+        # Its given column is chosen by `_settle_given`, after the columns drawn given a linked
+        # row are known: the generator refuses a given column that is one.
+        pending = _Pending(
+            entry, counted, child_plan, parent_expose, f"{child_table}.{declared.name}"
         )
-        if given is not None:
-            counts.update(given.members)
-            used += given.used
-            unused += given.unused
-            _take_given(given, child_plan, parent_expose, (notes, f"{child_table}.{declared.name}"))
-        cited = _counts_cited(counted, given)
-        return _Placed(used, unused, counts, notes, True, None, cited)
+        cited = _counts_cited(counted, None)
+        return _Placed(
+            list(counted.used), list(counted.unused), counts, notes, True, None, cited, pending
+        )
     spread = spread_children(
         entry,
         tokens,
@@ -1847,6 +1869,35 @@ def _lay_out_children(
     )
     laid = held or "the histogram of children per parent is not one the layout can read"
     return _Placed(list(spread.used), list(spread.unused), None, notes, False, laid)
+
+
+def _settle_given(placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int) -> _Placed:
+    """*placed* with the given column of its ``counts`` entry chosen, when the profile groups one.
+
+    This reads which columns of the parent are drawn given a column of a linked row, so it runs
+    once those are declared. A grouping by one of them is passed over, with the reason.
+    """
+    pending = placed.pending
+    if pending is None or placed.entry is None:
+        return placed
+    given = given_children(
+        pending.relationship,
+        tokens,
+        pending.counted,
+        _given_parent(pending.parent_expose),
+        minimum_cell=minimum_cell,
+    )
+    if given is None:
+        return placed
+    placed.entry.update(given.members)
+    notes = list(placed.notes)
+    _take_given(given, pending.child_plan, pending.parent_expose, (notes, pending.name))
+    return placed._replace(
+        used=[*placed.used, *given.used],
+        unused=[*placed.unused, *given.unused],
+        notes=notes,
+        cited=_counts_cited(pending.counted, given),
+    )
 
 
 def _counts_cited(counted: Any, given: Optional[Any]) -> Tuple[_Cited, ...]:
@@ -1968,6 +2019,7 @@ def _spread_relationships(
     minimum_cell: int,
     fractional_bits: int,
     held_back: Optional[Callable[[str, str], Optional[str]]] = None,
+    declare_links: Optional[Callable[[], None]] = None,
 ) -> _Spreads:
     """Lay each relationship's children per parent out (ADR 0014 section 5, ADR 0016 section 7).
 
@@ -1979,6 +2031,10 @@ def _spread_relationships(
     was used and, with the reasons, what was not, and the ``counts`` entries, in relationship
     order. A relationship that *held_back* gives a reason for, by its child table and name, is laid
     out by no entry: every statistic of its profile entry is unused for that reason.
+
+    The given column of each ``counts`` entry is chosen last, after *declare_links* has run: it
+    declares the columns drawn given a column of a linked row, and a grouping by one of them is
+    passed over.
     """
     used: List[_Note] = []
     unused: List[_Note] = []
@@ -1990,6 +2046,7 @@ def _spread_relationships(
     found_tables = profile.get("tables")
     tables: Mapping[str, Any] = found_tables if isinstance(found_tables, Mapping) else {}
     planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
+    laid: List[_Slot] = []
     for index, entry in enumerate(found if isinstance(found, list) else ()):
         if not isinstance(entry, Mapping):
             continue
@@ -1999,7 +2056,7 @@ def _spread_relationships(
             entry, keys, planned, held_back
         )
         if why is not None or declared is None:
-            unused += [(pointer, why or "") for pointer in every]
+            laid.append(_Slot(tokens, entry, None, "", None, [(p, why or "") for p in every]))
             continue
         child_expose, parent_expose = planned[child_table], planned[parent_table]
         child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
@@ -2021,19 +2078,27 @@ def _spread_relationships(
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
         )
-        used += placed.used
-        unused += placed.unused
-        notes += placed.notes
-        if placed.entry is not None:
-            entries.append(placed.entry)
-            cited += [(placed.entry, item) for item in placed.cited]
-        classes = _structural_classes(entry)
+        laid.append(_Slot(tokens, entry, declared, child_table, placed, []))
+    if declare_links is not None:
+        declare_links()
+    for slot in laid:
+        unused += slot.passed
+        if slot.placed is None:
+            continue
+        settled = _settle_given(slot.placed, slot.tokens, minimum_cell=minimum_cell)
+        used += settled.used
+        unused += settled.unused
+        notes += settled.notes
+        if settled.entry is not None:
+            entries.append(settled.entry)
+            cited += [(settled.entry, item) for item in settled.cited]
+        classes = _structural_classes(slot.entry)
         if classes:
-            recorded, sentence = _structural_note(classes, placed.counted, placed.laid)
+            recorded, sentence = _structural_note(classes, settled.counted, settled.laid)
             if recorded:
-                records.append((tokens + ("structural",), sentence))
+                records.append((slot.tokens + ("structural",), sentence))
             else:
-                notes.append((f"{child_table}.{declared.name}", sentence))
+                notes.append((f"{slot.child_table}.{slot.declared.name}", sentence))
     return _Spreads(used, unused, entries, records, notes, tuple(cited))
 
 
@@ -3073,6 +3138,18 @@ def _draw_and_link(
         for expose in drawn:
             _determine(expose)
             _follow_dependencies(expose)
+        written = [expose for expose in exposes if expose.skipped is None]
+
+        def declare_links() -> None:
+            catalogue_foreign_keys(written, keys, reading.references, reading.profile)
+            link_givens(
+                written,
+                keys,
+                reading.profile,
+                reading.references,
+                minimum_cell=reading.minimum_cell,
+            )
+
         spread = _spread_relationships(
             drawn,
             keys,
@@ -3080,11 +3157,7 @@ def _draw_and_link(
             minimum_cell=reading.minimum_cell,
             fractional_bits=reading.fractional_bits,
             held_back=held_back,
-        )
-        written = [expose for expose in exposes if expose.skipped is None]
-        catalogue_foreign_keys(written, keys, reading.references, reading.profile)
-        link_givens(
-            written, keys, reading.profile, reading.references, minimum_cell=reading.minimum_cell
+            declare_links=declare_links,
         )
     except (ArithmeticError, ValueError) as error:
         raise AuthorError(_beyond_note(error)) from error
