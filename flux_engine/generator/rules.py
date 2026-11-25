@@ -584,10 +584,16 @@ class PlannedRule:
     #: Whether a FLUX-side ``derive`` reads the entity's previous version (EXPR-SPEC-2 section 3):
     #: only a history's emit generates it (ADR 0017 section 7), by the rows, one entity at a time.
     previous: bool = False
+    #: Whether a dependency holds by construction: a history's parent layout gives every version
+    #: of an entity one parent row, so the foreign key is a function of the entity. The layout
+    #: sets the columns, the rule draws nothing and sets nothing, and it is still checked.
+    by_layout: bool = False
 
     @property
     def determines(self) -> Tuple[str, ...]:
         """The columns this rule sets: a dependency's ``to`` columns, else its one column."""
+        if self.by_layout:
+            return ()
         if self.form == FORM_DEPENDENCY:
             return self.to_columns
         return () if self.column is None else (self.column,)
@@ -933,7 +939,7 @@ class RulePlan:
 
         by_name = {column_plan.column.name: column_plan for column_plan in plans}
         for rule in self.rules:
-            if rule.form != FORM_DEPENDENCY:
+            if rule.form != FORM_DEPENDENCY or rule.by_layout:
                 continue
             for column in rule.to_columns:
                 column_plan = by_name[column]
@@ -985,9 +991,10 @@ class RulePlan:
                 "from": list(rule.from_columns),
                 "to": list(rule.to_columns),
                 "band": None if rule.band is None else rule.band.as_document(),
-                "order": [position[column] for column in rule.to_columns],
+                "order": [position[column] for column in rule.to_columns if column in position],
                 "origin": rule.origin,
                 "nullRows": None if rule.null_rows is None else str(rule.null_rows),
+                **({"byLayout": True} if rule.by_layout else {}),
             }
         return RulePlan._text_document(rule, position)
 
@@ -2423,6 +2430,7 @@ def plan_rules(
         rules = rules + (_duration_rule(duration),)
     if within:
         rules = rules + _within_rules(model, target, within, windowed, f"{prefix}emit {target!r}")
+    rules = _held_by_layout(rules, history, keys, null_fractions or {})
     determining = [rule for rule in rules if rule.determines]
     rates, asof = tuple(rates), tuple(asof)
     contract_id = _contract_id(contract_document)
@@ -2443,6 +2451,41 @@ def plan_rules(
         rules, list(model.exposes[target].columns), determined, planned_links, asof
     )
     return RulePlan(contract_id, target, model, rules, order, placed, rates, asof, pick_copies)
+
+
+def _held_by_layout(
+    rules: Tuple[PlannedRule, ...],
+    history: Sequence[HistoryEntry],
+    keys: Optional[ExposeKeys],
+    null_fractions: Mapping[str, Any],
+) -> Tuple[PlannedRule, ...]:
+    """*rules*, with each dependency a history's parent layout already holds marked ``by_layout``.
+
+    A history with a ``parent`` lays its entities out over the parent's rows, so every version of
+    an entity carries one parent: the relationship's foreign key is a function of the natural
+    entity. A dependency from columns that include that entity's column to columns that are all
+    foreign-key columns of the parent relationship therefore holds by construction (ADR 0017,
+    amendment of 2026-11-25). Any other dependency is left to be refused or drawn as before.
+    """
+    if keys is None or not any(entry.parent is not None for entry in history):
+        return rules
+    parent = next(entry.parent for entry in history if entry.parent is not None)
+    relationship = next((r for r in keys.relationships if r.name == parent.relationship), None)
+    natural = {entity.column for entity in keys.entities if entity.kind == "natural"}
+    if relationship is None or len(natural) != 1:
+        return rules
+    foreign = set(relationship.from_columns)
+    held: List[PlannedRule] = []
+    for rule in rules:
+        if (
+            rule.form == FORM_DEPENDENCY
+            and set(rule.to_columns) <= foreign
+            and natural <= set(rule.from_columns)
+            and not any(column in null_fractions for column in rule.to_columns)
+        ):
+            rule = replace(rule, by_layout=True)
+        held.append(rule)
+    return tuple(held)
 
 
 def _no_source(

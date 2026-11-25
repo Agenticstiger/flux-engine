@@ -332,3 +332,91 @@ emit, the column and the declared share. It is not part of `plan.json`, a digest
 --json` lists it under `period_end_notes` in its artifacts. A bundle that wants a given share of NULL ends
 overall declares the share among open parents, which is the declared share divided by the share of
 open parents.
+
+## Amendment of 2026-11-25: a date column is drawn within the range its contract declares
+
+A DATE or TIMESTAMP column may carry `validationRules: [{type: range, constraint: "between '2001-01-01'
+and '2005-12-31'"}]`. Nothing read it: the column was drawn from its declared statistics, whose bins could
+run past the range, and `verify` counted only the rows' number and width, so a run could write most of a
+column outside its contract and pass. The profiler refuses the same rows (`FLX-5005`).
+
+**The range is read once, as the profiler reads it.** `CompiledColumn.declared_range` holds the
+`(low, high)` milliseconds `declared_range_bounds` gives (`between 'A' and 'B'`, or `>=`, `>`, `<=`, `<` joined
+by `and`; an ISO date is midnight UTC, a timestamp RFC 3339; anything else declares nothing). Each end is
+optional: `>= '2024-01-01'` is a range, as a one-sided INT or DECIMAL range is, and a high end in the year
+9999 or later is the open-end spelling and so no high end (`between '2024-01-01' and '9999-12-31'` is
+`>= '2024-01-01'`). A rule with neither end declares nothing, and nor does one whose low end is not before
+its high end. `declared_instants`, which `init` reads for its window, keeps its rule: both ends, the high end
+before the year 9999. A DATE holds the days from the first at or after the low end to the last at or before
+the high end.
+
+A strict end is kept strict: `> 'A'` and `< 'B'` hold the instants beyond `A` and before `B`, so the compiled
+range moves a strict end one millisecond inward (for a DATE, the days whose midnight lies inside it) and the cut
+and `verify` compare inclusively and exactly. The profiler reads a strict date bound as an inclusive one only to
+lay out its bin edges; where forge checks membership (its number ranges, and the dbt tests it generates with
+`strictly: true`) a strict bound is strict, and a run that wrote the excluded end would fail forge's own test of
+the same contract. `declared_range_bounds` gives each end with its strictness. A strict range that holds no day (`> '2005-01-01'
+and < '2005-01-02'` on a DATE) is `FLX-3403` at `plan` when the column is cut.
+
+**The statistics are cut before the draw, on kernel `0.2.0` only.** A column that is drawn from declared
+statistics is drawn inside its range, by cutting what it is drawn from, in its own units:
+
+- a declared `range` (a uniform draw, or a rate's start and clamp) is intersected with the contract's;
+- a bin is cut at the range's ends and keeps weight in proportion to the width it keeps, so a draw inside a
+  kept part is as likely as before; a bin wholly outside is dropped. The last bin of a histogram is closed
+  above, so a bin cut at the top ends on the range's last value (a bin cut to one value has equal edges).
+  Every weight is multiplied by one whole number, so the weights stay exact decimals and the draw, which
+  divides by their sum, is unchanged by it. A `binWeightsGiven` table is cut alike in every level;
+- a column with no statistics of its own, drawn within `timeBounds`, has that range intersected too;
+- a bin that is cut leaves the `range` the column declared as it was, since a histogram never reads it.
+
+A column whose statistics already lie inside its range is returned as it is, and keeps its plan and its
+bytes. Kernel `0.1.0` keeps its bytes. The column path and the per-row path read the cut statistics from the
+plan, so they agree under any `--jobs` and any shard. The cut changes `generatorDigest` only for a column it
+cuts.
+
+**A recorded plan replays as it was made.** `apply --run-id` and `replay` run the bundle again, so the
+engine records the cut: a plan that cut at least one column carries `dateRanges: "cut"` at the top of
+`plan.json`, which the plan digest covers. A plan without the key (one written before the cut, or one that cut
+no column) replays with no cut at all, so its rows, its run digest and `replay --assert-digest` keep what they
+were, and a range that holds none of the column's dates is no refusal there. Any other value is `FLX-2102`.
+A plan that cut no column keeps its bytes, its digest and its run id.
+
+**Nothing inside the range is refused (`FLX-3403`)**: the contract's range holds none of the dates the
+statistics give the column, or none of the bins that carry weight. So is a cut of the bins of a column that
+another column is drawn `given`, since that column's weight tables name the bins (ADR 0036 decision 3) and
+dropping or moving one would leave them naming a bin that cannot be drawn. The message names the column and
+the range and says what to change. `plan` prints one note for each cut column; it is in no plan document,
+digest or receipt.
+
+**What it does not cut.** A column whose value another construct sets is not drawn from its statistics, and
+is not cut here: a history's validity start and end, the cells an events or a periods entry sets (its
+`op`, `at`, `date`, type, period and override columns, before and after images and the columns that name a
+column of the history), every column of a snapshot, a key or a column a relationship sets, and a column a rule
+(a `lifetimes`, `within` or `rates` date, a `derive`) sets on every row. Such a column is never `FLX-3403`,
+whatever its statistics: a refusal would block a bundle whose layout writes inside the range. `plan` prints
+one note for it, naming what sets it (`note: vehicle_month.month is not drawn inside the contract's range
+... : its periods entry sets the column, and verify counts the rows outside the range`), and `verify` still
+counts its rows against the range.
+
+**A scale above 1 widens key columns past their range.** `--scale` above 1 grows an integer or decimal key
+column whose fidelity declares a range (`stages/scaling.py::widened_columns`), so its keys run past a contract
+range declared on it. At a scale above 1 `verify` does not count the contract's range of a column the scale
+widened, and `plan` prints one note for it (`note: depot.depot_id's contract range (>= 1 and <= 50) is not
+checked at --scale 2: the scale widens the column's keys`). A key column the scale does not widen, a column
+that is no key, and a scale of 1 or below keep the check.
+
+**`verify` checks the range.** For each emit of the run, the rows of a DATE, TIMESTAMP, INT or DECIMAL column
+whose contract declares a range are counted against it (NULL is never outside; numbers read the range as
+`author/ranges.py` does; a strict end of any column is strict, and the line quotes the range as the contract spells
+it, `>= 2001-01-01 and < 2006-01-01`, while the `plan` note names the inclusive ends drawn, 2001-01-01 to 2005-12-31). A column with rows outside adds one line under `rows:`
+and the run fails:
+
+```
+  ranges: <expose>.<column>: <n> of <rows> rows are outside the declared range (>= <low> and <= <high>)
+```
+
+and the JSON envelope's `rangeConformance` holds `{"ok": false, "problems": [...]}`. A run whose contract
+declares no range, or whose rows all lie inside, prints and returns what it did before: the line and the key
+are present only when rows lie outside. A bundle read after the run, whose contract is not the run's, adds
+nothing.

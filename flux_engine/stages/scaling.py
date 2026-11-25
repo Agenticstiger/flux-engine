@@ -11,7 +11,10 @@ so a related set of tables grows together and its keys still fit its rows. A spa
 grows from its low end: ``min`` stays, and ``max`` becomes ``min + (max - min + 1) * F - 1``
 for an integer column; a bin edge moves in proportion to its distance from ``min``, rounded
 as that end is and held to it. A table whose rows come from the run's own events (it is not
-drawn from statistics) has no declared size to multiply, and is left as it is.
+drawn from statistics) has no declared size to multiply, and is left as it is. A column's
+declared levels are not scaled: a foreign key that takes the nearest key its parent holds follows the
+parent's cut keys, and a history's tracked foreign key, which writes its level as the key, is refused at
+plan (``FLX-3403``, naming the parent's keys in the scaled plan) when a level is no key the cut parent holds.
 ``F = 1`` changes nothing, and writes nothing to the plan, so every digest of a bundle
 planned without it is the one it was. Any other value is recorded in ``plan.json`` as
 ``scale``, and ``apply`` and ``replay`` read it back from there, as they read the kernel.
@@ -62,6 +65,7 @@ __all__ = [
     "scaled_rows",
     "share_of",
     "too_many_child_rows_note",
+    "widened_columns",
 ]
 
 
@@ -264,21 +268,44 @@ def _scale_fidelity(
         }
     columns = block.get("columns")
     if isinstance(columns, Mapping):
-        from flux_engine.generator.relations import related_columns
-
-        kinds: Dict[str, LogicalKind] = {
-            column.name: column.logical_type.kind for column in resolved.compile().columns
-        }
-        keyed = related_columns(resolved.keys) | _natural_columns(resolved)
-        block["columns"] = {
-            name: (
-                _scale_column(name, declared, kinds[name], scale)
-                if name in keyed and name in kinds and isinstance(declared, Mapping)
-                else declared
-            )
-            for name, declared in columns.items()
-        }
+        block["columns"] = _scaled_columns(resolved, columns, scale)
     return block
+
+
+def _scaled_columns(
+    resolved: ResolvedEmit, columns: Mapping[str, Any], scale: Decimal
+) -> Dict[str, Any]:
+    """The declarations of *columns* with each key column's range and bins grown (:func:`_scale_column`)."""
+    from flux_engine.generator.relations import related_columns
+
+    kinds: Dict[str, LogicalKind] = {
+        column.name: column.logical_type.kind for column in resolved.compile().columns
+    }
+    keyed = related_columns(resolved.keys) | _natural_columns(resolved)
+    return {
+        name: (
+            _scale_column(name, declared, kinds[name], scale)
+            if name in keyed and name in kinds and isinstance(declared, Mapping)
+            else declared
+        )
+        for name, declared in columns.items()
+    }
+
+
+def widened_columns(resolved: ResolvedEmit, scale: Decimal) -> FrozenSet[str]:
+    """The columns of *resolved* that *scale* widens: a key column whose declared range it grows.
+
+    Only above 1 (below it the scale cuts a key's range and the contract's range still holds the
+    keys), and only a key column whose fidelity declares a range that :func:`_scale_column` grows,
+    so ``plan``, which scales, and ``verify``, which reads the contract against the run, name the
+    same columns. *resolved* is the emit as the bundle declares it, before :func:`scale_emit`.
+    """
+    fidelity = (resolved.extension or {}).get("fidelity")
+    columns = fidelity.get("columns") if isinstance(fidelity, Mapping) else None
+    if scale <= 1 or not isinstance(columns, Mapping):
+        return frozenset()
+    scaled = _scaled_columns(resolved, columns, scale)
+    return frozenset(name for name, declared in columns.items() if scaled[name] != declared)
 
 
 def scale_emit(resolved: ResolvedEmit, scale: Decimal) -> ResolvedEmit:

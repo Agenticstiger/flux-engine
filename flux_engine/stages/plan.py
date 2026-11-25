@@ -72,7 +72,7 @@ from flux_engine.evidence.register import (
     render_register,
     render_register_line,
 )
-from flux_engine.generator.relations import ForeignKey
+from flux_engine.generator.relations import ForeignKey, history_pick_of
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.generators import environment as _environment
 from flux_engine.lineage.emitter import dataset_for_expose
@@ -113,6 +113,8 @@ from flux_engine.stages.staging import STAGE_DIRNAME, discard_stage, stage_execu
 from flux_engine.stages.timings import lap, timed
 
 __all__ = [
+    "DATE_RANGES_CUT",
+    "DATE_RANGES_PLAN_KEY",
     "END_SHARE_PLAN_KEY",
     "GENERATORS_PLAN_KEY",
     "OVERLAY_PLAN_KEY",
@@ -200,6 +202,23 @@ def _derived_rows_entry(
         "rows": plan.rows,
         "rowsFrom": {"of": projection.of, "projection": projection.kind},
     }
+
+
+def _shortfall_entry(
+    outcome: Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"],
+) -> Dict[str, Any]:
+    """``declaredRows`` and ``shortfall`` of a history that holds fewer rows than it declares (ADR 0017).
+
+    A history that keeps to its parent's lifetime holds fewer rows than the contract declares when
+    no entity has room left for a version; the emit's ``generator.rows`` is what it holds. The two
+    keys say what was declared and how many rows are missing, and only an emit with a shortfall
+    above zero has them, so every other plan keeps its bytes and its planDigest. The digest covers
+    them, and ``verify`` reports them from the plan.
+    """
+    pick = None if outcome.plan is None else history_pick_of(outcome.plan)
+    if pick is None or pick.declared_rows is None or pick.declared_rows <= pick.rows:
+        return {}
+    return {"declaredRows": pick.declared_rows, "shortfall": pick.declared_rows - pick.rows}
 
 
 def column_provenance_text(result: "_pipeline.PipelineResult") -> str:
@@ -292,6 +311,32 @@ GENERATORS_PLAN_KEY = "generators"
 END_SHARE_PLAN_KEY = "historyEndShare"
 
 
+#: ``plan.json``'s key for a contract's date range cutting what a column draws (ADR 0024, the
+#: amendment of 2026-11-25): ``"cut"``. Present only when the plan cut at least one column, so every
+#: other plan keeps its bytes and its planDigest. A recorded plan without it replays with no cut
+#: (:func:`flux_engine.stages.apply.plan_date_ranges`), so a plan written before the cut keeps the
+#: rows and the run id it had.
+DATE_RANGES_PLAN_KEY = "dateRanges"
+DATE_RANGES_CUT = "cut"
+
+
+def _date_range_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``dateRanges``, only for a plan in which some column was cut at its contract's range."""
+    if not result.cut_ranges:
+        return {}
+    outcomes: List[Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"]] = [
+        *result.emits,
+        *result.hidden_emits,
+    ]
+    cut = any(
+        column.range_cut is not None
+        for outcome in outcomes
+        if outcome.plan is not None
+        for column in outcome.plan.columns
+    )
+    return {DATE_RANGES_PLAN_KEY: DATE_RANGES_CUT} if cut else {}
+
+
 def _end_share_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     """``historyEndShare``, only for a plan that allots a history's ``end`` a share of every entity.
 
@@ -380,6 +425,7 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
         **_register_entries(result),
         **_generator_entries(result),
         **_end_share_entries(result),
+        **_date_range_entries(result),
         **(
             {
                 REFERENCES_PLAN_KEY: {
@@ -444,6 +490,9 @@ def _plan_emits(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
             "declaresFidelity": outcome.resolved.fidelity is not None,
             "generator": _fidelity_summary(outcome),
             **_derived_rows_entry(outcome),
+            # A history that holds fewer rows than it declares says what it declared and by how
+            # many it fell short; any other emit has no key, so its plan keeps its bytes.
+            **_shortfall_entry(outcome),
             # An emit that declares a copula records its shrinkage and its factor's digest (ADR
             # 0035 decision 5); any other emit has no key, so its plan keeps its bytes.
             **_copula_entry(outcome),

@@ -108,6 +108,11 @@ from flux_engine.generator.dates import (
     unit_of,
     window_in_units,
 )
+from flux_engine.generator.declared_range import (
+    declared_ranges_of,
+    range_cut_notes,
+    scale_widened_notes,
+)
 from flux_engine.generator.dwell import (
     Dwell,
     DwellFamily,
@@ -284,15 +289,18 @@ from flux_engine.stages._parallel import (
 )
 from flux_engine.stages._plugin_exposes import plugin_exposes, refuse_plugin_combinations
 from flux_engine.stages._prewarm import start_forkserver_early
+from flux_engine.stages._range_setters import range_setter_notes, uncut_columns
 from flux_engine.stages.scaling import (
     FLX_3404,
     FLX_3405,
     child_rows_note,
     key_space_note,
     scale_emit,
+    scale_text,
     scaled_rows,
     share_of,
     too_many_child_rows_note,
+    widened_columns,
 )
 from flux_engine.stages.timings import lap, span
 from flux_engine.verticals import emit_aliases, pack_of_world
@@ -476,6 +484,10 @@ class PipelineResult:
     #: 2026-11-24): every entity for a new plan, which the plan then says with ``historyEndShare``,
     #: or the eligible entities alone for a recorded plan without the key.
     end_share: str = END_SHARE_OF_ENTITIES
+    #: Whether a column may be cut at its contract's range (ADR 0024); false replays a plan as it was.
+    cut_ranges: bool = True
+    #: The key columns ``--scale`` widened, by exposeId: their contract range is not verified.
+    scale_widened: Mapping[str, FrozenSet[str]] = field(default_factory=dict)
 
     def emit(self, expose_id: str) -> EmitOutcome:
         for outcome in self.emits:
@@ -737,13 +749,35 @@ def _history_chains(
 
 
 def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
-    """The advice a plan prints, one sentence each: period ends, end shares and parent bounds."""
+    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds and range cuts."""
     outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*result.emits, *result.hidden_emits]
     plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
+    emits = [outcome.resolved for outcome in outcomes]
     return (
-        period_end_null_notes([outcome.resolved for outcome in outcomes])
+        period_end_null_notes(emits)
         + end_share_notes(plans, result.root)
         + parent_bound_history_notes(plans, result.root)
+        + tuple(
+            note for plan in plans for note in range_cut_notes(plan.expose.expose_id, plan.columns)
+        )
+        + tuple(
+            note
+            for outcome in outcomes
+            if outcome.plan is not None
+            for note in range_setter_notes(
+                outcome.resolved, outcome.plan, emits, _related_of(outcome.resolved)
+            )
+        )
+        + tuple(
+            note
+            for outcome in outcomes
+            for note in scale_widened_notes(
+                outcome.resolved.expose_id,
+                declared_ranges_of(outcome.resolved.expose, outcome.resolved.compile()),
+                result.scale_widened.get(outcome.resolved.expose_id, ()),
+                scale_text(result.scale),
+            )
+        )
     )
 
 
@@ -1759,6 +1793,7 @@ def check_relations_declared(
             rules=rules,
             generator_version=version,
             plugin=plugin,
+            uncut=uncut_columns(resolved, resolved_emits),
         )
         planned.append(
             _PlannedEmit(expose=expose, plan=built, mapping=None, coverage=coverage_of_plan(built))
@@ -1882,6 +1917,7 @@ def execute(
     common_draws_of: Optional[Path] = None,
     most_rows: Optional[int] = None,
     end_share: Optional[str] = None,
+    cut_ranges: bool = True,
 ) -> PipelineResult:
     """Run every stage of the six-step loop's core once, in memory.
 
@@ -1928,6 +1964,8 @@ def execute(
     plan holds of each reference expose (ADR 0023 section 2): an emit that declares
     ``reference: true`` takes its rows from *references* when they are given, and from the
     pinned profile's ``references`` otherwise. Neither is read for a run with no reference expose.
+
+    *cut_ranges* is false for a recorded plan without ``dateRanges`` (ADR 0024): it replays uncut.
 
     *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
     2026-11-24): the plan's ``historyEndShare`` (:func:`flux_engine.stages.apply.plan_end_share`)
@@ -2042,10 +2080,12 @@ def execute(
                 "responses": responses,
                 "replicate": replicate,
                 "end_share": end_share,
+                "cut_ranges": cut_ranges,
             },
         )
 
         declared_rows = {emit.expose_id: emit.declared_row_count for emit in resolved_emits}
+        widened = _widened_by(resolved_emits, scale)
         if scale is not None and scale != 1:
             resolved_emits = tuple(scale_emit(emit, scale) for emit in resolved_emits)
         check_flux_side_rule_ids(resolved_emits, where=cast.simulation_id)
@@ -2254,6 +2294,7 @@ def execute(
                 plugins=plugins,
                 root=root,
                 end_share=run_end_share,
+                cut_ranges=cut_ranges,
             )
         _require_coverage(planned_emits, asked_by)
         lap("plan emits")
@@ -2343,6 +2384,8 @@ def execute(
                 responses=_runtime_of(early),
                 replicate=replicate,
                 end_share=run_end_share,
+                cut_ranges=cut_ranges,
+                scale_widened=widened,
             )
 
         if probing:
@@ -2369,6 +2412,14 @@ def execute(
             emits = tuple(made)
         lap("digests")
         return finished(emits, False)
+
+
+def _widened_by(
+    resolved_emits: Sequence[ResolvedEmit], scale: Optional[Decimal]
+) -> Dict[str, FrozenSet[str]]:
+    """The key columns *scale* widens, by exposeId, for the emits that have any."""
+    found = {emit.expose_id: widened_columns(emit, scale or Decimal(1)) for emit in resolved_emits}
+    return {expose_id: columns for expose_id, columns in found.items() if columns}
 
 
 def _refuses_unscaled(directory: Any, options: Mapping[str, Any]) -> bool:
@@ -3263,6 +3314,7 @@ def _plan_emit(
     plugins: Optional[Mapping[str, PluginExpose]] = None,
     emits: Sequence[ResolvedEmit] = (),
     rows: Optional[int] = None,
+    cut_ranges: bool = True,
 ) -> _PlannedEmit:
     """Decide how one emit's columns will be produced, refusing what cannot be.
 
@@ -3331,6 +3383,7 @@ def _plan_emit(
             generator_version=generator_version,
             plugin=plugin,
             projected=names_a_snapshot(resolved.extension),
+            uncut=uncut_columns(resolved, emits) if cut_ranges else None,
         )
         refuse_conditions(resolved, plan, rules, simulation, where=cast.simulation_id)
         refuse_copula_combinations(resolved, where=cast.simulation_id)
@@ -3403,6 +3456,7 @@ def _planned_with_projections(
     root: SeedTreeRoot,
     plugins: Optional[Mapping[str, PluginExpose]] = None,
     end_share: str = END_SHARE_OF_ENTITIES,
+    cut_ranges: bool = True,
 ) -> Tuple[_PlannedEmit, ...]:
     """Every emit planned and related, a projected emit's rows derived from its history (ADR 0027 section 2).
 
@@ -3427,6 +3481,7 @@ def _planned_with_projections(
             plugins=plugins,
             rows=rows,
             emits=resolved_emits,
+            cut_ranges=cut_ranges,
         )
 
     guesses = {index: _most_rows(resolved_emits, found) for index, found in projected.items()}

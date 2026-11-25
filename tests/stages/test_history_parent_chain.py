@@ -29,13 +29,14 @@ import pytest
 import yaml
 
 from flux_engine.core.kernels import KERNEL_V2
+from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.verify import verify
 
 from ._fleet import CONTRACT, DEPOT, HISTORY, NAMESPACE, UNTIL, expose, plan_module, repin, rows
 from ._fleet import bundle as fleet_bundle
-from ._same_run import assert_shares_join_to_the_run
+from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
 
 pytestmark = pytest.mark.integration
 
@@ -210,6 +211,23 @@ def test_a_run_repeats_and_its_shares_join_to_the_run(tmp_path: Path) -> None:
 
     bundle = _bundle(tmp_path, vehicles=SHORT_VEHICLES, leases=2000)
     assert_shares_join_to_the_run(bundle, tmp_path, run_bundle, 3, (HISTORY, LEASE))
+
+
+@pytest.mark.skipif(parallel.cpu_jobs() < 2, reason="one CPU: every emit stays in one process")
+def test_the_nested_shortfall_replan_is_the_same_run_at_one_and_four_jobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The vehicles hold fewer rows than declared and so do the leases under them: both are planned
+    # again at the rows they hold, the leases after the vehicles. A worker is started for every 40
+    # rows, so four jobs cut each emit into slices, and what they write, and the plan, are one
+    # job's.
+    monkeypatch.setattr(parallel, "MIN_ROWS_PER_JOB", 40)
+    bundle = _bundle(tmp_path, vehicles=SHORT_VEHICLES, leases=2000)
+    one, four = assert_same_run_at_one_and_four_jobs(bundle, result=True, kernel=KERNEL_V2)
+    held = {each.resolved.expose_id: each.writer.lines() for each in one.emits}
+    assert 0 < len(held[HISTORY]) < 200 and 0 < len(held[LEASE]) < 2000
+    assert parallel.workers_for(len(held[LEASE]), 4) > 1
+    assert {each.resolved.expose_id: each.writer.lines() for each in four.emits} == held
 
 
 def test_a_count_that_keeps_moving_is_refused(
