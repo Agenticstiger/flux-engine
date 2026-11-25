@@ -120,6 +120,8 @@ class DateDeclarations:
     unused: List[_Note]
     #: The ``rates`` entries, one per column a calendar shapes.
     rates: List[Dict[str, Any]] = field(default_factory=list)
+    #: The checks of the contract that order two dates and were not written, as (subject, why).
+    declined_orders: List[Tuple[str, str]] = field(default_factory=list)
     #: What each written number rests on: the entry, the member of it (tokens below the entry), the
     #: statistic of the profile it was read from (tokens into the profile) and the sentence that
     #: says how. The entry is one of ``lifetimes``, ``within`` or ``rates``, by identity.
@@ -466,6 +468,7 @@ class _Declarer:
         self.window_end = window_end
         self.window_start = window_start
         self.minimum_cell = minimum_cell
+        self.declined_orders: List[Tuple[str, str]] = []
         self.used: List[_Note] = []
         self.unused: List[_Note] = []
         self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Optional[Tuple[str, ...]], str]] = (
@@ -953,18 +956,32 @@ class _Declarer:
         """A lifetime for each table whose contract orders two of its dates and whose profile gives no pair of them.
 
         The profile's date pair, when it publishes one for the two columns, is the statistic and
-        wins: this reads nothing of the profile. The days between the dates are an assumption.
+        wins: this reads nothing of the profile. The days between the dates are an assumption. An
+        order that cannot be written is listed in ``declined_orders`` with the reason.
         """
         for expose, held in self.exposes.items():
-            if expose in self.lifetimes:
-                continue
+            written = False
             for order in held.orders:
                 if self._published_pair(expose, order):
                     continue
+                subject = f"{expose}.{order.rule}"
+                if written or expose in self.lifetimes:
+                    self.declined_orders.append(
+                        (subject, "the table declares one lifetime, and another one already does")
+                    )
+                    continue
                 entry = self._order_lifetime(expose, held, order)
-                if entry is not None:
+                if isinstance(entry, str):
+                    self.declined_orders.append(
+                        (
+                            subject,
+                            f"the check orders {order.start!r} and {order.end!r}, and no lifetime "
+                            f"is written for it: {entry}",
+                        )
+                    )
+                else:
                     self.lifetimes[expose] = entry
-                    break
+                    written = True
 
     def _published_pair(self, expose: str, order: DateOrder) -> bool:
         tables = self.profile.get("tables")
@@ -978,19 +995,24 @@ class _Declarer:
 
     def _order_lifetime(
         self, expose: str, held: DatedExpose, order: DateOrder
-    ) -> Optional[Dict[str, Any]]:
-        """The lifetime that keeps *order*, or ``None`` when the bundle cannot hold it."""
+    ) -> Union[Dict[str, Any], str]:
+        """The lifetime that keeps *order*, or why the bundle cannot hold it."""
         start, end = order.start, order.end
-        if self._usable(expose, start, end) is not None or self.window_start is None:
-            return None
-        if self._set_already(expose, start) or self._set_already(expose, end):
-            return None
-        if held.kinds[start] is not held.kinds[end]:
-            return None
+        refused = self._usable(expose, start, end)
+        if refused is None:
+            refused = self._set_already(expose, start) or self._set_already(expose, end)
+        if refused is None and held.kinds[start] is not held.kinds[end]:
+            refused = "a lifetime's end is the same kind of column as its start"
         shortest = 1 if order.strict else 0
-        longest = (self.window_end - self.window_start) // _DAY_MS
-        if longest <= shortest:
-            return None
+        if refused is None and self.window_start is None:
+            refused = "the run's window is not known"
+        longest = (
+            0 if self.window_start is None else (self.window_end - self.window_start) // _DAY_MS
+        )
+        if refused is None and longest <= shortest:
+            refused = f"the run's window holds {longest} days, too few to draw a gap in"
+        if refused is not None:
+            return refused
         entry: Dict[str, Any] = {
             "emit": expose,
             "start": start,
@@ -1003,7 +1025,10 @@ class _Declarer:
             # A NULL end would fail the check: the end keeps a date past the window.
             entry["endPastWindow"] = "kept"
         if not open_end and not self._fits(held, start, end, shortest, longest):
-            return None
+            return (
+                f"the declared range of {end!r} cannot be shown to hold every end the gap can "
+                f"draw; widen it, or let the check hold on a NULL {end!r}"
+            )
         self.cited.append(
             (
                 entry,
@@ -1653,4 +1678,5 @@ def declare_dates(
         unused=declarer.unused,
         rates=rates,
         cited=declarer.cited,
+        declined_orders=declarer.declined_orders,
     )

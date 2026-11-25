@@ -4337,6 +4337,7 @@ def _author_bundle(
         + tuple(histories.notes)
         + tuple(projections.notes)
         + tuple(exact_notes)
+        + tuple(dated.declined_orders)
     )
     namespace = drafted.namespace
     counts = _counts(

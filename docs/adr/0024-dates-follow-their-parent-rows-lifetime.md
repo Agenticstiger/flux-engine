@@ -518,3 +518,6 @@ a share of the rows well below its tolerance.
    and rejecting rows, which loses the tolerance the check allows. A column inequality constraint that
    rejects and resamples is the other common form; SDV's Inequality constraint was looked at for the
    pattern only and nothing of it was taken.
+7. **A check not written is named.** When `init` cannot write a check as an order (a column a rule or a
+   history sets, a window too short to draw a gap in, an end range that cannot be shown to hold the gap), its
+   report carries a line naming the check and why.

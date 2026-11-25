@@ -243,3 +243,18 @@ def test_the_orders_are_read_from_the_tree() -> None:
     (found,) = orders("b IS NULL OR a < b")
     assert (found.start, found.end, found.strict, found.null_end_holds) == ("a", "b", True, True)
     assert orders("a >= b OR b >= a") == []
+
+
+def test_an_order_that_cannot_be_written_is_reported(tmp_path: Path) -> None:
+    # A rule of the contract sets the end, so no lifetime can draw it.
+    document = yaml.safe_load(CARD)
+    document["exposes"][0]["contract"]["invariants"].append(
+        {"id": "cancelled_a_month_on", "derive": "cancelled_on", "expr": "ADD_DAYS(issued_on, 30)"}
+    )
+    result = _init(
+        tmp_path, yaml.safe_dump(document), _profile("card", "issued_on", "cancelled_on")
+    )
+    assert "lifetimes" not in _block(tmp_path)
+    notes = {item["subject"]: item["assumption"] for item in result.artifacts["notes"]}
+    reason = notes["card.card_cancelled_after_issued"]
+    assert "already sets 'cancelled_on'" in reason and "no lifetime is written" in reason
