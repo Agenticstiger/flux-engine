@@ -1,4 +1,4 @@
-# Written by `fluxsim init` from subscriptions.fluid.yaml and subscriptions.profile.json.
+# Written by `fluxsim init` from the contract subscriptions.fluid.yaml and its profile.
 # Every number below has its source in the parameter register
 # (extensions.com.agentics.flux/1.parameters): the profile, the contract, an
 # assumption with its reason, or a default. Replace the assumptions you can.

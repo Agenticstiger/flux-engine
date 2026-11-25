@@ -204,7 +204,7 @@ RECORDS = {"min": 1, "max": 1_000_000_000}
 BUDGET = {"maxChecksPerState": 20, "maxStateAge": "P30D"}
 
 _HEADER = (
-    "# Written by `fluxsim init` from {contract} and {profile}.\n"
+    "# Written by `fluxsim init` from the contract {contract} and its profile.\n"
     "# Every number below has its source in the parameter register\n"
     "# (extensions.com.agentics.flux/1.parameters): the profile, the contract, an\n"
     "# assumption with its reason, or a default. Replace the assumptions you can.\n"
@@ -3383,20 +3383,16 @@ def _register_labels(
 
 def _starter_files(
     contract_path: Path,
-    profile_path: Path,
     contract_bytes: bytes,
     world: Mapping[str, Any],
     persona: Mapping[str, Any],
     simulation: Mapping[str, Any],
     scoped: _Scoped,
 ) -> Tuple[StarterFile, ...]:
-    # A file name is any text: printable() keeps a newline in one from ending the comment.
-    header = (
-        _HEADER.format(
-            contract=printable(contract_path.name), profile=printable(Path(profile_path).name)
-        )
-        + scoped.header
-    )
+    # A file name is any text: printable() keeps a newline in one from ending the comment. The
+    # profile's name is left out: the header is bytes of every document, so the digest of the plan
+    # and the run id would follow the name the profile happens to be saved under.
+    header = _HEADER.format(contract=printable(contract_path.name)) + scoped.header
     return (
         StarterFile(
             _contract_file_name(contract_path),
@@ -3468,7 +3464,6 @@ def _author_bundle(
     contract_path = planned.contract_path
     files = _starter_files(
         contract_path,
-        Path(inputs.profile_path),
         planned.contract_bytes,
         drafted.world,
         drafted.persona,

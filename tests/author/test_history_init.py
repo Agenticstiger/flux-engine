@@ -431,16 +431,17 @@ def test_a_profile_without_a_history_writes_no_history_and_the_bytes_it_always_d
     assert "history" not in _namespace(tmp_path)
     digests = bundle_digests(tmp_path)
     # Pinned from the files `fluxsim init` wrote for this contract and profile before histories,
-    # but for the check of `account`, which the profile has no statistic to score: it is left out.
+    # but for the check of `account`, which the profile has no statistic to score: it is left out,
+    # and for the header, which no longer names the profile's file.
     assert digests == WITHOUT_HISTORY
 
 
 #: sha256 of each file of the bundle written for the profile with no history.
 WITHOUT_HISTORY: Dict[str, str] = {
-    "persona.flux.yml": "09abfa26eb21ac0667e7b872c394714fe05f17ae4a6b0a8b687b83d305023ab3",
+    "persona.flux.yml": "74f6062c0e15e70d2689583ad345103c7189b244886c3280c244573b49677755",
     "plans.fluid.yml": "a36ebfc4005a034a13b34c5ab0397ba8192c66a10d5616fced07c2fd1dd29d27",
-    "simulation.flux.yml": "b8f7e74c4af31648277b8f91b8b2985042cb5543b1fbd1560dadca5e6fa0995e",
-    "world.flux.yml": "9b8d0e5a5cc58cb4743d82eaeb2696bb8cee479486e835def76fc7e93705a17c",
+    "simulation.flux.yml": "a9b19c6e6d779786df3d174b8ab2477604182941065696fd9fc477796f2dbafc",
+    "world.flux.yml": "20a3e0be50c0216bb8ef8ac07cdc72b0100a3cf4bddccbb91b7841fcc96b88cc",
 }
 
 

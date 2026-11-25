@@ -34,7 +34,7 @@ from flux_engine.stages.run import run
 from flux_engine.stages.ship import ship
 from flux_engine.stages.verify import verify
 from tests.author.test_given_int import CONTRACT, _profile
-from tests.overlays import without_replacements
+from tests.overlays import with_the_profile_named, without_replacements
 
 from .conftest import FIXTURE_BUNDLE
 
@@ -75,8 +75,11 @@ class Shipped:
             profile=str(self.profile),
         )
         assert written.exit_code == 0, written.stderr
-        # The scorecard and the run below are the ones made before init wrote `replacedBy`.
-        self.bundle = without_replacements(root / "bundle")
+        # The scorecard and the run below are the ones made before init wrote `replacedBy`, when
+        # its header still named the profile's file.
+        self.bundle = with_the_profile_named(
+            without_replacements(root / "bundle"), self.profile.name
+        )
         self.state = root / ".flux"
         planned = plan(self.bundle, state_dir=self.state, profile=self.profile)
         assert planned.success, planned.stderr

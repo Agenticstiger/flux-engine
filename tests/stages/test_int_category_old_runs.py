@@ -43,7 +43,7 @@ from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.plan import plan
 from flux_engine.stages.verify import verify as run_verify
 from tests.author.test_given_int import CONTRACT, _profile
-from tests.overlays import without_replacements
+from tests.overlays import with_the_profile_named, without_replacements
 
 pytestmark = pytest.mark.integration
 
@@ -68,7 +68,7 @@ def made(tmp_path_factory: pytest.TempPathFactory) -> Tuple[Path, Path]:
         profile=str(root / "shop.profile.json"),
     )
     assert written.exit_code == 0, written.stderr
-    without_replacements(root / "bundle")
+    with_the_profile_named(without_replacements(root / "bundle"), "shop.profile.json")
     # The run recorded below is the one version 0.9.0 made, whose tolerances do not follow the row
     # count and whose columns are not allocated exactly: what init now writes for a small table is
     # taken off the bundle, as it was then.
