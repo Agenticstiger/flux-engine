@@ -43,7 +43,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   estimate states when the NULL cell stands clear of the noise, and otherwise the middle of the interval the release
   allows, as a labelled assumption that names the interval.
 - `fluxsim calibrate --fit` reads a noisy query rate (profile format 1-5-0) through its point estimate. A rate whose
-  unit's records stand inside the noise is left out, with a note in the fit's output (`noiseNotes` in `--json`), and a
+  unit's records, the sum of its two cells, are at most twice the noise floor over every cell of its statistic is left
+  out, with a note in the fit's output (`noiseNotes` in `--json`), and a
   profile whose rates are all inside it gives `FLX-3707` naming them. Each query's squared gaps weigh the inverse of its
   rate's variance, scaled so the least noisy weighs 1, as an exact rate does.
 - The profile-request reader and writer read and write format 1-3-0 (`history` on a table, `nullCount/2` on a column).

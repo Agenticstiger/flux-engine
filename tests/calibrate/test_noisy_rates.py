@@ -4,11 +4,11 @@
 
 """``fluxsim calibrate --fit`` reads the noisy rates of a private release (profile format 1-5-0).
 
-A noisy query rate is read through its point estimate. One whose unit's records do not stand clear
-of the noise (:func:`flux_stats.noise.noise_floor` over its two cells) states no rate and is left
-out, with a note; a release whose rates are all inside the noise gives ``FLX-3707`` naming them.
-Each query's squared gaps weigh the inverse of its rate's variance, scaled so the least noisy
-weighs 1, as an exact rate does.
+A noisy query rate is read through its point estimate. One whose unit's records, the sum of its two
+cells, do not exceed twice :func:`flux_stats.noise.noise_floor` over every cell of its statistic
+states no rate and is left out, with a note; a release whose rates are all inside the noise gives
+``FLX-3707`` naming them. Each query's squared gaps weigh the inverse of its rate's variance, scaled
+so the least noisy weighs 1, as an exact rate does.
 """
 
 from __future__ import annotations
@@ -151,3 +151,46 @@ def test_a_release_whose_rates_are_all_inside_the_noise_has_nothing_to_fit(tmp_p
     assert refused.value.code.code == "FLX-3707"
     assert "outside its noise" in message
     assert "'premium-renewed'" in message and "'renewed-offered'" in message
+
+
+def _premium(counts: Tuple[str, str], scale: str = "10") -> Any:
+    released = {"premium-renewed": counts, "renewed-offered": ("310", "590")}
+    targets = profile_targets(parse_profile(_released(released, scale)))
+    return targets, targets["premium-renewed"][0].groups[""]
+
+
+def test_a_rate_whose_records_the_noise_takes_to_zero_or_below_is_inside_the_noise() -> None:
+    """Noise alone drives the sum of the two cells to zero or below half the time: still noted."""
+    for counts in (("-4", "2"), ("-3", "3"), ("-9", "-1")):
+        targets, premium = _premium(counts)
+        assert premium.rate is None and premium.inside_noise, counts
+        assert inside_noise(targets) == frozenset({"premium-renewed"}), counts
+
+
+def test_the_records_of_a_rate_must_clear_twice_the_floor_of_a_cell() -> None:
+    """The records are the sum of two noisy cells, whose noise adds: one cell's floor is too low."""
+    floor = noise_floor("gaussian", Fraction(10), 2)
+    assert floor < 40 < 69 < 2 * floor < 70
+    for counts in (("20", "20"), ("35", "34")):
+        targets, premium = _premium(counts)
+        assert premium.rate is None and premium.inside_noise, counts
+        assert inside_noise(targets) == frozenset({"premium-renewed"}), counts
+    _, premium = _premium(("35", "35"))
+    assert premium.rate == Fraction(1, 2) and not premium.inside_noise
+    assert premium.variance == Fraction(100 * (35**2 + 35**2), 70**4)
+
+
+def test_the_floor_of_a_grouped_rate_is_over_every_cell_of_its_statistic() -> None:
+    """A union bound over all the cells: four groups' eight cells give a higher floor than two."""
+    four = 2 * noise_floor("gaussian", Fraction(10), 8)
+    assert 2 * noise_floor("gaussian", Fraction(10), 2) < 75 < four
+    profile = _released(CLEAR)
+    (statistic,) = profile["queries"][0]["statistics"]
+    statistic["groupBy"] = "plan"
+    statistic["groups"] = [
+        {"group": key, "status": "F", "noisyCounts": ["40", "35"]} for key in "abcd"
+    ]
+    targets = profile_targets(parse_profile(profile))
+    groups = targets["premium-renewed"][0].groups
+    assert sorted(groups) == ["a", "b", "c", "d"]
+    assert all(target.rate is None and target.inside_noise for target in groups.values())

@@ -85,25 +85,33 @@ class QueryTarget:
 def _target_of(statistic: StatisticEntry) -> Dict[str, Target]:
     """The rate each group of a query's statistic states.
 
-    A noisy statistic (profile format 1-5-0) is read through its point estimate. A group whose
-    unit's records do not exceed :func:`flux_stats.noise.noise_floor` over its two cells states no
-    rate: the noise is as large as what it counts. The rate of one that does carries its variance,
-    ``v (f^2 + t^2) / n^4`` for cell variance ``v``, ``f`` and ``t`` the false and true counts and
-    ``n`` their sum, the delta method's, for the fit to weigh it by.
+    A noisy statistic (profile format 1-5-0) is read through its point estimate. A group's unit's
+    records are the sum of its two cells, so their noise adds: a group whose records do not exceed
+    twice :func:`flux_stats.noise.noise_floor` over every cell of the statistic states no rate,
+    since a sum that noise alone made passes twice the floor only when one of its two cells passes
+    the floor. That covers records the noise takes to zero or below. The rate of one that does
+    carries its variance, ``v (f^2 + t^2) / n^4`` for cell variance ``v``, ``f`` and ``t`` the false
+    and true counts and ``n`` their sum, the delta method's, for the fit to weigh it by.
     """
     out: Dict[str, Target] = {}
     noise = statistic.noise
-    floor = noise_floor(noise.mechanism, noise.scale, 2) if noise is not None else None
+    floor = (
+        2 * noise_floor(noise.mechanism, noise.scale, 2 * max(len(statistic.groups), 1))
+        if noise is not None
+        else None
+    )
     for group in statistic.groups:
         if not group.published or group.suppressed_cells or group.statistic is None:
             out[group.key] = Target(None, WITHHELD)
             continue
         counts = group.statistic.level_counts
         total = sum(counts)
-        if len(counts) != 2 or total <= 0:
+        if len(counts) != 2:
             out[group.key] = Target(None)
         elif floor is not None and total <= floor:
             out[group.key] = Target(None, WITHHELD, inside_noise=True)
+        elif total <= 0:
+            out[group.key] = Target(None)
         elif floor is not None and statistic.cell_variance is not None:
             false, true = counts
             variance = (

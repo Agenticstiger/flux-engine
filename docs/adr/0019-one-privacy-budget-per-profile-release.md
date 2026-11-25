@@ -236,7 +236,9 @@ for a table that a unit follows into (ADR 0037).
    column the NULL share its estimate states when its NULL cell stands clear of the floor over the two cells;
    otherwise the share is unknown, and the middle of the interval the release allows, 0 to the NULL cell's
    estimate plus the floor over the rows, is assumed and named. `fluxsim calibrate --fit` leaves out a noisy rate
-   whose unit's records stand inside the floor, with a note (`FLX-3707` naming them when none is left), and weighs
+   whose unit's records, the sum of its two cells, are at most twice the floor over every cell of its statistic
+   (a sum that noise alone made passes that only when one of its two cells passes the floor), with a note
+   (`FLX-3707` naming them when none is left), and weighs
    each query's squared gaps by the inverse of its rate's variance, scaled so the least noisy weighs 1, as an
    exact rate does. All of it is post-processing of the release.
 
