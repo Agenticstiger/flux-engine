@@ -13,7 +13,10 @@ the devices bundle and read every topic back with a read-committed consumer:
   topic is created;
 * a delivery whose producer dies mid-transaction, and one that is aborted on an error, leave nothing
   visible, the next clean delivery leaves each record exactly once, and the one after sends nothing;
-* every value decodes through the registry, Avro and JSON Schema, to what was sent.
+* every value decodes through the registry, Avro and JSON Schema, to what was sent;
+* once the brokers drop a stream's progress (its group deleted, as the retention would), a stream
+  the run's record says reached the topic, whole or in part, is refused with nothing sent, and the
+  same cluster without the topics takes the run again.
 
 Skipped without confluent-kafka or a working Docker.
 """
@@ -58,7 +61,8 @@ from flux_engine.sinks._kafka_serdes import ConfluentSerdes  # noqa: E402
 from flux_engine.sinks._kafka_shape import ShapeSettings, StreamShape, stream_shapes  # noqa: E402
 from flux_engine.sinks.errors import FLX_3505  # noqa: E402
 from flux_engine.sinks.kafka import KafkaSettings, KafkaTarget  # noqa: E402
-from flux_engine.stages.deliver import deliver_run  # noqa: E402
+from flux_engine.sinks.receipts import SinkReceipt  # noqa: E402
+from flux_engine.stages.deliver import deliver_run, write_progress, write_receipts  # noqa: E402
 from flux_engine.stages.layout import RunLayout  # noqa: E402
 from flux_engine.stages.run import run  # noqa: E402
 
@@ -380,8 +384,8 @@ def test_an_external_audience_is_refused_before_any_topic_is_created(
 class _Faulty:
     """A producer that fails after *after* records: it dies silently (a zombie) or raises."""
 
-    def __init__(self, inner: TxnProducer, after: int, *, zombie: bool) -> None:
-        self.inner, self.after, self.zombie = inner, after, zombie
+    def __init__(self, inner: TxnProducer, after: int, *, zombie: bool, pause: float = 0.0) -> None:
+        self.inner, self.after, self.zombie, self.pause = inner, after, zombie, pause
         self.sent = 0
         self.dead = False
 
@@ -396,6 +400,8 @@ class _Faulty:
         timestamp_ms: int,
         headers: Sequence[Tuple[str, bytes]],
     ) -> None:
+        if self.pause:
+            time.sleep(self.pause)
         if self.sent >= self.after:
             self.dead = self.zombie
             raise FluxError(FLX_3505, "kafka: an injected failure")
@@ -421,6 +427,8 @@ class _FaultyBroker:
         self.inner = inner
         self.faults: List[Tuple[int, bool]] = []
         self.zombies: List[_Faulty] = []
+        #: Seconds each record of a faulty producer waits before it is sent.
+        self.pause = 0.0
 
     def describe(self, topic: str) -> Optional[TopicInfo]:
         return self.inner.describe(topic)
@@ -440,7 +448,7 @@ class _FaultyBroker:
         if not self.faults:
             return producer
         after, zombie = self.faults.pop(0)
-        faulty = _Faulty(producer, after, zombie=zombie)
+        faulty = _Faulty(producer, after, zombie=zombie, pause=self.pause)
         self.zombies.append(faulty)
         return faulty
 
@@ -515,7 +523,112 @@ def test_a_paced_delivery_commits_as_it_goes_and_a_resume_sends_the_rest_once(
     _check_topic(read_back(cluster, counts)["paced.site"], expected)
 
 
-# -- (3) values decode through the registry ----------------------------------------------
+# -- (3) progress the brokers dropped ---------------------------------------------------
+
+
+def _copy_of(kept: Kept, root: Path) -> RunLayout:
+    """The kept run under a state directory of its own, so the record a test keeps is its own."""
+    state = root / "state"
+    shutil.copytree(kept.layout.run_dir.parents[1], state)
+    return RunLayout.for_state_dir(state, kept.layout.run_id)
+
+
+def _keeping(layout: RunLayout, kept: Kept, target: KafkaTarget) -> Sequence[SinkReceipt]:
+    """A delivery that keeps what ``run --sink`` keeps: each receipt, and how far each stream got."""
+    return deliver_run(
+        layout,
+        kept.bundle,
+        target=target,
+        record=lambda receipt: write_receipts(layout, [receipt]),
+        record_committed=lambda receipt: write_progress(layout, receipt),
+    )
+
+
+def _drop_progress(cluster: Cluster, run_id: str, prefix: str) -> List[str]:
+    """Delete the progress groups of the run's streams on *prefix* topics, as the retention would.
+
+    A group is named like the stream's transactional id: ``flux-sink.<run>.<digest>.<topic>``.
+    """
+    admin = AdminClient({"bootstrap.servers": cluster.bootstrap})
+    listed = admin.list_consumer_groups(request_timeout=30).result()
+    groups = [
+        listing.group_id
+        for listing in listed.valid
+        if listing.group_id.startswith(f"flux-sink.{run_id}.")
+        and listing.group_id.split(".", 3)[-1].startswith(prefix)
+    ]
+    assert groups, "the delivery left no progress group"
+    for future in admin.delete_consumer_groups(groups, request_timeout=30).values():
+        future.result()
+    return groups
+
+
+def _delete_topics(cluster: Cluster, topics: Sequence[str]) -> None:
+    admin = AdminClient({"bootstrap.servers": cluster.bootstrap})
+    for future in admin.delete_topics(list(topics), operation_timeout=30).values():
+        future.result()
+    _wait(
+        "the topics to be deleted",
+        lambda: not set(topics) & set(admin.list_topics(timeout=5).topics),
+        60,
+    )
+
+
+def test_progress_the_brokers_dropped_refuses_a_delivered_stream_and_a_new_topic_takes_it(
+    cluster: Cluster, kept: Kept, tmp_path: Path
+) -> None:
+    prefix = "dropped."
+    layout = _copy_of(kept, tmp_path)
+    expected = {f"{prefix}{expose}": kept.expected(expose) for expose in EXPOSES}
+    counts = {topic: len(records) for topic, records in expected.items()}
+    target, _ = _target(cluster, **{"topic-prefix": prefix})
+    _keeping(layout, kept, target)
+    assert len(_drop_progress(cluster, layout.run_id, prefix)) == len(EXPOSES)
+    with pytest.raises(FluxError) as caught:
+        _keeping(layout, kept, target)
+    assert caught.value.code.code == "FLX-3514"
+    assert "offsets.retention.minutes" in str(caught.value)
+    after = read_back(cluster, counts)
+    assert {topic: len(messages) for topic, messages in after.items()} == counts
+    # The same cluster, its id unchanged, without the topics: nothing there could be sent twice.
+    _delete_topics(cluster, list(counts))
+    receipts = _keeping(layout, kept, target)
+    assert all(r.writer["skipped"] == 0 and r.writer["records"] > 0 for r in receipts)
+    found = read_back(cluster, counts)
+    for topic, records in expected.items():
+        _check_topic(found[topic], records)
+
+
+def test_a_partly_committed_stream_whose_progress_the_brokers_dropped_is_refused(
+    cluster: Cluster, kept: Kept, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flux_engine.sinks import kafka
+
+    monkeypatch.setattr(kafka, "_AGE_EVERY", 1)
+    prefix = "partial."
+    topic = f"{prefix}device_change"
+    layout = _copy_of(kept, tmp_path)
+    target, broker = _target(cluster, **{"topic-prefix": prefix, "commit-every": "0.1"})
+    # device_change is the run's first stream. Its producer fails after 40 records, sent slowly
+    # enough that the stream commits every tenth of a second before it fails.
+    broker.pause = 0.01
+    broker.faults = [(40, False)]
+    with pytest.raises(FluxError):
+        _keeping(layout, kept, target)
+    [entry] = json.loads(layout.sink_receipts_path.read_text(encoding="utf-8"))["progress"]
+    committed = entry["writer"]["committed"]
+    assert entry["table"] == topic and 0 < committed <= 40
+    assert len(read_back(cluster, {topic: committed})[topic]) == committed
+    _drop_progress(cluster, layout.run_id, prefix)
+    broker.pause = 0.0
+    with pytest.raises(FluxError) as caught:
+        _keeping(layout, kept, target)
+    assert caught.value.code.code == "FLX-3514"
+    assert f"{committed} record" in str(caught.value)
+    assert len(read_back(cluster, {topic: committed})[topic]) == committed
+
+
+# -- (4) values decode through the registry ----------------------------------------------
 
 
 def test_every_avro_value_decodes_through_the_registry_to_what_was_sent(

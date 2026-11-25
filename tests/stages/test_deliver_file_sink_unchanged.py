@@ -40,6 +40,8 @@ class _Stripped:
                 bundle_directory=None,
                 simulation_id=None,
                 delivered=(),
+                committed=(),
+                record_committed=None,
             )
         )
 
