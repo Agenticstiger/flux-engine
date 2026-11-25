@@ -580,7 +580,9 @@ Nothing is written when:
 
 - the directory holds anything, or cannot be written;
 - `--contract` comes without `--profile`, or the reverse, or `--overlay` or `--window` comes without both (exit 2);
-- a `--window` value is not a date or an RFC 3339 timestamp in the years 1 to 9999, or START is not before END (exit 2);
+- a `--window` value is not a date or an RFC 3339 timestamp in the years 1 to 9999, START is not before END, or END
+  is in the year 9999, which spells an open end rather than an instant (exit 2);
+- a `--history` file's `timeBounds` end, an entry's `until` or a `start` bin is in the year 9999;
 - an overlay file is refused by the reader, two files name one overlay, an overlay names a table the profile does not hold, or an overlay gives a table with a history another `rowCount`;
 - the profile cannot be read ([FLX-3109](../reference/errors/FLX-3109.md)) or is not a
   profile ([FLX-5036](../reference/errors/FLX-5036.md));

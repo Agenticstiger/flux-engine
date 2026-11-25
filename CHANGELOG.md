@@ -232,7 +232,15 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   unused list names a whole entry (see below) differs by that list too, and its register is format `1-4-0`. A bundle
   already written keeps its own.
 - A refused `init` reports its refusal even when a file it wrote cannot be removed while it cleans up, rather than a
-  permission error.
+  permission error, and a line after it names each file or directory left behind (a directory once, for what lies
+  in it). With `--overlay`, the directory `init` made for the bundles is removed with them.
+- `init` leaves out a history the plan refuses, and lists its statistics unused, when the bundle holds no
+  projection too. It did so only after leaving out a projection first; with none, it reported the history's
+  refusal and exited 1.
+- `init --window` refuses an END in the year 9999, and `init --history FILE` refuses a file whose `timeBounds` end,
+  an entry's `until` or a `start` bin falls there, naming the value and its place. The year 9999 spells an open
+  end, which gives the window nothing, as in a declared range; before, the window reached the end of the calendar,
+  and a plan with periods failed past it.
 - `init` no longer turns a table's date pair into a lifetime or a `within` entry on a column the table's history sets
   (its validity start, its validity end or its activation column). With `--history FILE` it refused with `FLX-6203`
   ("has more than one source"), and a history the profile carries could be dropped, its statistics listed unused. The
