@@ -132,6 +132,7 @@ from flux_engine.author.history import _pointers as declared_pointers
 from flux_engine.author.ledger import Ledger
 from flux_engine.author.noisy import cite_noisy, point_estimates
 from flux_engine.author.projection import (
+    DateSpan,
     Projected,
     ProjectionSource,
     follow_history,
@@ -143,9 +144,14 @@ from flux_engine.author.projection import (
 )
 from flux_engine.author.ranges import column_range
 from flux_engine.author.replace import ask_for_private_release, replacements_for
-from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_window, instant_ms
+from flux_engine.author.window import (
+    WINDOW_END_LIMIT_MS,
+    declared_days,
+    declared_window,
+    instant_ms,
+)
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
-from flux_engine.core.clock import format_rfc3339_ms
+from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
 from flux_engine.expr2.errors import FLX_6204
@@ -2801,6 +2807,24 @@ def _check_histories(
         raise
 
 
+def _date_spans(expose: AuthoredExpose, contract: Mapping[str, Any]) -> Dict[str, DateSpan]:
+    """Each DATE column of *expose* with a span: the days its contract's range holds, the profile's span."""
+    found: Dict[str, DateSpan] = {}
+    try:
+        schema = contract["exposes"][expose.index]["contract"]["schema"]
+    except (KeyError, IndexError, TypeError):
+        return found
+    for column in expose.columns:
+        context = expose.contexts.get(column.name)
+        if expose.kinds.get(column.name) is not LogicalKind.DATE or context is None:
+            continue
+        declared = declared_days(schema[context.schema_index])
+        published = None if column.noise_floored else column.time_span
+        if declared != (None, None) or published is not None:
+            found[column.name] = DateSpan(declared, published)
+    return found
+
+
 def _projections(
     planned: _Planned,
     histories: _Histories,
@@ -2825,6 +2849,9 @@ def _projections(
             entry,
             keys.expose(str(entry["emit"])),
             compile_expose(contract["exposes"][index[str(entry["emit"])].index]).columns,
+            window_ends(contract["exposes"][index[str(entry["emit"])].index].get("semantics")).get(
+                "start"
+            ),
         )
         for entry in histories.entries
     ]
@@ -2838,13 +2865,18 @@ def _projections(
             ),
             table=tables.get(expose.expose_id),
             window=window,
+            spans=_date_spans(expose, contract),
         )
         for expose in exposes
         if not expose.reference
         and expose.skipped is None
         and not keys.expose(expose.expose_id).versioned
     ]
-    found = project(sources, targets, {expose.expose_id: expose.kinds for expose in exposes})
+    found = project(
+        sources,
+        targets,
+        {expose.expose_id: expose.kinds for expose in exposes},
+    )
     if declined is not None:
         why = (
             f"the bundle written with these projections is refused, so none is written: {declined}"
@@ -5147,7 +5179,6 @@ def _relabel_edge(plan: ColumnPlan, labels: List[Label], position: str) -> None:
 
 def _milliseconds(text: str) -> int:
     """A range end spelled as a date or an RFC 3339 timestamp, in milliseconds since the epoch."""
-    from flux_engine.core.clock import parse_rfc3339_ms
 
     if len(text) == 10:
         return (date.fromisoformat(text) - date(1970, 1, 1)).days * _DAY_MILLISECONDS

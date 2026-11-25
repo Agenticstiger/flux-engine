@@ -130,6 +130,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `FLX-6203`, two sources for the start. Every other `within` entry on a column the history sets is still `FLX-6203`,
   and the message for a history with no parent now names `parent.lifetime` as the way to say it (ADR 0017, amendment of
   2026-11-25).
+- `init` starts a periods entry and limits an events entry where the data does. A `periods` entry carries `from`
+  (and `through`) from the contract's declared `range` on the period column, or else from the first and last bin of
+  its published histogram, when they lie inside the run's window; a published minimum or maximum is not read for
+  periods. Before, periods ran from the window's start whatever the data held, unless the histogram bounded them. An `events` entry for a history that ends no entity carries a `when` on
+  the version's validity start that holds the date column's declared range or its published minimum and maximum; before, an event was
+  written for every version. A history that ends entities is not limited, and the notes say why. A contract that
+  declares no range, with a profile that publishes no span of the column (for periods, no histogram), writes what it
+  wrote before.
 
 ### Fixed
 
