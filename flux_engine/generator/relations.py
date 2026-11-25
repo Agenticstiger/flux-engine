@@ -174,6 +174,8 @@ __all__ = [
     "IdentifierKey",
     "KeyGrid",
     "KeySpaceTooSmall",
+    "TrackedLevels",
+    "TrackedLevelsCut",
     "LinkedGiven",
     "ParentView",
     "ReferenceColumn",
@@ -213,15 +215,14 @@ FLX_3403 = register(
     "one DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no room "
     "inside timeBounds for an entity's versions, when a tracked column is not categorical, names "
     "an undeclared level or has no transition row for a level a chain can reach, when a tracked "
-    "column that is a foreign key has a level that is no key its parent holds in the plan (a "
-    "--scale below 1 cuts the parent's keys and leaves the levels), or when its parent is not a "
-    "to-one relationship. A history's parent.lifetime is refused when the parent emit declares no "
-    "lifetimes entry, or declares a history of its own that sets a lifetime column (a validity, "
-    "activation, tracked, end or rule-set column), which then differs between a parent's versions; "
-    "when the parent's lifetime leaves no room for one version of an entity (the message names "
-    "`history(<emit>).parent.lifetime`, the entity count and the parents' lifetimes); or when the "
-    "rows of the histories that keep to their parent's lifetime still move after one pass for "
-    "every emit (a history under a history that holds fewer rows than it declares is laid out "
+    "foreign key has a level that is no key its parent holds in the plan, or when its parent is "
+    "not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
+    "declares no lifetimes entry, or declares a history of its own that sets a lifetime column (a "
+    "validity, activation, tracked, end or rule-set column), which then differs between a parent's "
+    "versions; when the parent's lifetime leaves no room for one version of an entity (the message "
+    "names `history(<emit>).parent.lifetime`, the entity count and the parents' lifetimes); or "
+    "when the rows of the histories that keep to their parent's lifetime still move after one pass "
+    "for every emit (a history under a history that holds fewer rows than it declares is laid out "
     "after it). An asOf entry is refused when its relationship does not reach the natural entity "
     "of an emit that declares a history, its date is not a DATE or TIMESTAMP column, or a rule "
     "sets a column the contract requires from a row read as of a date where its entity has no "
@@ -243,7 +244,8 @@ FLX_3403 = register(
     "given a column the entry sets, which the draw would read as the level it drew; the message "
     "names both columns. A DATE or TIMESTAMP column drawn from declared statistics is refused when "
     "its contract's `range` rule holds none of the dates it is drawn from, or would cut the bins "
-    "of a column another column is drawn given; the message names the column and the range.",
+    "of a column another column is drawn given; so is an empty `range` rule (no value lies between "
+    "its ends); the message names the column and the range.",
 )
 
 #: Domain-separation label of a key layout's permutation key.
@@ -348,6 +350,34 @@ class KeySpaceTooSmall(FluxError):
     A class of its own so a plan under ``--scale`` can say how the scale moved the key's
     values against its rows (:func:`flux_engine.stages.scaling.key_space_note`).
     """
+
+
+@dataclass(frozen=True)
+class TrackedLevels:
+    """A tracked foreign key's levels and the key of the drawn parent that has to hold them.
+
+    ``parent`` and ``key`` are the parent's exposeId and key column, ``child`` and ``column`` the
+    history's expose and its tracked column, ``levels`` the column's levels.
+    """
+
+    parent: str
+    key: str
+    child: str
+    column: str
+    levels: Tuple[str, ...]
+
+
+class TrackedLevelsCut(FluxError):
+    """``FLX-3403`` for a tracked foreign key whose level is no key its drawn parent holds in this plan.
+
+    A class of its own so a plan under ``--scale`` below 1 can keep the parent's keys the level
+    names (:func:`flux_engine.stages.scaling.floored_rows`) and plan again; the text is the
+    refusal's, and ``tracked`` says what was asked of the parent.
+    """
+
+    def __init__(self, message: str, tracked: TrackedLevels) -> None:
+        super().__init__(FLX_3403, message)
+        self.tracked = tracked
 
 
 # ---------------------------------------------------------------------------
@@ -2386,6 +2416,8 @@ class _HistoryShape:
     hook: Optional[Tuple[ExpectedCountHook, Mapping[str, Any]]] = None
     start: str = ""
     end: Optional[str] = None
+    #: Whether a tracked foreign key's levels are checked against its parent's keys.
+    tracked_levels: bool = True
 
     @property
     def activation(self) -> Optional[str]:
@@ -2969,6 +3001,7 @@ def _history_shape_of(
         hook=None if held is None else held[1],
         start=binding.start,
         end=binding.end,
+        tracked_levels=binding.tracked_levels,
     )
 
 
@@ -4314,9 +4347,7 @@ def _check_weights(
                 "column, or another is given it; a weight picks the parent on its own"
             )
         if plan.rules is not None and any(
-            set(relationship.from_columns) & set(rule.foreign_columns)
-            for rule in plan.rules.rules
-            if not rule.by_layout
+            set(relationship.from_columns) & set(rule.foreign_columns) for rule in plan.rules.rules
         ):
             raise _refuse(f"{where}, but a dependency sets its columns")
         target = plans[relationship.target]
@@ -5520,7 +5551,7 @@ def _check_tracked_keys(
             except (ArithmeticError, ValueError, FluxError):
                 held = False
             if not held:
-                raise _refuse(
+                message = (
                     f"expose {shape.plan.expose.expose_id!r} column {column!r} is tracked by "
                     f"its history over levels and points at {relationship.target!r}, but level "
                     f"{level!r} is no key {relationship.target!r} holds in this plan "
@@ -5528,6 +5559,18 @@ def _check_tracked_keys(
                     "level as the key, so every level is a key of its parent: plan without "
                     "--scale, which cuts the parent's keys, or stop tracking the column so "
                     "its foreign key takes the nearest key the parent holds"
+                )
+                if not isinstance(parent, KeyGrid):
+                    raise _refuse(message)
+                raise TrackedLevelsCut(
+                    message,
+                    TrackedLevels(
+                        relationship.target,
+                        relationship.to_columns[0],
+                        shape.plan.expose.expose_id,
+                        column,
+                        tuple(_rows._level_names(statistics)),
+                    ),
                 )
 
 
@@ -5639,7 +5682,8 @@ class _Resolver:
             if column == getattr(history, role):
                 return ChainColumn(role, history.pick)
         if column in history.tracked:
-            _check_tracked_keys(shape, column, self.view)
+            if history.tracked_levels:
+                _check_tracked_keys(shape, column, self.view)
             return self._tracked(shape, history.tracked.index(column))
         return None
 

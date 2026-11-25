@@ -1701,24 +1701,31 @@ def _declared_not_generated(
 
 
 def _declared_conditions(
-    directory: Path, simulation_id: str, scale: Any
+    directory: Path, simulation_id: str, plan_document: Mapping[str, Any]
 ) -> Tuple[ConditionedEmit, ...]:
-    """Each conditioned emit of the run, worked out from the bundle and the plan's scale.
+    """Each conditioned emit of the run, worked out from the bundle and the plan's scale and floors.
 
     Names only: the exposeId, each group's rows and the columns it fixes, never a value. A
-    pure function of the bundle the plan binds and of the plan's ``scale``, so a run whose
-    plan holds no conditions gives ``()``.
+    pure function of the bundle the plan binds and of the plan's ``scale`` and ``scaleFloors``
+    (a floored parent is scaled to the rows the plan kept), so a run whose plan holds no
+    conditions gives ``()``.
     """
     from flux_engine.seam.conditions import conditions_of
     from flux_engine.seam.resolve import load_bundle, resolve_all_emits
-    from flux_engine.stages.scaling import optional_scale, scale_emit
+    from flux_engine.stages.apply import plan_scale_floors
+    from flux_engine.stages.scaling import kept_rows_of_plan, optional_scale, scale_emits_to_rows
 
-    factor = optional_scale(scale)
+    factor = optional_scale(plan_document.get("scale"))
+    emits = resolve_all_emits(load_bundle(directory), simulation_id=simulation_id)
+    kept = (
+        kept_rows_of_plan(emits, factor, plan_document.get("emits") or {})
+        if plan_scale_floors(plan_document)
+        else {}
+    )
     found = []
-    for resolved in resolve_all_emits(load_bundle(directory), simulation_id=simulation_id):
+    for resolved, scaled in zip(emits, scale_emits_to_rows(emits, factor, kept), strict=True):
         if resolved.extension is None or not conditions_of(resolved.extension):
             continue
-        scaled = scale_emit(resolved, factor)
         groups = conditions_of(scaled.extension)
         rows = scaled.declared_row_count
         found.append(
@@ -2256,7 +2263,7 @@ def ship(
             reference_exposes=tuple(sorted(plan_document.get(REFERENCES_PLAN_KEY) or {})),
             stored=stored,
             injected=_injected_violations_text(receipt),
-            conditioned=_declared_conditions(directory, simulation_id, plan_document.get("scale")),
+            conditioned=_declared_conditions(directory, simulation_id, plan_document),
             forecast_accuracy=accuracy,
             held_out_grade=held_out_grade,
             copulas=_declared_copulas(directory, simulation_id, plan_document),

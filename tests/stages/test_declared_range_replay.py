@@ -63,12 +63,18 @@ def _outside(dates: List[str]) -> int:
 
 
 @pytest.mark.parametrize(
-    "rule", [f"between '{LOW}' and '{HIGH}'", "between '2012-01-01' and '2013-12-31'"]
+    "rule",
+    [
+        f"between '{LOW}' and '{HIGH}'",
+        "between '2012-01-01' and '2013-12-31'",
+        f"between '{HIGH}' and '{LOW}'",
+    ],
 )
 def test_a_plan_recorded_without_the_cut_replays_its_own_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rule: str
 ) -> None:
-    # The second range holds none of the column's dates: no `FLX-3403` for a plan that never cut.
+    # The second range holds none of the column's dates and the third is empty: no `FLX-3403` for a
+    # plan that never cut.
     target = _visits(tmp_path, rule=rule)
     state = tmp_path / "state"
     layout, digest = _run_without_the_cut(target, state, monkeypatch)

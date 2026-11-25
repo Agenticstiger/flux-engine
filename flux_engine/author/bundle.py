@@ -135,7 +135,7 @@ from flux_engine.author.projection import (
 )
 from flux_engine.author.ranges import column_range
 from flux_engine.author.replace import replacements_for
-from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_instants, instant_ms
+from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_window, instant_ms
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
@@ -1334,7 +1334,11 @@ def _spans_of(
     context = expose.contexts.get(column.name)
     try:
         schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
-        contract_range = declared_instants(schema[context.schema_index]) if context else None
+        contract_range = (
+            declared_window(schema[context.schema_index], expose.kinds.get(column.name))
+            if context
+            else None
+        )
     except (KeyError, IndexError, TypeError):
         contract_range = None
     return found, contract_range
@@ -3946,7 +3950,11 @@ def _declared_ranges_of(
     context = expose.contexts.get(column.name)
     try:
         schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
-        contract_range = declared_instants(schema[context.schema_index]) if context else None
+        contract_range = (
+            declared_window(schema[context.schema_index], expose.kinds.get(column.name))
+            if context
+            else None
+        )
     except (KeyError, IndexError, TypeError):
         contract_range = None
     if contract_range is not None:
