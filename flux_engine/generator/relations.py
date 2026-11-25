@@ -174,6 +174,8 @@ __all__ = [
     "IdentifierKey",
     "KeyGrid",
     "KeySpaceTooSmall",
+    "TrackedLevels",
+    "TrackedLevelsCut",
     "LinkedGiven",
     "ParentView",
     "ReferenceColumn",
@@ -349,6 +351,34 @@ class KeySpaceTooSmall(FluxError):
     A class of its own so a plan under ``--scale`` can say how the scale moved the key's
     values against its rows (:func:`flux_engine.stages.scaling.key_space_note`).
     """
+
+
+@dataclass(frozen=True)
+class TrackedLevels:
+    """A tracked foreign key's levels and the key of the drawn parent that has to hold them.
+
+    ``parent`` and ``key`` are the parent's exposeId and key column, ``child`` and ``column`` the
+    history's expose and its tracked column, ``levels`` the column's levels.
+    """
+
+    parent: str
+    key: str
+    child: str
+    column: str
+    levels: Tuple[str, ...]
+
+
+class TrackedLevelsCut(FluxError):
+    """``FLX-3403`` for a tracked foreign key whose level is no key its drawn parent holds in this plan.
+
+    A class of its own so a plan under ``--scale`` below 1 can keep the parent's keys the level
+    names (:func:`flux_engine.stages.scaling.floored_rows`) and plan again; the text is the
+    refusal's, and ``tracked`` says what was asked of the parent.
+    """
+
+    def __init__(self, message: str, tracked: TrackedLevels) -> None:
+        super().__init__(FLX_3403, message)
+        self.tracked = tracked
 
 
 # ---------------------------------------------------------------------------
@@ -2387,6 +2417,8 @@ class _HistoryShape:
     hook: Optional[Tuple[ExpectedCountHook, Mapping[str, Any]]] = None
     start: str = ""
     end: Optional[str] = None
+    #: Whether a tracked foreign key's levels are checked against its parent's keys.
+    tracked_levels: bool = True
 
     @property
     def activation(self) -> Optional[str]:
@@ -2970,6 +3002,7 @@ def _history_shape_of(
         hook=None if held is None else held[1],
         start=binding.start,
         end=binding.end,
+        tracked_levels=binding.tracked_levels,
     )
 
 
@@ -5521,7 +5554,7 @@ def _check_tracked_keys(
             except (ArithmeticError, ValueError, FluxError):
                 held = False
             if not held:
-                raise _refuse(
+                message = (
                     f"expose {shape.plan.expose.expose_id!r} column {column!r} is tracked by "
                     f"its history over levels and points at {relationship.target!r}, but level "
                     f"{level!r} is no key {relationship.target!r} holds in this plan "
@@ -5529,6 +5562,18 @@ def _check_tracked_keys(
                     "level as the key, so every level is a key of its parent: plan without "
                     "--scale, which cuts the parent's keys, or stop tracking the column so "
                     "its foreign key takes the nearest key the parent holds"
+                )
+                if not isinstance(parent, KeyGrid):
+                    raise _refuse(message)
+                raise TrackedLevelsCut(
+                    message,
+                    TrackedLevels(
+                        relationship.target,
+                        relationship.to_columns[0],
+                        shape.plan.expose.expose_id,
+                        column,
+                        tuple(_rows._level_names(statistics)),
+                    ),
                 )
 
 
@@ -5640,7 +5685,8 @@ class _Resolver:
             if column == getattr(history, role):
                 return ChainColumn(role, history.pick)
         if column in history.tracked:
-            _check_tracked_keys(shape, column, self.view)
+            if history.tracked_levels:
+                _check_tracked_keys(shape, column, self.view)
             return self._tracked(shape, history.tracked.index(column))
         return None
 

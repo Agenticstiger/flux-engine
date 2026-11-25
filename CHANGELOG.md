@@ -255,12 +255,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   and sets nothing, and `verify` scores it at 100 %. It was `FLX-3403` ("a dependency sets its columns, which the
   layout sets"). Any other dependency on a counted relationship is refused as before, and every emit of a bundle
   with such a dependency keeps the bytes the bundle without it has (ADR 0017, the amendment of 2026-11-25).
-- A tracked foreign key whose level is no key its parent holds is `FLX-3403` at plan. A tracked column writes its
-  level as the cell and takes no parent row, so `--scale` below 1 cut a catalogue's rows and keys and left the
-  levels: `plan --scale 0.25` exited 0 and `verify` scored the link at about a quarter. The refusal names the expose,
-  the column, one such level and the keys the parent holds in that plan, and says to plan without `--scale` or to stop
-  tracking the column. A foreign key that is not tracked takes the nearest key the parent holds and is not refused.
-  Every bundle whose levels are all keys, at any scale, keeps its bytes, and so does every other bundle.
+- A tracked foreign key's levels are keys its parent holds. A tracked column writes its level as the cell and takes
+  no parent row, so `--scale` below 1 cut a catalogue's rows and keys and left the levels: `plan --scale 0.25` exited
+  0 and `verify` scored the link at about a quarter. Below 1 a drawn parent now keeps the fewest rows whose keys hold
+  every level its children track (its key range and `records` bounds move in proportion), `plan` prints a note naming
+  the parent, the rows and the scale, and `plan.json` says `scaleFloors: "trackedLevels"`. A recorded plan with the
+  key replays floored; one without it replays with neither the check nor the floor, byte for byte as it was made, and
+  any other value is `FLX-2102`. A level that is no key of the parent at any row count (off its range, before its
+  first key), a parent that is not a drawn whole-number key over a declared range and a plan at scale 1 are
+  `FLX-3403`, naming the expose, the column, one such level and the keys the parent holds in that plan. A foreign key
+  that is not tracked takes the nearest key the parent holds and is not refused. Every bundle whose levels are all
+  keys, at any scale, keeps its bytes, and so does every other bundle. A floor always keeps more rows than the scale
+  gives the parent (the note and `scaleFloors` appear only then), and `ship`'s EVIDENCE note counts a conditioned
+  floored parent's groups at the rows the run holds.
 - A DATE or TIMESTAMP column is drawn inside the range its contract declares (`validationRules: [{type: range,
   constraint: "between '2001-01-01' and '2005-12-31'"}]`), and `verify` checks the range. Before, a column whose bins
   ran past its range wrote rows outside it and `verify` said `rows: ok`. On kernel 0.2.0 the

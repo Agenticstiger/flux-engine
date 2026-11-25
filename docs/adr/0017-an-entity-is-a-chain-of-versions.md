@@ -683,11 +683,24 @@ scale 0.25 with the plan still exiting 0.
 - **The check.** `plan` refuses (`FLX-3403`) a tracked column that is the one column of a to-one relationship when a
   level it declares is no key of the parent's column in this plan: for a drawn parent, a value its ordered key
   layout does not take; for a reference expose, a value it does not publish. The message names the expose, the
-  column, the first such level and the keys the parent holds (`keys 101 to 107, 7 rows`), so a scaled plan shows
-  the cut, and says to plan without `--scale` or to stop tracking the column.
+  column, the first such level and the keys the parent holds (`keys 101 to 107, 7 rows`), and says to plan without
+  `--scale` or to stop tracking the column.
+- **The floor.** Below scale 1 a drawn parent keeps at least the keys its children's tracked levels name. Its rows
+  are floored at the fewest whose key grid holds every level (the parent is scaled as if its rows were that many:
+  its key range and its `records` bounds move in proportion), so a link the bundle held at scale 1 holds at 0.25;
+  the children keep their own scaled rows. A floor never lowers a count and a parent the scale does not cut is not
+  touched. `plan` prints one note naming the parent, the floor and the scale (`note: catalogue keeps 26 rows at
+  --scale 0.25, the fewest that hold every level vehicle.part_code tracks`). The floor is worked out for a parent
+  whose key is one whole-number column over a declared range with no bins; for another layout the check refuses as
+  it does at scale 1.
+- **The marker.** A plan that floored some parent writes `scaleFloors: "trackedLevels"` (the plan digest covers it).
+  `apply` and `replay` read it back: a recorded plan with it replays floored, and one without it replays with neither
+  the check nor the floor, as a plan written before them was made, so its rows keep their bytes. Any other value is
+  `FLX-2102`. A fresh plan always runs the check and the floor.
 - **What is not refused.** A foreign key that is not tracked: a `declared` pick takes the nearest key the parent
   holds (`KeyGrid.row_near`), so its link holds at any scale. A parent whose key is an identifier or a several-column
   key, and a relationship of several columns, are not asked.
 - **What moves.** Nothing for a bundle whose levels are all keys of the parent, at any scale, and nothing for a
-  bundle with no tracked foreign key. A bundle with a level that is no key is refused at plan where it ran before
-  with a link below 100 %.
+  bundle with no tracked foreign key. A bundle whose levels are keys of the parent at scale 1 and not at a scale
+  below 1 plans with the parent kept, where it ran before with a link below 100 %. A bundle with a level that is no
+  key of the parent at any row count is refused at plan at every scale.
