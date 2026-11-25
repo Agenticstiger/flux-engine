@@ -3794,13 +3794,14 @@ def bound_to_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str]
     total = sum((weight for _, _, weight in kept), Fraction(0))
     plan.declaration["binWeights"] = share_texts([weight / total for _, _, weight in kept])
     _read_shaped(plan, _WINDOW_SHAPED)
-    plan.labels = [
-        label
-        for label in plan.labels
-        if label.tokens[:1] not in (("bins",), ("binWeights",)) or len(label.tokens) != 2
-    ]
-    plan.labels.append(Label(("bins",), assumed(_WINDOW_CLIPPED)))
-    plan.labels.append(Label(("binWeights",), assumed(_WINDOW_CLIPPED)))
+    replaced: Dict[Tuple[str, ...], List[str]] = {("bins",): [], ("binWeights",): []}
+    for label in plan.labels:
+        reason = label.basis.reason
+        if label.tokens in replaced and reason is not None and reason not in replaced[label.tokens]:
+            replaced[label.tokens].append(reason)
+    plan.labels = [label for label in plan.labels if label.tokens[:1] not in replaced]
+    for tokens, reasons in replaced.items():
+        plan.labels.append(Label(tokens, assumed(" ".join([*reasons, _WINDOW_CLIPPED]))))
     plan.assumptions.append(_WINDOW_CLIPPED)
     plan.choices.append(_WINDOW_CLIPPED)
 
