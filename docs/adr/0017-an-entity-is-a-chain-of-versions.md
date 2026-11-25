@@ -490,7 +490,10 @@ with `lifetime: true` (section 5 there), and changes no bundle that does not ask
 every byte. It needs `parent.relationship` and a `lifetimes` entry (ADR 0024 section 4) on the emit that relationship
 reaches: its `start` column, and its `end` column when it names one, are the lifetime the history keeps to. Without
 the entry the history is refused at validation with `FLX-3403`, naming `parent.lifetime`; a `parent.lifetime` that is
-not `true` or `false` is refused the same way. Kernel `0.2.0` only, as every history.
+not `true` or `false` is refused the same way. When the parent emit declares a history of its own, a lifetime
+column that history does not carry (a validity column, the activation, a tracked or the end column, or one a rule
+sets) can differ between the versions of one parent, so the bound would hold an entity to an arbitrary version: the
+history is refused with `FLX-3403`, naming the emit and the columns. Kernel `0.2.0` only, as every history.
 
 **The lifetime.** For an entity, `P = [ps, pe]` is the lifetime of its parent row, read in the chain's unit as
 ADR 0024 reads a lifetime: a DATE start bounds a TIMESTAMP chain from its midnight, a DATE end up to the last

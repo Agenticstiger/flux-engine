@@ -53,7 +53,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   declared rows; only when no entity has room left does the history hold fewer rows, and plan, apply and verify
   count the rows it has. A parent that leaves no room for even one version is `FLX-3403` at plan, naming
   `history(<emit>).parent.lifetime`, how many entities it is and their parents' lifetimes. A history without the
-  key keeps every byte. `plan` notes how many entities were capped, how many versions moved, any shortfall and how
+  key keeps every byte. A parent that declares a history of its own must carry the lifetime columns (a column its
+  history sets, or a rule sets, can differ between versions): `FLX-3403` at plan names the emit and the columns. `plan` notes how many entities were capped, how many versions moved, any shortfall and how
   many entities end in one version with their parent, and the plan-time work of the bound grows linearly with the
   entities.
 - A periods kind's `when` and an events `when` can read the history's end column (`history[].end.column`, such as

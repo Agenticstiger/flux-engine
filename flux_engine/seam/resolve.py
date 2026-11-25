@@ -251,6 +251,7 @@ __all__ = [
     "MAX_FILE_BYTES",
     "REFERENCE_KEY",
     "RULES_KEY",
+    "other_sourced_columns",
     "load_documents_exact",
     "refuse_out_of_bounds_documents",
     "refuse_oversized_file",
@@ -2930,7 +2931,7 @@ def _with_history(
         counts=[entry for entry in counts if entry.emit == nfc(expose_id)],
         links=[entry for entry in links if entry.emit == nfc(expose_id)],
     )
-    other = _other_sourced_columns(
+    other = other_sourced_columns(
         contract_document,
         expose_id,
         extension.get(RULES_KEY) if extension is not None else None,
@@ -3117,7 +3118,7 @@ def _with_projection(
     }
 
 
-def _other_sourced_columns(
+def other_sourced_columns(
     contract_document: Mapping[str, Any],
     expose_id: str,
     flux_rules: Any,

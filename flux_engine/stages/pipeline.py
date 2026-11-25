@@ -263,6 +263,7 @@ from flux_engine.seam.resolve import (
     declared_overlay,
     declared_responses,
     load_bundle,
+    other_sourced_columns,
     parameter_entries,
     privacy_floors,
     profile_reference,
@@ -3565,8 +3566,55 @@ def _parent_lifetime_of(
     for other in resolved:
         if reached is not None and nfc(other.expose_id) == nfc(reached):
             held = lifetime_entries_of(other.extension, other.expose_id)[:1]
-            return (held[0].start, held[0].end) if held else None
+            if not held:
+                return None
+            _refuse_varying_lifetime(entry, other, (held[0].start, held[0].end))
+            return (held[0].start, held[0].end)
     return None
+
+
+def _refuse_varying_lifetime(
+    entry: Any, parent: ResolvedEmit, columns: Tuple[str, Optional[str]]
+) -> None:
+    """Refuse (``FLX-3403``) ``parent.lifetime`` on a parent whose versions can differ on its lifetime columns.
+
+    A parent that declares a history gives each entity a chain of versions, and only a carried
+    column keeps one value over them (ADR 0017 section 6). A lifetime column that the parent's history
+    sets (a validity column, the activation, a tracked or the end column) or that a rule sets can
+    differ between versions, and the bound would hold the entity to whichever version its row
+    reached. The message names the emit and the columns.
+    """
+    histories = history_entries_of(parent.extension, parent.expose_id)
+    if not histories:
+        return
+    semantics = (
+        declared_exposes(parent.contract_document).get(parent.expose_id, {}).get("semantics")
+    )
+    varying = set(window_ends(semantics).values()) | set(
+        other_sourced_columns(
+            parent.contract_document,
+            parent.expose_id,
+            parent.flux_side_rules,
+            parent.keys,
+            copies=False,
+        )
+    )
+    for kept in histories:
+        varying.update(item.column for item in kept.tracked)
+        varying.update(
+            column
+            for column in (kept.activation, kept.end.column if kept.end is not None else None)
+            if column is not None
+        )
+    named = sorted(column for column in columns if column is not None and column in varying)
+    if named:
+        raise FluxError(
+            FLX_3403,
+            f"history ({entry.emit}).parent.lifetime reads {', '.join(map(repr, named))} of "
+            f"{parent.expose_id!r}, which declares a history that does not carry "
+            f"{'it' if len(named) == 1 else 'them'}: the cells can differ between the versions "
+            "of one parent, so the bound would hold an entity to an arbitrary one",
+        )
 
 
 def _bridges_of(resolved: Sequence[ResolvedEmit]) -> Dict[str, Tuple[Tuple[str, str], ...]]:

@@ -31,6 +31,7 @@ from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.verify import verify
 
 from ._fleet import (
+    CONTRACT,
     DEPOT,
     NAMESPACE,
     UNTIL,
@@ -38,6 +39,7 @@ from ._fleet import (
     by_vehicle,
     plan_module,
     plan_refused,
+    repin,
     run_bundle,
 )
 from ._fleet import HISTORY as EMIT
@@ -297,3 +299,70 @@ def test_a_history_with_no_end_closes_a_last_version_only_when_its_parent_ended_
     rows = [{"vehicle": 1, "depot": 1, "valid_from": date(2024, 2, 1), "valid_to": closed}]
     found = within_parent_share(entry, rows, versions, parents, ("depot",), ("o", "c"))
     assert (found.satisfied, found.total) == (held, 1)
+
+
+def _versioned_depots(tmp_path: Path, *, closed_by: Optional[str]) -> Path:
+    """The bundle with the depot itself a history, ``closed_on`` set by a rule from ``closed_by``."""
+    target = _bundle(tmp_path)
+    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
+    depot = next(item for item in contract["exposes"] if item["exposeId"] == DEPOT)
+    depot["contract"]["schema"] = [
+        {"name": "depot_sk", "type": "INT", "required": True},
+        *depot["contract"]["schema"],
+        {"name": "depot_from", "type": "DATE", "required": True},
+        {"name": "depot_to", "type": "DATE", "required": False},
+    ]
+    depot["semantics"]["entities"] = [
+        {"name": "depot_version", "type": "primary", "expr": "depot_sk"},
+        {"name": "depot", "type": "natural", "expr": "depot_id"},
+    ]
+    depot["semantics"]["dimensions"] += [
+        {"name": "depot_from", "type": "time", "typeParams": {"validityParams": {"isStart": True}}},
+        {"name": "depot_to", "type": "time", "typeParams": {"validityParams": {"isEnd": True}}},
+    ]
+    if closed_by is not None:
+        depot["contract"]["invariants"] = [
+            {"id": "closed", "derive": "closed_on", "expr": closed_by}
+        ]
+    repin(target, contract)
+    path = target / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    flux = document["extensions"][NAMESPACE]
+    emit = flux["emits"][DEPOT]
+    emit["rows"] = 50
+    columns = emit["fidelity"]["columns"]
+    columns["depot_sk"] = {"range": {"min": "1", "max": "50"}}
+    columns["depot_from"] = {"range": {"min": "2023-01-01", "max": "2025-12-31"}}
+    columns["depot_to"] = {"range": {"min": "2023-01-01", "max": "2025-12-31"}}
+    if closed_by is not None:
+        columns.pop("closed_on")
+    flux["history"].append(
+        {
+            "emit": DEPOT,
+            "entities": 25,
+            "versions": {"bins": ["1", "2", "4"], "binWeights": ["0.5", "0.5"]},
+            "start": {"bins": ["2023-01-01", "2023-06-01"], "binWeights": ["1"]},
+            "length": {"bins": ["30", "200"], "binWeights": ["1"], "closed": "lower"},
+            "until": UNTIL,
+            "chain": "nextStart",
+        }
+    )
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    return target
+
+
+def test_a_parent_lifetime_a_rule_sets_on_a_versioned_parent_is_refused(tmp_path: Path) -> None:
+    bundle = _versioned_depots(tmp_path, closed_by="depot_to")
+    planned = plan_refused(bundle, tmp_path / "state")
+    assert "FLX-3403" in planned.stderr and "parent.lifetime" in planned.stderr
+    assert "closed_on" in planned.stderr and DEPOT in planned.stderr
+
+
+def test_a_parent_lifetime_the_versioned_parent_carries_plans(tmp_path: Path) -> None:
+    planned = plan_module.plan(
+        _versioned_depots(tmp_path, closed_by=None),
+        state_dir=tmp_path / "state",
+        kernel=KERNEL_V2.version,
+        stage=False,
+    )
+    assert planned.success, planned.stderr
