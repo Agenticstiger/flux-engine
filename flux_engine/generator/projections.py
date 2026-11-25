@@ -461,7 +461,8 @@ def held_givens(
         _refuse_unservable(where, column_plan, parent, parent in own)
         reason = _unheld_reason(history, plan, parent)
         if reason is not None:
-            shares = _fallback_draw(where, reason, column_plan, parent, history, plan)
+            unnamed = f"{where}, and {reason}, which no level of {parent!r} names"
+            shares = _fallback_draw(unnamed, column_plan, parent, history, plan)
             fallback[parent] = None
             if shares is not None:
                 marginals[name] = tuple((level, str(share)) for level, share in shares.items())
@@ -487,14 +488,12 @@ def _refuse_unservable(where: str, column_plan: ColumnPlan, parent: str, is_own:
 
 
 def _fallback_draw(
-    where: str,
-    reason: str,
-    column_plan: ColumnPlan,
-    parent: str,
-    history: GeneratorPlan,
-    plan: GeneratorPlan,
+    unnamed: str, column_plan: ColumnPlan, parent: str, history: GeneratorPlan, plan: GeneratorPlan
 ) -> Optional[Dict[str, Fraction]]:
-    """The marginal a column draws where its parent holds no level, ``None`` for its support, or the refusal."""
+    """The marginal a column draws where its parent holds no level, ``None`` for its support, or the refusal.
+
+    *unnamed* is the refusal's opening: the column, its parent and what sets the value no level names.
+    """
     found = implied_marginal(column_plan, parent, history, plan)
     if found is not None:
         return found[0]
@@ -502,11 +501,10 @@ def _fallback_draw(
     if gap is not None:
         name = column_plan.column.name
         raise _refuse(
-            f"{where}, and {reason}, which no level of {parent!r} names; {name!r} has no "
-            f"distribution of its own to draw from there ({gap}); declare level weights "
-            f"for {parent!r} that name the levels the table of {name!r} is keyed by, or "
-            f"declare a support for {name!r} that names the levels its table names, or "
-            f"draw it on its own"
+            f"{unnamed}; {name!r} has no distribution of its own to draw from there ({gap}); "
+            f"declare level weights for {parent!r} that name the levels the table of {name!r} is "
+            f"keyed by, or declare a support for {name!r} that names the levels its table names, "
+            "or draw it on its own"
         )
     return None
 
