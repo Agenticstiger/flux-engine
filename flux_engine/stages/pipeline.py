@@ -1088,6 +1088,72 @@ def widened_ranges_of(
     return found
 
 
+def unrepairable_withins_of(
+    emits: Sequence[ResolvedEmit], time_bounds: Optional[Mapping[str, Any]], *, where: str
+) -> Dict[Tuple[str, str], str]:
+    """Why each enforced ``within`` date of *emits* is refused by the plan's check and no wider range repairs it.
+
+    Keyed by ``(exposeId, column)``. A column is listed when :func:`_refuse_empty_intersections`
+    would refuse it even with repair on: the three conditions fail, and the parent's latest
+    start, or a parent's earliest end the check reads, is not declared (:func:`_repaired`).
+    The reason says so, and names the parent's start column when it is that start. A column the
+    plan accepts, or that :func:`widened_ranges_of` lists, is not listed. ``fluxsim init`` writes
+    no ``within`` entry for a listed date.
+    """
+    found: Dict[Tuple[str, str], str] = {}
+    window = window_of(time_bounds)
+    held = {(str(emit.contract_path), emit.expose_id): emit for emit in emits}
+    for emit in emits:
+        bounds = declared_bounds_of(emit)
+        group_of: Dict[str, List[Tuple[WithinLevel, ResolvedEmit]]] = {}
+        for entry in within_entries_of(emit.extension, emit.expose_id):
+            own = lifetime_entries_of(emit.extension, emit.expose_id)[:1]
+            column = own[0].start if entry.lifetime and own else entry.date
+            targets = _targets_along(emit, entry.relationship)
+            parent = held.get((str(emit.contract_path), targets[-1])) if targets else None
+            lifetime = lifetime_entries_of(parent.extension, parent.expose_id)[:1] if parent else ()
+            if column is None or parent is None or not lifetime:
+                continue  # the plan refuses it for what it is: not a range
+            level = WithinLevel(
+                column=column,
+                kind=_kind_of(emit, column),
+                relationship=entry.relationship,
+                start=lifetime[0].start,
+                end=lifetime[0].end,
+                parent_kind=_kind_of(parent, lifetime[0].start),
+                offset=entry.offset,
+                period=entry.lifetime,
+                target=entry.target,
+                bounds=bounds.get(column),
+            )
+            group_of.setdefault(column, []).append((level, parent))
+        for column, group in group_of.items():
+            if all(positive_target(level.target) for level, _ in group):
+                continue
+            terms = _intersection_terms(group, window, where)
+            if terms is None or _repaired(emit, terms, column, {}):
+                continue
+            reason = _empty_intersection_reason(emit, terms)
+            if reason is None:
+                continue
+            starts = sorted(
+                {level.start for level, parent in group if _parent_bounds(parent, where)[0] is None}
+            )
+            if starts:
+                named = ", ".join(repr(start) for start in starts)
+                reason = (
+                    f"the latest start of the parent's lifetime is not declared ({named} declares "
+                    "no range), so an enforced entry could leave a row of the date without a value"
+                )
+            else:
+                reason = (
+                    f"no declared range makes the entry hold on every row: {reason}, so an "
+                    "enforced entry could leave a row of the date without a value"
+                )
+            found[(emit.expose_id, column)] = reason
+    return found
+
+
 def _refuse_empty_intersections(
     resolved: ResolvedEmit,
     levels: Sequence[Tuple[WithinLevel, ResolvedEmit]],

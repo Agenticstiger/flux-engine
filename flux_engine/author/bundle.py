@@ -2745,7 +2745,10 @@ class _RangesWidened(Exception):
 
 
 class _WithinDeclined(Exception):
-    """A widened range leaves the expose no property ``verify`` can compare: the entry is not written.
+    """A child date's entry cannot be written: no widening makes the plan accept it, or it leaves no property to compare.
+
+    Either no range repairs the plan's check of the entry (the parent's latest start is not
+    declared), or a widened range leaves the expose no property ``verify`` can compare.
 
     ``reasons`` holds, per ``(exposeId, column)`` of the child date, why no ``within`` entry dates
     it, so the bundle is written again without the entry and without the widened range.
@@ -3439,8 +3442,9 @@ def _author_bundle(
     With *declined_projection*, the reason plan refuses it with its projections, none is written.
 
     A date of ``fallbacks.undated`` (per exposeId and column, with its reason) is dated by no
-    ``within`` entry. When a widened range leaves the expose no property to compare,
-    :class:`_WithinDeclined` says which dates, so the bundle is written again without them.
+    ``within`` entry. When no range repairs a date's entry, or a widened range leaves the expose no
+    property to compare, :class:`_WithinDeclined` says which dates, so the bundle is written again
+    without them.
 
     An exposure of ``fallbacks.declined`` (per exposeId and relationship, with its reason) and a
     ``rates`` entry of ``fallbacks.unrated`` (per exposeId and column, with its reason) are not
@@ -4175,10 +4179,11 @@ def _refuse_unless_widened(
     """
     from flux_engine.runtime import resolve_cast
     from flux_engine.seam.resolve import load_bundle, resolve_all_emits
-    from flux_engine.stages.pipeline import widened_ranges_of
+    from flux_engine.stages.pipeline import unrepairable_withins_of, widened_ranges_of
 
     kinds = {expose.expose_id: expose.kinds for expose in exposes}
     asked: Dict[Tuple[str, str], Tuple[int, int]] = {}
+    unrepairable: Dict[Tuple[str, str], str] = {}
     with tempfile.TemporaryDirectory(prefix="fluxsim-init-") as scratch:
         directory = Path(scratch)
         for entry in files:
@@ -4188,14 +4193,18 @@ def _refuse_unless_widened(
             for simulation_id in loaded.simulation_ids():
                 cast = resolve_cast(loaded.flux_documents, simulation_id=simulation_id)
                 emits = resolve_all_emits(loaded, simulation_id=simulation_id)
-                found = widened_ranges_of(
-                    emits, cast.simulation.get("spec", {}).get("timeBounds"), where=simulation_id
-                )
+                bounds = cast.simulation.get("spec", {}).get("timeBounds")
+                unrepairable.update(unrepairable_withins_of(emits, bounds, where=simulation_id))
+                if unrepairable:
+                    continue
+                found = widened_ranges_of(emits, bounds, where=simulation_id)
                 for (expose_id, column), (low, high) in found.items():
                     unit = _DAY_MILLISECONDS if kinds[expose_id][column] is LogicalKind.DATE else 1
                     asked[(expose_id, column)] = (low * unit, high * unit)
         except (FluxError, ArithmeticError, ValueError, KeyError):
             return  # what is wrong is not a range: the check that follows says what
+    if unrepairable:
+        raise _WithinDeclined(unrepairable)
     if asked:
         raise _RangesWidened(asked)
 
