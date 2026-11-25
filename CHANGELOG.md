@@ -24,6 +24,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Added
 
+- Profile format 1-5-0 and profile-request format 1-3-0, written down (PROFILE-SPEC section 3a, PROFILE-REQUEST-SPEC
+  section 8, ADR 0019). Each member of a table's `history` may carry a `noise` block, with its groups in the noisy
+  form, when the table is one a unit of privacy follows into and is not the unit's own expose; it is charged as a
+  count table over that table, L1 = L2 = `m_T`, and its share adds to the budget. A column of any domain may state
+  `nullCount/2`, a noisy count of its known and NULL rows, charged the same way. A history whose every member is noisy
+  no longer keeps a profile from P3. A request may ask for `history: {}` and for `nullCount/2`. The schema is
+  `docs/spec/profile-1-5.schema.json`; documents of format 1-4-0 and earlier read as before. The readers follow in the
+  next changes.
 - `init --json` carries `ledger.unused`, the list an owner can leave out of the profile: an entry the profile reader
   holds whole (a calendar entry with none of its histograms read, say) is named by its own pointer, so dropping
   exactly that list leaves a profile the reader accepts. `ledger.statistics` still names each statistic on its own,
