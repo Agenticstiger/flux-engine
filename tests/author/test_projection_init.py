@@ -26,10 +26,9 @@ import yaml
 
 from flux_engine.seam.history import history_entries_of
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
-from flux_engine.seam.resolve import load_bundle, resolve_all_emits
 from flux_engine.stages.plan import plan
-from flux_engine.stages.validate import validate
 
+from ._written import plan_written, resolved_emits
 from .test_history_init import (
     TIER,
     _init,
@@ -262,25 +261,14 @@ WRITTEN = ("plan_current", "plan_change", "plan_month")
 def test_the_written_bundle_validates_and_resolves(tmp_path: Path) -> None:
     namespace = _written(tmp_path, *WRITTEN)
     assert SNAPSHOTS_KEY in namespace
-    bundle = tmp_path / "bundle"
-    assert validate(bundle).exit_code == 0
-    loaded = load_bundle(bundle)
-    (simulation_id,) = loaded.simulation_ids()
-    emits = {e.expose_id: e for e in resolve_all_emits(loaded, simulation_id=simulation_id)}
+    emits = resolved_emits(tmp_path)
     assert history_entries_of(emits["plan_version"].extension, "plan_version")
     assert "rows" not in (emits["plan_current"].extension or {})
 
 
 def test_the_written_bundle_plans(tmp_path: Path) -> None:
     _written(tmp_path, *WRITTEN)
-    outcome = plan(
-        tmp_path / "bundle",
-        state_dir=tmp_path / "state",
-        profile=tmp_path / "plans.profile.json",
-        kernel="0.2.0",
-        stage=False,
-    )
-    assert outcome.success, outcome.stderr
+    plan_written(tmp_path)
 
 
 KEYS = (SNAPSHOTS_KEY, EVENTS_KEY, PERIODS_KEY)

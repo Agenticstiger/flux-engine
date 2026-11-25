@@ -34,15 +34,16 @@ Every refusal is ``FLX-3403``.
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from functools import lru_cache
 from itertools import accumulate
+from math import lcm
 from threading import local
-from typing import Any, Dict, Hashable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Hashable, List, Mapping, Optional, Sequence, Tuple, Union
 from weakref import WeakKeyDictionary
 
 import numpy as np
@@ -61,6 +62,7 @@ from flux_engine.generator.counts import (
     check_minimum,
     counted_layout,
     digest_key,
+    pass_excess,
 )
 from flux_engine.generator.paths import (
     CHANGE_PATH_SHAPE,
@@ -78,7 +80,12 @@ from flux_engine.generator.paths import (
 )
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.counts import ChildShape
-from flux_engine.seam.history import Histogram, HistoryEntry, HistoryTracked
+from flux_engine.seam.history import (
+    END_SHARE_OF_ELIGIBLE,
+    Histogram,
+    HistoryEntry,
+    HistoryTracked,
+)
 
 __all__ = [
     "Chain",
@@ -87,6 +94,9 @@ __all__ = [
     "HistoryPlan",
     "LevelTable",
     "OuterInputs",
+    "DeferredBound",
+    "ParentBound",
+    "ParentCut",
     "ReasonPlan",
     "TrackedSpec",
     "chain_unit_kind",
@@ -94,6 +104,8 @@ __all__ = [
     "chain_columns",
     "check_layout",
     "drawn_length",
+    "declared_ended",
+    "end_share_note",
     "ended_count",
     "ended_entities",
     "ended_key",
@@ -103,6 +115,9 @@ __all__ = [
     "first_start_at",
     "fit_lengths",
     "largest_count",
+    "limit_of",
+    "limits_of",
+    "parent_bound_notes",
     "length_table",
     "level_table",
     "open_end_unit",
@@ -219,16 +234,33 @@ class HistoryPick:
     rows: int
     entities: int
     window_start: int
+    parent_lifetime: Optional[Tuple[str, Optional[str]]] = None
+    #: The rows the contract declares for a history that keeps to its parent's lifetime, after
+    #: ``--scale``. The layout is worked out from them and may hold fewer (ADR 0017, amendment of
+    #: 2026-11-24), when ``rows`` is what it holds.
+    declared_rows: Optional[int] = None
+
+    @property
+    def laid_rows(self) -> int:
+        """The rows the layout is worked out from: the declared ones for a bound history, else ``rows``."""
+        return self.rows if self.declared_rows is None else self.declared_rows
 
     def as_document(self) -> Dict[str, Any]:
         """The ``history`` member of a driver's plan document: what the entry declares."""
-        return {
+        document: Dict[str, Any] = {
             "history": self.entry.as_member(),
             "kind": self.kind.value,
             "rows": self.rows,
             "entities": self.entities,
             "windowStartMs": self.window_start,
         }
+        if self.parent_lifetime is not None:
+            # Only a history bound by its parent's lifetime lists the columns it reads.
+            document["parentLifetime"] = list(self.parent_lifetime)
+        if self.declared_rows is not None and self.declared_rows != self.rows:
+            # The layout holds fewer rows than the contract declares.
+            document["declaredRows"] = self.declared_rows
+        return document
 
 
 @dataclass(frozen=True)
@@ -258,6 +290,81 @@ class OuterInputs:
                 None if self.expected is None else tuple(self.expected),
             )
         return (self.relationship, self.parents, self.shape, self.minimum, held)
+
+
+@dataclass(frozen=True, eq=False)
+class ParentBound:
+    """The lifetime of each parent row in the chain's unit (ADR 0017, amendment of 2026-11-24).
+
+    ``starts[p]`` is parent row ``p``'s lifetime start, meaningful where ``has_start[p]``; a parent
+    whose start is NULL bounds nothing. ``ends[p]`` is its last day (a DATE end bounds a TIMESTAMP
+    chain up to the last millisecond of its day, ADR 0024 section 5), meaningful where
+    ``has_end[p]``; a parent with no end, a NULL end, or an end before its start has none, and so
+    cuts nothing. ``identity`` stands for the arrays in the plan cache.
+    """
+
+    starts: "np.ndarray"
+    has_start: "np.ndarray"
+    ends: "np.ndarray"
+    has_end: "np.ndarray"
+    identity: Hashable
+
+    def get(self) -> "ParentBound":
+        """The bound itself (a :class:`DeferredBound` reads it when it is first needed)."""
+        return self
+
+    @classmethod
+    def of(
+        cls, lifetimes: Sequence[Optional[Tuple[int, Optional[int]]]], identity: Hashable
+    ) -> "ParentBound":
+        """The bound of parent rows whose lifetimes, ``None`` for a NULL start, are *lifetimes*."""
+        size = len(lifetimes)
+        starts = np.zeros(size, dtype=np.int64)
+        ends = np.zeros(size, dtype=np.int64)
+        has_start = np.zeros(size, dtype=bool)
+        has_end = np.zeros(size, dtype=bool)
+        for row, found in enumerate(lifetimes):
+            if found is None:
+                continue
+            starts[row], has_start[row] = found[0], True
+            if found[1] is not None:
+                ends[row], has_end[row] = found[1], True
+        return cls(starts, has_start, ends, has_end, identity)
+
+
+@dataclass(frozen=True, eq=False)
+class DeferredBound:
+    """A parent bound that is read only when a layout has to be worked out.
+
+    The layout of a history that keeps to its parent's lifetime is kept by the bound's
+    ``identity``, so a layout this process holds is found without reading a parent row; the
+    ``load`` that reads them runs only for a layout it does not hold.
+    """
+
+    identity: Hashable
+    load: Callable[[], ParentBound]
+
+    def get(self) -> ParentBound:
+        """The bound, read now."""
+        return self.load()
+
+
+@dataclass(frozen=True, eq=False)
+class ParentCut:
+    """What a parent's lifetime does to the entities of a history (ADR 0017, amendment of 2026-11-24).
+
+    ``limits[e]`` is where entity ``e``'s chain must end, in the chain's unit. ``forced`` flags the
+    entities whose parent ended inside the horizon (they end). ``capped`` is the number of entities
+    whose version count was cut to the room their parent leaves them, ``moved`` the versions they
+    lost that went to entities with room to spare, and ``shortfall`` the versions no entity had
+    room for, which the layout does not hold (its rows are the declared ones less the shortfall).
+    """
+
+    limits: "np.ndarray"
+    forced: "np.ndarray"
+    capped: int = 0
+    moved: int = 0
+    shortfall: int = 0
 
 
 @dataclass(frozen=True)
@@ -313,11 +420,12 @@ class HistoryPlan:
     forces_ending: bool = False
     changes: Optional["np.ndarray"] = None
     reasons: Optional[ReasonPlan] = None
+    cut: Optional[ParentCut] = None
 
     @property
     def rooms(self) -> "np.ndarray":
-        """Each entity's room: ``until`` less its first start, in the chain's unit."""
-        return self.until - self.first_starts
+        """Each entity's room: where its chain must end, less its first start, in the chain's unit."""
+        return limits_of(self, np.arange(self.entities, dtype=np.int64)) - self.first_starts
 
     def entity_of(self, row: int) -> int:
         """The entity version row *row* belongs to."""
@@ -373,6 +481,18 @@ class HistoryPlan:
         return self.closes_last and self.has_ended(entity)
 
 
+def limit_of(plan: HistoryPlan, entity: int) -> int:
+    """Where *entity*'s chain must end: ``until``, or its parent's last day when that is earlier."""
+    return plan.until if plan.cut is None else int(plan.cut.limits[entity])
+
+
+def limits_of(plan: HistoryPlan, entities: "np.ndarray") -> "np.ndarray":
+    """:func:`limit_of` for an array of entities."""
+    if plan.cut is None:
+        return np.full(entities.shape[0], plan.until, dtype=np.int64)
+    return plan.cut.limits[entities]
+
+
 # -- the counts as a multiset -------------------------------------------------------------------
 
 
@@ -410,8 +530,65 @@ def largest_count(entities: int, rows: int, versions: Optional[ChildShape]) -> i
     return int(_count_multiset(entities, rows, versions).max())
 
 
+def parent_bound_notes(expose_id: str, chain: "HistoryPlan") -> List[str]:
+    """What ``plan`` says of a history that keeps to its parent's lifetime, one sentence each.
+
+    The entities whose parent's lifetime leaves room for fewer versions than they were given, and
+    the versions that moved to entities with room to spare (a shortfall too, the declared rows the
+    parents leave no room for), and the count of entities forced to end with their parent in one
+    version, whose one version is the ending version itself and carries the end value from its
+    start (ADR 0017, amendment of 2026-11-24). Advice only: no plan document or digest carries it.
+    """
+    notes: List[str] = []
+    cut = chain.cut
+    if cut is not None and cut.capped:
+        said = (
+            f"note: history ({expose_id}): the parents' lifetimes leave {cut.capped} of "
+            f"{chain.entities} entities room for fewer versions than they were given; "
+            f"{cut.moved} versions moved to entities with room to spare"
+        )
+        if cut.shortfall:
+            said += (
+                f", and {cut.shortfall} found none, so the history has {chain.rows} rows "
+                f"of the {chain.rows + cut.shortfall} declared"
+            )
+        notes.append(said)
+    if chain.forces_ending and cut is not None:
+        single = int((cut.forced & (chain.versions.counts == 1)).sum())
+        if single:
+            notes.append(
+                f"note: history ({expose_id}): {single} entities end with their parent and have one "
+                "version, which is their ending version: it takes the end value from its start"
+            )
+    return notes
+
+
+def _bound_by_parent(entry: HistoryEntry) -> bool:
+    """Whether the entry keeps to its parent's lifetime (``parent.lifetime``)."""
+    return entry.parent is not None and entry.parent.lifetime
+
+
 def _closes_last(entry: HistoryEntry) -> bool:
-    return entry.end is not None and entry.end.mode == "closeLast"
+    """Whether an ended entity's last version is closed: ``closeLast``, or no ``end`` under a parent bound.
+
+    A history bound by its parent's lifetime with no ``end`` ends only the entities whose parent
+    ended, and closes their last version at the parent's last day (ADR 0017, amendment of
+    2026-11-24).
+    """
+    if entry.end is None:
+        return _bound_by_parent(entry)
+    return entry.end.mode == "closeLast"
+
+
+def _closing_words(entry: HistoryEntry) -> str:
+    """What the last version needs room for, in the words of the refusal that finds none."""
+    if not _closes_last(entry):
+        return ""
+    if entry.end is None:
+        return (
+            " and an entity whose parent ended has its last version closed on the parent's last day"
+        )
+    return " and closeLast closes the last one"
 
 
 def _first_start_interval(
@@ -426,7 +603,7 @@ def _first_start_interval(
         raise _refuse(
             f"history ({entry.emit}): the first starts have no room. They are drawn in "
             f"[timeBounds.start, until - {reserved}), because an entity takes up to {c} "
-            f"versions{' and closeLast closes the last one' if _closes_last(entry) else ''}, "
+            f"versions{_closing_words(entry)}, "
             f"and that interval is empty; move until later, start the window earlier, or "
             f"declare fewer versions per entity"
         )
@@ -482,22 +659,57 @@ def _eligible(entry: HistoryEntry, counts: "np.ndarray") -> "np.ndarray":
     """Which entities may end: all under ``closeLast`` without a column, else those with two versions."""
     end = entry.end
     assert end is not None
-    if end.mode == "closeLast" and end.column is None:
+    if end.every_entity_eligible:
         return np.ones(counts.shape[0], dtype=bool)
     return counts >= 2
 
 
-def ended_count(eligible: int, share: str) -> int:
-    """``n = LRM(E', [share, 1 - share])[0]``: the entities that end, of the *eligible* ones.
+def declared_ended(entities: int, share: str) -> int:
+    """``n = LRM(E, [share, 1 - share])[0]``: the entities the declared share asks to end, of *all* of them.
 
-    The classes are keyed ``"0"`` and ``"1"``. None end when none is eligible.
+    The classes are keyed ``"0"`` and ``"1"``. Whether that many are eligible is :func:`ended_count`'s.
     """
-    if eligible == 0:
+    if entities == 0:
         return 0
     weight = _weight(share, "history.end.share")
     if not 0 <= weight <= 1:
         raise _refuse(f"history.end.share is a decimal from 0 to 1, not {share!r}")
-    return largest_remainder(eligible, {"0": weight, "1": 1 - weight})["0"]  # type: ignore[dict-item]
+    return largest_remainder(entities, {"0": weight, "1": 1 - weight})["0"]  # type: ignore[dict-item]
+
+
+def ended_count(entities: int, eligible: int, share: str, *, of_eligible: bool = False) -> int:
+    """The entities that end: ``n`` of all *entities*, or every eligible one when fewer are eligible.
+
+    With *of_eligible*, the share of a plan recorded before the end share moved to every entity
+    (:data:`~flux_engine.seam.history.END_SHARE_OF_ELIGIBLE`): ``n = LRM(E', [share, 1 - share])[0]``
+    of the *eligible* entities alone, which is what every engine to 0.11.1 ended. Such a plan
+    replays under it, so its run id keeps the digests it had.
+    """
+    if of_eligible:
+        return declared_ended(eligible, share)
+    return min(declared_ended(entities, share), eligible)
+
+
+def end_share_note(expose_id: str, entry: HistoryEntry, plan: "HistoryPlan") -> Optional[str]:
+    """One sentence when fewer entities are eligible to end than the share of every entity asks for.
+
+    Every eligible entity then ends and the share yielded is lower than the one declared (ADR 0017,
+    the amendment of 2026-11-24). It names the emit, the declared share and the yielded share as a
+    decimal. It is advice only: nothing here changes a value, and no plan document carries it.
+    """
+    end = entry.end
+    if end is None or plan.ended is None or plan.entities == 0:
+        return None
+    if end.share_of == END_SHARE_OF_ELIGIBLE:
+        return None  # a plan recorded before the share moved to every entity declares no such share
+    if int(plan.ended.sum()) >= declared_ended(plan.entities, end.share):
+        return None
+    yielded = Fraction(int(plan.ended.sum()), plan.entities)
+    return (
+        f"note: {expose_id} declares a history end share of {end.share}, a share of every "
+        f"entity, and only {int(plan.ended.sum())} of {plan.entities} entities can end, so every "
+        f"eligible entity ends and the share yielded is {float(yielded):.4f}"
+    )
 
 
 def ended_entities(
@@ -506,14 +718,38 @@ def ended_entities(
     expose_id: str,
     entry: HistoryEntry,
     counts: "np.ndarray",
+    forced: Optional["np.ndarray"] = None,
 ) -> "np.ndarray":
-    """Which entities end, as a flag per entity: the eligible entity of rank ``r`` ends when ``permute/2(K_end, E', r) < n``."""
+    """Which entities end, as a flag per entity: the eligible entity of rank ``r`` ends when ``permute/2(K_end, E', r) < n``.
+
+    ``n`` is the share of every entity (:func:`ended_count`), chosen among the entities that can
+    end; for a plan recorded before the share moved, the share of the eligible entities alone
+    (``entry.end.share_of``). *forced* flags the entities whose parent ended inside the horizon (ADR 0017, amendment of
+    2026-11-24). They can end whatever their versions, they end, and they count towards ``n``: the
+    others end by the same permutation over the eligible entities that are not forced, ``n`` less
+    the forced ones, and when the forced ones are more than ``n`` they all end and no other does.
+    """
     end = entry.end
     assert end is not None
     ended = np.zeros(counts.shape[0], dtype=bool)
-    eligible = np.nonzero(_eligible(entry, counts))[0]
+    eligible_flags = _eligible(entry, counts)
+    held = 0
+    if forced is not None:
+        ended |= forced
+        held = int(forced.sum())
+        eligible_flags = eligible_flags & ~forced
+    eligible = np.nonzero(eligible_flags)[0]
     ranks = int(eligible.shape[0])
-    count = ended_count(ranks, end.share)
+    count = max(
+        ended_count(
+            int(counts.shape[0]),
+            ranks + held,
+            end.share,
+            of_eligible=end.share_of == END_SHARE_OF_ELIGIBLE,
+        )
+        - held,
+        0,
+    )
     if count == 0:
         return ended
     images = np.array(
@@ -576,7 +812,7 @@ def _bin_values(edges: Sequence[int], position: int, closed: str) -> Tuple[int, 
 
 def _start_table(
     histogram: Optional[Histogram], kind: LogicalKind, first: int, last: int, emit: str
-) -> Optional[_StartTable]:
+) -> "Optional[Union[_StartTable, _CutTable]]":
     """The table of ``start`` inside ``[first, last]``, or ``None`` when no bin meets it.
 
     Each bin keeps its weight times its values inside over all its values, exactly; a bin with
@@ -585,8 +821,134 @@ def _start_table(
     """
     if histogram is None:
         return None
+    bins = _start_bins(histogram, kind, emit)
+    if bins is None:  # bins that do not run in order: the table is cut bin by bin
+        edges = [unit_of(text, kind) for text in histogram.edges]
+        return _table_over(histogram, edges, first, last, f"history ({emit}).start")
+    return _cut_table(bins, first, last)
+
+
+@dataclass(frozen=True)
+class _StartBins:
+    """The bins of ``start`` as integers, so the table inside any interval is cut without a pass over them.
+
+    ``lows`` and ``highs`` are each non-empty bin's first and last value, in order and apart;
+    ``weights`` are the bins' weights over one denominator (a weight that is not above zero is
+    0), and ``prefix[j]`` is the sum of the first ``j`` of them.
+    """
+
+    lows: Tuple[int, ...]
+    highs: Tuple[int, ...]
+    weights: Tuple[int, ...]
+    prefix: Tuple[int, ...]
+
+
+@lru_cache(maxsize=8)
+def _start_bins(histogram: Histogram, kind: LogicalKind, emit: str) -> Optional[_StartBins]:
+    """The bins of *histogram* in *kind*'s unit, or ``None`` when they do not run in order and apart."""
     edges = [unit_of(text, kind) for text in histogram.edges]
-    return _table_over(histogram, edges, first, last, f"history ({emit}).start")
+    closed = histogram.closed or "lower"
+    fractions = [_weight(text, f"history ({emit}).start.binWeights") for text in histogram.weights]
+    denominator = lcm(*(weight.denominator for weight in fractions)) if fractions else 1
+    lows: List[int] = []
+    highs: List[int] = []
+    weights: List[int] = []
+    for position, weight in enumerate(fractions):
+        low, high = _bin_values(edges, position, closed)
+        if high < low:
+            continue  # a bin with no value drops out
+        if lows and low <= highs[-1]:
+            return None
+        lows.append(low)
+        highs.append(high)
+        weights.append(int(weight * denominator) if weight > 0 else 0)
+    return _StartBins(tuple(lows), tuple(highs), tuple(weights), (0, *accumulate(weights)))
+
+
+class _CutTable:
+    """``start`` over the part of it inside ``[first, last]``, with each threshold worked out on demand.
+
+    It answers exactly as :class:`_StartTable` over :func:`_table_over` does for the same
+    interval: the bins that meet the interval are the contiguous run ``f`` to ``g``; each keeps
+    its weight times its values inside over all its values, and the thresholds are the running
+    shares over their total, truncated at ``2**53``. A bin between the first and the last of the
+    run lies wholly inside, so a threshold is the first bin's share, the weights of the bins
+    after it, over the total, all in whole numbers over ``size(f) * size(l)`` times the weights'
+    denominator, and one ``value`` reads ``log2`` of the run of them. A bin of weight zero adds
+    nothing, so its threshold is its predecessor's and no draw picks it.
+    """
+
+    __slots__ = ("_bins", "_first", "_f", "_l", "_scale", "_head", "_inside", "_total")
+
+    def __init__(self, bins: _StartBins, first: int, last: int, f: int, g: int) -> None:
+        self._bins = bins
+        self._first = first
+        self._f = f
+        self._l = g
+        lows, highs, weights = bins.lows, bins.highs, bins.weights
+        inside_f = min(highs[f], last) - max(lows[f], first) + 1
+        inside_l = min(highs[g], last) - max(lows[g], first) + 1
+        self._inside = (inside_f, inside_l)
+        if f == g:
+            # One bin: its share is the whole, so its one threshold is ``2**53``.
+            self._scale = 1
+            self._head = self._total = weights[f] * inside_f
+            return
+        # Every share is over ``size(f) * size(g)`` times the weights' denominator.
+        size_f, size_l = highs[f] - lows[f] + 1, highs[g] - lows[g] + 1
+        self._scale = size_f * size_l
+        self._head = weights[f] * inside_f * size_l
+        tail = weights[g] * inside_l * size_f
+        middle = (bins.prefix[g] - bins.prefix[f + 1]) * self._scale
+        self._total = self._head + middle + tail
+
+    @property
+    def empty(self) -> bool:
+        """Whether no bin of the run has a weight above zero."""
+        return self._total == 0
+
+    def _threshold(self, k: int) -> int:
+        if k == self._l:
+            return _TWO_53
+        shares = (
+            self._head + (self._bins.prefix[k + 1] - self._bins.prefix[self._f + 1]) * self._scale
+        )
+        return (_TWO_53 * shares) // self._total
+
+    def value(self, u: int) -> int:
+        """The value one ``uniform53`` *u* picks (EXPR-SPEC-2 section 6's integer arithmetic)."""
+        low, high = self._f, self._l
+        while low < high:
+            middle = (low + high) // 2
+            if self._threshold(middle) > u:
+                high = middle
+            else:
+                low = middle + 1
+        index = low
+        before = self._threshold(index - 1) if index > self._f else 0
+        width = self._threshold(index) - before
+        lows, highs = self._bins.lows, self._bins.highs
+        if index == self._f:
+            start, count = max(lows[index], self._first), self._inside[0]
+        elif index == self._l:
+            start, count = lows[index], self._inside[1]
+        else:
+            start, count = lows[index], highs[index] - lows[index] + 1
+        return start + ((u - before) * count) // width
+
+    def values(self, u: "np.ndarray") -> "np.ndarray":
+        """:meth:`value` for each of the ``uint64`` array *u*, as int64."""
+        return np.array([self.value(int(draw)) for draw in u.tolist()], dtype=np.int64)
+
+
+def _cut_table(bins: _StartBins, first: int, last: int) -> Optional[_CutTable]:
+    """The table of *bins* inside ``[first, last]``, or ``None`` when no bin of weight above zero meets it."""
+    f = bisect_left(bins.highs, first)
+    g = bisect_right(bins.lows, last) - 1
+    if f > g:
+        return None
+    table = _CutTable(bins, first, last, f, g)
+    return None if table.empty else table
 
 
 def _table_over(
@@ -627,7 +989,7 @@ def _first_starts(
     expose_id: str,
     entities: int,
     interval: Tuple[int, int],
-    table: Optional[_StartTable],
+    table: "Optional[Union[_StartTable, _CutTable]]",
 ) -> "np.ndarray":
     """Every entity's first start: position 0 of its ``history`` path, in the chain's unit."""
     if entities == 0:
@@ -641,6 +1003,116 @@ def _first_starts(
     return first + drawn.astype(np.int64)
 
 
+def _bounded_first_starts(
+    root: SeedTreeRoot,
+    sim_id: str,
+    expose_id: str,
+    entry: HistoryEntry,
+    kind: LogicalKind,
+    low: "np.ndarray",
+    high: "np.ndarray",
+) -> "np.ndarray":
+    """Every entity's first start inside its own interval ``[low, high]``: position 0 of its ``history`` path.
+
+    Entities that share an interval share one draw's arithmetic, the table of ``start`` inside it
+    or a ``bounded`` over it, so an entity whose interval is ``J`` draws what :func:`_first_starts`
+    draws.
+    """
+    entities = int(low.shape[0])
+    found = np.zeros(entities, dtype=np.int64)
+    if entities == 0:
+        return found
+    key = _first_start_key(root, sim_id, expose_id)
+    order = np.lexsort((high, low))
+    edges = np.flatnonzero(
+        np.concatenate(
+            ([True], (low[order][1:] != low[order][:-1]) | (high[order][1:] != high[order][:-1]))
+        )
+    )
+    bounds = np.concatenate((edges, [entities]))
+    draws: Optional[List[int]] = None
+    words: Optional[List[int]] = None
+    for begin, stop in zip(bounds[:-1].tolist(), bounds[1:].tolist(), strict=True):
+        rows = order[begin:stop].astype(np.int64)
+        first, last = int(low[rows[0]]), int(high[rows[0]])
+        table = _start_table(entry.start, kind, first, last, entry.emit)
+        if table is not None:
+            if draws is None:
+                # A row's draw is its own, wherever it is asked for: every row's, once.
+                draws = kernel2.column_uniform53(
+                    key, np.arange(entities, dtype=np.int64), 0
+                ).tolist()
+            found[rows] = np.array(
+                [table.value(draws[row]) for row in rows.tolist()], dtype=np.int64
+            )
+        elif stop - begin > _SMALL_GROUP:
+            found[rows] = first + kernel2.column_bounded(key, rows, 0, last - first + 1).astype(
+                np.int64
+            )
+        else:
+            if words is None:
+                words = kernel2.column_words(key, np.arange(entities, dtype=np.int64), 0).tolist()
+            found[rows] = first + _bounded_each(key, rows, words, last - first + 1)
+    return found
+
+
+#: The most entities that share an interval for which each one is drawn on its own (a ``bounded``
+#: over a few entities costs more in array calls than in arithmetic).
+_SMALL_GROUP = 8
+_MASK_64 = (1 << 64) - 1
+
+
+def _bounded_each(
+    key: kernel2.Key, rows: "np.ndarray", words: Sequence[int], n: int
+) -> "np.ndarray":
+    """:func:`~flux_engine.core.kernel2.column_bounded` at draw 0 over *rows*, from their attempt-0 *words*.
+
+    The same arithmetic one row at a time: a row whose first word clears ``2**64 mod n`` takes the
+    high word of ``word * n``; the rare row it does not is drawn by ``column_bounded`` itself.
+    """
+    threshold = (1 << 64) % n
+    found = np.zeros(rows.shape[0], dtype=np.int64)
+    pending: List[int] = []
+    for place, row in enumerate(rows.tolist()):
+        product = words[row] * n
+        if (product & _MASK_64) >= threshold:
+            found[place] = product >> 64
+        else:
+            pending.append(place)
+    if pending:
+        found[pending] = kernel2.column_bounded(key, rows[pending], 0, n).astype(np.int64)
+    return found
+
+
+def _parent_interval(
+    bound: ParentBound,
+    parents: "np.ndarray",
+    span: Tuple[int, int, int, int],
+    closing: int,
+) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray", "np.ndarray"]:
+    """Each entity's first-start interval, where its chain must end, and which entities have no room.
+
+    *span* is the window's first unit, ``J``'s last, the horizon and the largest count ``c`` of
+    versions an entity takes; *closing* is ``1`` when an ended entity's last version is closed. The
+    chain must end at ``limit = min(until, pe)``. The first start lies in ``[max(first, ps),
+    limit - c' - 1]`` when that is not empty, so the entity has the room for ``c`` versions
+    (``c' = c + closing``), and so draws what it would draw without the bound where its parent cuts
+    nothing; otherwise in ``[max(first, ps), limit - closing - 2]``, the room for one version.
+    An entity with no such start is the third array's ``True``.
+    """
+    first, _last, until, c = span
+    low = np.where(
+        bound.has_start[parents], np.maximum(first, bound.starts[parents]), first
+    ).astype(np.int64)
+    limit = np.where(bound.has_end[parents], np.minimum(until, bound.ends[parents]), until).astype(
+        np.int64
+    )
+    full = limit - (c + closing) - 1
+    one = limit - (1 + closing) - 1
+    high = np.where(low <= full, full, one)
+    return low, high, limit, low > one
+
+
 def first_start_at(
     root: SeedTreeRoot,
     sim_id: str,
@@ -651,14 +1123,29 @@ def first_start_at(
     *,
     c: int,
     time_bounds: Any,
+    parent: Optional[Tuple[Optional[int], Optional[int]]] = None,
 ) -> int:
     """Entity *entity*'s first start drawn on its own stream: the per-row counterpart of the planner's.
 
     The one ``uniform53`` over the part of ``start`` inside ``J`` when a bin meets it, else one
     ``bounded`` over ``J``, at draw index 0 of ``("sim", sim_id, "gen", exposeId, "history",
-    entity)``.
+    entity)``. *parent* is the entity's parent lifetime in the chain's unit, its start and its last
+    day (``None`` for no bound): ``J`` is cut to it as the planner cuts it, to the room for ``c``
+    versions, else for one (:func:`_parent_interval`).
     """
-    first, last, _until = _first_start_interval(entry, kind, window_start(time_bounds), c)
+    first, last, until = _first_start_interval(entry, kind, window_start(time_bounds), c)
+    if parent is not None:
+        closing = 1 if _closes_last(entry) else 0
+        low, high = first, last
+        if parent[0] is not None:
+            low = max(low, parent[0])
+        limit = until if parent[1] is None else min(until, parent[1])
+        high = limit - (c + closing) - 1
+        if low > high:
+            high = limit - (1 + closing) - 1
+        if low > high:
+            raise _refuse(f"history ({entry.emit}).parent.lifetime: the parent leaves no room")
+        first, last = low, high
     table = _start_table(entry.start, kind, first, last, entry.emit)
     stream = counter_stream(root, history_path(sim_id, expose_id, entity), HISTORY_PATH_SHAPE)
     if table is not None:
@@ -682,6 +1169,12 @@ class HistoryBinding:
     entities: int
     start: str
     end: Optional[str] = None
+    #: The start and the end column of the parent emit's ``lifetimes`` entry, read by an entry that
+    #: declares ``parent.lifetime`` (ADR 0017, amendment of 2026-11-24).
+    parent_lifetime: Optional[Tuple[str, Optional[str]]] = None
+    #: The emit's rows as declared (after ``--scale``), for an entry that declares
+    #: ``parent.lifetime``: the layout is worked out from them and may hold fewer.
+    declared_rows: Optional[int] = None
 
 
 def plan_history(
@@ -695,6 +1188,7 @@ def plan_history(
     entities: int,
     time_bounds: Any,
     outer: Optional[OuterInputs] = None,
+    bound: Optional[Union[ParentBound, DeferredBound]] = None,
 ) -> HistoryPlan:
     """The layout of *entry*'s emit, worked out once per process (KERNEL-SPEC-2 section 8.4).
 
@@ -702,11 +1196,24 @@ def plan_history(
     Simulation's ``spec.timeBounds`` or a plan's ``(startMs, endMs)``, of which only the start is
     read; *outer* is what the entity layout reads of the parent, given exactly when the entry
     declares a ``parent``. Every refusal is ``FLX-3403`` (:func:`check_layout`).
+
+    *bound* is the lifetime of each parent row, given exactly when the entry declares
+    ``parent.lifetime``: the entity layout is then worked out first, since each entity's first
+    start and room read its parent's lifetime (ADR 0017, amendment of 2026-11-24).
     """
     window = window_start(time_bounds)
     chain_unit_kind(kind)
     _check_sizes(entry, rows, entities, None if outer is None else outer.parents)
-    held = (
+    if _bound_by_parent(entry) != (bound is not None) or (bound is not None and outer is None):
+        raise _refuse(
+            f"history ({entry.emit}): the parents' lifetimes are read with the entity layout, "
+            "and exactly when the entry declares parent.lifetime"
+        )
+    per_parent = None
+    if bound is not None:
+        assert outer is not None
+        per_parent = _outer_layout(root, sim_id, expose_id, entities, outer)
+    held: Tuple[Any, ...] = (
         root.digest,
         root.seed_tree_version,
         sim_id,
@@ -717,14 +1224,36 @@ def plan_history(
         entities,
         _in_unit(window, kind),
     )
+    if bound is not None:
+        assert outer is not None
+        held = held + (outer.cache_key(), bound.identity)
     chain = _PLANS.get(held)
     if chain is None:
-        chain = _chain(root, sim_id, expose_id, entry, kind, rows, entities, window)
+        chain = _chain(
+            root,
+            sim_id,
+            expose_id,
+            entry,
+            kind,
+            rows,
+            entities,
+            window,
+            None if bound is None or per_parent is None else (per_parent, bound),
+        )
         if len(_PLANS) >= _PLANS_KEPT:
             _PLANS.clear()
         _PLANS[held] = chain
     if outer is None:
         return chain
+    if per_parent is None:
+        per_parent = _outer_layout(root, sim_id, expose_id, entities, outer)
+    return replace(chain, per_parent=per_parent)
+
+
+def _outer_layout(
+    root: SeedTreeRoot, sim_id: str, expose_id: str, entities: int, outer: OuterInputs
+) -> CountedLayout:
+    """The entities per parent, ``A``, worked out once per process."""
     outer_held = (
         root.digest,
         root.seed_tree_version,
@@ -747,7 +1276,7 @@ def plan_history(
         if len(_OUTERS) >= _PLANS_KEPT:
             _OUTERS.clear()
         _OUTERS[outer_held] = per_parent
-    return replace(chain, per_parent=per_parent)
+    return per_parent
 
 
 def _chain(
@@ -759,61 +1288,188 @@ def _chain(
     rows: int,
     entities: int,
     window: int,
+    bound_by: Optional[Tuple[CountedLayout, Union[ParentBound, DeferredBound]]] = None,
 ) -> HistoryPlan:
-    """The version layout and the first starts: everything but the entities' parents."""
+    """The version layout and the first starts: everything but the entities' parents.
+
+    With *bound_by*, the entities' layout per parent and the parents' lifetimes, each entity's
+    first start and room read its parent's lifetime (:func:`_bounded_chain`).
+    """
     c = largest_count(entities, rows, entry.versions)
     until = unit_of(entry.until, kind)
     starts = np.zeros(0, dtype=np.int64)
+    cut = None
     if entities:
         first, last, until = _first_start_interval(entry, kind, window, c)
-        table = _start_table(entry.start, kind, first, last, entry.emit)
-        starts = _first_starts(root, sim_id, expose_id, entities, (first, last), table)
-    # With a shape the entity with the most room takes the most versions; without one every
-    # entity counts alike and the rooms are not read.
-    rooms = (
-        [Fraction(int(room)) for room in (until - starts).tolist()]
-        if entry.versions is not None
-        else None
-    )
+        if bound_by is None:
+            table = _start_table(entry.start, kind, first, last, entry.emit)
+            starts = _first_starts(root, sim_id, expose_id, entities, (first, last), table)
+        else:
+            span = (first, last, until, c)
+            starts, cut = _bounded_chain(root, sim_id, expose_id, (entry, kind), span, bound_by)
     versions = counted_layout(
         versions_key(root, sim_id, expose_id),
         entities,
         rows,
         shape=None if entry.versions is None else entry.versions.as_member(),
         minimum=1,
-        expected=rooms,
+        expected=_rooms_of(entry, until, starts, cut),
     )
     if entities and int(versions.counts.max()) > c:
         raise _refuse(
             f"history ({entry.emit}): an entity takes {int(versions.counts.max())} versions, "
             f"more than the {c} the first starts leave room for"
         )
-    ended = None if entry.end is None else _ended(root, sim_id, expose_id, entry, versions)
-    forces = entry.end is not None and entry.end.column is not None
-    changes = reasons = None
-    if entry.tracked:
-        changes = _change_offsets(versions.counts, ended if forces else None)
-        reasons = _reason_plan(root, sim_id, expose_id, entry, int(changes[-1]))
-    return HistoryPlan(
+    if cut is not None:
+        versions, cut = _fitted_counts(versions, starts, cut, 1 if _closes_last(entry) else 0)
+    plan = HistoryPlan(
         entities=entities,
-        rows=rows,
+        rows=versions.children,
         c=c,
         until=until,
         first_starts=starts,
         versions=versions,
         per_parent=None,
-        ended=ended,
         closes_last=_closes_last(entry),
-        forces_ending=forces,
-        changes=changes,
-        reasons=reasons,
+        cut=cut,
+    )
+    return _with_endings(root, sim_id, expose_id, entry, plan)
+
+
+def _bounded_chain(
+    root: SeedTreeRoot,
+    sim_id: str,
+    expose_id: str,
+    declared: Tuple[HistoryEntry, LogicalKind],
+    span: Tuple[int, int, int, int],
+    bound_by: Tuple[CountedLayout, Union[ParentBound, DeferredBound]],
+) -> Tuple["np.ndarray", ParentCut]:
+    """Every entity's first start inside its parent's lifetime, and what the lifetimes do to it.
+
+    *span* is the first starts' interval, the horizon and the largest count of versions an entity
+    takes. A parent that leaves an entity no room for even one version is ``FLX-3403``.
+    """
+    entry, kind = declared
+    until = span[2]
+    per_parent, bound = bound_by
+    lifetimes = bound.get()
+    parents = per_parent.parents_of(np.arange(per_parent.children, dtype=np.int64))
+    low, high, limits, short = _parent_interval(
+        lifetimes, parents, span, 1 if _closes_last(entry) else 0
+    )
+    if bool(short.any()):
+        raise _no_room(entry, kind, lifetimes, parents[short], int(parents.shape[0]), until)
+    starts = _bounded_first_starts(root, sim_id, expose_id, entry, kind, low, high)
+    closing = lifetimes.has_end[parents]
+    forced = closing & (lifetimes.ends[parents] <= until)
+    return starts, ParentCut(limits, forced)
+
+
+def _no_room(
+    entry: HistoryEntry,
+    kind: LogicalKind,
+    bound: ParentBound,
+    parents: "np.ndarray",
+    entities: int,
+    until: int,
+) -> FluxError:
+    """``FLX-3403`` for the entities whose parent leaves no room for one version: how many, and their parents' lifetimes."""
+    opened = bound.starts[parents][bound.has_start[parents]]
+    closed = bound.ends[parents][bound.has_end[parents]]
+
+    def spread(found: "np.ndarray") -> str:
+        return (
+            "none"
+            if found.shape[0] == 0
+            else f"{_unit_text(int(found.min()), kind)} to {_unit_text(int(found.max()), kind)}"
+        )
+
+    return _refuse(
+        f"history ({entry.emit}).parent.lifetime: {int(parents.shape[0])} of {entities} entities "
+        "have a parent whose lifetime leaves no room for one version before "
+        f"until ({_unit_text(until, kind)}){_closing_words(entry)}; the parents of those entities "
+        f"open {spread(opened)} and close {spread(closed)}; give the parents longer lifetimes, "
+        "move until later, or drop parent.lifetime"
     )
 
 
+def _unit_text(value: int, kind: LogicalKind) -> str:
+    """An instant in the chain's unit as the date or timestamp a contract writes."""
+    if kind is LogicalKind.DATE:
+        return date.fromordinal(value + _EPOCH_ORDINAL).isoformat()
+    moment = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(milliseconds=value)
+    return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _fitted_counts(
+    versions: CountedLayout, starts: "np.ndarray", cut: ParentCut, closing: int
+) -> Tuple[CountedLayout, ParentCut]:
+    """The version counts held to each entity's room, and the versions that lost their place passed on.
+
+    An entity's chain holds ``room - closing - 1`` versions, the first start and a closed last
+    version each taking a unit (ADR 0017 section 4, point 4), and at least one by the first start's
+    interval. Each count is capped at that; the versions above it go one at a time, in rounds, to
+    the entities still under their own cap, the most room first and a tie to the lower entity: the
+    cap-and-pass of :func:`~flux_engine.generator.counts.pass_excess` (``counts._capped``'s
+    allotment, with a cap for each entity and the room as the weight, which is the order the rank
+    coupling gives the counts by). Versions no entity has room for are the ``shortfall``: the
+    layout holds fewer rows than it was asked for.
+    """
+    rooms = cut.limits - starts
+    caps = rooms - closing - 1
+    counts = versions.counts
+    kept = np.minimum(counts, caps)
+    lost = int((counts - kept).sum())
+    if lost == 0:
+        return versions, cut
+    fitted, left = pass_excess(kept, caps, rooms, lost)
+    layout = CountedLayout(
+        counts=fitted, offsets=np.cumsum(fitted) - fitted, children=int(fitted.sum())
+    )
+    held = replace(cut, capped=int((counts > caps).sum()), moved=lost - left, shortfall=left)
+    return layout, held
+
+
+def _rooms_of(
+    entry: HistoryEntry, until: int, starts: "np.ndarray", cut: Optional[ParentCut]
+) -> Optional[List[Fraction]]:
+    """Each entity's room, for a shape: the entity with the most room takes the most versions.
+
+    Without a shape every entity counts alike and the rooms are not read.
+    """
+    if entry.versions is None:
+        return None
+    return [
+        Fraction(int(room)) for room in ((until if cut is None else cut.limits) - starts).tolist()
+    ]
+
+
+def _with_endings(
+    root: SeedTreeRoot, sim_id: str, expose_id: str, entry: HistoryEntry, plan: HistoryPlan
+) -> HistoryPlan:
+    """*plan* with the entities that end and, for a history that tracks columns, its ordinary changes."""
+    versions, forced = plan.versions, None if plan.cut is None else plan.cut.forced
+    if entry.end is None:
+        ended = forced if _bound_by_parent(entry) else None
+    else:
+        ended = _ended(root, sim_id, expose_id, entry, versions, forced)
+    forces = entry.end is not None and entry.end.column is not None
+    changes = reasons = None
+    if entry.tracked:
+        changes = _change_offsets(versions.counts, ended if forces else None)
+        reasons = _reason_plan(root, sim_id, expose_id, entry, int(changes[-1]))
+    return replace(plan, ended=ended, forces_ending=forces, changes=changes, reasons=reasons)
+
+
 def _ended(
-    root: SeedTreeRoot, sim_id: str, expose_id: str, entry: HistoryEntry, versions: CountedLayout
+    root: SeedTreeRoot,
+    sim_id: str,
+    expose_id: str,
+    entry: HistoryEntry,
+    versions: CountedLayout,
+    forced: Optional["np.ndarray"] = None,
 ) -> "np.ndarray":
-    return ended_entities(root, sim_id, expose_id, entry, versions.counts)
+    return ended_entities(root, sim_id, expose_id, entry, versions.counts, forced)
 
 
 def _change_offsets(counts: "np.ndarray", forced: Optional["np.ndarray"]) -> "np.ndarray":
@@ -824,7 +1480,8 @@ def _change_offsets(counts: "np.ndarray", forced: Optional["np.ndarray"]) -> "np
     """
     changes = counts.astype(np.int64) - 1
     if forced is not None:
-        changes = changes - forced.astype(np.int64)
+        # An entity forced to end by its parent may have one version, which is its ending version.
+        changes = np.maximum(changes - forced.astype(np.int64), 0)
     return np.concatenate((np.zeros(1, dtype=np.int64), np.cumsum(changes)))
 
 
@@ -923,7 +1580,7 @@ def drawn_length(
 
 
 def fit_lengths(lengths: Sequence[int], room: int) -> List[int]:
-    """The closed *lengths* of one chain fitted into *room* units (ADR 0017 section 4, item 4).
+    """The closed *lengths* of one chain fitted into *room* units (ADR 0017 section 4, point 4).
 
     Lengths whose sum is at most ``room - 1`` stay. Otherwise each keeps one unit and the other
     ``room - 1 - k`` units are allotted in proportion to ``d_j - 1`` by the Largest Remainder
@@ -1030,7 +1687,7 @@ def entity_chain(
     return build_chain(
         int(plan.first_starts[entity]),
         drawn,
-        plan.until,
+        limit_of(plan, entity),
         day_before=_day_before(entry, kind),
         closed_last=closes,
     )
@@ -1080,7 +1737,7 @@ def chain_columns(
         )[0]
         lengths[closed] = length_table(entry, kind).values(words >> np.uint64(11))
     firsts = plan.first_starts[ents].astype(np.int64)
-    room = plan.until - firsts
+    room = limits_of(plan, ents) - firsts
     sums = np.zeros(ents.shape[0], dtype=np.int64)
     np.add.at(sums, owner, lengths)
     for index in np.nonzero(sums > room - 1)[0].tolist():

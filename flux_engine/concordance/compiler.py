@@ -68,6 +68,7 @@ from flux_engine.seam.emit import (
     strip_excluded as seam_strip_excluded,
 )
 from flux_engine.seam.hidden import fidelity_without_hidden
+from flux_engine.seam.projections import SNAPSHOTS_KEY
 from flux_stats.fixedpoint import (
     DEFAULT_FIELD_CAPACITY_BITS,
     FLX_5001,
@@ -85,6 +86,7 @@ from flux_stats.fixedpoint import (
 from flux_stats.spelling import parse_exact, render_exact
 
 __all__ = [
+    "names_a_snapshot",
     "CompiledFidelity",
     "CompiledProperty",
     "EXCLUDED_FIELD_NAMES",
@@ -445,6 +447,17 @@ class CompiledFidelity:
         }
 
 
+def names_a_snapshot(extension: Optional[Mapping[str, Any]]) -> bool:
+    """Whether *extension*, an emit's entry, is that of an emit a ``snapshots`` entry names.
+
+    Resolution writes the entry into the emit's extension member (ADR 0027), so the
+    one test serves ``validate``, ``plan`` and a ``verify`` that reads the transported
+    block. Such an emit draws no column of its own and may declare an empty
+    ``fidelity.columns``.
+    """
+    return isinstance(extension, Mapping) and SNAPSHOTS_KEY in extension
+
+
 def compile_fidelity(
     *,
     contract: Mapping[str, Any],
@@ -487,7 +500,11 @@ def compile_fidelity(
             )
         # A value that is not a mapping is a block nobody can read, not a
         # missing one: the parser refuses it as what it is.
-        block = parse_fidelity_block(fidelity_without_hidden(raw, extension), expose=expose)
+        block = parse_fidelity_block(
+            fidelity_without_hidden(raw, extension),
+            expose=expose,
+            allow_no_columns=names_a_snapshot(extension),
+        )
 
     columns = tuple(nfc(str(name)) for name in expose.column_names)
     h = digest_of_document(

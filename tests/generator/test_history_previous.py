@@ -31,18 +31,15 @@ import yaml
 from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.generator import columns
-from flux_engine.generator.relations import relate_plans, related_columns
+from flux_engine.generator.relations import related_columns
 from flux_engine.generator.rows import (
-    GENERATOR_VERSION_2,
     GeneratorPlan,
-    build_plan,
     generate_row_slice,
     generate_rows,
 )
 from flux_engine.generator.rules import plan_rules
-from flux_engine.seam.contract import compile_expose
 from flux_engine.seam.history import HistoryEntry
-from flux_engine.seam.keys import compile_keys, mark_key_columns
+from flux_engine.seam.keys import compile_keys
 from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
 from flux_engine.stages.plan import build_plan_document
@@ -50,6 +47,7 @@ from flux_engine.stages.verify import verify
 from tests.stages.test_history_run import EMIT as RUN_EMIT
 from tests.stages.test_history_run import NAMESPACE, _bundle, _rows, _run, _subscriptions
 
+from ._history_plans import plans_of
 from .test_history_end import (
     EMIT,
     by_entity,
@@ -59,7 +57,7 @@ from .test_history_end import (
     fresh_layouts,  # noqa: F401  (an autouse fixture)
 )
 from .test_history_end import HistoryBinding as _Binding
-from .test_history_layout import BOUNDS, SIM_ID, _column, _h, root_for, table
+from .test_history_layout import _column, root_for, table
 from .test_rules_over_links import _by_both_paths
 
 pytestmark = pytest.mark.unit
@@ -110,47 +108,18 @@ def plans_with(
 ) -> Dict[str, GeneratorPlan]:
     """The plans of the document, the versioned emit carrying *rules* as FLUX-side rules."""
     found = document()
-    keys = compile_keys(found)
-    assert keys is not None
     declarations = declared(rows, 6)
     for name in ("prior_plan", "prior_prior", "prior_customer"):
         declarations[EMIT][0][name] = {"levels": {"a": "1"}}
-    plans: Dict[str, GeneratorPlan] = {}
-    for expose in found["exposes"]:
-        expose_id = expose["exposeId"]
-        expose_keys = keys.expose(expose_id)
-        compiled = mark_key_columns(compile_expose(expose), expose_keys)
-        fidelity, count = declarations[expose_id]
-        related = related_columns(expose_keys) | ({"sub_id"} if expose_id == EMIT else set())
-        plans[expose_id] = build_plan(
-            compiled,
-            sim_id=SIM_ID,
-            seam_digest=_h(expose_id),
-            rows=count,
-            fidelity={"columns": fidelity},
-            time_bounds=BOUNDS,
-            related=related,
-            rules=plan_rules(
-                contract_document=found,
-                expose_id=expose_id,
-                settings=None,
-                related=related,
-                mapping=None,
-                has_fidelity=True,
-                strict=False,
-                flux_rules=list(rules) if expose_id == EMIT else None,
-                keys=expose_keys,
-                rows=count,
-                null_fractions={},
-                counter_based=True,
-                links=(),
-                copies=False,
-                history=(held,) if with_history and expose_id == EMIT else (),
-            ),
-            generator_version=GENERATOR_VERSION_2,
-        )
     binding = {EMIT: _Binding(held, entities, "valid_from", "valid_to")} if bind else {}
-    return relate_plans(plans, keys, None, None, None, found, None, binding)
+
+    def plan_rules_of(expose_id: str) -> Dict[str, Any]:
+        return {
+            "flux_rules": list(rules) if expose_id == EMIT else None,
+            "history": (held,) if with_history and expose_id == EMIT else (),
+        }
+
+    return plans_of(found, declarations, binding, emit=EMIT, rules_for=plan_rules_of)
 
 
 def rows_of(plans: Mapping[str, GeneratorPlan], expose_id: str = EMIT) -> List[Dict[str, Any]]:

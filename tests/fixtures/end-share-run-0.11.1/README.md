@@ -1,0 +1,1 @@
+A run of `tests/fixtures/history-fleet` (the history declares an `end`, 60 entities, 200 versions), planned and applied by flux-sim-engine 0.11.1 (kernel 0.2.0) and kept as that engine wrote `plan.json` and `run-digest.json`. Its end share was a share of the eligible entities, so the plan carries no `historyEndShare` key and must replay to these bytes.

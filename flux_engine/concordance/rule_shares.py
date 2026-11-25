@@ -65,7 +65,12 @@ from typing import (
     Tuple,
 )
 
-from flux_engine.concordance.history_checks import AsOfRows, history_shares
+from flux_engine.concordance.history_checks import (
+    WITHIN_PARENT,
+    AsOfRows,
+    history_shares,
+    within_parent_share,
+)
 from flux_engine.concordance.projection_checks import (
     entity_columns,
     projected_history,
@@ -220,6 +225,9 @@ class RuleSource:
     time_bounds: Optional[Mapping[str, Any]] = None
     #: The history of each emit that declares one (kernel 0.2.0), which an as-of link reads as versions.
     histories: Tuple[HistoryEntry, ...] = ()
+    #: The start and end column of each emit's ``lifetimes`` entry, which a history that keeps to its
+    #: parent's lifetime reads in the parent's rows (ADR 0017, amendment of 2026-11-24).
+    lifetimes: Mapping[str, Tuple[str, Optional[str]]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -568,11 +576,25 @@ def tables_needed(
         if link is not None:
             needed.add(link.target)  # an as-of link is measured on the rows it reads
     needed |= _projection_reads(extension, model, expose_id)
+    needed |= _parent_lifetime_reads(extension, model, expose_id)
     for counts_entry in counts:
         link = model.exposes[nfc(expose_id)].links.get(counts_entry.relationship)
         if link is not None and _scored_counts(counts_entry):
             needed.add(link.target)  # the minimum and the condition are scored on the parents' rows
     return needed
+
+
+def _parent_lifetime_reads(
+    extension: Optional[Mapping[str, Any]], model: Model, expose_id: str
+) -> Set[str]:
+    """The parent of each history bound by its parent's lifetime: its rows are read to score the bound."""
+    found: Set[str] = set()
+    for held in history_entries_of(extension, expose_id):
+        if held.parent is not None and held.parent.lifetime:
+            link = model.exposes[nfc(expose_id)].links.get(held.parent.relationship)
+            if link is not None:
+                found.add(link.target)
+    return found
 
 
 def _generated_aggregate(invariant: Mapping[str, Any], counted: FrozenSet[Tuple[str, str]]) -> bool:
@@ -966,6 +988,31 @@ def _score_history(scoring: _Scoring) -> None:
     for entry in history_entries_of(scoring.source.extension, scoring.target):
         for rule_id, holds in history_shares(entry, scoring.rows.tables[scoring.target], versions):
             scoring.add(rule_id, FORM_CHECK, ORIGIN_BUNDLE, holds, True)
+        _score_within_parent(scoring, entry, versions)
+
+
+def _score_within_parent(scoring: _Scoring, entry: HistoryEntry, versions: Any) -> None:
+    """``history:within_parent``: the entities that keep to their parent's lifetime, when the entry asks."""
+    parent = entry.parent
+    if parent is None or not parent.lifetime:
+        return
+    link = scoring.model.exposes[scoring.target].links.get(parent.relationship)
+    lifetime = None if link is None else scoring.source.lifetimes.get(link.target)
+    if link is None or lifetime is None or link.target not in scoring.rows.tables:
+        return
+    parents = {
+        tuple(row.get(column) for column in link.to_columns): row
+        for row in scoring.rows.tables[link.target]
+    }
+    holds = within_parent_share(
+        entry,
+        scoring.rows.tables[scoring.target],
+        versions,
+        parents,
+        link.from_columns,
+        lifetime,
+    )
+    scoring.add(WITHIN_PARENT, FORM_CHECK, ORIGIN_BUNDLE, holds, True)
 
 
 def _score_asof(scoring: _Scoring) -> None:

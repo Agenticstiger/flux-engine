@@ -88,6 +88,7 @@ __all__ = [
     "counted_layout",
     "digest_key",
     "expected_count_hooks",
+    "pass_excess",
     "register_expected_count_hook",
     "sigma_of",
     "slot_values",
@@ -601,28 +602,50 @@ def _allot(spare: int, weights: "np.ndarray") -> "np.ndarray":
     return floors.astype(np.int64)
 
 
+def pass_excess(
+    counts: "np.ndarray", caps: "np.ndarray", weights: "np.ndarray", excess: int
+) -> Tuple["np.ndarray", int]:
+    """*excess* children passed, one at a time, to the ranks still under their own cap.
+
+    The cap-and-pass of a ``one_to_one`` allotment with a cap for each rank: *counts* are at most
+    *caps* already; the children above a cap go one each, in rounds, to the ranks under theirs,
+    the largest weight first and a tie to the lower rank, until none is left or no rank has room.
+    Returns the new counts and the children no rank had room for (``0`` when they all found
+    one). Exact integers throughout; it draws nothing.
+    """
+    found = counts.copy()
+    left = excess
+    while left > 0:
+        under = np.flatnonzero(found < caps)
+        if under.shape[0] == 0:
+            break
+        order = under[np.argsort(-weights[under], kind="stable")][:left]
+        found[order] += 1
+        left -= int(order.shape[0])
+    return found, left
+
+
 def _capped(per_rank: "np.ndarray", weights: "np.ndarray") -> "np.ndarray":
     """The allotment of a ``one_to_one`` relationship: no rank has more than one child.
 
     Equal to *per_rank* when no rank has more than one. Otherwise each rank keeps at most one
     and the children above one go one each to the ranks with none, the largest weight ``y``
-    first and a tie to the lower rank; more such children than ranks is ``FLX-3403``
-    (:class:`TooManyChildRows`).
+    first and a tie to the lower rank (:func:`pass_excess` with a cap of one); more such
+    children than ranks is ``FLX-3403`` (:class:`TooManyChildRows`).
     """
     spare = int(np.maximum(per_rank - 1, 0).sum())
     if spare == 0:
         return per_rank
-    capped = np.minimum(per_rank, 1)
-    empty = [int(rank) for rank in np.flatnonzero(capped == 0)]
-    if spare > len(empty):
+    capped, left = pass_excess(
+        np.minimum(per_rank, 1), np.ones(per_rank.shape[0], dtype=np.int64), weights, spare
+    )
+    if left:
         raise TooManyChildRows(
             _code(),
             f"a one_to_one relationship gives no parent more than one child, and the "
             f"{_plural(int(per_rank.sum()), 'child row', 'child rows')} are more than its "
             f"{_plural(per_rank.shape[0], 'eligible parent', 'eligible parents')}",
         )
-    empty.sort(key=lambda rank: (-int(weights[rank]), rank))
-    capped[np.array(empty[:spare], dtype=np.int64)] = 1
     return capped
 
 

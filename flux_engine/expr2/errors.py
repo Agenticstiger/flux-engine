@@ -199,8 +199,11 @@ FLX_6203 = register(
     "Every value has one source (EXPR-SPEC-2 §9). A `derive` together with a `generates` "
     "on the same column, two `generates` on one column, a `dependency`'s `to` column that "
     "another rule or dependency also determines, or a scenario mapping on a column that "
-    "a rule determines are two sources, whatever their `when`s. Several `derive` rules on one "
-    "column are one source.",
+    "a rule determines are two sources, whatever their `when`s. So is a rule on the column "
+    "a history's `end.column` names, which the history sets: its end value on an ending "
+    "version and a drawn level on the others. A rule on a column that a snapshots, events or "
+    "periods entry sets (a column of the version, an image, the op) is one too, since the "
+    "projection writes that cell. Several `derive` rules on one column are one source.",
 )
 FLX_6204 = register(
     "FLX-6204",
@@ -277,7 +280,11 @@ FLX_6210 = register(
     "Simulation does not generate from statistics, a FLUX-side check with a generates "
     "setting, a percent band that needs violations, a key or foreign key (a dependency may "
     "set a single foreign key), a relationship's "
-    "toColumns, a column another is drawn given, and an emit with no fidelity block.",
+    "toColumns, a column another is drawn given, and an emit with no fidelity block. A "
+    "`sharedColumns` copy into another relationship's foreign key is refused when the table "
+    "the copy goes through does not hold the column as a foreign key to the same keys of "
+    "that relationship's target, when the relationship is inner and the copy may be NULL "
+    "through a left join, and when copies read each other in a cycle.",
 )
 
 #: Every code this package raises, by code string.

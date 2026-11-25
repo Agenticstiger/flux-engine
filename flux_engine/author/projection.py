@@ -30,6 +30,12 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.author.basis import Label, assumed
 from flux_engine.author.columns import ColumnPlan
+from flux_engine.author.history import (
+    Published,
+    profile_relationship,
+    restate_assumptions,
+    structural_record,
+)
 from flux_engine.seam.contract import CompiledColumn, LogicalKind, compile_expose
 from flux_engine.seam.keys import ExposeKeys
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
@@ -38,7 +44,10 @@ __all__ = [
     "HistoryTarget",
     "Projected",
     "ProjectionSource",
+    "follow_history",
+    "history_target",
     "project",
+    "release_counts",
     "span_primary_key",
 ]
 
@@ -60,20 +69,23 @@ class HistoryTarget:
     expose_id: str
     natural: Tuple[str, ...]
     columns: Mapping[str, CompiledColumn]
+    #: The exposeId the history's ``parent`` is laid out under, ``None`` when it writes no ``parent``.
+    parent: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class ProjectionSource:
     """What :func:`project` reads of one expose that has no validity window.
 
-    ``keys`` is the expose's keys, ``counted`` whether a ``counts`` entry is written over one of
-    its relationships.
+    ``keys`` is the expose's keys, ``counts`` the ``counts`` entries written over its
+    relationships. A projected emit takes none: :func:`release_counts` gives the statistic to the
+    history's parent.
     """
 
     expose_id: str
     contract_expose: Mapping[str, Any]
     keys: ExposeKeys
-    counted: bool = False
+    counts: Tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass
@@ -90,6 +102,8 @@ class Projected:
     #: Each projected emit with the history it follows and the columns that hold that history's
     #: values, which the run does not draw from the emit's own statistics.
     carried: Dict[str, Tuple[str, Tuple[str, ...]]] = field(default_factory=dict)
+    #: Each ``counts`` entry written over a relationship of an emit that is now projected, by emit.
+    released: List[Tuple[str, Mapping[str, Any]]] = field(default_factory=list)
 
     def declare_in(self, namespace: Dict[str, Any]) -> None:
         """Declare each entry list under its key, in emit order; none declares nothing."""
@@ -107,8 +121,6 @@ class Projected:
 #: written).
 _Verdict = Optional[Tuple[str, List[str]]]
 
-_COUNTED = "a counts entry is written over one of its relationships, which a projected emit refuses"
-
 
 def _primary_columns(keys: ExposeKeys) -> Tuple[str, ...]:
     return tuple(entity.column for entity in keys.entities if entity.kind == "primary")
@@ -121,6 +133,41 @@ def _unused(projected: Projected, source: ProjectionSource, rule: str, misses: L
             "unused, the expose meets only part of the rule: " + "; ".join(misses),
         )
     )
+
+
+def _counted_misses(source: ProjectionSource, target: Optional[HistoryTarget]) -> List[str]:
+    """What keeps a ``counts`` entry's foreign key from following the history.
+
+    A projected emit takes the history's value in a column the history holds, so a counted
+    relationship's foreign key follows the history only when the history has that column and
+    writes a ``parent`` over the same parent expose, whose keys it then holds. Otherwise the
+    column would hold the history's drawn values, which are no keys of the parent.
+    """
+    if target is None:
+        return []
+    names = {entry.get("relationship") for entry in source.counts}
+    found: List[str] = []
+    for item in source.keys.relationships:
+        if item.name not in names:
+            continue
+        column = item.from_columns[0]
+        if column not in target.columns:
+            found.append(
+                f"its column {column} is set by a counts entry, which a projected emit "
+                f"refuses, and {target.expose_id} has no column of that name to take it from"
+            )
+        elif target.parent != item.target:
+            held = (
+                f"writes no parent over {item.target}"
+                if target.parent is None
+                else f"writes its parent over {target.parent}, not over {item.target}"
+            )
+            found.append(
+                f"its column {column} is set by a counts entry, which a projected emit "
+                f"refuses, and {target.expose_id} {held}, so the values it holds in {column} "
+                f"are no keys of {item.target}"
+            )
+    return found
 
 
 def _snapshot_misses(
@@ -139,9 +186,7 @@ def _snapshot_misses(
                 f"its column {name} is {column.logical_type} and {target.expose_id}'s is "
                 f"{held.logical_type}"
             )
-    if source.counted:
-        misses.append(_COUNTED)
-    return misses
+    return misses + _counted_misses(source, target)
 
 
 def _as_snapshot(
@@ -239,9 +284,7 @@ def _events_misses(
     date = _default_time(source.contract_expose)
     if date is None or date not in columns or columns[date].logical_type.kind not in _INSTANTS:
         misses.append("it declares no defaultAggTimeDimension that is a DATE or TIMESTAMP column")
-    if source.counted:
-        misses.append(_COUNTED)
-    return misses
+    return misses + _counted_misses(source, target)
 
 
 def _events_entry(
@@ -379,9 +422,7 @@ def _periods_misses(
             misses.append(
                 f"its primary key {key} is not a whole-number column (ADR 0027 section 5)"
             )
-    if source.counted:
-        misses.append(_COUNTED)
-    return misses
+    return misses + _counted_misses(source, target)
 
 
 def _as_periods(
@@ -437,6 +478,7 @@ def _write_one(
         verdict = rule()
         if verdict is not None and not verdict[1]:
             projected.emits[source.expose_id] = _ROWS_REASON
+            projected.released += [(source.expose_id, entry) for entry in source.counts]
             return
         partial = partial or verdict
     if partial is not None:
@@ -461,3 +503,172 @@ def project(
         if source.expose_id not in held:
             _write_one(source, held, kinds.get(source.expose_id, {}), projected)
     return projected
+
+
+_MOVED = (
+    "the emit is projected from a history, which refuses a counts entry over its relationship, so "
+    "its children per parent are the history's parent's: {why}"
+)
+_KEPT = (
+    "the emit is projected from a history, which refuses a counts entry over its relationship, so "
+    "none is written, and the history's parent does not take this statistic: {why}"
+)
+
+
+_NOT_ENTITIES = (
+    "its children per parent count events or periods, not entities, and the history's parent "
+    "takes entities per parent"
+)
+
+
+def history_target(
+    entry: Mapping[str, Any], held: ExposeKeys, columns: Sequence[CompiledColumn]
+) -> HistoryTarget:
+    """The target of the ``history`` *entry* of the emit with the keys *held* and *columns*."""
+    declared = entry.get("parent")
+    name = declared.get("relationship") if isinstance(declared, dict) else None
+    return HistoryTarget(
+        str(entry["emit"]),
+        tuple(item.column for item in held.entities if item.kind == "natural"),
+        {column.name: column for column in columns},
+        None if name is None else _target_of(held, str(name)),
+    )
+
+
+def _target_of(keys: ExposeKeys, name: str) -> Optional[str]:
+    """The expose the relationship *name* reaches, or ``None`` when the expose has none of that name."""
+    for item in keys.relationships:
+        if item.name == name:
+            return str(item.target)
+    return None
+
+
+def _history_parent(
+    history: Optional[Dict[str, Any]],
+    counts: Mapping[str, Any],
+    declared_target: str,
+    keys_of: Callable[[str], ExposeKeys],
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """The ``parent`` of *history* that may take *counts*, or ``None`` with why it may not."""
+    parent = history.get("parent") if history is not None else None
+    if history is None or not isinstance(parent, dict):
+        return None, "the history writes no parent"
+    target = _target_of(keys_of(str(history["emit"])), str(parent["relationship"]))
+    if target != declared_target:
+        return None, f"the history's parent is laid out under {target}, not {declared_target}"
+    if "children" in parent:
+        return None, "the history's own children per parent are written and are kept"
+    if "children" not in counts:
+        return None, "the statistic gives no children per parent"
+    return parent, ""
+
+
+def release_counts(
+    found: Projected,
+    histories: Sequence[Dict[str, Any]],
+    keys_of: Callable[[str], ExposeKeys],
+    published: Published,
+) -> List[Tuple[str, str]]:
+    """Take each ``counts`` entry off a projected emit and give its statistic to the history's parent.
+
+    A ``counts`` entry over a relationship of a projected emit is refused (ADR 0027), so the emit
+    stays a projection and the entry is dropped. When the history of the emit has a ``parent``
+    under the same parent expose and no ``children`` of its own, and the emit is a snapshot (one
+    row per entity, so its children per parent are entities per parent), the entry's ``children``
+    (and ``minChildren``, when the parent has none) become the parent's; otherwise the statistic is
+    unused, with why. An events or periodic emit counts events or periods per parent, so its
+    statistic is never given to the parent. *published* holds the profile's relationships and the lists its layout made
+    of them, changed in place; *histories* are the ``history`` entries. Returns each
+    ``(emit, column)`` whose foreign key the counted layout no longer sets.
+    """
+    freed: List[Tuple[str, str]] = []
+    lists = published.lists()
+    sources = published.relationships if isinstance(published.relationships, list) else []
+    snapshots = {str(item["emit"]) for item in found.snapshots}
+    # By emit, so which snapshot gives its statistic does not depend on the order of the exposes.
+    for emit, counts in sorted(found.released, key=lambda item: item[0]):
+        name = str(counts["relationship"])
+        declared = next(item for item in keys_of(emit).relationships if item.name == name)
+        history_id = found.carried[emit][0]
+        history = next((item for item in histories if item["emit"] == history_id), None)
+        if emit in snapshots:
+            parent, why = _history_parent(history, counts, declared.target, keys_of)
+        else:
+            parent, why = None, _NOT_ENTITIES
+        if parent is not None:
+            sentence = _MOVED.format(
+                why=f"{history_id}'s parent {parent['relationship']} takes it as its children"
+            )
+            _give_children(parent, counts)
+        else:
+            sentence = _KEPT.format(why=why)
+        _drop_counts(lists, emit, name)
+        found_entry, tokens = profile_relationship(sources, emit, declared)
+        if tokens is not None and found_entry is not None:
+            _move_statistic(lists, (tokens, found_entry), parent, sentence)
+        found.notes.append((f"{emit}: counts", sentence))
+        freed.append((emit, declared.from_columns[0]))
+    return freed
+
+
+def _give_children(parent: Dict[str, Any], counts: Mapping[str, Any]) -> None:
+    """Give a history's *parent* the children per parent of a ``counts`` entry, and its minimum when it has none."""
+    parent["children"] = dict(counts["children"])
+    if "minChildren" in counts and "minChildren" not in parent:
+        parent["minChildren"] = counts["minChildren"]
+
+
+def _drop_counts(
+    lists: Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]], emit: str, name: str
+) -> None:
+    """Take the ``counts`` entry over relationship *name* of *emit*, and its note, out of *lists*."""
+    entries, _, _, _, notes = lists
+    entries[:] = [
+        item
+        for item in entries
+        if not (item.get("emit") == emit and item.get("relationship") == name)
+    ]
+    notes[:] = [item for item in notes if item[0] != f"{emit}.{name}"]
+
+
+def _move_statistic(
+    lists: Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]],
+    published: Tuple[Tuple[str, ...], Mapping[str, Any]],
+    parent: Optional[Dict[str, Any]],
+    sentence: str,
+) -> None:
+    """Say, in *lists*, where the profile's statistics of a relationship went: *parent* took them, or none did."""
+    _, used, unused, records, _ = lists
+    tokens, entry = published
+    size = len(tokens)
+    gone = [item for item in used if tuple(item[0][:size]) == tokens]
+    used[:] = [item for item in used if item not in gone]
+    records[:] = [item for item in records if tuple(item[0][:size]) != tokens]
+    said = structural_record(
+        entry,
+        parent is not None and "minChildren" in parent,
+        "the emit is projected from a history",
+    )
+    if said:
+        records.append((tokens + ("structural",), said))
+    if parent is not None:
+        used += [(pointer, sentence) for pointer, _ in gone]
+    else:
+        unused += [(pointer, sentence) for pointer, _ in gone]
+
+
+_FOLLOWS = (
+    "The emit is projected from {history}, so its rows follow from the history and the column "
+    "holds the value of a version, not a parent the counted layout sets."
+)
+
+
+def follow_history(expose: Any, column: str, history: str) -> None:
+    """Say that the foreign key *column* of a projected *expose* follows *history*, not a ``counts`` entry."""
+    sentence = _FOLLOWS.format(history=history)
+    for plan in expose.columns:
+        if plan.name == column:
+            plan.assumptions = [sentence]
+            plan.choices = [sentence]
+            plan.how = "a column of the history the emit is projected from"
+    restate_assumptions(expose)

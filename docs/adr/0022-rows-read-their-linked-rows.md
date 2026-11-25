@@ -181,3 +181,58 @@ as a `derive` without a band does.
   consecutive rows.
 - FLUID gaining a spelling for a conditional link, a sentinel or a pair key, which would move the
   declaration into the contract.
+
+## Amendment of 2026-11-24: a copy into a foreign key sets that relationship's pick
+
+Section 4 left a copy into a key or foreign key column out. A child with two relationships, `R` to a
+parent that holds a second parent's key (a trip's vehicle holds `depot_id`) and `S` to
+that second parent (its depot), drew `S`'s foreign key on its own, so the two disagreed. A copy of the
+column through `R` into `S`'s foreign key now sets `S`'s pick.
+
+The rules, each decided here:
+
+1. **Opt-in.** Only a `sharedColumns` entry of `R` that lists a column which is the one-column foreign
+   key of another relationship `S` of the same expose changes anything, and only where the Simulation
+   declares `copies: true` on kernel `0.2.0`. Any other copy, every bundle without `copies: true`, and
+   kernel `0.1.0` (where the declaration stays listed as declared and not generated) keep every byte.
+   A column that is a key, part of a key, or `R`'s own foreign key stays listed as before.
+2. **The pick.** The row `S` reaches is the row of `S`'s target that the parent of `R` reaches through
+   its own relationship `Q`: `S`-parent(row) = `Q`-parent(`R`-parent(row)), and NULL when either reaches
+   no row. The foreign key column holds that row's key, so it equals the copied value, and a link, a
+   derive over `S.x` or a copy through `S` reads that row. The copy draws nothing and makes no rule.
+3. **Integrity.** The copy is accepted only when the source column is itself the one-column foreign key
+   of a relationship `Q` of `R`'s target to `S`'s target over the same key columns: the value is then a
+   key of `S`'s target by construction. Otherwise the plan is `FLX-6210`, naming the column, both
+   relationships and why. A NULL source gives a NULL foreign key, so `S` with `joinType: inner` is
+   `FLX-6210` unless `R` and `Q` are inner too.
+4. **What `S` may not be** (`FLX-3403`, the codes of the other relational refusals): one that references
+   each parent once (one_to_one, or its column a key), part of a key or a bridge, counted (a `counts`
+   entry or an expected-count hook), weighted by a `links` entry, a history's `parent`; a column that
+   declares a `nullFraction`, a draw, an `allocation` or a `given`, or that a rule sets; and `R` with a
+   conditional link or a rule on its columns, or `Q` the same in `R`'s target, since the row then
+   reached is not the pick. `R` and `Q` must have a pick of their own; `R`'s target must not be a
+   reference expose. The foreign-key column of `R`, and the column `Q` holds in `R`'s target, must be
+   neither drawn `given` another column nor read by another column's `given`, since a pick another
+   column's level fixes is not read from the row's cell alone; `Q` must be laid out as a foreign key (or a
+   part of a key) of its own in `R`'s target. Each is `FLX-3403`, naming the column and the relationship.
+   `R`'s target must also declare no history and be no projection of one (`FLX-3403`, naming `R` and `S`):
+   an entity's foreign keys are those of its first version on every version, so `Q`-parent(`R`-parent(row))
+   would not equal the copied cell on a later version; and a row of a snapshot, events or periods emit holds
+   the cells of the version it reads (ADR 0027), not the pick of a draw of its own, so the row `Q` reaches
+   from it is not the row its cell names.
+5. **Order and cycles.** A pick is a function of other picks, not a cell a rule sets, so nothing waits
+   for a rule: a rule, link or copy that reads `S` reads the pick. The plans read each other through `R`
+   as a path does, and a cycle among them is `FLX-6210` as a cycle among rules that read links is. A copy
+   through a copy (`Q` itself copied) follows the same rule one level down.
+6. **Determinism.** No search over keys is made: the row is found by following picks, each a pure
+   function of the plan and the seed tree, so the rows are the same under any `--jobs`, slice, and on the
+   column path and the per-row path (the column path takes this pick per row, as a weighted pick does).
+   The cost is two picks per row and the parent's cells; no index is built and no memory is held beyond
+   the existing pick caches.
+7. **Reports.** `plan` lists nothing as declared and not generated for the column, coverage names the
+   relationship as its source, and `fluxsim verify` scores the copy as the `derive` it is (`R.column`),
+   next to the relationship's integrity line, which keeps holding on every row.
+
+A contract's own `sharedColumns` copies nothing from a slowly changing dimension through a relationship,
+so a slowly changing target, and a projection of one, are out of reach of this amendment, and a copy through
+either is refused (point 4).

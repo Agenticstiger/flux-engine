@@ -40,7 +40,7 @@ member out, as it leaves out the counts' (:func:`flux_engine.seam.emit.seam_reus
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 from fractions import Fraction
@@ -58,6 +58,8 @@ from flux_engine.seam.keys import ExposeKeys, Relationship, window_ends
 from flux_engine.seam.links import LinkEntry
 
 __all__ = [
+    "END_SHARE_OF_ELIGIBLE",
+    "END_SHARE_OF_ENTITIES",
     "HISTORY_KEY",
     "Histogram",
     "HistoryEnd",
@@ -93,7 +95,7 @@ _ENTRY_KEYS = (
     "reasons",
     "end",
 )
-_PARENT_KEYS = ("relationship", "minChildren", "parentWhen", "children")
+_PARENT_KEYS = ("relationship", "minChildren", "parentWhen", "children", "lifetime")
 _HISTOGRAM_KEYS = ("bins", "binWeights", "closed")
 _LENGTH_REFUSED = ("mean", "given", "states", "otherwise", "open")
 _LEVEL_KEYS = ("levels", "levelWeights")
@@ -138,6 +140,7 @@ class HistoryParent:
     min_children: Optional[int] = None
     parent_when: Optional[str] = None
     children: Optional[ChildShape] = None
+    lifetime: bool = False
 
     def as_member(self) -> Dict[str, Any]:
         """The parent as the entry holds it, each key only when declared."""
@@ -148,6 +151,8 @@ class HistoryParent:
             member["parentWhen"] = self.parent_when
         if self.children is not None:
             member["children"] = self.children.as_member()
+        if self.lifetime:
+            member["lifetime"] = True
         return member
 
 
@@ -168,14 +173,35 @@ class HistoryTracked:
         return member
 
 
+#: What an ``end``'s share is a share of (ADR 0017, the amendment of 2026-11-24): every entity,
+#: which is what a plan made by this engine's release and later asks for, and ``plan.json`` says so
+#: with ``historyEndShare``.
+END_SHARE_OF_ENTITIES = "entities"
+
+#: An ``end``'s share as engine 0.11.1 and earlier took it: a share of the entities that can end.
+#: A recorded plan with no ``historyEndShare`` replays under it, so its run id keeps its digests.
+END_SHARE_OF_ELIGIBLE = "eligible"
+
+
 @dataclass(frozen=True)
 class HistoryEnd:
-    """How an entity's history ends: a ``mode``, a ``share`` and, optionally, a column and its value."""
+    """How an entity's history ends: a ``mode``, a ``share`` and, optionally, a column and its value.
+
+    *share_of* is what the share is a share of (:data:`END_SHARE_OF_ENTITIES`, or
+    :data:`END_SHARE_OF_ELIGIBLE` for a plan recorded before the end share moved). It is no part of
+    the entry a Simulation declares: the plan says it, and :func:`history_entries_of` sets it.
+    """
 
     mode: str
     share: str
     column: Optional[str] = None
     value: Optional[str] = None
+    share_of: str = END_SHARE_OF_ENTITIES
+
+    @property
+    def every_entity_eligible(self) -> bool:
+        """Whether every entity can end: ``closeLast`` with no column, where no entity is left out."""
+        return self.mode == "closeLast" and self.column is None
 
     def as_member(self) -> Dict[str, Any]:
         """The end as the entry holds it, each key only when declared."""
@@ -421,11 +447,15 @@ def _parent(raw: Any, at: str, code: ErrorCode, refusal: ErrorCode) -> HistoryPa
         )
         _unknown(shape, _LEVEL_KEYS + _BIN_KEYS, f"{at}.children", code)
         children = _shape(shape, f"{at}.children", refusal)
+    lifetime = mapping.get("lifetime", False)
+    if not isinstance(lifetime, bool):
+        raise FluxError(refusal, f"{at}.lifetime is true or false")
     return HistoryParent(
         relationship=relationship,
         min_children=minimum,
         parent_when=nfc(condition) if isinstance(condition, str) else None,
         children=children,
+        lifetime=lifetime,
     )
 
 
@@ -639,9 +669,14 @@ def bound_into_h(entries: Sequence[HistoryEntry], emit: str) -> Optional[Dict[st
 
 
 def history_entries_of(
-    extension: Optional[Mapping[str, Any]], emit: str
+    extension: Optional[Mapping[str, Any]], emit: str, *, end_share: str = END_SHARE_OF_ENTITIES
 ) -> Tuple[HistoryEntry, ...]:
-    """The history an emit's bound extension holds (the member :func:`bound_into_h` made), or ``()``."""
+    """The history an emit's bound extension holds (the member :func:`bound_into_h` made), or ``()``.
+
+    *end_share* is what the entry's ``end`` share is a share of, which the plan the run executes
+    states (:data:`END_SHARE_OF_ENTITIES`, or :data:`END_SHARE_OF_ELIGIBLE` for a plan that does
+    not). The Simulation does not declare it.
+    """
     raw = extension.get(HISTORY_KEY) if extension is not None else None
     if not isinstance(raw, Mapping):
         return ()
@@ -651,6 +686,8 @@ def history_entries_of(
         get("FLX-3105"),
         get("FLX-3403"),
     )
+    if entry.end is not None and end_share != entry.end.share_of:
+        entry = replace(entry, end=replace(entry.end, share_of=end_share))
     return (entry,)
 
 
@@ -1175,6 +1212,33 @@ def check_history_sources(
     sets = _history_sets(entry, target)
     _check_lifetime_sources(entry, lifetimes, sets, refusal)
     _check_within_sources(entry, within, sets, refusal)
+    _check_parent_lifetime(entry, target, lifetimes)
+
+
+def _check_parent_lifetime(
+    entry: HistoryEntry, target: HistoryTarget, lifetimes: Sequence[LifetimeEntry]
+) -> None:
+    """Refuse (``FLX-3403``) ``parent.lifetime`` where there is nothing to keep to (ADR 0017, amendment of 2026-11-24).
+
+    The key needs ``parent.relationship``, a to-one relationship of the emit whose target emit
+    declares a ``lifetimes`` entry: its start, and optionally its end, are the columns the history
+    keeps to. The message names the key.
+    """
+    parent = entry.parent
+    if parent is None or not parent.lifetime:
+        return
+    at = f"history ({entry.emit}).parent.lifetime"
+    relationship = target.relationships.get(parent.relationship)
+    if relationship is None:
+        return  # check_history refuses a parent that is no relationship of the emit
+    held = nfc(relationship.target)
+    if not any(nfc(found.emit) == held for found in lifetimes):
+        raise FluxError(
+            get("FLX-3403"),
+            f"{at} needs a lifetimes entry on {relationship.target!r}, the emit relationship "
+            f"{parent.relationship!r} reaches: it names the start, and the end, the history "
+            "keeps to",
+        )
 
 
 def _history_sets(entry: HistoryEntry, target: HistoryTarget) -> Dict[str, str]:

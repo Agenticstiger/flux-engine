@@ -50,7 +50,7 @@ from typing import (
     Union,
 )
 
-from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity
+from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity, names_a_snapshot
 from flux_engine.concordance.predicate import (
     DeclaredExpose,
     FidelityBlock,
@@ -116,15 +116,22 @@ from flux_engine.generator.dwell import (
     family_span,
 )
 from flux_engine.generator.families import ColumnType, Family
-from flux_engine.generator.history import HistoryBinding
+from flux_engine.generator.history import (
+    HistoryBinding,
+    HistoryPick,
+    HistoryPlan,
+    end_share_note,
+    parent_bound_notes,
+)
 from flux_engine.generator.plugin import PluginExpose, check_rows, generate_values, request_of
-from flux_engine.generator.projections import derived_rows, project_plan, projection_of
+from flux_engine.generator.projections import chain_of, derived_rows, project_plan, projection_of
 from flux_engine.generator.rates import Rates
 from flux_engine.generator.reference import ReferenceRows, build_reference_plan
 from flux_engine.generator.relations import (
     FLX_3403,
     KeySpaceTooSmall,
     check_links_resolved,
+    history_pick_of,
     relate_plans,
     related_columns,
 )
@@ -227,7 +234,7 @@ from flux_engine.seam.emit import (
     seam_digests,
     seam_entropy_bytes,
 )
-from flux_engine.seam.history import HISTORY_KEY, history_entries_of
+from flux_engine.seam.history import END_SHARE_OF_ENTITIES, HISTORY_KEY, history_entries_of
 from flux_engine.seam.keys import compile_keys, declared_exposes, window_ends
 from flux_engine.seam.links import link_entries_of
 from flux_engine.seam.mapping import (
@@ -256,6 +263,7 @@ from flux_engine.seam.resolve import (
     declared_overlay,
     declared_responses,
     load_bundle,
+    other_sourced_columns,
     parameter_entries,
     privacy_floors,
     profile_reference,
@@ -301,8 +309,11 @@ from flux_engine.world import (
 __all__ = [
     "EmitOutcome",
     "PipelineResult",
+    "advice_notes",
     "compile_declared_fidelity",
+    "end_share_notes",
     "execute",
+    "parent_bound_history_notes",
     "input_digest_of",
     "parameter_register_of",
     "parse_declared_fidelity",
@@ -461,6 +472,10 @@ class PipelineResult:
     #: The sweep run this execution is, with the effects it took (ADR 0029 section 3); ``None``
     #: for every run that is not a forecast's replicate.
     replicate: Optional[Replicate] = None
+    #: What a history's ``end`` share was a share of in this execution (ADR 0017, the amendment of
+    #: 2026-11-24): every entity for a new plan, which the plan then says with ``historyEndShare``,
+    #: or the eligible entities alone for a recorded plan without the key.
+    end_share: str = END_SHARE_OF_ENTITIES
 
     def emit(self, expose_id: str) -> EmitOutcome:
         for outcome in self.emits:
@@ -679,6 +694,57 @@ def period_end_null_notes(resolved: Sequence[ResolvedEmit]) -> Tuple[str, ...]:
             f"share generated can be lower than {declared}"
         )
     return tuple(notes)
+
+
+def end_share_notes(plans: Sequence[GeneratorPlan], root: SeedTreeRoot) -> Tuple[str, ...]:
+    """One sentence for each history whose declared end share yields less than it declares.
+
+    The share is a share of every entity, and an ``end`` with a column ends only entities of two
+    versions or more, so a history with too few of them ends every one that can and the share
+    generated is lower than the share declared (ADR 0017, the amendment of 2026-11-24). Advice
+    only: no plan document or digest carries it.
+    """
+    notes = (
+        end_share_note(expose_id, pick.entry, chain)
+        for expose_id, pick, chain in _history_chains(
+            plans, root, lambda pick: pick.entry.end is not None
+        )
+    )
+    return tuple(note for note in notes if note is not None)
+
+
+def parent_bound_history_notes(
+    plans: Sequence[GeneratorPlan], root: SeedTreeRoot
+) -> Tuple[str, ...]:
+    """The notes of each history that keeps to its parent's lifetime (:func:`parent_bound_notes`)."""
+    return tuple(
+        note
+        for expose_id, _, chain in _history_chains(
+            plans, root, lambda pick: pick.parent_lifetime is not None
+        )
+        for note in parent_bound_notes(expose_id, chain)
+    )
+
+
+def _history_chains(
+    plans: Sequence[GeneratorPlan], root: SeedTreeRoot, wanted: Callable[[HistoryPick], bool]
+) -> Iterator[Tuple[str, HistoryPick, HistoryPlan]]:
+    """The exposeId, pick and layout of each history among *plans* that *wanted* names."""
+    for plan in plans:
+        pick = history_pick_of(plan)
+        if pick is not None and wanted(pick):
+            yield plan.expose.expose_id, pick, chain_of(plan, root)
+
+
+def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
+    """The advice a plan prints, one sentence each: period ends, end shares and parent bounds."""
+    outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*result.emits, *result.hidden_emits]
+    plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
+    return (
+        period_end_null_notes([outcome.resolved for outcome in outcomes])
+        + end_share_notes(plans, result.root)
+        + parent_bound_history_notes(plans, result.root)
+    )
 
 
 def _nullable_period_end(emit: ResolvedEmit) -> Optional[Tuple[str, Any]]:
@@ -1646,10 +1712,16 @@ def parse_declared_fidelity(resolved: ResolvedEmit) -> Optional[FidelityBlock]:
     the code and the message ``verify`` gives it. Nothing here forms a
     statistic.
     """
-    if resolved.fidelity is None:
-        return None
-    _, expose = _declared_contract(resolved)
-    return parse_fidelity_block(canonicalise(resolved.written_fidelity), expose=expose)
+    return None if resolved.fidelity is None else _parsed_fidelity(resolved)
+
+
+def _parsed_fidelity(resolved: ResolvedEmit) -> FidelityBlock:
+    """*resolved*'s declared fidelity block, parsed; a snapshot's may declare no column."""
+    return parse_fidelity_block(
+        canonicalise(resolved.written_fidelity),
+        expose=_declared_contract(resolved)[1],
+        allow_no_columns=names_a_snapshot(resolved.extension),
+    )
 
 
 def compile_declared_fidelity(resolved: ResolvedEmit) -> Optional[CompiledFidelity]:
@@ -1743,6 +1815,7 @@ def execute(
     replicate: Optional[Replicate] = None,
     common_draws_of: Optional[Path] = None,
     most_rows: Optional[int] = None,
+    end_share: Optional[str] = None,
 ) -> PipelineResult:
     """Run every stage of the six-step loop's core once, in memory.
 
@@ -1789,6 +1862,11 @@ def execute(
     plan holds of each reference expose (ADR 0023 section 2): an emit that declares
     ``reference: true`` takes its rows from *references* when they are given, and from the
     pinned profile's ``references`` otherwise. Neither is read for a run with no reference expose.
+
+    *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
+    2026-11-24): the plan's ``historyEndShare`` (:func:`flux_engine.stages.apply.plan_end_share`)
+    when a recorded plan is executed, so that it replays the allocation it was made with, and
+    ``None`` for a new plan, which takes every entity.
 
     *most_rows* bounds the rows the plans of every emit hold together, derived and hidden emits
     included. When their sum is above it, :class:`PlannedRowsAboveCeiling` is raised after the
@@ -1837,6 +1915,7 @@ def execute(
     # starts at one job, and no worker is reserved: the pool is built later, as always.
     start_forkserver_early(jobs)
     run_kernel = _kernels.DEFAULT_KERNEL if kernel is None else kernel
+    run_end_share = END_SHARE_OF_ENTITIES if end_share is None else end_share
     if run_kernel.seed_tree_version != kernel2.SEED_TREE_VERSION:
         # New generation features run on kernel 0.2.0 only: 0.1.0's draws are frozen.
         if scale is not None and scale != 1:
@@ -1862,23 +1941,7 @@ def execute(
         fidelity = str(simulation.get("spec", {}).get("fidelity", "deterministic"))
         require_supported_fidelity(fidelity)
 
-        sovereignty_audit = []
-        for owner_id, owner_kind, document in (
-            (cast.simulation_id, "Simulation", simulation),
-            (cast.world_id, "World", world_doc),
-        ):
-            sovereignty_policy = SovereigntyPolicy.from_document(
-                document.get("spec", {}).get("sovereignty")
-            )
-            row = enforce_sovereignty(
-                sovereignty_policy,
-                zone=zone,
-                document_id=owner_id,
-                document_kind=owner_kind,
-                event_time=str(simulation.get("spec", {}).get("timeBounds", {}).get("start", "")),
-            )
-            if row is not None:
-                sovereignty_audit.append(row)
+        sovereignty_audit = _sovereignty_audit_of(cast, simulation, world_doc, zone)
 
         # The two declarations the FLUX schema leaves optional and this engine
         # cannot run without, refused in the order `validate` checks them,
@@ -1912,6 +1975,7 @@ def execute(
                 "require_staged": require_staged,
                 "responses": responses,
                 "replicate": replicate,
+                "end_share": end_share,
             },
         )
 
@@ -2123,6 +2187,7 @@ def execute(
                 published=published,
                 plugins=plugins,
                 root=root,
+                end_share=run_end_share,
             )
         _require_coverage(planned_emits, asked_by)
         lap("plan emits")
@@ -2197,7 +2262,7 @@ def execute(
                 arm_counts=counts,
                 emits=made,
                 decisions=decisions,
-                sovereignty_audit=tuple(sovereignty_audit),
+                sovereignty_audit=sovereignty_audit,
                 input_digest=input_digest,
                 files_not_hashed=loaded.digest_inputs().not_hashed,
                 components=components,
@@ -2211,6 +2276,7 @@ def execute(
                 hidden_emits=hidden_emits,
                 responses=_runtime_of(early),
                 replicate=replicate,
+                end_share=run_end_share,
             )
 
         if probing:
@@ -3198,6 +3264,7 @@ def _plan_emit(
             rules=rules,
             generator_version=generator_version,
             plugin=plugin,
+            projected=names_a_snapshot(resolved.extension),
         )
         refuse_conditions(resolved, plan, rules, simulation, where=cast.simulation_id)
         refuse_copula_combinations(resolved, where=cast.simulation_id)
@@ -3233,6 +3300,30 @@ def _plan_emit(
     )
 
 
+def _sovereignty_audit_of(
+    cast: Cast, simulation: Mapping[str, Any], world_doc: Mapping[str, Any], zone: Optional[str]
+) -> Tuple[SovereigntyAuditRow, ...]:
+    """The audit rows the Simulation's and the World's sovereignty policies enforce in *zone*."""
+    rows = []
+    for owner_id, owner_kind, document in (
+        (cast.simulation_id, "Simulation", simulation),
+        (cast.world_id, "World", world_doc),
+    ):
+        sovereignty_policy = SovereigntyPolicy.from_document(
+            document.get("spec", {}).get("sovereignty")
+        )
+        row = enforce_sovereignty(
+            sovereignty_policy,
+            zone=zone,
+            document_id=owner_id,
+            document_kind=owner_kind,
+            event_time=str(simulation.get("spec", {}).get("timeBounds", {}).get("start", "")),
+        )
+        if row is not None:
+            rows.append(row)
+    return tuple(rows)
+
+
 def _planned_with_projections(
     resolved_emits: Sequence[ResolvedEmit],
     per_emit_digests: Sequence[SeamDigests],
@@ -3245,6 +3336,7 @@ def _planned_with_projections(
     published: Optional[Mapping[str, ReferenceRows]],
     root: SeedTreeRoot,
     plugins: Optional[Mapping[str, PluginExpose]] = None,
+    end_share: str = END_SHARE_OF_ENTITIES,
 ) -> Tuple[_PlannedEmit, ...]:
     """Every emit planned and related, a projected emit's rows derived from its history (ADR 0027 section 2).
 
@@ -3273,7 +3365,18 @@ def _planned_with_projections(
 
     guesses = {index: _most_rows(resolved_emits, found) for index, found in projected.items()}
     planned = tuple(plan_at(index, guesses.get(index)) for index in range(len(resolved_emits)))
-    related = _relate_emits(resolved_emits, planned, namespace)
+    related = _relate_emits(resolved_emits, planned, namespace, end_share)
+
+    def replan(rows: Mapping[int, int]) -> Tuple[_PlannedEmit, ...]:
+        """Every emit planned again, the emits *rows* names at those rows, and related once more."""
+        return _relate_emits(
+            resolved_emits,
+            tuple(plan_at(index, rows.get(index)) for index in range(len(resolved_emits))),
+            namespace,
+            end_share,
+        )
+
+    related, shrunk = _settled_histories(resolved_emits, related, guesses, root, replan)
     if not projected:
         return related
     counts = {
@@ -3286,8 +3389,17 @@ def _planned_with_projections(
         for index, found in projected.items()
     }
     if any(counts[index] != guesses[index] for index in counts):
-        replanned = tuple(plan_at(index, counts.get(index)) for index in range(len(resolved_emits)))
-        related = _relate_emits(resolved_emits, replanned, namespace)
+        related = replan({**shrunk, **counts})
+    return _with_projected_plans(resolved_emits, related, projected, root)
+
+
+def _with_projected_plans(
+    resolved_emits: Sequence[ResolvedEmit],
+    related: Sequence[_PlannedEmit],
+    projected: Mapping[int, Tuple[str, str, str]],
+    root: SeedTreeRoot,
+) -> Tuple[_PlannedEmit, ...]:
+    """Each emit in *projected* with the plan derived from its history's layouts, and the others as they are."""
     return tuple(
         (
             replace(
@@ -3307,6 +3419,99 @@ def _planned_with_projections(
         )
         for index, planned_emit in enumerate(related)
     )
+
+
+def _settled_histories(
+    resolved_emits: Sequence[ResolvedEmit],
+    related: Tuple[_PlannedEmit, ...],
+    guesses: Mapping[int, int],
+    root: SeedTreeRoot,
+    replan: Callable[[Mapping[int, int]], Tuple[_PlannedEmit, ...]],
+) -> Tuple[Tuple[_PlannedEmit, ...], Dict[int, int]]:
+    """The emits related after every history that holds fewer rows than it declares is planned at them.
+
+    Each pass plans again the histories :func:`_shrunk_histories` finds, with *replan*, which can
+    move the rows of another history, so the passes go on until none is found; the rows of every
+    emit that shrank come back with the plans. More passes than there are emits is refused.
+    """
+    shrunk: Dict[int, int] = {}
+    for _ in range(len(resolved_emits) + 1):
+        found = _shrunk_histories(resolved_emits, related, root)
+        if not found:
+            return related, shrunk
+        shrunk.update(found)
+        related = replan({**guesses, **shrunk})
+    raise FluxError(
+        FLX_3403,
+        "the rows of the histories that keep to their parent's lifetime are still changing "
+        f"after {len(resolved_emits) + 1} passes ({sorted(shrunk.items())}); "
+        "a history whose parent is a history that holds fewer rows than it declares cannot be laid out",
+    )
+
+
+def _shrunk_histories(
+    resolved_emits: Sequence[ResolvedEmit], related: Sequence[_PlannedEmit], root: SeedTreeRoot
+) -> Dict[int, int]:
+    """The rows of each history that keeps to its parent's lifetime and holds fewer than it declares.
+
+    The parents' lifetimes can leave no entity room for a version the layout was asked for, and the
+    layout then holds fewer rows (ADR 0017, amendment of 2026-11-24). Its emit is planned again at
+    the rows it holds, so that plan, apply and verify count the same rows.
+
+    A history whose parent is itself a history that keeps to its parent's lifetime reads the
+    parent's rows, which are the rows the parent's layout holds only once the parent is planned at
+    them. Such a history is laid out in the pass after the one that settles its parent: a history is
+    left out of a pass when a parent of it, or of a parent, is found to hold fewer rows in it.
+    """
+    bound = {
+        index
+        for index, planned in enumerate(related)
+        if planned.plan is not None
+        and (pick := history_pick_of(planned.plan)) is not None
+        and pick.parent_lifetime is not None
+    }
+    found: Dict[int, int] = {}
+    left_out: Set[int] = set()  # the histories that are not laid out in this pass
+    visited: Set[int] = set()
+
+    def visit(index: int) -> None:
+        if index in visited:
+            return
+        visited.add(index)
+        above = _parent_emit_of(resolved_emits, index)
+        if above is not None and above in bound:
+            visit(above)
+            if above in found or above in left_out:
+                left_out.add(index)
+                return
+        plan = _plan_of(related[index])
+        held = chain_of(plan, root).rows
+        if held != plan.rows:
+            found[index] = held
+
+    for index in sorted(bound):
+        visit(index)
+    return found
+
+
+def _parent_emit_of(resolved_emits: Sequence[ResolvedEmit], index: int) -> Optional[int]:
+    """The position of the emit the ``parent`` relationship of the history at *index* reaches."""
+    emit = resolved_emits[index]
+    entries = history_entries_of(emit.extension, emit.expose_id)
+    if not entries or entries[0].parent is None or emit.keys is None:
+        return None
+    reached = next(
+        (
+            relationship.target
+            for relationship in emit.keys.relationships
+            if relationship.name == entries[0].parent.relationship
+        ),
+        None,
+    )
+    for position, other in enumerate(resolved_emits):
+        if reached is not None and nfc(other.expose_id) == nfc(reached):
+            return position
+    return None
 
 
 def _plan_of(planned: _PlannedEmit) -> GeneratorPlan:
@@ -3364,6 +3569,7 @@ def _relate_emits(
     resolved_emits: Sequence[ResolvedEmit],
     planned_emits: Tuple[_PlannedEmit, ...],
     namespace: Mapping[str, Any],
+    end_share: str = END_SHARE_OF_ENTITIES,
 ) -> Tuple[_PlannedEmit, ...]:
     """Relate the generator-driven emits of each contract that declares keys.
 
@@ -3374,7 +3580,8 @@ def _relate_emits(
     plan the contract relates nothing in comes back unchanged, and so does
     its coverage. Runs after every emit is planned and before any row is
     drawn, so a relationship that cannot hold is refused (``FLX-3403``) with
-    nothing generated.
+    nothing generated. *end_share* is what a history's ``end`` share is a share of
+    (:func:`execute`'s).
     """
     groups: Dict[str, List[int]] = {}
     for index, (resolved, planned) in enumerate(zip(resolved_emits, planned_emits, strict=True)):
@@ -3382,7 +3589,7 @@ def _relate_emits(
             groups.setdefault(str(resolved.contract_path), []).append(index)
     related = list(planned_emits)
     for indexes in groups.values():
-        _relate_group(resolved_emits, planned_emits, indexes, related, namespace)
+        _relate_group(resolved_emits, planned_emits, indexes, related, namespace, end_share)
     for planned in related:
         if planned.plan is not None:
             check_links_resolved(planned.plan)
@@ -3395,6 +3602,7 @@ def _relate_group(
     indexes: Sequence[int],
     related: List[_PlannedEmit],
     namespace: Mapping[str, Any],
+    end_share: str,
 ) -> None:
     """Relate the plans of the emits at *indexes*, one contract's, and set the changed ones in *related*.
 
@@ -3411,7 +3619,7 @@ def _relate_group(
         _counts_of([resolved_emits[index] for index in indexes]),
         resolved_emits[indexes[0]].contract_document,
         namespace,
-        _histories_of([resolved_emits[index] for index in indexes]),
+        _histories_of([resolved_emits[index] for index in indexes], end_share),
     )
     for index in indexes:
         planned = planned_emits[index]
@@ -3430,11 +3638,14 @@ def _related_of(resolved: ResolvedEmit) -> FrozenSet[str]:
     return related | natural
 
 
-def _histories_of(resolved: Sequence[ResolvedEmit]) -> Dict[str, HistoryBinding]:
-    """The history each emit declares, by exposeId, with the scaled entities and the validity columns (ADR 0017)."""
+def _histories_of(resolved: Sequence[ResolvedEmit], end_share: str) -> Dict[str, HistoryBinding]:
+    """The history each emit declares, by exposeId, with the scaled entities and the validity columns (ADR 0017).
+
+    The ``end`` of an entry is a share of *end_share* (:func:`execute`'s).
+    """
     found: Dict[str, HistoryBinding] = {}
     for emit in resolved:
-        entries = history_entries_of(emit.extension, emit.expose_id)
+        entries = history_entries_of(emit.extension, emit.expose_id, end_share=end_share)
         if not entries:
             continue
         semantics = (
@@ -3444,9 +3655,86 @@ def _histories_of(resolved: Sequence[ResolvedEmit]) -> Dict[str, HistoryBinding]
         if "start" not in ends:
             continue  # relate_plans refuses the emit with the contract's own words
         found[nfc(emit.expose_id)] = HistoryBinding(
-            entries[0], entries[0].entities, ends["start"], ends.get("end")
+            entries[0],
+            entries[0].entities,
+            ends["start"],
+            ends.get("end"),
+            parent_lifetime := _parent_lifetime_of(emit, entries[0], resolved),
+            None if parent_lifetime is None else emit.declared_row_count,
         )
     return found
+
+
+def _parent_lifetime_of(
+    emit: ResolvedEmit, entry: Any, resolved: Sequence[ResolvedEmit]
+) -> Optional[Tuple[str, Optional[str]]]:
+    """The start and end columns of the ``lifetimes`` entry on the emit a history's ``parent`` reaches.
+
+    Read only for an entry that declares ``parent.lifetime`` (ADR 0017, amendment of 2026-11-24);
+    ``None`` otherwise, and when the parent emit declares no lifetime, which the layout refuses.
+    """
+    if entry.parent is None or not entry.parent.lifetime or emit.keys is None:
+        return None
+    reached = next(
+        (
+            relationship.target
+            for relationship in emit.keys.relationships
+            if relationship.name == entry.parent.relationship
+        ),
+        None,
+    )
+    for other in resolved:
+        if reached is not None and nfc(other.expose_id) == nfc(reached):
+            held = lifetime_entries_of(other.extension, other.expose_id)[:1]
+            if not held:
+                return None
+            _refuse_varying_lifetime(entry, other, (held[0].start, held[0].end))
+            return (held[0].start, held[0].end)
+    return None
+
+
+def _refuse_varying_lifetime(
+    entry: Any, parent: ResolvedEmit, columns: Tuple[str, Optional[str]]
+) -> None:
+    """Refuse (``FLX-3403``) ``parent.lifetime`` on a parent whose versions can differ on its lifetime columns.
+
+    A parent that declares a history gives each entity a chain of versions, and only a carried
+    column keeps one value over them (ADR 0017 section 6). A lifetime column that the parent's history
+    sets (a validity column, the activation, a tracked or the end column) or that a rule sets can
+    differ between versions, and the bound would hold the entity to whichever version its row
+    reached. The message names the emit and the columns.
+    """
+    histories = history_entries_of(parent.extension, parent.expose_id)
+    if not histories:
+        return
+    semantics = (
+        declared_exposes(parent.contract_document).get(parent.expose_id, {}).get("semantics")
+    )
+    varying = set(window_ends(semantics).values()) | set(
+        other_sourced_columns(
+            parent.contract_document,
+            parent.expose_id,
+            parent.flux_side_rules,
+            parent.keys,
+            copies=False,
+        )
+    )
+    for kept in histories:
+        varying.update(item.column for item in kept.tracked)
+        varying.update(
+            column
+            for column in (kept.activation, kept.end.column if kept.end is not None else None)
+            if column is not None
+        )
+    named = sorted(column for column in columns if column is not None and column in varying)
+    if named:
+        raise FluxError(
+            FLX_3403,
+            f"history ({entry.emit}).parent.lifetime reads {', '.join(map(repr, named))} of "
+            f"{parent.expose_id!r}, which declares a history that does not carry "
+            f"{'it' if len(named) == 1 else 'them'}: the cells can differ between the versions "
+            "of one parent, so the bound would hold an entity to an arbitrary one",
+        )
 
 
 def _bridges_of(resolved: Sequence[ResolvedEmit]) -> Dict[str, Tuple[Tuple[str, str], ...]]:

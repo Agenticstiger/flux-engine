@@ -1,0 +1,297 @@
+{
+  "columnProvenanceDigest": "sha256:4e17deec1672cd7b44feb2e67476136a02a70df67d7ddfb2a0627411b80bab66",
+  "emits": {
+    "depot": {
+      "G": "sha256:bee1d666ceaf1ab81553894a2ebd2d0f8323f9d66f38eace582ec85936cad250",
+      "H": "sha256:d0f1d597bedf970fceaf33a0311cc96dfcdc177dfc014001cb596adee1505139",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:bee1d666ceaf1ab81553894a2ebd2d0f8323f9d66f38eace582ec85936cad250",
+        "H": "sha256:d0f1d597bedf970fceaf33a0311cc96dfcdc177dfc014001cb596adee1505139",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "depot",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "depot_id"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 78,
+              "sum": 42,
+              "value": 22
+            },
+            "margin": "999.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:depot_id"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "depot_id",
+          "region",
+          "opened_on",
+          "closed_on"
+        ],
+        "generatorDigest": "sha256:54d479e465dfce93eeaa3de6e92d2db17c524a4d65e63f608e09bdf239d5d6f3",
+        "rows": 50
+      },
+      "productRef": "fleet.vehicles"
+    },
+    "service_visit": {
+      "G": "sha256:98aee855a952aa6ad0fa547de12a19d8ceef861a70b4283d897cd2d9281447f3",
+      "H": "sha256:0f0022938bb4a15ed3c605dee1e902270165e660698f6a263c43d11427689a13",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:98aee855a952aa6ad0fa547de12a19d8ceef861a70b4283d897cd2d9281447f3",
+        "H": "sha256:0f0022938bb4a15ed3c605dee1e902270165e660698f6a263c43d11427689a13",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "service_visit",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "cost"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 81,
+              "sum": 45,
+              "value": 25
+            },
+            "margin": "999.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:cost"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "visit_id",
+          "vehicle_id",
+          "visited_on",
+          "cost"
+        ],
+        "generatorDigest": "sha256:41334c9acd1420b1e6cb9ed172933a05d9d37b6530b5707fa93d05aa33f46fc3",
+        "rows": 600
+      },
+      "productRef": "fleet.vehicles"
+    },
+    "vehicle_change": {
+      "G": "sha256:a4fc0b475f6c8133886cb5a5fae1f2c5eb4267a522cef1cfd25469daadb6ad37",
+      "H": "sha256:3de4680fae9f1ef9b8e13ce77076914395b34f24a0a660bfd96da589b481c751",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:a4fc0b475f6c8133886cb5a5fae1f2c5eb4267a522cef1cfd25469daadb6ad37",
+        "H": "sha256:3de4680fae9f1ef9b8e13ce77076914395b34f24a0a660bfd96da589b481c751",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "vehicle_change",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "event_id"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 102,
+              "sum": 66,
+              "value": 46
+            },
+            "margin": "999999999.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:event_id"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "event_id",
+          "vehicle_id",
+          "op",
+          "changed_at",
+          "recorded_at",
+          "before_model",
+          "after_model"
+        ],
+        "generatorDigest": "sha256:1f497509a85da7e04ab3788b9a0c0d456d102a1dc086a5bf2197bd172fd7b9b7",
+        "rows": 200
+      },
+      "productRef": "fleet.vehicles",
+      "rows": 200,
+      "rowsFrom": {
+        "of": "vehicle_version",
+        "projection": "events"
+      }
+    },
+    "vehicle_current": {
+      "G": "sha256:307499ff09001dbec8f3a7e1ba224837f37b6558fbbe5ee2bcb0cecda39bf4c3",
+      "H": "sha256:17a0ab6eeca5abdcc031a6de4b11fc5b26b52a70ef493cb8c208cb9d4beb6648",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:307499ff09001dbec8f3a7e1ba224837f37b6558fbbe5ee2bcb0cecda39bf4c3",
+        "H": "sha256:17a0ab6eeca5abdcc031a6de4b11fc5b26b52a70ef493cb8c208cb9d4beb6648",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "vehicle_current",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "vehicle_id"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 80,
+              "sum": 44,
+              "value": 24
+            },
+            "margin": "999.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:vehicle_id"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "vehicle_id",
+          "model",
+          "status",
+          "commissioned_on"
+        ],
+        "generatorDigest": "sha256:6b51733968d327d269abb5e88d359eb145484b3450fb99361d670fe71d10572b",
+        "rows": 60
+      },
+      "productRef": "fleet.vehicles",
+      "rows": 60,
+      "rowsFrom": {
+        "of": "vehicle_version",
+        "projection": "snapshots"
+      }
+    },
+    "vehicle_month": {
+      "G": "sha256:d06bf95628c7444418d5bd672688052f320c5928dd623233298e7bcd1890b25a",
+      "H": "sha256:6339434ed8e6ff0986fb36548409ab90c3aec98cc02295a2a805fac36c105848",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:d06bf95628c7444418d5bd672688052f320c5928dd623233298e7bcd1890b25a",
+        "H": "sha256:6339434ed8e6ff0986fb36548409ab90c3aec98cc02295a2a805fac36c105848",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "vehicle_month",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "period_id"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 102,
+              "sum": 66,
+              "value": 46
+            },
+            "margin": "999999999.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:period_id"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "period_id",
+          "vehicle_id",
+          "month",
+          "model"
+        ],
+        "generatorDigest": "sha256:1c416b6571e6aa946ae30a37b456171907215c08a4828565eb89ebe49923e4af",
+        "rows": 1486
+      },
+      "productRef": "fleet.vehicles",
+      "rows": 1486,
+      "rowsFrom": {
+        "of": "vehicle_version",
+        "projection": "periods"
+      }
+    },
+    "vehicle_version": {
+      "G": "sha256:d6998f5df3312ba0b19de53d45a26cbc710ef00ef2c5d238baf257ea1e7a6476",
+      "H": "sha256:194f1ab571716800a318fd0349ec9537f5b2c5eec02197cefa56c889049f0d81",
+      "declaresFidelity": true,
+      "fidelity": {
+        "G": "sha256:d6998f5df3312ba0b19de53d45a26cbc710ef00ef2c5d238baf257ea1e7a6476",
+        "H": "sha256:194f1ab571716800a318fd0349ec9537f5b2c5eec02197cefa56c889049f0d81",
+        "encoding": {
+          "fractionalBits": 16,
+          "rounding": "floor"
+        },
+        "exposeId": "vehicle_version",
+        "fieldCapacityBits": 253,
+        "properties": [
+          {
+            "columns": [
+              "vehicle_sk"
+            ],
+            "epsilon": "0.0000152587890625",
+            "magnitudeBits": {
+              "meanComparison": 80,
+              "sum": 44,
+              "value": 24
+            },
+            "margin": "999.9999847412109375",
+            "maxNonMembers": null,
+            "property": "mean",
+            "propertyId": "000:mean:vehicle_sk"
+          }
+        ]
+      },
+      "generator": {
+        "columns": [
+          "vehicle_sk",
+          "vehicle_id",
+          "depot_id",
+          "valid_from",
+          "valid_to",
+          "model",
+          "status",
+          "commissioned_on"
+        ],
+        "generatorDigest": "sha256:016210b855ce90d77595d2e61104dbe5994190939f5949ad2f18571bdbf9ec33",
+        "rows": 200
+      },
+      "productRef": "fleet.vehicles"
+    }
+  },
+  "fidelity": "deterministic",
+  "generated_at": "2026-11-25T06:52:30+00:00",
+  "inputDigest": "sha256:fabf9470feeb9ea3b72650a0bcb7afea0c93a5d3dd723ef6eb1c6ebb5fae4e06",
+  "kernelVersion": "0.2.0",
+  "planDigest": "sha256:a28e95573384a621df051ea301fa0b3124d33b1f4c089180951332f1fff327a9",
+  "seed": 42,
+  "seedTreeDigest": "sha256:5045ece95fce4306e67f07b1b48afc3a82ca777218a262d5b68560a9cfb69a60",
+  "seedTreeShapes": {
+    "world.subject.products": 1
+  },
+  "seedTreeVersion": "flux-seed/2",
+  "simulationId": "sim-fleet"
+}

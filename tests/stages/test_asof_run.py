@@ -33,10 +33,9 @@ import yaml
 
 from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.stages import _parallel as parallel
-from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
-from flux_engine.stages.plan import build_plan_document
 
+from ._same_run import assert_same_run_at_one_and_four_jobs, assert_the_run_repeats
 from .test_history_run import _rows, _subscriptions
 
 pytestmark = pytest.mark.integration
@@ -188,10 +187,7 @@ def test_a_written_row_that_breaks_the_rule_fails_verify(tmp_path: Path) -> None
 
 
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path)
-    first = run_cli(bundle, tmp_path / "a")
-    second = run_cli(bundle, tmp_path / "b")
-    assert first.emit_path("invoice").read_bytes() == second.emit_path("invoice").read_bytes()
+    assert_the_run_repeats(_bundle(tmp_path), tmp_path, run_cli, "invoice")
 
 
 # --- size -------------------------------------------------------------------------------------
@@ -212,12 +208,7 @@ def test_a_scale_below_one_scales_the_entities_and_the_invoices(
 def test_four_jobs_make_the_run_one_job_makes(tmp_path: Path) -> None:
     invoices = 3 * parallel.MIN_ROWS_PER_JOB + 11
     bundle = _bundle(tmp_path, invoices=invoices)
-    one = pipeline.execute(bundle, jobs=1, kernel=KERNEL_V2)
-    four = pipeline.execute(bundle, jobs=4, kernel=KERNEL_V2)
-    assert build_plan_document(four) == build_plan_document(one)
-    for mine, theirs in zip(four.emits, one.emits, strict=True):
-        assert mine.result == theirs.result
-        assert mine.writer.lines() == theirs.writer.lines()
+    _, four = assert_same_run_at_one_and_four_jobs(bundle, result=True, kernel=KERNEL_V2)
     generated = [e for e in four.emits if e.plan is not None and e.plan.rows == invoices]
     assert generated and all(e.processes > 1 for e in generated)
 

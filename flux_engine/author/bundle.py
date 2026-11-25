@@ -112,19 +112,24 @@ from flux_engine.author.derived import (
 from flux_engine.author.exact import EXACT_HOW, allot_small_tables
 from flux_engine.author.given import choose_givens
 from flux_engine.author.history import (
+    HistoryReads,
     HistorySource,
+    Published,
     declare_date_ranges,
     decline_history,
+    restate_assumptions,
     write_history,
 )
 from flux_engine.author.history import _pointers as declared_pointers
 from flux_engine.author.ledger import Ledger
 from flux_engine.author.noisy import cite_noisy, point_estimates
 from flux_engine.author.projection import (
-    HistoryTarget,
     Projected,
     ProjectionSource,
+    follow_history,
+    history_target,
     project,
+    release_counts,
     span_primary_key,
 )
 from flux_engine.author.ranges import column_range
@@ -2127,7 +2132,7 @@ def _projections(
     keys: Optional[ContractKeys],
     contract: Mapping[str, Any],
     histories: _Histories,
-    spread: _Spreads,
+    published: Published,
     declined: Optional[str],
 ) -> Projected:
     """The ``snapshots``, ``events`` and ``periods`` entries of the written exposes (ADR 0027 section 9).
@@ -2139,25 +2144,22 @@ def _projections(
     if keys is None or not histories.entries:
         return Projected()
     index = {expose.expose_id: expose for expose in exposes}
-    targets = []
-    for entry in histories.entries:
-        history = index[str(entry["emit"])]
-        held = keys.expose(history.expose_id)
-        columns = compile_expose(contract["exposes"][history.index]).columns
-        targets.append(
-            HistoryTarget(
-                history.expose_id,
-                tuple(item.column for item in held.entities if item.kind == "natural"),
-                {column.name: column for column in columns},
-            )
+    targets = [
+        history_target(
+            entry,
+            keys.expose(str(entry["emit"])),
+            compile_expose(contract["exposes"][index[str(entry["emit"])].index]).columns,
         )
-    counted = {str(entry["emit"]) for entry in spread.entries}
+        for entry in histories.entries
+    ]
     sources = [
         ProjectionSource(
             expose.expose_id,
             contract["exposes"][expose.index],
             keys.expose(expose.expose_id),
-            counted=expose.expose_id in counted,
+            counts=tuple(
+                entry for entry in published.spread.entries if entry["emit"] == expose.expose_id
+            ),
         )
         for expose in exposes
         if not expose.reference
@@ -2170,10 +2172,13 @@ def _projections(
             f"the bundle written with these projections is refused, so none is written: {declined}"
         )
         return Projected(notes=[(f"{emit}: projection", why) for emit in sorted(found.emits)])
+    freed = release_counts(found, histories.entries, keys.expose, published)
     for emit, reason in found.emits.items():
         index[emit].projected = reason
         if emit in found.carried:
             _release_carried(index[emit], *found.carried[emit])
+    for emit, column in freed:
+        follow_history(index[emit], column, found.carried[emit][0])
     for entry in (*found.events, *found.periods):
         emit = str(entry["emit"])
         span_primary_key(index[emit].columns, keys.expose(emit))
@@ -2223,6 +2228,7 @@ def _histories(
     *,
     minimum_cell: int,
     fractional_bits: int,
+    published: Published,
     declined: Optional[str] = None,
 ) -> _Histories:
     """Write the ``history`` entry of each written expose whose profile table publishes one.
@@ -2234,11 +2240,13 @@ def _histories(
     unused for that reason.
     """
     result = _Histories([], [], [], [])
+    reads = HistoryReads(exposes, published)
     for expose in exposes:
         table = tables.get(expose.expose_id)
         if expose.reference or not isinstance(table, Mapping) or "history" not in table:
             continue
         plans = {plan.name: plan for plan in expose.columns}
+        held = keys.expose(expose.expose_id) if keys is not None else None
         source = HistorySource(
             expose_id=expose.expose_id,
             table=table,
@@ -2246,15 +2254,19 @@ def _histories(
             plans=plans,
             kinds=expose.kinds,
             contract_expose=contract["exposes"][expose.index],
-            keys=keys.expose(expose.expose_id) if keys is not None else None,
+            keys=held,
             window=window,
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
             set_by_rules=frozenset(expose.derives) | frozenset(expose.copies) | expose.dependents,
+            parents=reads.candidates(expose.expose_id, held),
+            catalogues=reads.catalogues(held),
         )
         written = write_history(source) if declined is None else decline_history(source, declined)
         if written.entry is not None:
             result.entries.append(written.entry)
+            restate_assumptions(expose)
+            reads.release(expose.expose_id, written)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)
         result.used.extend(written.used)
         result.unused.extend(written.unused)
@@ -3708,6 +3720,9 @@ def _histories_and_projections(
             _declared_histories(authored, keys, contract, planned.reading.tables, window, declared),
             _declared_projections(authored, keys, contract, declared),
         )
+    published = Published(
+        planned.reading.profile.get("relationships"), planned.reading.references, planned.spread
+    )
     histories = _histories(
         authored,
         keys,
@@ -3716,9 +3731,10 @@ def _histories_and_projections(
         window,
         minimum_cell=planned.reading.minimum_cell,
         fractional_bits=planned.reading.fractional_bits,
+        published=published,
         declined=declined[0],
     )
-    projections = _projections(authored, keys, contract, histories, planned.spread, declined[1])
+    projections = _projections(authored, keys, contract, histories, published, declined[1])
     return histories, projections
 
 

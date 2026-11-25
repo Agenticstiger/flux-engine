@@ -42,6 +42,7 @@ from __future__ import annotations
 import copy
 import re
 from dataclasses import dataclass, field, replace
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Collection, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -119,7 +120,7 @@ _EVENTS_KEYS = (
     "after",
     "when",
 )
-_PERIODS_KEYS = ("emit", "of", "column", "grain", "match", "kinds")
+_PERIODS_KEYS = ("emit", "of", "column", "grain", "match", "from", "through", "kinds")
 _KIND_KEYS = ("count", "when", "overrides")
 _TYPE_KEYS = ("column", "values")
 _LEVEL_KEYS = ("levels", "levelWeights")
@@ -127,6 +128,8 @@ _ENDED = ("keep", "drop")
 _OPS = ("c", "u", "d")
 _GRAINS = ("day", "week", "month", "quarter", "year")
 _MATCHES = ("overlap", "start", "end")
+_DAY_MS = 86_400_000
+_EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
 _MOST_ENTRIES = 4096
 _MOST_ROWS = 1 << 31
 #: The most characters an override text may have.
@@ -215,13 +218,23 @@ class PeriodsEntry:
     grain: Optional[str] = None
     match: str = "overlap"
     kinds: Tuple[PeriodKind, ...] = ()
+    from_day: Optional[str] = None
+    through_day: Optional[str] = None
 
     def as_member(self) -> Dict[str, Any]:
-        """The entry as the emit's ``periods`` member holds it: no ``emit``, the default match written."""
+        """The entry as the emit's ``periods`` member holds it: no ``emit``, the default match written.
+
+        ``from`` and ``through`` are written only when declared, so an entry without them hashes
+        as it did before they existed.
+        """
         member: Dict[str, Any] = {"of": self.of, "column": self.column}
         if self.grain is not None:
             member["grain"] = self.grain
         member["match"] = self.match
+        if self.from_day is not None:
+            member["from"] = self.from_day
+        if self.through_day is not None:
+            member["through"] = self.through_day
         if self.kinds:
             member["kinds"] = [kind.as_member() for kind in self.kinds]
         return member
@@ -354,6 +367,16 @@ def _kinds(raw: Any, at: str, code: ErrorCode, refusal: ErrorCode) -> Tuple[Peri
     )
 
 
+def _day_text(raw: Mapping[str, Any], key: str, at: str, refusal: ErrorCode) -> Optional[str]:
+    """A DATE text ``YYYY-MM-DD`` (quote it in YAML), or ``None`` when *key* is absent."""
+    value = raw.get(key)
+    if key in raw and (not isinstance(value, str) or _instant(value, LogicalKind.DATE) is None):
+        raise FluxError(
+            refusal, f"{at}.{key} is a DATE text YYYY-MM-DD (quote it in YAML), not {value!r}"
+        )
+    return value
+
+
 def _read_periods(
     raw: Mapping[str, Any], at: str, code: ErrorCode, refusal: ErrorCode
 ) -> PeriodsEntry:
@@ -363,6 +386,13 @@ def _read_periods(
     match = raw.get("match", "overlap")
     if match not in _MATCHES:
         raise FluxError(refusal, f"{at}.match is one of {list(_MATCHES)}, not {match!r}")
+    from_day = _day_text(raw, "from", at, refusal)
+    through_day = _day_text(raw, "through", at, refusal)
+    if from_day is not None and through_day is not None and through_day < from_day:
+        raise FluxError(
+            refusal,
+            f"{at}.through {through_day} is before its from {from_day}: the range is empty",
+        )
     return PeriodsEntry(
         emit=nfc(str(raw["emit"])),
         of=_text(raw, "of", at, refusal),
@@ -370,6 +400,8 @@ def _read_periods(
         grain=grain,
         match=match,
         kinds=_kinds(raw["kinds"], at, code, refusal) if "kinds" in raw else (),
+        from_day=from_day,
+        through_day=through_day,
     )
 
 
@@ -613,6 +645,7 @@ class ProjectionTarget:
     end: Optional[str]
     contract: Mapping[str, Any] = field(compare=False, repr=False)
     granularity: Mapping[str, str] = field(default_factory=dict)
+    time_bounds: Optional[Mapping[str, Any]] = field(default=None, compare=False, repr=False)
 
     def kind_of(self, column: str) -> LogicalKind:
         """The logical kind of a column of the projected emit."""
@@ -636,11 +669,13 @@ def projection_target(
     history_expose: Mapping[str, Any],
     history_contract: Mapping[str, Any],
     history: HistoryEntry,
+    time_bounds: Optional[Mapping[str, Any]] = None,
 ) -> ProjectionTarget:
     """What the contracts say, for the ``check_*`` functions.
 
     *expose* is the projected emit's ``exposes[]`` entry, *history_expose* the history emit's,
-    *history_contract* the contract document that holds it and *history* its entry.
+    *history_contract* the contract document that holds it and *history* its entry;
+    *time_bounds* is the Simulation's ``timeBounds``, which a periods entry's range is read against.
     """
     mine = compile_expose(expose)
     theirs = compile_expose(history_expose)
@@ -655,6 +690,7 @@ def projection_target(
         end=ends.get("end"),
         contract=history_contract,
         granularity=_granularities(expose),
+        time_bounds=time_bounds,
     )
 
 
@@ -768,9 +804,12 @@ def _check_when(
 ) -> None:
     """Refuse (*refusal*) a ``when`` that reads anything but the version's own columns.
 
-    It reads the history's tracked columns, its validity and its activation, and through
-    ``previous.`` those of the version before; *row_only* is the columns that only the row
-    reads, never ``previous.`` (a period column). A text that does not parse or check is refused
+    It reads the history's tracked columns, its validity and its activation, its end column
+    (ADR 0027, the amendment of 2026-11-24), and through ``previous.`` those of the version
+    before; *row_only* is the columns that only the row reads, never ``previous.`` (a period
+    column). The end column holds the end value on an ending version and a drawn level on any
+    other, so a ``when`` that reads it is refused at plan time where its result depends on that
+    draw. A text that does not parse or check is refused
     as any rule's is.
     """
     from flux_engine.expr2.check import PREDICATE, check
@@ -782,6 +821,8 @@ def _check_when(
     history = target.history
     version = {item.column for item in history.tracked}
     version.update(name for name in (target.start, target.end, history.activation) if name)
+    if history.end is not None and history.end.column is not None:
+        version.add(history.end.column)
     for read in checked.reads:
         allowed = version | (set(row_only) if read.reach == "row" else set())
         if read.reach not in ("row", "previous") or read.column not in allowed:
@@ -971,6 +1012,52 @@ def _check_kind(
         _check_when(kind.when, target, (entry.column,), at, refusal)
 
 
+def _check_range(
+    entry: PeriodsEntry, target: ProjectionTarget, at: str, refusal: ErrorCode
+) -> None:
+    """Refuse a ``from`` or a ``through`` that lies outside the window, ``timeBounds.end`` excluded."""
+    window = _window_days(target.time_bounds)
+    if window is None:
+        return
+    for key, text in (("from", entry.from_day), ("through", entry.through_day)):
+        day = _instant(text, LogicalKind.DATE) if text is not None else None
+        if text is not None and day is not None:
+            _check_day(key, (text, day), entry.from_day is None, window, (at, refusal))
+
+
+def _window_days(bounds: Any) -> Optional[Tuple[int, int]]:
+    """The first day of the window (in days since the epoch) and its end (in milliseconds), if it has both."""
+    if not isinstance(bounds, Mapping):
+        return None
+    start, end = (
+        _instant(text, LogicalKind.TIMESTAMP) if isinstance(text, str) else None
+        for text in (bounds.get("start"), bounds.get("end"))
+    )
+    return None if start is None or end is None else (start // _DAY_MS, end)
+
+
+def _check_day(
+    key: str,
+    held: Tuple[str, int],
+    open_from: bool,
+    window: Tuple[int, int],
+    where: Tuple[str, ErrorCode],
+) -> None:
+    """Refuse the day *held* (its text and its day) of ``from`` or ``through`` that the window excludes.
+
+    *open_from* says the entry has no ``from``, so a ``through`` before the window is an empty range.
+    """
+    (text, day), (first, end), (at, refusal) = held, window, where
+    before = (
+        f"{at}.{key} {text} is before timeBounds.start, whose day is "
+        f"{date.fromordinal(first + _EPOCH_ORDINAL).isoformat()}"
+    )
+    if day < first and (key == "from" or open_from):
+        raise FluxError(refusal, before if key == "from" else f"{before}: the range is empty")
+    if day * _DAY_MS >= end:
+        raise FluxError(refusal, f"{at}.{key} {text} is not before timeBounds.end")
+
+
 def check_periods(
     entry: PeriodsEntry, target: ProjectionTarget, *, refusal: ErrorCode
 ) -> PeriodsEntry:
@@ -981,7 +1068,8 @@ def check_periods(
     entry nor the column's ``timeGranularity`` gives, or that is not ``day``, ``week``, ``month``,
     ``quarter`` or ``year``; an ``overrides`` that names no column of the emit or is no value of
     its column's type; and a kind's ``when`` that reads anything but the version's tracked
-    columns, validity and activation, and the period column. The entry returned has its grain
+    columns, validity and activation, and the period column; a ``from`` before ``timeBounds.start``'s
+    day, and a ``from`` or a ``through`` not before ``timeBounds.end``. The entry returned has its grain
     written, so the contract's default and an explicit grain bind alike.
     """
     at = f"periods ({entry.emit})"
@@ -997,6 +1085,7 @@ def check_periods(
             "day cannot be a version's column",
         )
     grain = _grain_of(entry, target, at, refusal)
+    _check_range(entry, target, at, refusal)
     for index, kind in enumerate(entry.kinds):
         _check_kind(kind, entry, target, f"{at}.kinds[{index}]", refusal)
     return replace(entry, grain=grain)

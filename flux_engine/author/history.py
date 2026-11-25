@@ -15,13 +15,17 @@ Simulation's ``history`` entry:
 * ``chain`` is the level of ``chain`` that holds on at least :data:`CHAIN_HOLDS_AT_LEAST` of
   consecutive versions. When none does, no entry is written and every published member is unused;
 * ``tracked`` is each candidate column that moves in at least one published change, with its
-  ``initial`` and ``transitions``; the others are carried;
+  ``initial`` and ``transitions``; the others are carried. A candidate that is a foreign key into a
+  public reference table (one the profile releases whole) declares the table's keys as its levels,
+  at equal weights, so it can be tracked; with a key not published, it is carried;
 * ``reasons`` is the histogram of the changes by the column they move, without ``several``;
 * ``end`` is ``closeLast`` with the closed share of ``lastVersion``, when that share is above zero.
   A profile does not say which value marks an end, so ``finalVersion`` is never written;
-* ``parent`` is never written: a profile publishes children per parent over rows, which are versions
-  here, and an entity names one column, so a relationship on the natural entity's column would make
-  the natural key a foreign key, which the generator refuses.
+* ``parent`` is written when the history's emit has a to-one relationship to another expose that the
+  history can lay its entities under (:func:`_parent`). A profile counts children per parent in rows,
+  which are versions here, so the published shape is kept and its total is the entities' (the
+  ledger says so); a relationship on the natural entity's column is never the parent, since that
+  would make the natural key a foreign key, which the generator refuses.
 
 Every published member that is not used is returned with the reason it is not, as ADR 0014 requires.
 :func:`declare_date_ranges` gives each date column of the emit that declares no range the window as
@@ -34,10 +38,11 @@ from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal
 from fractions import Fraction
-from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple, Union
 
 from flux_engine.author.basis import Label, assumed
-from flux_engine.author.children import count_children
+from flux_engine.author.catalogue import published_levels
+from flux_engine.author.children import count_children, declare_counted
 from flux_engine.author.columns import ColumnPlan, cell_weights, count_cells, share_texts
 from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
@@ -46,10 +51,19 @@ from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM, MEAN
 
 __all__ = [
     "CHAIN_HOLDS_AT_LEAST",
+    "HistoryReads",
     "HistorySource",
     "HistoryWritten",
+    "ParentCandidate",
+    "Published",
+    "catalogue_columns",
     "declare_date_ranges",
     "decline_history",
+    "parent_candidates",
+    "profile_relationship",
+    "release_relationship",
+    "restate_assumptions",
+    "structural_record",
     "write_history",
 ]
 
@@ -66,6 +80,23 @@ _MEMBERS = ("versionsPerEntity", "firstStart", "versionLength", "chain", "lastVe
 
 #: A pointer into the profile, with how it was used or why it was not.
 _Note = Tuple[Tuple[str, ...], str]
+
+
+@dataclass(frozen=True)
+class ParentCandidate:
+    """A to-one relationship of the history's emit that its entities could be laid out under.
+
+    ``column`` is the foreign key, ``parent`` the parent expose and ``parent_rows`` its rows.
+    ``entry`` is the profile's ``relationships`` entry for it, ``tokens`` its pointer, both ``None``
+    when the profile publishes none.
+    """
+
+    name: str
+    column: str
+    parent: str
+    parent_rows: int
+    entry: Optional[Mapping[str, Any]] = None
+    tokens: Optional[Tuple[str, ...]] = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +119,10 @@ class HistorySource:
     minimum_cell: int
     fractional_bits: int
     set_by_rules: FrozenSet[str] = frozenset()
+    parents: Tuple[ParentCandidate, ...] = ()
+    #: Each foreign key of the emit into a reference expose, by column: the expose and the keys the
+    #: profile publishes for it, or ``None`` when they are not all published.
+    catalogues: Mapping[str, Tuple[str, Optional[Tuple[str, ...]]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -104,6 +139,11 @@ class HistoryWritten:
     unused: List[_Note] = field(default_factory=list)
     #: What is assumed, by subject: a sentence a person reads.
     notes: List[Tuple[str, str]] = field(default_factory=list)
+    #: The relationship the entry's ``parent`` names, with its pointer into the profile when it has
+    #: one: no ``counts`` entry and no spread may lay the same relationship out.
+    parent_of: Optional[Tuple[str, Optional[Tuple[str, ...]]]] = None
+    #: The decisions about the parent's relationship that no statistic holds, listed as used.
+    records: List[_Note] = field(default_factory=list)
 
 
 class _Skip(Exception):
@@ -466,6 +506,21 @@ def _refusal_of(
     """Why a candidate column cannot be tracked in this emit, or ``None``."""
     if plan is None or _levels_of(plan) is None:
         return "the emit declares no levels for the column, so it is carried"
+    return _held_back(name, plan, source, fixed, given)
+
+
+def _held_back(
+    name: str,
+    plan: ColumnPlan,
+    source: HistorySource,
+    fixed: FrozenSet[str],
+    given: FrozenSet[str],
+) -> Optional[str]:
+    """What else keeps a column that has levels from being tracked: the history, a rule or a draw owns it.
+
+    A column that is a foreign key into a reference table has the table's keys as its levels, which
+    :func:`_declare_keys` declares once it is tracked, so only this is asked of it.
+    """
     if name in fixed:
         return "the column is a key, or a validity column, which the history sets"
     if name in source.set_by_rules:
@@ -505,6 +560,83 @@ def _track_one(
     return item
 
 
+_KEYS_REASON = (
+    "The history tracks this foreign key into {target}, a table the profile releases whole, so the "
+    "column declares {target}'s {count} keys as its levels, at equal weights: a version's value is "
+    "a key, and the levels it first takes and moves between are the history's own."
+)
+
+
+def _catalogue_keys(
+    name: str, plan: Optional[ColumnPlan], source: HistorySource
+) -> Union[Tuple[str, ...], str, None]:
+    """The keys of the reference table a column without levels points at; a sentence when they are not all published; else ``None``."""
+    if plan is None or _levels_of(plan) is not None or name not in source.catalogues:
+        return None
+    target, keys = source.catalogues[name]
+    if not keys:
+        return (
+            f"the column is a foreign key into {target}, whose keys are not all published, so "
+            "no level is guessed and it is carried"
+        )
+    return keys
+
+
+def _declare_keys(plan: ColumnPlan, keys: Sequence[str], target: str) -> None:
+    """Declare the keys of the reference table as the levels of the tracked foreign key."""
+    reason = _KEYS_REASON.format(target=target, count=len(keys))
+    texts = share_texts([Fraction(1)] * len(keys))
+    plan.declaration["levels"] = dict(zip(keys, texts, strict=True))
+    plan.labels.append(Label(("levels",), assumed(reason)))
+    plan.assumptions = [reason]
+    plan.choices = []
+    plan.how = f"a foreign key to {target}, tracked by the history over its {len(keys)} keys"
+    plan.passed = [
+        (
+            place,
+            (
+                "its own histogram of values adds no bound: the column's levels are the "
+                "reference table's keys, which the history moves between"
+                if "not levels of the catalogue's keys" in why
+                else why
+            ),
+        )
+        for place, why in plan.passed
+    ]
+
+
+def _track_candidate(
+    name: str,
+    entry: Mapping[str, Any],
+    where: Tuple[str, ...],
+    source: HistorySource,
+    held: Tuple[FrozenSet[str], FrozenSet[str]],
+) -> Union[Dict[str, Any], str]:
+    """The ``tracked`` item of candidate column *name*, or the sentence that says why it is carried.
+
+    *held* is the columns the history sets or a key holds, and the columns another is drawn given.
+    """
+    fixed, given = held
+    plan = source.plans.get(name)
+    keys = _catalogue_keys(name, plan, source)
+    if isinstance(keys, str):
+        return keys
+    if keys and plan is not None:
+        reason = _held_back(name, plan, source, fixed, given)
+    else:
+        reason = _refusal_of(name, plan, source, fixed, given)
+    if reason is not None:
+        return reason
+    assert plan is not None
+    try:
+        item = _track_one(name, entry, where, source, keys or _levels_of(plan) or ())
+    except _Skip as skipped:
+        return str(skipped)
+    if keys:
+        _declare_keys(plan, keys, source.catalogues[name][0])
+    return item
+
+
 def _track(
     history: Mapping[str, Any], base: Tuple[str, ...], source: HistorySource, fixed: FrozenSet[str]
 ) -> _Tracking:
@@ -520,15 +652,9 @@ def _track(
     )
     for name in sorted(str(key) for key in candidates):
         where = base + ("columns", name)
-        reason = _refusal_of(name, source.plans.get(name), source, fixed, given)
-        try:
-            if reason is not None:
-                raise _Skip(reason)
-            plan = source.plans[name]
-            declared = _levels_of(plan) or ()
-            item = _track_one(name, candidates[name], where, source, declared)
-        except _Skip as skipped:
-            result.unused += [(where + (key,), str(skipped)) for key in ("initial", "transitions")]
+        item = _track_candidate(name, candidates[name], where, source, (fixed, given))
+        if isinstance(item, str):
+            result.unused += [(where + (key,), item) for key in ("initial", "transitions")]
             continue
         result.columns.append(item)
         result.used.append(
@@ -565,6 +691,398 @@ def _reasons(
         return None
     named = {name: weight for name, weight in kept.items() if weight > 0}
     return {"levels": list(named), "levelWeights": share_texts(list(named.values()))}
+
+
+# ---------------------------------------------------------------------------
+# The parent
+# ---------------------------------------------------------------------------
+
+_PARENT_REASON = (
+    "The history lays its entities out under the parent rows of this relationship (ADR 0017 "
+    "section 3), so every version of an entity copies its parent's key and the foreign key "
+    "declares no draw of its own."
+)
+_PARENT_HOW = "a foreign key, set by the history's layout of its entities under their parent"
+_PARENT_SETS = (
+    "the history sets the foreign key from its parent rows, so this statistic of its own values "
+    "adds no bound to it"
+)
+_PARENT_ROWS = (
+    "The profile counts children per parent in version rows, not in entities. The shape of the "
+    "published classes is kept as the shape of entities per parent, and its total is the "
+    "entities'."
+)
+_DRAWN_GIVEN = ("given", "binWeightsGiven", "levelWeightsGiven")
+
+
+def _parent_hold(source: HistorySource, candidate: ParentCandidate, fixed: FrozenSet[str]) -> str:
+    """Why the entities cannot be laid out under *candidate*, or an empty text when they can."""
+    plan = source.plans.get(candidate.column)
+    if plan is None:
+        return "its column is not one the bundle plans"
+    if candidate.column in fixed:
+        return "its column is a key, or a validity column, which the history sets"
+    if candidate.column in source.set_by_rules:
+        return "a rule, a dependency or a copy sets its column"
+    nulls = plan.declaration.get("nullFraction")
+    if nulls is not None and Decimal(str(nulls)) != 0:
+        return "its column declares a nullFraction, and the layout gives every entity a parent"
+    if any(key in plan.declaration for key in _DRAWN_GIVEN):
+        return "its column is drawn given another"
+    if candidate.parent_rows < 1:
+        return "its parent holds no row"
+    return ""
+
+
+def _publishes_children(candidate: ParentCandidate) -> bool:
+    statistics = candidate.entry.get("statistics") if candidate.entry is not None else None
+    return any(
+        isinstance(statistic, Mapping)
+        and statistic.get("definition") == _MARGINAL
+        and _group(statistic) is not None
+        for statistic in (statistics if isinstance(statistics, list) else ())
+    )
+
+
+def _pick_parent(
+    source: HistorySource, fixed: FrozenSet[str], written: HistoryWritten
+) -> Optional[ParentCandidate]:
+    """The relationship the history's entities are laid out under, or ``None``.
+
+    The candidates are the to-one relationships of the emit into another expose, each held by what
+    :func:`_parent_hold` says. With one candidate, it is the parent. With several, the parent is
+    the one the profile publishes children per parent for, when exactly one is; otherwise none is
+    written, since two parents would be a guess, and the note names them.
+    """
+    held = [(item, _parent_hold(source, item, fixed)) for item in source.parents]
+    free = [item for item, why in held if not why]
+    for item, why in held:
+        if why:
+            written.notes.append(
+                (f"history parent {item.name}", f"not the parent of the entities: {why}")
+            )
+    if len(free) <= 1:
+        return free[0] if free else None
+    published = [item for item in free if _publishes_children(item)]
+    if len(published) == 1:
+        written.notes.append(
+            (
+                "history parent",
+                f"The emit has {len(free)} relationships to another expose "
+                f"({', '.join(item.name for item in free)}); the entities are laid out under "
+                f"{published[0].name}, the only one the profile publishes children per parent for.",
+            )
+        )
+        return published[0]
+    written.notes.append(
+        (
+            "history parent",
+            f"The emit has {len(free)} relationships to another expose "
+            f"({', '.join(item.name for item in free)}) and "
+            + (
+                "the profile publishes children per parent for none of them"
+                if not published
+                else "the profile publishes children per parent for more than one"
+            )
+            + ", so no parent is written: choosing one would be a guess.",
+        )
+    )
+    return None
+
+
+def _as_entities(entry: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The relationship with each published mean set aside: a mean of version rows is not the entities'."""
+    statistics = [
+        (
+            {"definition": MEAN.identifier, "groups": []}
+            if isinstance(statistic, Mapping) and statistic.get("definition") == MEAN.identifier
+            else statistic
+        )
+        for statistic in entry.get("statistics") or ()
+    ]
+    return {**entry, "statistics": statistics}
+
+
+def structural_record(entry: Mapping[str, Any], minimum: bool, otherwise: str) -> str:
+    """What the bundle does with a relationship's ``orphan`` and ``childless`` classes, one sentence.
+
+    A ``childless`` class is written as ``minChildren 1`` on the history's parent when *minimum*,
+    and otherwise not written, for the reason *otherwise*.
+    """
+    structural = entry.get("structural")
+    classes = structural if isinstance(structural, list) else []
+    parts: List[str] = []
+    if "orphan" in classes:
+        parts.append(
+            "orphan: checked, since the bundle builds every foreign key so that it finds its parent"
+        )
+    if "childless" in classes:
+        parts.append(
+            "childless: written as minChildren 1 on the history's parent"
+            if minimum
+            else f"childless: not written, because {otherwise}"
+        )
+    return "; ".join(parts)
+
+
+def _parent(
+    source: HistorySource, candidate: ParentCandidate, entities: int, written: HistoryWritten
+) -> Dict[str, Any]:
+    """The ``parent`` of the entry for *candidate*, with what is read of its statistics."""
+    parent: Dict[str, Any] = {"relationship": candidate.name}
+    subject = f"history parent {candidate.name}"
+    if candidate.entry is None or candidate.tokens is None:
+        written.notes.append(
+            (
+                subject,
+                "The profile publishes no children per parent for it, so the entities are spread "
+                "over the parent rows as alike as whole counts allow.",
+            )
+        )
+        return parent
+    tokens, entry = candidate.tokens, candidate.entry
+    _list_unused(
+        entry,
+        tokens,
+        written,
+        means=True,
+        text="a mean of version rows per parent, not of entities, so it sets no total for the "
+        "history's parent",
+    )
+    counted = count_children(
+        _as_entities(entry), tokens, entities, candidate.parent_rows,
+        minimum_cell=source.minimum_cell, fractional_bits=source.fractional_bits,
+    )  # fmt: skip
+    if counted is None or counted.why_not is not None:
+        why = (counted.why_not if counted is not None else None) or (
+            "the histogram of children per parent is not one the layout can read"
+        )
+        text = f"no children for the history's parent: {why}"
+        _list_unused(entry, tokens, written, means=False, text=text)
+        written.notes.append((subject, f"No children per parent is written: {why}."))
+        return parent
+    parent.update(counted.members)
+    written.used += [
+        (pointer, "the classes of the history parent's children, read as entities per parent")
+        for pointer, _ in counted.used
+    ]
+    written.unused += list(counted.unused)
+    written.notes.append((subject, _PARENT_ROWS))
+    if counted.assumption:
+        written.notes.append((subject, counted.assumption))
+    record = structural_record(
+        entry, "minChildren" in parent, "the children per parent are not laid out"
+    )
+    if record:
+        written.records.append((tokens + ("structural",), record))
+    return parent
+
+
+def _statistics_of(entry: Mapping[str, Any]) -> List[Tuple[int, bool]]:
+    """Each published statistic of a profile relationship by its place, with whether it is a mean."""
+    statistics = entry.get("statistics")
+    return [
+        (
+            index,
+            isinstance(statistic, Mapping) and statistic.get("definition") == MEAN.identifier,
+        )
+        for index, statistic in enumerate(statistics if isinstance(statistics, list) else ())
+    ]
+
+
+def _list_unused(
+    entry: Mapping[str, Any],
+    tokens: Tuple[str, ...],
+    written: HistoryWritten,
+    *,
+    means: bool,
+    text: str,
+) -> None:
+    """List each published statistic of the relationship that is a mean (*means*), or is none, as unused with *text*."""
+    written.unused += [
+        (tokens + ("statistics", str(index)), text)
+        for index, is_mean in _statistics_of(entry)
+        if is_mean == means
+    ]
+
+
+def parent_candidates(
+    expose_id: str,
+    keys: ExposeKeys,
+    rows_of: Mapping[str, int],
+    relationships: Any,
+) -> Tuple[ParentCandidate, ...]:
+    """The to-one relationships of *expose_id* that its entities could be laid out under.
+
+    Each is a many-to-one relationship of one column into another written expose (*rows_of* holds
+    the rows of each) that is no key of the emit. A profile ``relationships`` entry between the
+    same tables and columns is attached to it, with its pointer.
+    """
+    key_sets = {frozenset(key) for key in (*keys.keys, *keys.instant_keys)}
+    published = relationships if isinstance(relationships, list) else []
+    found: List[ParentCandidate] = []
+    for relationship in keys.relationships:
+        if (
+            relationship.cardinality != "many_to_one"
+            or len(relationship.from_columns) != 1
+            or relationship.target == expose_id
+            or relationship.target not in rows_of
+            or frozenset(relationship.from_columns) in key_sets
+        ):
+            continue
+        entry, tokens = profile_relationship(published, expose_id, relationship)
+        found.append(
+            ParentCandidate(
+                relationship.name,
+                relationship.from_columns[0],
+                relationship.target,
+                rows_of[relationship.target],
+                entry,
+                tokens,
+            )
+        )
+    return tuple(found)
+
+
+def profile_relationship(
+    published: Sequence[Any], child: str, declared: Any
+) -> Tuple[Optional[Mapping[str, Any]], Optional[Tuple[str, ...]]]:
+    """The profile's ``relationships`` entry for the relationship *declared* of *child*, with its pointer."""
+    for index, item in enumerate(published):
+        if _is_relationship(item, child, declared):
+            return item, ("relationships", str(index))
+    return None, None
+
+
+def _is_relationship(item: Any, child: str, declared: Any) -> bool:
+    """Whether a profile ``relationships`` entry is *declared*, read from *child*."""
+    if not isinstance(item, Mapping):
+        return False
+    parent, held = item.get("parent"), item.get("child")
+    if not isinstance(parent, Mapping) or not isinstance(held, Mapping):
+        return False
+    return (
+        parent.get("table") == declared.target
+        and held.get("table") == child
+        and tuple(map(str, parent.get("columns") or ())) == tuple(declared.to_columns)
+        and tuple(map(str, held.get("columns") or ())) == tuple(declared.from_columns)
+    )
+
+
+def catalogue_columns(
+    keys: ExposeKeys, reference_ids: FrozenSet[str], references: Any
+) -> Dict[str, Tuple[str, Optional[Tuple[str, ...]]]]:
+    """Each foreign key of the emit into a reference expose, by column, with the keys published for it.
+
+    The relationships are to-one and of one column on each side. *references* is the profile's
+    ``references`` section; the keys are ``None`` when its table does not publish them all.
+    """
+    found: Dict[str, Tuple[str, Optional[Tuple[str, ...]]]] = {}
+    for relationship in keys.relationships:
+        if (
+            relationship.cardinality != "many_to_one"
+            or len(relationship.from_columns) != 1
+            or len(relationship.to_columns) != 1
+            or relationship.target not in reference_ids
+        ):
+            continue
+        table = references.get(relationship.target) if isinstance(references, Mapping) else None
+        published = (
+            published_levels(table, relationship.to_columns[0])
+            if isinstance(table, Mapping)
+            else None
+        )
+        found[relationship.from_columns[0]] = (relationship.target, published)
+    return found
+
+
+def release_relationship(
+    lists: Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]],
+    emit: str,
+    relationship: str,
+    tokens: Optional[Tuple[str, ...]],
+) -> None:
+    """Take a relationship out of the counted layout or the spread that another reader now sets.
+
+    *lists* are the ``counts`` entries and the used, unused, record and note lists the layout made
+    of the profile's relationships; each is changed in place. The history's ``parent`` reads the
+    relationship's statistics itself, so what the layout said of them is dropped.
+    """
+    entries, used, unused, records, notes = lists
+    entries[:] = [
+        item
+        for item in entries
+        if not (item.get("emit") == emit and item.get("relationship") == relationship)
+    ]
+    if tokens is not None:
+        for held in (used, unused, records):
+            held[:] = [item for item in held if tuple(item[0][: len(tokens)]) != tokens]
+    notes[:] = [item for item in notes if item[0] != f"{emit}.{relationship}"]
+
+
+@dataclass(frozen=True)
+class Published:
+    """What the profile publishes beyond a history's own table, which an entry or a projection reads.
+
+    ``relationships`` and ``references`` are the profile's sections of those names. ``spread`` is
+    what the counted layout made of the relationships: its ``counts`` entries and the used,
+    unused, record and note lists, which a history's ``parent`` or a projected emit takes
+    statistics from and changes in place.
+    """
+
+    relationships: Any
+    references: Any
+    spread: Any
+
+    def lists(self) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any]]:
+        """The ``counts`` entries, then the used, unused, record and note lists of the spread."""
+        spread = self.spread
+        return (spread.entries, spread.used, spread.unused, spread.records, spread.notes)
+
+
+class HistoryReads:
+    """What the histories of the written *exposes* read of the other exposes and of the profile."""
+
+    def __init__(self, exposes: Sequence[Any], published: Published) -> None:
+        self.published = published
+        self.rows_of = {
+            item.expose_id: item.rows
+            for item in exposes
+            if item.skipped is None and not item.reference
+        }
+        self.reference_ids = frozenset(item.expose_id for item in exposes if item.reference)
+
+    def candidates(self, expose_id: str, held: Optional[ExposeKeys]) -> Tuple[ParentCandidate, ...]:
+        """The relationships the entities of *expose_id* could be laid out under (:func:`parent_candidates`)."""
+        if held is None:
+            return ()
+        return parent_candidates(expose_id, held, self.rows_of, self.published.relationships)
+
+    def catalogues(
+        self, held: Optional[ExposeKeys]
+    ) -> Dict[str, Tuple[str, Optional[Tuple[str, ...]]]]:
+        """The foreign keys of an emit into a reference expose, with their keys (:func:`catalogue_columns`)."""
+        if held is None:
+            return {}
+        return catalogue_columns(held, self.reference_ids, self.published.references)
+
+    def release(self, expose_id: str, written: HistoryWritten) -> None:
+        """Take the relationship the history's ``parent`` reads off the counted layout."""
+        if written.parent_of is not None:
+            release_relationship(self.published.lists(), expose_id, *written.parent_of)
+            self.published.spread.records.extend(written.records)
+
+
+def restate_assumptions(expose: Any) -> None:
+    """Take the assumptions of the authored *expose*'s columns from what their plans say now.
+
+    A history changes how some columns are drawn after the exposes were planned, so the sentences
+    a column's earlier plan assumed are replaced by the ones its plan assumes now.
+    """
+    names = {plan.name for plan in expose.columns}
+    expose.assumptions = [item for item in expose.assumptions if item[0] not in names] + [
+        (plan.name, sentence) for plan in expose.columns for sentence in plan.assumptions
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +1123,24 @@ def _required_end(source: HistorySource, end: str) -> None:
 def _until(source: HistorySource, kind: LogicalKind) -> str:
     _, high = _window_units(source, kind)
     return _spell(kind, high)
+
+
+def _write_parent(
+    source: HistorySource, entry: Dict[str, Any], entities: int, written: HistoryWritten
+) -> None:
+    """Add the ``parent`` the entities are laid out under to *entry*, when the history has one."""
+    chosen = _pick_parent(source, written.exempt - source.set_by_rules, written)
+    if chosen is None:
+        return
+    entry["parent"] = _parent(source, chosen, entities, written)
+    written.exempt |= {chosen.column}
+    written.parent_of = (chosen.name, chosen.tokens)
+    plan = source.plans[chosen.column]
+    declare_counted(plan, None, reason=_PARENT_REASON, how=_PARENT_HOW, sets=_PARENT_SETS)
+    plan.passed = [
+        (place, _PARENT_SETS if why.startswith("the counted layout sets") else why)
+        for place, why in plan.passed
+    ]
 
 
 def _build(source: HistorySource, written: HistoryWritten) -> None:
@@ -653,6 +1189,7 @@ def _build(source: HistorySource, written: HistoryWritten) -> None:
         )
     )
     written.exempt = _fixed(source, (start, end, *natural)) | source.set_by_rules
+    _write_parent(source, entry, entities, written)
     _tracked_and_end(history, base, source, entry, written)
     written.entry = entry
     written.start_column = start

@@ -36,6 +36,7 @@ rows and the history's rows are read as written and nothing is regenerated.
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from fractions import Fraction
@@ -644,18 +645,37 @@ def _period_start(anchor: date, grain: str, position: int) -> date:
     return add_months(anchor, _MONTHS[grain] * position)
 
 
-def _periods(grain: str, window: _Window) -> Dict[datetime, datetime]:
-    """Each period's first instant and its end, which the window's end cuts (ADR 0027 section 5)."""
-    anchor = window[0].date()
+def _periods(
+    grain: str, window: _Window, from_day: Optional[str] = None, through_day: Optional[str] = None
+) -> Dict[datetime, datetime]:
+    """Each period's first instant and its end, which the window's end cuts (ADR 0027 section 5).
+
+    The periods start from *from_day* (the window's start day when none) and the last one starts
+    on or before *through_day*.
+    """
+    anchor = date.fromisoformat(from_day) if from_day is not None else window[0].date()
+    last = None
+    if through_day:
+        try:
+            last = _moment(date.fromisoformat(through_day) + timedelta(days=1))
+        except OverflowError:
+            last = None  # the day after the last day of the calendar: no period starts after it
     found: Dict[datetime, datetime] = {}
     position = 0
     while True:
-        begins = _moment(_period_start(anchor, grain, position))
-        if begins is None or begins >= window[1]:
+        begins = _start_moment(anchor, grain, position)
+        if begins is None or begins >= window[1] or (last is not None and begins >= last):
             return found
-        following = _moment(_period_start(anchor, grain, position + 1))
+        following = _start_moment(anchor, grain, position + 1)
         found[begins] = window[1] if following is None else min(following, window[1])
         position += 1
+
+
+def _start_moment(anchor: date, grain: str, position: int) -> Optional[datetime]:
+    """The instant period *position* starts, or ``None`` for a period past the calendar."""
+    with suppress(ValueError, OverflowError):
+        return _moment(_period_start(anchor, grain, position))
+    return None
 
 
 def _intervals(
@@ -708,7 +728,7 @@ class _Held:
         self.window = window
         self.sentinel = open_sentinel(history, history_rows, versions)
         self.chains = entity_chains(history_rows, versions, self.sentinel)
-        self.grid = _periods(str(entry.grain), window)
+        self.grid = _periods(str(entry.grain), window, entry.from_day, entry.through_day)
         skipped = {entry.column} | {name for kind in entry.kinds for name, _ in kind.overrides}
         self.named = set(history_rows[0]) - skipped if history_rows else set()
         self.intervals: Dict[Tuple[Any, ...], List[_Interval]] = {}

@@ -476,3 +476,177 @@ A history on a hidden table (ADR 0024 section 3) is listed as not scored, with t
 - A satellite keyed by its hub's key: a natural entity that is also a foreign key, whose entities would take
   their parent's key, one entity per parent.
 - A FLUID spelling for a history's generation facts, which would move them into the contract.
+
+## Amendment of 2026-11-24: a history keeps to its parent's lifetime
+
+A history's dates are absolute: its first starts are drawn inside `J` and its chains fitted to `until`, so they
+ignore the lifetime of the parent row the `parent` relationship reaches. A vehicle could start before its
+depot opened and outlive it. A `lifetimes` or `within` entry on the history's start cannot say it, since the
+history sets that column (section 2, `FLX-6203`). This amendment is the history's counterpart of ADR 0024's `within`
+with `lifetime: true` (section 5 there), and changes no bundle that does not ask for it.
+
+**The key.** `history[].parent.lifetime: true`, default false, in the `parent` entry beside `minChildren`,
+`parentWhen` and `children`. It enters the entry's member in `H` as the other members do, so a bundle without it keeps
+every byte. It needs `parent.relationship` and a `lifetimes` entry (ADR 0024 section 4) on the emit that relationship
+reaches: its `start` column, and its `end` column when it names one, are the lifetime the history keeps to. Without
+the entry the history is refused at validation with `FLX-3403`, naming `parent.lifetime`; a `parent.lifetime` that is
+not `true` or `false` is refused the same way. When the parent emit declares a history of its own, a lifetime
+column that history does not carry (a validity column, the activation, a tracked or the end column, or one a rule
+sets) can differ between the versions of one parent, so the bound would hold an entity to an arbitrary version: the
+history is refused with `FLX-3403`, naming the emit and the columns. Kernel `0.2.0` only, as every history.
+
+**The lifetime.** For an entity, `P = [ps, pe]` is the lifetime of its parent row, read in the chain's unit as
+ADR 0024 reads a lifetime: a DATE start bounds a TIMESTAMP chain from its midnight, a DATE end up to the last
+millisecond of its day, and `pe`, the parent's last day, is absent when the lifetime declares no end, the end is NULL,
+or the end is before the start, so a parent that violates its own lifetime reads as open and cuts nothing. A parent
+whose start is NULL bounds nothing. The lifetimes are the parents' final cells, read once per process at plan time
+from the parent's own plan, a chunk at a time, and kept by the parent's digest, as a weighted pick reads its parent's
+weights (ADR 0023 section 4). The plan grows with the parents' rows for a history that declares the key and for no
+other. Which parent an entity has is the entity layout's (section 3), so that layout is worked out first, and the
+first starts, rooms, version counts and ended entities after it.
+
+**1. The first start.** The chain of entity `e` must end at `limit = min(until, pe)`, its parent's last day when that
+is before `until`. The first start is drawn at `s` in `[max(a0, ps), limit - c' - 1]`, with `a0` the window's first
+unit and `c'` as section 4 says (`c` and one more under `closeLast` or for a history with this key and no `end`,
+since an entity whose parent ended has a closed last version, point 3), so the entity has the room its `c`
+versions need. Where that interval is empty, the first start is drawn in `[max(a0, ps), limit - k - 1]`, with
+`k = 1` and one more for a closing unit: the room for one version, the least an entity has. From the part of `start`
+inside the interval with one `uniform53`, or uniformly over it with one `bounded`, at position 0 of the same
+`history` path as before. Entities that share an interval draw by the same table, so an entity whose parent cuts
+nothing draws what it drew without the key. An entity for which even the room for one version is empty is
+`FLX-3403` at plan time, naming `history(<emit>).parent.lifetime`, how many entities it is and the range of their
+parents' lifetimes: the bound is never written knowing it will be violated.
+
+**2. The room and the counts.** Entity `e`'s room is `r = limit - s`, and its chain holds `r - z - 1` versions at most,
+with `z` one when an ended entity's last version is closed (point 1) and zero otherwise: the first start and a closed last version each take a unit
+(section 4, point 4), and by point 1 that is at least one. The versions per entity are assigned as section 3 says,
+the rank coupling reading the rooms, and each entity's count is then capped at what its room holds. The versions
+an entity loses go to other entities, one at a time, in rounds: each round gives one to every entity that is
+still under its own cap, the entity with the most room first and a tie to the lower entity index, until none is left.
+This is the cap-and-pass of `counts._capped`, the allotment of a `one_to_one` relationship, with a cap for each
+entity in place of one (`counts.pass_excess` is both), so the emit keeps its declared rows and the shape's order is the
+rooms' order. An entity that takes more than the shape's largest count does so only for the versions another entity
+lost. Only when no entity has room left do the rows shrink: the history then has fewer rows than declared, the
+shortfall. `plan`, `apply` and `verify` count the rows it has: the emit is planned again at them, and a layout is
+always worked out from the declared rows. A history whose parent is itself such a history reads the
+rows its parent holds, so it is laid out after the parent is planned at them, in as many passes as there are emits
+and one; a count still moving after that is `FLX-3403`. Since the count never exceeds the room, the fit (section 4, point 4) never
+fails and the chain ends by `limit`.
+
+**3. The ending.** An entity whose parent's last day `pe` is at or before `until` is *forced* to end:
+
+- under `finalVersion` its final version starts, at the latest, the day before `pe`, and carries `value`;
+- under `closeLast` its last version closes, at the latest, the day before `pe`;
+- with no `end`, its last version is closed at the latest the day before `pe`, and no other entity ends: the
+  history closes the last version of the forced entities only.
+
+A forced entity ends whatever its number of versions: with one version, that version is its ending version
+(under `finalVersion` it takes `value`, and it is no change reason). Such an entity is in its ending state from its
+first day: its only version starts at its first start and already carries `value`, so a column that says the entity
+is ended reads so on every row it has. This is kept on purpose, since a rule that ties the version's state to the
+parent's end (the entity is ended once its parent is) needs it, and `plan` says how many entities there are, one
+note naming the emit, so the count is no surprise. A parent that ended after `until` bounds the room only, and forces
+nothing.
+
+**The share.** Forced entities can end whatever their versions and count towards the entities that end. As the
+amendment below says, `n` is `min(LRM(E, [share, 1 - share])[0], E')`, a share of every entity `E`, capped at the `E'`
+entities that can end, which are the eligible ones and the forced ones. The other entities end by the permutation
+`permute/2(K_end, E'', r) < n - f` over the `E''` eligible entities that are not forced, with `f` the forced ones. When `f`
+is more than `n`, all forced entities end and no other does. The permutation, and so the bytes, are what they were
+when `f` is zero.
+
+**Plan time.** The cost of the bound is per entity. The parents' lifetimes are
+read a chunk at a time into arrays, keeping only the two cells of each row, and the layout of a history this process
+already holds is found without reading them. Each entity draws inside its own interval, so a `start` histogram has
+a table inside almost every entity's interval (a TIMESTAMP chain makes most intervals distinct); the table is not built
+bin by bin but read on demand, in whole numbers, by bisection over the bins that meet the interval, with the values the
+full table gives for every draw. Plan time therefore grows linearly with the entities and logarithmically with the
+bins, and does not grow with the number of distinct parent lifetimes beyond that. The cap-and-pass costs one sort per
+round, and a round that finds no entity under its cap ends it. `plan` also notes how many entities were capped, how many versions moved and any
+shortfall (the room, point 2).
+
+**4. The `activation` column** holds the first start, as section 5 says, so it keeps to the same bound.
+
+**Deterministic everywhere.** The first starts, the rooms, the capped counts and the ended entities are plan-time arrays over the
+entities, so a slice, `--jobs`, `--shard`, the column path and the per-row path read the same values; `--scale`
+scales the entities and parents as before. The projections (ADR 0027) read the same layout, since a projection's
+history is the bound history. `plan` keeps the history's digest apart through the member in `H` and the parent
+columns in the driver's document.
+
+**The line.** `fluxsim verify` adds `history:within_parent`, enforced like the other `history:` lines, for an entry
+with `parent.lifetime: true`. It covers the entities whose parent row has a start, and counts those that hold: the
+first start is not before the parent's start; and, when the parent has ended, no version starts after the parent's
+last day, every closed end is at or before it, and an entity whose parent ended by `until` has ended (its last version
+is closed, or under `finalVersion` carries `value`). A parent's DATE end is its last day to the last millisecond,
+so with a TIMESTAMP `until` the parent ended by `until` when that millisecond is not after it, not when its day is.
+For a history with no `end`, a closed last version is allowed only when the parent's last day is at most `until`; an
+entity of any other parent keeps its last version open, and one that does not is a violation. `history:one_current`
+reads a closed last version as allowed for a history with this key and no `end`.
+
+**When the forced entities are more than the share.** All of them end, and the share the run reaches is higher than the
+declared one, by the forced entities beyond it. Nothing is printed: `history:within_parent` and the count of ended
+entities in the rows are where it shows.
+
+## Amendment of 2026-11-24: the end share is a share of every entity
+
+Section 5 took `share` of the eligible entities, so a declared share ended fewer entities than it named in a
+bundle whose eligible entities were fewer than all of them (an `end` with a `column` needs two versions). A reader
+who writes a `share` means that share of the histories, so the share is now a share of every entity:
+
+- `n = min(LRM(E, [share, 1 - share])[0], E')`, with `E` the number of entities and `E'` the number of eligible
+  ones, the classes keyed `"0"` and `"1"`. The ended entities are still chosen among the eligible ones, the entity
+  of eligible rank `r` ending when `permute/2(K_end, E', r) < n`, so which entities end is the same permutation.
+- When fewer entities are eligible than the share asks for, every eligible entity ends, and `plan` says so in a
+  note on its text output that names the emit, the declared share and the share yielded, as a decimal. It is advice
+  only: no plan document or digest carries it. No bundle is refused for it.
+- With `closeLast` and no `column` every entity is eligible, so `E' = E` and the count is the one section 5 gave.
+  Every other `end` ends a different set of entities when the eligible ones are fewer than `E`, so **the bytes of
+  such a history and of every projection of it move**. A history without an `end` keeps its bytes.
+- A run id made before this change replays byte for byte, as every earlier change to generation has kept its
+  recorded runs. `plan` writes `historyEndShare: "entities"` into `plan.json` when an emit declares a history with
+  an `end` that leaves an entity ineligible (`E' < E`: a `column`, or `finalVersion`). The plan digest covers it,
+  and a recorded plan without the key replays `LRM(E', ...)`, the eligible entities alone. Planning the same bundle
+  again carries the key, so it moves the plan digest and the run id with the bytes. The kernel stays `0.2.0`,
+  which every bundle shares, so a key the plan carries is the narrower marker. Any other value of the key is
+  `FLX-2102`.
+
+## Amendment of 2026-11-24: `init` writes the history's parent
+
+Section 13 said `init` writes no `parent`. A foreign key left as a carried column is drawn once, on the entity's
+first version, from its own statistics, so the entities were not grouped under a parent and a projection that
+copies the parent's key (ADR 0027) rarely agreed with the history. `init` now writes it:
+
+- **The relationship.** The candidates are the history's emit's many-to-one relationships of one column into
+  another written expose, that are no key of the emit, whose column no rule, copy or dependency sets and that
+  declares no `nullFraction` and is drawn given no column. With one candidate it is the parent, whether or not the
+  profile publishes children per parent for it. With several, the parent is the one the profile publishes a
+  histogram of children per parent for, when exactly one is; otherwise `init` writes no parent and the notes name
+  the candidates, since choosing would be a guess.
+- **The children.** A profile counts children per parent in rows, which are versions here, and publishes no count
+  of entities. `init` keeps the shape of the published classes as the shape of entities per parent and takes the
+  total from the entities (`entities`, not the version rows), so a mean of version rows per parent is unused, with
+  that reason. The classes, `minChildren` (1 with the `childless` structural class) and the withheld-class
+  assumption are read as for a `counts` entry. A histogram the layout cannot read leaves the parent without
+  `children`, and the statistic is unused with the reason.
+- **One layout per relationship.** The foreign key declares no draw of its own, and no `counts` entry or spread
+  lays the same relationship out: the ledger entries `init` made for it under the counted layout are replaced by
+  the parent's.
+- **What moves.** A bundle `init` writes for a contract whose versioned expose has such a relationship. A contract
+  without one, and every bundle of a profile without a history, keeps its bytes.
+
+## Amendment of 2026-11-24: `init` tracks a foreign key into a reference table
+
+Section 13 carried every candidate column for which the emit declares no levels, which left a foreign key into a
+catalogue untracked: a contract's `product_id` has no levels of its own, the keys of the table it points at are
+its values. `init` now tracks it:
+
+- **The levels.** A candidate column of the history's emit that is a to-one, one-column foreign key into an expose
+  the profile releases whole (`references`) declares that table's keys as its levels, at equal weights, since the
+  profile counts no weight for them, and so passes the check that a tracked column declares levels. Its `initial`
+  and `transitions` are the history statistic's, as for any categorical column, and their levels must be keys.
+- **No guess.** When the table's keys are not all published, or a published change names a value that is no key, the
+  column stays carried and its statistics are unused, with that reason. A foreign key into a table that is not
+  released whole stays carried as before. A reference table is never the history's `parent`: a catalogue does not
+  hold entities.
+- **What moves.** A bundle for a contract with such a foreign key in a history whose profile publishes its
+  `initial` and `transitions`. Every other bundle keeps its bytes.
