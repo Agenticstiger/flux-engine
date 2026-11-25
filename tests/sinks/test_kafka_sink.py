@@ -1248,6 +1248,7 @@ def test_the_producer_carries_the_transaction_timeout_and_sends_no_metrics(
 def test_brokers_that_refuse_the_transaction_timeout_are_told_what_to_lower(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("confluent_kafka")
     from confluent_kafka import KafkaError, KafkaException
 
     class _Refusing(_Recorder):
@@ -1494,9 +1495,9 @@ def _adapter(
 
 
 def _kafka_error(name: str) -> Any:
-    from confluent_kafka import KafkaError
+    kafka_error = pytest.importorskip("confluent_kafka").KafkaError
 
-    return KafkaError(getattr(KafkaError, name))
+    return kafka_error(getattr(kafka_error, name))
 
 
 def test_credentials_in_the_clear_are_refused_when_a_broker_is_not_on_this_machine(
@@ -1557,6 +1558,7 @@ def test_a_leader_that_is_not_yet_elected_is_waited_out(monkeypatch: pytest.Monk
 def test_a_topic_the_configuration_read_does_not_know_yet_is_waited_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pytest.importorskip("confluent_kafka")
     from confluent_kafka import KafkaException
 
     admin = _Admin(config_errors=[KafkaException(_kafka_error("UNKNOWN_TOPIC_OR_PART"))])
