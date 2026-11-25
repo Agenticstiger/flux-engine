@@ -113,7 +113,9 @@ the pairs of its two parents prove that a pair repeats, and the entry declares `
 declares `distinct: true`, which no statistic states, so a note says so. Its rows are the published `rowCount`;
 without one, the inverse-variance mean of the two sides' totals of children (a `mean/1`'s total, exact to the unit, or
 the sum a histogram gives with each class's parents at its middle and the variance of an even spread over the class),
-rounded half up and kept within one row and the pairs of the two parents.
+rounded half up and kept within one row and the pairs of the two parents. Neither side's `counts` entry takes a
+given column: a side's rows pair with the other side's stubs one by one, so a profile statistic that groups its
+children by a column of its parent is listed unused, with that reason.
 
 ## Consequences
 

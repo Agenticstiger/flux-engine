@@ -1976,11 +1976,36 @@ def _lay_out_children(
     return _Placed(list(spread.used), list(spread.unused), None, notes, False, laid)
 
 
-def _settle_given(placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int) -> _Placed:
+#: Why the grouping of an association side's children is not read (ADR 0039 section 5).
+_PAIRED_GIVEN = (
+    "an association table pairs its two sides stub by stub, so its children per parent follow no "
+    "column of the parent"
+)
+
+
+def _association_tables(
+    planned: Mapping[str, AuthoredExpose], keys: Optional[ContractKeys]
+) -> FrozenSet[str]:
+    """The planned tables of two foreign keys and no other column (ADR 0039)."""
+    if keys is None:
+        return frozenset()
+    return frozenset(
+        expose_id
+        for expose_id, expose in planned.items()
+        if association_pair(keys.expose(expose_id), [plan.name for plan in expose.columns])
+        is not None
+    )
+
+
+def _settle_given(
+    placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int, paired: bool = False
+) -> _Placed:
     """*placed* with the given column of its ``counts`` entry chosen, when the profile groups one.
 
     This reads which columns of the parent are drawn given a column of a linked row, so it runs
-    once those are declared. A grouping by one of them is passed over, with the reason.
+    once those are declared. A grouping by one of them is passed over, with the reason. The side of
+    an association table (*paired*) takes no given column: its rows pair with the other side's stub
+    by stub, so the statistic a given would rest on is listed unused.
     """
     pending = placed.pending
     if pending is None or placed.entry is None:
@@ -1994,6 +2019,9 @@ def _settle_given(placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int
     )
     if given is None:
         return placed
+    if paired:
+        passed = [(pointer, _PAIRED_GIVEN) for pointer, _ in given.used]
+        return placed._replace(unused=[*placed.unused, *passed, *given.unused])
     placed.entry.update(given.members)
     notes = list(placed.notes)
     _take_given(given, pending.child_plan, pending.parent_expose, (notes, pending.name))
@@ -2152,6 +2180,7 @@ def _spread_relationships(
     found_tables = profile.get("tables")
     tables: Mapping[str, Any] = found_tables if isinstance(found_tables, Mapping) else {}
     planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
+    paired = _association_tables(planned, keys)
     slots: List[_Slot] = []
     for index, entry in enumerate(found if isinstance(found, list) else ()):
         if not isinstance(entry, Mapping):
@@ -2191,7 +2220,12 @@ def _spread_relationships(
         unused += slot.passed
         if slot.placed is None:
             continue
-        settled = _settle_given(slot.placed, slot.tokens, minimum_cell=minimum_cell)
+        settled = _settle_given(
+            slot.placed,
+            slot.tokens,
+            minimum_cell=minimum_cell,
+            paired=slot.child_table in paired,
+        )
         used += settled.used
         unused += settled.unused
         written_notes = list(settled.notes)

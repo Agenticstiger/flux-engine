@@ -136,7 +136,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   class of the shape holds adding its whole share. `fluxsim init` writes such a table from the two relationships'
   children per parent in place of leaving it out, with `distinct: true`, or `distinct: false` when the published rows
   are more than the pairs of the two parents; with no published `rowCount` its rows are the inverse-variance mean of
-  the two sides' totals, kept within the pairs. Kernel 0.2.0 only; a bundle that declares none keeps its digests.
+  the two sides' totals, kept within the pairs. A grouping of a side's children by a column of its parent is listed
+  unused, as the sides pair stub by stub. Kernel 0.2.0 only; a bundle that declares none keeps its digests.
 
 ### Changed
 

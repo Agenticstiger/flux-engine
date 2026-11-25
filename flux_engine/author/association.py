@@ -17,8 +17,13 @@ entry as it would for any counted relationship; this module adds the pairing:
   parents at its middle, with the variance of an even spread over the class), rounded and kept
   within one row and the pairs the two parents make;
 * :func:`association_entry` is the ``associations`` entry, written once both relationships are
-  laid out by counts. It declares ``distinct: true``: a table of two foreign keys and no other
-  column holds each pair once, which no statistic of the profile states, so a note says so.
+  laid out by counts. Rows above the pairs the two parents make prove that a pair repeats, and
+  it declares ``distinct: false``; at or below them it declares ``distinct: true``, the
+  assumption a table of two foreign keys and no other column most often holds, which no
+  statistic of the profile states, so a note says so.
+
+A side's children follow no column of its parent: they pair with the other side's stubs one by
+one, so init gives neither ``counts`` entry a given column and lists a grouping of them unused.
 """
 
 from __future__ import annotations

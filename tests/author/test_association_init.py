@@ -7,8 +7,10 @@
 The contract holds members, clubs and their memberships, a table of two foreign keys and no other
 column; the profile publishes each relationship's children per parent. Pinned here:
 
-* init writes a ``counts`` entry for each side and an ``associations`` entry with ``distinct:
-  true``, and the membership emit declares no column of its own, as the pairing sets both keys;
+* init writes a ``counts`` entry for each side and an ``associations`` entry, with ``distinct:
+  false`` when the published rows exceed the pairs of the two parents and ``distinct: true``
+  otherwise, and the membership emit declares no column of its own, as the pairing sets both keys;
+* a side's children follow no column of its parent: a grouping of them is listed unused;
 * a run of the bundle holds every pair once, each side's rows per parent within verify's
   tolerance of its shape;
 * with no published ``rowCount`` the rows are the inverse-variance mean of the two sides' totals:
@@ -29,6 +31,7 @@ import yaml
 from flux_engine.author.association import association_pair
 from flux_engine.seam.keys import ExposeKeys, Relationship
 from flux_engine.stages.run import run
+from flux_stats.profile import SCHEMA_URL_1_4_0
 from tests.bundles import init_from_texts
 
 from .test_children import NAMESPACE, _histogram, _mean, _metric
@@ -283,3 +286,63 @@ def test_an_association_is_two_keys_and_every_column(
     keys: ExposeKeys, columns: List[str], found: bool
 ) -> None:
     assert (association_pair(keys, columns) is not None) is found
+
+
+#: The members carry a segment, by which the profile also groups their children per member.
+SEGMENTED = CONTRACT.replace(
+    "        - { name: member_id, type: INT, required: true }\n"
+    "    semantics:\n      entities:\n        - { name: member, type: primary, expr: member_id }",
+    "        - { name: member_id, type: INT, required: true }\n"
+    "        - { name: segment, type: \"enum('a','b')\", required: true }\n"
+    "    semantics:\n      entities:\n        - { name: member, type: primary, expr: member_id }",
+    1,
+)
+
+
+def _segmented() -> Dict[str, Any]:
+    """The profile with each member's segment, and the children per member grouped by it."""
+    profile = _profile()
+    profile["_schemaURL"] = SCHEMA_URL_1_4_0
+    half = MEMBERS // 2
+    profile["tables"]["member"]["columns"]["segment"] = {
+        "domain": "category",
+        "metrics": {"count": _metric("count/1", MEMBERS), "nullCount": _metric("nullCount/1", 0)},
+        "statistics": [
+            {
+                "definition": "levelHistogram/1",
+                "levels": ["a", "b"],
+                "sampleSize": {"min": 1, "max": 99999},
+                "disclosure": "acro-default",
+                "groups": [{"group": "", "k": MEMBERS, "levelCounts": [half, half], "status": "F"}],
+            }
+        ],
+    }
+    grouped = copy.deepcopy(profile["relationships"][0]["statistics"][0])
+    grouped["groupBy"] = "segment"
+    grouped["groups"] = [
+        {"group": name, "k": half, "binCounts": [75, 100, 75, 50], "status": "F"}
+        for name in ("a", "b")
+    ]
+    profile["relationships"][0]["statistics"].append(grouped)
+    return profile
+
+
+def test_a_side_s_children_follow_no_column_of_its_parent(tmp_path: Path) -> None:
+    # A side whose children followed the segment would pair with no stub of the other side, so
+    # init lists the grouping unused and still writes the table.
+    assert "segment" in SEGMENTED
+    result = init_from_texts(tmp_path, SEGMENTED, _segmented(), NAMES)
+    assert result.exit_code == 0, result.stderr
+    namespace = yaml.safe_load(
+        (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    )["extensions"][NAMESPACE]
+    assert [entry["emit"] for entry in namespace["associations"]] == ["membership"]
+    member = next(
+        entry for entry in namespace["counts"] if entry["relationship"] == "membership_to_member"
+    )
+    assert "given" not in member and "childrenGiven" not in member
+    states = {entry["pointer"]: entry for entry in result.artifacts["ledger"]["statistics"]}
+    grouped = states["/relationships/0/statistics/2"]
+    assert grouped["state"] == "unused"
+    assert "stub by stub" in grouped["note"]
+    assert len(_run(tmp_path)) == ROWS
