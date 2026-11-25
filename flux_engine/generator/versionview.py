@@ -76,6 +76,26 @@ def unit_value(kind: LogicalKind, unit: int) -> Any:
     return date.fromordinal(unit + _EPOCH_ORDINAL) if kind is LogicalKind.DATE else unit
 
 
+def _within_parent(
+    chain: HistoryPlan,
+    entities: "np.ndarray",
+    opened: "np.ndarray",
+    valid_to: "np.ndarray",
+    scale: int,
+) -> "np.ndarray":
+    """*valid_to* with each forced entity's open version cut at the end of its parent's last day.
+
+    A forced entity's limit is its parent's last day, the last unit of the parent's lifetime, so
+    the version is valid up to the next unit; a history with no parent bound has no cut.
+    """
+    cut = chain.cut
+    if cut is None:
+        return valid_to.astype(np.int64)
+    bounded = opened & cut.forced[entities]
+    parent_end = (cut.limits[entities].astype(np.int64) + 1) * scale
+    return np.where(bounded, np.minimum(valid_to, parent_end), valid_to).astype(np.int64)
+
+
 class _Version:
     """One version row as a :class:`~flux_engine.expr2.evaluate.RowView`: its own columns and the version before."""
 
@@ -174,13 +194,17 @@ class VersionView:
         """The instants each version is valid over, in milliseconds: from its start up to its end, excluded.
 
         An open version is valid up to *window_end*. Under ``dayBefore`` a DATE end covers its whole day.
+        In a history bound by its parent's lifetime, the open last version of an entity whose parent
+        ended (a forced entity, which ends under ``finalVersion``) is valid through its parent's
+        last day and no further, so what a projection reads of it stays inside the parent's
+        lifetime as the history's own versions do (ADR 0017, amendment of 2026-11-26).
         """
         starts, ends, opened = self.instants()
         scale = DAY_MS if self.kind is LogicalKind.DATE else 1
         whole = DAY_MS if self.pick.entry.chain == "dayBefore" else 0
         valid_from = starts.astype(np.int64) * scale
         valid_to = np.where(opened, window_end, ends.astype(np.int64) * scale + whole)
-        return valid_from, valid_to.astype(np.int64)
+        return valid_from, _within_parent(self.chain, self.entities, opened, valid_to, scale)
 
     # -- the columns a when reads -----------------------------------------------------------
 

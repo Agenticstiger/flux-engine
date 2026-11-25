@@ -379,6 +379,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   which `verify` refuses (`FLX-5034`): a grouped histogram or a rank correlation over a number column drawn evenly
   over its contract's range, or a histogram grouped by a boolean column. The column is drawn as before, and its notes
   say which property is left out.
+- In a history kept to its parent's lifetime (`parent.lifetime: true`), the periodic rows of an entity that ends
+  with its parent stay inside the parent's lifetime. Under `finalVersion` that entity's ending version is open, and a
+  periods projection held it up to the window's end, long after the parent had ended; its periods now stop at the
+  parent's last day (ADR 0017, the amendment of 2026-11-26). Only a bundle that declares the key changes bytes, and
+  no released version has it; every other bundle and every recorded plan keeps its bytes.
+- As intended, an entity of such a history ends when its parent's lifetime ends inside the horizon, even when the
+  declared end `share` is 0: under `finalVersion` its final version carries the end value, and an entity with one
+  version carries it from its first day, so the share a run reaches can be above the declared one.
 
 ## 0.11.1 - 2026-11-24
 
