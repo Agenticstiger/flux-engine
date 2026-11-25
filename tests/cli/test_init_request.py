@@ -237,37 +237,16 @@ def test_the_request_file_starts_with_a_header_naming_what_it_is_and_its_spec(
     assert load_request_text(render_request(request)) == request
 
 
-def test_a_directory_that_cannot_be_removed_does_not_change_the_refusal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("stuck", "overlays"), [("rmdir", False), ("unlink", False), ("unlink", True)]
+)
+def test_what_cleanup_cannot_remove_does_not_change_the_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stuck: str, overlays: bool
 ) -> None:
-    """The request cannot be written, so init removes what it wrote; a refused rmdir is not an error."""
-    profile = FIXTURES / "author" / "orders.profile.json"
+    """The request cannot be written, so init removes what it wrote, best effort.
 
-    def full(path: Path, data: bytes) -> None:
-        raise OSError(errno.ENOSPC, "No space left on device")
-
-    monkeypatch.setattr(request_module, "_write_new", full)
-    plain = tmp_path / "plain"
-    plain.mkdir()
-    expected = run_init(str(plain / "b"), contract=str(ORDERS), profile=str(profile))
-    assert expected.exit_code == 1 and "No space left on device" in expected.stderr
-
-    def refuse(self: Path) -> None:
-        raise PermissionError(errno.EACCES, "Permission denied")
-
-    monkeypatch.setattr(Path, "rmdir", refuse)
-    stubborn = tmp_path / "stubborn"
-    stubborn.mkdir()
-    result = run_init(str(stubborn / "b"), contract=str(ORDERS), profile=str(profile))
-    assert result.exit_code == expected.exit_code
-    assert result.stderr == expected.stderr.replace(str(plain), str(stubborn))
-
-
-@pytest.mark.parametrize("overlays", [False, True])
-def test_a_file_that_cannot_be_removed_does_not_change_the_refusal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overlays: bool
-) -> None:
-    """Cleanup of what init wrote is best effort for a file too: the refusal is the one reported."""
+    A directory or a file it cannot remove is left as it is: the refusal is the one reported.
+    """
     profile = FIXTURES / "author" / "orders.profile.json"
     extra: Dict[str, Any] = {}
     if overlays:
@@ -287,10 +266,10 @@ def test_a_file_that_cannot_be_removed_does_not_change_the_refusal(
     expected = run_init(str(plain / "b"), contract=str(ORDERS), profile=str(profile), **extra)
     assert expected.exit_code == 1 and "No space left on device" in expected.stderr
 
-    def refuse(self: Path, missing_ok: bool = False) -> None:
+    def refuse(self: Path, *args: Any, **kwargs: Any) -> None:
         raise PermissionError(errno.EACCES, "Permission denied")
 
-    monkeypatch.setattr(Path, "unlink", refuse)
+    monkeypatch.setattr(Path, stuck, refuse)
     stubborn = tmp_path / "stubborn"
     stubborn.mkdir()
     result = run_init(str(stubborn / "b"), contract=str(ORDERS), profile=str(profile), **extra)
