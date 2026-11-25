@@ -422,6 +422,31 @@ def test_a_file_name_that_is_not_plain_text_cannot_end_the_header_comment(
     assert not any(line.startswith("name: planted") for line in result.stdout.splitlines())
 
 
+def test_the_header_names_a_contract_file_that_is_not_plain_text_in_quotes(tmp_path: Path) -> None:
+    # A name with a newline or a terminal escape is written the way ``printable`` writes it: quoted,
+    # with the character escaped, so the header stays its own comment lines.
+    odd = tmp_path / "gym\nlines\x1b[2J.fluid.yaml"
+    shutil.copyfile(ORDERS_CONTRACT, odd)
+    result = _init(tmp_path / "b", odd, ORDERS_PROFILE)
+    assert result.exit_code == 0, result.stderr
+    for name in ("simulation.flux.yml", "world.flux.yml", "persona.flux.yml"):
+        text = (tmp_path / "b" / name).read_text(encoding="utf-8")
+        assert text.startswith(
+            "# Written by `fluxsim init` from the contract 'gym\\nlines\\x1b[2J.fluid.yaml' "
+            "and its profile.\n"
+        ), name
+        assert "\x1b" not in text, name
+
+
+def test_the_header_names_a_plain_contract_file_as_it_is(tmp_path: Path) -> None:
+    result = _init(tmp_path / "b", ORDERS_CONTRACT, ORDERS_PROFILE)
+    assert result.exit_code == 0, result.stderr
+    text = (tmp_path / "b" / "simulation.flux.yml").read_text(encoding="utf-8")
+    assert text.startswith(
+        f"# Written by `fluxsim init` from the contract {ORDERS_CONTRACT.name} and its profile.\n"
+    )
+
+
 def test_an_integer_key_spans_the_foreign_keys_of_its_children(tmp_path: Path) -> None:
     contract = {
         "fluidVersion": "0.7.7",

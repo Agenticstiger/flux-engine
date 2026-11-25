@@ -17,6 +17,9 @@ stations, versions of a station's line and the readings taken on a line:
   anything, names the table and the column, and says what to change;
 * the bundle of each that is written plans and applies, and the table that refers to the versions
   is written.
+* a column that holds one date at or after 9999-01-01T00:00:00 gives the window nothing, and a date
+  before it does; a column with a span that starts before it, from its published range or from its
+  bins, keeps every span it has, even when another ends in the year 9999.
 """
 
 from __future__ import annotations
@@ -28,12 +31,16 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytest
 import yaml
 
+from flux_engine.author.bundle import AuthoredExpose, _spans_of
+from flux_engine.author.columns import ColumnPlan
+from flux_engine.author.window import WINDOW_END_LIMIT_MS, instant_ms
 from flux_engine.cli._init import run_init
 from flux_engine.core.kernels import KERNEL_V2
+from flux_engine.seam.contract import LogicalKind
 from flux_engine.stages.apply import apply
 from flux_engine.stages.plan import plan
 
-from .test_history_init import NAMESPACE, _levels, _metrics, _ms, _profile
+from .test_history_init import NAMESPACE, _bins, _levels, _metrics, _ms, _profile
 
 pytestmark = pytest.mark.integration
 
@@ -195,11 +202,20 @@ def _init(
     first_end: Optional[str] = None,
     window: Optional[Tuple[str, str]] = None,
     end_type: str = "DATE",
+    edges: Optional[List[str]] = None,
 ) -> Any:
+    """Run ``init`` on the library; *edges* (dates) give the end column a published histogram."""
+    found = _profile_of(last_end, first_end)
+    if edges is not None:
+        found["tables"]["line_version"]["columns"]["valid_to"]["statistics"] = [
+            _bins(
+                [_ms(*(int(part) for part in edge.split("-"))) for edge in edges],
+                [10] * (len(edges) - 1),
+                10 * (len(edges) - 1),
+            )
+        ]
     (tmp_path / "library.fluid.yml").write_text(_contract(required_end, end_type), encoding="utf-8")
-    (tmp_path / "library.profile.json").write_text(
-        json.dumps(_profile_of(last_end, first_end)), encoding="utf-8"
-    )
+    (tmp_path / "library.profile.json").write_text(json.dumps(found), encoding="utf-8")
     return run_init(
         str(tmp_path / "bundle"),
         contract=str(tmp_path / "library.fluid.yml"),
@@ -211,6 +227,12 @@ def _init(
 def _emits(tmp_path: Path) -> Dict[str, Any]:
     text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
     found: Dict[str, Any] = yaml.safe_load(text)["extensions"][NAMESPACE]["emits"]
+    return found
+
+
+def _time_bounds(tmp_path: Path) -> Dict[str, str]:
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    found: Dict[str, str] = yaml.safe_load(text)["spec"]["timeBounds"]
     return found
 
 
@@ -348,6 +370,45 @@ def test_a_window_given_beside_an_end_column_in_the_year_9999_is_not_refused_for
     _plans(tmp_path)
 
 
+def test_an_end_column_that_runs_from_2025_to_the_last_day_keeps_its_span(tmp_path: Path) -> None:
+    # Versions that close in 2025 and versions that stay open on 9999-12-31: the range starts in
+    # 2025, so the column's span is not a year-9999 span and the window reaches its end.
+    result = _init(tmp_path, required_end=True, last_end="9999-12-31", first_end="2025-10-01")
+    assert result.exit_code == 0, result.stderr
+    assert _time_bounds(tmp_path) == {
+        "start": "2025-01-01T00:00:00.000Z",
+        "end": "9999-12-31T00:00:00.000Z",
+    }
+    _plans(tmp_path)
+
+
+def test_a_value_exactly_at_the_start_of_the_year_9999_gives_the_window_nothing(
+    tmp_path: Path,
+) -> None:
+    # 9999-01-01T00:00:00 is the first instant a window may not reach: the column is left out.
+    result = _init(tmp_path, required_end=True, last_end="9999-01-01")
+    assert result.exit_code == 0, result.stderr
+    ended = _emits(tmp_path)["line_version"]["fidelity"]["columns"]["valid_to"]
+    assert ended["bins"] == ["9999-01-01", "9999-01-02", "9999-01-03"]
+    assert _time_bounds(tmp_path) == {
+        "start": "2025-01-01T00:00:00.000Z",
+        "end": "2025-09-01T00:00:00.000Z",
+    }
+    _plans(tmp_path)
+
+
+def test_a_value_just_before_the_year_9999_is_a_span_the_window_holds(tmp_path: Path) -> None:
+    # The last day of 9998 is a date the window can hold: the column keeps its span, which ends at
+    # the edge that closes its one value, two days later.
+    result = _init(tmp_path, required_end=False, last_end="9998-12-31")
+    assert result.exit_code == 0, result.stderr
+    assert _time_bounds(tmp_path) == {
+        "start": "2025-01-01T00:00:00.000Z",
+        "end": "9999-01-02T00:00:00.000Z",
+    }
+    _plans(tmp_path)
+
+
 def test_an_ordinary_one_value_date_is_drawn_exactly(tmp_path: Path) -> None:
     result = _init(tmp_path, required_end=False, last_end="2025-10-01")
     assert result.exit_code == 0, result.stderr
@@ -360,3 +421,53 @@ def test_an_ordinary_one_value_date_is_drawn_exactly(tmp_path: Path) -> None:
     drawn = _drawn(_plans(tmp_path), "line_version", "valid_to")
     assert len(drawn) == 20
     assert set(drawn) == {"2025-10-01"}
+
+
+# -- the spans a column gives the window -------------------------------------------------------------
+
+
+def _spans(
+    time_span: Optional[Tuple[int, int]], bins: Optional[List[str]] = None
+) -> List[Tuple[int, int]]:
+    """The spans :func:`_spans_of` gives the window for a date column with a published range and bins."""
+    column = ColumnPlan("opened_on", time_span=time_span)
+    if bins is not None:
+        column.declaration["bins"] = bins
+    expose = AuthoredExpose("visit", kinds={"opened_on": LogicalKind.DATE})
+    found, _ = _spans_of(expose, column, None)
+    return found
+
+
+def _at(text: str) -> int:
+    moment = instant_ms(text)
+    assert moment is not None
+    return moment
+
+
+def test_a_column_with_a_span_in_2025_keeps_every_span_when_another_is_in_the_year_9999() -> None:
+    # The published range runs from 2025 to the last day; its bins are the last two days. Only
+    # the span that starts in 2025 is a span a window can hold, and the column keeps both.
+    ranged = (_at("2025-10-01"), _at("9999-12-31"))
+    binned = (_at("9999-12-30"), _at("9999-12-31"))
+    assert _spans(ranged, ["9999-12-30", "9999-12-31"]) == [ranged, binned]
+    # The same, with the span in 2025 held by the bins and the published range in the year 9999.
+    assert _spans(binned, ["2025-10-01", "9999-12-31"]) == [binned, ranged]
+
+
+def test_a_column_whose_every_span_starts_in_the_year_9999_gives_the_window_nothing() -> None:
+    assert _spans((_at("9999-12-30"), _at("9999-12-31")), ["9999-12-30", "9999-12-31"]) == []
+    assert _spans(None, ["9999-12-30", "9999-12-31"]) == []
+    assert _spans((_at("9999-12-30"), _at("9999-12-31"))) == []
+
+
+def test_a_span_that_starts_exactly_at_9999_01_01_gives_the_window_nothing() -> None:
+    limit = (WINDOW_END_LIMIT_MS, WINDOW_END_LIMIT_MS + 86_400_000)
+    assert _at("9999-01-01T00:00:00") == WINDOW_END_LIMIT_MS
+    assert _spans(limit) == []
+    assert _spans(None, ["9999-01-01", "9999-01-02"]) == []
+    # One millisecond earlier, the span is one a window can hold.
+    before = (WINDOW_END_LIMIT_MS - 1, WINDOW_END_LIMIT_MS + 86_400_000)
+    assert _spans(before) == [before]
+    assert _spans(None, ["9998-12-31T23:59:59.999Z", "9999-01-02"]) == [
+        (WINDOW_END_LIMIT_MS - 1, WINDOW_END_LIMIT_MS + 86_400_000)
+    ]

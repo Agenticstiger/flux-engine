@@ -185,3 +185,36 @@ def test_a_cut_at_the_window_reads_every_statistic_the_bins_cited() -> None:
     assert _reads(plan) == {tokens: columns._WINDOW_SHAPED for tokens in _ALL_FOUR}
     assert {label.tokens for label in plan.labels} == {("bins",), ("binWeights",)}
     assert all(label.basis.statistic is None for label in plan.labels)
+
+
+def test_a_cut_at_the_window_keeps_the_reasons_the_whole_bins_had_before_its_own() -> None:
+    # The register holds one entry per pointer: a whole-array label the bins already had gives its
+    # reason to the new label, which comes first, and the cut's reason comes last. A reason a
+    # label already holds is not said twice.
+    plan = ColumnPlan(
+        name="d",
+        declaration={
+            "bins": ["2022-01-01", "2024-01-01", "2026-01-01"],
+            "binWeights": ["0.5", "0.5"],
+        },
+        labels=[
+            Label(("bins",), assumed("the first reason of the bins")),
+            Label(("bins",), assumed("the second reason of the bins")),
+            Label(("bins",), assumed("the first reason of the bins")),
+            Label(("binWeights",), assumed("the reason of the weights")),
+            Label(("bins", "0"), from_profile(_MIN, "min/1")),
+        ],
+    )
+    columns.bound_to_window(
+        plan, LogicalKind.DATE, ("2023-01-01T00:00:00Z", "2025-01-01T00:00:00Z")
+    )
+    reasons = {label.tokens: label.basis.reason for label in plan.labels}
+    assert reasons == {
+        ("bins",): (
+            "the first reason of the bins the second reason of the bins " + columns._WINDOW_CLIPPED
+        ),
+        ("binWeights",): "the reason of the weights " + columns._WINDOW_CLIPPED,
+    }
+    assert all(
+        (label.basis.reason or "").endswith(columns._WINDOW_CLIPPED) for label in plan.labels
+    )
