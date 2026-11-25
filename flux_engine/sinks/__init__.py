@@ -25,6 +25,9 @@ answerable for: KERNEL-SPEC §8 computes the ``outputDigest`` above the sink.
   store or a local directory, written through pyiceberg and deltalake with the
   credentials and configuration of the person's own environment. Need
   ``flux-sim-engine[publish]``.
+* :mod:`flux_engine.sinks.kafka` -- one stream as keyed, timestamped records on a Kafka
+  topic, delivered exactly once and only to the audience its target declares, written
+  through confluent-kafka and its registry serializers. Needs ``flux-sim-engine[kafka]``.
 * :mod:`flux_engine.sinks.receipts` -- what a sink is told before a stream
   (:class:`~flux_engine.sinks.receipts.StreamContext`) and what it reports
   after one (:class:`~flux_engine.sinks.receipts.SinkReceipt`). No extra.

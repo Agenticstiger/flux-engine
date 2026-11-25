@@ -1,0 +1,64 @@
+# Copyright 2026 Agentics Transformation Limited
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: Kafka integration
+
+# The Kafka sink against a real Apache Kafka broker and a Karapace schema
+# registry, both started in Docker by tests/sinks/test_kafka_integration.py.
+# Pulling two images and starting a broker is slow and needs Docker, so this
+# is off the per-pull-request path: it runs once a day, on demand, and when
+# another workflow calls it (ci.yml does on a manual run, so a run of the
+# whole suite includes it).
+on:
+  schedule:
+    # Daily 03:23 UTC, a minute no other workflow in this repository uses.
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Naming bash is what turns on `-o pipefail` (see ci.yml).
+    shell: bash
+    working-directory: flux-engine
+
+env:
+  # Same as in ci.yml: a missing sibling FLUX checkout fails a pytest job
+  # instead of skipping it.
+  FLUX_EXAMPLES_REQUIRED: "1"
+  PYTHONUNBUFFERED: "1"
+  # CI installs into the runner's own interpreter (see the Makefile).
+  BIN: ""
+
+jobs:
+  kafka-integration:
+    name: Kafka integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: flux-engine
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            flux-engine/pyproject.toml
+            flux-engine/packages/flux-stats/pyproject.toml
+
+      - name: Install flux_engine and flux-stats (dev and kafka extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/flux-stats -e ".[dev,kafka]"
+
+      # The suite skips itself when Docker is missing; the target fails on a
+      # skipped test or on none run, so that cannot pass.
+      - name: The Kafka sink against a real broker and registry (make kafka-integration)
+        run: make kafka-integration

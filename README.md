@@ -56,7 +56,7 @@ Open `.flux/runs/<runId>/EVIDENCE.md` first: its last section, "What Was Not Pro
 ## Runs offline: your data and your model stay yours
 
 - FLUX needs no internet to produce results.
-- The network is used only for a target you name: an object store, a database or an Iceberg catalogue as a `--sink`, or an OpenLineage URL your own code sets. Everything else is local.
+- The network is used only for a target you name: an object store, a database, an Iceberg catalogue or Kafka brokers and a schema registry as a `--sink`, or an OpenLineage URL your own code sets. Everything else is local.
 - An object store target with no credentials is refused unless you pass `--sink-opt instance-identity=true`, so a run never asks the cloud's instance metadata service by surprise.
 - There is no telemetry, no update check and no LLM inside FLUX.
 - The [agent skills](skills/README.md) are plain text that runs on the model you choose, a local one included.

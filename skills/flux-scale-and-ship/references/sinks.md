@@ -1,6 +1,6 @@
 # Sinks
 
-Offline first: `fluxsim plugins` and `fluxsim apply --help`. The page: [Load a simulation into a database](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/load-a-simulation-into-a-database.md).
+Offline first: `fluxsim plugins` and `fluxsim apply --help`. The pages: [Load a simulation into a database](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/load-a-simulation-into-a-database.md) and, for Kafka, [Stream a simulation into Kafka](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/stream-a-simulation-into-kafka.md).
 
 A sink writes the rows of a whole run as typed columns, in addition to the NDJSON the run directory already holds. `--sink NAME:TARGET` works on `apply` and `run`; `--sink-opt KEY=VALUE` is repeatable. A run writes to one sink per command; to deliver to a second place, run `apply` again with the other `--sink`. The stream's `outputDigest` is computed before a sink sees a row, so a sink changes where rows land and nothing about what they are. A share (`--shard`) is refused by `--sink`.
 
@@ -11,7 +11,7 @@ fluxsim plugins
 fluxsim plugins --json
 ```
 
-It lists each sink, the extra it needs and whether that is installed, without importing it. The Parquet and Arrow IPC sinks need the arrow extra of flux-sim-engine; the database sink needs the adbc extra plus the ADBC driver of the database (SQLite, DuckDB, PostgreSQL, Snowflake or BigQuery). A missing extra or driver is FLX-3501: ask the user to install it; do not install it yourself.
+It lists each sink, the extra it needs and whether that is installed, without importing it. The Parquet and Arrow IPC sinks need the arrow extra of flux-sim-engine; the database sink needs the adbc extra plus the ADBC driver of the database (SQLite, DuckDB, PostgreSQL, Snowflake or BigQuery); the Kafka sink needs the kafka extra. A missing extra or driver is FLX-3501: ask the user to install it; do not install it yourself.
 
 ## `parquet:DIR` and `arrow-ipc:DIR`
 
@@ -45,6 +45,10 @@ The target is the driver name: `sqlite`, `duckdb`, `postgresql`, `snowflake` or 
 | `db.KEY-env` | the name of an environment variable that holds that driver option |
 
 The sink touches only tables it created; a table without its four `_flux_` columns is refused in every mode (FLX-3506). Ask the user before using `mode=replace` against a database.
+
+## `kafka:HOST:PORT[,HOST:PORT...]`
+
+The target names the brokers, and a run contacts only those and the schema registry the user names. Records are keyed by entity, with event time in the record timestamp, and delivery is exactly-once. It needs the kafka extra. Credentials come only from environment variables the user sets, as for a database; never put one in a command. Run it only when the user asked for it and named the brokers. The options and the audience gate are on the page linked above.
 
 ## The credential rule
 

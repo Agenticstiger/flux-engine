@@ -214,7 +214,12 @@ def _add_profile(
             "the profile document the Simulation pins under "
             "extensions['com.agentics.flux/1'].profile (docs/spec/PROFILE-SPEC.md); refused "
             "when its digest is not the pinned one, and when the Simulation pins none"
-            + ("; read only for a fresh plan, so refused with --run-id" if fresh_plan_only else "")
+            + (
+                "; with --run-id, read only with --sink, so a sink's external audience can be "
+                "graded from it, and refused without"
+                if fresh_plan_only
+                else ""
+            )
             + (
                 "; --verify and --ship score the run against it (docs/spec/SCORECARD-SPEC.md)"
                 if run
@@ -377,7 +382,7 @@ def _add_sink(parser: argparse.ArgumentParser, *, when: str) -> None:
             f"also write every stream to a sink, {when}: "
             "parquet:DIR or arrow-ipc:DIR (a directory, or an s3://, gs://, az:// or abfs:// "
             "prefix), adbc:DRIVER, iceberg:CATALOG/NAMESPACE or delta:DIR (a directory or an "
-            "object store URL) (`fluxsim plugins` lists them)"
+            "object store URL) or kafka:HOST:PORT[,HOST:PORT...] (`fluxsim plugins` lists them)"
         ),
     )
     parser.add_argument(

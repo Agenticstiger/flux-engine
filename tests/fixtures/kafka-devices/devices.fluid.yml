@@ -1,0 +1,161 @@
+# A site, a versioned device (a validity window) and four exposes that read it. The
+# simulation declares a history for device_version.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: fleet.devices
+name: Devices
+metadata:
+  owner:
+    team: fleet
+exposes:
+  - exposeId: site
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: site, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: site_id, type: INT, required: true }
+        - { name: region, type: STRING, required: true }
+        - { name: opened_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: site, type: primary, expr: site_id }
+      dimensions:
+        - { name: opened_on, type: time }
+        - { name: region, type: categorical }
+  - exposeId: device_version
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: device_version, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: device_sk, type: INT, required: true }
+        - { name: device_id, type: INT, required: true }
+        - { name: site_id, type: INT, required: true }
+        - { name: valid_from, type: DATE, required: true }
+        - { name: valid_to, type: DATE, required: false }
+        - { name: firmware, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+        - { name: installed_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: device_version, type: primary, expr: device_sk }
+        - { name: device, type: natural, expr: device_id }
+      dimensions:
+        - { name: valid_from, type: time, typeParams: { validityParams: { isStart: true } } }
+        - { name: valid_to, type: time, typeParams: { validityParams: { isEnd: true } } }
+        - { name: firmware, type: categorical }
+        - { name: status, type: categorical }
+        - { name: installed_on, type: time }
+      relationships:
+        - name: site
+          to: site
+          fromColumns: [site_id]
+          toColumns: [site_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: reading
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: reading, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: reading_id, type: INT, required: true }
+        - { name: device_id, type: INT, required: true }
+        - { name: read_on, type: DATE, required: true }
+        - { name: value, type: "DECIMAL(10,2)", required: true }
+    semantics:
+      defaultAggTimeDimension: read_on
+      entities:
+        - { name: reading, type: primary, expr: reading_id }
+      dimensions:
+        - { name: read_on, type: time }
+      relationships:
+        - name: device
+          to: device_version
+          fromColumns: [device_id]
+          toColumns: [device_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: device_current
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: device_current, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: device_id, type: INT, required: true }
+        - { name: firmware, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+        - { name: installed_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: device, type: primary, expr: device_id }
+      dimensions:
+        - { name: firmware, type: categorical }
+        - { name: status, type: categorical }
+        - { name: installed_on, type: time }
+  - exposeId: device_change
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: device_change, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: event_id, type: INT, required: true }
+        - { name: device_id, type: INT, required: true }
+        - { name: op, type: STRING, required: true }
+        - { name: changed_at, type: DATE, required: true }
+        - { name: recorded_at, type: DATE, required: true }
+        - { name: before_firmware, type: STRING, required: false }
+        - { name: after_firmware, type: STRING, required: false }
+    semantics:
+      defaultAggTimeDimension: recorded_at
+      entities:
+        - { name: event, type: primary, expr: event_id }
+      dimensions:
+        - { name: op, type: categorical }
+        - { name: changed_at, type: time }
+        - { name: recorded_at, type: time }
+        - { name: before_firmware, type: categorical }
+        - { name: after_firmware, type: categorical }
+      relationships:
+        - name: device
+          to: device_version
+          fromColumns: [device_id]
+          toColumns: [device_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: device_month
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: device_month, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: period_id, type: INT, required: true }
+        - { name: device_id, type: INT, required: true }
+        - { name: month, type: DATE, required: true }
+        - { name: firmware, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: period, type: primary, expr: period_id }
+      dimensions:
+        - { name: month, type: time, typeParams: { timeGranularity: month } }
+        - { name: firmware, type: categorical }
+      relationships:
+        - name: device
+          to: device_version
+          fromColumns: [device_id]
+          toColumns: [device_id]
+          cardinality: many_to_one
+          joinType: inner
