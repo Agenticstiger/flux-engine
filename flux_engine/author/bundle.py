@@ -132,6 +132,7 @@ from flux_engine.author.history import (
 from flux_engine.author.history import _pointers as declared_pointers
 from flux_engine.author.ledger import Ledger
 from flux_engine.author.noisy import cite_noisy, point_estimates
+from flux_engine.author.orders import contract_date_orders
 from flux_engine.author.projection import (
     DateSpan,
     Projected,
@@ -4780,6 +4781,28 @@ def _carried_by_snapshot(
     return frozenset(projections.carried[expose.expose_id][1]) - ruled
 
 
+def _date_bounds(expose: AuthoredExpose) -> Dict[str, Tuple[int, int]]:
+    """The span each date column's declared draw reaches, in milliseconds: its bins' ends, or its range."""
+    found: Dict[str, Tuple[int, int]] = {}
+    for plan in expose.columns:
+        if expose.kinds.get(plan.name) not in DATE_KINDS:
+            continue
+        bins = plan.declaration.get("bins")
+        held = plan.declaration.get("range")
+        ends = (
+            (bins[0], bins[-1])
+            if isinstance(bins, list) and bins
+            else (
+                (held["min"], held["max"])
+                if isinstance(held, Mapping) and "min" in held and "max" in held
+                else None
+            )
+        )
+        if ends is not None:
+            found[plan.name] = (_milliseconds(str(ends[0])), _milliseconds(str(ends[1])))
+    return found
+
+
 def _dated_columns(
     planned: _Planned,
     window: Tuple[str, str],
@@ -4815,6 +4838,13 @@ def _dated_columns(
                     if label != _HISTORY_LABEL
                 },
                 carried=_carried_by_snapshot(expose, projections, snapshots),
+                orders=tuple(contract_date_orders(planned.contract["exposes"][expose.index])),
+                required=frozenset(
+                    name
+                    for name, context in expose.contexts.items()
+                    if name in expose.kinds and context.column.required
+                ),
+                bounds=_date_bounds(expose),
             )
             for expose in planned.authored
             if not expose.reference

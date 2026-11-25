@@ -37,6 +37,7 @@ from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tupl
 
 from flux_engine.author.columns import _share_text, cell_weights, count_cells
 from flux_engine.author.forms import SUPERSEDED, grouped, number_grouped
+from flux_engine.author.orders import DateOrder
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.dates import MOST_STATES
 from flux_engine.seam.keys import ContractKeys
@@ -101,6 +102,13 @@ class DatedExpose:
     #: A lifetime over two of them would be a second source for both: the history sets both dates.
     carried: FrozenSet[str] = frozenset()
 
+    #: The orders its contract's ``check`` rules declare between two of its dates.
+    orders: Tuple[DateOrder, ...] = ()
+    #: Its DATE and TIMESTAMP columns the contract makes ``required``.
+    required: FrozenSet[str] = frozenset()
+    #: The span each date column's declared draw reaches, in milliseconds, where it declares one.
+    bounds: Mapping[str, Tuple[int, int]] = field(default_factory=dict)
+
 
 @dataclass
 class DateDeclarations:
@@ -115,7 +123,7 @@ class DateDeclarations:
     #: What each written number rests on: the entry, the member of it (tokens below the entry), the
     #: statistic of the profile it was read from (tokens into the profile) and the sentence that
     #: says how. The entry is one of ``lifetimes``, ``within`` or ``rates``, by identity.
-    cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]] = field(
+    cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Optional[Tuple[str, ...]], str]] = field(
         default_factory=list
     )
 
@@ -460,7 +468,9 @@ class _Declarer:
         self.minimum_cell = minimum_cell
         self.used: List[_Note] = []
         self.unused: List[_Note] = []
-        self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]] = []
+        self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Optional[Tuple[str, ...]], str]] = (
+            []
+        )
         #: expose -> (start, end or None, the declaration)
         self.lifetimes: Dict[str, Dict[str, Any]] = {}
         #: The exposes whose lifetime is only a start a relationship's date pair offered: one is
@@ -936,6 +946,83 @@ class _Declarer:
             self.used.append((tokens, how))
             self.cited.append((entry, (key,), tokens, how))
         return entry if len(entry) > 2 else None
+
+    # -- orders the contract declares ---------------------------------------
+
+    def lifetimes_of_orders(self) -> None:
+        """A lifetime for each table whose contract orders two of its dates and whose profile gives no pair of them.
+
+        The profile's date pair, when it publishes one for the two columns, is the statistic and
+        wins: this reads nothing of the profile. The days between the dates are an assumption.
+        """
+        for expose, held in self.exposes.items():
+            if expose in self.lifetimes:
+                continue
+            for order in held.orders:
+                if self._published_pair(expose, order):
+                    continue
+                entry = self._order_lifetime(expose, held, order)
+                if entry is not None:
+                    self.lifetimes[expose] = entry
+                    break
+
+    def _published_pair(self, expose: str, order: DateOrder) -> bool:
+        tables = self.profile.get("tables")
+        table = tables.get(expose) if isinstance(tables, Mapping) else None
+        items = table.get("datePairs") if isinstance(table, Mapping) else None
+        names = {order.start, order.end}
+        return any(
+            isinstance(item, Mapping) and {str(item.get("start")), str(item.get("end"))} == names
+            for item in (items if isinstance(items, list) else ())
+        )
+
+    def _order_lifetime(
+        self, expose: str, held: DatedExpose, order: DateOrder
+    ) -> Optional[Dict[str, Any]]:
+        """The lifetime that keeps *order*, or ``None`` when the bundle cannot hold it."""
+        start, end = order.start, order.end
+        if self._usable(expose, start, end) is not None or self.window_start is None:
+            return None
+        if self._set_already(expose, start) or self._set_already(expose, end):
+            return None
+        if held.kinds[start] is not held.kinds[end]:
+            return None
+        shortest = 1 if order.strict else 0
+        longest = (self.window_end - self.window_start) // _DAY_MS
+        if longest <= shortest:
+            return None
+        entry: Dict[str, Any] = {
+            "emit": expose,
+            "start": start,
+            "end": end,
+            "duration": {"bins": [str(shortest), str(longest)], "binWeights": ["1"]},
+        }
+        nullable = end not in held.required
+        open_end = nullable and order.null_end_holds
+        if nullable and not open_end:
+            # A NULL end would fail the check: the end keeps a date past the window.
+            entry["endPastWindow"] = "kept"
+        if not open_end and not self._fits(held, start, end, shortest, longest):
+            return None
+        self.cited.append(
+            (
+                entry,
+                ("duration",),
+                None,
+                f"the days from {start!r} to {end!r}, which the contract's check "
+                f"{order.rule!r} orders and the profile gives no pair for: drawn evenly from "
+                f"{shortest} to {longest} days, the most the run's window allows",
+            )
+        )
+        return entry
+
+    @staticmethod
+    def _fits(held: DatedExpose, start: str, end: str, shortest: int, longest: int) -> bool:
+        """Whether a kept end can always be drawn inside its declared range (``FLX-6204``)."""
+        reach, span = held.bounds.get(start), held.bounds.get(end)
+        if reach is None or span is None:
+            return False
+        return reach[1] + shortest * _DAY_MS <= span[1] and reach[0] + longest * _DAY_MS >= span[0]
 
     # -- relationships -------------------------------------------------------
 
@@ -1554,6 +1641,7 @@ def declare_dates(
         declined_rates=declined_rates,
     )
     declarer.lifetimes_of_tables()
+    declarer.lifetimes_of_orders()
     declarer.start_only_lifetimes()
     within = declarer.within_entries()
     lifetimes = list(declarer.lifetimes.values())

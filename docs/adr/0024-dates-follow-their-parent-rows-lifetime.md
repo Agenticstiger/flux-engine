@@ -483,3 +483,38 @@ profile's durations say.
 - **What is kept.** A pair one of whose columns a derive, a dependency, a copy or a key sets, and every pair of an
   emit that is not a snapshot.
 - **What moves.** A bundle `init` writes for such a snapshot. No plan or recorded plan changes.
+
+## Amendment of 2026-11-25: a check orders two dates
+
+### Context
+
+A contract can order two dates of one row as an invariant, such as `cancelled_on IS NULL OR
+cancelled_on >= issued_on` at most 5 % failing. `init` wrote an order only from a profile's
+`datePairs`. A private release publishes none, so each date was drawn on its own, and the check held on
+a share of the rows well below its tolerance.
+
+### Decision
+
+1. **What is read.** A `check` of the contract, with no `when`, whose syntax tree (the engine's own
+   `flux-expr/2` parser, never a pattern over the text) is `b >= a`, `b > a`, `a <= b` or `a < b` over two
+   columns of the row, optionally behind `b IS NULL OR` or `a IS NULL OR`. Anything else orders nothing here.
+2. **Which form.** A lifetime. It is the one form that orders two dates of one row: a `within` entry orders a
+   child's date inside a linked parent's lifetime, and a `derive` would fix the gap, so the end could not
+   draw the days between the dates as an open question. The lifetime starts at `a` and ends at `b`.
+3. **The gap is an assumption.** With no published pair, the days between the dates are drawn evenly from
+   0 days (1 for a strict order) up to the days between the window's start and end, the most a row that
+   starts at the window's start can hold. Evenly says the least: nothing published favours a short or a long
+   gap, and a gap longer than the window only ends after it. The number is assumed in the register, naming
+   the check, so a person can replace it. No `target` is written: every row holds the order.
+4. **The end.** A nullable end the check lets be NULL keeps the lifetime's default, so an end after the
+   window is NULL (a card not cancelled by the window's end). A nullable end the check does not let be NULL,
+   and a required end, keep their date past the window (`endPastWindow: kept`); then the bundle is written
+   only when the end's declared range holds every end the gap can draw (`FLX-6204` would refuse it
+   otherwise), and no lifetime is written when it cannot be shown to.
+5. **What wins.** A published `datePairs` entry for the two columns, used or not, is read exactly as before
+   and this reads nothing. A table declares one lifetime: a pair's, when it has one.
+6. **Prior art.** The same construction a generator uses to keep a return date after a purchase date: the
+   later date is the earlier one plus a random offset (dbldatagen's date ranges), rather than sampling both
+   and rejecting rows, which loses the tolerance the check allows. A column inequality constraint that
+   rejects and resamples is the other common form; SDV's Inequality constraint was looked at for the
+   pattern only and nothing of it was taken.

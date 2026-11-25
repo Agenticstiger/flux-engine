@@ -107,6 +107,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   stays carried and the ledger names what to change (publish fewer levels or more rows). Before, `init` declared
   nothing for such a column and the history carried it (ADR 0017, amendment of 2026-11-25).
 
+- `init` keeps the order a contract's check declares between two dates of a row (`b >= a`, `b > a`, `a <= b` or
+  `a < b`, each optionally behind `b IS NULL OR` or `a IS NULL OR`, read from the check's syntax tree). Where the
+  profile publishes no date pair for the two columns, as a private release never does, it writes a `lifetimes` entry
+  from the first to the second, with the days between them drawn evenly from 0 (1 for a strict order) up to the days
+  the run's window holds, as an assumption in the parameter register. Before, each date was drawn on its own and the
+  check held on only part of the rows. A published pair is read as before. You can replace the gap with a histogram
+  of your own (ADR 0024, amendment of 2026-11-25: a check orders two dates).
+
 ### Changed
 
 - `init` writes a table of two foreign keys whose relationships are both laid out by counts as an association, where
