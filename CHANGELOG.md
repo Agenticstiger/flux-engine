@@ -220,8 +220,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet. When a relationship, a
   history or a projection needs its table, `init` refuses before it writes anything (`FLX-3125`), names the table and
   the column, and says to write the open end as NULL, or to make the column a TIMESTAMP; before, it left the table out
-  and wrote a bundle the plan refused with `FLX-3403`. When nothing needs the table, it is left out, as before, and
-  its statistics are listed unused with the reason.
+  and its own check then refused the whole init ("the bundle written from these inputs does not validate",
+  `FLX-3403`), writing no bundle. When nothing needs the table, it is left out, as before, and its statistics are
+  listed unused with the reason.
 - `init` no longer writes a bundle the plan refuses with `FLX-6204` when an enforced `within` date's parent has a
   lifetime whose start declares no range: no widening of the date's range can meet the plan's check then, so the
   entry is left out and its pair is listed unused, with the reason.
