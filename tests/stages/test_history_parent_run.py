@@ -272,3 +272,28 @@ def test_plan_says_how_many_entities_end_with_their_parent_in_one_version(tmp_pa
     assert planned.success, planned.stderr
     assert f"history ({EMIT}): " in planned.stderr
     assert "entities end with their parent and have one version" in planned.stderr
+
+
+@pytest.mark.parametrize(("closed", "held"), [(None, 1), (date(2024, 5, 1), 0)])
+def test_a_history_with_no_end_closes_a_last_version_only_when_its_parent_ended_by_until(
+    closed: Optional[date], held: int
+) -> None:
+    from flux_engine.concordance.history_checks import within_parent_share
+    from flux_engine.expr2.scope import Versions
+    from flux_engine.seam.history import Histogram, HistoryEntry, HistoryParent
+
+    entry = HistoryEntry(
+        emit=EMIT,
+        entities=1,
+        length=Histogram(("30", "90"), ("1",)),
+        until="2024-03-31",
+        parent=HistoryParent("depot", lifetime=True),
+    )
+    assert entry.end is None
+    versions = Versions(("vehicle",), "valid_from", "valid_to")
+    # The depot's last day is after ``until``: nothing forces the vehicle to end, so a closed
+    # last version is a violation of the bound, and an open one holds it.
+    parents = {(1,): {"o": date(2024, 1, 1), "c": date(2024, 12, 31)}}
+    rows = [{"vehicle": 1, "depot": 1, "valid_from": date(2024, 2, 1), "valid_to": closed}]
+    found = within_parent_share(entry, rows, versions, parents, ("depot",), ("o", "c"))
+    assert (found.satisfied, found.total) == (held, 1)

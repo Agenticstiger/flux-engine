@@ -573,8 +573,11 @@ with `parent.lifetime: true`. It covers the entities whose parent row has a star
 first start is not before the parent's start; and, when the parent has ended, no version starts after the parent's
 last day, every closed end is at or before it, and an entity whose parent ended by `until` has ended (its last version
 is closed, or under `finalVersion` carries `value`). A parent's DATE end is its last day to the last millisecond,
-so with a TIMESTAMP `until` the parent ended by `until` when that millisecond is not after it, not when its day is. `history:one_current` reads a closed last version as allowed
-for a history with this key and no `end`.
+so with a TIMESTAMP `until` the parent ended by `until` when that millisecond is not after it, not when its day is.
+For a history with no `end`, a closed last version is allowed only when the parent's last day is at most `until`; an
+entity of any other parent keeps its last version open, and one that does not is a violation. `history:one_current`
+reads a closed last version as allowed for a history with this key and no `end`. An entity left with an empty
+intersection counts as a violation there.
 
 **When the forced entities are more than the share.** All of them end, and the share the run reaches is higher than the
 declared one, by the forced entities beyond it. Nothing is printed: `history:within_parent` and the count of ended

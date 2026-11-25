@@ -286,7 +286,8 @@ def _within_parent_holds(
     Its first start is not before the parent's start. When the parent has ended (an end not before
     its start), no version starts after the parent's last day, every closed end is at or before it,
     and an entity whose parent ended by ``until`` has ended: its last version is closed, or under
-    ``finalVersion`` carries the end value.
+    ``finalVersion`` carries the end value. Any other entity of a history with no ``end`` keeps its
+    last version open: nothing but the parent's end closes it.
     """
     start = parent.get(lifetime[0])
     if start is None or versions.end is None:
@@ -296,13 +297,27 @@ def _within_parent_holds(
         return False
     stop = None if lifetime[1] is None else parent.get(lifetime[1])
     if stop is None or lifetime_open(start, stop):
-        return True
+        return _open_last_kept(ordered, versions, entry, sentinel)
     if not _ends_by(ordered, (versions.start, versions.end), stop, sentinel):
         return False
     until = _instant(entry.until, first)
     if until is not None and not at_or_before_end(_last_instant(stop, until), until):
-        return True  # the parent ended after the horizon: nothing forces the entity to end
+        # The parent ended after the horizon: nothing forces the entity to end.
+        return _open_last_kept(ordered, versions, entry, sentinel)
     return chain_ended(ordered, versions, entry, sentinel)
+
+
+def _open_last_kept(
+    ordered: Sequence[_Row], versions: Versions, entry: HistoryEntry, sentinel: Any
+) -> bool:
+    """Whether an entity nothing forces to end keeps its last version open, when the history has no ``end``.
+
+    A history with no ``end`` closes a last version only to end with its parent, when the parent's
+    last day is at most ``until``; with an ``end`` declared the history's own end mode may close it.
+    """
+    if entry.end is not None or versions.end is None:
+        return True
+    return is_open(ordered[-1].get(versions.end), sentinel)
 
 
 def _ends_by(ordered: Sequence[_Row], columns: Tuple[str, str], stop: Any, sentinel: Any) -> bool:

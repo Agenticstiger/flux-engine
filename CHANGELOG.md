@@ -45,8 +45,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   amendment of 2026-11-24). It needs a `lifetimes` entry on the emit the `parent` relationship reaches. An entity's
   first start is drawn inside its parent's lifetime with room for the versions it takes, its versions are fitted to
   end by the parent's last day, and an entity whose parent ended ends: its final version starts, or its last version
-  closes, by that day. Those entities count towards the end `share`. `fluxsim verify` adds `history:within_parent`,
-  and a generated run never writes a version it knows breaks it. An entity whose parent leaves room for fewer
+  closes, by that day. Those entities count towards the end `share`. `fluxsim verify` adds `history:within_parent`;
+  for a history with no `end` it holds a closed last version only when the parent's last day is at most `until`. A
+  generated run never writes a version it knows breaks it. An entity whose parent leaves room for fewer
   versions than it was given is capped at that room, and the versions it loses go one at a time to the entities
   with the most room left (the allotment `one_to_one` uses, with a cap for each entity), so the emit keeps its
   declared rows; only when no entity has room left does the history hold fewer rows, and plan, apply and verify
