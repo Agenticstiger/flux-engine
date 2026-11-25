@@ -160,6 +160,7 @@ __all__ = [
     "SCHEMA_URL_1_2_0",
     "SCHEMA_URL_1_3_0",
     "SCHEMA_URL_1_4_0",
+    "NULL_COUNT_2",
     "SCHEMA_URL_1_5_0",
     "SEVERAL",
     "STRUCTURAL_CLASSES",
@@ -218,7 +219,9 @@ _FORMS_OF_1_5_0: Mapping[str, str] = MappingProxyType(
 NULL_COUNT_LEVELS: Tuple[str, ...] = ("known", "null")
 
 #: The identifier of the statistic that states how many rows of a column are known and NULL.
-_NULL_COUNT = "nullCount/2"
+#: The definition of a column's noisy count of its known and NULL rows (format 1-5-0).
+NULL_COUNT_2 = "nullCount/2"
+_NULL_COUNT = NULL_COUNT_2
 
 #: Every form that only format ``1-4-0`` holds, by the key the reader names it with, and what the
 #: refusal calls it. A document that names an earlier format and holds one is refused

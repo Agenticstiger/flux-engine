@@ -75,7 +75,7 @@ from flux_engine.core.errors import ErrorCode, FluxError, register
 from flux_engine.seam.coverage import printable
 from flux_stats import registry as _stats_registry
 from flux_stats.cliques import CLIQUE_DEFINITION, CLIQUE_DEFINITION_2
-from flux_stats.profile import CALENDAR_LEVELS
+from flux_stats.profile import CALENDAR_LEVELS, NULL_COUNT_2
 from flux_stats.rank_correlation import RANK_IDENTIFIERS
 from flux_stats.spelling import refuse as _refuse_profile
 
@@ -720,11 +720,11 @@ class UnusedStatistic:
 
 
 def _registered_identifiers() -> FrozenSet[str]:
-    """Every statistic and metric definition a profile can hold, a clique marginal's and a rank correlation's."""
+    """Every statistic and metric definition a profile can hold: a clique marginal's, a rank correlation's and a noisy null count's too."""
     return (
         frozenset(entry.identifier for entry in _stats_registry.definitions())
         | frozenset(metric.identifier for metric in _stats_registry.metrics())
-        | frozenset({CLIQUE_DEFINITION, CLIQUE_DEFINITION_2})
+        | frozenset({CLIQUE_DEFINITION, CLIQUE_DEFINITION_2, NULL_COUNT_2})
         | RANK_IDENTIFIERS
     )
 

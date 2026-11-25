@@ -520,6 +520,19 @@ def _emit_rows(
     return rows, assumed(reason), reason
 
 
+def _noise_floors(
+    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str
+) -> Tuple[Tuple[int, Fraction], ...]:
+    """The noise floor of each noisy null count of *column* (profile format 1-5-0), by statistic."""
+    prefix = ("tables", expose_id, "columns", column, "statistics")
+    found = [
+        (int(tokens[-1]), note.floor)
+        for tokens, note in (noisy or {}).items()
+        if tokens[:-1] == prefix and getattr(note, "floor", None) is not None
+    ]
+    return tuple(sorted(found))
+
+
 def _noise_clear(
     noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str
 ) -> Tuple[Tuple[int, Tuple[bool, ...]], ...]:
@@ -589,6 +602,7 @@ def _plan_expose(
             range_rule=column_range(schema[position]),
             asked_levels=_levels_asked(asked, column.name),
             noise_clear=_noise_clear(noisy, expose_id, column.name),
+            noise_floors=_noise_floors(noisy, expose_id, column.name),
             open_end=_open_end_ms(expose, column.name) if "history" in table else None,
         )
         if _draws_int_levels(context, grouping, set_by_rules):

@@ -220,6 +220,7 @@ def _fit_lines(outcome: Any) -> Any:
     gate = outcome.gate
     if outcome.held_out_note is not None:
         lines.append(outcome.held_out_note)
+    lines.extend(outcome.noise_notes)
     if gate is not None:
         lines.append(f"grade: pinned profile {gate.pinned_grade}, held-out profile {gate.grade}")
         for query in gate.queries:
@@ -301,6 +302,7 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         "gaps": outcome.patch["gaps"],
         "heldOut": _gate_document(outcome),
         "heldOutNote": outcome.held_out_note,
+        "noiseNotes": list(outcome.noise_notes),
         "calibrated": outcome.calibrated,
         "bundle": str(outcome.bundle.path) if outcome.bundle is not None else None,
     }

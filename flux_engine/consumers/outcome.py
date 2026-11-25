@@ -40,6 +40,7 @@ from flux_engine.consumers.rates import MEASURED, NO_ROWS, NOT_A_RATE, Rate, gro
 from flux_engine.consumers.verify_errors import FLX_3701, FLX_3702
 from flux_engine.core.errors import FluxError
 from flux_engine.seam.consumers import ConsumerQuery, ConsumerRegistry
+from flux_stats.noise import noise_floor
 from flux_stats.profile import Profile, StatisticEntry
 
 __all__ = [
@@ -64,6 +65,12 @@ class Target:
 
     rate: Optional[Fraction]
     reason: str = NO_TARGET
+    #: The variance of a noisy rate (profile format 1-5-0), by the delta method over its two noisy
+    #: cells; ``None`` for an exact one.
+    variance: Optional[Fraction] = None
+    #: A noisy rate whose unit's records do not stand clear of the noise: it states no rate, and it
+    #: is left out as a withheld one is.
+    inside_noise: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,16 +83,35 @@ class QueryTarget:
 
 
 def _target_of(statistic: StatisticEntry) -> Dict[str, Target]:
+    """The rate each group of a query's statistic states.
+
+    A noisy statistic (profile format 1-5-0) is read through its point estimate. A group whose
+    unit's records do not exceed :func:`flux_stats.noise.noise_floor` over its two cells states no
+    rate: the noise is as large as what it counts. The rate of one that does carries its variance,
+    ``v (f^2 + t^2) / n^4`` for cell variance ``v``, ``f`` and ``t`` the false and true counts and
+    ``n`` their sum, the delta method's, for the fit to weigh it by.
+    """
     out: Dict[str, Target] = {}
+    noise = statistic.noise
+    floor = noise_floor(noise.mechanism, noise.scale, 2) if noise is not None else None
     for group in statistic.groups:
         if not group.published or group.suppressed_cells or group.statistic is None:
             out[group.key] = Target(None, WITHHELD)
             continue
         counts = group.statistic.level_counts
         total = sum(counts)
-        out[group.key] = (
-            Target(Fraction(counts[1], total)) if len(counts) == 2 and total > 0 else Target(None)
-        )
+        if len(counts) != 2 or total <= 0:
+            out[group.key] = Target(None)
+        elif floor is not None and total <= floor:
+            out[group.key] = Target(None, WITHHELD, inside_noise=True)
+        elif floor is not None and statistic.cell_variance is not None:
+            false, true = counts
+            variance = (
+                statistic.cell_variance * (false * false + true * true) / Fraction(total) ** 4
+            )
+            out[group.key] = Target(Fraction(true, total), variance=variance)
+        else:
+            out[group.key] = Target(Fraction(counts[1], total))
     return out
 
 

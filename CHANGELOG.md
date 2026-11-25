@@ -36,7 +36,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   noisy no longer keeps a run from P3. Before, a `noise` block on any history member was refused in every format.
 - Profile format 1-5-0 lets a query's rate carry noise: the query states its `unit` (a table's rows, groups of them by the
   child columns of a followed relationship, or a history's entities), which gives the charge, and flux-stats reads, checks
-  and charges it. A noisy query in an earlier format is refused as before. `fluxsim calibrate` does not read noisy rates yet.
+  and charges it. A noisy query in an earlier format is refused as before.
+- `fluxsim init` reads a private release's noisy history and noisy null counts (profile format 1-5-0). A noisy history
+  member is read through its point estimate, its cells inside the noise (`noise_floor` over all its cells) carrying no
+  weight; one with no cell clear of it is read as withheld. A `nullCount/2` gives a nullable column the NULL share its
+  estimate states when the NULL cell stands clear of the noise, and otherwise the middle of the interval the release
+  allows, as a labelled assumption that names the interval.
+- `fluxsim calibrate --fit` reads a noisy query rate (profile format 1-5-0) through its point estimate. A rate whose
+  unit's records stand inside the noise is left out, with a note in the fit's output (`noiseNotes` in `--json`), and a
+  profile whose rates are all inside it gives `FLX-3707` naming them. Each query's squared gaps weigh the inverse of its
+  rate's variance, scaled so the least noisy weighs 1, as an exact rate does.
 - The profile-request reader and writer read and write format 1-3-0 (`history` on a table, `nullCount/2` on a column).
   `init` asks for them, in the request it writes beside a bundle, only when the profile it was given is a private
   release, and every other request keeps its format and bytes.

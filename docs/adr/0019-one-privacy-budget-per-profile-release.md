@@ -230,6 +230,15 @@ for a table that a unit follows into (ADR 0037).
    the charge, and each query states its own share. A noisy query with no unit, another unit, a charge of 0 or an
    earlier format is refused (`FLX-5036`), naming the query. A run whose queries are all noisy no longer loses P3 for
    them.
+9. **The engine reads each new part with the noise floor of the amendment above.** `fluxsim init` reads a noisy
+   history member through its point estimate, and only its cells above `noise_floor` over all its cells carry
+   weight; a member with none above it says nothing and is read as withheld. A `nullCount/2` gives a nullable
+   column the NULL share its estimate states when its NULL cell stands clear of the floor over the two cells;
+   otherwise the share is unknown, and the middle of the interval the release allows, 0 to the NULL cell's
+   estimate plus the floor over the rows, is assumed and named. `fluxsim calibrate --fit` leaves out a noisy rate
+   whose unit's records stand inside the floor, with a note (`FLX-3707` naming them when none is left), and weighs
+   each query's squared gaps by the inverse of its rate's variance, scaled so the least noisy weighs 1, as an
+   exact rate does. All of it is post-processing of the release.
 
 ### Consequences
 

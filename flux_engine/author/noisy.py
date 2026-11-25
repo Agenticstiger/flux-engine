@@ -30,6 +30,7 @@ from flux_engine.author.forms import grouped
 from flux_stats.cliques import CLIQUE_DEFINITION
 from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM
 from flux_stats.noise import noise_floor, point_estimate, variance_of
+from flux_stats.profile import NULL_COUNT_2
 from flux_stats.spelling import render_exact
 
 __all__ = ["NoisyNote", "cite_noisy", "point_estimates"]
@@ -37,7 +38,20 @@ __all__ = ["NoisyNote", "cite_noisy", "point_estimates"]
 _COUNT_KEYS = {
     LEVEL_HISTOGRAM.identifier: "levelCounts",
     MARGINAL_HISTOGRAM.identifier: "binCounts",
+    NULL_COUNT_2: "levelCounts",
 }
+
+#: The members of a table's ``history`` that may carry noise (profile format 1-5-0), and those of
+#: one of its tracked columns.
+_HISTORY_MEMBERS = (
+    "versionsPerEntity",
+    "firstStart",
+    "versionLength",
+    "chain",
+    "lastVersion",
+    "reasons",
+)
+_TRACKED_MEMBERS = ("initial", "transitions")
 
 
 @dataclass(frozen=True)
@@ -56,6 +70,9 @@ class NoisyNote:
     #: Of an ungrouped histogram, whether each cell's noisy count stands clear of the noise
     #: (:func:`flux_stats.noise.noise_floor`, ADR 0019, amendment of 2026-11-25); ``None`` else.
     clear: Optional[Tuple[bool, ...]] = None
+    #: Of a ``nullCount/2`` (profile format 1-5-0), the count a cell must exceed to stand clear of
+    #: the noise, over its two cells; ``None`` else.
+    floor: Optional[Fraction] = None
 
     @property
     def sentence(self) -> str:
@@ -104,6 +121,9 @@ def point_estimates(
             for index, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
                 tokens = ("tables", str(expose), "columns", str(name), "statistics", str(index))
                 _estimate(statistic, tokens, notes)
+        history = table.get("history") if isinstance(table, dict) else None
+        if isinstance(history, dict):
+            _estimate_history(history, ("tables", str(expose), "history"), notes)
     # A relationship's noisy histogram of children per parent, grouped or not (profile format
     # 1-4-0), is read as a column's is.
     relationships = view.get("relationships")
@@ -114,25 +134,66 @@ def point_estimates(
     return view, notes
 
 
-def _estimate(
-    statistic: Any, tokens: Tuple[str, ...], notes: Dict[Tuple[str, ...], NoisyNote]
+def _estimate_history(
+    history: Dict[str, Any], base: Tuple[str, ...], notes: Dict[Tuple[str, ...], NoisyNote]
 ) -> None:
-    """Replace a noisy histogram's cells by their point estimate, in place, and note its noise."""
+    """Read each noisy member of a history, and of its tracked columns, with the noise floor."""
+    for key in _HISTORY_MEMBERS:
+        _estimate(history.get(key), base + (key,), notes, floored=True)
+    columns = history.get("columns")
+    for name, column in (columns.items() if isinstance(columns, dict) else ()):
+        for key in _TRACKED_MEMBERS:
+            if isinstance(column, dict):
+                _estimate(column.get(key), base + ("columns", str(name), key), notes, floored=True)
+
+
+def _estimate(
+    statistic: Any,
+    tokens: Tuple[str, ...],
+    notes: Dict[Tuple[str, ...], NoisyNote],
+    *,
+    floored: bool = False,
+) -> None:
+    """Replace a noisy histogram's cells by their point estimate, in place, and note its noise.
+
+    A *floored* statistic, a member of a history (profile format 1-5-0), keeps only the cells that
+    stand clear of the noise (:func:`flux_stats.noise.noise_floor` over all its cells, ADR 0019,
+    amendment of 2026-11-25): a cell inside it carries no weight, and a statistic with no cell
+    clear of it says nothing, so its groups are read as withheld.
+    """
     if not isinstance(statistic, dict) or "noise" not in statistic:
         return
     key = _COUNT_KEYS[statistic["definition"]]
     noise = statistic.pop("noise")
     records = None
     clear = None
+    cells = sum(len(group.get("noisyCounts", ())) for group in statistic["groups"])
+    floor = noise_floor(str(noise["mechanism"]), Fraction(noise["scale"]), max(cells, 1))
+    standing = False
     for group in statistic["groups"]:
         noisy = [Fraction(text) for text in group.pop("noisyCounts")]
         estimate = point_estimate(noisy)
-        group["k"] = estimate.records
-        group[key] = list(estimate.counts)
-        records = estimate.records if not grouped(statistic) else None
-        if not grouped(statistic) and statistic["definition"] == MARGINAL_HISTOGRAM.identifier:
-            floor = noise_floor(str(noise["mechanism"]), Fraction(noise["scale"]), len(noisy))
-            clear = tuple(value > floor for value in noisy)
+        counts = list(estimate.counts)
+        if floored:
+            counts = [
+                count if value > floor else 0 for count, value in zip(counts, noisy, strict=True)
+            ]
+            standing = standing or any(value > floor for value in noisy)
+        group["k"] = sum(counts) if floored else estimate.records
+        group[key] = counts
+        records = group["k"] if not grouped(statistic) else None
+        if not grouped(statistic) and (
+            statistic["definition"] == MARGINAL_HISTOGRAM.identifier
+            or statistic["definition"] == NULL_COUNT_2
+        ):
+            single = noise_floor(str(noise["mechanism"]), Fraction(noise["scale"]), len(noisy))
+            clear = tuple(value > single for value in noisy)
+    if floored and not standing:
+        for group in statistic["groups"]:
+            group.pop("k", None)
+            group.pop(key, None)
+            group["status"] = "C"
+        records = None
     variance = variance_of(str(noise["mechanism"]), Fraction(noise["scale"]))
     notes[tokens] = NoisyNote(
         tokens=tokens,
@@ -142,11 +203,16 @@ def _estimate(
         definition=str(statistic["definition"]),
         records=records,
         clear=clear,
+        floor=floor if statistic["definition"] == NULL_COUNT_2 else None,
     )
 
 
 def _has_noise(profile: Mapping[str, Any]) -> bool:
     tables = profile.get("tables")
+    for table in tables.values() if isinstance(tables, Mapping) else ():
+        history = table.get("history") if isinstance(table, Mapping) else None
+        if isinstance(history, Mapping) and _history_has_noise(history):
+            return True
     for entry in profile.get("relationships") or ():
         statistics = entry.get("statistics") if isinstance(entry, Mapping) else None
         if any(isinstance(item, Mapping) and "noise" in item for item in statistics or ()):
@@ -160,6 +226,24 @@ def _has_noise(profile: Mapping[str, Any]) -> bool:
             if any(isinstance(item, Mapping) and "noise" in item for item in statistics or ()):
                 return True
     return False
+
+
+def _history_has_noise(history: Mapping[str, Any]) -> bool:
+    """Whether a member of *history*, or of one of its tracked columns, carries noise."""
+    if any(
+        isinstance(history.get(key), Mapping) and "noise" in history[key]
+        for key in _HISTORY_MEMBERS
+    ):
+        return True
+    columns = history.get("columns")
+    return any(
+        isinstance(column, Mapping)
+        and any(
+            isinstance(column.get(key), Mapping) and "noise" in column[key]
+            for key in _TRACKED_MEMBERS
+        )
+        for column in (columns.values() if isinstance(columns, Mapping) else ())
+    )
 
 
 def cite_noisy(basis: Basis, notes: Mapping[Tuple[str, ...], NoisyNote]) -> Basis:
