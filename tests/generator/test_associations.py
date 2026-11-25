@@ -18,12 +18,15 @@ from __future__ import annotations
 import collections
 from fractions import Fraction
 from itertools import product
-from typing import List, Optional, Tuple
+from types import SimpleNamespace
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pytest
 
+from flux_engine.core import kernel2
 from flux_engine.core.errors import FluxError
+from flux_engine.core.seedtree import derive_root
 from flux_engine.generator import associations
 from flux_engine.generator.associations import (
     PairedSide,
@@ -218,8 +221,57 @@ def test_the_second_side_has_no_run_of_children() -> None:
 
 def test_the_distance_is_the_exact_total_variation_distance() -> None:
     shape = ChildShape("bins", ("0", "1", "3", "6"), ("0.1", "0.5", "0.4"))
-    # Classes [0], [1, 2], [3, 6]: shares 0.2, 0.4, 0.4 against 0.1, 0.5, 0.4.
+    # Classes [0], [1, 2], [3, 6]: shares 0.2, 0.4, 0.3 against 0.1, 0.5, 0.4, and the 9, which
+    # no class holds, a share of 0.1 of its own against nothing.
     degrees = [0, 0, 1, 2, 2, 2, 3, 6, 9, 4]
-    assert degree_distance(degrees, shape) == Fraction(1, 10)
-    assert degree_overlap(degrees, shape) == (90, 100)
+    assert degree_distance(degrees, shape) == Fraction(1, 5)
+    assert degree_overlap(degrees, shape) == (80, 100)
     assert degree_distance(degrees, None) is None and degree_distance([], shape) is None
+
+
+@pytest.mark.parametrize(
+    ("degrees", "shape", "distance"),
+    [
+        ([20] * 10, ChildShape("bins", ("61", "70", "80"), ("0.5", "0.5")), Fraction(1)),
+        ([5] * 4 + [50], ChildShape("levels", ("5",), ("1",)), Fraction(1, 5)),
+        ([2, 4], ChildShape("levels", ("2", "5"), ("0.5", "0.5")), Fraction(1, 2)),
+        ([0, 1], ChildShape("bins", ("1", "3"), ("1",)), Fraction(1, 2)),
+    ],
+)
+def test_a_count_no_class_holds_adds_its_whole_share_to_the_distance(
+    degrees: List[int], shape: ChildShape, distance: Fraction
+) -> None:
+    # Above the last class, a one-class shape, between two levels and below the first class.
+    assert degree_distance(degrees, shape) == distance
+
+
+def _neighbour_sets(pairing: Pairing) -> int:
+    held: Dict[int, set] = {}
+    for first, second in _pairs(pairing):
+        held.setdefault(first, set()).add(second)
+    return len({frozenset(found) for found in held.values()})
+
+
+def test_a_rebuilt_dense_table_keeps_many_neighbour_sets() -> None:
+    # 4,500 of the 6,000 pairs: the repair lays the whole table out again, and the keyed ties
+    # give parents of as many rows different second-side parents instead of a few blocks.
+    dense = pair_layout(KEYS, _side((200, 30)), 4500)
+    assert dense.rebuilt and len(set(_pairs(dense))) == 4500
+    assert _neighbour_sets(dense) >= 100
+    _check_degrees(dense)
+
+
+def test_a_rebuild_keeps_no_switch_or_placement_and_the_plan_says_so() -> None:
+    dense = pair_layout(KEYS, _side((200, 30)), 4500)
+    assert dense.report()["repair"] == {"switches": 0, "placed": 0, "rebuilt": True}
+    side = PairedSide(("a", "b"), 0, (None, None), (0, 0), (200, 30), True)
+    counted = SimpleNamespace(paired=side, child_rows=4500)
+    plan = SimpleNamespace(
+        relations=SimpleNamespace(drivers=(("a_id", SimpleNamespace(counted=counted)),)),
+        sim_id="s",
+        expose=SimpleNamespace(expose_id="link"),
+        seam_digest="d",
+    )
+    root = derive_root(bytes(32), 7, seed_tree_version=kernel2.SEED_TREE_VERSION)
+    (note,) = associations.association_notes([plan], root)
+    assert note.startswith("link: association a, b: ") and "laid out again" in note

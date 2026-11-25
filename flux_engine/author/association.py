@@ -30,17 +30,21 @@ from flux_engine.seam.keys import ExposeKeys, Relationship
 from flux_stats.definitions import MARGINAL_HISTOGRAM, MEAN
 
 __all__ = [
-    "DISTINCT_NOTE",
     "association_entry",
     "association_pair",
     "edge_rows",
 ]
 
-#: What a person is told of an association's ``distinct``.
-DISTINCT_NOTE = (
+#: What a person is told of an association's ``distinct``, when the rows fit in the pairs.
+_DISTINCT = (
     "A table of two foreign keys and no other column is taken to hold each pair once "
     "(distinct: true): no statistic of the profile says whether a pair repeats. Set distinct: "
     "false if the source repeats pairs."
+)
+#: ... and when they do not.
+_REPEATED = (
+    "The table's {rows} rows are more than the {pairs} pairs its {first} and {second} parents "
+    "make, so some pair repeats (distinct: false)."
 )
 
 #: The variance of a published total of children: a whole number, exact to its unit.
@@ -191,11 +195,23 @@ def edge_rows(
 
 
 def association_entry(
-    expose_id: str, pair: Tuple[Relationship, Relationship], counted: Sequence[Mapping[str, Any]]
-) -> Optional[Dict[str, Any]]:
-    """The ``associations`` entry of *expose_id*, when both its relationships are laid out by counts."""
+    expose_id: str,
+    pair: Tuple[Relationship, Relationship],
+    counted: Sequence[Mapping[str, Any]],
+    rows: Tuple[int, int, int],
+) -> Optional[Tuple[Dict[str, Any], str]]:
+    """The ``associations`` entry of *expose_id* and its note, when both its sides are laid out by counts.
+
+    *rows* are the table's rows and its two parents'. Rows above the pairs the parents make prove
+    that a pair repeats: the entry declares ``distinct: false``. At or below them, ``distinct:
+    true`` is the assumption a table of two keys and no other column most often holds.
+    """
     laid = {str(entry["relationship"]) for entry in counted if entry.get("emit") == expose_id}
     names: List[str] = [relationship.name for relationship in pair]
     if not all(name in laid for name in names):
         return None
-    return {"emit": expose_id, "relationships": names, "distinct": True}
+    edges, first, second = rows
+    if edges > first * second:
+        note = _REPEATED.format(rows=edges, pairs=first * second, first=first, second=second)
+        return {"emit": expose_id, "relationships": names, "distinct": False}, note
+    return {"emit": expose_id, "relationships": names, "distinct": True}, _DISTINCT

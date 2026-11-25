@@ -30,7 +30,7 @@ import pytest
 
 from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import KERNEL_V1, KERNEL_V2
-from flux_engine.generator import columns
+from flux_engine.generator import associations, columns
 from flux_engine.stages import _parallel as parallel
 from flux_engine.stages import pipeline
 from flux_engine.stages._module_checks import module_checks
@@ -334,3 +334,23 @@ def test_what_the_pairing_cannot_hold_is_refused_before_any_row(
     with pytest.raises(FluxError) as caught:
         pipeline.execute(_bundle(tmp_path, "refused", **change), kernel=KERNEL_V2)
     assert caught.value.code.code == "FLX-3403" and needle in str(caught.value)
+
+
+def test_a_worker_reads_the_pairing_the_run_worked_out(
+    outcome: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pool hands every distinct pairing to its workers, which then work none out again.
+    plans = [emit.plan for emit in outcome.emits if emit.plan is not None]
+    handed = associations.pairings_of(plans, outcome.root)
+    assert len(handed) == 1
+    monkeypatch.setattr(associations, "_PAIRINGS", {})
+    associations.seed_pairings(handed)
+
+    def refused(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("a worker worked the pairing out again")
+
+    monkeypatch.setattr(associations, "pair_layout", refused)
+    (pairing,) = handed.values()
+    membership = next(plan for plan in plans if plan.expose.expose_id == "membership")
+    found = associations.plan_pairing(membership, outcome.root)
+    assert found is not None and found[1] is pairing

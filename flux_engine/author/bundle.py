@@ -49,7 +49,6 @@ from typing import (
 import yaml
 
 from flux_engine.author.association import (
-    DISTINCT_NOTE,
     association_entry,
     association_pair,
     edge_rows,
@@ -3293,16 +3292,20 @@ def _mark_associations(
     exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys], spread: "_Spreads"
 ) -> None:
     """Give each association table its ``associations`` entry, once both sides are laid out by counts."""
+    rows_of = {expose.expose_id: expose.rows for expose in exposes}
     for expose in exposes:
         if keys is None or expose.skipped is not None or expose.reference:
             continue
         pair = association_pair(
             keys.expose(expose.expose_id), [plan.name for plan in expose.columns]
         )
-        if pair is not None:
-            expose.association = association_entry(expose.expose_id, pair, spread.entries)
-            if expose.association is not None:
-                spread.notes.append((expose.expose_id, DISTINCT_NOTE))
+        if pair is None or not all(item.target in rows_of for item in pair):
+            continue
+        rows = (expose.rows, rows_of[pair[0].target], rows_of[pair[1].target])
+        found = association_entry(expose.expose_id, pair, spread.entries, rows)
+        if found is not None:
+            expose.association, note = found
+            spread.notes.append((expose.expose_id, note))
 
 
 def _cliques_of(table: Any) -> Tuple[CliqueEntry, ...]:

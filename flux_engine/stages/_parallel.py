@@ -57,6 +57,7 @@ from flux_engine.core import kernel2
 from flux_engine.core.errors import FluxError
 from flux_engine.core.rng import kernel_context
 from flux_engine.core.seedtree import SeedTreeRoot
+from flux_engine.generator.associations import pairings_of, seed_pairings
 from flux_engine.generator.dates import DatesTally
 from flux_engine.generator.rows import GeneratorPlan, generate_row_slice, written_rows
 from flux_engine.generator.rules import new_tally
@@ -226,11 +227,16 @@ _WORKER: Dict[str, Any] = {}
 _EmitJob = Tuple[GeneratorPlan, CompiledExpose]
 
 
-def _start_worker(emits: Mapping[str, _EmitJob], root: SeedTreeRoot) -> None:
+def _start_worker(
+    emits: Mapping[str, _EmitJob], root: SeedTreeRoot, pairings: Mapping[Any, Any]
+) -> None:
     _exit_with_parent()
     # The pipeline evaluates a run in the kernel's decimal context; a new
     # process starts in Python's default one, so install the kernel's here.
     setcontext(kernel_context())
+    # An association that holds each pair once is worked out once, by the process that starts
+    # the pool, and every worker holds it as that process does (ADR 0039).
+    seed_pairings(pairings)
     _WORKER.update(emits=emits, root=root)
 
 
@@ -280,6 +286,11 @@ def _run_slice(task: Tuple[str, int, int, bool]) -> _SliceOutcome:
     except FluxError as error:
         return _SliceOutcome(framing_refusal=(error.code.code, error.detail))
     return _SliceOutcome(rows=rows if keep_rows else (), lines=tuple(lines), dates=tally)
+
+
+def _pairings(emits: Mapping[str, _EmitJob], root: SeedTreeRoot) -> Dict[Any, Any]:
+    """The distinct association pairings the emits read, worked out in this process (ADR 0039)."""
+    return pairings_of([plan for plan, _ in emits.values()], root)
 
 
 def _context() -> Any:
@@ -347,7 +358,7 @@ class FramedPool:
                 max_workers=workers,
                 mp_context=_context(),
                 initializer=_start_worker,
-                initargs=(self._emits, root),
+                initargs=(self._emits, root, _pairings(self._emits, root)),
             )
 
     def submit(

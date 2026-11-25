@@ -30,14 +30,17 @@ every process that needs a row's parents finds the same ones.
    the whole layout, and a row's parents are read from its index alone, in any slice.
 5. **Repair** (``distinct`` only). A row whose pair an earlier row already holds is repaired by a
    degree-preserving switch: with a partner row ``s`` holding ``(a', b')``, ``(a, b), (a', b')``
-   becomes ``(a, b'), (a', b)`` when neither new pair is held. Partners are
-   ``permute/2(K', E, r * 64 + t)`` for the attempts ``t < 64``, ``K'`` the key of the path ending
-   ``"switches"``. The rows left go through a Havel-Hakimi pass over their own stubs (each first-side
-   parent, most rows first, takes the second-side stubs with the most left that it does not already
-   pair with); should that pass find no stub for a parent, the whole table is laid out again by
-   Havel-Hakimi, which the Gale-Ryser condition guarantees. So the repair always ends, with no
-   pair repeated. It reads every row: it is a global pass, made once per process and not per
-   slice, so a slice's rows are the same in any process, but the pass costs ``O(E)`` memory.
+   becomes ``(a, b'), (a', b)`` when neither new pair is held. The switches run in rounds
+   ``t < 64``, each over the rows still waiting in row order, with the partner
+   ``permute/2(K', E, (64 r + t) mod E)``, ``K'`` the key of the path ending ``"switches"``. The rows
+   left go through a Havel-Hakimi pass over their own stubs (each first-side parent, most rows
+   first, takes the second-side stubs with the most left that it does not already pair with);
+   should that pass find no stub for a parent, the whole table is laid out again by Havel-Hakimi,
+   which the Gale-Ryser condition guarantees, with keyed ties so that no block pattern forms. So
+   the repair always ends, with no pair repeated. It reads every row: it is a global pass, made
+   once by the process that starts a worker pool and handed to the workers
+   (:func:`pairings_of`, :func:`seed_pairings`), so a slice's rows are the same in any process, but
+   the pass costs ``O(E)`` memory.
 
 The realised total variation distance between each side's parents counted into its shape's
 classes and the shape's weights is recorded in the plan (:func:`degree_distance`), and ``verify``
@@ -52,6 +55,7 @@ bipartite configuration model meet the degrees only in expectation.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from fractions import Fraction
 from functools import cached_property
@@ -62,7 +66,6 @@ import numpy as np
 
 from flux_engine.core import kernel2
 from flux_engine.core.errors import FluxError
-from flux_engine.core.permute import permute2
 from flux_engine.core.seedtree import SeedTreeRoot
 from flux_engine.generator.counts import (
     CountedLayout,
@@ -88,17 +91,22 @@ __all__ = [
     "degree_distance",
     "degree_overlap",
     "gale_ryser_gap",
+    "association_notes",
+    "association_report",
     "pair_keys",
     "pair_layout",
     "paired_sides",
     "pairing_for",
+    "pairings_of",
+    "plan_pairing",
     "realisable",
+    "seed_pairings",
 ]
 
 #: The largest total variation distance ``verify`` allows a side's rows per parent from its shape
 #: when its ``counts`` entry declares no tolerance: the children-per-parent check's own default.
 DEGREE_TOLERANCE = Fraction(1, 10)
-#: The partner rows a repeated pair's switch tries before the Havel-Hakimi pass takes the row.
+#: The rounds of switches a repeated pair's row takes part in before the Havel-Hakimi pass takes it.
 SWITCH_ATTEMPTS = 64
 #: Pair codes ``a * |B| + b`` are int64: a table whose pairs do not fit is refused.
 _MOST_PAIRS = 1 << 62
@@ -354,16 +362,19 @@ def pair_layout(keys: PairKeys, paired: PairedSide, edges: int, where: str = "")
     owners = np.repeat(np.arange(first.shape[0], dtype=np.int64), first)
     repair = _Repair(owners, plain.second_of(rows), int(second.shape[0]))
     repair.switch(keys.switches)
-    rebuilt = not _place(repair)
-    held = _rebuilt(first, second, keys.stubs) if rebuilt else repair.second
+    if _place(repair):
+        held, switched, placed, rebuilt = repair.second, repair.switched, repair.placed, False
+    else:
+        # The whole table is laid out again: no switch or placement of the repair is kept.
+        held, switched, placed, rebuilt = _rebuilt(first, second, keys.stubs), 0, 0, True
     return Pairing(
         edges,
         (first, second),
         keys.stubs,
         second=held,
         moved=moved,
-        switches=repair.switched,
-        placed=repair.placed,
+        switches=switched,
+        placed=placed,
         rebuilt=rebuilt,
         distances=distances,
     )
@@ -375,12 +386,12 @@ def pair_layout(keys: PairKeys, paired: PairedSide, edges: int, where: str = "")
 class _Held:
     """The pairs a distinct association holds, as codes ``a * width + b``.
 
-    A sorted array of the codes at the start, with two small sets of the codes added and taken off
+    A sorted list of the codes at the start, with two small sets of the codes added and taken off
     since, so a membership test is one bisection and no set holds every row.
     """
 
     def __init__(self, codes: "np.ndarray") -> None:
-        self.start = np.unique(codes)
+        self.start: List[int] = np.unique(codes).tolist()
         self.added: Set[int] = set()
         self.removed: Set[int] = set()
 
@@ -389,8 +400,8 @@ class _Held:
             return True
         if code in self.removed:
             return False
-        at = int(np.searchsorted(self.start, code))
-        return at < self.start.shape[0] and int(self.start[at]) == code
+        at = bisect_left(self.start, code)
+        return at < len(self.start) and self.start[at] == code
 
     def take(self, code: int) -> None:
         if code in self.added:
@@ -444,20 +455,29 @@ class _Repair:
         return True
 
     def switch(self, key: bytes) -> None:
-        """Try :data:`SWITCH_ATTEMPTS` partners keyed by *key* for each repeated row, in row order."""
+        """Up to :data:`SWITCH_ATTEMPTS` rounds of keyed switches over the repeated rows.
+
+        Round ``t`` takes every row still waiting, in row order, and tries the partner
+        ``permute/2(K, E, (64 r + t) mod E)``; a row that switches stops waiting. The partners of a
+        round are worked out in one array call, and the switches are made one at a time.
+        """
         edges = int(self.first.shape[0])
         waiting = set(self.pending)
-        left: List[int] = []
-        for row in self.pending:
-            for attempt in range(SWITCH_ATTEMPTS):
-                ordinal = (row * SWITCH_ATTEMPTS + attempt) % edges
-                if self._partner(row, permute2(key, edges, ordinal), waiting):
+        for attempt in range(SWITCH_ATTEMPTS):
+            if not waiting:
+                break
+            rows = sorted(waiting)
+            for row, partner in zip(rows, _partners(key, edges, rows, attempt), strict=True):
+                if self._partner(row, partner, waiting):
                     waiting.discard(row)
                     self.switched += 1
-                    break
-            else:
-                left.append(row)
-        self.pending = left
+        self.pending = sorted(waiting)
+
+
+def _partners(key: bytes, edges: int, rows: Sequence[int], attempt: int) -> List[int]:
+    """The partner of each of *rows* at *attempt*: ``permute/2(K, E, (64 r + attempt) mod E)``."""
+    held = np.asarray(rows, dtype=np.int64) * SWITCH_ATTEMPTS + attempt
+    return kernel2.permute2_array(key, edges, held % edges)
 
 
 def _place(repair: _Repair) -> bool:
@@ -491,22 +511,27 @@ def _rebuilt(first: "np.ndarray", second: "np.ndarray", key: bytes) -> "np.ndarr
     """Every row's second-side parent by Havel-Hakimi over the whole table (Gale-Ryser holds).
 
     First-side parents in decreasing order of rows (the lower row on a tie) each take the
-    second-side parents with the most stubs left (the lower row on a tie); a parent's rows hold its
-    picks in the order of the keyed permutation of the second side.
+    second-side parents with the most stubs left. A tie between those goes by a keyed order of
+    the parent's own: second-side parent ``b`` ranks ``(sigma(b) + tau(a)) mod |B|``, with
+    ``sigma(b) = permute/2(K, |B|, b)`` and ``tau(a) = permute/2(K, |A|, a)``, so parents with as
+    many rows take different second-side parents and no block pattern forms. A parent's rows hold
+    its picks in that order too.
     """
-    width = int(second.shape[0])
+    width, parents = int(second.shape[0]), int(first.shape[0])
     left = second.astype(np.int64).copy()
     offsets = np.cumsum(first) - first
     held = np.empty(int(first.sum()), dtype=np.int64)
-    order = sorted(range(first.shape[0]), key=lambda parent: (-int(first[parent]), parent))
-    rank = np.asarray(
+    order = sorted(range(parents), key=lambda parent: (-int(first[parent]), parent))
+    sigma = np.asarray(
         kernel2.permute2_array(key, width, np.arange(width, dtype=np.int64)), dtype=np.int64
     )
+    tau = kernel2.permute2_array(key, parents, np.arange(parents, dtype=np.int64))
     for parent in order:
         need = int(first[parent])
         if need == 0:
             break
-        picked = np.lexsort((np.arange(width), -left))[:need]
+        rank = (sigma + tau[parent]) % width
+        picked = np.lexsort((rank, -left))[:need]
         if int(left[picked].min()) <= 0:
             raise _refuse("an association that met the Gale-Ryser check found no layout")
         left[picked] -= 1
@@ -526,17 +551,20 @@ def degree_overlap(
     ``(satisfied, total)`` whose ratio is ``1 - d``, ``d`` the total variation distance between the
     share of parents in each class and the class's weight: with the weights as whole numbers
     ``w_k`` summing to ``W`` and ``n_k`` of the ``n`` parents in class ``k``, ``total = n * W``
-    and ``satisfied = sum_k min(n_k * W, w_k * n)``. A parent's count goes to the class whose low
-    edge is the greatest at or below it (the first class when none is), as ``verify`` bins children
-    per parent. ``None`` with no shape or no parent.
+    and ``satisfied = sum_k min(n_k * W, w_k * n)``. A parent's count goes to the class that holds
+    it; a count no class holds (below the first, above the last, or between two levels) is mass
+    of its own, whose weight is 0, so it adds its whole share to the distance. ``None`` with no
+    shape or no parent.
     """
     held = np.asarray(degrees, dtype=np.int64)
     if shape is None or held.shape[0] == 0:
         return None
     classes = classes_of(shape.as_member())
     lows = np.array([cls.low for cls in classes], dtype=np.int64)
-    index = np.clip(np.searchsorted(lows, held, side="right") - 1, 0, len(classes) - 1)
-    run = np.bincount(index, minlength=len(classes)).tolist()
+    highs = np.array([cls.high for cls in classes], dtype=np.int64)
+    index = np.searchsorted(lows, held, side="right") - 1
+    inside = (index >= 0) & (held <= highs[np.clip(index, 0, len(classes) - 1)])
+    run = np.bincount(index[inside], minlength=len(classes)).tolist()
     shares = [Fraction(cls.weight) for cls in classes]
     scale = lcm(*(share.denominator for share in shares))
     weights = [int(share * scale) for share in shares]
@@ -626,20 +654,14 @@ def pair_keys(root: SeedTreeRoot, sim_id: str, expose_id: str, pair: Tuple[str, 
     )
 
 
-def pairing_for(
+def _held_key(
     root: SeedTreeRoot, address: Tuple[str, str, str], edges: int, paired: PairedSide
-) -> Pairing:
-    """The pairing of an association of *edges* rows, worked out once per process.
-
-    *address* is the emit's Simulation, exposeId and seam digest.
-    """
-    sim_id, expose_id, seam_digest = address
-    held = (
+) -> Tuple[Any, ...]:
+    """What a pairing is held under: the root, the emit's address and its whole declaration."""
+    return (
         root.digest,
         root.seed_tree_version,
-        sim_id,
-        expose_id,
-        seam_digest,
+        *address,
         edges,
         paired.relationships,
         paired.shapes,
@@ -647,6 +669,17 @@ def pairing_for(
         paired.parents,
         paired.distinct,
     )
+
+
+def pairing_for(
+    root: SeedTreeRoot, address: Tuple[str, str, str], edges: int, paired: PairedSide
+) -> Pairing:
+    """The pairing of an association of *edges* rows, worked out once per process.
+
+    *address* is the emit's Simulation, exposeId and seam digest.
+    """
+    sim_id, expose_id, _ = address
+    held = _held_key(root, address, edges, paired)
     found = _PAIRINGS.get(held)
     if found is None:
         found = pair_layout(
@@ -659,3 +692,72 @@ def pairing_for(
             _PAIRINGS.clear()
         _PAIRINGS[held] = found
     return found
+
+
+def plan_pairing(plan: Any, root: SeedTreeRoot) -> Optional[Tuple[PairedSide, Pairing]]:
+    """The association of *plan*'s emit and its pairing under *root*, or ``None`` for an emit with none."""
+    relations = getattr(plan, "relations", None)
+    for _, driver in relations.drivers if relations is not None else ():
+        counted = getattr(driver, "counted", None)
+        if counted is not None and counted.paired is not None:
+            address = (plan.sim_id, plan.expose.expose_id, plan.seam_digest)
+            return counted.paired, pairing_for(root, address, counted.child_rows, counted.paired)
+    return None
+
+
+def association_report(plan: Any, root: SeedTreeRoot) -> Optional[Dict[str, Any]]:
+    """The plan's ``association`` member for *plan*'s emit (ADR 0039), or ``None``."""
+    found = plan_pairing(plan, root)
+    if found is None:
+        return None
+    paired, pairing = found
+    return {
+        "relationships": list(paired.relationships),
+        "distinct": paired.distinct,
+        **pairing.report(),
+    }
+
+
+def association_notes(plans: Sequence[Any], root: SeedTreeRoot) -> Tuple[str, ...]:
+    """The plan's notes on each association whose layout moved rows or was laid out again."""
+    notes: List[str] = []
+    for plan in plans:
+        found = plan_pairing(plan, root)
+        if found is None:
+            continue
+        paired, pairing = found
+        where = f"{plan.expose.expose_id}: association {', '.join(paired.relationships)}"
+        caps, shifted = pairing.moved[0] + pairing.moved[1], pairing.moved[2]
+        if caps or shifted:
+            notes.append(
+                f"{where}: {caps} rows moved under the caps of the other side's parents and "
+                f"{shifted} by the Gale-Ryser check, so the rows per parent differ from the shapes"
+            )
+        if pairing.rebuilt:
+            notes.append(
+                f"{where}: the switches left repeated pairs no stub could take, so the whole table "
+                "was laid out again by Havel-Hakimi with keyed ties; it is dense, and its pairs "
+                "are less random than a sparser table's"
+            )
+    return tuple(notes)
+
+
+def pairings_of(plans: Sequence[Any], root: SeedTreeRoot) -> Dict[Tuple[Any, ...], Pairing]:
+    """The pairing of every distinct association *plans* read, to hand to worker processes.
+
+    A distinct pairing reads every row (step 5), so it is worked out once, here, and a worker
+    holds it as this process does (:func:`seed_pairings`) instead of working it out again. One
+    that allows repeats reads a row's index alone and is not handed over.
+    """
+    found: Dict[Tuple[Any, ...], Pairing] = {}
+    for plan in plans:
+        held = plan_pairing(plan, root)
+        if held is not None and held[0].distinct:
+            address = (plan.sim_id, plan.expose.expose_id, plan.seam_digest)
+            found[_held_key(root, address, held[1].edges, held[0])] = held[1]
+    return found
+
+
+def seed_pairings(pairings: Mapping[Tuple[Any, ...], Pairing]) -> None:
+    """Hold *pairings* in this process, as a worker does with the ones its run worked out."""
+    _PAIRINGS.update(pairings)

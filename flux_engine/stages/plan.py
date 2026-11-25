@@ -72,7 +72,7 @@ from flux_engine.evidence.register import (
     render_register,
     render_register_line,
 )
-from flux_engine.generator.associations import pairing_for
+from flux_engine.generator.associations import association_report
 from flux_engine.generator.relations import ForeignKey, history_pick_of
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.generators import environment as _environment
@@ -198,25 +198,8 @@ def _association_entry(
     total variation distance from its ``counts`` shape (``null`` for a side with none). Any other
     emit has no key, so its plan keeps its bytes.
     """
-    plan = outcome.plan
-    relations = None if plan is None else plan.relations
-    if plan is None or relations is None:
-        return {}
-    for _, driver in relations.drivers:
-        counted = driver.counted if isinstance(driver, ForeignKey) else None
-        if counted is None or counted.paired is None:
-            continue
-        paired = counted.paired
-        address = (plan.sim_id, plan.expose.expose_id, plan.seam_digest)
-        pairing = pairing_for(root, address, counted.child_rows, paired)
-        return {
-            "association": {
-                "relationships": list(paired.relationships),
-                "distinct": paired.distinct,
-                **pairing.report(),
-            }
-        }
-    return {}
+    report = None if outcome.plan is None else association_report(outcome.plan, root)
+    return {} if report is None else {"association": report}
 
 
 def _derived_rows_entry(

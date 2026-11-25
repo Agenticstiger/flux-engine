@@ -122,12 +122,12 @@ def _repeated(owners: List[int], second: List[int]) -> Tuple[List[int], Set[Tupl
 def _switch(
     owners: List[int], second: List[int], waiting: List[int], held: Set[Tuple[int, int]]
 ) -> Tuple[List[int], int]:
-    """The keyed switches: the rows they leave, and how many they made."""
+    """The keyed switches, in rounds: the rows they leave, and how many they made."""
     switches, edges = _key("switches"), len(owners)
     _, repeated = _repeated(owners, second)
-    pending, switched, left = set(waiting), 0, []
-    for row in waiting:
-        for attempt in range(ATTEMPTS):
+    pending, switched = set(waiting), 0
+    for attempt in range(ATTEMPTS):
+        for row in sorted(pending):
             other = k2.permute(switches, edges, (row * ATTEMPTS + attempt) % edges)
             a, b, a2, b2 = owners[row], second[row], owners[other], second[other]
             blocked = other in pending or a == a2 or b == b2 or (a2, b2) in repeated
@@ -138,10 +138,7 @@ def _switch(
             second[row], second[other] = b2, b
             pending.discard(row)
             switched += 1
-            break
-        else:
-            left.append(row)
-    return left, switched
+    return sorted(pending), switched
 
 
 def _place(
@@ -182,11 +179,13 @@ def _rebuilt(first: Sequence[int], second: Sequence[int]) -> List[int]:
     stubs = _key("stubs")
     width = len(second)
     left = list(second)
-    rank = [k2.permute(stubs, width, b) for b in range(width)]
+    sigma = [k2.permute(stubs, width, b) for b in range(width)]
+    tau = [k2.permute(stubs, len(first), a) for a in range(len(first))]
     offsets = [sum(first[:p]) for p in range(len(first))]
     held = [0] * sum(first)
     for parent in sorted(range(len(first)), key=lambda p: (-first[p], p)):
-        picked = sorted(range(width), key=lambda b: (-left[b], b))[: first[parent]]
+        rank = [(sigma[b] + tau[parent]) % width for b in range(width)]
+        picked = sorted(range(width), key=lambda b: (-left[b], rank[b]))[: first[parent]]
         for b in picked:
             left[b] -= 1
         for offset, b in enumerate(sorted(picked, key=lambda b: rank[b])):
@@ -226,7 +225,7 @@ def _reference(
     if distinct and edges:
         second, switched, placed, rebuilt = _repair(owners, second)
         if rebuilt:
-            second = _rebuilt(degrees[0], degrees[1])
+            second, switched, placed = _rebuilt(degrees[0], degrees[1]), 0, 0
     return {
         "stubsKey": stubs.hex(),
         "switchesKey": _key("switches").hex(),

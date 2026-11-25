@@ -870,20 +870,28 @@ two parents' rows.
    `s = permute/2(K, E, r)`, `K` the key of the path `("sim", sim_id, "gen", exposeId, "associate", a, b, "stubs")`:
    `sha256("flux-seed/2" NUL root NUL key_label(path))`, as section 8.1 derives a count key.
 5. **Repair** (`distinct` only). A row is *repeated* when an earlier row holds its pair; the pairs held so at the start
-   are the *repeated pairs*. For each repeated row `r` in row order, for `t = 0 .. 63`, the partner is
-   `s = permute/2(K', E, (64 r + t) mod E)` with `K'` the key of the path ending `"switches"`; with `(a, b)` and
-   `(a', b')` the two rows' pairs, the switch is made when `s` is not a repeated row still waiting, `a != a'`,
-   `b != b'`, `(a', b')` is no repeated pair, and neither `(a, b')` nor `(a', b)` is held: the rows become `(a, b')` and
-   `(a', b)`, and `r` stops waiting. The rows still waiting are then placed: their second-side parents form a
-   multiset of stubs; their first-side parents, most waiting rows first (the lower row on a tie), each take, for their
-   rows in row order, the parents of the stubs left that they do not pair with, most stubs first (the lower row on a
-   tie). When a parent finds fewer such stubs than rows, every row's second-side parent is laid out again: first-side
-   parents in decreasing order of `d_a` (the lower row on a tie) each take the `d_a[p]` second-side parents with the
-   most stubs left (the lower row on a tie), held by its rows in ascending order of `permute/2(K, P_b, q)`.
+   are the *repeated pairs*. The switches run in rounds `t = 0 .. 63`: round `t` takes every repeated row `r` still
+   waiting, in row order, and its partner `s = permute/2(K', E, (64 r + t) mod E)` with `K'` the key of the path
+   ending `"switches"`. With `(a, b)` and `(a', b')` the two rows' pairs, the switch is made when `s` is not a
+   repeated row still waiting, `a != a'`, `b != b'`, `(a', b')` is no repeated pair, and neither `(a, b')` nor
+   `(a', b)` is held: the rows become `(a, b')` and `(a', b)`, and `r` stops waiting. The rows still waiting are then
+   placed: their second-side parents form a multiset of stubs; their first-side parents, most waiting rows first (the
+   lower row on a tie), each take, for their rows in row order, the parents of the stubs left that they do not pair
+   with, most stubs first (the lower row on a tie). When a parent finds fewer such stubs than rows, every row's
+   second-side parent is laid out again and no switch or placement is kept: first-side parents in decreasing order of
+   `d_a` (the lower row on a tie) each take the `d_a[p]` second-side parents with the most stubs left, a tie going to
+   the lower rank `(sigma(q) + tau(p)) mod P_b` with `sigma(q) = permute/2(K, P_b, q)` and
+   `tau(p) = permute/2(K, P_a, p)`, held by its rows in ascending order of that rank. The keyed ties give parents of
+   as many rows different second-side parents, so a dense table holds no block pattern.
 
 With `distinct: false` steps 2, 3 and 5 are skipped and a row's parents are a function of its index alone. The repair
-reads every row; each process that writes the emit works it out once, so `--jobs`, chunking and `--shard` keep the
-bytes. The `associate` path is a key only, with no draw.
+reads every row: the process that starts a run's worker pool works it out once and hands it to every worker, and a
+process that writes the emit without a pool works it out itself, so `--jobs`, chunking and `--shard` keep the bytes.
+The `associate` path is a key only, with no draw.
+
+**The distance.** A side's distance from its shape is the total variation distance between its parents counted into
+the shape's classes and the classes' weights. A count that no class holds (below the first, above the last, between
+two levels) is a mass of its own whose weight is 0, so it adds its whole share to the distance.
 
 **Section 12.** The `associate` path is additive: the literal `associate` stands after `exposeId` where no other shape
 has it, only a bundle that declares `associations` reads it, nothing that exists moves, and

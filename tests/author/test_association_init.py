@@ -26,6 +26,8 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from flux_engine.author.association import association_pair
+from flux_engine.seam.keys import ExposeKeys, Relationship
 from flux_engine.stages.run import run
 from tests.bundles import init_from_texts
 
@@ -101,12 +103,12 @@ def _relationship(parent: str, column: str, statistics: List[Dict[str, Any]]) ->
     }
 
 
-def _profile(*, means: bool = True) -> Dict[str, Any]:
+def _profile(*, means: bool = True, total: int = ROWS) -> Dict[str, Any]:
     member = [_histogram(MEMBER_BINS, MEMBER_PARENTS, MEMBERS)]
     club = [_histogram(CLUB_BINS, CLUB_PARENTS, CLUBS)]
     if means:
-        member.append(_mean(ROWS, MEMBERS))
-        club.append(_mean(ROWS, CLUBS))
+        member.append(_mean(total, MEMBERS))
+        club.append(_mean(total, CLUBS))
     count = {"domain": "number", "metrics": {"count": _metric("count/1", ROWS)}}
     return {
         "_producer": "https://example.invalid/profiler",
@@ -206,3 +208,78 @@ def test_with_no_row_count_two_histograms_meet_at_their_inverse_variance_mean(
     rows = _rows(tmp_path, _profile(means=False))
     assert rows == int(mean + Fraction(1, 2))
     assert min(s for s, _ in sides) <= rows <= max(s for s, _ in sides)
+
+
+def _run(tmp_path: Path) -> Any:
+    state = tmp_path / "state"
+    outcome = run(tmp_path / "bundle", state_dir=state, profile=tmp_path / NAMES[1])
+    assert outcome.success, outcome.stderr
+    run_id = outcome.artifacts["plan"]["run_id"]
+    text = (state / "runs" / run_id / "emits" / "membership.ndjson").read_text(encoding="utf-8")
+    return [tuple(json.loads(line)) for line in text.splitlines() if line]
+
+
+def test_published_rows_above_the_pairs_say_that_pairs_repeat(tmp_path: Path) -> None:
+    # 20,000 rows over 600 members and 30 clubs, which make 18,000 pairs: some pair repeats.
+    profile = _profile(total=20000)
+    profile["tables"]["membership"]["rowCount"] = 20000
+    result = init_from_texts(tmp_path, CONTRACT, profile, NAMES)
+    assert result.exit_code == 0, result.stderr
+    namespace = yaml.safe_load(
+        (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    )["extensions"][NAMESPACE]
+    assert namespace["emits"]["membership"]["rows"] == 20000
+    assert namespace["associations"][0]["distinct"] is False
+    assert "more than the 18000 pairs" in result.stdout
+    assert len(_run(tmp_path)) == 20000
+
+
+def test_published_rows_at_the_pairs_keep_each_pair_once(tmp_path: Path) -> None:
+    profile = _profile(total=MEMBERS * CLUBS)
+    profile["tables"]["membership"]["rowCount"] = MEMBERS * CLUBS
+    namespace = _init(tmp_path, profile)
+    assert namespace["associations"][0]["distinct"] is True
+    pairs = _run(tmp_path)
+    assert len(pairs) == len(set(pairs)) == MEMBERS * CLUBS
+
+
+def test_a_published_row_count_wins_over_the_totals(tmp_path: Path) -> None:
+    profile = _profile()  # the totals say 1,800
+    profile["tables"]["membership"]["rowCount"] = 1700
+    assert _init(tmp_path, profile)["emits"]["membership"]["rows"] == 1700
+
+
+def test_derived_rows_are_kept_within_the_pairs(tmp_path: Path) -> None:
+    # Both totals say 20,000, more than the 18,000 pairs, and no rowCount says otherwise.
+    namespace = _init(tmp_path, _rowless(_profile(total=20000)))
+    assert namespace["emits"]["membership"]["rows"] == MEMBERS * CLUBS
+    assert namespace["associations"][0]["distinct"] is True
+
+
+def _rowless(profile: Dict[str, Any]) -> Dict[str, Any]:
+    del profile["tables"]["membership"]["rowCount"]
+    return profile
+
+
+def _keys(*columns: str) -> ExposeKeys:
+    relationships = tuple(
+        Relationship(name, "link", name, (column,), (column,), "many_to_one", "left")
+        for name, column in zip(("a", "b"), columns, strict=False)
+    )
+    return ExposeKeys("link", relationships=relationships)
+
+
+@pytest.mark.parametrize(
+    ("keys", "columns", "found"),
+    [
+        (_keys("x", "y"), ["x", "y"], True),
+        (_keys("x", "y"), ["x", "y", "note"], False),  # a column of its own: not an association
+        (_keys("x", "y"), ["x"], False),
+        (_keys("x", "x"), ["x"], False),  # both keys in one column
+        (_keys("x"), ["x"], False),
+    ],
+)
+def test_an_association_is_two_keys_and_every_column(
+    keys: ExposeKeys, columns: List[str], found: bool
+) -> None:
+    assert (association_pair(keys, columns) is not None) is found

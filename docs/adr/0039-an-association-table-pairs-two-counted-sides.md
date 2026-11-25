@@ -75,19 +75,24 @@ The textbook bipartite configuration model, on exact integers (KERNEL-SPEC-2 sec
    stub `permute/2(K, E, r)`, whose parent is found by bisection, with `K` the key of
    `("sim", sim_id, "gen", exposeId, "associate", a, b, "stubs")`.
 5. **Repair** (`distinct`). A row whose pair an earlier row holds is switched with a keyed partner
-   `permute/2(K', E, r * 64 + t)`, `t < 64`, when `(a, b), (a', b')` can become `(a, b'), (a', b)` with neither new
-   pair held, which keeps both sides' degrees. The rows left go through a Havel-Hakimi pass over their own stubs; a
-   first-side parent that finds too few stubs it does not already pair with makes the whole table laid out again by
-   Havel-Hakimi, which the Gale-Ryser condition guarantees. So the repair always ends, with no pair repeated.
+   `permute/2(K', E, (64 r + t) mod E)` in round `t < 64` (each round takes the rows still waiting, in row order),
+   when `(a, b), (a', b')` can become `(a, b'), (a', b)` with neither new pair held, which keeps both sides'
+   degrees. The rows left go through a Havel-Hakimi pass over their own stubs; a first-side parent that finds too few
+   stubs it does not already pair with makes the whole table laid out again by Havel-Hakimi, which the Gale-Ryser
+   condition guarantees. So the repair always ends, with no pair repeated. That layout breaks its ties by a keyed
+   order of each first-side parent's own (KERNEL-SPEC-2 section 8.7), so a dense table holds many neighbour sets and
+   no block pattern; the plan notes when it was taken.
 
 With repeats allowed, steps 2, 3 and 5 are not taken, and a row's parents are a function of its index alone.
 
 ### 3. What the repair costs
 
-The repair needs a global pass: it reads every row's pair. Each process that writes rows of the emit works it out
-once, from the same keys, so a slice's rows are the same in any process and `--jobs` and `--shard` change no byte,
-but the pass is not slice-independent and holds `O(E)` integers in memory. A table that allows repeats has no such
-pass.
+The repair needs a global pass: it reads every row's pair. The process that starts a run's worker pool works it out
+once and hands it to every worker, and a process without a pool works it out itself, from the same keys, so a slice's
+rows are the same in any process and `--jobs` and `--shard` change no byte. The pass is not slice-independent and
+holds `O(E)` integers in memory. Each round of switches draws its partners in one array call, and the membership of a
+pair is one bisection into the sorted pairs: 400,000 rows at a density of 0.8 take about 13 s and 3,000,000 rows at
+0.5 about 18 s on one core. A table that allows repeats has no such pass.
 
 ### 4. What the plan and verify say
 
@@ -96,13 +101,16 @@ steps 2 and 3, what the repair did (`switches`, `placed`, `rebuilt`) and each si
 from its shape (`null` for a side with none). `fluxsim verify` adds a line `association:<a>,<b>.pairs` (the share of
 rows whose pair occurs once, as a bridge's line) and, for each side with a shape, `association:<a>,<b>.rows:<side>`,
 whose share is `1 - d` for that distance and which is met when `d` is at most the side's `counts` tolerance (`0.10`
-when it declares none). The children-per-parent rows of the scorecard score each side against the profile as before.
+when it declares none). A count no class of the shape holds is a mass of its own, so it adds its whole share to `d`.
+`fluxsim plan` prints a note when the caps or the Gale-Ryser step moved rows, and when the whole table was laid out
+again. The children-per-parent rows of the scorecard score each side against the profile as before.
 
 ### 5. `fluxsim init`
 
 An expose of exactly two `many_to_one` relationships over one column each, the two columns all of its columns and no
-entity key, whose relationships are both laid out by counts, is written with an `associations` entry and
-`distinct: true` (no statistic says whether a pair repeats; a note says so). Its rows are the published `rowCount`;
+entity key, whose relationships are both laid out by counts, is written with an `associations` entry. Rows above
+the pairs of its two parents prove that a pair repeats, and the entry declares `distinct: false`; at or below them it
+declares `distinct: true`, which no statistic states, so a note says so. Its rows are the published `rowCount`;
 without one, the inverse-variance mean of the two sides' totals of children (a `mean/1`'s total, exact to the unit, or
 the sum a histogram gives with each class's parents at its middle and the variance of an even spread over the class),
 rounded half up and kept within one row and the pairs of the two parents.

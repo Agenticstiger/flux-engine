@@ -95,6 +95,7 @@ from flux_engine.generator import GeneratorPlan, build_plan, generate_rows
 # Imported for its registration: the exposure hook gives the counted layout a parent's expected
 # count (ADR 0025 section 4), and must be registered before any plan is related.
 from flux_engine.generator import exposure as _exposure  # noqa: F401
+from flux_engine.generator.associations import association_notes
 from flux_engine.generator.conditions import with_conditions
 from flux_engine.generator.copula import declares_copula
 from flux_engine.generator.counts import TooFewChildRows, TooManyChildRows
@@ -761,7 +762,7 @@ def _history_chains(
 
 
 def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
-    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds and range cuts."""
+    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds, associations and range cuts."""
     outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*result.emits, *result.hidden_emits]
     plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
     emits = [outcome.resolved for outcome in outcomes]
@@ -769,6 +770,7 @@ def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
         period_end_null_notes(emits)
         + end_share_notes(plans, result.root)
         + parent_bound_history_notes(plans, result.root)
+        + association_notes(plans, result.root)
         + tuple(
             note for plan in plans for note in range_cut_notes(plan.expose.expose_id, plan.columns)
         )
