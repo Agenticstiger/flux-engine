@@ -283,6 +283,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   outside the range.
   At `--scale` above 1 `verify` does not count the contract's range of a key column the scale widens, and `plan` prints
   one note naming the column, its range and the scale; a column the scale does not widen stays checked.
+- `init` no longer refuses its own bundle (`FLX-3105`) when it leaves out a table made only of foreign keys, which
+  gives its fidelity block nothing to declare: the `counts` entries into that table are taken back, and the
+  statistics of those relationships are listed unused with the reason. The table is not written, and `init` says so.
+- `init` no longer places a counted child by a parent column that is itself drawn given a column of a linked row,
+  which `plan` refuses (`FLX-3403`): that grouping is listed unused with the reason, and the next usable column, or
+  none, places the child.
+- `init` no longer writes a property over a column that declares neither the range nor the levels it compares over,
+  which `verify` refuses (`FLX-5034`): a grouped histogram or a rank correlation over a number column drawn evenly
+  over its contract's range, or a histogram grouped by a boolean column. The column is drawn as before, and its notes
+  say which property is left out.
 
 ## 0.11.1 - 2026-11-24
 
