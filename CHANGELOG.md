@@ -169,12 +169,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `init --window` no longer writes a register with two entries for one number (`FLX-3105`, "by the same pointer")
   when the window cuts a date column whose weights rest on one assumption, such as a withheld minimum. The column's
   one entry names both reasons.
-- `init` no longer leaves out a table whose date column holds one value, 9999-12-31 (the end of every open version,
-  say), which made it refuse a table that refers to it with `FLX-3403`. The column is drawn within the day that ends
-  there, stated as an assumption.
+- A date or timestamp column whose profile publishes one value is drawn as exactly that value on every row, where it
+  was drawn within the day that starts there, so its rows took that day and the next. The register says every row
+  takes it. A DATE column whose one value is 9999-12-30 or 9999-12-31 (the end of every open version, say), or a
+  TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet: `init` refuses it before
+  it writes anything, names the table and the column, and says to write the open end as NULL, or to make the column
+  a TIMESTAMP. Before, such a DATE left its table out of the bundle, and `init` refused the bundle with `FLX-3403`.
+- `init` no longer writes a bundle the plan refuses with `FLX-6204` when an enforced `within` date's parent has a
+  lifetime whose start declares no range: no widening of the date's range can meet the plan's check then, so the
+  entry is left out and its pair is listed unused, with the reason.
 - `init` no longer names the profile's file in the header of each document it writes, so the same contract and
   profile give the same bytes, plan digest and `runId` wherever the profile is saved. Every bundle `init` writes from
-  now on differs by that header line, and so by its digests, from one it wrote before for the same inputs; a bundle
+  now on differs by that header line, and so by its digests, from one it wrote before for the same inputs; one whose
+  unused list names a whole entry (see below) differs by that list too, and its register is format `1-4-0`. A bundle
   already written keeps its own.
 - A refused `init` reports its refusal even when a file it wrote cannot be removed while it cleans up, rather than a
   permission error.
