@@ -784,16 +784,28 @@ def _rmdir_if_empty(directory: Path) -> None:
         pass
 
 
+def _unlink_if_there(path: Path) -> None:
+    """Remove the file *path* if it is there; best effort, like :func:`_rmdir_if_empty`.
+
+    A file that cannot be removed (a permission refused, say) is left as it is, so the refusal
+    that led to the cleanup is the one reported.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _remove_request(request: Path) -> None:
     """Remove a profile *request* ``init`` wrote, and the directory it went in when that is empty."""
-    request.unlink(missing_ok=True)
+    _unlink_if_there(request)
     _rmdir_if_empty(request.parent)
 
 
 def _remove(directory: Path, names: Tuple[str, ...], request: Optional[Path] = None) -> None:
     """Remove the files *names* ``init`` wrote into *directory* and its *request*, and the directory when it is empty."""
     for name in names:
-        (directory / name).unlink(missing_ok=True)
+        _unlink_if_there(directory / name)
     if request is not None:
         _remove_request(request)
     _rmdir_if_empty(directory)
@@ -867,7 +879,7 @@ def _written_each(root: Path, bundles: List[Any], asked: _AuthorRequest) -> Stag
     def undo() -> None:
         for path, was_there, files, request in written:
             for name in files:
-                (path / name).unlink(missing_ok=True)
+                _unlink_if_there(path / name)
             if not was_there:
                 shutil.rmtree(path, ignore_errors=True)
             if request is not None:

@@ -10,6 +10,7 @@ import errno
 import os
 import stat
 from pathlib import Path
+from typing import Any, Dict
 
 import pytest
 
@@ -258,5 +259,40 @@ def test_a_directory_that_cannot_be_removed_does_not_change_the_refusal(
     stubborn = tmp_path / "stubborn"
     stubborn.mkdir()
     result = run_init(str(stubborn / "b"), contract=str(ORDERS), profile=str(profile))
+    assert result.exit_code == expected.exit_code
+    assert result.stderr == expected.stderr.replace(str(plain), str(stubborn))
+
+
+@pytest.mark.parametrize("overlays", [False, True])
+def test_a_file_that_cannot_be_removed_does_not_change_the_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overlays: bool
+) -> None:
+    """Cleanup of what init wrote is best effort for a file too: the refusal is the one reported."""
+    profile = FIXTURES / "author" / "orders.profile.json"
+    extra: Dict[str, Any] = {}
+    if overlays:
+        pricier = tmp_path / "doubled.yml"
+        pricier.write_text(
+            "name: doubled\npatch:\n  tables:\n    orders:\n      rowCount: 1200\n",
+            encoding="utf-8",
+        )
+        extra = {"overlays": (str(pricier),)}
+
+    def full(path: Path, data: bytes) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(request_module, "_write_new", full)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    expected = run_init(str(plain / "b"), contract=str(ORDERS), profile=str(profile), **extra)
+    assert expected.exit_code == 1 and "No space left on device" in expected.stderr
+
+    def refuse(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    stubborn = tmp_path / "stubborn"
+    stubborn.mkdir()
+    result = run_init(str(stubborn / "b"), contract=str(ORDERS), profile=str(profile), **extra)
     assert result.exit_code == expected.exit_code
     assert result.stderr == expected.stderr.replace(str(plain), str(stubborn))
