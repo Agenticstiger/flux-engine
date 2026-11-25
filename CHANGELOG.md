@@ -273,7 +273,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `ranges:` line naming the expose, the column, the rows and the range (and `rangeConformance` in `--json`). A run with
   no declared range, or none outside it, prints exactly what it printed before (ADR 0024, the amendment of
   2026-11-25). A strict end (`>`, `<`) is kept strict, one unit inward: `>= '2001-01-01' and < '2006-01-01'` draws
-  and accepts up to 2005-12-31, and `verify` quotes the range as the contract spells it. A strict range that holds no
+  and accepts up to 2005-12-31, and `verify` names each end with its own `>`, `>=`, `<` or `<=`. A strict range that holds no
   day is refused at `plan` (`FLX-3403`). A range with one end (`>= '2024-01-01'`), and one whose high
   end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
   key (every plan written before this change) replays with no cut, so its rows and `replay --assert-digest` keep what
