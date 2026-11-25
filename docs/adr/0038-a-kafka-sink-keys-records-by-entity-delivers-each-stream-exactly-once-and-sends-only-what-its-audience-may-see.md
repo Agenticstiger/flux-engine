@@ -40,23 +40,49 @@ not. The minimum grade is `P1` (checked) for an internal audience and `P3` (diff
 an external one, compared in ADR 0020's order, so `P3`, `P4` and `P0` reach an external audience and `P5` reaches
 neither.
 
-The grade compared is the one the run's own plan records, and nothing else. Before delivery the engine reads the
-run's `plan.json` with the checks `apply` runs on it (the plan still digests to its `planDigest`, it is this run
-directory's plan, and `run-digest.json` names it), takes its `privacyGrade` (the weakest of the pinned profile's
-grade and every generator plugin's, ADR 0032), and hands it to the sink with the stream
-(`StreamContext.privacy_grade`). It is never worked out again from a bundle directory. The gate fails closed: a plan
-that records no grade (a run that pins no profile and declares no plugin records none), a plan or run digest that
-does not check, or a stream handed no grade at all is refused with `FLX-3512` for every audience, naming what is
-missing; so is a grade below the audience's minimum. All of it happens before anything is contacted, and the
-refusal names the grade, the audience and its minimum, never a value of the data. A column's `sensitivity` floor
-stays where ADR 0020 put it, at `plan`, `apply` and `ship`.
+The grade is worked out again from the run's bound record and its bundle, never taken from `plan.json`'s
+`privacyGrade` alone. Before delivery the engine checks the record as `apply` does: the plan still digests to its
+`planDigest`, it is this run directory's plan, and `run-digest.json` names it. It then checks that `receipt.json`
+belongs to that plan, by three comparisons (the receipt's `planDigest` is the plan's, its `runDigest` is the digest of
+`run-digest.json`, and each stream's `outputDigest` is the component `run-digest.json` records for that expose), and
+that the bundle is the plan's (its input digest, worked out as `apply` works it out, is the plan's `inputDigest`).
+The grade is then read the way `apply` reads it: what the plan records, clamped for a run that pins a profile (a
+recorded `P0` or `P4` is read as `P1`), and weakened by every generator plugin the bundle declares (ADR 0032). The
+pin and the plugins are read from the bundle, which `inputDigest` covers. The result goes to the sink with the
+stream (`StreamContext.privacy_grade`).
+
+An internal audience is held to that grade. An external audience is held to a grade worked out from the pinned
+profile itself, as `ship` works it out, so `--profile` must be given to `run` and to `apply --run-id`, and must be the
+profile the Simulation pins (`FLX-3109`, `FLX-3110`). The receipt's writer records it as `profileGrade`, next to
+`privacyGrade`. A plan alone never unlocks an external target.
+
+The gate fails closed: a run that pins no profile and declares no plugin has no grade and goes to no Kafka target; a
+plan, run digest or receipt that does not check, a bundle that is not the plan's, or a stream handed no grade at all
+is refused with `FLX-3512` for every audience, naming what is missing; so is an external target given no profile or
+a profile that is not the pinned one (the message names `--profile`), and so is a grade below the audience's
+minimum. All of it happens before anything is contacted, and the refusal names the grade, the audience and its
+minimum, never a value of the data. Other sinks are not gated: they receive the same rows as before. A column's
+`sensitivity` floor stays where ADR 0020 put it, at `plan`, `apply` and `ship`.
+
+#### Threat model
+
+The state directory is writable by whoever runs the engine, so the files of a run are evidence, not authority.
+
+- An internal audience trusts the run's bound record: the plan digest, `run-digest.json`, and the receipt and its
+  streams bound to them. Editing the plan's grade, or swapping in another run's receipt and streams, is refused.
+- An external audience is re-derived from the pinned profile, which the command must be given. A forged
+  `privacyGrade` in the plan does not reach it.
+- What stays possible: someone able to rewrite every file of a run directory consistently (plan, run digest, receipt
+  and streams) can make a run look like another one. For an external target that still needs the pinned profile to
+  grade `P3`.
+- A run that pins no profile cannot go to an external audience.
 
 ### 3. What the sink reads, and what it touches
 
 The engine also hands each stream's sink the bundle directory and the Simulation's id
 (`StreamContext.bundle_directory`, `StreamContext.simulation_id`), only so that the sink can find the stream's
 declarations: the contract's keys and Kafka binding, and the Simulation's `history`, `snapshots`, `events` and
-`periods` entries. They never feed the gate. The contract digest of the header the sink is opened with must be the
+`periods` entries. The sink never reads a grade from them; the engine does (section 2). The contract digest of the header the sink is opened with must be the
 bundle's, else `FLX-3504`.
 
 The sink connects to the bootstrap servers of its target, the brokers they name, and the registry its `registry`
@@ -235,8 +261,8 @@ every `--jobs`: pacing chooses when a record is sent, never what it holds.
 Every record carries headers that label it synthetic and name its stream: `flux.synthetic: true`, `flux.run-id`,
 `flux.expose`, `flux.output-digest` and `flux.row`, the row's position in the stream. The receipt names the topic,
 its partition count, the shape (`debezium` or `row`), the value format and subject, the key format, the pace, the
-compression, the transactions, the records sent and skipped as already delivered, the audience and the grade. It
-holds no credential.
+compression, the transactions, the records sent and skipped as already delivered, the audience, the grade and, when
+the command was given the pinned profile, the grade worked out from it (`profileGrade`). It holds no credential.
 
 ### 12. Credentials and options
 
@@ -271,8 +297,9 @@ with no progress. A progress read that a partition error answers is `FLX-3505`, 
 ## Consequences
 
 - The engine's bytes and digests do not change: the sink reads the rows the digest covers and adds nothing to them.
-- A run's recorded privacy grade travels with its streams, so a stream for outside readers is refused before it
-  leaves, and a run that records no grade (one that pins no profile) is not streamed to Kafka at all.
+- A run's privacy grade, worked out from its bound record and bundle, travels with its streams, so a stream for
+  outside readers is refused before it leaves, and a run that pins no profile and declares no plugin is not streamed
+  to Kafka at all. An external target needs `--profile`.
 - Kafka consumers read synthetic records with the keys, partitions, timestamps, schemas and change-data-capture
   shape of the real topics, and can tell them apart by their headers and their topic's prefix.
 - A paced stream is held in memory until its last row arrives.

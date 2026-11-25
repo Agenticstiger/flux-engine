@@ -52,7 +52,7 @@ def test_another_audience_is_refused_naming_the_allowed_ones(value: str) -> None
 
 
 def graded(grade: Optional[str], problem: Optional[str] = None) -> RecordedGrade:
-    return RecordedGrade(grade=grade, problem=problem)
+    return RecordedGrade(grade=grade, problem=problem, profile_grade=grade)
 
 
 @pytest.mark.parametrize("grade", sorted(READS))

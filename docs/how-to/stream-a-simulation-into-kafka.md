@@ -39,7 +39,7 @@ The examples use a device-telemetry bundle like the one in [Project a history](.
 fluxsim run . --profile ../devices.profile.json --sink kafka:localhost:9092 --sink-opt audience=internal
 ```
 
-The bundle must pin a privacy profile, or the run records no grade and the sink refuses every stream (see the audience gate below). The Simulation pins it under its extension block:
+The bundle must pin a privacy profile (or declare a generator plugin), or the run has no grade and the sink refuses every stream (see the audience gate below). The Simulation pins it under its extension block:
 
 ```text
 extensions:
@@ -61,7 +61,15 @@ Every Kafka target declares who will read it. There is no default, and a target 
 | `internal` | `P1` | the readers work for the data's owner |
 | `external` | `P3` | the readers do not, so the numbers must rest on differentially private marginals |
 
-The grades compare in the order of [ADR 0020](../adr/0020-privacy-grades.md): `P5` is below `P1`, which is below `P3`, which is below `P4` and `P0`. A run whose generator plugin states `P5` reaches neither. The grade is the one the run's plan records (after its binding is checked), with every generator plugin the bundle declares, as `apply` reads it, and the engine hands it to the sink with each stream. A stream below its audience's minimum, or one the run has no recorded grade for, is refused with `FLX-3512` before anything is contacted. Delivery is refused unless the run's plan records a privacy grade; a run that pins a profile records one. The message names the grade, the audience and its minimum, and never a value of the data.
+The grades compare in the order of [ADR 0020](../adr/0020-privacy-grades.md): `P5` is below `P1`, which is below `P3`, which is below `P4` and `P0`. A run whose generator plugin states `P5` reaches neither. The engine works the grade out as `apply` reads it, from the run's plan after its binding is checked, with every generator plugin the bundle declares, and hands it to the sink with each stream. Before it does, it checks that the run's `receipt.json` and streams belong to that plan and that the bundle is the plan's. A stream below its audience's minimum, or one the run has no grade for, is refused with `FLX-3512` before anything is contacted. A run that pins no profile and declares no generator plugin has no grade, so it goes to no Kafka target. The message names the grade, the audience and its minimum, and never a value of the data.
+
+An external target is held to a grade worked out from the pinned profile itself, so it needs `--profile PATH`, the profile the Simulation pins, on `run` and on `apply --run-id`. Without it, or with another profile, the stream is refused with `FLX-3512` and the message names `--profile`. `apply` reads `--profile` with `--run-id` only together with `--sink`. The receipt records that grade as `profileGrade`.
+
+```text
+fluxsim apply . --run-id RUN_ID --profile ../devices.profile.json --sink kafka:broker-1.example.org:9093 --sink-opt audience=external
+```
+
+What the gate trusts is the same as in [ADR 0038](../adr/0038-a-kafka-sink-keys-records-by-entity-delivers-each-stream-exactly-once-and-sends-only-what-its-audience-may-see.md). An internal target trusts the run's bound record: the plan digest, `run-digest.json`, and the receipt and its streams bound to them. An external target is re-derived from the pinned profile. Someone who can rewrite every file of a run directory consistently can still make a run look like another one; for an external target that still needs the pinned profile to grade `P3`.
 
 ## Topics and keys
 

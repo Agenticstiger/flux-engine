@@ -130,7 +130,9 @@ def test_a_run_that_pins_no_profile_records_no_grade_and_says_so(
     assert result.success, result.stderr
     for context in recorder.contexts:
         assert context.privacy_grade is not None and context.privacy_grade.grade is None
-        assert "records no privacy grade" in str(context.privacy_grade.problem)
+        assert "pins no profile and declares no generator plugin" in str(
+            context.privacy_grade.problem
+        )
 
 
 def test_a_plan_edited_after_the_run_gives_no_grade_and_names_its_check(tmp_path: Path) -> None:
@@ -138,11 +140,11 @@ def test_a_plan_edited_after_the_run_gives_no_grade_and_names_its_check(tmp_path
     result = run(bundle, state_dir=state, profile=PROFILE)
     assert result.success, result.stderr
     layout = RunLayout.for_state_dir(state, result.artifacts["plan"]["run_id"])
-    assert privacy_grade_of(layout).grade == "P1"
+    assert privacy_grade_of(layout, bundle).grade == "P1"
     document: Dict[str, Any] = json.loads(layout.plan_path.read_text(encoding="utf-8"))
     document["privacyGrade"] = "P0"
     layout.plan_path.write_text(json.dumps(document), encoding="utf-8")
-    recorded = privacy_grade_of(layout)
+    recorded = privacy_grade_of(layout, bundle)
     assert recorded.grade is None
     assert "plan does not check" in str(recorded.problem)
     assert "FLX-" in str(recorded.problem)
@@ -154,7 +156,7 @@ def test_a_damaged_run_directory_gives_no_grade_and_raises_nothing(tmp_path: Pat
     assert result.success, result.stderr
     layout = RunLayout.for_state_dir(state, result.artifacts["plan"]["run_id"])
     layout.run_digest_path.unlink()
-    recorded = privacy_grade_of(layout)
+    recorded = privacy_grade_of(layout, bundle)
     assert recorded.grade is None and recorded.problem
     assert "run-digest.json" in recorded.problem and "FileNotFoundError" in recorded.problem
 

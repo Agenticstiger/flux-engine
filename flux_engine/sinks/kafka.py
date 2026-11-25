@@ -54,8 +54,9 @@ time (divided by N), in event-time order within each key's order, and commits at
 
 **Credentials.** Never an option: ``sasl-username-env``, ``sasl-password-env`` and
 ``registry-auth-env`` name environment variables, read when a stream starts. A credential goes
-only over TLS (``SASL_SSL``, an ``https`` registry) unless every server it goes to is on this
-machine. Errors are scrubbed of every credential, and librdkafka logs to the
+only over TLS (``SASL_SSL``, an ``https`` registry), except a SASL credential to brokers that are
+all on this machine; the registry's credential never goes in clear, since its client follows the
+environment's proxies. Errors are scrubbed of every credential, and librdkafka logs to the
 ``flux_engine.sinks.kafka`` logger.
 """
 
@@ -365,16 +366,12 @@ class KafkaSettings:
                     raise FluxError(FLX_3504, f"the option {name} needs --sink-opt registry=URL")
         else:
             secure = all(url.startswith("https://") for url in registry_urls)
-            elsewhere = [
-                url
-                for url in registry_urls
-                if not url.startswith("https://") and not is_loopback(urlsplit(url).hostname or "")
-            ]
-            if auth_env is not None and elsewhere:
+            if auth_env is not None and not secure:
                 raise FluxError(
                     FLX_3504,
-                    "registry-auth-env sends a credential, which goes only over https unless every "
-                    "registry URL is on this machine",
+                    "registry-auth-env needs every registry URL to be https: the credential goes "
+                    "with every request, and through any proxy the environment names "
+                    "(HTTP_PROXY, ALL_PROXY), even for a registry on this machine",
                 )
             if ca is not None and not secure:
                 raise FluxError(FLX_3504, "registry-ca-location needs an https registry")
@@ -1073,6 +1070,11 @@ class KafkaSink:
             "privacyGrade": self.grade.value,
             "partitioner": "murmur2_random",
         }
+        held = self.context.privacy_grade
+        if held is not None and held.profile_grade is not None:
+            # The grade worked out from the pinned profile the command was given; an external
+            # audience is held to this one.
+            writer["profileGrade"] = held.profile_grade
         writer.update(self._owner.broker.versions())
         return SinkReceipt(
             sink=self.name,

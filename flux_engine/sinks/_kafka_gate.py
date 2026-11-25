@@ -52,10 +52,14 @@ def parse_audience(value: Optional[str]) -> str:
 def require_grade(audience: str, recorded: Optional[RecordedGrade], *, expose_id: str) -> Pattern:
     """The run's recorded grade as a :class:`~flux_engine.core.grades.Pattern`, when *audience* may read it.
 
-    *recorded* is what the engine read from the run's own plan
-    (:class:`~flux_engine.sinks.receipts.RecordedGrade`). ``FLX-3512`` for every audience when the
-    sink was handed none, when the record states no grade (the message names what is missing), when
-    the text is not a grade, and when the grade is below the audience's minimum.
+    *recorded* is what the engine worked out for the run
+    (:class:`~flux_engine.sinks.receipts.RecordedGrade`). An internal audience is held to its
+    ``grade``, which the run's bound record and bundle give. An external audience is held to its
+    ``profile_grade`` alone, which is worked out from the pinned profile the command was given, so
+    a run's files never unlock an external target by themselves. ``FLX-3512`` for every audience
+    when the sink was handed none, when the record states no grade (the message names what is
+    missing), when the text is not a grade, and when the grade is below the audience's minimum; and
+    for an external audience when no profile graded the run (the message names ``--profile``).
     """
     if audience not in MINIMUM_GRADE:
         raise FluxError(
@@ -65,19 +69,30 @@ def require_grade(audience: str, recorded: Optional[RecordedGrade], *, expose_id
     if recorded is None:
         raise FluxError(
             FLX_3512,
-            f"the engine did not hand the sink the grade the run's plan records for expose "
+            f"the engine did not hand the sink the grade the run is held to for expose "
             f"{expose_id!r}, so it cannot tell whether an {audience} audience may read it; "
             "nothing was sent",
         )
     if recorded.grade is None:
-        problem = recorded.problem or "the run's plan states no grade"
+        problem = recorded.problem or "the run states no grade"
         raise FluxError(
             FLX_3512,
             f"expose {expose_id!r} has no privacy grade an {audience} audience can be held "
             f"against: {problem}; nothing was sent",
         )
+    held: Optional[str] = recorded.grade
+    if audience == "external":
+        held = recorded.profile_grade
+        if held is None:
+            why = recorded.profile_problem or "no profile was given"
+            raise FluxError(
+                FLX_3512,
+                f"expose {expose_id!r} cannot go to an external audience: the grade is worked "
+                f"out from the profile the run pins, which --profile must name ({why}); "
+                "nothing was sent",
+            )
     try:
-        pattern = Pattern(recorded.grade)
+        pattern = Pattern(held)
     except ValueError:
         raise FluxError(
             FLX_3512,

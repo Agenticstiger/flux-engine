@@ -42,6 +42,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Union,
 )
 
 from flux_engine.api.emit import EmitHeader
@@ -99,46 +100,221 @@ def _header(outcome: "EmitOutcome") -> EmitHeader:
     )
 
 
-def privacy_grade_of(layout: RunLayout) -> RecordedGrade:
-    """The privacy grade the run's own plan records, read after the checks ``apply`` runs on it.
+class _NotBound(Exception):
+    """A run file that does not belong to the run's plan; the text names the check."""
 
-    The plan must still digest to its ``planDigest`` and be this run directory's plan
-    (:func:`~flux_engine.stages.apply.load_recorded_plan`), and ``run-digest.json`` must name that
-    plan (:func:`~flux_engine.stages.apply.require_run_digest_binds_plan`). The grade is the one
-    that plan records under ``privacyGrade``, which ``plan`` writes as the weakest of the pinned
-    profile's grade and every generator plugin's (ADR 0020, ADR 0032). It is read from the run's
-    record alone and never worked out again from a bundle, so a sink is told the grade the run is
-    bound to. When the checks fail, or the plan records no grade (it pins no profile and declares
-    no plugin, or an engine that did not grade wrote it), there is no grade and ``problem`` says
-    which; a sink that needs the grade refuses the stream, and any other sink is unaffected.
+
+def _first_line(error: FluxError) -> str:
+    return (error.detail.strip().splitlines() or [""])[0][:300]
+
+
+def _require_receipt_of_plan(
+    receipt: Mapping[str, Any], plan_document: Mapping[str, Any], run_digest: Mapping[str, Any]
+) -> None:
+    """Refuse a ``receipt.json`` that is not the one of the plan and ``run-digest.json`` beside it.
+
+    Three checks, each one ``apply`` makes when it writes the run: the receipt names the plan's
+    ``planDigest``; its ``runDigest`` is the digest of ``run-digest.json``; and each stream's
+    ``outputDigest`` is the component ``run-digest.json`` records for that expose. A component the
+    run digest does not record fails the check.
     """
-    from flux_engine.core.grades import Pattern
-    from flux_engine.stages._grades import GRADE_KEY
-    from flux_engine.stages.apply import load_recorded_plan, require_run_digest_binds_plan
+    from flux_engine.core.digest import digest_of_document
+
+    if receipt.get("planDigest") != plan_document.get("planDigest"):
+        raise _NotBound("receipt.json names another plan (planDigest)")
+    found = digest_of_document(dict(run_digest), subject="runDigest").value
+    if receipt.get("runDigest") != found:
+        raise _NotBound("receipt.json's runDigest is not the digest of run-digest.json")
+    components = run_digest.get("components")
+    recorded = components.get("emits") if isinstance(components, Mapping) else None
+    emits = receipt.get("emits")
+    if not isinstance(recorded, Mapping) or not isinstance(emits, Mapping):
+        raise _NotBound("run-digest.json or receipt.json records no emit streams (emits)")
+    for expose_id in sorted(emits):
+        entry = emits[expose_id]
+        claimed = entry.get("outputDigest") if isinstance(entry, Mapping) else None
+        if claimed is None or recorded.get(expose_id) != claimed:
+            raise _NotBound(
+                f"the outputDigest receipt.json gives expose {expose_id!r} is not the component "
+                f"emits.{expose_id} of run-digest.json"
+            )
+
+
+def privacy_grade_of(
+    layout: RunLayout, bundle_directory: Path, *, profile: Union[str, Path, None] = None
+) -> RecordedGrade:
+    """The privacy grade a run is held to, worked out from its bound record and its bundle.
+
+    The run's record is checked first. The plan must still digest to its ``planDigest`` and be this
+    run directory's plan (:func:`~flux_engine.stages.apply.load_recorded_plan`);
+    ``run-digest.json`` must name that plan
+    (:func:`~flux_engine.stages.apply.require_run_digest_binds_plan`); and ``receipt.json`` must
+    belong to both (:func:`_require_receipt_of_plan`), so the streams a sink is given are the
+    plan's. The bundle must be the plan's: its input digest, worked out as ``apply`` works it out,
+    is the plan's ``inputDigest``.
+
+    The grade is read the way ``apply`` reads it: what the plan records, which
+    :func:`~flux_engine.stages._grades.recorded_grade` clamps for a run that pins a profile (a
+    ``P0`` or ``P4`` there is read as ``P1``), then the weaker of that and every generator plugin
+    the bundle declares (ADR 0020, ADR 0032). Whether a profile is pinned, and the plugins, are
+    read from the bundle, never from the plan. A run that pins no profile and declares no plugin
+    has no grade.
+
+    *profile* is the file the command was given. When it is the profile the Simulation pins
+    (:func:`~flux_engine.seam.profile.require_profile`), the grade is worked out again from its
+    document as ``ship`` does, and is returned as ``profile_grade``; when it is not, or none was
+    given, there is none and ``profile_problem`` says why a given one does not pair. An external
+    audience is held to that grade alone (:mod:`flux_engine.sinks._kafka_gate`).
+
+    When a check fails there is no grade and ``problem`` says which; a sink that needs the grade
+    refuses the stream, and any other sink is unaffected. Nothing here raises.
+    """
+    from flux_engine.stages.apply import (
+        load_recorded_plan,
+        plan_kernel,
+        require_run_digest_binds_plan,
+    )
 
     try:
         plan_document = load_recorded_plan(layout)
         run_digest = read_json_object(layout.run_digest_path, code=FLX_2109, remedy=RUN_FILE_REMEDY)
         require_run_digest_binds_plan(layout, plan_document, run_digest)
     except FluxError as error:
-        first = (error.detail.strip().splitlines() or [""])[0][:300]
+        first = _first_line(error)
         return RecordedGrade(
             problem=f"the run's plan does not check ({error.code.code}{': ' + first if first else ''})"
         )
     except (OSError, ValueError) as error:
-        filename = getattr(error, "filename", None)
-        named = Path(str(filename)).name if filename else "a run file"
+        return RecordedGrade(problem=_unreadable(error))
+    try:
+        receipt = read_json_object(layout.receipt_path, code=FLX_2109, remedy=RUN_FILE_REMEDY)
+        _require_receipt_of_plan(receipt, plan_document, run_digest)
+    except _NotBound as error:
+        return RecordedGrade(problem=f"the run's receipt does not belong to its plan: {error}")
+    except FluxError as error:
+        first = _first_line(error)
         return RecordedGrade(
-            problem=f"the run's {named} could not be read ({type(error).__name__}); "
-            "a damaged run directory records no grade"
+            problem=f"the run's receipt does not check ({error.code.code}"
+            f"{': ' + first if first else ''})"
         )
-    recorded = plan_document.get(GRADE_KEY)
-    if recorded not in {pattern.value for pattern in Pattern}:
+    except (OSError, ValueError) as error:
+        return RecordedGrade(problem=_unreadable(error))
+    try:
+        loaded, cast, emits = _load_run_bundle(bundle_directory, plan_document)
+        current = _input_digest_of(loaded, plan_kernel(plan_document))
+    except FluxError as error:
+        first = _first_line(error)
         return RecordedGrade(
-            problem="the run's plan records no privacy grade; a plan records one when the "
-            "Simulation pins a profile or declares a generator plugin"
+            problem="the bundle could not be read as the run's "
+            f"({error.code.code}{': ' + first if first else ''})"
         )
-    return RecordedGrade(grade=str(recorded))
+    except (OSError, ValueError, KeyError) as error:
+        return RecordedGrade(problem=_unreadable(error))
+    except Exception as error:  # noqa: BLE001 - a bundle that cannot be read grades nothing
+        return RecordedGrade(problem=_not_worked_out("the bundle", error))
+    if current != plan_document.get("inputDigest"):
+        return RecordedGrade(
+            problem="the bundle is not the plan's: its input digest is not the plan's inputDigest"
+        )
+    return _graded(plan_document, cast, emits, profile)
+
+
+def _unreadable(error: Exception) -> str:
+    filename = getattr(error, "filename", None)
+    named = Path(str(filename)).name if filename else "a run file"
+    return (
+        f"the run's {named} could not be read ({type(error).__name__}); "
+        "a damaged run directory records no grade"
+    )
+
+
+def _not_worked_out(what: str, error: Exception) -> str:
+    """Why *what* gave no grade, naming the error's type and never its text."""
+    return f"{what} could not be worked out ({type(error).__name__}); it gives no grade"
+
+
+def _load_run_bundle(
+    bundle_directory: Path, plan_document: Mapping[str, Any]
+) -> Tuple[Any, Any, Any]:
+    from flux_engine.runtime import resolve_cast
+    from flux_engine.seam.resolve import load_bundle, resolve_all_emits
+
+    loaded = load_bundle(bundle_directory)
+    simulation_id = str(plan_document["simulationId"])
+    cast = resolve_cast(loaded.flux_documents, simulation_id=simulation_id)
+    emits = resolve_all_emits(loaded, simulation_id=simulation_id)
+    return loaded, cast, emits
+
+
+def _input_digest_of(loaded: Any, kernel: Any) -> str:
+    from flux_engine.stages import pipeline
+
+    return str(pipeline.input_digest_of(loaded, kernel=kernel).ref.value)
+
+
+def _graded(
+    plan_document: Mapping[str, Any], cast: Any, emits: Any, profile: Union[str, Path, None]
+) -> RecordedGrade:
+    """The grade of a run whose record and bundle check; see :func:`privacy_grade_of`."""
+    from flux_engine.seam.profile import require_profile
+    from flux_engine.seam.resolve import declared_generators, profile_reference
+    from flux_engine.stages._grades import recorded_grade, run_grade, with_generators
+
+    where = cast.simulation_id
+    try:
+        pinned = profile_reference(cast.simulation, where=where)
+        if pinned is None and not declared_generators(cast.simulation, where=where):
+            return RecordedGrade(
+                problem="the run pins no profile and declares no generator plugin, so it has "
+                "no privacy grade; a Simulation pins a profile or declares a generator plugin"
+            )
+        grade = with_generators(
+            recorded_grade(plan_document, pinned=pinned is not None),
+            cast.simulation,
+            where=where,
+        )
+    except FluxError as error:
+        return RecordedGrade(
+            problem=f"the run's declarations could not be read ({error.code.code})"
+        )
+    except Exception as error:  # noqa: BLE001 - declarations that cannot be read grade nothing
+        return RecordedGrade(problem=_not_worked_out("the run's declarations", error))
+    if pinned is None:
+        return RecordedGrade(grade=grade.value, profile_problem="the run pins no profile")
+    if profile is None:
+        return RecordedGrade(grade=grade.value)
+    try:
+        paired = require_profile(pinned, Path(profile), where=where)
+        assert paired is not None
+        derived = run_grade(
+            emits,
+            cast.simulation,
+            paired.document,
+            pinned=True,
+            recorded=recorded_grade(plan_document, pinned=True),
+            where=where,
+        ).pattern
+    except FluxError as error:
+        return RecordedGrade(
+            grade=grade.value,
+            profile_problem=f"the profile given does not pair with the one the run pins "
+            f"({error.code.code})",
+        )
+    except Exception as error:  # noqa: BLE001 - a profile that cannot be graded grades nothing
+        return RecordedGrade(
+            grade=grade.value, profile_problem=_not_worked_out("the profile's grade", error)
+        )
+    return RecordedGrade(grade=grade.value, profile_grade=derived.value)
+
+
+def _grade_for(
+    layout: Optional[RunLayout], bundle_directory: Optional[Path], profile: Union[str, Path, None]
+) -> Optional[RecordedGrade]:
+    if layout is None:
+        return None
+    if bundle_directory is None:
+        return RecordedGrade(problem="the delivery was handed no bundle to grade the run from")
+    return privacy_grade_of(layout, bundle_directory, profile=profile)
 
 
 def deliver(
@@ -149,6 +325,7 @@ def deliver(
     record: Optional[Callable[[SinkReceipt], object]] = None,
     layout: Optional[RunLayout] = None,
     bundle_directory: Optional[Path] = None,
+    profile: Union[str, Path, None] = None,
 ) -> Tuple[SinkReceipt, ...]:
     """Write every stream of *result* to a sink from *target*; return the receipts.
 
@@ -160,10 +337,11 @@ def deliver(
     delivery before anything lands. *record* is called with each receipt
     as soon as its stream is published, so a later stream's failure leaves
     the earlier ones on record. With the run's *layout*, each stream's context carries the grade
-    the run's plan records (:func:`privacy_grade_of`); with *bundle_directory*, the bundle and the
-    Simulation, so a sink can find a stream's declarations. Neither changes a row.
+    is held to (:func:`privacy_grade_of`, which needs *bundle_directory* too, and reads *profile*,
+    the file the command was given); with *bundle_directory*, the bundle and the Simulation, so a
+    sink can find a stream's declarations. Neither changes a row.
     """
-    grade = privacy_grade_of(layout) if layout is not None else None
+    grade = _grade_for(layout, bundle_directory, profile)
     contexts = [
         StreamContext(
             run_id=run_id,
@@ -221,6 +399,7 @@ def deliver_run(
     *,
     target: "SinkTarget",
     record: Optional[Callable[[SinkReceipt], object]] = None,
+    profile: Union[str, Path, None] = None,
 ) -> Tuple[SinkReceipt, ...]:
     """Write every stream of an applied run to a sink from the files of its run directory.
 
@@ -230,7 +409,8 @@ def deliver_run(
     receipt's before a row goes to the sink, so what a sink is given is what the run
     recorded. The header comes from the bundle's contract, as the run's own does; the
     column types a file sink writes (an integer's width, a decimal's precision) are the
-    contract's own.
+    contract's own. *profile* is the file the command was given, from which an external audience's
+    grade is worked out (:func:`privacy_grade_of`).
     """
     from flux_engine.core.digest import DigestRef
     from flux_engine.safeio import read_bytes_nofollow
@@ -244,7 +424,7 @@ def deliver_run(
         for entry in resolve_all_emits(load_bundle(bundle_directory), simulation_id=simulation_id)
     }
     reported = run_receipt["emits"]
-    grade = privacy_grade_of(layout)
+    grade = privacy_grade_of(layout, bundle_directory, profile=profile)
     streams = []
     for expose_id in sorted(reported):
         entry = resolved.get(expose_id)

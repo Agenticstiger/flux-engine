@@ -35,15 +35,23 @@ __all__ = ["FileEntry", "RecordedGrade", "SinkReceipt", "StreamContext"]
 
 @dataclass(frozen=True)
 class RecordedGrade:
-    """The privacy grade a run's own plan records, read after the plan's binding checks.
+    """The privacy grade a run is held to, worked out again from its bound record and its bundle.
 
-    ``grade`` is ``P0``, ``P1``, ``P3``, ``P4`` or ``P5`` (ADR 0020) when the run's record
-    states one, else ``None``, and ``problem`` then names what is missing or does not check:
-    a plan that records no grade, or a plan or ``run-digest.json`` that does not bind to the run.
+    ``grade`` is ``P0``, ``P1``, ``P3``, ``P4`` or ``P5`` (ADR 0020) when the run's record states
+    one, else ``None``, and ``problem`` then names what is missing or does not check: a run that
+    pins no profile and declares no generator plugin, a plan, ``run-digest.json`` or ``receipt.json``
+    that does not bind to the run, or a bundle that is not the plan's.
+
+    ``profile_grade`` is the grade worked out from the profile the command was given, when that
+    profile is the one the run pins, and ``None`` otherwise; ``profile_problem`` then says why a
+    profile does not pair, when one was given. An external audience is held to ``profile_grade``
+    alone.
     """
 
     grade: Optional[str] = None
     problem: Optional[str] = None
+    profile_grade: Optional[str] = None
+    profile_problem: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -69,7 +77,8 @@ class StreamContext:
         header carries the closed set's ``INT`` alone, so this is where a file sink learns
         an integer column's width. No digest covers it.
     privacy_grade
-        The grade the run's own plan records, read after the plan's binding checks
+        The grade the run is held to, worked out from its bound record and its bundle, and from
+        the pinned profile when the command was given it
         (:class:`RecordedGrade`, :func:`flux_engine.stages.deliver.privacy_grade_of`), or
         ``None`` when the caller did not read the run's record. A sink whose destination
         declares an audience compares it with that audience's minimum (ADR 0038). No digest

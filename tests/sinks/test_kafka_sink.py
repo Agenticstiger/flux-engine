@@ -21,16 +21,17 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 import pytest
 
 from flux_engine.api.emit import EmitHeader
-from flux_engine.core.digest import DigestRef, digest_of_document
+from flux_engine.core.digest import DigestRef, build_plan_digest, digest_of_document
 from flux_engine.core.errors import FluxError
-from flux_engine.sinks import kafka
+from flux_engine.sinks import kafka, registry
 from flux_engine.sinks._kafka_broker import ClientSettings, ConfluentBroker, Credentials
 from flux_engine.sinks._kafka_records import KafkaRecord
 from flux_engine.sinks.kafka import Clock, KafkaSettings, KafkaSink, KafkaTarget
 from flux_engine.sinks.receipts import RecordedGrade, SinkReceipt, StreamContext
 from flux_engine.sinks.registry import known_of, open_target
-from flux_engine.stages.deliver import deliver_run
-from flux_engine.stages.layout import RunLayout
+from flux_engine.stages.apply import apply
+from flux_engine.stages.deliver import deliver_run, privacy_grade_of
+from flux_engine.stages.layout import RunLayout, run_id_for
 from flux_engine.stages.run import run
 
 from ._kafka_fakes import (
@@ -109,9 +110,16 @@ def target_of(
 
 
 def deliver(
-    kept: Kept, broker: FakeBroker, options: Optional[Mapping[str, str]] = None, **more: Any
+    kept: Kept,
+    broker: FakeBroker,
+    options: Optional[Mapping[str, str]] = None,
+    *,
+    profile: Optional[Path] = None,
+    **more: Any,
 ) -> Sequence[SinkReceipt]:
-    return deliver_run(kept.layout, kept.bundle, target=target_of(broker, options, **more))
+    return deliver_run(
+        kept.layout, kept.bundle, target=target_of(broker, options, **more), profile=profile
+    )
 
 
 def doc(stored: Stored) -> Dict[str, Any]:
@@ -398,7 +406,7 @@ def test_the_factory_reads_no_environment_variable_and_contacts_nothing(
 def test_an_external_audience_is_refused_on_a_checked_run_before_any_call(kept: Kept) -> None:
     broker = FakeBroker()
     with pytest.raises(FluxError) as caught:
-        deliver(kept, broker, {"audience": "external"})
+        deliver(kept, broker, {"audience": "external"}, profile=PROFILE)
     assert caught.value.code.code == "FLX-3512"
     assert "P1" in str(caught.value) and "external" in str(caught.value)
     assert broker.calls == [] and broker.topics == {}
@@ -412,7 +420,7 @@ def test_a_run_that_records_no_grade_is_refused_for_every_audience_before_any_ca
         with pytest.raises(FluxError) as caught:
             deliver(unpinned, broker, {"audience": audience})
         assert caught.value.code.code == "FLX-3512"
-        assert "records no privacy grade" in str(caught.value)
+        assert "pins no profile and declares no generator plugin" in str(caught.value)
         assert broker.calls == []
 
 
@@ -1655,3 +1663,191 @@ def test_a_flush_that_drains_in_steps_commits_and_one_that_stalls_does_not() -> 
     with pytest.raises(FluxError) as caught:
         _txn_over(stalled).commit(topic="t", records=5, metadata="m")
     assert caught.value.code.code == "FLX-3505" and not stalled.committed
+
+
+# -- the grade is worked out again, and the run's files must be the plan's -----------------------
+
+EXTERNAL: Mapping[str, str] = {"audience": "external"}
+TELCO_PROFILE = FIXTURES / "private-telco" / "telco.profile.json"
+
+
+def _copy_of(kept: Kept, root: Path) -> Kept:
+    """The run of *kept*, with its state directory copied under *root* so a test may edit it."""
+    state = root / "state"
+    shutil.copytree(kept.layout.run_dir.parents[1], state)
+    return Kept(kept.bundle, RunLayout.for_state_dir(state, kept.layout.run_id))
+
+
+def _forged(kept: Kept, root: Path, grade: str) -> Kept:
+    """A plan of the pinned run with *grade* written in and re-digested, alone under its run id."""
+    copied = _copy_of(kept, root)
+    document: Dict[str, Any] = json.loads(copied.layout.plan_path.read_text(encoding="utf-8"))
+    document.pop("planDigest")
+    document["privacyGrade"] = grade
+    document["planDigest"] = build_plan_digest(document).ref.value
+    layout = RunLayout.for_state_dir(root / "state", run_id_for(document["planDigest"]))
+    layout.plan_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.plan_path.write_text(json.dumps(document), encoding="utf-8")
+    return Kept(kept.bundle, layout)
+
+
+def _through_apply(
+    forged: Kept,
+    broker: FakeBroker,
+    monkeypatch: pytest.MonkeyPatch,
+    options: Mapping[str, str],
+    profile: Optional[Path],
+) -> Any:
+    """``apply --run-id RUN --sink kafka:...`` on the forged plan, against *broker*."""
+
+    def factory(target: str, given: Mapping[str, str]) -> KafkaTarget:
+        return KafkaTarget(
+            KafkaSettings.parse(target, given),
+            broker=broker,
+            serdes=FakeSerdes(),
+            clock=FakeClock(WALL_2026).clock(),
+        )
+
+    monkeypatch.setattr(registry, "load_factory", lambda name: factory)
+    return apply(
+        forged.bundle,
+        run_id=forged.layout.run_id,
+        state_dir=forged.layout.run_dir.parents[1],
+        sink=f"kafka:{BOOTSTRAP}",
+        sink_options=dict(options),
+        profile=profile,
+    )
+
+
+@pytest.mark.parametrize("grade", ["P3", "P0"])
+def test_a_forged_plan_does_not_open_an_external_target(
+    kept: Kept, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, grade: str
+) -> None:
+    broker = FakeBroker()
+    forged = _forged(kept, tmp_path, grade)
+    result = _through_apply(forged, broker, monkeypatch, EXTERNAL, PROFILE)
+    assert result.exit_code == 1 and result.error_code == "FLX-3512", result.stderr
+    assert broker.calls == [] and not any(broker.logs.values())
+
+
+def test_a_forged_p0_plan_is_read_as_p1_for_an_internal_target(
+    kept: Kept, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = FakeBroker()
+    result = _through_apply(_forged(kept, tmp_path, "P0"), broker, monkeypatch, INTERNAL, None)
+    assert result.success, result.stderr
+    writers = [receipt["writer"] for receipt in result.artifacts["sinks"]["receipts"]]
+    assert {writer["privacyGrade"] for writer in writers} == {"P1"}
+    assert all("profileGrade" not in writer for writer in writers)
+
+
+def _other_run(root: Path) -> RunLayout:
+    """A run of the devices bundle under another seed, with no pinned profile."""
+    bundle = root / "bundle-b"
+    shutil.copytree(DEVICES, bundle)
+    path = bundle / "simulation.flux.yml"
+    text = path.read_text(encoding="utf-8")
+    text = text[: text.index("    profile:\n")] + text[text.index("    history:") :]
+    path.write_text(text.replace("seed: 42", "seed: 7"), encoding="utf-8")
+    result = run(bundle, state_dir=root / "state-b")
+    assert result.success, result.stderr
+    return RunLayout.for_state_dir(root / "state-b", result.artifacts["plan"]["run_id"])
+
+
+def _swapped(kept: Kept, root: Path) -> Kept:
+    """The pinned run with another run's ``receipt.json`` and ``emits/`` in its directory."""
+    other = _other_run(root)
+    copied = _copy_of(kept, root)
+    shutil.copy(other.receipt_path, copied.layout.receipt_path)
+    shutil.rmtree(copied.layout.run_dir / "emits")
+    shutil.copytree(other.run_dir / "emits", copied.layout.run_dir / "emits")
+    return copied
+
+
+def test_another_runs_receipt_and_streams_are_not_delivered_to_kafka(
+    kept: Kept, tmp_path: Path
+) -> None:
+    swapped = _swapped(kept, tmp_path)
+    recorded = privacy_grade_of(swapped.layout, swapped.bundle)
+    assert recorded.grade is None and "receipt does not belong to its plan" in str(recorded.problem)
+    for audience in ("internal", "external"):
+        broker = FakeBroker()
+        with pytest.raises(FluxError) as caught:
+            deliver(swapped, broker, {"audience": audience}, profile=PROFILE)
+        assert caught.value.code.code == "FLX-3512"
+        assert broker.calls == [] and not any(broker.logs.values())
+
+
+def test_a_file_sink_still_takes_the_streams_of_a_swapped_run(kept: Kept, tmp_path: Path) -> None:
+    pytest.importorskip("pyarrow")
+    swapped = _swapped(kept, tmp_path)
+    delivered = deliver_run(
+        swapped.layout, swapped.bundle, target=open_target(f"parquet:{tmp_path / 'out'}")
+    )
+    assert len(delivered) == 6
+
+
+@pytest.mark.parametrize("profile", [None, TELCO_PROFILE])
+def test_an_external_target_needs_the_pinned_profile(kept: Kept, profile: Optional[Path]) -> None:
+    broker = FakeBroker()
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, broker, EXTERNAL, profile=profile)
+    assert caught.value.code.code == "FLX-3512" and "--profile" in str(caught.value)
+    assert broker.calls == [] and broker.topics == {}
+
+
+def test_an_internal_target_needs_no_profile(kept: Kept) -> None:
+    recorded = privacy_grade_of(kept.layout, kept.bundle)
+    assert recorded.grade == "P1" and recorded.profile_grade is None
+    assert privacy_grade_of(kept.layout, kept.bundle, profile=PROFILE).profile_grade == "P1"
+    assert "pair" in str(
+        privacy_grade_of(kept.layout, kept.bundle, profile=TELCO_PROFILE).profile_problem
+    )
+
+
+def test_an_external_target_takes_a_run_the_pinned_profile_grades_p3(
+    kept: Kept, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No fixture releases a profile under differential privacy for the devices bundle, so the
+    profile's grading is replaced by one that grades P3; everything else is the engine's own."""
+    from flux_engine.core.grades import Pattern
+    from flux_engine.stages import _grades
+
+    real = _grades.run_grade
+
+    def graded_p3(*args: Any, **kwargs: Any) -> Any:
+        found = real(*args, **kwargs)
+        return type("Graded", (), {"pattern": Pattern.P3, "profile": found.profile})()
+
+    monkeypatch.setattr(_grades, "run_grade", graded_p3)
+    broker = FakeBroker()
+    receipts = deliver(kept, broker, EXTERNAL, profile=PROFILE)
+    assert len(receipts) == 6 and any(broker.logs.values())
+    for receipt in receipts:
+        assert receipt.writer["audience"] == "external"
+        assert receipt.writer["privacyGrade"] == "P3" and receipt.writer["profileGrade"] == "P3"
+
+
+def test_a_bundle_that_is_not_the_plans_has_no_grade(kept: Kept, tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    shutil.copytree(kept.bundle, bundle)
+    path = bundle / "simulation.flux.yml"
+    path.write_text(path.read_text(encoding="utf-8").replace("seed: 42", "seed: 43"))
+    broker = FakeBroker()
+    with pytest.raises(FluxError) as caught:
+        deliver_run(kept.layout, bundle, target=target_of(broker), profile=PROFILE)
+    assert caught.value.code.code == "FLX-3512" and "input digest" in str(caught.value)
+    assert broker.calls == []
+
+
+def test_apply_run_id_takes_a_profile_with_a_sink_and_refuses_it_without(
+    kept: Kept, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copied = _copy_of(kept, tmp_path)
+    state = copied.layout.run_dir.parents[1]
+    refused = apply(kept.bundle, run_id=copied.layout.run_id, state_dir=state, profile=PROFILE)
+    assert refused.exit_code == 2 and "--profile" in refused.stderr
+    result = _through_apply(copied, FakeBroker(), monkeypatch, INTERNAL, PROFILE)
+    assert result.success, result.stderr
+    writers = [receipt["writer"] for receipt in result.artifacts["sinks"]["receipts"]]
+    assert {writer["profileGrade"] for writer in writers} == {"P1"}

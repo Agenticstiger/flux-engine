@@ -100,8 +100,9 @@ options:
                         extensions['com.agentics.flux/1'].profile
                         (docs/spec/PROFILE-SPEC.md); refused when its digest
                         is not the pinned one, and when the Simulation pins
-                        none; read only for a fresh plan, so refused with
-                        --run-id
+                        none; with --run-id, read only with --sink, so a
+                        sink's external audience can be graded from it, and
+                        refused without
   --state-dir STATE_DIR
                         run-state directory (default: ./.flux)
   -j, --json            emit machine-readable JSON

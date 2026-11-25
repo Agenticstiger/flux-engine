@@ -90,6 +90,7 @@ def _deliver_step(
     stdout_lines: List[str],
     *,
     ship: bool,
+    profile: Union[str, Path, None] = None,
 ) -> Optional[StageResult]:
     """Write every stream to *target* and record the receipts; a failed result or ``None``."""
     from flux_engine.stages.deliver import deliver, deliver_run, receipt_line, write_receipts
@@ -110,10 +111,13 @@ def _deliver_step(
                 record=record,
                 layout=layout,
                 bundle_directory=Path(bundle_directory),
+                profile=profile,
             )
         else:
             # A committed run that was kept holds no execution in memory: its files are delivered.
-            receipts = deliver_run(layout, Path(bundle_directory), target=target, record=record)
+            receipts = deliver_run(
+                layout, Path(bundle_directory), target=target, record=record, profile=profile
+            )
         receipts_path = layout.sink_receipts_path
     except FluxError as error:
         artifacts["sinks"] = {"ran": True, "ok": False, "sink": target.name}
@@ -420,7 +424,15 @@ def _run(
 
     if target is not None:
         failed = _deliver_step(
-            target, bundle_directory, applied, run_id, state_dir, artifacts, stdout_lines, ship=ship
+            target,
+            bundle_directory,
+            applied,
+            run_id,
+            state_dir,
+            artifacts,
+            stdout_lines,
+            ship=ship,
+            profile=profile,
         )
         if failed is not None:
             return failed

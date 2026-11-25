@@ -94,7 +94,7 @@ class Prepared:
             rows=len(rows),
             output_digest=digest,
             declared_types=tuple(column.declared_type for column in expose.columns),
-            privacy_grade=privacy_grade_of(self.layout),
+            privacy_grade=privacy_grade_of(self.layout, self.bundle),
             bundle_directory=self.bundle,
             simulation_id=SIMULATION,
         )

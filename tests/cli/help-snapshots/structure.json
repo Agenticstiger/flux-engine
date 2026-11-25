@@ -963,7 +963,7 @@
         "default": "None",
         "type": null,
         "required": false,
-        "help": "the profile document the Simulation pins under extensions['com.agentics.flux/1'].profile (docs/spec/PROFILE-SPEC.md); refused when its digest is not the pinned one, and when the Simulation pins none; read only for a fresh plan, so refused with --run-id",
+        "help": "the profile document the Simulation pins under extensions['com.agentics.flux/1'].profile (docs/spec/PROFILE-SPEC.md); refused when its digest is not the pinned one, and when the Simulation pins none; with --run-id, read only with --sink, so a sink's external audience can be graded from it, and refused without",
         "metavar": "PATH",
         "choices": null
       },
