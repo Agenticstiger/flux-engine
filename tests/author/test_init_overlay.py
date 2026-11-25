@@ -519,5 +519,5 @@ def test_an_overlay_citation_into_an_emptied_calendar_entry_is_refused_at_plan(
     assert not planned.success
     assert planned.error_code == "FLX-5036", planned.stderr
     assert (
-        EMPTIED_ENTRY in planned.stderr and "holds none of its three histograms" in planned.stderr
+        EMPTIED_ENTRY in planned.stderr and "which holds none of its statistics" in planned.stderr
     )
