@@ -177,11 +177,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   holds, so `tier` given `model` follows the `model` each row carries; a plan with such a column says
   `projectedGivens: "afterProjection"` (plan.json states only that key; the generator document the plan's digest
   covers names the held columns as `heldGivens`), and a recorded plan without the key replays the draw it was made
-  with. The plan refuses, `FLX-3403` naming both columns and the entry, what that cannot serve: a column drawn `given` the
-  `op`, `at`, `date`, `type` or period column, a kind's override or an image, one with `allocation: exact`, and one
-  drawn `given` a column of the version the history may fill with a value no level of the emit's names (a
-  `nullFraction`, a rule, a relationship or the history's `end` sets it, or other levels) (ADR 0027, the amendments
-  of 2026-11-24 and 2026-11-25).
+  with. Where the column of the version holds a value no level of the emit's names (a `nullFraction`, a rule, a
+  relationship or the history's `end` sets it, or the history draws other levels), the column drawn `given` it is
+  drawn from its own declared `support`, equal weights, which must name the levels its table names (and `maxCardinality`
+  with it); the plan prints one note for each such column, and `fallbackGivens` in the generator document names the
+  parents, so the digest covers them. The plan refuses, `FLX-3403` naming both columns and the entry, what that cannot
+  serve: a column drawn `given` the `op`, `at`, `date`, `type` or period column, a kind's override or an image, one with
+  `allocation: exact`, and one drawn `given` a column of the version the history may fill with such a value when it
+  declares no support naming its table's levels (ADR 0027, the amendments of 2026-11-24 and 2026-11-25).
 - The run's window now covers the whole range of every date column, the date range the contract declares, and the bins
   the column is drawn from (those that carry weight), so `init` no longer cuts a column at a window that other columns
   imply. A column's bins are cut only at a window you pass with `--window`. A contract range that ends in the year

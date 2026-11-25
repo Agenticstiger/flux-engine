@@ -18,7 +18,7 @@ import pytest
 
 from flux_engine.core.errors import FluxError
 from flux_engine.generator import columns
-from flux_engine.generator.rows import cells_before_rules, held_levels
+from flux_engine.generator.rows import UNNAMED_LEVEL, cells_before_rules, held_levels
 
 from .test_columns import _both, _given_plan, _root
 
@@ -67,3 +67,8 @@ def test_a_held_value_that_is_no_level_is_refused() -> None:
 
 def test_held_values_are_read_as_their_levels() -> None:
     assert held_levels(_given_plan(), {"market": ["IE", "DE"]}) == {"market": ["IE", "DE"]}
+
+
+def test_a_value_no_level_names_holds_the_unnamed_level_in_a_fallback_column() -> None:
+    held = held_levels(_given_plan(), {"market": ["DE", "NL", None]}, ("market",))
+    assert held == {"market": ["DE", UNNAMED_LEVEL, UNNAMED_LEVEL]}

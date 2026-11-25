@@ -70,6 +70,7 @@ __all__ = [
     "ProjectionPlan",
     "chain_of",
     "derived_rows",
+    "fallback_notes",
     "held_givens",
     "refuse_rows",
     "projection_of",
@@ -111,6 +112,8 @@ class ProjectionPlan:
     for the moment of a call and is no part of the plan. ``held`` names the columns of the version
     the entry sets that a column of the emit is drawn given: their levels are the version's, held
     in the row before the emit's own cells are drawn (ADR 0027, the amendment of 2026-11-25).
+    ``fallback`` names those of them the history may hold a value no level of the emit's column
+    names in: a column drawn given such a column is drawn from its own distribution there.
     """
 
     kind: str
@@ -121,6 +124,7 @@ class ProjectionPlan:
     root: Optional[SeedTreeRoot] = field(default=None, compare=False, repr=False)
     window: Optional[Tuple[int, int]] = None
     held: Tuple[str, ...] = ()
+    fallback: Tuple[str, ...] = ()
 
     def as_document(self) -> Dict[str, Any]:
         """The ``projection`` member of the plan's document: where the rows come from."""
@@ -134,6 +138,8 @@ class ProjectionPlan:
             document["entry"] = self.entry.as_member()
         if self.held:
             document["heldGivens"] = list(self.held)
+        if self.fallback:
+            document["fallbackGivens"] = list(self.fallback)
         return document
 
 
@@ -286,11 +292,13 @@ def _projection(
             )
         return ProjectionPlan(key, of, history, options)
     sets = projected_cells(key, options, history, plan)
-    held = held_givens(key, options, sets, history, plan) if after else ()
+    held, fallback = held_givens(key, options, sets, history, plan) if after else ((), ())
     if not after:
         _unheld_givens(key, options, sets, plan)
     _refuse_rules_on_projected_cells(key, sets, plan)
-    return ProjectionPlan(key, of, history, entry=options, window=plan.time_bounds, held=held)
+    return ProjectionPlan(
+        key, of, history, entry=options, window=plan.time_bounds, held=held, fallback=fallback
+    )
 
 
 def projected_cells(
@@ -408,19 +416,23 @@ def _given_over_projected(
 
 def held_givens(
     key: str, entry: Any, sets: Mapping[str, str], history: GeneratorPlan, plan: GeneratorPlan
-) -> Tuple[str, ...]:
-    """The columns of the version a column of the emit is drawn given, or the refusal (``FLX-3403``).
+) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
+    """The columns of the version a column of the emit is drawn given, and which may hold no level.
 
     Such a column's level is the version's: the entry's cells are set before the emit draws its
     own, so the column drawn given it reads the level the row holds (ADR 0027, the amendment of
-    2026-11-25). Refused, as a draw this cannot serve, is a column drawn given any other cell the
-    entry sets (an op, at, date, type or period column, a kind's override, a before or after
-    image), whose values are not drawn from the column's levels; a column with ``allocation:
-    exact``, whose classes are allotted by the draw of its parent; and a column of the version that
-    the history may fill with a value that is none of the emit's levels (:func:`_unheld_reason`).
+    2026-11-25). Refused (``FLX-3403``), as a draw this cannot serve, is a column drawn given any
+    other cell the entry sets (an op, at, date, type or period column, a kind's override, a before
+    or after image), whose values are not drawn from the column's levels; and a column with
+    ``allocation: exact``, whose classes are allotted by the draw of its parent.
+
+    A column of the version the history may fill with a value that is none of the emit's levels
+    (:func:`_unheld_reason`) is the second member: where a row holds such a value, the column drawn
+    given it is drawn from its own declared support, and is refused when it declares none.
     """
     own, _ = _period_cells(entry) if key == PERIODS_KEY else _event_cells(entry)
     held: Dict[str, None] = {}
+    fallback: Dict[str, None] = {}
     for column_plan, parent in _given_over_projected(sets, plan):
         name = column_plan.column.name
         where = (
@@ -441,9 +453,59 @@ def held_givens(
             )
         reason = _unheld_reason(history, plan, parent)
         if reason is not None:
-            raise _refuse(f"{where}, and {reason}, which no level of {parent!r} names")
+            gap = _own_distribution_gap(column_plan)
+            if gap is not None:
+                raise _refuse(
+                    f"{where}, and {reason}, which no level of {parent!r} names; {name!r} has no "
+                    f"distribution of its own to draw from there ({gap}); declare a support for "
+                    f"{name!r} that names the levels its table names, or draw it on its own"
+                )
+            fallback[parent] = None
         held[parent] = None
-    return tuple(sorted(held))
+    return tuple(sorted(held)), tuple(sorted(fallback))
+
+
+def _own_distribution_gap(column_plan: ColumnPlan) -> Optional[str]:
+    """Why a column drawn given another has no distribution of its own, or ``None`` when it has one.
+
+    The distribution is its declared ``support``, equal weights over it, and it must name exactly the
+    levels the column's table names, so no column given this one meets a level it has no row for.
+    """
+    statistics = column_plan.statistics
+    if column_plan.family is not Family.CATEGORICAL or is_binned(column_plan):
+        return "it is drawn from bins"
+    if not statistics.support:
+        return "it declares no support"
+    table = statistics.level_weights_given
+    named = set(next(iter(table.values()))) if table else set()
+    if set(statistics.support) != named:
+        return f"its support names {sorted(statistics.support)} and its table {sorted(named)}"
+    return None
+
+
+def fallback_notes(plan: GeneratorPlan) -> Tuple[str, ...]:
+    """One sentence for each column of *plan*'s emit drawn from its own distribution where its parent holds no level.
+
+    The sentence names the column, its parent in the version and what sets the parent's unnamed
+    values. Advice only: nothing here changes how a value is drawn, and the plan document and its
+    digests carry the columns (``fallbackGivens``) rather than the sentence.
+    """
+    projection = plan.projection
+    if projection is None or not projection.fallback:
+        return ()
+    expose_id = plan.expose.expose_id
+    sets = projected_cells(projection.kind, projection.entry, projection.history, plan)
+    notes = []
+    for column_plan, parent in _given_over_projected(sets, plan):
+        if parent not in projection.fallback:
+            continue
+        name = column_plan.column.name
+        reason = _unheld_reason(projection.history, plan, parent)
+        notes.append(
+            f"note: {expose_id}.{name} is drawn given {parent}; where {parent} holds a value no "
+            f"level names ({reason}), {name} is drawn from its own distribution"
+        )
+    return tuple(notes)
 
 
 def _unheld_givens(key: str, entry: Any, sets: Mapping[str, str], plan: GeneratorPlan) -> None:

@@ -129,7 +129,13 @@ from flux_engine.generator.history import (
     parent_bound_notes,
 )
 from flux_engine.generator.plugin import PluginExpose, check_rows, generate_values, request_of
-from flux_engine.generator.projections import chain_of, derived_rows, project_plan, projection_of
+from flux_engine.generator.projections import (
+    chain_of,
+    derived_rows,
+    fallback_notes,
+    project_plan,
+    projection_of,
+)
 from flux_engine.generator.rates import Rates
 from flux_engine.generator.reference import ReferenceRows, build_reference_plan
 from flux_engine.generator.relations import (
@@ -764,6 +770,7 @@ def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
         period_end_null_notes(emits)
         + end_share_notes(plans, result.root)
         + parent_bound_history_notes(plans, result.root)
+        + tuple(note for plan in plans for note in fallback_notes(plan))
         + tuple(
             note for plan in plans for note in range_cut_notes(plan.expose.expose_id, plan.columns)
         )

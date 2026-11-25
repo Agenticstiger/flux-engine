@@ -54,6 +54,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Collection,
     Dict,
     FrozenSet,
     Iterator,
@@ -1647,6 +1648,11 @@ def _categorical_levels(
         raise FluxError(
             FLX_3402, f"{column.name}: a conditional column is drawn with a given level"
         )
+    table = statistics.level_weights_given.get(given_level)
+    if table is None and statistics.support:
+        # A level no row of the table is keyed by: a projection holds a value no level of the
+        # parent names (:data:`UNNAMED_LEVEL`), and the column draws from its own declared support.
+        return _declared_support(tuple(statistics.support))
     return _weighted_levels(tuple(sorted(statistics.level_weights_given[given_level].items())))
 
 
@@ -2212,6 +2218,11 @@ def _conditional_row(
 #: holds, in row order (ADR 0027, the amendment of 2026-11-25).
 HeldLevels = Mapping[str, Sequence[str]]
 
+#: The level a row holds in a column of a projection whose value no level of that column names. No
+#: weight table is keyed by it (a NUL cannot be written in a declaration), so a column drawn given
+#: such a column and declaring a ``support`` draws from that support (:func:`_categorical_levels`).
+UNNAMED_LEVEL = "\x00unnamed"
+
 
 def _held_row(held: Optional[HeldLevels], position: int) -> Mapping[str, str]:
     """The level of each column *held* names at the slice's row *position*."""
@@ -2220,24 +2231,33 @@ def _held_row(held: Optional[HeldLevels], position: int) -> Mapping[str, str]:
     return {name: levels[position] for name, levels in held.items()}
 
 
-def held_levels(plan: GeneratorPlan, values: Mapping[str, Sequence[Any]]) -> HeldLevels:
+def held_levels(
+    plan: GeneratorPlan,
+    values: Mapping[str, Sequence[Any]],
+    fallback: Collection[str] = (),
+) -> HeldLevels:
     """The level of each value of *values*, by column: a column's class of the value a row holds.
 
     A categorical column's level is the one that renders to the value, and a column drawn from
-    bins takes the bin that holds it (:func:`bin_class`). The plan admits only a column whose
-    every value is one of its classes (:func:`flux_engine.generator.projections.held_givens`), so a
-    value with no level is refused (``FLX-3403``) as a plan the generator cannot draw.
+    bins takes the bin that holds it (:func:`bin_class`). A value with no level is refused
+    (``FLX-3403``) as a plan the generator cannot draw, except in a column of *fallback*, whose
+    columns drawn given it have a distribution of their own to draw from where it holds a value no
+    level names (a NULL, or a value outside its levels): such a value holds :data:`UNNAMED_LEVEL`,
+    which no weight table is keyed by (ADR 0027, the amendment of 2026-11-25).
     """
     found: Dict[str, Sequence[str]] = {}
     for name, cells in values.items():
         column_plan = plan.column_plan(name)
+        free = name in fallback
         if is_binned(column_plan):
-            found[name] = [bin_class(column_plan, cell) for cell in cells]
+            found[name] = [_bin_held(column_plan, cell, free) for cell in cells]
             continue
         index = level_index(column_plan)
         levels: List[str] = []
         for cell in cells:
             level = index.get((type(cell), cell))
+            if level is None and free:
+                level = UNNAMED_LEVEL
             if level is None:
                 from flux_engine.generator.relations import FLX_3403
 
@@ -2249,6 +2269,20 @@ def held_levels(plan: GeneratorPlan, values: Mapping[str, Sequence[Any]]) -> Hel
             levels.append(level)
         found[name] = levels
     return found
+
+
+def _bin_held(column_plan: ColumnPlan, cell: Any, free: bool) -> str:
+    """The bin a held *cell* is in; for a *free* column, :data:`UNNAMED_LEVEL` where it is in none.
+
+    A NULL, or a value of a kind the bins do not hold, is in no bin. A number outside every bin is
+    in the nearest, as the draw of the column itself would place it (:func:`bin_class`).
+    """
+    if not free:
+        return bin_class(column_plan, cell)
+    try:
+        return UNNAMED_LEVEL if cell is None else bin_class(column_plan, cell)
+    except FluxError:
+        return UNNAMED_LEVEL
 
 
 def level_index(column_plan: ColumnPlan) -> Mapping[Tuple[type, Any], str]:

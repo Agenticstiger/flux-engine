@@ -448,6 +448,7 @@ def events_rows(
     held = held_levels(
         own_plan,
         {name: _image(history_rows, low, about, position[name]) for name in projection.held},
+        projection.fallback,
     )
     own = cells_before_rules(own_plan, start, stop, root=root, held=held) if free else ()
     columns: List[List[Any]] = []

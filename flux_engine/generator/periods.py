@@ -516,6 +516,7 @@ def periods_rows(
             for index, source in named
             if names[index] in projection.held
         },
+        projection.fallback,
     )
     own = cells_before_rules(own_plan, start, stop, root=root, held=held)
     position = names.index(entry.column)
