@@ -98,8 +98,8 @@ pair is one bisection into the sorted pairs: 400,000 rows at a density of 0.8 ta
 
 `plan.json` gains, for the emit only, an `association` member: the relationships, `distinct`, the rows, the moves of
 steps 2 and 3, what the repair did (`switches`, `placed`, `rebuilt`) and each side's realised total variation distance
-from its shape (`null` for a side with none). `fluxsim verify` adds a line `association:<a>,<b>.pairs` (the share of
-rows whose pair occurs once, as a bridge's line) and, for each side with a shape, `association:<a>,<b>.rows:<side>`,
+from its shape (`null` for a side with none). `fluxsim verify` adds, for a table that holds each pair once
+(`distinct`), a line `association:<a>,<b>.pairs` (the share of rows whose pair occurs once, as a bridge's line) and, for each side with a shape, `association:<a>,<b>.rows:<side>`,
 whose share is `1 - d` for that distance and which is met when `d` is at most the side's `counts` tolerance (`0.10`
 when it declares none). A count no class of the shape holds is a mass of its own, so it adds its whole share to `d`.
 `fluxsim plan` prints a note when the caps or the Gale-Ryser step moved rows, and when the whole table was laid out
