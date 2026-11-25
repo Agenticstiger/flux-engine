@@ -343,8 +343,11 @@ def test_no_entry_leaves_every_published_member_unused_with_the_reason(tmp_path:
     for pointer in published:
         assert states[pointer]["state"] == "unused", pointer
         assert "the versions do not chain" in states[pointer]["note"]
+    # No member is read, so the register names the history whole, as the reader needs.
     register = _namespace(tmp_path)["unused"]
-    assert f"{HISTORY}/versionsPerEntity" in {item["statistic"]["pointer"] for item in register}
+    pointers = {item["statistic"]["pointer"] for item in register}
+    assert HISTORY in pointers
+    assert not [pointer for pointer in pointers if pointer.startswith(HISTORY + "/")]
 
 
 def test_every_published_member_is_used_or_unused_with_a_reason(tmp_path: Path) -> None:

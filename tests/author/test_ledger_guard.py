@@ -6,8 +6,10 @@
 
 A data owner who releases only the statistics the ledger calls used must get the bundle the
 whole profile gave. So, for each profile below, the bundle is written, and then once for each
-statistic the ledger lists as unused, with that statistic removed from the profile; the
-Simulation document must come out the same.
+statistic the Simulation lists as unused, with that statistic removed from the profile; the
+Simulation document must come out the same. An entry of format 1-3-0 the profile reader refuses
+without some of its members (a calendar entry, a date pair, an exposure, a history) is listed whole
+when no member is read, so it is removed whole.
 
 What is compared is the whole document less the two parts that name the profile by
 construction: ``extensions[namespace].profile`` (the profile's digest) and
@@ -41,7 +43,15 @@ pytestmark = pytest.mark.integration
 NAMESPACE = "com.agentics.flux/1"
 
 #: Pointers a removal cannot be judged at, by scenario, each with why.
-SKIPPED: Dict[str, Dict[str, str]] = {}
+SKIPPED: Dict[str, Dict[str, str]] = {
+    "edition-history": {
+        "/tables/edition/history/columns/language": (
+            "it leaves with the reasons over it, which the register lists beside it: the reader "
+            "refuses reasons over a column the history does not track. "
+            "test_init_ledger_entries drops the whole list at once."
+        ),
+    },
+}
 
 _DATE_TABLE = "/tables/orders/columns/placed_on"
 
@@ -65,6 +75,20 @@ def _children_scenario() -> Tuple[str, Dict[str, Any]]:
     )
     profile["_schemaURL"] = profile["_schemaURL"].replace("1-0-0", "1-1-0")
     return test_children.CONTRACT, profile
+
+
+def _library_scenario() -> Tuple[str, Dict[str, Any]]:
+    """Date pairs, a calendar and an exposure, each read or not, that the reader holds whole."""
+    from tests.cli import test_init_ledger_entries as library
+
+    return library.CONTRACT, library._profile()
+
+
+def _editions_scenario() -> Tuple[str, Dict[str, Any]]:
+    """A history with a tracked column that never moves, which the reader holds whole."""
+    from tests.cli import test_init_ledger_entries as library
+
+    return library.EDITION_CONTRACT, library._edition_profile()
 
 
 def _dated(maximum: str) -> Tuple[str, Dict[str, Any]]:
@@ -127,6 +151,9 @@ WINDOWS: Dict[str, Tuple[str, str]] = {
 SCENARIOS = {
     "ledger-shop": _ledger_scenario,
     "children": _children_scenario,
+    # An entry of format 1-3-0 leaves whole, or not at all: the reader refuses it without members.
+    "library-entries": _library_scenario,
+    "edition-history": _editions_scenario,
     # The maximum closes the top of a ladder whose next bin lies beyond the run's window.
     "date-max-past-the-ladder": lambda: _dated("1788220800000"),
     "date-max-in-the-ladder": lambda: _dated("1751241600000"),
@@ -188,10 +215,10 @@ def test_a_statistic_the_ledger_calls_unused_changes_nothing(name: str, tmp_path
     window = WINDOWS.get(name)
     first, whole = _author(tmp_path / "whole", contract, profile, window)
     assert first.exit_code == 0, first.stderr
+    # What the Simulation lists is what an owner reads and drops: it names an entry the profile
+    # reader refuses without some members whole, and none of those it needs beside one that is read.
     unused: List[str] = [
-        entry["pointer"]
-        for entry in first.artifacts["ledger"]["statistics"]
-        if entry["state"] == "unused"
+        item["statistic"]["pointer"] for item in whole["extensions"][NAMESPACE]["unused"]
     ]
     skipped = SKIPPED.get(name, {})
     expected = _comparable(whole)

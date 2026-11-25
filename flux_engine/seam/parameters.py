@@ -1619,6 +1619,28 @@ def _is_reference_entry(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> 
     )
 
 
+#: The entries of a format 1-3-0 profile the reader refuses without some of their statistics, by the
+#: shape of the pointer at one: a ``None`` is any one token. A list of unused statistics may name
+#: one whole, since leaving out a member of it alone leaves a document the reader refuses.
+_WHOLE_ENTRIES: Tuple[Tuple[Optional[str], ...], ...] = (
+    ("tables", None, "calendar", None),
+    ("tables", None, "datePairs", None),
+    ("tables", None, "history"),
+    ("tables", None, "history", "columns", None),
+    ("relationships", None, "dates", None),
+    ("relationships", None, "exposure", None),
+)
+
+
+def _is_whole_entry(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> bool:
+    """Whether *tokens* name an entry of format 1-3-0 that holds statistics, as a whole."""
+    return any(
+        len(tokens) == len(shape)
+        and all(want is None or want == token for want, token in zip(shape, tokens, strict=True))
+        for shape in _WHOLE_ENTRIES
+    ) and isinstance(_resolve(profile, tokens), Mapping)
+
+
 def _published(chain: Sequence[Tuple[Any, Tuple[str, ...]]]) -> bool:
     """Whether the profile published what the chain from a statistic to the target reaches.
 
@@ -1755,6 +1777,7 @@ def check_profile_citations(
             item.citation,
             unused_in,
             f"{item.label or f'{where}: unused[{item.index}]'}.statistic",
+            whole_entries=True,
         )
 
 
@@ -1797,9 +1820,15 @@ def check_contract_citations(
             ) from None
 
 
-def _check_citation(citation: Citation, profile: Mapping[str, Any], at: str) -> None:
-    """Refuse (``FLX-3113``) a citation, named *at*, that the pinned *profile* does not publish."""
-    landing = _landing(citation, profile, at)
+def _check_citation(
+    citation: Citation, profile: Mapping[str, Any], at: str, *, whole_entries: bool = False
+) -> None:
+    """Refuse (``FLX-3113``) a citation, named *at*, that the pinned *profile* does not publish.
+
+    A citation of an entry that holds statistics (a calendar entry, a date pair, an exposure, a
+    history) is read only with *whole_entries*, which only a statistic listed as unused has.
+    """
+    landing = _landing(citation, profile, at, whole_entries=whole_entries)
     if landing is None:
         return
     found, chain = landing
@@ -1827,7 +1856,7 @@ def _check_citation(citation: Citation, profile: Mapping[str, Any], at: str) -> 
 
 
 def _landing(
-    citation: Citation, profile: Mapping[str, Any], at: str
+    citation: Citation, profile: Mapping[str, Any], at: str, *, whole_entries: bool = False
 ) -> Optional[Tuple[Optional[str], List[Tuple[Any, Tuple[str, ...]]]]]:
     """Where *citation* lands: :func:`_cited_statistic`'s answer, or ``None`` for a ``rowCount``.
 
@@ -1847,6 +1876,14 @@ def _landing(
                 raise FluxError(
                     FLX_3113,
                     f"{at} is a table published whole under references, which has no "
+                    "definition; drop 'definition'",
+                )
+            return None
+        if whole_entries and _is_whole_entry(profile, citation.tokens):
+            if citation.definition is not None:
+                raise FluxError(
+                    FLX_3113,
+                    f"{at} is an entry of the profile that holds statistics, which has no "
                     "definition; drop 'definition'",
                 )
             return None

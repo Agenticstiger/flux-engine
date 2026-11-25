@@ -18,6 +18,12 @@ one state for each:
 The bundle records the unused ones in its parameter register
 (PARAMETER-REGISTER-SPEC, format 1-2-0), and ``--strict`` refuses them.
 
+The register lists what an owner can leave out, and the profile reader refuses a few entries of
+format 1-3-0 without some of their members (a calendar entry with none of its histograms, a date
+pair with no ``order``, an exposure with one of its two counts). So :meth:`Ledger.unused_entries`
+names such an entry whole when none of its statistics is read, and lists no member the reader
+needs beside one that is.
+
 The shape follows mypy's ``--warn-unused-configs`` and dbt's
 ``--warn-error-options``: every input that has no effect is named, with what it
 is, rather than dropped without a word.
@@ -26,10 +32,10 @@ is, rather than dropped without a word.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.author.forms import unread_reason
-from flux_engine.seam.parameters import render_pointer
+from flux_engine.seam.parameters import MAX_REASON_LENGTH, render_pointer
 from flux_stats.definitions import CORRELATION
 from flux_stats.rank_correlation import RANK_IDENTIFIERS
 
@@ -123,6 +129,25 @@ class LedgerEntry:
         return document
 
 
+@dataclass(frozen=True)
+class _Group:
+    """An entry of a format 1-3-0 profile, which the reader refuses without some of its members.
+
+    *members* are the statistics and metrics the ledger holds of it, by their tokens. *needed* are
+    the ones the reader requires of the entry (a date pair's ``order``, an exposure's two counts),
+    so one of them leaves only with the whole entry. *any_of* says the reader requires at least
+    one member, whichever (a calendar's three histograms). *held_by* is a member that has to leave
+    with this entry or not be there: a history lists its ``reasons`` over its tracked columns, and
+    one of those cannot leave while the reasons are kept.
+    """
+
+    tokens: Tuple[str, ...]
+    members: Tuple[Tuple[str, ...], ...]
+    needed: Tuple[Tuple[str, ...], ...] = ()
+    any_of: bool = False
+    held_by: Optional[Tuple[str, ...]] = None
+
+
 def _status(node: Mapping[str, Any]) -> Optional[str]:
     status = node.get("status")
     return str(status) if status is not None else None
@@ -154,6 +179,8 @@ class Ledger:
         noisy: Optional[Mapping[Tuple[str, ...], Mapping[str, str]]] = None,
     ) -> None:
         self._entries: Dict[Tuple[str, ...], LedgerEntry] = {}
+        #: The entries of format 1-3-0 whose members the reader does not let leave one by one.
+        self._groups: List[_Group] = []
         #: The statistics a profile of the contract would publish in place of the bundle's
         #: assumptions (register format 1-3-0, ``replacedBy``): each statistic's pointer and
         #: definition, with how many assumed numbers it would replace. Set once the register is built.
@@ -186,6 +213,7 @@ class Ledger:
                     ("relationships", str(index), "dates", str(position)),
                     pair,
                     _SECTION_REASONS["dates"],
+                    dated=True,
                 )
 
     def _relationship_exposure(self, index: int, item: Mapping[str, Any]) -> None:
@@ -194,15 +222,14 @@ class Ledger:
         for position, each in enumerate(exposure if isinstance(exposure, list) else ()):
             if not isinstance(each, Mapping):
                 continue
+            base = ("relationships", str(index), "exposure", str(position))
             for key in ("children", "activeDays"):
                 node = each.get(key)
                 if isinstance(node, Mapping):
-                    self._add(
-                        ("relationships", str(index), "exposure", str(position), key),
-                        node,
-                        _SECTION_REASONS["exposure"],
-                        metric=True,
-                    )
+                    self._add(base + (key,), node, _SECTION_REASONS["exposure"], metric=True)
+            # The reader needs both counts of an exposure.
+            counts = tuple(base + (key,) for key in ("children", "activeDays"))
+            self._group(base, counts, needed=counts)
 
     # -- reading the document ------------------------------------------------
 
@@ -228,11 +255,18 @@ class Ledger:
             tokens, definition, UNUSED, reason, self._noisy.get(tokens)
         )
 
-    def _statistics(self, base: Tuple[str, ...], item: Mapping[str, Any], reason: str) -> None:
+    def _statistics(
+        self, base: Tuple[str, ...], item: Mapping[str, Any], reason: str
+    ) -> List[Tuple[str, ...]]:
+        """List the statistics of *item*, and say where each is."""
         found = item.get("statistics")
+        listed: List[Tuple[str, ...]] = []
         for index, statistic in enumerate(found if isinstance(found, list) else ()):
             if isinstance(statistic, Mapping):
-                self._add(base + ("statistics", str(index)), statistic, reason, metric=False)
+                tokens = base + ("statistics", str(index))
+                self._add(tokens, statistic, reason, metric=False)
+                listed.append(tokens)
+        return listed
 
     def _table(self, name: str, table: Mapping[str, Any]) -> None:
         base = ("tables", name)
@@ -250,7 +284,12 @@ class Ledger:
             found = table.get(section)
             for index, item in enumerate(found if isinstance(found, list) else ()):
                 if isinstance(item, Mapping):
-                    self._pair(base + (section, str(index)), item, _SECTION_REASONS[section])
+                    self._pair(
+                        base + (section, str(index)),
+                        item,
+                        _SECTION_REASONS[section],
+                        dated=section == "datePairs",
+                    )
         self._rank_reasons(base, table.get("columnPairs"))
 
     def _columns(self, base: Tuple[str, ...], columns: Any) -> None:
@@ -286,22 +325,35 @@ class Ledger:
     def _calendar(self, base: Tuple[str, ...], calendar: Any) -> None:
         """List the month, day-of-week and hour-of-week histograms of a table's calendar as unused."""
         for index, item in enumerate(calendar if isinstance(calendar, list) else ()):
+            held: List[Tuple[str, ...]] = []
             for key in ("month", "dayOfWeek", "hourOfWeek"):
                 node = item.get(key) if isinstance(item, Mapping) else None
                 if isinstance(node, Mapping):
+                    tokens = base + ("calendar", str(index), key)
                     self._add(
-                        base + ("calendar", str(index), key),
+                        tokens,
                         node,
                         "no rule of fluxsim init reads this calendar histogram",
                         metric=False,
                     )
+                    held.append(tokens)
+            # The reader needs one of the three histograms, whichever.
+            self._group(base + ("calendar", str(index)), tuple(held), any_of=True)
 
-    def _pair(self, base: Tuple[str, ...], item: Mapping[str, Any], reason: str) -> None:
-        """A section's statistics, and the ``order`` of a date pair when it has one."""
-        self._statistics(base, item, reason)
+    def _pair(
+        self, base: Tuple[str, ...], item: Mapping[str, Any], reason: str, *, dated: bool = False
+    ) -> None:
+        """A section's statistics, and the ``order`` of a date pair when it has one.
+
+        A date pair (*dated*) is one entry the reader refuses without its ``order``; its statistics
+        may all be gone.
+        """
+        listed = self._statistics(base, item, reason)
         order = item.get("order")
         if isinstance(order, Mapping):
             self._add(base + ("order",), order, reason, metric=False)
+            if dated:
+                self._group(base, tuple(listed) + (base + ("order",),), needed=(base + ("order",),))
 
     def _rank_reasons(self, base: Tuple[str, ...], pairs: Any) -> None:
         """Give a rank correlation, and a Pearson correlation, of a column pair its own reason."""
@@ -316,19 +368,58 @@ class Ledger:
                 entry.note = _CORRELATION_REASON
 
     def _history(self, base: Tuple[str, ...], history: Mapping[str, Any]) -> None:
-        """The statistics of a table's ``history`` (profile format 1-3-0), each unused until read."""
+        """The statistics of a table's ``history`` (profile format 1-3-0), each unused until read.
+
+        The reader needs five of them and, of each tracked column, both its statistics, and it
+        refuses ``reasons`` over a column the history does not track.
+        """
+        listed: List[Tuple[str, ...]] = []
         for key in _HISTORY_MEMBERS:
             node = history.get(key)
             if isinstance(node, Mapping):
                 self._add(base + (key,), node, _HISTORY_REASON, metric=False)
+                listed.append(base + (key,))
+        reasons = base + ("reasons",)
         columns = history.get("columns")
         for name, entry in (columns.items() if isinstance(columns, Mapping) else ()):
+            tracked: List[Tuple[str, ...]] = []
             for key in ("initial", "transitions"):
                 node = entry.get(key) if isinstance(entry, Mapping) else None
                 if isinstance(node, Mapping):
-                    self._add(
-                        base + ("columns", str(name), key), node, _HISTORY_REASON, metric=False
-                    )
+                    tokens = base + ("columns", str(name), key)
+                    self._add(tokens, node, _HISTORY_REASON, metric=False)
+                    tracked.append(tokens)
+            listed.extend(tracked)
+            self._group(
+                base + ("columns", str(name)),
+                tuple(tracked),
+                needed=tuple(tracked),
+                held_by=reasons if reasons in self._entries else None,
+            )
+        needed = tuple(base + (key,) for key in _HISTORY_MEMBERS if key != "reasons")
+        self._group(base, tuple(listed), needed=needed)
+
+    def _group(
+        self,
+        tokens: Tuple[str, ...],
+        members: Tuple[Tuple[str, ...], ...],
+        *,
+        needed: Tuple[Tuple[str, ...], ...] = (),
+        any_of: bool = False,
+        held_by: Optional[Tuple[str, ...]] = None,
+    ) -> None:
+        """Note an entry of the profile at *tokens* the reader refuses without some of *members*."""
+        held = tuple(member for member in members if member in self._entries)
+        if held:
+            self._groups.append(
+                _Group(
+                    tokens,
+                    held,
+                    tuple(member for member in needed if member in self._entries),
+                    any_of,
+                    held_by,
+                )
+            )
 
     # -- what the rules did --------------------------------------------------
 
@@ -400,4 +491,46 @@ class Ledger:
         return counts
 
     def unused_entries(self) -> List[LedgerEntry]:
-        return [entry for entry in self._entries.values() if entry.state == UNUSED]
+        """What an owner can leave out of the profile, each as one pointer, with its reason.
+
+        An unused statistic is listed alone, except where the profile reader refuses an entry
+        without some of its members (:class:`_Group`). An entry no member of which the bundle
+        reads is listed whole, by its own pointer, in place of its members. In an entry with a
+        member the bundle reads, a member is listed alone only if the reader lets it leave alone,
+        and one it needs is not listed. A profile with exactly the listed pointers dropped is one
+        the reader accepts. The inventory (:meth:`__iter__`) still holds each statistic, with the
+        state the rules gave it.
+        """
+        listing: Dict[Tuple[str, ...], Optional[LedgerEntry]] = dict(self._entries)
+        for group in self._groups:
+            self._settle(group, listing)
+        return [entry for entry in listing.values() if entry is not None and entry.state == UNUSED]
+
+    def _settle(self, group: _Group, listing: Dict[Tuple[str, ...], Optional[LedgerEntry]]) -> None:
+        """Replace the members of *group* in *listing* by what an owner can leave out of it."""
+        members = [self._entries[tokens] for tokens in group.members]
+        if any(member.state == USED for member in members):
+            if not group.any_of:
+                for tokens in group.needed:
+                    listing[tokens] = None
+            return
+        unused = [member for member in members if member.state == UNUSED]
+        if not unused:
+            return
+        for tokens in group.members:
+            listing[tokens] = None
+        if group.held_by is not None and self._entries[group.held_by].state != UNUSED:
+            return
+        listing[group.members[0]] = LedgerEntry(
+            group.tokens, None, UNUSED, _joined_reasons([member.note for member in unused])
+        )
+
+
+def _joined_reasons(notes: Sequence[str]) -> str:
+    """The reasons of the members of an entry, each said once, as the one reason of the entry."""
+    distinct = list(dict.fromkeys(notes))
+    joined = "; ".join(distinct)
+    if len(joined) <= MAX_REASON_LENGTH:
+        return joined
+    more = len(distinct) - 1
+    return f"{distinct[0]}; and {more} other reason{'s' if more != 1 else ''} for its other members"
