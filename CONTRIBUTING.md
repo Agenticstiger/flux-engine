@@ -70,6 +70,16 @@ the lineage, publishing and Kafka sink tests against the real libraries, so
 install those extras first: `uv sync --extra dev --extra lineage --extra
 publish --extra kafka`, then `uv pip install "sqlalchemy>=2.0.18,<3"`.
 
+The tests that start a Kafka broker and a schema registry in Docker are not
+part of `make ci-local`. The `Kafka integration` workflow runs them daily and on
+demand, and `make kafka-integration` runs them where Docker is running.
+
+Two benchmarks run by hand and on no CI. `make bench` runs
+`tests/bench/test_kafka_sink_overhead.py` and the other sink benchmarks; it
+needs pytest-benchmark (`uv sync --extra dev --group accuracy`) and, for the
+Kafka sink, the `kafka` extra. `python -m tests.bench.kafka_real_broker` times
+the Kafka sink against a real broker and registry and needs Docker.
+
 No CI job runs [the end-to-end harness](e2e/aws/README.md) under `e2e/aws/`.
 It is a uv project of its own that checks FLUX the way a data owner would use
 it, against a relational source on AWS, and is run by hand. Its privacy judge

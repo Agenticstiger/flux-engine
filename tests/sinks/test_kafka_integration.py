@@ -70,8 +70,10 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 PROFILE = FIXTURES / "kafka-devices.profile.json"
 SIMULATION = "sim-devices"
 EXPOSES = ("site", "device_version", "reading", "device_current", "device_change", "device_month")
-KAFKA_IMAGE = "apache/kafka:4.4.0"
-REGISTRY_IMAGE = "ghcr.io/aiven-open/karapace:6.2.4"
+KAFKA_IMAGE = (
+    "apache/kafka:4.4.0@sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f"
+)
+REGISTRY_IMAGE = "ghcr.io/aiven-open/karapace:6.2.4@sha256:005eda40272a09f34e60605ae40b1c205c0a5119164b8a090a51ad7f939f79f3"
 PARTITIONS = 3
 
 

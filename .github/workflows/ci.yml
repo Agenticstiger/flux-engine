@@ -972,6 +972,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: flux-engine
+          persist-credentials: false
 
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -1034,6 +1035,19 @@ jobs:
             exec setpriv --reuid "$1" --regid "$2" --clear-groups \
               env "PATH=$3" "HOME=$4" scripts/offline_journey.sh "$5/offline-journey"
           ' sh "$(id -u)" "$(id -g)" "$PATH" "$HOME" "$RUNNER_TEMP"
+
+  # ----------------------------------------------------- kafka-integration
+  # The Kafka sink against a real broker and registry in Docker. It runs daily
+  # and on demand from its own workflow (kafka-integration.yml); it is called
+  # here on a manual run so a run of the whole suite includes it, and so a
+  # branch can run it before that workflow is on the default branch. Not a
+  # gate job: it is not in ci-gate's `needs`.
+  kafka-integration:
+    name: Kafka integration
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/kafka-integration.yml
 
   # ------------------------------------------------------------- ci-gate
   # The one required status check on main.

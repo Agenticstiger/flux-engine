@@ -46,8 +46,10 @@ from flux_engine.stages.deliver import deliver_run
 
 from ._kafka_streams import Prepared, generate
 
-KAFKA_IMAGE = "apache/kafka:4.4.0"
-REGISTRY_IMAGE = "ghcr.io/aiven-open/karapace:6.2.4"
+KAFKA_IMAGE = (
+    "apache/kafka:4.4.0@sha256:833b867a9585a141da455dc2b57431c65cbccb27f11c91f694444cca9f777e0f"
+)
+REGISTRY_IMAGE = "ghcr.io/aiven-open/karapace:6.2.4@sha256:005eda40272a09f34e60605ae40b1c205c0a5119164b8a090a51ad7f939f79f3"
 EVENTS = "device_change"
 
 
