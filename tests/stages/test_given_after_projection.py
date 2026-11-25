@@ -255,3 +255,118 @@ def test_a_plan_with_a_value_this_engine_does_not_know_is_refused(tmp_path: Path
     moved.plan_path.write_text(json.dumps(forged, indent=2, sort_keys=True), "utf-8")
     with pytest.raises(FluxError, match=f"FLX-2102.*{KEY}"):
         load_recorded_plan(moved)
+
+
+def _simulation(target: Path) -> Tuple[Path, Dict[str, Any]]:
+    path = target / "simulation.flux.yml"
+    return path, yaml.safe_load(path.read_text("utf-8"))
+
+
+def test_a_column_drawn_given_a_column_of_the_version_cannot_allot_exact_classes(
+    tmp_path: Path,
+) -> None:
+    # Without the guard the classes are allotted by the parent's draw while the row holds the
+    # version's level: wrong data, no error.
+    target = given_bundle(tmp_path, _fleet.EVENTS)
+    path, document = _simulation(target)
+    emit = document["extensions"][_fleet.NAMESPACE]["emits"][_fleet.EVENTS]
+    columns = emit["fidelity"]["columns"]
+    columns["model"]["allocation"] = "exact"
+    columns["tier"]["allocation"] = "exact"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    text = _refusal(target)
+    for word in (f"({_fleet.EVENTS})", "'tier'", "'model'", "allocation: exact"):
+        assert word in text, text
+
+
+def test_a_version_column_a_rule_of_the_history_sets_is_refused(tmp_path: Path) -> None:
+    target = given_bundle(tmp_path, _fleet.PERIODIC)
+    path, document = _simulation(target)
+    emits = document["extensions"][_fleet.NAMESPACE]["emits"]
+    emits[_fleet.HISTORY]["rules"] = [
+        {
+            "id": "model_is_fixed",
+            "language": "flux-expr/3",
+            "derive": "model",
+            "expr": "status || 'an'",
+        }
+    ]
+    del emits[_fleet.HISTORY]["fidelity"]["columns"]["model"]
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    text = _refusal(target)
+    for word in ("'tier'", "'model'", "model_is_fixed", "of the history sets it"):
+        assert word in text, text
+
+
+def test_a_version_column_the_history_ends_in_a_value_outside_the_levels_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The history's end value is one of its levels, and every level of the history is a level of
+    # the emit's column, so no declaration reaches this guard. It is pinned with the emit's levels
+    # read without ``truck``, which the history ends in and draws with no weight.
+    from flux_engine.generator import projections
+
+    real = projections.level_index
+
+    def without_truck(column_plan: Any) -> Any:
+        return {key: level for key, level in real(column_plan).items() if level != "truck"}
+
+    monkeypatch.setattr(projections, "level_index", without_truck)
+    history = {"levels": {"sedan": "0.5", "van": "0.5", "truck": "0"}}
+    target = given_bundle(tmp_path, _fleet.PERIODIC, history=history)
+    path, document = _simulation(target)
+    document["extensions"][_fleet.NAMESPACE]["history"][0]["end"] = {
+        "mode": "finalVersion",
+        "share": "0.25",
+        "column": "model",
+        "value": "truck",
+    }
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    text = _refusal(target)
+    for word in ("'tier'", "'model'", "end writes 'truck'"):
+        assert word in text, text
+
+
+def test_a_version_column_a_relationship_of_the_history_sets_is_refused(tmp_path: Path) -> None:
+    target = given_bundle(tmp_path, _fleet.PERIODIC)
+    contract = yaml.safe_load((target / _fleet.CONTRACT).read_text("utf-8"))
+    catalogue = yaml.safe_load(yaml.safe_dump(_fleet.expose(contract, _fleet.DEPOT)))
+    catalogue["exposeId"] = "model_type"
+    catalogue["binding"]["location"]["table"] = "model_type"
+    catalogue["contract"]["schema"] = [{"name": "model", "type": "STRING", "required": True}]
+    catalogue["semantics"] = {
+        "entities": [{"name": "model_type", "type": "primary", "expr": "model"}]
+    }
+    contract["exposes"].insert(1, catalogue)
+    history = _fleet.expose(contract, _fleet.HISTORY)
+    history["semantics"]["relationships"].append(
+        {
+            "name": "model_type",
+            "to": "model_type",
+            "fromColumns": ["model"],
+            "toColumns": ["model"],
+            "cardinality": "many_to_one",
+            "joinType": "inner",
+        }
+    )
+    _fleet.repin(target, contract)
+    path, document = _simulation(target)
+    flux = document["extensions"][_fleet.NAMESPACE]
+    flux["emits"]["model_type"] = {
+        "rows": 3,
+        "fidelity": {
+            "encoding": {"fractionalBits": 16, "rounding": "floor"},
+            "records": {"min": 1, "max": 1000000},
+            "columns": {"model": {"levels": dict(LEVELS)}},
+            "properties": [],
+            "budget": {"maxChecksPerState": 20, "maxStateAge": "P30D"},
+            "failureAction": "withholdBundle",
+        },
+    }
+    del flux["emits"][_fleet.HISTORY]["fidelity"]["columns"]["model"]
+    emits = document["spec"]["emits"]
+    emits.append({**emits[0], "exposeId": "model_type"})
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    text = _refusal(target)
+    for word in ("'tier'", "'model'", "a relationship of the history sets it"):
+        assert word in text, text
