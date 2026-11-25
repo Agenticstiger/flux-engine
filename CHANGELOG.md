@@ -177,6 +177,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Fixed
 
+- An instant before the year 1000 is written with a four-digit year on every platform, as RFC 3339 writes it
+  (`0001-01-01T00:00:00.000Z`). Below 1000 the engine used the platform's `strftime`, and glibc writes the year 1 as
+  `1`: on Linux a TIMESTAMP cell then held no RFC 3339 instant, and `fluxsim init` failed on a run window that starts
+  before 1000, such as one a profile's year grid gives when its first bin, from 0001-01-01, holds records. macOS
+  wrote four digits already, so its output does not change.
 - `plan` refused (`FLX-3403`), and `validate` warned of, a date column whose declared range reaches past the run's
   window even when its draw stays inside it, as a range read from a profile does (its full year grid, with weight only
   in the bins inside the window). Both now read the edges the draw can reach: the weighted bins' hull, or the declared
