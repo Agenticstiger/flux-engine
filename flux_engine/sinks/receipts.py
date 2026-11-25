@@ -96,13 +96,13 @@ class StreamContext:
         No digest covers it.
     committed
         How far the run's ``sink-receipts.json`` says this stream's expose was committed by a
-        sink that commits a stream in parts, as receipt documents of the stream so far (any
-        sink, any target), or empty. A receipt of the whole stream replaces its entry there.
+        sink that commits what it sends, as receipt documents of the stream so far (any sink,
+        any target), or empty. A receipt of the whole stream replaces its entry there.
         Every other sink ignores it. No digest covers it.
     record_committed
         Keeps a receipt of the stream so far in the run's ``sink-receipts.json``, or ``None``
-        when the caller keeps no record. A sink that commits a stream in parts calls it after
-        each commit, so a later delivery can tell what reached the destination even when the
+        when the caller keeps no record. A sink that commits what it sends calls it after each
+        commit, so a later delivery can tell what reached the destination even when the
         destination has forgotten it. Every other sink ignores it.
     """
 

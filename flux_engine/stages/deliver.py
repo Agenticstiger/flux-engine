@@ -23,7 +23,7 @@ line would mean the line was not the engine's, and is refused.
 sink, target and expose: delivering the same run to a second place adds to
 the document, and delivering it again to the same place replaces that
 entry. The run id is a function of the plan, so every receipt in the file
-is about the same streams. A sink that commits a stream in parts also keeps
+is about the same streams. A sink that commits what it sends also keeps
 there, under ``progress``, a receipt of the stream so far after each commit,
 until the stream's own receipt replaces it.
 """
@@ -353,8 +353,8 @@ def deliver(
     is held to (:func:`privacy_grade_of`, which needs *bundle_directory* too, and reads *profile*,
     the file the command was given); with *bundle_directory*, the bundle and the Simulation, so a
     sink can find a stream's declarations. Neither changes a row. *record_committed* goes to every
-    stream's sink as ``StreamContext.record_committed``; a sink that commits a stream in parts
-    calls it after each commit (:func:`write_progress` keeps what it is given).
+    stream's sink as ``StreamContext.record_committed``; a sink that commits what it sends calls
+    it after each commit (:func:`write_progress` keeps what it is given).
     """
     grade = _grade_for(layout, bundle_directory, profile)
     document = _recorded_document(layout) if layout is not None else {}
@@ -670,28 +670,53 @@ def _write_document(layout: RunLayout, receipts: _Entries, progress: _Entries) -
     return path
 
 
+def _destination_id(entry: Mapping[str, Any]) -> Optional[str]:
+    """The id a destination gives itself, as a receipt's writer records it (``clusterId``), or ``None``."""
+    writer = entry.get("writer")
+    found = writer.get("clusterId") if isinstance(writer, Mapping) else None
+    return found if isinstance(found, str) else None
+
+
+def _same_place(entry: Mapping[str, Any], receipt: Mapping[str, Any]) -> bool:
+    """Whether *entry* is about the stream and the place *receipt* names.
+
+    The same sink, expose and table, on the same destination: the same destination id when both
+    name one (a Kafka cluster's, however its target was written), else the same target
+    (:func:`_key`).
+    """
+    if any(entry.get(name) != receipt.get(name) for name in ("sink", "exposeId", "table")):
+        return False
+    ours, theirs = _destination_id(entry), _destination_id(receipt)
+    if ours is not None and theirs is not None:
+        return ours == theirs
+    return _key(dict(entry)) == _key(dict(receipt))
+
+
 def write_receipts(layout: RunLayout, receipts: Sequence[SinkReceipt]) -> Path:
     """Merge *receipts* into ``<run>/sink-receipts.json``; returns its path.
 
-    A stream's receipt replaces the entry ``progress`` held for it (:func:`write_progress`).
+    A stream's receipt replaces every entry ``progress`` held for that stream in that place
+    (:func:`write_progress`, :func:`_same_place`).
     """
     existing = _recorded_document(layout)
     entries, progress = _by_key(existing, "receipts"), _by_key(existing, "progress")
     for receipt in receipts:
         document = receipt.as_document()
         entries[_key(document)] = document
-        progress.pop(_key(document), None)
+        progress = {
+            key: entry for key, entry in progress.items() if not _same_place(entry, document)
+        }
     return _write_document(layout, entries, progress)
 
 
 def write_progress(layout: RunLayout, receipt: SinkReceipt) -> Path:
     """Keep *receipt*, of a stream so far, under ``progress`` in ``<run>/sink-receipts.json``.
 
-    A sink that commits a stream in parts calls this after each commit, through
+    A sink that commits what it sends calls this after each commit, through
     ``StreamContext.record_committed``. The entry replaces the stream's earlier one, and the
     stream's own receipt replaces it in turn (:func:`write_receipts`). ``FLX-3505`` when the file
-    cannot be written: the delivery stops there, and a later one resumes from what the destination
-    holds.
+    cannot be written: the delivery stops there, and the part just committed is not in the record,
+    so the message says to deliver again while the destination still holds the stream's progress.
     """
     existing = _recorded_document(layout)
     entries, progress = _by_key(existing, "receipts"), _by_key(existing, "progress")
@@ -703,8 +728,9 @@ def write_progress(layout: RunLayout, receipt: SinkReceipt) -> Path:
         raise FluxError(
             FLX_3505,
             f"sink-receipts.json could not keep how far expose {receipt.expose_id!r} was "
-            f"committed ({type(error).__name__}); the delivery stops here, and the next one "
-            "resumes from what the destination holds",
+            f"committed ({type(error).__name__}), so the delivery stops here and that part is not "
+            "in the run's record; deliver again while the destination still holds the stream's "
+            "progress, and the delivery resumes after the part",
         ) from None
 
 

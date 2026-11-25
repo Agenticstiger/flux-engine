@@ -236,10 +236,11 @@ failure, a forced abort and a second delivery of the same run.
 The brokers drop that progress: it is a memberless group's committed offset, and the brokers expire it after
 `offsets.retention.minutes` (7 days by default). Without it a re-run would send every finished stream again, resend
 the committed part of an unfinished one, and lose the fingerprint guard below, so the run keeps a record of its own in
-`sink-receipts.json`. It holds the receipt of each stream delivered and, after every commit of a stream sent in parts
-(with `commit-every` or a pace), a receipt of the stream so far under `progress`, counting the records committed;
-the sink hands that receipt to the engine (`StreamContext.record_committed`) once the brokers have committed the
-part, and the stream's own receipt replaces it when the stream finishes. The engine hands each stream what the record
+`sink-receipts.json`. It holds the receipt of each stream delivered and, after every commit the brokers take (each
+part of a stream sent in parts with `commit-every` or a pace, and the last commit of any stream), a receipt of the
+stream so far under `progress`, counting the records committed; the sink hands that receipt to the engine
+(`StreamContext.record_committed`) once the brokers have committed, and the stream's own receipt replaces every such
+entry of that stream on that cluster when it lands. The engine hands each stream what the record
 holds for it (`StreamContext.delivered` and `StreamContext.committed`; only the sink that needs them reads them). When
 the brokers hold no progress for a stream and an entry of the same sink and topic counts records sent, skipped or
 committed there, on the same cluster, the stream is refused with `FLX-3514` before anything is sent. An entry is about

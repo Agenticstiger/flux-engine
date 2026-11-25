@@ -120,9 +120,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   pinned profile when the command was given it (`RecordedGrade`, which says what is missing or does not check);
   `StreamContext.bundle_directory` and `StreamContext.simulation_id`, which say where the stream's declarations are;
   and `StreamContext.delivered` and `StreamContext.committed`, the receipts the run's `sink-receipts.json` already holds
-  for the stream, whole and so far. A sink that commits a stream in parts keeps a receipt of the stream so far there
-  after each commit, through `StreamContext.record_committed` (`write_progress`), until the stream's receipt replaces
-  it. `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill them all; `apply --run-id` takes `--profile` with
+  for the stream, whole and so far. A sink that commits what it sends keeps a receipt of the stream so far there after
+  each commit, through `StreamContext.record_committed` (`write_progress`), until the stream's receipt replaces it.
+  `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill them all; `apply --run-id` takes `--profile` with
   `--sink`, for an external audience. They default to `None` (`delivered` and `committed` to empty), no digest covers
   them, and the existing sinks ignore them. `privacy_grade_of` takes the `receipt.json` document its caller read
   (`receipt=`), so the streams delivered from a run directory are the ones its checks covered.

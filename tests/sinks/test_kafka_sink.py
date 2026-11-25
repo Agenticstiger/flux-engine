@@ -2411,6 +2411,111 @@ def test_another_cluster_is_not_guarded_by_how_far_a_stream_was_committed(
     assert len(receipts) == 6 and all(r.writer["records"] > 0 for r in receipts)
 
 
+def test_only_a_positive_count_of_this_sink_and_topic_says_the_stream_reached_it(
+    kept: Kept,
+) -> None:
+    from flux_engine.core.target_label import target_label
+
+    sink = _sink(kept, target_of(FakeBroker()), "site")
+    label = target_label("kafka", BOOTSTRAP)
+
+    def entry(**writer: Any) -> Dict[str, Any]:
+        return {"sink": "kafka", "target": label, "table": "sim.site", "writer": writer}
+
+    assert sink._reached(entry(committed=3), None, label) == 3
+    assert sink._reached(entry(records=2, skipped=5), None, label) == 7
+    for writer in (
+        {"committed": 0},
+        {"committed": -2},
+        {"committed": True},
+        {"committed": "3"},
+        {},
+    ):
+        assert sink._reached(entry(**writer), None, label) == 0
+    assert sink._reached({**entry(committed=3), "table": "sim.reading"}, None, label) == 0
+    assert sink._reached({**entry(committed=3), "sink": "parquet"}, None, label) == 0
+    assert sink._reached({**entry(committed=3), "writer": "3"}, None, label) == 0
+    assert sink._reached(entry(committed=3, clusterId="c1"), "c1", "another target") == 3
+    assert sink._reached(entry(committed=3, clusterId="c1"), "c2", label) == 0
+    # An id that is not text names no cluster, so the target decides.
+    assert sink._reached(entry(committed=3, clusterId=7), "c1", label) == 3
+    assert sink._reached(entry(committed=3, clusterId=7), "c1", "another target") == 0
+
+
+def test_a_receipt_replaces_its_streams_progress_however_the_cluster_was_reached(
+    recorded: Kept,
+) -> None:
+    from flux_engine.core.target_label import target_label
+    from flux_engine.stages.deliver import write_progress
+
+    layout = recorded.layout
+
+    def label(target: str) -> str:
+        return target_label("kafka", target)
+
+    def kept(target: str, table: str, cluster: Optional[str]) -> SinkReceipt:
+        writer: Dict[str, Any] = {"committed": 2}
+        if cluster is not None:
+            writer["clusterId"] = cluster
+        return SinkReceipt(
+            sink="kafka",
+            run_id=layout.run_id,
+            expose_id="site",
+            output_digest="sha256:" + "1" * 64,
+            rows=3,
+            target=target,
+            table=table,
+            writer=writer,
+        )
+
+    write_progress(layout, kept("localhost:9092", "sim.site", "c1"))  # the same place
+    write_progress(layout, kept("localhost:9092", "again.site", "c1"))  # another topic
+    write_progress(layout, kept("kafka.internal.example:9092", "sim.site", "c2"))  # another cluster
+    write_progress(layout, kept("127.0.0.2:9092", "sim.site", None))  # a cluster it cannot tell
+    write_receipts(layout, [kept("127.0.0.1:9092", "sim.site", "c1")])
+    document = json.loads(layout.sink_receipts_path.read_text(encoding="utf-8"))
+    assert {(e["target"], e["table"]) for e in document["progress"]} == {
+        (label("localhost:9092"), "again.site"),
+        (label("kafka.internal.example:9092"), "sim.site"),
+        (label("127.0.0.2:9092"), "sim.site"),
+    }
+    write_receipts(layout, [kept("127.0.0.2:9092", "sim.site", None)])
+    document = json.loads(layout.sink_receipts_path.read_text(encoding="utf-8"))
+    assert {(e["target"], e["table"]) for e in document["progress"]} == {
+        (label("localhost:9092"), "again.site"),
+        (label("kafka.internal.example:9092"), "sim.site"),
+    }
+
+
+def test_a_part_the_run_cannot_record_stops_the_delivery_and_a_retry_resumes_after_it(
+    recorded: Kept, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flux_engine.stages import deliver as stage
+
+    monkeypatch.setattr(kafka, "_AGE_EVERY", 8)
+    options = {"commit-every": "1"}
+    real = stage.atomic_write_text
+
+    def full(*args: Any, **kwargs: Any) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(stage, "atomic_write_text", full)
+    broker = FakeBroker()
+    with pytest.raises(FluxError) as caught:
+        _keeping(recorded, broker, options, clock=_TickingClock(0.25))
+    assert caught.value.code.code == "FLX-3505"
+    text = str(caught.value)
+    assert "sink-receipts.json could not keep" in text and "OSError" in text
+    assert "still holds the stream's progress" in text
+    group = broker.producers[0].group
+    committed = json.loads(broker.committed[(group, "sim.device_change")])["records"]
+    assert committed > 0 and len(broker.read("sim.device_change")) == committed
+    monkeypatch.setattr(stage, "atomic_write_text", real)
+    receipts = _keeping(recorded, broker, options, clock=_TickingClock(0.25))
+    change = next(r for r in receipts if r.table == "sim.device_change")
+    assert change.writer["skipped"] == committed
+
+
 def test_apply_keeps_how_far_a_stream_was_committed_and_refuses_it_after_the_drop(
     kept: Kept, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
