@@ -134,7 +134,7 @@ from flux_engine.author.projection import (
     span_primary_key,
 )
 from flux_engine.author.ranges import column_range
-from flux_engine.author.replace import replacements_for
+from flux_engine.author.replace import ask_for_private_release, replacements_for
 from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_window, instant_ms
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
@@ -1558,6 +1558,8 @@ def _cite_and_replace(
         fractional_bits=bits,
     )
     ledger.replacements = replaceable
+    if asked is not None and "privacy" in pinned:
+        asked = ask_for_private_release(asked, document, column_domains(document))
     return cited, asked
 
 

@@ -218,3 +218,10 @@ holds names and registered identifiers only, and no budget.
 A `history.columns` name that is not a column of its table is refused with `FLX-5038`, naming where. Whether a name is the
 entity, start or end column is the profiler's to refuse, against the contract. A request that names 1-0-0, 1-1-0 or
 1-2-0 and holds either ask is refused with `FLX-5038`, naming the addition and the format to name.
+
+**What `fluxsim init` asks for.** The request `init` writes beside a bundle (the one for the assumptions, above) asks
+for these two only when the profile it was given has a `privacy` block, a private release, and then only of the tables
+that request already holds. It asks `history: {}` for a table whose contract declares a validity window, and
+`nullCount/2` for each column of such a table the contract does not make required. The new `nullCount/2` follows the
+column's other statistics, so no pointer a `replacedBy` names moves. Every other request, and every first request
+written from a contract alone, keeps the format and the bytes it had.

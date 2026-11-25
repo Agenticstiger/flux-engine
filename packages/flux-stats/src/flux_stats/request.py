@@ -62,6 +62,9 @@ __all__ = [
     "MOST_RELATIONSHIP_GROUPS",
     "MOST_RELATIONSHIP_LINKS",
     "REQUEST_SCHEMA_URL_1_2_0",
+    "REQUEST_SCHEMA_URL_1_3_0",
+    "NULL_COUNT",
+    "RequestHistory",
     "RequestLinked",
     "ProfileRequest",
     "RequestColumn",
@@ -118,6 +121,19 @@ REQUEST_SCHEMA_URL_1_1_0 = (
 REQUEST_SCHEMA_URL_1_2_0 = (
     "https://agenticstiger.github.io/flux/engine/spec/profile-request/1-2-0/FluxProfileRequest.json"
 )
+
+#: Format ``1-3-0`` of the request. It adds ``history`` to a table and ``nullCount/2`` to the
+#: statistics of a column (:data:`_ADDITIONS_OF_1_3_0`); a document that uses one names this URL.
+#: A request that asks for neither keeps the format it named before and its bytes. ``1-3-0`` holds
+#: everything ``1-2-0`` does.
+REQUEST_SCHEMA_URL_1_3_0 = (
+    "https://agenticstiger.github.io/flux/engine/spec/profile-request/1-3-0/FluxProfileRequest.json"
+)
+
+#: The statistic a column may ask for in format 1-3-0 whatever its domain: how many rows hold a
+#: value and how many hold NULL, released with noise (PROFILE-SPEC.md section 3a). It is a name a
+#: request carries and no registered definition of the readers of a profile's statistics.
+NULL_COUNT = "nullCount/2"
 
 #: The bounds a request is held to. A request lists names and identifiers, so
 #: every one is far below what a contract of a real data product holds, and far
@@ -208,6 +224,18 @@ class RequestRankCorrelation:
 
 
 @dataclass(frozen=True)
+class RequestHistory:
+    """The history of a table asked for (format 1-3-0): its entity, start and end are the contract's.
+
+    ``columns`` are the candidate tracked columns, categorical columns of the table other than the
+    entity, start and end, each once; ``None`` leaves the choice to the profiler, which takes the
+    contract's categorical columns of the table other than those three.
+    """
+
+    columns: Optional[Tuple[str, ...]] = None
+
+
+@dataclass(frozen=True)
 class RequestLinked:
     """A column of a relationship's child table grouped by a column of its parent table (format 1-2-0)."""
 
@@ -237,6 +265,8 @@ class RequestTable:
     rank_correlations: Tuple[RequestRankCorrelation, ...] = ()
     #: Format 1-2-0: the columns a profiler may join into cliques, each once.
     clique_columns: Tuple[str, ...] = ()
+    #: Format 1-3-0: the history of the table asked for, or ``None``.
+    history: Optional[RequestHistory] = None
 
 
 @dataclass(frozen=True)
@@ -351,11 +381,24 @@ def _distinct(names: Sequence[str], where: str) -> None:
         raise _refuse(where, "names one entry twice")
 
 
-def _statistics(value: Any, where: str, domain: Optional[str]) -> Tuple[str, ...]:
-    """Registered statistic identifiers; for a column, those that read its domain."""
+def _statistics(
+    value: Any, where: str, domain: Optional[str], *, from_1_3_0: bool = True
+) -> Tuple[str, ...]:
+    """Registered statistic identifiers; for a column, those that read its domain.
+
+    A column may also ask for ``nullCount/2`` in format 1-3-0, whatever its domain.
+    """
     found = _names(value, where, most=MOST_STATISTICS_PER_ENTRY)
     _distinct(found, where)
     for index, identifier in enumerate(found):
+        if identifier == NULL_COUNT and domain is not None:
+            if not from_1_3_0:
+                raise _refuse(
+                    f"{where}[{index}]",
+                    f"is an addition of format 1-3-0, and this document names an earlier format: "
+                    f"name {REQUEST_SCHEMA_URL_1_3_0} in _schemaURL",
+                )
+            continue
         try:
             entry = definition(identifier)
         except KeyError:
@@ -380,7 +423,7 @@ def _metric_names(value: Any, where: str, domain: str) -> Tuple[str, ...]:
     return found
 
 
-def _column(name: str, value: Any, where: str) -> RequestColumn:
+def _column(name: str, value: Any, where: str, *, from_1_3_0: bool = True) -> RequestColumn:
     raw = _mapping(value, where, required=("domain",), optional=("metrics", "statistics"))
     domain = raw["domain"]
     if domain not in DOMAINS:
@@ -389,7 +432,9 @@ def _column(name: str, value: Any, where: str) -> RequestColumn:
         name=name,
         domain=domain,
         metrics=_metric_names(raw.get("metrics", []), f"{where}.metrics", domain),
-        statistics=_statistics(raw.get("statistics", []), f"{where}.statistics", domain),
+        statistics=_statistics(
+            raw.get("statistics", []), f"{where}.statistics", domain, from_1_3_0=from_1_3_0
+        ),
     )
 
 
@@ -400,6 +445,7 @@ def _table(
     *,
     additions: bool = True,
     from_1_2_0: bool = True,
+    from_1_3_0: bool = True,
 ) -> RequestTable:
     raw = _mapping(
         value,
@@ -410,15 +456,18 @@ def _table(
             if additions
             else ("rowCount", "workload")
         )
-        + _keys_of_1_2_0("table"),
+        + _keys_of_1_2_0("table")
+        + _keys_of_1_3_0("table"),
     )
     _needs_1_2_0(from_1_2_0, raw, where, "table")
+    _needs_1_3_0(from_1_3_0, raw, where, "table")
     row_count = raw.get("rowCount", False)
     if not isinstance(row_count, bool):
         raise _refuse(f"{where}.rowCount", "is true or false")
     declared = _mapping_of_names(raw["columns"], f"{where}.columns", MOST_COLUMNS_PER_TABLE)
     columns = tuple(
-        _column(name, declared[name], f"{where}.columns.{name}") for name in sorted(declared)
+        _column(name, declared[name], f"{where}.columns.{name}", from_1_3_0=from_1_3_0)
+        for name in sorted(declared)
     )
     pairs = tuple(
         _date_pair(item, f"{where}.datePairs[{index}]", columns)
@@ -448,6 +497,7 @@ def _table(
         clique_columns=_clique_columns(
             raw.get("cliqueColumns", []), f"{where}.cliqueColumns", columns
         ),
+        history=_history(raw["history"], f"{where}.history", columns) if "history" in raw else None,
     )
 
 
@@ -586,8 +636,9 @@ def parse_request(document: Any) -> ProfileRequest:
             "request._schemaURL",
             "this reader reads " + ", ".join(_READ_FORMATS),
         )
-    from_1_2_0 = raw["_schemaURL"] == REQUEST_SCHEMA_URL_1_2_0
-    dated = raw["_schemaURL"] in (REQUEST_SCHEMA_URL_1_1_0, REQUEST_SCHEMA_URL_1_2_0)
+    from_1_3_0 = raw["_schemaURL"] == REQUEST_SCHEMA_URL_1_3_0
+    from_1_2_0 = raw["_schemaURL"] in (REQUEST_SCHEMA_URL_1_2_0, REQUEST_SCHEMA_URL_1_3_0)
+    dated = raw["_schemaURL"] != REQUEST_SCHEMA_URL
     additions = dated
     digest: Optional[str] = None
     if "contract" in raw:
@@ -617,6 +668,7 @@ def parse_request(document: Any) -> ProfileRequest:
             f"request.tables.{name}",
             additions=additions,
             from_1_2_0=from_1_2_0,
+            from_1_3_0=from_1_3_0,
         )
         for name in sorted(declared)
     }
@@ -837,6 +889,10 @@ def _table_document(table: RequestTable) -> Dict[str, Any]:
         ]
     if table.clique_columns:
         item["cliqueColumns"] = list(table.clique_columns)
+    if table.history is not None:
+        item["history"] = (
+            {} if table.history.columns is None else {"columns": list(table.history.columns)}
+        )
     return item
 
 
@@ -940,9 +996,16 @@ class RequestWorkload:
 def _schema_url_of(request: ProfileRequest) -> str:
     """The earliest format that holds every addition the request uses, so one without keeps its text.
 
-    Format 1-2-0 when the request holds an addition of :data:`_ADDITIONS_OF_1_2_0`, 1-1-0 when it
-    holds one of that format, and 1-0-0 otherwise.
+    Format 1-3-0 when the request holds an addition of :data:`_ADDITIONS_OF_1_3_0`, 1-2-0 when it
+    holds one of :data:`_ADDITIONS_OF_1_2_0`, 1-1-0 when it holds one of that format, and 1-0-0
+    otherwise.
     """
+    if any(
+        addition.held(entry)
+        for addition in _ADDITIONS_OF_1_3_0
+        for entry in _entries_of(request, addition.section)
+    ):
+        return REQUEST_SCHEMA_URL_1_3_0
     if any(
         addition.held(entry)
         for addition in _ADDITIONS_OF_1_2_0
@@ -979,12 +1042,63 @@ _ADDITIONS_OF_1_2_0: Tuple[_Addition, ...] = (
     _Addition("relationship", "linked", lambda relationship: bool(relationship.linked)),
 )
 
+#: Every key or statistic that only format ``1-3-0`` holds, as :data:`_ADDITIONS_OF_1_2_0` is for
+#: ``1-2-0``. A column's ``nullCount/2`` is read by :func:`_statistics` and is listed here for the
+#: format a request is written in.
+_ADDITIONS_OF_1_3_0: Tuple[_Addition, ...] = (
+    _Addition("table", "history", lambda table: table.history is not None),
+    _Addition(
+        "table",
+        "columns",
+        lambda table: any(NULL_COUNT in column.statistics for column in table.columns),
+    ),
+)
+
 #: Every format this reader reads, oldest first.
 _READ_FORMATS: Tuple[str, ...] = (
     REQUEST_SCHEMA_URL,
     REQUEST_SCHEMA_URL_1_1_0,
     REQUEST_SCHEMA_URL_1_2_0,
+    REQUEST_SCHEMA_URL_1_3_0,
 )
+
+
+def _keys_of_1_3_0(section: str) -> Tuple[str, ...]:
+    """The keys a *section* may carry in format 1-3-0 and not before (a table's ``history``)."""
+    return tuple(
+        item.key
+        for item in _ADDITIONS_OF_1_3_0
+        if item.section == section and item.key != "columns"
+    )
+
+
+def _needs_1_3_0(from_1_3_0: bool, raw: Mapping[str, Any], where: str, section: str) -> None:
+    """Refuse (``FLX-5038``) an addition of format 1-3-0 in a document that names an earlier format."""
+    if from_1_3_0:
+        return
+    for key in _keys_of_1_3_0(section):
+        if key in raw:
+            raise _refuse(
+                f"{where}.{key}",
+                "is an addition of format 1-3-0, and this document names an earlier format: name "
+                f"{REQUEST_SCHEMA_URL_1_3_0} in _schemaURL",
+            )
+
+
+def _history(value: Any, where: str, columns: Sequence[RequestColumn]) -> RequestHistory:
+    """A table's ``history``: ``{}``, or ``columns``, categorical columns of the table named once."""
+    raw = _mapping(value, where, optional=("columns",))
+    if "columns" not in raw:
+        return RequestHistory()
+    names = _names(raw["columns"], f"{where}.columns", most=MOST_COLUMNS_PER_TABLE)
+    _distinct(names, f"{where}.columns")
+    domains = {column.name: column.domain for column in columns}
+    for position, name in enumerate(names):
+        if name not in domains:
+            raise _refuse(f"{where}.columns[{position}]", "names no column of this table")
+        if domains[name] != CATEGORY:
+            raise _refuse(f"{where}.columns[{position}]", "names a column that is not categorical")
+    return RequestHistory(columns=names)
 
 
 def _keys_of_1_2_0(section: str) -> Tuple[str, ...]:
