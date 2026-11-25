@@ -1612,15 +1612,17 @@ def _advertising_broker(
 def test_the_producers_advertised_brokers_are_checked_before_it_is_initialised(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    broker = _advertising_broker(monkeypatch, ("127.0.0.1", "kafka-2.example.org"), SASL_PLAINTEXT)
+    broker = _advertising_broker(
+        monkeypatch, ("127.0.0.1", "kafka-2.internal.example"), SASL_PLAINTEXT
+    )
     with pytest.raises(FluxError) as caught:
         broker.transactional_producer("id", "id")
-    assert caught.value.code.code == "FLX-3504" and "kafka-2.example.org" in str(caught.value)
+    assert caught.value.code.code == "FLX-3504" and "kafka-2.internal.example" in str(caught.value)
     assert _Advertising.calls == ["list_topics"]
     local = _advertising_broker(monkeypatch, ("127.0.0.1", "localhost"), SASL_PLAINTEXT)
     local.transactional_producer("id", "id")
     assert _Advertising.calls == ["list_topics", "init_transactions"]
-    plain = _advertising_broker(monkeypatch, ("kafka-2.example.org",), {})
+    plain = _advertising_broker(monkeypatch, ("kafka-2.internal.example",), {})
     plain.transactional_producer("id", "id")
     assert _Advertising.calls == ["init_transactions"]  # no credential in the clear: no check
 
@@ -1628,7 +1630,7 @@ def test_the_producers_advertised_brokers_are_checked_before_it_is_initialised(
 def test_the_progress_consumers_advertised_brokers_are_checked_before_it_reads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    broker = _advertising_broker(monkeypatch, ("kafka-2.example.org",), SASL_PLAINTEXT)
+    broker = _advertising_broker(monkeypatch, ("kafka-2.internal.example",), SASL_PLAINTEXT)
     with pytest.raises(FluxError) as caught:
         broker.progress("g", "t")
     assert caught.value.code.code == "FLX-3504"
