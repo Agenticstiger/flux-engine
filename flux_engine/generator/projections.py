@@ -663,7 +663,7 @@ def _unheld_reason(history: GeneratorPlan, plan: GeneratorPlan, name: str) -> Op
     source = history.column_plan(name)
     statistics = source.statistics
     if statistics.null_fraction is not None:
-        return "the history may leave it NULL (it declares a nullFraction)"
+        return "the history may leave it NULL: it declares a nullFraction"
     setter = _rule_setters(history.rules).get(name)
     if setter is not None:
         return f"{setter} of the history sets it"

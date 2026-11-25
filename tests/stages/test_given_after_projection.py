@@ -605,6 +605,18 @@ def test_a_plan_says_which_distribution_a_fallback_column_is_drawn_from(
         assert result.emit(projection).plan.projection.fallback == ("model",)  # type: ignore[union-attr]
 
 
+@pytest.mark.parametrize("projection", PROJECTIONS)
+def test_the_note_for_a_history_that_may_leave_null_has_no_nested_parentheses(
+    tmp_path: Path, projection: str
+) -> None:
+    history = {"levels": dict(LEVELS), "nullFraction": "0.4"}
+    target = given_bundle(tmp_path, projection, history=history)
+    result = pipeline.execute(target, kernel=KERNEL_V2)
+    notes = [note for note in pipeline.advice_notes(result) if f"{projection}.tier" in note]
+    assert len(notes) == 1
+    assert "(the history may leave it NULL: it declares a nullFraction)" in notes[0]
+
+
 #: A table of counts, not of shares: the rows are read as shares, each over its own total.
 COUNT_TIERS = {
     "sedan": {"a": "3", "b": "1"},
