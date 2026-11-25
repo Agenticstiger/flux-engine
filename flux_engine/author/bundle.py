@@ -1224,8 +1224,9 @@ def _time_bounds(
     :data:`WINDOW_END_LIMIT_MS` (an open end of 9999-12-31 on every row) gives the window nothing,
     as a contract range that ends there gives nothing. A contract range that reaches beyond every
     span the profile and the bundle give, or the hull of contract ranges alone, is a ``time
-    window`` note, which is a gap at ``/spec/timeBounds``. With nothing to go on, a year is
-    assumed.
+    window`` note, which is a gap at ``/spec/timeBounds``; one that makes the window longer than
+    :data:`PLAUSIBLE_WINDOW_YEARS` is refused (:func:`_refuse_a_stretching_contract_range`). With
+    nothing to go on, a year is assumed.
     """
     if given is not None:
         return given, None
@@ -1243,6 +1244,7 @@ def _time_bounds(
         end = max(span[1] for span in spans)
         if end <= start:
             end = start + 1
+        _refuse_a_stretching_contract_range(own, contract_ranges, (start, end))
         window = (format_rfc3339_ms(start), format_rfc3339_ms(end))
         widening = sorted(
             {
@@ -1281,6 +1283,47 @@ def _time_bounds(
         "span your data covers."
     )
     return ASSUMED_WINDOW, ("time window", note)
+
+
+#: The longest run window a contract's declared date range may make. A few hundred years holds
+#: the dates a data product records; a longer window comes from a range that marks no data, such
+#: as an open end spelled before the year 9999 or a placeholder.
+PLAUSIBLE_WINDOW_YEARS = 300
+
+#: A Gregorian year of 365.2425 days, in milliseconds.
+_YEAR_MS = 31_556_952_000
+
+
+def _refuse_a_stretching_contract_range(
+    own: Sequence[Tuple[int, int]],
+    contract_ranges: Sequence[Tuple[str, Tuple[int, int]]],
+    window: Tuple[int, int],
+) -> None:
+    """Refuse a contract range that makes the run's window longer than :data:`PLAUSIBLE_WINDOW_YEARS`.
+
+    *own* is the spans the profile and the bundle give, *contract_ranges* each contract range by
+    its column, and *window* the hull of both. Each range that reaches beyond *own* is named. A
+    window *own* already makes that long is not the contract's doing, so nothing is refused.
+    """
+    longest = PLAUSIBLE_WINDOW_YEARS * _YEAR_MS
+    if window[1] - window[0] <= longest:
+        return
+    if own and max(last for _, last in own) - min(first for first, _ in own) > longest:
+        return
+    low = min((first for first, _ in own), default=None)
+    high = max((last for _, last in own), default=None)
+    named = [
+        f"{name} ({format_rfc3339_ms(first)[:10]} to {format_rfc3339_ms(last)[:10]})"
+        for name, (first, last) in contract_ranges
+        if low is None or high is None or first < low or last > high
+    ]
+    raise AuthorError(
+        f"the contract range of {', '.join(named)} would make the run's window longer than "
+        f"{PLAUSIBLE_WINDOW_YEARS} years, from {format_rfc3339_ms(window[0])[:10]} to "
+        f"{format_rfc3339_ms(window[1])[:10]}, and such a window is refused; declare the range "
+        "the data covers, or, when its high end marks an open end, write that end in the year "
+        "9999, which no window reads"
+    )
 
 
 def _weighted_edges(edges: List[Any], weights: Any) -> List[Any]:

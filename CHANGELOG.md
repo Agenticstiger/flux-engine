@@ -237,6 +237,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `init` leaves out a history the plan refuses, and lists its statistics unused, when the bundle holds no
   projection too. It did so only after leaving out a projection first; with none, it reported the history's
   refusal and exited 1.
+- `init` refuses a contract's declared date range that would make the run's window longer than 300 years, naming
+  the column, its range and the window, before writing anything. Such a range marks no data (an open end spelled
+  before the year 9999, or a placeholder such as 0001-01-01); write an open end in the year 9999, which no window
+  reads. A shorter range that widens the window is still a note and a gap at `/spec/timeBounds`.
 - `init --window` refuses an END in the year 9999, and `init --history FILE` refuses a file whose `timeBounds` end,
   an entry's `until` or a `start` bin falls there, naming the value and its place. The year 9999 spells an open
   end, which gives the window nothing, as in a declared range; before, the window reached the end of the calendar,

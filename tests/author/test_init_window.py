@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from flux_engine.author.bundle import AuthoredExpose, _time_bounds
+from flux_engine.author.bundle import AuthoredExpose, AuthorError, _time_bounds
 from flux_engine.author.columns import ColumnContext, ColumnPlan, bound_to_window
 from flux_engine.author.window import (
     WINDOW_END_LIMIT_MS,
@@ -451,6 +451,60 @@ def test_a_contract_range_inside_the_published_span_gives_no_note() -> None:
     window, note = _contracted("between '2025-11-01' and '2026-08-01'")
     assert window == (format_rfc3339_ms(_ms("2025-10-01")), format_rfc3339_ms(_ms("2026-09-01")))
     assert note is None
+
+
+@pytest.mark.parametrize(
+    ("range_text", "shown"),
+    [
+        # an open end spelled before the year 9999
+        ("between '2020-01-01' and '2999-12-31'", "2020-01-01 to 2999-12-31"),
+        # a placeholder start
+        (">= '0001-01-01' and <= '2026-12-31'", "0001-01-01 to 2026-12-31"),
+        # a year past what the window may hold, reached from the published span
+        ("between '2025-10-01' and '2326-10-01'", "2025-10-01 to 2326-10-01"),
+    ],
+)
+def test_a_contract_range_that_stretches_the_window_past_300_years_is_refused(
+    range_text: str, shown: str
+) -> None:
+    with pytest.raises(AuthorError) as refused:
+        _contracted(range_text)
+    message = str(refused.value)
+    assert (
+        f"the contract range of t.d ({shown}) would make the run's window longer than 300 years"
+        in (message)
+    )
+    assert "and such a window is refused" in message
+    assert "write that end in the year 9999, which no window reads" in message
+
+
+def test_a_contract_range_that_keeps_the_window_within_300_years_is_a_note() -> None:
+    window, note = _contracted("between '2025-10-01' and '2325-09-01'")
+    assert window[1].startswith("2325-09-01") and note is not None and note[0] == "time window"
+
+
+def test_a_window_the_profile_stretches_is_not_refused_for_a_contract_range() -> None:
+    # The published span already runs past 300 years, so the contract range is not what makes it.
+    column = ColumnPlan(name="d", time_span=(_ms("0001-01-01"), _ms("2026-09-01")))
+    expose = _expose(column)
+    expose.index = 0
+    context = ColumnContext.__new__(ColumnContext)
+    object.__setattr__(context, "schema_index", 0)
+    expose.contexts = {"d": context}
+    contract = {
+        "exposes": [{"contract": {"schema": [_rule("between '2020-01-01' and '2999-12-31'")]}}]
+    }
+    window, note = _time_bounds([expose], contract)
+    assert window == (format_rfc3339_ms(_ms("0001-01-01")), format_rfc3339_ms(_ms("2999-12-31")))
+    assert note is not None and "t.d" in note[1]
+
+
+def test_init_refuses_a_contract_range_past_300_years_before_writing(tmp_path: Path) -> None:
+    contract = _loose_contract(tmp_path, "between '1900-01-01' and '2999-12-31'")
+    result = run_init(str(tmp_path / "b"), contract=str(contract), profile=str(PROFILE))
+    assert result.exit_code == 1
+    assert "the contract range of orders.created_at (1900-01-01 to 2999-12-31)" in result.stderr
+    assert not (tmp_path / "b").exists()
 
 
 def test_a_contract_range_alone_gives_the_window_and_a_note_that_says_so() -> None:
