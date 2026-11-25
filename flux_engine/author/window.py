@@ -79,7 +79,9 @@ def parse_window(start: str, end: str) -> Tuple[str, str]:
 
     Each end is a date (``YYYY-MM-DD``, midnight UTC) or an RFC 3339 timestamp. Raises
     :class:`WindowError`, naming the value, for text that is neither, an instant outside the
-    years 1 to 9999, or a START that is not before END.
+    years 1 to 9999, a START that is not before END, or an END at or after
+    :data:`WINDOW_END_LIMIT_MS`: the year 9999 spells an open end, which no window reads (as in a
+    declared range), and a run's periods step past the end of its window.
     """
     ends: List[int] = []
     for name, text in (("START", start), ("END", end)):
@@ -92,4 +94,9 @@ def parse_window(start: str, end: str) -> Tuple[str, str]:
         ends.append(milliseconds)
     if ends[0] >= ends[1]:
         raise WindowError(f"--window START {start!r} is not before END {end!r}")
+    if ends[1] >= WINDOW_END_LIMIT_MS:
+        raise WindowError(
+            f"--window END {end!r} is in the year 9999, which spells an open end rather than an "
+            "instant the run reaches; give the instant your data runs to"
+        )
     return format_rfc3339_ms(ends[0]), format_rfc3339_ms(ends[1])

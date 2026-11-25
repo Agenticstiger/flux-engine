@@ -126,6 +126,7 @@ from flux_engine.generator.statistics import (
     DATE_EPOCH_ORDINAL,
     FLX_3402,
     ColumnStatistics,
+    drawn_edges,
     integer_width_bounds,
     joint_level,
     statistics_from_fidelity,
@@ -567,10 +568,14 @@ def declared_range_findings(
 
     Reading the statistics refuses a bin outside its column's range and a
     range outside its integer width (``FLX-3402``). What comes back is the
-    softer finding: a DATE or TIMESTAMP column whose own range or bin edge
-    lies outside the run's ``timeBounds``. The bounds only fill a range the
+    softer finding: a DATE or TIMESTAMP column whose draw can reach a date
+    outside the run's ``timeBounds``. That reads the edges the draw can reach
+    (:func:`~flux_engine.generator.statistics.drawn_edges`): the hull of the
+    bins that carry weight when the column declares bins, else its declared
+    range. A range wider than a draw that keeps inside the window places no
+    date outside it, so it is no finding. The bounds only fill a range the
     column leaves undeclared (:func:`_with_time_bounds`), so a declared range
-    wider than the run window is legal, and still worth a line.
+    wider than the run window is legal.
     """
     statistics = statistics_from_fidelity(expose, fidelity)
     bounds = _time_bounds_ms(time_bounds)
@@ -586,9 +591,7 @@ def declared_range_findings(
             low, high = Decimal(bounds[0] // 86_400_000), Decimal(bounds[1] // 86_400_000)
         else:
             low, high = Decimal(bounds[0]), Decimal(bounds[1])
-        edges = [value for value in (declared.range_min, declared.range_max) if value is not None]
-        edges += list(declared.bins or ())
-        if any(edge < low or edge > high for edge in edges):
+        if any(edge < low or edge > high for edge in drawn_edges(declared)):
             findings.append(
                 f"{expose.expose_id}.{column.name}: the declared range or bins leave the run's "
                 "timeBounds, so rows can carry dates outside the window the run covers"
