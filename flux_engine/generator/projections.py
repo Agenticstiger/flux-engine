@@ -317,12 +317,13 @@ def _refuse_rules_on_projected_cells(
     The emit's rules run over its rows once the projection has set its cells, so a rule that set
     one of them would be a second source for it.
     """
+    sets = projected_cells(key, entry, history, plan)
+    _refuse_given_over_projected_cells(key, sets, plan)
     rules = plan.rules
     if rules is None:
         return
     from flux_engine.expr2.errors import FLX_6203
 
-    sets = projected_cells(key, entry, history, plan)
     setters: Dict[str, str] = {}
     for rule in rules.rules:
         for column in (*rule.determines, *rule.to_columns):
@@ -339,6 +340,30 @@ def _refuse_rules_on_projected_cells(
                 f"({plan.expose.expose_id}) sets it as {role}, and {setters[column]} sets it too",
             )
     _refuse_reads_through_projected_keys(key, sets, plan)
+
+
+def _refuse_given_over_projected_cells(
+    key: str, sets: Mapping[str, str], plan: GeneratorPlan
+) -> None:
+    """Refuse (``FLX-3403``) a column the emit draws given a column the projection sets.
+
+    A column drawn ``given`` another is drawn from the level the other column's own draw made in
+    the row. The projection then replaces that cell with the version's, so the column would
+    follow a level the row does not hold. A column the entry sets itself is replaced as well and
+    is no source of a disagreement.
+    """
+    for column_plan in plan.columns:
+        name = column_plan.column.name
+        if name in sets:
+            continue
+        for parent in column_plan.statistics.parents:
+            if parent in sets:
+                raise _refuse(
+                    f"{key} entry ({plan.expose.expose_id}): column {name!r} is drawn given "
+                    f"{parent!r}, which the entry sets as {sets[parent]}, so {name!r} would "
+                    f"follow the level the draw of {parent!r} made, not the one the row holds; "
+                    f"draw {name!r} given a column the entry does not set, or on its own"
+                )
 
 
 def _refuse_reads_through_projected_keys(

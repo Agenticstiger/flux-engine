@@ -306,6 +306,11 @@ lines. This amendment fixes the order:
   relationship's foreign-key column (a column of the version the row carries), the cell and the pick name different
   rows, so such a rule would read another row's value. It is `FLX-3403` at plan in this version, naming the rule,
   the relationship and the column; a rule over the row's own cells is not affected.
+- **A `given` draw over a set cell is refused.** A column drawn `given` another is drawn from the level the
+  other column's own draw made in the row, which the entry then replaces. A column of an events or periodic emit
+  drawn `given` a column the entry sets (`model` on a month, an image on a change) follows a level the row does
+  not hold, so it is `FLX-3403` at plan, naming both columns and the entry. A column the entry sets itself may
+  declare a `given`, which its cell then replaces.
 - **What moves.** The rows of an events or a periodic emit whose rules read a cell the entry sets, and so their
   digests. Every other emit, and every such emit without rules, keeps its bytes. A snapshot is unchanged: its rows
   are the history's, rules included.

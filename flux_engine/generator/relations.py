@@ -237,7 +237,10 @@ FLX_3403 = register(
     "sharedColumns entry into another relationship's foreign key is refused when the "
     "relationship it goes through reaches an emit that declares a history or one projected "
     "from a history (a snapshot or an events emit), whose rows hold the cells of a version "
-    "and not the pick the copy follows; the message names both relationships.",
+    "and not the pick the copy follows; the message names both relationships. An events or "
+    "periods entry is also refused when a column of its emit is drawn given a column the "
+    "entry sets, which the draw would read as the level it drew and not the cell the row "
+    "holds; the message names both columns.",
 )
 
 #: Domain-separation label of a key layout's permutation key.
