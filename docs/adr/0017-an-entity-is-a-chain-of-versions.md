@@ -704,3 +704,23 @@ scale 0.25 with the plan still exiting 0.
   bundle with no tracked foreign key. A bundle whose levels are keys of the parent at scale 1 and not at a scale
   below 1 plans with the parent kept, where it ran before with a link below 100 %. A bundle with a level that is no
   key of the parent at any row count is refused at plan at every scale.
+
+## Amendment of 2026-11-25: dates outside the window read the draw
+
+Section 11 refused a date column of a history's emit whose declared range or bins leave `spec.timeBounds`, and read
+every edge the column declares. A column read from a noisy profile declares the profile's full year grid as its range
+(0001-01-01 to the last instant), because a histogram property's bins must partition the declared range, while its
+bins carry weight only inside the window. The grid placed no row outside the window and was refused all the same.
+
+- **The rule.** Section 11 reads the edges the draw can reach. For a column that declares bins, those run from the lower
+  edge of its first bin with a positive weight to the upper edge of its last: a weightless bin at either end does not
+  count, and one between weighted bins lies inside that hull. For a column with no bins, they are its declared range.
+  A column with neither is handled as before.
+- **Why.** A range wider than the draw places no date outside the window. The range of a profile's column stays its
+  full grid, since the bins must partition it, and the draw is what decides which dates a row can carry.
+- **The same edges elsewhere.** The warning of `validate` and `plan` for an emit with no history (the declared range or
+  bins leave the run's `timeBounds`) reads these edges too, so the two checks say the same of one column.
+- **What stays refused.** A bin outside the window that carries weight, and a column that declares no range and no
+  bins unless the history or another source sets it (`FLX-3403`).
+- **What moves.** Nothing already planned. This changes what `plan` accepts and not what the generator draws, so a plan
+  recorded before replays to its recorded digest, and a bundle accepted before keeps its run digest.

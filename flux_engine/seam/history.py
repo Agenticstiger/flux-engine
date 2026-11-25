@@ -1305,17 +1305,21 @@ def check_history_dates(
 ) -> None:
     """Refuse a date of a history's emit outside ``timeBounds`` (ADR 0017 section 11).
 
-    Refused with *refusal* (``FLX-3403``): a DATE or TIMESTAMP column whose declared range or bins
-    leave ``spec.timeBounds``, and one that declares no range and no bins, which would be drawn
-    inside the window and so change with it, unless the history sets it (its start, its end, its
-    activation or a key) or another source does: *other_sourced* is the columns a rule, a
-    dependency or a copy sets, which are never drawn (EXPR-SPEC-2 section 9). A history that sets a column still refuses a range it declares outside
-    the window. ``openEnd`` is no declared range and is not read. Every other emit keeps
-    the warning of ``fluxsim validate``. *hidden* is the emit's hidden columns: the expose is
-    compiled with them, as the plan compiles it, so a statistic for one is not refused as
-    naming a column the expose lacks.
+    Refused with *refusal* (``FLX-3403``): a DATE or TIMESTAMP column whose draw can reach a date
+    outside ``spec.timeBounds``, read at the edges the draw can reach
+    (:func:`~flux_engine.generator.statistics.drawn_edges`): the hull of the bins that carry
+    weight when the column declares bins, else its declared range. A range wider than the draw
+    places no date outside the window and is not refused. A column that declares no range and no
+    bins is refused too: it would be drawn inside the window and so change with it, unless the
+    history sets it (its start, its end, its activation or a key) or another source does:
+    *other_sourced* is the columns a rule, a dependency or a copy sets, which are never drawn
+    (EXPR-SPEC-2 section 9). A history that sets a column still refuses a draw it declares outside
+    the window. ``openEnd`` is no declared range and is not read. Every other emit keeps the
+    warning of ``fluxsim validate``. *hidden* is the emit's hidden columns: the expose is compiled
+    with them, as the plan compiles it, so a statistic for one is not refused as naming a column
+    the expose lacks.
     """
-    from flux_engine.generator.statistics import statistics_from_fidelity
+    from flux_engine.generator.statistics import drawn_edges, statistics_from_fidelity
 
     if target.window is None:
         return
@@ -1331,8 +1335,7 @@ def check_history_dates(
             continue
         declared = statistics[column.name]
         low, high = (_in_unit(edge, kind) for edge in target.window)
-        edges = [v for v in (declared.range_min, declared.range_max) if v is not None]
-        edges += list(declared.bins or ())
+        edges = drawn_edges(declared)
         if not edges and column.name not in sets:
             raise FluxError(
                 refusal,

@@ -171,6 +171,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Fixed
 
+- `plan` refused (`FLX-3403`), and `validate` warned of, a date column whose declared range reaches past the run's
+  window even when its draw stays inside it, as a range read from a profile does (its full year grid, with weight only
+  in the bins inside the window). Both now read the edges the draw can reach: the weighted bins' hull, or the declared
+  range when the column has no bins. A bin outside the window that carries weight is still refused (ADR 0017, the
+  amendment of 2026-11-25).
 - A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
   the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
   plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
