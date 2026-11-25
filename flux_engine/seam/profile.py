@@ -117,7 +117,7 @@ def load_profile(path: Path) -> PinnedProfile:
     except (OSError, UnicodeDecodeError) as exc:
         reason = exc.strerror if isinstance(exc, OSError) else "it is not UTF-8"
         raise FluxError(FLX_3109, f"the profile at {path} could not be read: {reason}") from exc
-    profile, document = load_profile_text(text, allow_empty_calendar_entries=True)
+    profile, document = load_profile_text(text, allow_emptied_entries=True)
     digest = digest_of_document(document, subject=f"profile:{Path(path).name}")
     return PinnedProfile(profile=profile, digest=digest, path=Path(path), document=document)
 

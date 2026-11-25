@@ -113,28 +113,36 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   profile, so `--profile` is given to `run` and to `apply --run-id`), and a stream below the minimum, from a run that
   pins no profile and declares no plugin, or from a run whose receipt and streams are not its plan's, is refused before
   anything is contacted (`FLX-3512`); declarations Kafka cannot take are `FLX-3513`, a topic that will not take the stream,
-  or a stream this run's receipts record as delivered whose progress the brokers have since dropped, is `FLX-3514`, and a
-  registry subject that cannot carry it is `FLX-3515`. No digest moves. See [Stream a simulation
-  into Kafka](docs/how-to/stream-a-simulation-into-kafka.md) and [ADR
+  or a stream this run's `sink-receipts.json` records as having reached the topic, whole or in part, whose progress the
+  brokers have since dropped while the topic stayed, is `FLX-3514`, and a registry subject that cannot carry it is
+  `FLX-3515`. A receipt records the run's grade, or with `--profile` the weaker of the run's and the profile's, and
+  says which (`gradeSource`). No digest moves. See
+  [Stream a simulation into Kafka](docs/how-to/stream-a-simulation-into-kafka.md) and [ADR
   0038](docs/adr/0038-a-kafka-sink-keys-records-by-entity-delivers-each-stream-exactly-once-and-sends-only-what-its-audience-may-see.md).
-- A sink is now told four more facts about a stream: `StreamContext.privacy_grade`, the grade the run is held to,
+- A sink is now told more about a stream: `StreamContext.privacy_grade`, the grade the run is held to,
   worked out from the run's bound plan, `run-digest.json`, `receipt.json` and bundle as `apply` reads it, and from the
   pinned profile when the command was given it (`RecordedGrade`, which says what is missing or does not check);
   `StreamContext.bundle_directory` and `StreamContext.simulation_id`, which say where the stream's declarations are;
-  and `StreamContext.delivered`, the receipts the run's `sink-receipts.json` already holds for the stream.
-  `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill all four; `apply --run-id` takes `--profile` with
-  `--sink`, for an external audience. They default to `None` (`delivered` to empty), no digest covers them, and the
-  existing sinks ignore them.
+  and `StreamContext.delivered` and `StreamContext.committed`, the receipts the run's `sink-receipts.json` already holds
+  for the stream, whole and so far. A sink that commits what it sends keeps a receipt of the stream so far there after
+  each commit, through `StreamContext.record_committed` (`write_progress`), until the stream's receipt replaces it.
+  Both writers of the file hold an advisory lock on the run directory across each read and write.
+  `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill them all; `apply --run-id` takes `--profile` with
+  `--sink`, for an external audience. They default to `None` (`delivered` and `committed` to empty), no digest covers
+  them, and the existing sinks ignore them. `privacy_grade_of` takes the `receipt.json` document its caller read
+  (`receipt=`), so the streams delivered from a run directory are the ones its checks covered.
 
 ### Changed
 
 - The engine needs `flux-spec>=0.5.5,<0.6` (was `>=0.5.4`). 0.5.5's FLUID 0.7.7 preview declares a versioned
   table's open end and version chain (`validityParams.openEnd` and `chain`), which `fluxsim init` reads into a
   history; under 0.5.4 a contract that declared either was refused by validation.
-- The engine reads a profile whose calendar entry holds none of its three histograms, as when a release step drops
-  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place: `init`
-  and `plan` accept it, and a citation into such an entry is still refused (`FLX-5036`). flux-stats' `parse_profile`
-  and `load_profile_text` take `allow_empty_calendar_entries`, off by default, which the engine sets.
+- The engine reads a profile in which an entry holds only the keys that name it, as when a release step drops
+  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place:
+  `init` and `plan` accept it, and a citation at or under such an entry is still refused (`FLX-5036`). The entries
+  are a calendar entry, a date pair, a relationship's date pair, an exposure, a history and a tracked column of
+  one. An entry that holds some of its statistics, but not all, is refused as before. flux-stats' `parse_profile`
+  and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets.
 - A profile's `privacy` block may state more loss than its noisy statistics and cliques spend, including when none
   remain; a stated loss is an upper bound, and a total below what they spend is still refused (`FLX-5036`). The grade
   comes from the statistics alone, so a block that nothing spends earns no grade, and `init` notes the stated and
@@ -187,6 +195,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   in the bins inside the window). Both now read the edges the draw can reach: the weighted bins' hull, or the declared
   range when the column has no bins. A bin outside the window that carries weight is still refused (ADR 0017, the
   amendment of 2026-11-25).
+- `verify` no longer refuses (`FLX-5037`) a histogram of a DATE column whose profile grid ends at the calendar's last
+  instant, 253402300799999 milliseconds. A profile spells the last edge of a year grid there and a declaration spells
+  it as the day 9999-12-31; they are one edge. An edge that is not a whole day still matches no declared edge.
+- `verify` no longer refuses (`FLX-5005`, "the two sides group into different sets") a property grouped by a column
+  because a noisy profile lists a level whose noisy counts project to no record and the generated rows hold none of
+  it. A level the profile holds no record of is left out on both sides, as a suppressed group is, and the other groups
+  are compared. A level the profile holds records of that the rows lack is still refused.
 - A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
   the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
   plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
