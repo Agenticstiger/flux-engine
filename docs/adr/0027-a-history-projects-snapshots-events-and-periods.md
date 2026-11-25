@@ -401,7 +401,8 @@ that projects a column of the version (`model` on a month, or on a change) and d
   relationship or the history's `end` sets it (an `end` value that is a level of the emit's column is served), it
   is drawn from levels the emit's column does not hold, or, for a column drawn from bins, it is of another type.
 - **Recorded plans.** A plan with such a column says `projectedGivens: "afterProjection"`, which the plan digest
-  covers, and the projection member of its emit names the held columns as `heldGivens`. A recorded plan without
+  covers; plan.json states only that key. The generator document the plan's digest covers (its `generatorDigest`)
+  names the held columns, as `heldGivens` in the projection member of the emit. A recorded plan without
   the key replays the draw engine 0.11.1 made, given the level the column's own draw made, so its rows and its run
   id keep their bytes. Any other value is `FLX-2102`.
 - **What moves.** Only a bundle the first amendment refused: its plan is now accepted. Every other plan writes no

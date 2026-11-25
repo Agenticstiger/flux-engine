@@ -15,6 +15,7 @@ plan without ``projectedGivens`` replays the draw it was made with.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -393,3 +394,22 @@ def test_a_version_column_a_relationship_of_the_history_sets_is_refused(tmp_path
     text = _refusal(target)
     for word in ("'tier'", "'model'", "a relationship of the history sets it"):
         assert word in text, text
+
+
+@pytest.mark.parametrize("projection", PROJECTIONS)
+def test_the_generator_document_names_the_held_columns_and_its_digest_covers_them(
+    tmp_path: Path, projection: str
+) -> None:
+    # plan.json states only ``projectedGivens``; the held columns are in the generator document the
+    # plan's ``generatorDigest`` covers.
+    plan = (
+        pipeline.execute(given_bundle(tmp_path, projection), kernel=KERNEL_V2).emit(projection).plan
+    )
+    assert plan.projection is not None
+    assert plan.as_document()["projection"]["heldGivens"] == ["model"]
+    other = replace(plan, projection=replace(plan.projection, held=("model", "status")))
+    assert other.as_document()["projection"]["heldGivens"] == ["model", "status"]
+    assert other.digest().value != plan.digest().value
+    none = replace(plan, projection=replace(plan.projection, held=()))
+    assert "heldGivens" not in none.as_document()["projection"]
+    assert none.digest().value != plan.digest().value

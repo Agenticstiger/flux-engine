@@ -175,8 +175,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. A
   column drawn `given` a column of the version is now drawn after the projection, given the level the version
   holds, so `tier` given `model` follows the `model` each row carries; a plan with such a column says
-  `projectedGivens: "afterProjection"`, and a recorded plan without the key replays the draw it was made with. The
-  plan refuses, `FLX-3403` naming both columns and the entry, what that cannot serve: a column drawn `given` the
+  `projectedGivens: "afterProjection"` (plan.json states only that key; the generator document the plan's digest
+  covers names the held columns as `heldGivens`), and a recorded plan without the key replays the draw it was made
+  with. The plan refuses, `FLX-3403` naming both columns and the entry, what that cannot serve: a column drawn `given` the
   `op`, `at`, `date`, `type` or period column, a kind's override or an image, one with `allocation: exact`, and one
   drawn `given` a column of the version the history may fill with a value no level of the emit's names (a
   `nullFraction`, a rule, a relationship or the history's `end` sets it, or other levels) (ADR 0027, the amendments
