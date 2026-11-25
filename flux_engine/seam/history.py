@@ -40,7 +40,7 @@ member out, as it leaves out the counts' (:func:`flux_engine.seam.emit.seam_reus
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from decimal import Decimal
 from fractions import Fraction
@@ -58,6 +58,8 @@ from flux_engine.seam.keys import ExposeKeys, Relationship, window_ends
 from flux_engine.seam.links import LinkEntry
 
 __all__ = [
+    "END_SHARE_OF_ELIGIBLE",
+    "END_SHARE_OF_ENTITIES",
     "HISTORY_KEY",
     "Histogram",
     "HistoryEnd",
@@ -171,14 +173,35 @@ class HistoryTracked:
         return member
 
 
+#: What an ``end``'s share is a share of (ADR 0017, the amendment of 2026-11-24): every entity,
+#: which is what a plan made by this engine's release and later asks for, and ``plan.json`` says so
+#: with ``historyEndShare``.
+END_SHARE_OF_ENTITIES = "entities"
+
+#: An ``end``'s share as engine 0.11.1 and earlier took it: a share of the entities that can end.
+#: A recorded plan with no ``historyEndShare`` replays under it, so its run id keeps its digests.
+END_SHARE_OF_ELIGIBLE = "eligible"
+
+
 @dataclass(frozen=True)
 class HistoryEnd:
-    """How an entity's history ends: a ``mode``, a ``share`` and, optionally, a column and its value."""
+    """How an entity's history ends: a ``mode``, a ``share`` and, optionally, a column and its value.
+
+    *share_of* is what the share is a share of (:data:`END_SHARE_OF_ENTITIES`, or
+    :data:`END_SHARE_OF_ELIGIBLE` for a plan recorded before the end share moved). It is no part of
+    the entry a Simulation declares: the plan says it, and :func:`history_entries_of` sets it.
+    """
 
     mode: str
     share: str
     column: Optional[str] = None
     value: Optional[str] = None
+    share_of: str = END_SHARE_OF_ENTITIES
+
+    @property
+    def every_entity_eligible(self) -> bool:
+        """Whether every entity can end: ``closeLast`` with no column, where no entity is left out."""
+        return self.mode == "closeLast" and self.column is None
 
     def as_member(self) -> Dict[str, Any]:
         """The end as the entry holds it, each key only when declared."""
@@ -646,9 +669,14 @@ def bound_into_h(entries: Sequence[HistoryEntry], emit: str) -> Optional[Dict[st
 
 
 def history_entries_of(
-    extension: Optional[Mapping[str, Any]], emit: str
+    extension: Optional[Mapping[str, Any]], emit: str, *, end_share: str = END_SHARE_OF_ENTITIES
 ) -> Tuple[HistoryEntry, ...]:
-    """The history an emit's bound extension holds (the member :func:`bound_into_h` made), or ``()``."""
+    """The history an emit's bound extension holds (the member :func:`bound_into_h` made), or ``()``.
+
+    *end_share* is what the entry's ``end`` share is a share of, which the plan the run executes
+    states (:data:`END_SHARE_OF_ENTITIES`, or :data:`END_SHARE_OF_ELIGIBLE` for a plan that does
+    not). The Simulation does not declare it.
+    """
     raw = extension.get(HISTORY_KEY) if extension is not None else None
     if not isinstance(raw, Mapping):
         return ()
@@ -658,6 +686,8 @@ def history_entries_of(
         get("FLX-3105"),
         get("FLX-3403"),
     )
+    if entry.end is not None and end_share != entry.end.share_of:
+        entry = replace(entry, end=replace(entry.end, share_of=end_share))
     return (entry,)
 
 

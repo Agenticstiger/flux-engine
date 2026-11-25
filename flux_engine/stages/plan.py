@@ -85,6 +85,7 @@ from flux_engine.safeio import (
 )
 from flux_engine.seam.coverage import ExposeCoverage, printable
 from flux_engine.seam.declared import NotGenerated, render_not_generated
+from flux_engine.seam.history import END_SHARE_OF_ENTITIES, history_entries_of
 from flux_engine.seam.mean_reach import check_restated_means
 from flux_engine.seam.overlay import overlaid_profile
 from flux_engine.seam.parameters import check_profile_citations
@@ -112,6 +113,7 @@ from flux_engine.stages.staging import STAGE_DIRNAME, discard_stage, stage_execu
 from flux_engine.stages.timings import lap, timed
 
 __all__ = [
+    "END_SHARE_PLAN_KEY",
     "GENERATORS_PLAN_KEY",
     "OVERLAY_PLAN_KEY",
     "PROFILE_PIN_KEY",
@@ -280,6 +282,41 @@ OVERLAY_PLAN_KEY = "overlay"
 GENERATORS_PLAN_KEY = "generators"
 
 
+#: ``plan.json``'s key for what a history's ``end`` share is a share of (ADR 0017, the amendment of
+#: 2026-11-24): ``"entities"``, every entity. Present only when an emit of the run declares a
+#: history whose ``end`` leaves some entity unable to end (a ``column`` or ``finalVersion``), the one
+#: allotment the two takes of the share tell apart, so every other plan keeps its bytes and its
+#: planDigest. A recorded plan
+#: without it is one written by engine 0.11.1 or earlier, whose share was a share of the entities
+#: that can end, and it replays under that allocation (:func:`flux_engine.stages.apply.plan_end_share`).
+END_SHARE_PLAN_KEY = "historyEndShare"
+
+
+def _end_share_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``historyEndShare``, only for a plan that allots a history's ``end`` a share of every entity.
+
+    Only an ``end`` that leaves an entity unable to end has an allotment the old share could give
+    differently: with every entity eligible the share of the eligible entities is the share of all.
+
+    A run that executes a recorded plan (``apply --run-id``, ``replay``) never builds a plan document,
+    so the key a plan says is the one it was made with; the plan digest covers it, so planning a
+    bundle again moves the run id.
+    """
+    if result.end_share != END_SHARE_OF_ENTITIES:
+        return {}
+    outcomes: List[Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"]] = [
+        *result.emits,
+        *result.hidden_emits,
+    ]
+    emits = [outcome.resolved for outcome in outcomes]
+    declared = any(
+        entry.end is not None and not entry.end.every_entity_eligible
+        for resolved in emits
+        for entry in history_entries_of(resolved.extension, resolved.expose_id)
+    )
+    return {END_SHARE_PLAN_KEY: END_SHARE_OF_ENTITIES} if declared else {}
+
+
 def _generator_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     """``generators``: per expose a plugin generates, what ran it, only for a Simulation that declares one.
 
@@ -342,6 +379,7 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
         **_profile_entries(result),
         **_register_entries(result),
         **_generator_entries(result),
+        **_end_share_entries(result),
         **(
             {
                 REFERENCES_PLAN_KEY: {

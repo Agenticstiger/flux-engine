@@ -1,0 +1,23 @@
+{
+  "components": {
+    "assignment": "sha256:832e767323d67f521e63c0e7c596b38b6b4a802ebca2ee59c7e92e04b1432c5d",
+    "decisions": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "delivery": "sha256:8cb7bc3b220c4dc3133c30b0fefb2908d97bff2ac987cee033d5b3dd42af9db6",
+    "emits": {
+      "depot": "sha256:3ba37707b664e139f8eb9d988efd9206aa189179ce15cbabb50d99fd9cde6182",
+      "service_visit": "sha256:b198b4f6057a100050cd0ff06b070d0a568a1fd022f8e6c0f94df02a829dc012",
+      "vehicle_change": "sha256:cce2ac749da0b3ba822701965df5880f62757d276279857c4818c3fe90f19a50",
+      "vehicle_current": "sha256:a0ab029c18c4b4c41de2adcbc34398eb1a09c04d9f4a5d2c39fd2896ef4b1eef",
+      "vehicle_month": "sha256:1802f20a7e17d1f1ab89eae97bfb87b05787fea7890bd58ce94411eec98d534e",
+      "vehicle_version": "sha256:d4960f904b9086f00a3b6516a8ec96904155b792e07a9fa84f669827864d2539"
+    },
+    "events": "sha256:a45bfe9c75c6ee09b0cf0f1ff539d40e10d5d001072b5590e1b48c63df511dff",
+    "journeys": "sha256:4ab92b80ec8618957b41e9d08a1da8d107af13afba037bd3c4dcc53c7a5561b3",
+    "population": "sha256:2f5e63e0484c245e86e435f5ceedf02a7f1b10ed1a6a473b81561b85b1bf3e9f"
+  },
+  "inputDigest": "sha256:fabf9470feeb9ea3b72650a0bcb7afea0c93a5d3dd723ef6eb1c6ebb5fae4e06",
+  "kernelVersion": "0.2.0",
+  "planDigest": "sha256:a28e95573384a621df051ea301fa0b3124d33b1f4c089180951332f1fff327a9",
+  "runFormatVersion": 1,
+  "traceVersion": "flux-trace/1"
+}

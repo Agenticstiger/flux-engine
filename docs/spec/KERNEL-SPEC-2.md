@@ -605,6 +605,17 @@ before, `s_last + d_last - 1` day, under `dayBefore`. Under `finalVersion` its l
 is a final version that carries the entry's `value` in `column` and stays open. The ending change is forced and draws
 nothing.
 
+**Plans written before the share moved.** Engine 0.11.1 and earlier took `share` of the eligible entities alone,
+`n = LRM(E', [share, 1 - share])[0]`, with the same permutation. A plan states which count it was made with: `plan`
+writes `historyEndShare: "entities"` into `plan.json` when an emit declares a history with an `end` that leaves an
+entity ineligible (a `column`, or `finalVersion`), so the plan digest covers it. Every other plan has no key, since
+with every entity eligible `E' = E` and the two counts are one. A recorded plan without the key replays the earlier
+count, so a run id made before the change replays to the run digest it recorded; planning the same bundle again
+carries the key, and moves the plan digest, the run id and the bytes of the history and of every table that reads
+it. Any other value of the key is refused (`FLX-2102`). Kernel `0.2.0` did not change: the key is read only for a
+bundle that declares such an `end`, and an engine without this paragraph ignores it, so it replays a plan that
+carries the key to the earlier count and so to other bytes (section 12).
+
 **Change reasons.** The ordinary changes are every version after an entity's first except an ending version,
 numbered `t` in row order, `T` of them. With one tracked column it is the reason of every change. Otherwise the
 `reasons` classes take `LRM(T, weights)` changes each, keyed as section 8.1 keys classes, and change `t` takes the

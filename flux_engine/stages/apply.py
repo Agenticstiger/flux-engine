@@ -63,6 +63,7 @@ from flux_engine.safeio import (
 )
 from flux_engine.seam.attest import build_seam_attestation
 from flux_engine.seam.coverage import printable
+from flux_engine.seam.history import END_SHARE_OF_ELIGIBLE, END_SHARE_OF_ENTITIES
 from flux_engine.seam.resolve import load_bundle, profile_reference
 from flux_engine.stages import pipeline as _pipeline
 from flux_engine.stages._grades import (
@@ -94,6 +95,7 @@ from flux_engine.stages.layout import (
     run_id_for,
 )
 from flux_engine.stages.plan import (
+    END_SHARE_PLAN_KEY,
     REFERENCES_PLAN_KEY,
     column_provenance_text,
     parameter_register_text,
@@ -112,6 +114,7 @@ from flux_engine.stages.timings import lap, timed
 __all__ = [
     "apply",
     "load_recorded_plan",
+    "plan_end_share",
     "plan_kernel",
     "require_run_digest_binds_plan",
     "write_run",
@@ -180,6 +183,7 @@ def load_recorded_plan(layout: RunLayout) -> Dict[str, Any]:
             f"(planDigest {recorded}); the directory is named {layout.run_id!r}",
         )
     plan_kernel(document)
+    plan_end_share(document)
     return document
 
 
@@ -204,6 +208,42 @@ def plan_kernel(plan_document: Mapping[str, Any]) -> Kernel:
             ],
         )
     return kernel
+
+
+#: How much of a recorded value a diagnostic quotes: a plan is read before it is trusted.
+_QUOTED_VALUE_CHARS = 40
+
+
+def _short_repr(value: object) -> str:
+    """*value* as a repr a diagnostic can carry: escaped, and cut at :data:`_QUOTED_VALUE_CHARS`."""
+    text = repr(value)
+    if len(text) <= _QUOTED_VALUE_CHARS:
+        return text
+    return text[: _QUOTED_VALUE_CHARS - 3] + "..."
+
+
+def plan_end_share(plan_document: Mapping[str, Any]) -> str:
+    """What a recorded plan's history ``end`` shares are shares of, or the refusal (``FLX-2102``).
+
+    A plan with ``historyEndShare`` says ``"entities"``: the share is a share of every entity (ADR
+    0017, the amendment of 2026-11-24). A plan without it was written by engine 0.11.1 or earlier,
+    whose share was a share of the entities that can end, and it replays under that allocation, so
+    the run id it made keeps its digests. Any other value comes from an engine this one does not
+    know, and a plan that names one is refused rather than run under the allocation it was not made
+    with.
+    """
+    if END_SHARE_PLAN_KEY not in plan_document:
+        return END_SHARE_OF_ELIGIBLE
+    named = plan_document[END_SHARE_PLAN_KEY]
+    if named != END_SHARE_OF_ENTITIES:
+        raise FluxError(
+            FLX_2102,
+            f"the recorded plan names {END_SHARE_PLAN_KEY} {_short_repr(named)}, a value this "
+            f"engine does not know (a plan written by a newer or incompatible version; it knows "
+            f"{END_SHARE_OF_ENTITIES!r}, and a plan without the key takes "
+            f"{END_SHARE_OF_ELIGIBLE!r}); plan again with this engine",
+        )
+    return END_SHARE_OF_ENTITIES
 
 
 def require_run_digest_binds_plan(
@@ -652,6 +692,7 @@ def _apply(
                 strict_coverage=strict_coverage,
                 kernel=kernel,
                 scale=optional_scale(plan_document.get("scale")),
+                end_share=plan_end_share(plan_document),
                 shard=shares,
                 references=plan_document.get(REFERENCES_PLAN_KEY),
                 allow_generators=allow_generators,

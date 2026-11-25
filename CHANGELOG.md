@@ -105,8 +105,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   on a history whose `end` has a column (entities of two versions or more) ended fewer entities than it named.
   The ended entities are still chosen among the eligible ones; when fewer are eligible than the share asks for,
   every eligible entity ends and `plan` notes the share yielded (ADR 0017, the amendment of 2026-11-24).
-  **The bytes of such a history and of every projection of it move**; a history with no `end`, and a `closeLast`
-  end without a column, keep theirs.
+  A plan that allots it so says with `historyEndShare: "entities"` in `plan.json`, which the plan digest covers, and
+  a recorded plan without the key replays the old allocation: **a plan made by 0.11.1 or earlier replays to the run
+  digest it recorded, and planning the same bundle again moves the plan digest, the run id and the bytes of such a
+  history and of every projection of it**. A history with no `end`, and a `closeLast` end without a column, whose
+  every entity is eligible, keep their bytes, their plan digest and their run id, since their plan carries no key.
+  Kernel 0.2.0 is unchanged, so an engine without this change ignores the key and replays a plan that carries it
+  to other bytes.
 - Under `copies: true` on kernel 0.2.0, a `sharedColumns` entry that names a foreign-key column of another
   relationship was listed as declared and not generated. It now sets that relationship's pick, so **the bytes of
   that foreign-key column move** and a rule that reads through the relationship reads the copied row, or the plan is

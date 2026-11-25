@@ -601,6 +601,13 @@ who writes a `share` means that share of the histories, so the share is now a sh
 - With `closeLast` and no `column` every entity is eligible, so `E' = E` and the count is the one section 5 gave.
   Every other `end` ends a different set of entities when the eligible ones are fewer than `E`, so **the bytes of
   such a history and of every projection of it move**. A history without an `end` keeps its bytes.
+- A run id made before this change replays byte for byte, as every earlier change to generation has kept its
+  recorded runs. `plan` writes `historyEndShare: "entities"` into `plan.json` when an emit declares a history with
+  an `end` that leaves an entity ineligible (`E' < E`: a `column`, or `finalVersion`). The plan digest covers it,
+  and a recorded plan without the key replays `LRM(E', ...)`, the eligible entities alone. Planning the same bundle
+  again carries the key, so it moves the plan digest and the run id with the bytes. The kernel stays `0.2.0`,
+  which every bundle shares, so a key the plan carries is the narrower marker. Any other value of the key is
+  `FLX-2102`.
 
 ## Amendment of 2026-11-24: `init` writes the history's parent
 

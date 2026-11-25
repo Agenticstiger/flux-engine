@@ -80,7 +80,12 @@ from flux_engine.generator.paths import (
 )
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.counts import ChildShape
-from flux_engine.seam.history import Histogram, HistoryEntry, HistoryTracked
+from flux_engine.seam.history import (
+    END_SHARE_OF_ELIGIBLE,
+    Histogram,
+    HistoryEntry,
+    HistoryTracked,
+)
 
 __all__ = [
     "Chain",
@@ -654,7 +659,7 @@ def _eligible(entry: HistoryEntry, counts: "np.ndarray") -> "np.ndarray":
     """Which entities may end: all under ``closeLast`` without a column, else those with two versions."""
     end = entry.end
     assert end is not None
-    if end.mode == "closeLast" and end.column is None:
+    if end.every_entity_eligible:
         return np.ones(counts.shape[0], dtype=bool)
     return counts >= 2
 
@@ -672,8 +677,16 @@ def declared_ended(entities: int, share: str) -> int:
     return largest_remainder(entities, {"0": weight, "1": 1 - weight})["0"]  # type: ignore[dict-item]
 
 
-def ended_count(entities: int, eligible: int, share: str) -> int:
-    """The entities that end: ``n`` of all *entities*, or every eligible one when fewer are eligible."""
+def ended_count(entities: int, eligible: int, share: str, *, of_eligible: bool = False) -> int:
+    """The entities that end: ``n`` of all *entities*, or every eligible one when fewer are eligible.
+
+    With *of_eligible*, the share of a plan recorded before the end share moved to every entity
+    (:data:`~flux_engine.seam.history.END_SHARE_OF_ELIGIBLE`): ``n = LRM(E', [share, 1 - share])[0]``
+    of the *eligible* entities alone, which is what every engine to 0.11.1 ended. Such a plan
+    replays under it, so its run id keeps the digests it had.
+    """
+    if of_eligible:
+        return declared_ended(eligible, share)
     return min(declared_ended(entities, share), eligible)
 
 
@@ -687,6 +700,8 @@ def end_share_note(expose_id: str, entry: HistoryEntry, plan: "HistoryPlan") -> 
     end = entry.end
     if end is None or plan.ended is None or plan.entities == 0:
         return None
+    if end.share_of == END_SHARE_OF_ELIGIBLE:
+        return None  # a plan recorded before the share moved to every entity declares no such share
     if int(plan.ended.sum()) >= declared_ended(plan.entities, end.share):
         return None
     yielded = Fraction(int(plan.ended.sum()), plan.entities)
@@ -708,7 +723,8 @@ def ended_entities(
     """Which entities end, as a flag per entity: the eligible entity of rank ``r`` ends when ``permute/2(K_end, E', r) < n``.
 
     ``n`` is the share of every entity (:func:`ended_count`), chosen among the entities that can
-    end. *forced* flags the entities whose parent ended inside the horizon (ADR 0017, amendment of
+    end; for a plan recorded before the share moved, the share of the eligible entities alone
+    (``entry.end.share_of``). *forced* flags the entities whose parent ended inside the horizon (ADR 0017, amendment of
     2026-11-24). They can end whatever their versions, they end, and they count towards ``n``: the
     others end by the same permutation over the eligible entities that are not forced, ``n`` less
     the forced ones, and when the forced ones are more than ``n`` they all end and no other does.
@@ -724,7 +740,16 @@ def ended_entities(
         eligible_flags = eligible_flags & ~forced
     eligible = np.nonzero(eligible_flags)[0]
     ranks = int(eligible.shape[0])
-    count = max(ended_count(int(counts.shape[0]), ranks + held, end.share) - held, 0)
+    count = max(
+        ended_count(
+            int(counts.shape[0]),
+            ranks + held,
+            end.share,
+            of_eligible=end.share_of == END_SHARE_OF_ELIGIBLE,
+        )
+        - held,
+        0,
+    )
     if count == 0:
         return ended
     images = np.array(

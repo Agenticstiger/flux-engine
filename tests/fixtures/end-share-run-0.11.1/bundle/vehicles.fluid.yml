@@ -1,0 +1,163 @@
+# A depot, a versioned vehicle (a validity window) and four exposes that read it. The
+# simulation declares a history for vehicle_version.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: fleet.vehicles
+name: Fleet
+metadata:
+  owner:
+    team: fleet
+exposes:
+  - exposeId: depot
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: depot, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: depot_id, type: INT, required: true }
+        - { name: region, type: STRING, required: true }
+        - { name: opened_on, type: DATE, required: true }
+        - { name: closed_on, type: DATE, required: false }
+    semantics:
+      entities:
+        - { name: depot, type: primary, expr: depot_id }
+      dimensions:
+        - { name: opened_on, type: time }
+        - { name: closed_on, type: time }
+        - { name: region, type: categorical }
+  - exposeId: vehicle_version
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: vehicle_version, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: vehicle_sk, type: INT, required: true }
+        - { name: vehicle_id, type: INT, required: true }
+        - { name: depot_id, type: INT, required: true }
+        - { name: valid_from, type: DATE, required: true }
+        - { name: valid_to, type: DATE, required: false }
+        - { name: model, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+        - { name: commissioned_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: vehicle_version, type: primary, expr: vehicle_sk }
+        - { name: vehicle, type: natural, expr: vehicle_id }
+      dimensions:
+        - { name: valid_from, type: time, typeParams: { validityParams: { isStart: true } } }
+        - { name: valid_to, type: time, typeParams: { validityParams: { isEnd: true } } }
+        - { name: model, type: categorical }
+        - { name: status, type: categorical }
+        - { name: commissioned_on, type: time }
+      relationships:
+        - name: depot
+          to: depot
+          fromColumns: [depot_id]
+          toColumns: [depot_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: service_visit
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: service_visit, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: visit_id, type: INT, required: true }
+        - { name: vehicle_id, type: INT, required: true }
+        - { name: visited_on, type: DATE, required: true }
+        - { name: cost, type: "DECIMAL(10,2)", required: true }
+    semantics:
+      defaultAggTimeDimension: visited_on
+      entities:
+        - { name: service_visit, type: primary, expr: visit_id }
+      dimensions:
+        - { name: visited_on, type: time }
+      relationships:
+        - name: vehicle
+          to: vehicle_version
+          fromColumns: [vehicle_id]
+          toColumns: [vehicle_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: vehicle_current
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: vehicle_current, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: vehicle_id, type: INT, required: true }
+        - { name: model, type: STRING, required: true }
+        - { name: status, type: STRING, required: true }
+        - { name: commissioned_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: vehicle, type: primary, expr: vehicle_id }
+      dimensions:
+        - { name: model, type: categorical }
+        - { name: status, type: categorical }
+        - { name: commissioned_on, type: time }
+  - exposeId: vehicle_change
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: vehicle_change, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: event_id, type: INT, required: true }
+        - { name: vehicle_id, type: INT, required: true }
+        - { name: op, type: STRING, required: true }
+        - { name: changed_at, type: DATE, required: true }
+        - { name: recorded_at, type: DATE, required: true }
+        - { name: before_model, type: STRING, required: false }
+        - { name: after_model, type: STRING, required: false }
+    semantics:
+      defaultAggTimeDimension: recorded_at
+      entities:
+        - { name: event, type: primary, expr: event_id }
+      dimensions:
+        - { name: op, type: categorical }
+        - { name: changed_at, type: time }
+        - { name: recorded_at, type: time }
+        - { name: before_model, type: categorical }
+        - { name: after_model, type: categorical }
+      relationships:
+        - name: vehicle
+          to: vehicle_version
+          fromColumns: [vehicle_id]
+          toColumns: [vehicle_id]
+          cardinality: many_to_one
+          joinType: inner
+  - exposeId: vehicle_month
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: fleet, table: vehicle_month, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: period_id, type: INT, required: true }
+        - { name: vehicle_id, type: INT, required: true }
+        - { name: month, type: DATE, required: true }
+        - { name: model, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: period, type: primary, expr: period_id }
+      dimensions:
+        - { name: month, type: time, typeParams: { timeGranularity: month } }
+        - { name: model, type: categorical }
+      relationships:
+        - name: vehicle
+          to: vehicle_version
+          fromColumns: [vehicle_id]
+          toColumns: [vehicle_id]
+          cardinality: many_to_one
+          joinType: inner

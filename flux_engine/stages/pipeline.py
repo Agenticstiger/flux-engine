@@ -234,7 +234,7 @@ from flux_engine.seam.emit import (
     seam_digests,
     seam_entropy_bytes,
 )
-from flux_engine.seam.history import HISTORY_KEY, history_entries_of
+from flux_engine.seam.history import END_SHARE_OF_ENTITIES, HISTORY_KEY, history_entries_of
 from flux_engine.seam.keys import compile_keys, declared_exposes, window_ends
 from flux_engine.seam.links import link_entries_of
 from flux_engine.seam.mapping import (
@@ -472,6 +472,10 @@ class PipelineResult:
     #: The sweep run this execution is, with the effects it took (ADR 0029 section 3); ``None``
     #: for every run that is not a forecast's replicate.
     replicate: Optional[Replicate] = None
+    #: What a history's ``end`` share was a share of in this execution (ADR 0017, the amendment of
+    #: 2026-11-24): every entity for a new plan, which the plan then says with ``historyEndShare``,
+    #: or the eligible entities alone for a recorded plan without the key.
+    end_share: str = END_SHARE_OF_ENTITIES
 
     def emit(self, expose_id: str) -> EmitOutcome:
         for outcome in self.emits:
@@ -1811,6 +1815,7 @@ def execute(
     replicate: Optional[Replicate] = None,
     common_draws_of: Optional[Path] = None,
     most_rows: Optional[int] = None,
+    end_share: Optional[str] = None,
 ) -> PipelineResult:
     """Run every stage of the six-step loop's core once, in memory.
 
@@ -1857,6 +1862,11 @@ def execute(
     plan holds of each reference expose (ADR 0023 section 2): an emit that declares
     ``reference: true`` takes its rows from *references* when they are given, and from the
     pinned profile's ``references`` otherwise. Neither is read for a run with no reference expose.
+
+    *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
+    2026-11-24): the plan's ``historyEndShare`` (:func:`flux_engine.stages.apply.plan_end_share`)
+    when a recorded plan is executed, so that it replays the allocation it was made with, and
+    ``None`` for a new plan, which takes every entity.
 
     *most_rows* bounds the rows the plans of every emit hold together, derived and hidden emits
     included. When their sum is above it, :class:`PlannedRowsAboveCeiling` is raised after the
@@ -1905,6 +1915,7 @@ def execute(
     # starts at one job, and no worker is reserved: the pool is built later, as always.
     start_forkserver_early(jobs)
     run_kernel = _kernels.DEFAULT_KERNEL if kernel is None else kernel
+    run_end_share = END_SHARE_OF_ENTITIES if end_share is None else end_share
     if run_kernel.seed_tree_version != kernel2.SEED_TREE_VERSION:
         # New generation features run on kernel 0.2.0 only: 0.1.0's draws are frozen.
         if scale is not None and scale != 1:
@@ -1930,23 +1941,7 @@ def execute(
         fidelity = str(simulation.get("spec", {}).get("fidelity", "deterministic"))
         require_supported_fidelity(fidelity)
 
-        sovereignty_audit = []
-        for owner_id, owner_kind, document in (
-            (cast.simulation_id, "Simulation", simulation),
-            (cast.world_id, "World", world_doc),
-        ):
-            sovereignty_policy = SovereigntyPolicy.from_document(
-                document.get("spec", {}).get("sovereignty")
-            )
-            row = enforce_sovereignty(
-                sovereignty_policy,
-                zone=zone,
-                document_id=owner_id,
-                document_kind=owner_kind,
-                event_time=str(simulation.get("spec", {}).get("timeBounds", {}).get("start", "")),
-            )
-            if row is not None:
-                sovereignty_audit.append(row)
+        sovereignty_audit = _sovereignty_audit_of(cast, simulation, world_doc, zone)
 
         # The two declarations the FLUX schema leaves optional and this engine
         # cannot run without, refused in the order `validate` checks them,
@@ -1980,6 +1975,7 @@ def execute(
                 "require_staged": require_staged,
                 "responses": responses,
                 "replicate": replicate,
+                "end_share": end_share,
             },
         )
 
@@ -2191,6 +2187,7 @@ def execute(
                 published=published,
                 plugins=plugins,
                 root=root,
+                end_share=run_end_share,
             )
         _require_coverage(planned_emits, asked_by)
         lap("plan emits")
@@ -2265,7 +2262,7 @@ def execute(
                 arm_counts=counts,
                 emits=made,
                 decisions=decisions,
-                sovereignty_audit=tuple(sovereignty_audit),
+                sovereignty_audit=sovereignty_audit,
                 input_digest=input_digest,
                 files_not_hashed=loaded.digest_inputs().not_hashed,
                 components=components,
@@ -2279,6 +2276,7 @@ def execute(
                 hidden_emits=hidden_emits,
                 responses=_runtime_of(early),
                 replicate=replicate,
+                end_share=run_end_share,
             )
 
         if probing:
@@ -3302,6 +3300,30 @@ def _plan_emit(
     )
 
 
+def _sovereignty_audit_of(
+    cast: Cast, simulation: Mapping[str, Any], world_doc: Mapping[str, Any], zone: Optional[str]
+) -> Tuple[SovereigntyAuditRow, ...]:
+    """The audit rows the Simulation's and the World's sovereignty policies enforce in *zone*."""
+    rows = []
+    for owner_id, owner_kind, document in (
+        (cast.simulation_id, "Simulation", simulation),
+        (cast.world_id, "World", world_doc),
+    ):
+        sovereignty_policy = SovereigntyPolicy.from_document(
+            document.get("spec", {}).get("sovereignty")
+        )
+        row = enforce_sovereignty(
+            sovereignty_policy,
+            zone=zone,
+            document_id=owner_id,
+            document_kind=owner_kind,
+            event_time=str(simulation.get("spec", {}).get("timeBounds", {}).get("start", "")),
+        )
+        if row is not None:
+            rows.append(row)
+    return tuple(rows)
+
+
 def _planned_with_projections(
     resolved_emits: Sequence[ResolvedEmit],
     per_emit_digests: Sequence[SeamDigests],
@@ -3314,6 +3336,7 @@ def _planned_with_projections(
     published: Optional[Mapping[str, ReferenceRows]],
     root: SeedTreeRoot,
     plugins: Optional[Mapping[str, PluginExpose]] = None,
+    end_share: str = END_SHARE_OF_ENTITIES,
 ) -> Tuple[_PlannedEmit, ...]:
     """Every emit planned and related, a projected emit's rows derived from its history (ADR 0027 section 2).
 
@@ -3342,7 +3365,7 @@ def _planned_with_projections(
 
     guesses = {index: _most_rows(resolved_emits, found) for index, found in projected.items()}
     planned = tuple(plan_at(index, guesses.get(index)) for index in range(len(resolved_emits)))
-    related = _relate_emits(resolved_emits, planned, namespace)
+    related = _relate_emits(resolved_emits, planned, namespace, end_share)
     shrunk = _shrunk_histories(related, root)
     if not projected and not shrunk:
         return related
@@ -3358,7 +3381,7 @@ def _planned_with_projections(
     if shrunk or any(counts[index] != guesses[index] for index in counts):
         counts.update(shrunk)
         replanned = tuple(plan_at(index, counts.get(index)) for index in range(len(resolved_emits)))
-        related = _relate_emits(resolved_emits, replanned, namespace)
+        related = _relate_emits(resolved_emits, replanned, namespace, end_share)
     if not projected:
         return related
     return tuple(
@@ -3455,6 +3478,7 @@ def _relate_emits(
     resolved_emits: Sequence[ResolvedEmit],
     planned_emits: Tuple[_PlannedEmit, ...],
     namespace: Mapping[str, Any],
+    end_share: str = END_SHARE_OF_ENTITIES,
 ) -> Tuple[_PlannedEmit, ...]:
     """Relate the generator-driven emits of each contract that declares keys.
 
@@ -3465,7 +3489,8 @@ def _relate_emits(
     plan the contract relates nothing in comes back unchanged, and so does
     its coverage. Runs after every emit is planned and before any row is
     drawn, so a relationship that cannot hold is refused (``FLX-3403``) with
-    nothing generated.
+    nothing generated. *end_share* is what a history's ``end`` share is a share of
+    (:func:`execute`'s).
     """
     groups: Dict[str, List[int]] = {}
     for index, (resolved, planned) in enumerate(zip(resolved_emits, planned_emits, strict=True)):
@@ -3473,7 +3498,7 @@ def _relate_emits(
             groups.setdefault(str(resolved.contract_path), []).append(index)
     related = list(planned_emits)
     for indexes in groups.values():
-        _relate_group(resolved_emits, planned_emits, indexes, related, namespace)
+        _relate_group(resolved_emits, planned_emits, indexes, related, namespace, end_share)
     for planned in related:
         if planned.plan is not None:
             check_links_resolved(planned.plan)
@@ -3486,6 +3511,7 @@ def _relate_group(
     indexes: Sequence[int],
     related: List[_PlannedEmit],
     namespace: Mapping[str, Any],
+    end_share: str,
 ) -> None:
     """Relate the plans of the emits at *indexes*, one contract's, and set the changed ones in *related*.
 
@@ -3502,7 +3528,7 @@ def _relate_group(
         _counts_of([resolved_emits[index] for index in indexes]),
         resolved_emits[indexes[0]].contract_document,
         namespace,
-        _histories_of([resolved_emits[index] for index in indexes]),
+        _histories_of([resolved_emits[index] for index in indexes], end_share),
     )
     for index in indexes:
         planned = planned_emits[index]
@@ -3521,11 +3547,14 @@ def _related_of(resolved: ResolvedEmit) -> FrozenSet[str]:
     return related | natural
 
 
-def _histories_of(resolved: Sequence[ResolvedEmit]) -> Dict[str, HistoryBinding]:
-    """The history each emit declares, by exposeId, with the scaled entities and the validity columns (ADR 0017)."""
+def _histories_of(resolved: Sequence[ResolvedEmit], end_share: str) -> Dict[str, HistoryBinding]:
+    """The history each emit declares, by exposeId, with the scaled entities and the validity columns (ADR 0017).
+
+    The ``end`` of an entry is a share of *end_share* (:func:`execute`'s).
+    """
     found: Dict[str, HistoryBinding] = {}
     for emit in resolved:
-        entries = history_entries_of(emit.extension, emit.expose_id)
+        entries = history_entries_of(emit.extension, emit.expose_id, end_share=end_share)
         if not entries:
             continue
         semantics = (
