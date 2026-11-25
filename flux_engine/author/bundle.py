@@ -3462,7 +3462,7 @@ def _author_bundle(
         [expose for expose in planned.drawn if expose.skipped is None],
         _follows_the_entity(planned.authored, histories),
     )
-    dated = _dated_columns(planned, window, fallbacks)
+    dated = _dated_columns(planned, window, fallbacks, histories)
     _release_dated_columns(planned.authored, dated)
     _declare_copulas(planned.authored, planned.reading, dated, histories)
     drafted = _draft_documents(
@@ -3742,8 +3742,35 @@ def _histories_and_projections(
     return histories, projections
 
 
-def _dated_columns(planned: _Planned, window: Tuple[str, str], fallbacks: _Fallbacks) -> Any:
-    """Declare the dates of the written exposes: ``within`` entries, exposures and ``rates``."""
+def _history_columns(planned: _Planned, histories: _Histories) -> Dict[str, FrozenSet[str]]:
+    """The columns each written history sets, by emit: the validity start and end, and the ``activation``.
+
+    A history that is not written (the plan refuses it, or the profile publishes none) sets none.
+    """
+    exposes = planned.contract["exposes"]
+    index = {expose.expose_id: expose.index for expose in planned.authored}
+    found: Dict[str, FrozenSet[str]] = {}
+    for entry in histories.entries:
+        emit = str(entry["emit"])
+        names = {
+            name
+            for name in window_ends(exposes[index[emit]].get("semantics")).values()
+            if isinstance(name, str)
+        }
+        if isinstance(entry.get("activation"), str):
+            names.add(nfc(str(entry["activation"])))
+        found[emit] = frozenset(names)
+    return found
+
+
+def _dated_columns(
+    planned: _Planned, window: Tuple[str, str], fallbacks: _Fallbacks, histories: _Histories
+) -> Any:
+    """Declare the dates of the written exposes: ``within`` entries, exposures and ``rates``.
+
+    A column a written history sets is dated by no lifetime and no ``within`` entry.
+    """
+    history_columns = _history_columns(planned, histories)
     return declare_dates(
         planned.reading.profile,
         {
@@ -3754,6 +3781,11 @@ def _dated_columns(planned: _Planned, window: Tuple[str, str], fallbacks: _Fallb
                 | frozenset(expose.copies)
                 | frozenset(plan.name for plan in expose.columns if plan.fixed),
                 columns=frozenset(expose.kinds),
+                history=frozenset(
+                    name
+                    for name in expose.kinds
+                    if nfc(name) in history_columns.get(expose.expose_id, frozenset())
+                ),
             )
             for expose in planned.authored
             if not expose.reference

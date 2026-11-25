@@ -85,6 +85,9 @@ class DatedExpose:
     #: Every column the bundle writes for it, or ``None`` when that is not checked: a dwell
     #: family is given one of them.
     columns: Optional[FrozenSet[str]] = None
+    #: Its columns that the history written for it sets: the validity start and end, and the
+    #: ``activation`` column. A lifetime or a ``within`` entry would be a second source for them.
+    history: FrozenSet[str] = frozenset()
 
 
 @dataclass
@@ -510,11 +513,17 @@ class _Declarer:
             return f"the contract declares no DATE or TIMESTAMP column {missing[0]!r} for it"
         return None
 
+    def _history_sets(self, expose: str, column: str) -> Optional[str]:
+        """Why a date of an expose is set by its history, or ``None``."""
+        if column in self.exposes[expose].history:
+            return f"the table's history sets {column!r}"
+        return None
+
     def _set_already(self, expose: str, column: str) -> Optional[str]:
-        """Why a date of an expose is set by a key or a rule of the contract, or ``None``."""
+        """Why a date of an expose is set by its history, a key or a rule of the contract, or ``None``."""
         if column in self.exposes[expose].blocked:
             return f"a key or a rule of the contract already sets {column!r}"
-        return None
+        return self._history_sets(expose, column)
 
     def lifetimes_of_tables(self) -> None:
         tables = self.profile.get("tables")
@@ -564,6 +573,10 @@ class _Declarer:
         reversed_pair = forward < ORDER_HOLDS_AT_LEAST or reverse > forward
         start, end = (pair.second, pair.first) if reversed_pair else (pair.first, pair.second)
         reason = self._usable(expose, pair.first, pair.second)
+        if reason is None:
+            reason = self._history_sets(expose, pair.first) or self._history_sets(
+                expose, pair.second
+            )
         if reason is None and held.kinds[pair.first] is not held.kinds[pair.second]:
             reason = "a lifetime's end is the same kind of column as its start"
         if reason is None and end in held.blocked:
@@ -1005,6 +1018,8 @@ class _Declarer:
                 continue
             if self._usable(parent_table, pair.first) or self._usable(child_table, pair.second):
                 continue
+            if self._history_sets(parent_table, pair.first) is not None:
+                continue
             if self._set_already(child_table, pair.second) is not None:
                 continue
             rows = order.same + order.after
@@ -1216,7 +1231,8 @@ class _Declarer:
         if parent_life is None or parent_life["start"] != pair.first:
             self.reject(
                 pair,
-                self._set_already(child_table, pair.second)
+                self._history_sets(parent_table, pair.first)
+                or self._set_already(child_table, pair.second)
                 or f"{pair.first!r} does not start a lifetime the bundle declares for "
                 f"{parent_table!r}",
             )
