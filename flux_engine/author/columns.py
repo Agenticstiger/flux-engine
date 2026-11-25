@@ -3801,16 +3801,25 @@ def bound_to_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str]
     total = sum((weight for _, _, weight in kept), Fraction(0))
     plan.declaration["binWeights"] = share_texts([weight / total for _, _, weight in kept])
     _read_shaped(plan, _WINDOW_SHAPED)
-    replaced: Dict[Tuple[str, ...], List[str]] = {("bins",): [], ("binWeights",): []}
-    for label in plan.labels:
-        reason = label.basis.reason
-        if label.tokens in replaced and reason is not None and reason not in replaced[label.tokens]:
-            replaced[label.tokens].append(reason)
-    plan.labels = [label for label in plan.labels if label.tokens[:1] not in replaced]
-    for tokens, reasons in replaced.items():
-        plan.labels.append(Label(tokens, assumed(" ".join([*reasons, _WINDOW_CLIPPED]))))
+    _label_whole_bins(plan, _WINDOW_CLIPPED)
     plan.assumptions.append(_WINDOW_CLIPPED)
     plan.choices.append(_WINDOW_CLIPPED)
+
+
+def _label_whole_bins(plan: ColumnPlan, reason: str) -> None:
+    """Give the bins and their weights one label each, for *reason*, in place of every label they had.
+
+    The register holds one entry per pointer, so a whole-array label the bins already had is not
+    kept beside the new one: its reason comes first in the new label's, which ends with *reason*.
+    """
+    replaced: Dict[Tuple[str, ...], List[str]] = {("bins",): [], ("binWeights",): []}
+    for label in plan.labels:
+        known = label.basis.reason
+        if label.tokens in replaced and known is not None and known not in replaced[label.tokens]:
+            replaced[label.tokens].append(known)
+    plan.labels = [label for label in plan.labels if label.tokens[:1] not in replaced]
+    for tokens, reasons in replaced.items():
+        plan.labels.append(Label(tokens, assumed(" ".join([*reasons, reason]))))
 
 
 def _draw_clipped(
