@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Union
 
 from flux_engine.core.digest import DigestRef
 from flux_engine.core.target_label import target_label
@@ -94,6 +94,16 @@ class StreamContext:
         their documents (any sink, any target), or empty. A sink whose destination keeps its own
         record of what it received may compare it with this one. Every other sink ignores it.
         No digest covers it.
+    committed
+        How far the run's ``sink-receipts.json`` says this stream's expose was committed by a
+        sink that commits what it sends, as receipt documents of the stream so far (any sink,
+        any target), or empty. A receipt of the whole stream replaces its entry there.
+        Every other sink ignores it. No digest covers it.
+    record_committed
+        Keeps a receipt of the stream so far in the run's ``sink-receipts.json``, or ``None``
+        when the caller keeps no record. A sink that commits what it sends calls it after each
+        commit, so a later delivery can tell what reached the destination even when the
+        destination has forgotten it. Every other sink ignores it.
     """
 
     run_id: str
@@ -105,6 +115,10 @@ class StreamContext:
     bundle_directory: Optional[Path] = None
     simulation_id: Optional[str] = None
     delivered: Tuple[Mapping[str, Any], ...] = ()
+    committed: Tuple[Mapping[str, Any], ...] = ()
+    record_committed: Optional[Callable[["SinkReceipt"], object]] = field(
+        default=None, compare=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if isinstance(self.rows, bool) or not isinstance(self.rows, int) or self.rows < 0:

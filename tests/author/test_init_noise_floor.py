@@ -303,3 +303,49 @@ def test_a_history_emit_keeps_a_released_column_drawn_inside_the_window(tmp_path
     outcome = run(tmp_path / "bundle", state_dir=tmp_path / "state", profile=profile, verify=True)
     assert outcome.success, outcome.stderr + outcome.stdout
     assert "fidelity tier_version" in outcome.stdout
+
+
+def test_a_grid_the_window_does_not_meet_is_drawn_over_its_whole_range(tmp_path: Path) -> None:
+    # The released grid runs from 1950 to 1962, and no bin clears the floor: the run's window is
+    # the assumed year, which the grid does not meet, so the column is drawn over its whole range.
+    profile = _profile(
+        ["80", "-40", "120", "60", "-90", "30", "150", "-20", "100", "40", "-60", "90"], "50"
+    )
+    statistic = profile["tables"]["member"]["columns"]["joined_on"]["statistics"][0]
+    statistic["bins"] = [_ms(year) for year in range(1950, 1963)]
+    result = _init(tmp_path, profile)
+    column = _joined_on(tmp_path)
+    window = _simulation(tmp_path)["spec"]["timeBounds"]
+    assert window["start"] > "1963"
+    assert column["bins"] == ["1950-01-01", "1962-01-01"]
+    assert column["binWeights"] == ["1"]
+    notes = [line for line in result.stdout.splitlines() if "joined_on" in line]
+    assert any("does not meet the run's time window" in line for line in notes), notes
+    days = _days_after(tmp_path)
+    assert days and all("1950-01-01" <= day <= "1962-01-01" for day in days)
+
+
+def _days_after(tmp_path: Path) -> List[str]:
+    outcome = run(
+        tmp_path / "bundle", state_dir=tmp_path / "state", profile=tmp_path / "library.profile.json"
+    )
+    assert outcome.success, outcome.stderr
+    return _days(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("first", "clears"), [("10", False), ("10.000001", True)], ids=["at the floor", "above it"]
+)
+def test_a_count_at_the_floor_is_noise_and_one_above_it_stands_clear(
+    tmp_path: Path, first: str, clears: bool
+) -> None:
+    # Twelve bins of Gaussian noise of scale 2.5 have a floor of exactly 10: only a count above it
+    # stands clear (strictly greater).
+    assert noise_floor("gaussian", Fraction("2.5"), 12) == 10
+    _init(tmp_path, _profile([first] + ["0"] * 11, "2.5"))
+    column = _joined_on(tmp_path)
+    if clears:
+        assert len(column["binWeights"]) == 12 and column["binWeights"][0] != "0"
+        assert all(weight == "0" for weight in column["binWeights"][1:])
+    else:
+        assert column["binWeights"] == ["1"] and len(column["bins"]) == 2

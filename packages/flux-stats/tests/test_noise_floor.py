@@ -79,3 +79,13 @@ def test_empty_cells_rarely_clear_the_floor() -> None:
 def test_a_floor_needs_cells_and_a_scale_of_at_least_zero(scale: Fraction, cells: int) -> None:
     with pytest.raises(ValueError):
         noise_floor("gaussian", scale, cells)
+
+
+def test_the_floor_steps_where_the_count_of_cells_passes_a_power_of_e() -> None:
+    # e^3 is about 20.09: 20 cells have ceil(ln m) = 3, and 21 have 4.
+    assert (ceil_ln(20), ceil_ln(21)) == (3, 4)
+    assert noise_floor("gaussian", Fraction(1), 20) == 4  # sqrt(2 (5 + 3))
+    above = noise_floor("gaussian", Fraction(1), 21)  # sqrt(2 (5 + 4)) = sqrt(18), rounded up
+    assert above * above >= 18 and above - Fraction(math.sqrt(18)) < Fraction(1, 10**6)
+    assert noise_floor("laplace", Fraction(1), 20) == 8
+    assert noise_floor("laplace", Fraction(1), 21) == 9

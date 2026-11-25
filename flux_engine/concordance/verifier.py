@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 from flux_engine.concordance.boundary.slice import CommittedState
 from flux_engine.concordance.boundary.statistic import (
@@ -750,6 +750,23 @@ def _is_date(column: ColumnDeclaration) -> bool:
     return column.kind is ColumnKind.RANGE and column.domain is ValueDomain.DATE
 
 
+#: The last instant a DATE column holds (9999-12-31T23:59:59.999Z), in milliseconds. A profiler's
+#: grid ends the year grid's last bin there, where a declaration spells the same edge as the day
+#: 9999-12-31; the two are one edge of a DATE column.
+_LAST_INSTANT_MS = 253_402_300_799_999
+_LAST_DAY = _LAST_INSTANT_MS // MS_PER_DAY
+
+
+def _edge_in_days(edge: Fraction) -> Fraction:
+    """A profile's bin edge of a DATE column, in the days of a declaration.
+
+    The calendar's last instant is the day 9999-12-31, the edge a declaration spells for it. Every
+    other edge is read as the milliseconds it is, so one that is not a whole day stays a fraction
+    of a day and matches no declared edge.
+    """
+    return Fraction(_LAST_DAY) if edge == _LAST_INSTANT_MS else Fraction(edge) / MS_PER_DAY
+
+
 def _whole_days(value: int, what: str) -> int:
     """*value*, a profile's milliseconds, as days; refused (``FLX-5037``) unless it is exact.
 
@@ -784,6 +801,38 @@ def _group_in_days(group: ProfileGroup) -> ProfileGroup:
             quantile_witness=None if witness is None else _whole_days(witness, "order statistic"),
         ),
     )
+
+
+def holds_no_records(group: ProfileGroup) -> bool:
+    """Whether the profile published the noisy *group* with no record in it.
+
+    A noisy release lists every level of a grouping column, and a level whose noisy cells add up
+    to nothing above zero projects to no records. It is a level the profile cannot see, not one it
+    holds: it is left out of the comparison on both sides, as a group the profile suppressed is,
+    whether or not the generated rows hold a record of it. An exact group of no record stays a
+    refusal (SEAM-FIDELITY-SPEC section 5).
+    """
+    return (
+        group.published
+        and bool(group.noisy)
+        and group.statistic is not None
+        and group.statistic.k == 0
+    )
+
+
+def groups_to_compare(
+    profiled: Iterable[ProfileGroup], held: Iterable[str]
+) -> Tuple[Set[str], Set[str]]:
+    """The group keys the synthetic side must hold, and those of the profile left out.
+
+    The first is every key of the profile but the ones it holds no record of that the synthetic
+    side holds no record of either: a level neither side has is no group on either. A key the
+    synthetic side holds that the profile lacks, and a key the profile holds records of that it
+    lacks, stay a difference between the two.
+    """
+    held_keys = set(held)
+    empty = {group.key for group in profiled if holds_no_records(group)} - held_keys
+    return {group.key for group in profiled} - empty, empty
 
 
 def _with_cells(
@@ -988,7 +1037,7 @@ class ClearProfile:
                     if metric is not None and metric.value is not None:
                         published = Fraction(metric.value)
                         if _is_date(column) and found.domain == "timestamp":
-                            published /= MS_PER_DAY
+                            published = _edge_in_days(published)
                         if not interval.contains(published):
                             raise FluxError(
                                 FLX_5005,
@@ -1049,7 +1098,15 @@ class ClearProfile:
         for candidate in candidates:
             bins = candidate.bins
             if in_days:
-                bins = tuple(Fraction(edge) / MS_PER_DAY for edge in bins)
+                bins = tuple(_edge_in_days(Fraction(edge)) for edge in bins)
+            held_by_bins = candidate.group_by_bins
+            if keys_in_days and held_by_bins is not None:
+                held_by_bins = BinGrouping(
+                    column=held_by_bins.column,
+                    bins=tuple(
+                        _edge_in_days(Fraction(edge)) * MS_PER_DAY for edge in held_by_bins.bins
+                    ),
+                )
             if candidate.identifier == statistic.identifier:
                 differs = [
                     name
@@ -1058,7 +1115,7 @@ class ClearProfile:
                             "groupBy",
                             candidate.group_by == grouping
                             and candidate.group_by_link == link
-                            and candidate.group_by_bins == wanted_bins,
+                            and held_by_bins == wanted_bins,
                         ),
                         ("bins", bins == declaration.bins),
                         ("levels", candidate.levels == levels),
@@ -1072,7 +1129,7 @@ class ClearProfile:
                 candidate.identifier == statistic.identifier
                 and candidate.group_by == grouping
                 and candidate.group_by_link == link
-                and candidate.group_by_bins == wanted_bins
+                and held_by_bins == wanted_bins
                 and not candidate.per
                 and bins == declaration.bins
                 and candidate.levels == levels
@@ -1332,7 +1389,8 @@ class ClearProfile:
             ]
         profiled = {group.key: group for group in reference.groups}
         synthetic_groups = {group.group: group for group in synthetic_statistic.groups}
-        if set(profiled) != set(synthetic_groups):
+        expected, left_out = groups_to_compare(reference.groups, synthetic_groups)
+        if expected != set(synthetic_groups):
             return base, [
                 Refusal(
                     code=FLX_5005.code,
@@ -1354,10 +1412,13 @@ class ClearProfile:
         draws = {group.key: group for group in drawn.groups} if drawn is not None else {}
         for ordinal, key in enumerate(_in_group_order(profiled, entry.declaration)):
             group = profiled[key]
-            synthetic = synthetic_groups[key]
+            synthetic = synthetic_groups.get(key)
             outcome, committed, score, widened, sampled = CENSORED, 0, None, None, None
             cells: Tuple[CellCounts, ...] = ()
-            if group.published and group.statistic is not None:
+            if key in left_out or holds_no_records(group):
+                pass
+            elif group.published and group.statistic is not None:
+                assert synthetic is not None
                 committed = group.statistic.k
                 where = f"{property_id} group #{ordinal}" if grouped else property_id
                 floor = block.records.minimum if grouped else 1
@@ -1391,7 +1452,7 @@ class ClearProfile:
                 GroupOutcome(
                     group=key,
                     committed_count=committed,
-                    synthetic_count=synthetic.k,
+                    synthetic_count=synthetic.k if synthetic is not None else 0,
                     outcome=outcome,
                     score=score,
                     widening=widened,

@@ -34,24 +34,35 @@ pytestmark = pytest.mark.integration
 KEY = "dateRanges"
 
 
-def _recorded_digest(state: Path, run_id: str) -> str:
+def recorded_digest(state: Path, run_id: str) -> str:
     document = json.loads((state / "runs" / run_id / "run-digest.json").read_text("utf-8"))
     return digest_of_document(document, subject="runDigest").value
+
+
+def run_as_before(
+    target: Path, state: Path, monkeypatch: pytest.MonkeyPatch, name: str, **forced: Any
+) -> Tuple[RunLayout, str]:
+    """A run whose ``pipeline.<name>`` is always called with *forced*; its layout and run digest.
+
+    A change that writes a plan key is undone this way, so the run is the one the engine made
+    before it, and its plan holds no key.
+    """
+    called = getattr(pipeline, name)
+
+    def before(*args: Any, **options: Any) -> Any:
+        return called(*args, **{**options, **forced})
+
+    with monkeypatch.context() as patched:
+        patched.setattr(pipeline, name, before)
+        layout = run_bundle(target, state, jobs=1)
+    return layout, recorded_digest(state, layout.run_id)
 
 
 def _run_without_the_cut(
     target: Path, state: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Tuple[RunLayout, str]:
     """A run as the engine made it before the cut: nothing is cut and the plan holds no key."""
-    built = pipeline.build_plan
-
-    def uncut(*args: Any, **options: Any) -> Any:
-        return built(*args, **{**options, "uncut": None})
-
-    with monkeypatch.context() as patched:
-        patched.setattr(pipeline, "build_plan", uncut)
-        layout = run_bundle(target, state, jobs=1)
-    return layout, _recorded_digest(state, layout.run_id)
+    return run_as_before(target, state, monkeypatch, "build_plan", uncut=None)
 
 
 def _dates(layout: RunLayout) -> List[str]:
@@ -86,7 +97,7 @@ def test_a_plan_recorded_without_the_cut_replays_its_own_bytes(
         )
         assert replayed.success, replayed.stderr
         assert layout.emit_path(VISIT).read_bytes() == recorded
-        assert _recorded_digest(state, layout.run_id) == digest
+        assert recorded_digest(state, layout.run_id) == digest
 
 
 def test_applying_a_plan_recorded_without_the_cut_writes_no_cut_rows(
@@ -111,7 +122,7 @@ def test_a_new_plan_that_cut_says_so_and_replays_cut(tmp_path: Path) -> None:
     assert load_recorded_plan(layout)[KEY] == "cut"
     assert _outside(_dates(layout)) == 0
     recorded = layout.emit_path(VISIT).read_bytes()
-    digest = _recorded_digest(state, layout.run_id)
+    digest = recorded_digest(state, layout.run_id)
     replayed = replay(target, run_id=layout.run_id, assert_digest=digest, state_dir=state, jobs=4)
     assert replayed.success, replayed.stderr
     assert layout.emit_path(VISIT).read_bytes() == recorded

@@ -1898,6 +1898,16 @@ _NOISE_EVERYWHERE_READ = (
     "no bin's count stands clear of the noise, so the column is drawn evenly within the run's "
     "time window, inside its range; the histogram property still scores it"
 )
+#: The same, when the column's declared range and the run's window do not meet.
+_NOISE_OUTSIDE_WINDOW = (
+    "No bin of the column's released histogram stands clear of the noise, and its declared range "
+    "does not meet the run's time window (spec.timeBounds), so the column is drawn evenly over its "
+    "whole declared range, outside the window."
+)
+_NOISE_OUTSIDE_WINDOW_READ = (
+    "no bin's count stands clear of the noise and the range does not meet the run's time window, "
+    "so the column is drawn evenly over its whole range; the histogram property still scores it"
+)
 
 
 def draw_in_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str]) -> None:
@@ -1905,18 +1915,20 @@ def draw_in_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str])
 
     Only a plan with :attr:`ColumnPlan.drawn_in_window` changes. The bin is the window cut to the
     column's declared range, the histogram's grid, since a bin stays inside the range
-    (``FLX-3402``); when the two do not meet, it is the range. A DATE column's bin runs over the
-    whole days inside it, so every day it draws lies inside it.
+    (``FLX-3402``). When the two do not meet, the bin is the whole range, outside the window, and
+    the column's assumption says so. A DATE column's bin runs over the whole days inside it, so
+    every day it draws lies inside it.
     """
     if not plan.drawn_in_window:
         return
     low, high = (parse_rfc3339_ms(text) for text in window)
+    outside = False
     if plan.published_range is not None:
         first, last = (int(edge) for edge in plan.published_range)
         if max(low, first) < min(high, last):
             low, high = max(low, first), min(high, last)
         else:
-            low, high = first, last
+            low, high, outside = first, last, True
     step = _DAY_MS if kind is LogicalKind.DATE else 1
     if kind is LogicalKind.DATE:
         low, high = -(-low // _DAY_MS) * _DAY_MS, high // _DAY_MS * _DAY_MS
@@ -1925,8 +1937,14 @@ def draw_in_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str])
     plan.declaration["bins"] = [_spell(kind, Decimal(low)), _spell(kind, Decimal(high))]
     plan.declaration["binWeights"] = ["1"]
     plan.labels = [label for label in plan.labels if label.tokens[:1] not in _BIN_LABELS]
-    plan.labels.append(Label(("bins",), assumed(_NOISE_EVERYWHERE_READ)))
-    plan.labels.append(Label(("binWeights",), assumed(_NOISE_EVERYWHERE_READ)))
+    read = _NOISE_OUTSIDE_WINDOW_READ if outside else _NOISE_EVERYWHERE_READ
+    plan.labels.append(Label(("bins",), assumed(read)))
+    plan.labels.append(Label(("binWeights",), assumed(read)))
+    if outside:
+        plan.assumptions = [
+            _NOISE_OUTSIDE_WINDOW if sentence == _NOISE_EVERYWHERE else sentence
+            for sentence in plan.assumptions
+        ]
 
 
 _BIN_LABELS = (("bins",), ("binWeights",))

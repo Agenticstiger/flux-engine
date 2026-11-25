@@ -959,7 +959,7 @@ def test_a_released_profile_with_an_emptied_calendar_entry_grades_as_it_would_wi
     parse_profile(without)
     with pytest.raises(FluxError):
         parse_profile(with_entry)
-    parse_profile(with_entry, allow_empty_calendar_entries=True)
+    parse_profile(with_entry, allow_emptied_entries=True)
 
     graded = grade_profile(with_entry, pinned=True)
     expected = grade_profile(without, pinned=True)

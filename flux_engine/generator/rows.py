@@ -42,6 +42,7 @@ digesting stay where KERNEL-SPEC §8 and §9 put them.
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_right
 from dataclasses import dataclass, replace
 from datetime import date
@@ -54,6 +55,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    Collection,
     Dict,
     FrozenSet,
     Iterator,
@@ -1650,6 +1652,11 @@ def _categorical_levels(
         raise FluxError(
             FLX_3402, f"{column.name}: a conditional column is drawn with a given level"
         )
+    table = statistics.level_weights_given.get(given_level)
+    if table is None and statistics.support:
+        # A level no row of the table is keyed by: a projection holds a value no level of the
+        # parent names (:data:`UNNAMED_LEVEL`), and the column draws from its own declared support.
+        return _declared_support(tuple(statistics.support))
     return _weighted_levels(tuple(sorted(statistics.level_weights_given[given_level].items())))
 
 
@@ -2180,13 +2187,15 @@ def _conditional_row(
     givens: FrozenSet[str],
     source: _Source,
     row_index: int,
+    held: Mapping[str, str],
 ) -> Tuple[Any, ...]:
     """One row of a plan with conditional columns, drawn in *order*.
 
     Every cell is still drawn once, from its own stream, so the order the
     cells are drawn in changes no value. Drawing parents before children only
     puts each given level in hand before the columns that read it. The row is
-    returned in the expose's declared column order.
+    returned in the expose's declared column order. A column *held* names is given by the level
+    *held* gives it, whatever its own draw made.
     """
     sim_id, expose_id, h = plan.sim_id, plan.expose.expose_id, plan.seam_digest
     values: List[Any] = [None] * len(plan.columns)
@@ -2204,7 +2213,121 @@ def _conditional_row(
             )
         else:
             values[index] = _cell(column_plan, source, sim_id, expose_id, row_index, h, given_level)
+        if name in held:
+            levels[name] = held[name]
     return tuple(values)
+
+
+#: For each column a projection sets that some column is drawn given, the level each row of a slice
+#: holds, in row order (ADR 0027, the amendment of 2026-11-25).
+HeldLevels = Mapping[str, Sequence[str]]
+
+#: The level a row holds in a column of a projection whose value no level of that column names. No
+#: weight table is keyed by it (a NUL cannot be written in a declaration), so a column drawn given
+#: such a column and declaring a ``support`` draws from that support (:func:`_categorical_levels`).
+UNNAMED_LEVEL = "\x00unnamed"
+
+
+def own_plan_of(plan: GeneratorPlan) -> GeneratorPlan:
+    """*plan*'s own cells as they are drawn: no projection, and the marginal of a column that falls back.
+
+    A column of the projection's ``marginals`` (a column drawn given a column of the version, where
+    the version holds a value no level names) gains one row in its table, keyed by
+    :data:`UNNAMED_LEVEL`: the weights its table and its parent's level weights imply, as integers
+    over the least common denominator, so the row holds the exact shares
+    (:func:`flux_engine.generator.projections.implied_marginal`). The row is added here, to the
+    draw's own copy, and not to the plan's statistics, which everything else reads.
+    """
+    projection = plan.projection
+    marginals = {} if projection is None else dict(getattr(projection, "marginals", ()))
+    if not marginals:
+        return replace(plan, projection=None)
+    columns = []
+    for column_plan in plan.columns:
+        shares = marginals.get(column_plan.column.name)
+        table = column_plan.statistics.level_weights_given
+        if shares is None or table is None:
+            columns.append(column_plan)
+            continue
+        fractions = {level: Fraction(text) for level, text in shares}
+        scale = math.lcm(*(share.denominator for share in fractions.values()))
+        row = {level: Decimal(int(share * scale)) for level, share in fractions.items()}
+        statistics = replace(
+            column_plan.statistics, level_weights_given={**table, UNNAMED_LEVEL: row}
+        )
+        columns.append(replace(column_plan, statistics=statistics))
+    return replace(plan, projection=None, columns=tuple(columns))
+
+
+def _held_row(held: Optional[HeldLevels], position: int) -> Mapping[str, str]:
+    """The level of each column *held* names at the slice's row *position*."""
+    if not held:
+        return {}
+    return {name: levels[position] for name, levels in held.items()}
+
+
+def held_levels(
+    plan: GeneratorPlan,
+    values: Mapping[str, Sequence[Any]],
+    fallback: Collection[str] = (),
+) -> HeldLevels:
+    """The level of each value of *values*, by column: a column's class of the value a row holds.
+
+    A categorical column's level is the one that renders to the value, and a column drawn from
+    bins takes the bin that holds it (:func:`bin_class`). A value with no level is refused
+    (``FLX-3403``) as a plan the generator cannot draw, except in a column of *fallback*, whose
+    columns drawn given it have a distribution of their own to draw from where it holds a value no
+    level names (a NULL, or a value outside its levels): such a value holds :data:`UNNAMED_LEVEL`,
+    which no weight table is keyed by (ADR 0027, the amendment of 2026-11-25).
+    """
+    found: Dict[str, Sequence[str]] = {}
+    for name, cells in values.items():
+        column_plan = plan.column_plan(name)
+        free = name in fallback
+        if is_binned(column_plan):
+            found[name] = [_bin_held(column_plan, cell, free) for cell in cells]
+            continue
+        index = level_index(column_plan)
+        levels: List[str] = []
+        for cell in cells:
+            level = index.get((type(cell), cell))
+            if level is None and free:
+                level = UNNAMED_LEVEL
+            if level is None:
+                from flux_engine.generator.relations import FLX_3403
+
+                raise FluxError(
+                    FLX_3403,
+                    f"{plan.expose.expose_id}: column {name!r} holds {cell!r}, none of the levels "
+                    "a column drawn given it is drawn given",
+                )
+            levels.append(level)
+        found[name] = levels
+    return found
+
+
+def _bin_held(column_plan: ColumnPlan, cell: Any, free: bool) -> str:
+    """The bin a held *cell* is in; for a *free* column, :data:`UNNAMED_LEVEL` where it is in none.
+
+    A NULL, or a value of a kind the bins do not hold, is in no bin. A number outside every bin is
+    in the nearest, as the draw of the column itself would place it (:func:`bin_class`).
+    """
+    if not free:
+        return bin_class(column_plan, cell)
+    try:
+        return UNNAMED_LEVEL if cell is None else bin_class(column_plan, cell)
+    except FluxError:
+        return UNNAMED_LEVEL
+
+
+def level_index(column_plan: ColumnPlan) -> Mapping[Tuple[type, Any], str]:
+    """Each level of a categorical column, by the value it renders to (its type with it)."""
+    with localcontext(_KERNEL_CONTEXT):
+        return {
+            (type(value), value): level
+            for level in _level_names(column_plan.statistics)
+            for value in (_level_to_value(level, column_plan.column),)
+        }
 
 
 def _conditioned_cell(
@@ -2370,15 +2493,23 @@ def generate_row_slice(
 
 
 def cells_before_rules(
-    plan: GeneratorPlan, start: int, stop: int, *, root: SeedTreeRoot
+    plan: GeneratorPlan,
+    start: int,
+    stop: int,
+    *,
+    root: SeedTreeRoot,
+    held: Optional[HeldLevels] = None,
 ) -> Tuple[Tuple[Any, ...], ...]:
     """Rows *start* to *stop* - 1 of a plan that projects nothing, as its own cells draw them.
 
     No rule has set a column yet. A projected emit's rows start here (ADR 0027 sections 4 and
     5): the projection sets its cells over them, and :func:`with_rules` then runs the emit's
-    rules, so a rule reads the cells the projection set as it reads any cell.
+    rules, so a rule reads the cells the projection set as it reads any cell. *held* gives, for a
+    column the projection sets, the level each row holds (:func:`held_levels`): a column drawn
+    given it is drawn given that level, not the one the column's own draw made (ADR 0027, the
+    amendment of 2026-11-25).
     """
-    rows = _cell_rows(plan, start, stop, _stream_source(plan, root, None))
+    rows = _cell_rows(plan, start, stop, _stream_source(plan, root, None), held)
     if plan.plugin is not None:
         # A plugin's values reach only a pass over a plan that projects nothing.
         rows = plan.plugin.overlay(rows, None)
@@ -2400,13 +2531,17 @@ def with_rules(
 
 
 def _cell_rows(
-    plan: GeneratorPlan, start: int, stop: int, streams: _Source
+    plan: GeneratorPlan,
+    start: int,
+    stop: int,
+    streams: _Source,
+    held: Optional[HeldLevels] = None,
 ) -> Tuple[Tuple[Any, ...], ...]:
     """Rows *start* to *stop* - 1 as their own cells draw them, before any rule sets a column.
 
     A history's ending versions then take their end value (ADR 0017 section 5).
     """
-    return _with_end_values(plan, start, _drawn_rows(plan, start, stop, streams), streams)
+    return _with_end_values(plan, start, _drawn_rows(plan, start, stop, streams, held), streams)
 
 
 def _with_end_values(
@@ -2434,7 +2569,11 @@ def _with_end_values(
 
 
 def _drawn_rows(
-    plan: GeneratorPlan, start: int, stop: int, streams: _Source
+    plan: GeneratorPlan,
+    start: int,
+    stop: int,
+    streams: _Source,
+    held: Optional[HeldLevels] = None,
 ) -> Tuple[Tuple[Any, ...], ...]:
     """Rows *start* to *stop* - 1 as their cells draw them, by the column path or row by row."""
     computed: Optional[Tuple[Tuple[Any, ...], ...]] = None
@@ -2444,18 +2583,18 @@ def _drawn_rows(
         # rules, a contract's and a bundle's, as the per-row path's do.
         from flux_engine.generator import columns as _columns
 
-        computed = _columns.column_rows(plan, start, stop, streams)
+        computed = _columns.column_rows(plan, start, stop, streams, held)
     expose_id = plan.expose.expose_id
     givens = _given_columns(plan)
     if computed is not None:
         return computed
     if plan.relations is not None:
-        return _related_rows(plan, start, stop, streams, givens)
+        return _related_rows(plan, start, stop, streams, givens, held)
     if givens or plan.conditions is not None:
         order = _draw_order(plan)
         return tuple(
-            _conditional_row(plan, order, givens, streams, row_index)
-            for row_index in range(start, stop)
+            _conditional_row(plan, order, givens, streams, row_index, _held_row(held, at))
+            for at, row_index in enumerate(range(start, stop))
         )
     return tuple(
         tuple(
@@ -2532,6 +2671,7 @@ def _related_rows(
     stop: int,
     streams: _Source,
     givens: FrozenSet[str],
+    held: Optional[HeldLevels] = None,
 ) -> Tuple[Tuple[Any, ...], ...]:
     """Rows *start* to *stop* - 1 of a plan whose contract relates its columns.
 
@@ -2563,6 +2703,7 @@ def _related_rows(
         first = row_index if pick is None else reader.first_row_of(owner, pick, row_index)
         values: List[Any] = [None] * len(plan.columns)
         levels: Dict[str, str] = {}
+        holds = _held_row(held, row_index - start)
         for index in order:
             column_plan, driver = plan.columns[index], drivers[index]
             name = column_plan.column.name
@@ -2591,6 +2732,8 @@ def _related_rows(
                 values[index] = reader.cell(owner, column_plan, driver, at, given_level)
             else:
                 values[index] = _cell(column_plan, streams, sim_id, expose_id, at, h, given_level)
+            if name in holds:
+                levels[name] = holds[name]
         return tuple(values)
 
     return tuple(row(row_index) for row_index in range(start, stop))
