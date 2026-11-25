@@ -75,6 +75,7 @@ __all__ = [
     "history_entries_of",
     "history_target",
     "read_history_block",
+    "read_within_as_parent_lifetime",
 ]
 
 #: The top-level key of the namespace that declares histories, and the member an emit's ``H``
@@ -1267,6 +1268,50 @@ def check_history_sources(
     _check_parent_lifetime(entry, target, lifetimes)
 
 
+def read_within_as_parent_lifetime(
+    histories: Sequence[HistoryEntry],
+    within: Sequence[WithinEntry],
+    target: HistoryTarget,
+    emit: str,
+) -> Tuple[Tuple[HistoryEntry, ...], Tuple[WithinEntry, ...]]:
+    """The histories and ``within`` entries, with *emit*'s ``within`` read as ``parent.lifetime`` where it says so (ADR 0017, amendment of 2026-11-25).
+
+    A ``within`` entry of the history's emit that names exactly the history's parent relationship
+    (one hop) and the history's validity start as its ``date``, and carries no ``offset``,
+    ``target``, ``exposure`` or ``lifetime`` of its own, says what ``parent.lifetime: true`` says: the
+    history's versions start inside the life of the row the relationship reaches. It is read as
+    that key, and dropped as an entry, so that nothing else sets the start from it. Every other
+    entry, and every history that has no parent, is returned as given. *target* is the emit's
+    :func:`history_target`.
+    """
+    wanted = nfc(emit)
+    start = target.start
+    if start is None:
+        return tuple(histories), tuple(within)
+    mapped: List[HistoryEntry] = []
+    dropped: set = set()
+    for entry in histories:
+        parent = entry.parent
+        if nfc(entry.emit) == wanted and parent is not None:
+            for index, placed in enumerate(within):
+                if (
+                    nfc(placed.emit) == wanted
+                    and placed.relationship == (parent.relationship,)
+                    and placed.date is not None
+                    and nfc(placed.date) == nfc(start)
+                    and placed.offset is None
+                    and placed.target is None
+                    and not placed.exposure
+                    and not placed.lifetime
+                ):
+                    dropped.add(index)
+                    parent = replace(parent, lifetime=True)
+            entry = replace(entry, parent=parent)
+        mapped.append(entry)
+    kept = tuple(placed for index, placed in enumerate(within) if index not in dropped)
+    return tuple(mapped), kept
+
+
 def _check_parent_lifetime(
     entry: HistoryEntry, target: HistoryTarget, lifetimes: Sequence[LifetimeEntry]
 ) -> None:
@@ -1337,11 +1382,17 @@ def _check_within_sources(
         if placed.emit != entry.emit or placed.date is None:
             continue
         if nfc(placed.date) in sets:
+            hint = (
+                "; to keep the history inside a parent's life, give it a parent relationship "
+                "and set parent.lifetime: true"
+                if entry.parent is None
+                else ""
+            )
             raise FluxError(
                 refusal,
                 f"column {placed.date!r} has more than one source: the history ({entry.emit}) "
                 f"sets it as its {sets[nfc(placed.date)]} and the within entry on relationship "
-                f"{'.'.join(placed.relationship)!r} with date {placed.date!r} sets it too",
+                f"{'.'.join(placed.relationship)!r} with date {placed.date!r} sets it too{hint}",
             )
 
 

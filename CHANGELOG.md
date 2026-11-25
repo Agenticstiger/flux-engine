@@ -123,6 +123,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   unpublished statistic is (`FLX-3113`). 0.12.0 refused an entry that a release had cut in part. flux-stats'
   `parse_profile` and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets;
   without it each entry is read as the format writes it, and a cut entry is refused naming the member it misses.
+- A `within` entry that keeps a history's start inside its parent's life is read as `parent.lifetime: true`: when its
+  emit is the history's, its relationship is the history's parent relationship (one hop), its `date` is the history's
+  validity start and it carries no `offset`, `target` or `exposure`, the bound is applied once, through the parent's
+  lifetime, and the bundle draws the rows the same bundle with `parent.lifetime: true` draws. It was refused at plan as
+  `FLX-6203`, two sources for the start. Every other `within` entry on a column the history sets is still `FLX-6203`,
+  and the message for a history with no parent now names `parent.lifetime` as the way to say it (ADR 0017, amendment of
+  2026-11-25).
 
 ### Fixed
 

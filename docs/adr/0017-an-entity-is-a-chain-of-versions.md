@@ -139,7 +139,7 @@ validity column or a column a rule sets; and every refusal of sections 5, 6 and 
 values, the scale and the layout's counts, which follow from declared values alone, never a drawn row. A
 `lifetimes` or `within`
 entry (ADR 0024) on the start, the end or the activation column of a history's emit is two sources for one
-value, `FLX-6203`.
+value, `FLX-6203`, except the `within` entry that says `parent.lifetime: true` (amendment of 2026-11-25).
 
 ### 3. Entities per parent and versions per entity: two counted layouts, nested
 
@@ -867,3 +867,24 @@ released whole declared none, because its category was read only for text column
   is declared, the column is carried as before, and the ledger says what to change.
 - **What does not move.** A column that is no foreign key, a foreign key whose published levels are not whole
   numbers, and a table released whole (section 13's own route) give the bundle they gave before.
+
+## Amendment of 2026-11-25: a `within` entry that keeps the start inside the parent's life is `parent.lifetime`
+
+The amendment of 2026-11-24 keeps a history's versions inside the life of its parent with
+`history[].parent.lifetime: true`. The same bound written the general way, a `within` entry on the
+history's emit for the parent relationship and the history's validity start, was refused as two sources
+for the start (`FLX-6203`), though it asks for nothing else.
+
+- **Read as the key.** A `within` entry whose emit is the history's, whose relationship is exactly the
+  history's `parent.relationship` (one hop), whose `date` is the history's validity start and that carries
+  no `offset`, `target`, `exposure` or `lifetime`, is read as `parent.lifetime: true`. It is applied once,
+  through the parent's lifetime, and is no `within` entry afterwards, so nothing else sets the start from
+  it. The reading happens where the bundle is resolved, before any reader of the entries, so the bundle
+  draws the rows the same bundle written with the key draws. A target emit with no `lifetimes` entry is
+  `FLX-3403`, as for the key.
+- **What stays refused.** Every other `within` entry on a column the history sets (another relationship,
+  a path of several hops, the validity end, the activation column, an entry that draws its own offset or
+  target) is `FLX-6203`. The message for a history with no parent also names `parent.lifetime`, with the
+  parent relationship it needs.
+- **What does not move.** A `within` entry on a date the history does not set, and a bundle that declares no
+  such entry, read and hash as before.
