@@ -63,6 +63,14 @@ Open `.flux/runs/<runId>/EVIDENCE.md` first: its last section, "What Was Not Pro
 - A generator plugin is your own code and is not sandboxed, so allow only plugins you trust.
 - CI checks it three ways: sockets are blocked in every test run, a real command line journey runs with no network, and a source scan looks for network and model clients. [Runs offline](docs/explanation/offline.md) has the details and the limits.
 
+## Roadmap
+
+- **Faster on many cores.** The 0.11.0 changelog logs the causes for the next release; the aim is about 8 times faster at 16 jobs, with every run still byte for byte the same.
+- **A living clone (proposed).** The contract's world kept running on a clock and replayable to the byte, on rules alone or with your own small language model as an opt-in.
+- **Learned generators (designed, build deferred).** `flux-learned`, a separate plugin that trains inside the data owner's own environment under differential privacy.
+
+[Where FLUX fits](docs/explanation/compared.md) says what FLUX is good at, where it is not, how it compares with other synthetic data tools, and gives the details of this roadmap.
+
 ## How FLUX works
 
 FLUX makes rows from the numbers a bundle declares, never by fitting a model to records. Those numbers can come from a profile: aggregate statistics that a data owner computes with `fluid profile` where the data lives. `fluxsim init --contract --profile` writes a bundle from a contract and a profile, and labels every number by what it rests on ([write a bundle from a profile](docs/how-to/write-a-bundle-from-a-profile.md)). A run can then be scored against a profile that carries the statistics its bundle declares. From data-product-forge 0.31.0, `fluid profile` writes one: an ungrouped `mean/1` for each number column whose mean passes its output checks, so a `mean` property over such a column is scored. A property that reads any other statistic, such as a support, is refused with [FLX-5037](docs/reference/errors/FLX-5037.md); [score a run against a profile](docs/how-to/score-a-run-against-a-profile.md) shows the check with a profile written by hand. [Architecture and patterns](docs/explanation/architecture.md) draws the whole picture: what crosses over from the data, the parts you install, the packages inside the engine and the rules between them, the life of a run, and the design patterns behind it.
