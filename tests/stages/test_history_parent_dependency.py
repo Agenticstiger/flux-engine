@@ -12,6 +12,9 @@ the dependency is already true. What is pinned:
 * **It plans.** The dependency is accepted, and ``verify`` scores it at 100 %.
 * **It draws nothing.** Every emit's bytes equal the bundle without the dependency, in one job
   and in four.
+* **A weight is refused first.** A ``links`` weight on the history's parent relationship is refused
+  (``FLX-3403``, a second way to pick the parent) with or without the dependency, so a weighted
+  relationship never meets a dependency the layout holds.
 * **The rest stays refused.** A dependency whose ``from`` lacks the natural entity column, or
   whose ``to`` adds a foreign key the layout does not set, is ``FLX-3403`` as before.
 """
@@ -139,3 +142,18 @@ def test_any_other_dependency_on_the_counted_relationship_stays_refused(
     planned = plan_refused(target, tmp_path / "state")
     assert "FLX-3403" in planned.stderr, planned.stderr
     assert "a dependency sets its columns" in planned.stderr, planned.stderr
+
+
+@pytest.mark.parametrize("dependency", [DEPENDENCY, None])
+def test_a_weight_on_the_parent_relationship_is_refused_with_or_without_the_dependency(
+    tmp_path: Path, dependency: Optional[Dict[str, Any]]
+) -> None:
+    target = _bundle(tmp_path, dependency=dependency)
+    path = target / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    document["extensions"][NAMESPACE]["links"] = [
+        {"emit": HISTORY, "relationship": "depot", "weight": "depot_id"}
+    ]
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    planned = plan_refused(target, tmp_path / "state")
+    assert "FLX-3403" in planned.stderr and "pick the parent a second way" in planned.stderr

@@ -4348,9 +4348,7 @@ def _check_weights(
                 "column, or another is given it; a weight picks the parent on its own"
             )
         if plan.rules is not None and any(
-            set(relationship.from_columns) & set(rule.foreign_columns)
-            for rule in plan.rules.rules
-            if not rule.by_layout
+            set(relationship.from_columns) & set(rule.foreign_columns) for rule in plan.rules.rules
         ):
             raise _refuse(f"{where}, but a dependency sets its columns")
         target = plans[relationship.target]
