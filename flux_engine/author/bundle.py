@@ -1702,6 +1702,20 @@ class _Spreads(NamedTuple):
     notes: List[Tuple[str, str]]
     #: What each number of a ``counts`` entry rests on, by the entry (see :data:`_Cited`).
     cited: Tuple[Tuple[Dict[str, Any], "_Cited"], ...] = ()
+    #: What each laid-out relationship wrote, so one can be taken back (see :func:`_without_unwritten`).
+    laid: Tuple["_Laid", ...] = ()
+
+
+class _Laid(NamedTuple):
+    """What :func:`_spread_relationships` wrote for one relationship, by the two tables it joins."""
+
+    parent: str
+    child: str
+    #: The ``counts`` entry, when the counted layout placed the relationship.
+    entry: Optional[Dict[str, Any]]
+    #: The sentences and the decision about its structural classes that it added to the report.
+    notes: Tuple[Tuple[str, str], ...]
+    records: Tuple[_Note, ...]
 
 
 #: What a number of a written entry rests on: the member of the entry (tokens below it), the
@@ -2042,11 +2056,12 @@ def _spread_relationships(
     records: List[_Note] = []
     notes: List[Tuple[str, str]] = []
     cited: List[Tuple[Dict[str, Any], _Cited]] = []
+    laid: List[_Laid] = []
     found = profile.get("relationships")
     found_tables = profile.get("tables")
     tables: Mapping[str, Any] = found_tables if isinstance(found_tables, Mapping) else {}
     planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
-    laid: List[_Slot] = []
+    slots: List[_Slot] = []
     for index, entry in enumerate(found if isinstance(found, list) else ()):
         if not isinstance(entry, Mapping):
             continue
@@ -2056,7 +2071,7 @@ def _spread_relationships(
             entry, keys, planned, held_back
         )
         if why is not None or declared is None:
-            laid.append(_Slot(tokens, entry, None, "", None, [(p, why or "") for p in every]))
+            slots.append(_Slot(tokens, entry, None, "", None, [(p, why or "") for p in every]))
             continue
         child_expose, parent_expose = planned[child_table], planned[parent_table]
         child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
@@ -2078,17 +2093,18 @@ def _spread_relationships(
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
         )
-        laid.append(_Slot(tokens, entry, declared, child_table, placed, []))
+        slots.append(_Slot(tokens, entry, declared, child_table, placed, []))
     if declare_links is not None:
         declare_links()
-    for slot in laid:
+    for slot in slots:
         unused += slot.passed
         if slot.placed is None:
             continue
         settled = _settle_given(slot.placed, slot.tokens, minimum_cell=minimum_cell)
         used += settled.used
         unused += settled.unused
-        notes += settled.notes
+        written_notes = list(settled.notes)
+        written_records: List[_Note] = []
         if settled.entry is not None:
             entries.append(settled.entry)
             cited += [(settled.entry, item) for item in settled.cited]
@@ -2096,10 +2112,49 @@ def _spread_relationships(
         if classes:
             recorded, sentence = _structural_note(classes, settled.counted, settled.laid)
             if recorded:
-                records.append((slot.tokens + ("structural",), sentence))
+                written_records.append((slot.tokens + ("structural",), sentence))
             else:
-                notes.append((f"{slot.child_table}.{slot.declared.name}", sentence))
-    return _Spreads(used, unused, entries, records, notes, tuple(cited))
+                written_notes.append((f"{slot.child_table}.{slot.declared.name}", sentence))
+        notes += written_notes
+        records += written_records
+        laid.append(
+            _Laid(
+                slot.declared.target,
+                slot.child_table,
+                settled.entry,
+                tuple(written_notes),
+                tuple(written_records),
+            )
+        )
+    return _Spreads(used, unused, entries, records, notes, tuple(cited), tuple(laid))
+
+
+def _without_unwritten(spread: _Spreads, written: Set[str]) -> _Spreads:
+    """*spread* without what it wrote for a relationship whose parent or child emit is not written.
+
+    The layout runs before each expose is finished, and an expose is left out at that point when
+    the layout has set its keys and nothing is left for its fidelity block to declare (a table of
+    foreign keys alone, whose ``counts`` entries set them all). A ``counts`` entry names an emit
+    the Simulation then does not write, which ``plan`` refuses (FLX-3105), so each such
+    relationship's entry, its numbers' citations and its sentences are taken back. Its
+    statistics are listed unused, with the reason, by :func:`_reset_unwritten_relationships`.
+    """
+    gone = [item for item in spread.laid if not {item.parent, item.child} <= written]
+    if not gone:
+        return spread
+    gone_ids = {id(item) for item in gone}
+    entries = {id(item.entry) for item in gone if item.entry is not None}
+    notes = {id(note) for item in gone for note in item.notes}
+    records = {id(record) for item in gone for record in item.records}
+    return _Spreads(
+        spread.used,
+        spread.unused,
+        [entry for entry in spread.entries if id(entry) not in entries],
+        [record for record in spread.records if id(record) not in records],
+        [note for note in spread.notes if id(note) not in notes],
+        tuple(pair for pair in spread.cited if id(pair[0]) not in entries),
+        tuple(item for item in spread.laid if id(item) not in gone_ids),
+    )
 
 
 class _Histories(NamedTuple):
@@ -3687,6 +3742,9 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
     spread = _draw_and_link(reading, keys, exposes, drawn, held_back)
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
     _refuse_a_needed_one_value(exposes, keys)
+    spread = _without_unwritten(
+        spread, {expose.expose_id for expose in authored if not expose.reference}
+    )
     return _Planned(
         contract_path,
         contract,
