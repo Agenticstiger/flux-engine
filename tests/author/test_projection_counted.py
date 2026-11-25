@@ -14,7 +14,7 @@ the cases where it is kept and where it is unused, and the bundle of a contract 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pytest
 
@@ -228,3 +228,106 @@ WITHOUT_COUNTS: Dict[str, str] = {
     "simulation.flux.yml": "8e7d0acc907fcfbfd26cc9e298a97acd5185fc39ae6968195fcba2c81a19e74b",
     "world.flux.yml": "9b8d0e5a5cc58cb4743d82eaeb2696bb8cee479486e835def76fc7e93705a17c",
 }
+
+
+def _counted_child(expose: str, anchor: str, text: Optional[str] = None) -> str:
+    """The contract with *expose* naming the account each row belongs to, after the line *anchor*."""
+    text = CONTRACT.read_text(encoding="utf-8") if text is None else text
+    start = text.index(f"  - exposeId: {expose}\n")
+    end = text.find("\n  - exposeId:", start + 1)
+    block = text[start : end if end != -1 else len(text)]
+    changed = block.replace(
+        anchor, anchor + "\n        - { name: account_id, type: INT, required: true }", 1
+    ).replace(
+        "      relationships:\n",
+        "      relationships:\n        - name: account\n          to: account\n"
+        "          fromColumns: [account_id]\n          toColumns: [account_id]\n"
+        "          cardinality: many_to_one\n",
+        1,
+    )
+    assert changed != block
+    return text.replace(block, changed, 1)
+
+
+def _counted_profile(expose: str) -> Dict[str, Any]:
+    profile = _profile_with(expose)
+    profile["tables"]["account"]["rowCount"] = 400
+    profile["tables"]["account"]["columns"]["account_id"]["metrics"] = _metrics("1", "400", 400)
+    table = profile["tables"][expose]
+    table["columns"]["account_id"] = {
+        "domain": "number",
+        "metrics": _metrics("1", "400", table["rowCount"]),
+    }
+    profile["relationships"] = [
+        {
+            "parent": {"table": "account", "columns": ["account_id"]},
+            "child": {"table": expose, "columns": ["account_id"]},
+            "statistics": [_bins(["0", "1", "2", "3", "6"], [0, 100, 200, 100], 400)],
+            "structural": ["childless"],
+        }
+    ]
+    return profile
+
+
+@pytest.mark.parametrize(
+    ("expose", "anchor", "key"),
+    [
+        ("plan_change", "        - { name: event_id, type: INT, required: true }", "events"),
+        ("plan_month", "        - { name: period_id, type: INT, required: true }", "periods"),
+    ],
+    ids=["events", "periods"],
+)
+def test_an_events_or_periodic_table_gives_no_count_to_the_history_parent(
+    tmp_path: Path, expose: str, anchor: str, key: str
+) -> None:
+    # Its count is events or periods per account, not plans per account: the unit differs.
+    result = _init(tmp_path, _counted_profile(expose), _counted_child(expose, anchor))
+    namespace = _namespace(tmp_path)
+    assert [item["emit"] for item in namespace[key]] == [expose]
+    assert "counts" not in namespace
+    parent = _entries(tmp_path)[0].get("parent")
+    assert parent is None or "children" not in parent
+    state = _states(result)["/relationships/0/statistics/0"]
+    assert state["state"] == "unused"
+    assert "the emit is projected from a history" in state["note"]
+    assert "count events or periods, not entities" in state["note"]
+
+
+def _swapped(text: str, first: str, second: str) -> str:
+    """*text* with the expose *second* written before the expose *first*."""
+
+    def block(name: str) -> str:
+        start = text.index(f"  - exposeId: {name}\n")
+        end = text.find("\n  - exposeId:", start + 1)
+        return text[start : end + 1 if end != -1 else len(text)]
+
+    one, two = block(first), block(second)
+    return text.replace(one, "\0", 1).replace(two, one, 1).replace("\0", two, 1)
+
+
+def test_the_snapshot_takes_the_count_whichever_projection_comes_first(tmp_path: Path) -> None:
+    # A snapshot and an events table are both counted children of the account: only the snapshot's
+    # statistic is entities per parent, whichever of them the profile lists first.
+    event_id = "        - { name: event_id, type: INT, required: true }"
+    contract = _counted_child("plan_change", event_id, COUNTED)
+    for order in ("snapshot-first", "events-first"):
+        profile = _counted_profile("plan_current")
+        events = _counted_profile("plan_change")
+        profile["tables"]["plan_change"] = events["tables"]["plan_change"]
+        profile["relationships"].append(events["relationships"][0])
+        if order == "events-first":
+            profile["relationships"].reverse()
+            contract = _swapped(contract, "plan_current", "plan_change")
+        sub = tmp_path / order
+        sub.mkdir()
+        result = _init(sub, profile, contract)
+        parent = _entries(sub)[0]["parent"]
+        assert parent["children"]["binWeights"] == ["0", "0.25", "0.5", "0.25"]
+        states = _states(result)
+        snapshot = next(
+            r for r in profile["relationships"] if r["child"]["table"] == "plan_current"
+        )
+        index = profile["relationships"].index(snapshot)
+        for position in (0, 1):
+            wanted = "used" if position == index else "unused"
+            assert states[f"/relationships/{position}/statistics/0"]["state"] == wanted

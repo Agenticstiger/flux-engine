@@ -515,6 +515,12 @@ _KEPT = (
 )
 
 
+_NOT_ENTITIES = (
+    "its children per parent count events or periods, not entities, and the history's parent "
+    "takes entities per parent"
+)
+
+
 def history_target(
     entry: Mapping[str, Any], held: ExposeKeys, columns: Sequence[CompiledColumn]
 ) -> HistoryTarget:
@@ -567,21 +573,28 @@ def release_counts(
 
     A ``counts`` entry over a relationship of a projected emit is refused (ADR 0027), so the emit
     stays a projection and the entry is dropped. When the history of the emit has a ``parent``
-    under the same parent expose and no ``children`` of its own, the entry's ``children`` (and
-    ``minChildren``, when the parent has none) become the parent's; otherwise the statistic is
-    unused, with why. *published* holds the profile's relationships and the lists its layout made
+    under the same parent expose and no ``children`` of its own, and the emit is a snapshot (one
+    row per entity, so its children per parent are entities per parent), the entry's ``children``
+    (and ``minChildren``, when the parent has none) become the parent's; otherwise the statistic is
+    unused, with why. An events or periodic emit counts events or periods per parent, so its
+    statistic is never given to the parent. *published* holds the profile's relationships and the lists its layout made
     of them, changed in place; *histories* are the ``history`` entries. Returns each
     ``(emit, column)`` whose foreign key the counted layout no longer sets.
     """
     freed: List[Tuple[str, str]] = []
     lists = published.lists()
     sources = published.relationships if isinstance(published.relationships, list) else []
-    for emit, counts in found.released:
+    snapshots = {str(item["emit"]) for item in found.snapshots}
+    # By emit, so which snapshot gives its statistic does not depend on the order of the exposes.
+    for emit, counts in sorted(found.released, key=lambda item: item[0]):
         name = str(counts["relationship"])
         declared = next(item for item in keys_of(emit).relationships if item.name == name)
         history_id = found.carried[emit][0]
         history = next((item for item in histories if item["emit"] == history_id), None)
-        parent, why = _history_parent(history, counts, declared.target, keys_of)
+        if emit in snapshots:
+            parent, why = _history_parent(history, counts, declared.target, keys_of)
+        else:
+            parent, why = None, _NOT_ENTITIES
         if parent is not None:
             sentence = _MOVED.format(
                 why=f"{history_id}'s parent {parent['relationship']} takes it as its children"

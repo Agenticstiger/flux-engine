@@ -364,8 +364,11 @@ had a different number of rows per parent than the history had entities. `init` 
   parent expose, so that the column holds that parent's keys on every version. A history with no `parent` holds
   drawn values in the column, which are no keys of the parent, so a table that would copy them stays unprojected,
   with that as the part of the rule it misses, and keeps its own rows and its own `counts` entry.
-- **The statistic.** The emit's own `counts` entry is not written. When the history has a `parent` under the same
-  parent expose and no `children` of its own, the entry's `children` become the parent's, and so does its
-  `minChildren` when the parent has none. Otherwise (the history has children of its own) the statistic is unused,
-  with that reason. The ledger says which statistic moved where and why.
+- **The statistic.** The emit's own `counts` entry is not written. A snapshot has one row per entity, so its children
+  per parent are entities per parent: when the history has a `parent` under the same parent expose and no `children`
+  of its own, the entry's `children` become the parent's, and so does its `minChildren` when the parent has none.
+  An events or periodic emit counts events or periods per parent, which is another unit, so its statistic is never
+  given to the parent: it is unused, with that reason. A statistic is unused with its reason too when the history
+  has children of its own. Where two snapshots of one history could give, the one whose emit id sorts first does,
+  so the result does not depend on the order of the exposes. The ledger says which statistic moved where and why.
 - **What moves.** A bundle for a contract with such an expose. Every other bundle keeps its bytes.
