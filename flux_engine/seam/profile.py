@@ -32,6 +32,7 @@ from flux_stats.profile import Profile, load_profile_text
 __all__ = [
     "FLX_3109",
     "FLX_3110",
+    "FLX_3125",
     "PinnedProfile",
     "load_profile",
     "require_profile",
@@ -58,6 +59,20 @@ FLX_3110 = register(
     "Either the profile changed after it was pinned, or it is a different "
     "profile. Pin the new digest in the Simulation if the change is "
     "intended, or pass the profile that was pinned. Nothing was written.",
+)
+
+FLX_3125 = register(
+    "FLX-3125",
+    "a date or timestamp column publishes one value the engine cannot yet write on every row",
+    "A DATE column whose one published value is 9999-12-30 or 9999-12-31, or a TIMESTAMP "
+    "column whose one published value is within 2 milliseconds of the last instant the "
+    "calendar holds, is drawn as exactly that value, and the engine cannot yet spell the "
+    "second grid step past it, which closes the bin the value is drawn from. `fluxsim init` "
+    "leaves the table of such a column out of the bundle, and refuses with this code only "
+    "when something it writes needs that table: a relationship of a table it writes targets "
+    "it, or a history file names it. The message names the table and the column. Write the "
+    "column's open end as NULL, or make a DATE column a TIMESTAMP, or write a TIMESTAMP's "
+    "end as an earlier instant. Nothing was written.",
 )
 
 

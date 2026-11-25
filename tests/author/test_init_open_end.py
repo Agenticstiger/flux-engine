@@ -37,6 +37,7 @@ import yaml
 from flux_engine.author.bundle import AuthoredExpose, _spans_of
 from flux_engine.author.columns import ColumnPlan
 from flux_engine.author.window import WINDOW_END_LIMIT_MS, instant_ms
+from flux_engine.cli import main
 from flux_engine.cli._init import run_init
 from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.seam.contract import LogicalKind
@@ -300,6 +301,55 @@ def test_a_required_end_that_holds_the_last_day_is_refused_before_anything_is_wr
     assert "cannot yet write a DATE of exactly 9999-12-31 on every row" in message
     assert "write its open end as NULL, or make the column a TIMESTAMP" in message
     assert not (tmp_path / "bundle").exists()
+
+
+def test_the_refusal_of_a_value_init_cannot_draw_exactly_carries_a_code(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init(tmp_path, required_end=True, last_end="9999-12-31")
+    exit_code = main(
+        [
+            "init",
+            str(tmp_path / "again"),
+            "--contract",
+            str(tmp_path / "library.fluid.yml"),
+            "--profile",
+            str(tmp_path / "library.profile.json"),
+            "--json",
+        ]
+    )
+    envelope = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert envelope["error"]["code"] == "FLX-3125"
+    message = " ".join(envelope["error"]["message"].split())
+    assert "line_version.valid_to publishes one value, the last the calendar holds" in message
+    assert not (tmp_path / "again").exists()
+
+
+def test_the_refusal_of_a_one_value_timestamp_and_of_a_history_file_carry_the_code_too(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "library.fluid.yml").write_text(_contract(True, "TIMESTAMP"), encoding="utf-8")
+    found = _profile_of("9999-12-31")
+    last = str(253_402_300_799_999)
+    found["tables"]["line_version"]["columns"]["valid_to"]["metrics"] = _metrics(last, last, 20)
+    (tmp_path / "library.profile.json").write_text(json.dumps(found), encoding="utf-8")
+    refused = run_init(
+        str(tmp_path / "bundle"),
+        contract=str(tmp_path / "library.fluid.yml"),
+        profile=str(tmp_path / "library.profile.json"),
+    )
+    assert refused.exit_code == 1 and refused.error_code == "FLX-3125"
+    named = copy.deepcopy(HISTORY_FILE)
+    named["history"][0].update({"emit": "line_version", "tracked": []})
+    named["history"][0].pop("parent")
+    for key in ("snapshots", "events", "periods"):
+        named.pop(key, None)
+    (tmp_path / "history.json").write_text(json.dumps(named), encoding="utf-8")
+    other = tmp_path / "other"
+    other.mkdir()
+    by_file = _init_without_readings(other, "9999-12-31", history=str(tmp_path / "history.json"))
+    assert by_file.exit_code == 1 and by_file.error_code == "FLX-3125"
 
 
 def _init_without_readings(tmp_path: Path, last_end: str, history: Optional[str] = None) -> Any:

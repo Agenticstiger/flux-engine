@@ -165,7 +165,7 @@ from flux_engine.seam.parameters import (
     read_unused_block,
     render_pointer,
 )
-from flux_engine.seam.profile import load_profile
+from flux_engine.seam.profile import FLX_3125, load_profile
 from flux_engine.seam.profile_request import column_domains
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
 from flux_engine.seam.resolve import EXTENSION_NAMESPACE, FLX_3105, ExactLoader, read_bundle_file
@@ -3637,7 +3637,8 @@ def _refuse_a_needed_one_value(
 
     A table whose column publishes one date or instant the engine cannot yet write is left out. It
     is refused, with the reason it was left out, only when a relationship of an expose the bundle
-    writes targets it: plan would refuse that bundle (``FLX-3403``). Nothing is written then.
+    writes targets it: plan would refuse that bundle (``FLX-3403``). Nothing is written then, and
+    the refusal is ``FLX-3125``, with the reason the table was left out as its detail.
     """
     left_out = {
         expose.expose_id: expose.needed_refusal
@@ -3651,7 +3652,7 @@ def _refuse_a_needed_one_value(
             continue
         for relationship in keys.expose(expose.expose_id).relationships:
             if relationship.target in left_out:
-                raise AuthorError(left_out[relationship.target])
+                raise FluxError(FLX_3125, left_out[relationship.target])
 
 
 def _bundle_window(
@@ -3761,7 +3762,7 @@ def _check_declared_entries(planned: _Planned, declared: DeclaredHistory) -> Non
     for entry in (*declared.history, *declared.snapshots, *declared.events, *declared.periods):
         for name in (entry.get("emit"), entry.get("of")):
             if isinstance(name, str) and name in left_out:
-                raise AuthorError(left_out[name])
+                raise FluxError(FLX_3125, left_out[name])
     try:
         check_entries(
             declared,
