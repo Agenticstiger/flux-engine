@@ -344,7 +344,7 @@ A history never writes a version it knows breaks the bound:
 | `length` | Required: a version's length, a histogram whose edges are whole days of at least one, in the spelling of a fidelity `distribution` (`bins`, `binWeights`, `closed`). A TIMESTAMP chain draws whole milliseconds inside its day bins. |
 | `until` | Required: the history's horizon, a value of the start column's type, inside the window. Every version starts before it. |
 | `chain` | `nextStart`, the default, or `dayBefore` (DATE columns only). |
-| `openEnd` | Optional: the text written in the end column of an open version, read as the column's type. Without it an open end is NULL. The one date allowed outside the window. |
+| `openEnd` | Optional: the text written in the end column of an open version, read as the column's type. Without it an open end is NULL. The one date allowed outside the window. `fluxsim init` copies it from the contract's `validityParams.openEnd` on the validity window's end dimension, and the declared `chain` sets `chain` the same way. |
 | `activation` | Optional: a column of the start's type that holds the entity's first start on every version. |
 | `tracked` | The columns that change between versions: each is `{column, initial, transitions}`, a categorical column with `levels`. `initial` gives the first version's value (the column's own levels by default), and `transitions` gives each level the weights of the levels it moves to, never itself. |
 | `reasons` | `levels` with `levelWeights`, naming tracked columns: the share of the changes each makes. Required when more than one column is tracked. |

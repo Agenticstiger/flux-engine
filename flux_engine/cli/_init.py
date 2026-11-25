@@ -14,13 +14,14 @@ this process was started (see :func:`command_prefix`).
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import sys
 from dataclasses import dataclass, replace
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import unquote, urlparse
 
 from flux_engine.api.stages import StageResult
@@ -780,8 +781,7 @@ def run_author(directory: str, asked: _AuthorRequest) -> StageResult:
         return StageResult(stage="init", exit_code=1, stderr=f"init: {error}")
     written = _write_request(request, bundle)
     if isinstance(written, StageResult):
-        _remove(Path(directory), names, request)
-        return written
+        return _naming_what_stays(written, _remove(Path(directory), names, request))
     return _described(directory, bundle, names, asked.contract, asked.profile, written)
 
 
@@ -822,44 +822,70 @@ def _write_request(target: Optional[Path], bundle: Any) -> Any:
     return target
 
 
-def _rmdir_if_empty(directory: Path) -> None:
-    """Remove *directory* when it is empty.
+def _rmdir_if_empty(directory: Path) -> List[Path]:
+    """Remove *directory* when it is empty; the directory, in a list, when it is still there.
 
-    Cleanup is best effort: a directory that is already gone, still holds something or cannot be
-    removed (a permission refused, say) is left as it is, so the refusal that led here is the one
-    reported.
+    Cleanup is best effort: a directory that still holds something or cannot be removed (a
+    permission refused, say) is left as it is, so the refusal that led here is the one reported,
+    and what stays is returned for that refusal to name (:func:`_naming_what_stays`).
     """
     try:
         directory.rmdir()
     except OSError:
         pass
+    return [directory] if os.path.lexists(directory) else []
 
 
-def _unlink_if_there(path: Path) -> None:
-    """Remove the file *path* if it is there; best effort, like :func:`_rmdir_if_empty`.
+def _unlink_if_there(path: Path) -> List[Path]:
+    """Remove the file *path* if it is there; the path, in a list, when it is still there.
 
-    A file that cannot be removed (a permission refused, say) is left as it is, so the refusal
-    that led to the cleanup is the one reported.
+    Best effort, like :func:`_rmdir_if_empty`: a file that cannot be removed (a permission
+    refused, say) is left as it is, and named by the refusal that led to the cleanup.
     """
     try:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+    return [path] if os.path.lexists(path) else []
 
 
-def _remove_request(request: Path) -> None:
-    """Remove a profile *request* ``init`` wrote, and the directory it went in when that is empty."""
-    _unlink_if_there(request)
-    _rmdir_if_empty(request.parent)
+def _remove_request(request: Path) -> List[Path]:
+    """Remove a profile *request* ``init`` wrote, and the directory it went in when that is empty.
+
+    Returns what is still there.
+    """
+    return _unlink_if_there(request) + _rmdir_if_empty(request.parent)
 
 
-def _remove(directory: Path, names: Tuple[str, ...], request: Optional[Path] = None) -> None:
-    """Remove the files *names* ``init`` wrote into *directory* and its *request*, and the directory when it is empty."""
+def _remove(directory: Path, names: Tuple[str, ...], request: Optional[Path] = None) -> List[Path]:
+    """Remove the files *names* ``init`` wrote into *directory* and its *request*, and the directory when it is empty.
+
+    Returns what is still there.
+    """
+    left: List[Path] = []
     for name in names:
-        _unlink_if_there(directory / name)
+        left += _unlink_if_there(directory / name)
     if request is not None:
-        _remove_request(request)
-    _rmdir_if_empty(directory)
+        left += _remove_request(request)
+    return left + _rmdir_if_empty(directory)
+
+
+def _naming_what_stays(result: StageResult, left: Sequence[Path]) -> StageResult:
+    """*result*, with a line naming each file or directory cleanup could not remove.
+
+    What lies inside a named directory is not named again: removing the directory removes it.
+    """
+    from flux_engine.seam.coverage import printable
+
+    there = [path for path in dict.fromkeys(left) if os.path.lexists(path)]
+    named = [path for path in there if not any(other in path.parents for other in there)]
+    if not named:
+        return result
+    them = "it" if len(named) == 1 else "them"
+    listed = ", ".join(printable(str(path)) for path in named)
+    return replace(
+        result, stderr=f"{result.stderr}\ninit: could not remove {listed}; remove {them} by hand"
+    )
 
 
 def _read_overlays(files: Tuple[str, ...]) -> Any:
@@ -918,23 +944,30 @@ def _authored_each(asked: _AuthorRequest, overlays: List[Any]) -> Any:
 def _written_each(root: Path, bundles: List[Any], asked: _AuthorRequest) -> StageResult:
     """Write each bundle into *root*, named after its overlay, with the request for its assumptions.
 
-    When a directory or a
-    file cannot be written, everything this call wrote is removed.
+    When a directory or a file cannot be written, everything this call wrote is removed, *root*
+    too when this call made it, and the refusal names what stays.
     """
     from flux_engine.starter import ScaffoldError, write_project
 
     requests = [_request_path(str(root / bundle.overlay.name), bundle) for bundle in bundles]
     written: List[Tuple[Path, bool, Tuple[str, ...], Optional[Path]]] = []
     results: List[StageResult] = []
+    root_was_there = os.path.lexists(root)
 
-    def undo() -> None:
+    def undo(result: StageResult) -> StageResult:
+        """*result*, after removing what this call wrote, naming what stays."""
+        left: List[Path] = []
         for path, was_there, files, request in written:
             for name in files:
-                _unlink_if_there(path / name)
+                left += _unlink_if_there(path / name)
             if not was_there:
                 shutil.rmtree(path, ignore_errors=True)
+                left.append(path)
             if request is not None:
-                _remove_request(request)
+                left += _remove_request(request)
+        if not root_was_there:
+            left += _rmdir_if_empty(root)
+        return _naming_what_stays(result, left)
 
     for bundle, request in zip(bundles, requests, strict=True):
         target = root / bundle.overlay.name
@@ -942,13 +975,11 @@ def _written_each(root: Path, bundles: List[Any], asked: _AuthorRequest) -> Stag
         try:
             names = write_project(target, lambda bundle=bundle: bundle.files)  # type: ignore[misc]
         except ScaffoldError as error:
-            undo()
-            return StageResult(stage="init", exit_code=1, stderr=f"init: {error}")
+            return undo(StageResult(stage="init", exit_code=1, stderr=f"init: {error}"))
         placed = _write_request(request, bundle)
         written.append((target, existed, names, request))
         if isinstance(placed, StageResult):
-            undo()
-            return placed
+            return undo(placed)
         results.append(
             _described(str(target), bundle, names, asked.contract, asked.profile, placed)
         )

@@ -379,6 +379,36 @@ def test_the_window_is_given_once(tmp_path: Path) -> None:
 def test_the_window_of_the_file_is_checked_as_window_is(tmp_path: Path) -> None:
     document = {**HISTORY_FILE, "timeBounds": {"start": "2025-12-31", "end": "2025-01-01"}}
     assert "timeBounds" in _refused(tmp_path, document)
+    document = {**HISTORY_FILE, "timeBounds": {"start": "2024-01-01", "end": "9999-12-31"}}
+    message = _refused(tmp_path, document)
+    assert "timeBounds: END '9999-12-31' is in the year 9999" in message
+
+
+def _until_9999(entry: Dict[str, Any]) -> None:
+    entry["until"] = "9999-12-31"
+
+
+def _start_bin_9999(entry: Dict[str, Any]) -> None:
+    entry["start"]["bins"][1] = "9999-06-01"
+
+
+@pytest.mark.parametrize(
+    ("place", "edit"),
+    [("history[0].until", _until_9999), ("history[0].start.bins[1]", _start_bin_9999)],
+)
+@pytest.mark.parametrize("bounded", [True, False])
+def test_an_instant_of_the_history_in_the_year_9999_is_refused_naming_its_place(
+    tmp_path: Path, place: str, edit: Any, bounded: bool
+) -> None:
+    # Before, a file with no timeBounds and an until of 9999-12-31 made the window end there:
+    # init wrote the bundle, and a plan with periods failed past the end of the calendar.
+    document = copy.deepcopy(HISTORY_FILE)
+    if not bounded:
+        del document["timeBounds"]
+    edit(document["history"][0])
+    message = _refused(tmp_path, document)
+    assert f"history.yml: {place} '9999-" in message
+    assert "is in the year 9999, which spells an open end" in message
 
 
 def test_a_file_that_is_not_a_regular_file_or_text_or_one_document_is_refused(
