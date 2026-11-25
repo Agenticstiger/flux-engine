@@ -162,6 +162,7 @@ from flux_engine.generator.statistics import DATE_EPOCH_ORDINAL
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
 from flux_engine.seam.counts import CountsEntry
 from flux_engine.seam.keys import ContractKeys, ExposeKeys, Relationship
+from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
 
 __all__ = [
     "FLX_3403",
@@ -231,7 +232,11 @@ FLX_3403 = register(
     "before `timeBounds.end` or not a `YYYY-MM-DD` text, or a `through` before the `from`. A "
     "DATE or TIMESTAMP column of a history's emit is refused when it declares no "
     "range or bins, or a range or bins outside timeBounds, and so is a relationship whose "
-    "parent is a periodic emit, whose rows grow with the window.",
+    "parent is a periodic emit, whose rows grow with the window. A copy through a "
+    "sharedColumns entry into another relationship's foreign key is refused when the "
+    "relationship it goes through reaches an emit that declares a history or one projected "
+    "from a history (a snapshot or an events emit), whose rows hold the cells of a version "
+    "and not the pick the copy follows; the message names both relationships.",
 )
 
 #: Domain-separation label of a key layout's permutation key.
@@ -2514,34 +2519,64 @@ def relate_plans(
         )
         for expose_id in sorted(plans)
     }
-    _refuse_copies_into_histories(shapes, histories)
+    _refuse_copies_into_histories(shapes, histories, _projected_emits(namespace or {}))
     related = _with_drivers(plans, _Resolver(shapes))
     _check_asof_reads(related, keys)
     return _attach_sums(_attach_reads(_link_givens(related, keys), keys))
 
 
 def _refuse_copies_into_histories(
-    shapes: Mapping[str, _Shape], histories: Mapping[str, HistoryBinding]
+    shapes: Mapping[str, _Shape],
+    histories: Mapping[str, HistoryBinding],
+    projected: Mapping[str, str],
 ) -> None:
-    """Refuse (``FLX-3403``) a copy through a relationship whose target declares a history (ADR 0022 section 4).
+    """Refuse (``FLX-3403``) a copy through a relationship whose target declares a history or is projected from one (ADR 0022 section 4).
 
     A history's emit holds the foreign keys of an entity's first version on every later version, so
     the row a copy reaches from a later version, followed through the relationship that holds the
     copied column, is not the row the copied cell names there: a relationship into a slowly
-    changing target is out of reach of a copy, as it is of a one_to_one pick.
+    changing target is out of reach of a copy, as it is of a one_to_one pick. An emit projected
+    from a history (a snapshot, events or periods, ADR 0027) holds the history's cells on the row
+    it reads, not the pick of a draw of its own, so the row its relationship names is not the
+    row the copy reaches either. *projected* maps each such emit, in NFC, to the kind of its
+    entry.
     """
     held = {nfc(expose_id) for expose_id in histories}
     for expose_id in sorted(shapes):
         for copied in shapes[expose_id].copied.values():
-            if nfc(copied.reach) in held:
+            reach = nfc(copied.reach)
+            where = (
+                f"expose {expose_id!r} copies {copied.column!r} through relationship "
+                f"{copied.through!r} into relationship {copied.relationship!r}"
+            )
+            if reach in held:
                 raise _refuse(
-                    f"expose {expose_id!r} copies {copied.column!r} through relationship "
-                    f"{copied.through!r} into relationship {copied.relationship!r}, but "
-                    f"{copied.reach!r} declares a history, whose foreign keys are those of an "
-                    "entity's first version on each of its versions, so the copy would not equal "
-                    f"the row {copied.relationship!r} names on a later version; read the column "
-                    "from a table with no history, or leave the copy out"
+                    f"{where}, but {copied.reach!r} declares a history, whose foreign keys are "
+                    "those of an entity's first version on each of its versions, so the copy "
+                    f"would not equal the row {copied.relationship!r} names on a later version; "
+                    "read the column from a table with no history, or leave the copy out"
                 )
+            if reach in projected:
+                raise _refuse(
+                    f"{where}, but {copied.reach!r} is projected from a history ({projected[reach]} "
+                    f"entry), so each of its rows holds the cells of a version, not the pick of a "
+                    f"draw of its own, and the copy would not equal the row "
+                    f"{copied.relationship!r} names there; read the column from a table that is "
+                    "no projection, or leave the copy out"
+                )
+
+
+def _projected_emits(namespace: Mapping[str, Any]) -> Dict[str, str]:
+    """The emits a ``snapshots``, ``events`` or ``periods`` entry of the namespace names, in NFC, with the entry's kind."""
+    found: Dict[str, str] = {}
+    for kind in (SNAPSHOTS_KEY, EVENTS_KEY, PERIODS_KEY):
+        entries = namespace.get(kind)
+        if not isinstance(entries, (list, tuple)):
+            continue
+        for entry in entries:
+            if isinstance(entry, Mapping) and isinstance(entry.get("emit"), str):
+                found.setdefault(nfc(entry["emit"]), kind)
+    return found
 
 
 def _periodic_emits(namespace: Mapping[str, Any]) -> FrozenSet[str]:

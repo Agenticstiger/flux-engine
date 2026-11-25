@@ -215,8 +215,11 @@ The rules, each decided here:
    neither drawn `given` another column nor read by another column's `given`, since a pick another
    column's level fixes is not read from the row's cell alone; `Q` must be laid out as a foreign key (or a
    part of a key) of its own in `R`'s target. Each is `FLX-3403`, naming the column and the relationship.
-   `R`'s target must also declare no history (`FLX-3403`): an entity's foreign keys are those of its first
-   version on every version, so `Q`-parent(`R`-parent(row)) would not equal the copied cell on a later version.
+   `R`'s target must also declare no history and be no projection of one (`FLX-3403`, naming `R` and `S`):
+   an entity's foreign keys are those of its first version on every version, so `Q`-parent(`R`-parent(row))
+   would not equal the copied cell on a later version; and a row of a snapshot, events or periods emit holds
+   the cells of the version it reads (ADR 0027), not the pick of a draw of its own, so the row `Q` reaches
+   from it is not the row its cell names.
 5. **Order and cycles.** A pick is a function of other picks, not a cell a rule sets, so nothing waits
    for a rule: a rule, link or copy that reads `S` reads the pick. The plans read each other through `R`
    as a path does, and a cycle among them is `FLX-6210` as a cycle among rules that read links is. A copy
@@ -231,4 +234,5 @@ The rules, each decided here:
    next to the relationship's integrity line, which keeps holding on every row.
 
 A contract's own `sharedColumns` copies nothing from a slowly changing dimension through a relationship,
-so a slowly changing target is out of reach of this amendment, and a copy through one is refused (point 4).
+so a slowly changing target, and a projection of one, are out of reach of this amendment, and a copy through
+either is refused (point 4).
