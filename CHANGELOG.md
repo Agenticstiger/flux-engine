@@ -32,11 +32,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   emit's columns, and no weight for the ended status on a carried end column. When `plan` still refuses the bundle,
   `init` says so, names the file, and writes nothing. The numbers of such a history are assumed, for the reason
   "declared by --history", and cite nothing of the profile's history. Without the flag, `init` writes a history from
-  the profile as before.
-- `validate --profile FILE` reads the profile a Simulation pins and refuses what `plan` refuses about it: a profile that
-  is not the pinned one or cannot be read (`FLX-3109`, `FLX-3110`), an overlay that names a table or column the profile
-  lacks (`FLX-3105`), and a profile that lacks a table or column the bundle's register cites (`FLX-3113`). A profile
-  given to a Simulation that pins none, and the grade floor (`FLX-4005`), are left to `plan`.
+  the profile as before. `init --json` names the file as `historyFile`.
+- `validate --profile FILE` (`profile=` in `flux_engine.engine.validate`) reads the profile a Simulation pins and
+  refuses what `plan` refuses about it: a profile that is not the pinned one or cannot be read (`FLX-3109`,
+  `FLX-3110`), an overlay that names a table or column the profile lacks (`FLX-3105`), and a profile that lacks a
+  table or column the bundle's register cites (`FLX-3113`). A profile given to a Simulation that pins none, and the
+  grade floor (`FLX-4005`), are left to `plan`.
 - Register format `1-4-0`. A register that counts a new position, or cites a rank correlation or the
   `cliqueMarginal/2` clique definition, names `1-4-0`; any other register keeps the format it had, from `1-0-0` to
   `1-3-0`, and every digest it had. See `PARAMETER-REGISTER-SPEC.md`.
@@ -44,21 +45,37 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 ### Changed
 
 - `flux_engine.author.author_bundle` takes one `AuthorInputs` instead of separate arguments.
+- `flux_engine.author.replace` exports `ASSUMPTIONS_REQUEST_PATH` (`requests/assumptions.profile-request.yml`, inside
+  the bundle directory) in place of `ASSUMPTIONS_REQUEST_SUFFIX`.
 - `init --window` refuses a window that does not hold the range of a date column, whether the profile publishes it or
-  the contract declares it. The message names each column, its range and the window. A range is not cut, since the
-  bins of a property partition it.
+  the contract declares it, a loose range such as `between '1900-01-01' and '2100-12-31'` included. The message names
+  each column, its range and the window. A range is not cut, since the bins of a property partition it. A contract
+  range that ends in the year 9999 is not read as a range, so it neither widens nor refuses a window.
+- `calibrate --fit` reads no held-out profile for a bundle that declares no held-out query: a profile given with
+  `--held-out` is not read, where it was refused with `FLX-3702`, and the note says so.
+- `flux_engine.calibrate.fit.run_fit` raises `HeldOutNeeded`, a usage error with no `FLX` code, when the bundle
+  declares a held-out query and the request names no held-out profile. `calibrate --fit` reports it with exit status
+  2, as it reported a missing `--held-out` before.
 
 ### Fixed
 
 - The run's window now covers the whole range of every date column, the date range the contract declares, and the
   bins the column is drawn from, so `init` no longer cuts a column at a window that other columns imply. A column's
-  bins are cut only at a window you pass with `--window`.
-- The parameter register counts the numbers under the namespace keys beside `emits` (`counts`, `history`, `events`,
-  `periods`, `lifetimes`, `within`, `rates`, `conditions`) and of the copula, and `init` gives each one a source. A
-  copula's values cite the rank correlation of their pair, and a binned clique's numbers cite the clique marginal.
-  A bundle that declares none of these keys keeps its register and its digests. A register entry names its number by
-  position, so a hand edit that removes such an entry (a `rates` entry, say) removes the register entries that point
-  into it too; `plan` refuses an entry that reaches nothing (`FLX-3105`).
+  bins are cut only at a window you pass with `--window`. A contract range that ends in the year 9999 says only that
+  the column holds a date and gives the window nothing: a run's periods step past the window's end, and a window that
+  ends in that year cannot be planned. A contract range that widens the window beyond every span the profile and the
+  bundle give (a loose range such as `between '1900-01-01' and '2100-12-31'`) is named under "time window", a gap at
+  `/spec/timeBounds` that `--strict` refuses; a date column the profile publishes no order statistic for is drawn
+  evenly across the whole window.
+- The parameter register counts the numbers under the namespace keys beside `emits` (`facts`, `links`, `counts`,
+  `history`, `events`, `periods`, `lifetimes`, `within`, `rates`, `conditions`) and of the copula, and `init` gives
+  each one a source. A copula's values cite the rank correlation of their pair, and a binned clique's numbers cite the
+  clique marginal. A bundle that declares none of these keys keeps its register and its digests. One that declares
+  any of them plans with a new register, plan digest and `runId`; in a bundle `init` wrote before this release, their
+  numbers have no register entry, so they count as defaults and the bundle's share of defaults rises until `init`
+  writes it again. A register entry names its number by position, so a hand edit that removes such an entry (a
+  `rates` entry, say) removes the register entries that point into it too; `plan` refuses an entry that reaches
+  nothing (`FLX-3105`).
 - `calibrate --fit` on a bundle that declares no held-out query runs, says that no held-out check was made, and exits
   1 with `FLX-3712`, since such a fit is never called calibrated. The JSON report carries the note as `heldOutNote`.
 - `init` writes the assumptions request inside the bundle directory, as `requests/assumptions.profile-request.yml`,
