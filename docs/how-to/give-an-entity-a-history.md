@@ -316,8 +316,19 @@ last day, and its versions end by that day. An entity whose depot closed ends: u
 starts, and under `closeLast`, or with no `end`, its last version closes, by the depot's last day. Those entities
 count towards the `share` of the `end`. A depot with no end, a NULL end, or an end before its start cuts nothing.
 The key needs a `lifetimes` entry on the emit the relationship reaches, or the plan refuses it with `FLX-3403`.
-An entity whose depot leaves no room for a chain (it closed before the window, or opened in the last days before
-`until`) keeps its own draw and breaks the bound.
+A history never writes a version it knows breaks the bound:
+
+- An entity whose depot leaves room for fewer versions than it was given is capped at that room, and the versions it
+  loses go, one at a time, to the entities with the most room left, so the emit keeps its declared `rows`. Only when
+  no entity has room left does the history hold fewer rows, and `plan`, `apply` and `verify` count the rows it has.
+  `plan` says how many entities were capped, how many versions moved and any shortfall.
+- An entity whose depot leaves room for no version at all (it closed before the window, or opened in the last days
+  before `until`) is `FLX-3403` at plan, naming `history(<emit>).parent.lifetime`, how many entities it is and the range
+  of their depots' lifetimes. An entity whose depot has room for one version is not refused: its first start is drawn
+  with room for that one.
+- When the depot's emit declares a history of its own, a lifetime column it sets can differ between its versions, and
+  the bound would hold an entity to an arbitrary one. The depot's history must carry the lifetime columns, or the plan
+  refuses the key with `FLX-3403`, naming the emit and the columns.
 
 ## The `history` key
 
@@ -402,7 +413,7 @@ Each line is enforced, so one violating entity fails the run, except the `asOf:`
 | `history:no_gaps_no_overlap` | an entity's versions meet end to start, as the chain says. |
 | `history:one_current` | an entity has one open version, its last, unless it ended under `closeLast`, when it has none. |
 | `history:ended_is_last` | with an `end.column` and `end.value`, the value appears only on an entity's last version. |
-| `history:within_parent` | with `parent.lifetime: true`: an entity's first start is not before its parent's start, no version starts after the parent's last day, every closed end is at or before it, and an entity whose parent ended by `until` has ended. It covers the entities whose parent row has a start. |
+| `history:within_parent` | with `parent.lifetime: true`: an entity's first start is not before its parent's start, no version starts after the parent's last day, every closed end is at or before it, and an entity whose parent ended by `until` has ended. With no `end` column, a closed last version is allowed only when the parent's last day is at most `until`; any other entity keeps its last version open. It covers the entities whose parent row has a start. |
 | `asOf:<relationship>.<date>` | how many rows read a version. Not enforced. |
 
 A rule that reads `previous` is checked like any other rule, on every row.
@@ -425,6 +436,7 @@ Every refusal comes before a row exists.
   - a `versions` class is below 1, or there are more entities than versions, which names `--scale` when a scale caused it;
   - `until` is outside the window, a `start` bin lies outside it, or a `length` bin edge is below one day;
   - the first starts have no room for the most versions an entity takes;
+  - with `parent.lifetime: true`, a parent whose lifetime leaves room for not even one version of an entity, and a parent emit that declares a history without carrying the lifetime columns;
   - `dayBefore` on TIMESTAMP columns;
   - a primary key other than one column, or the natural entity's columns and the start;
   - an `activation`, tracked or end column that is a key, a validity column or a column a rule sets, a tracked column that is not categorical, and an `end.value` that appears anywhere but the last version;

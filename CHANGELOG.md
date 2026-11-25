@@ -54,9 +54,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   count the rows it has. A parent that leaves no room for even one version is `FLX-3403` at plan, naming
   `history(<emit>).parent.lifetime`, how many entities it is and their parents' lifetimes. A history without the
   key keeps every byte. A parent that declares a history of its own must carry the lifetime columns (a column its
-  history sets, or a rule sets, can differ between versions): `FLX-3403` at plan names the emit and the columns. `plan` notes how many entities were capped, how many versions moved, any shortfall and how
-  many entities end in one version with their parent, and the plan-time work of the bound grows linearly with the
-  entities.
+  history sets, or a rule sets, can differ between versions): `FLX-3403` at plan names the emit and the columns.
+  `plan` notes how many entities were capped, how many versions moved, any shortfall and how many entities end in
+  one version with their parent, and the plan-time work of the bound grows linearly with the entities.
 - A periods kind's `when` and an events `when` can read the history's end column (`history[].end.column`, such as
   `status`), so a kind can leave out the ending versions: `status <> 'retired'`. On an ending version the column
   holds the end value and on any other a drawn level, so the predicate is known at plan time only where every level
@@ -81,7 +81,6 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   and the `children` classes, read from the version rows per parent the profile counts and kept as the shape of
   entities per parent (ADR 0017, the amendment of 2026-11-24). The entities are then grouped under their parent, so
   a projection copies the parent's key consistently. A bundle for a contract without such a relationship is unchanged.
-
 - `fluxsim init` tracks a foreign key into a table the profile releases whole: the column declares the table's keys
   as its levels and takes its `initial` and `transitions` from the history statistic. A key that is not published, or
   a change that names no key, leaves the column carried, with the reason in the ledger (ADR 0017, the amendment of

@@ -519,7 +519,7 @@ parents' lifetimes: the bound is never written knowing it will be violated.
 
 **2. The room and the counts.** Entity `e`'s room is `r = limit - s`, and its chain holds `r - z - 1` versions at most,
 with `z` one when an ended entity's last version is closed (point 1) and zero otherwise: the first start and a closed last version each take a unit
-(section 4, item 4), and by point 1 that is at least one. The versions per entity are assigned as section 3 says,
+(section 4, point 4), and by point 1 that is at least one. The versions per entity are assigned as section 3 says,
 the rank coupling reading the rooms, and each entity's count is then capped at what its room holds. The versions
 an entity loses go to other entities, one at a time, in rounds: each round gives one to every entity that is
 still under its own cap, the entity with the most room first and a tie to the lower entity index, until none is left.
@@ -528,7 +528,7 @@ entity in place of one (`counts.pass_excess` is both), so the emit keeps its dec
 rooms' order. An entity that takes more than the shape's largest count does so only for the versions another entity
 lost. Only when no entity has room left do the rows shrink: the history then has fewer rows than declared, the
 shortfall. `plan`, `apply` and `verify` count the rows it has: the emit is planned again at them, and a layout is
-always worked out from the declared rows. Since the count never exceeds the room, the fit (section 4, item 4) never
+always worked out from the declared rows. Since the count never exceeds the room, the fit (section 4, point 4) never
 fails and the chain ends by `limit`.
 
 **3. The ending.** An entity whose parent's last day `pe` is at or before `until` is *forced* to end:
@@ -579,8 +579,7 @@ is closed, or under `finalVersion` carries `value`). A parent's DATE end is its 
 so with a TIMESTAMP `until` the parent ended by `until` when that millisecond is not after it, not when its day is.
 For a history with no `end`, a closed last version is allowed only when the parent's last day is at most `until`; an
 entity of any other parent keeps its last version open, and one that does not is a violation. `history:one_current`
-reads a closed last version as allowed for a history with this key and no `end`. An entity left with an empty
-intersection counts as a violation there.
+reads a closed last version as allowed for a history with this key and no `end`.
 
 **When the forced entities are more than the share.** All of them end, and the share the run reaches is higher than the
 declared one, by the forced entities beyond it. Nothing is printed: `history:within_parent` and the count of ended

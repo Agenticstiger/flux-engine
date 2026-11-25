@@ -1407,7 +1407,7 @@ def _fitted_counts(
     """The version counts held to each entity's room, and the versions that lost their place passed on.
 
     An entity's chain holds ``room - closing - 1`` versions, the first start and a closed last
-    version each taking a unit (ADR 0017 section 4, item 4), and at least one by the first start's
+    version each taking a unit (ADR 0017 section 4, point 4), and at least one by the first start's
     interval. Each count is capped at that; the versions above it go one at a time, in rounds, to
     the entities still under their own cap, the most room first and a tie to the lower entity: the
     cap-and-pass of :func:`~flux_engine.generator.counts.pass_excess` (``counts._capped``'s
@@ -1580,7 +1580,7 @@ def drawn_length(
 
 
 def fit_lengths(lengths: Sequence[int], room: int) -> List[int]:
-    """The closed *lengths* of one chain fitted into *room* units (ADR 0017 section 4, item 4).
+    """The closed *lengths* of one chain fitted into *room* units (ADR 0017 section 4, point 4).
 
     Lengths whose sum is at most ``room - 1`` stay. Otherwise each keeps one unit and the other
     ``room - 1 - k`` units are allotted in proportion to ``d_j - 1`` by the Largest Remainder
