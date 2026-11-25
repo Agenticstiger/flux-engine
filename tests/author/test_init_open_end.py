@@ -2,23 +2,21 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""``fluxsim init`` writes a versioned table whose end column holds one value, the last day a date can hold.
+"""``fluxsim init`` writes a versioned table whose end column holds one value, such as an open end.
 
 A table of versions whose end column is required holds a sentinel such as ``9999-12-31`` for every open
-version. When every version is open the profile publishes that one date and nothing else for the
-column, and the column is spanned by the day after it. No day follows ``9999-12-31``, so the plan of
-the column raised ``OverflowError`` and the whole table was left out of the bundle; a table that
-refers to it was then refused (``FLX-3403``), and ``init`` exited 1 on a world that is fine with a NULL
-open end.
+version. When every version is open the profile publishes that one value and nothing else for the
+column, and every row of the column takes it.
 
-Pinned here, through ``fluxsim init`` and ``plan`` on a lending library of regions, stations, versions
-of a station's line and the readings taken on a line:
+Pinned here, through ``fluxsim init``, ``plan`` and ``apply`` on a lending library of regions,
+stations, versions of a station's line and the readings taken on a line:
 
-* a required end column holding ``9999-12-31`` writes the versioned table, spanned by the day that
-  ends there, and says so in the register;
-* the same world with a NULL open end (an optional end column, an ordinary last date) is written as
-  it always was, spanned by the day that starts there;
-* the bundle of either plans, and the table that refers to the versions is written.
+* an ordinary one-value date (``2025-10-01``) is written, and every row drawn holds exactly it;
+* the same value as a timestamp (``9999-12-31T00:00:00``, a sentinel open end) is the same;
+* a DATE that is ``9999-12-31`` cannot be written on every row yet: ``init`` refuses before it writes
+  anything, names the table and the column, and says what to change;
+* the bundle of each that is written plans and applies, and the table that refers to the versions
+  is written.
 """
 
 from __future__ import annotations
@@ -32,6 +30,7 @@ import yaml
 
 from flux_engine.cli._init import run_init
 from flux_engine.core.kernels import KERNEL_V2
+from flux_engine.stages.apply import apply
 from flux_engine.stages.plan import plan
 
 from .test_history_init import NAMESPACE, _levels, _metrics, _ms, _profile
@@ -77,7 +76,7 @@ def _to_one(name: str, target: str, column: str) -> Dict[str, Any]:
     }
 
 
-def _contract(required_end: bool) -> str:
+def _contract(required_end: bool, end_type: str = "DATE") -> str:
     """Regions hold stations; a line's versions (a validity window) hold a station; readings name a line."""
     exposes = [
         _expose(
@@ -97,7 +96,7 @@ def _contract(required_end: bool) -> str:
                 _column("line_id"),
                 _column("station_id"),
                 _column("valid_from", "DATE"),
-                _column("valid_to", "DATE", required_end),
+                _column("valid_to", end_type, required_end),
                 _column("tier", "STRING"),
             ],
             [
@@ -195,8 +194,9 @@ def _init(
     last_end: str,
     first_end: Optional[str] = None,
     window: Optional[Tuple[str, str]] = None,
+    end_type: str = "DATE",
 ) -> Any:
-    (tmp_path / "library.fluid.yml").write_text(_contract(required_end), encoding="utf-8")
+    (tmp_path / "library.fluid.yml").write_text(_contract(required_end, end_type), encoding="utf-8")
     (tmp_path / "library.profile.json").write_text(
         json.dumps(_profile_of(last_end, first_end)), encoding="utf-8"
     )
@@ -236,29 +236,86 @@ def _reasons(tmp_path: Path) -> List[str]:
     return found
 
 
-def _plans(tmp_path: Path) -> None:
+def _plans(tmp_path: Path) -> Path:
+    """Plan and apply the bundle; the state directory holding the run."""
+    state = tmp_path / "state"
     planned = plan(
         tmp_path / "bundle",
-        state_dir=tmp_path / "state",
+        state_dir=state,
         profile=tmp_path / "library.profile.json",
         kernel=KERNEL_V2.version,
         stage=False,
     )
     assert planned.success, planned.stderr
+    run_id = str(planned.artifacts["run_id"])
+    applied = apply(tmp_path / "bundle", state_dir=state, run_id=run_id, auto_plan=False)
+    assert applied.success, applied.stderr
+    return state / "runs" / run_id
 
 
-def test_a_required_end_that_holds_the_last_day_is_spanned_by_the_day_that_ends_there(
+def _drawn(run_dir: Path, table: str, column: str) -> List[Any]:
+    """Every value of *column* in the rows the run drew for *table*."""
+    attestation = json.loads(
+        (run_dir / f"seam-attestation-{table}.json").read_text(encoding="utf-8")
+    )
+    lines = (run_dir / "emits" / f"{table}.ndjson").read_text(encoding="utf-8").splitlines()
+    position = attestation["columns"].index(column)
+    return [json.loads(line)[position] for line in lines if line]
+
+
+def test_a_required_end_that_holds_the_last_day_is_refused_before_anything_is_written(
     tmp_path: Path,
 ) -> None:
     result = _init(tmp_path, required_end=True, last_end="9999-12-31")
+    assert result.exit_code == 1
+    message = " ".join(result.stderr.split())
+    assert "line_version.valid_to" in message
+    assert "publishes one value, the last the calendar holds, on every row" in message
+    assert "cannot yet write a DATE of exactly 9999-12-31 on every row" in message
+    assert "write its open end as NULL, or make the column a TIMESTAMP" in message
+    assert not (tmp_path / "bundle").exists()
+
+
+def test_a_required_timestamp_end_at_the_start_of_the_last_day_is_drawn_exactly(
+    tmp_path: Path,
+) -> None:
+    result = _init(tmp_path, required_end=True, last_end="9999-12-31", end_type="TIMESTAMP")
     assert result.exit_code == 0, result.stderr
     emits = _emits(tmp_path)
     assert {"region", "station", "line_version", "reading"} <= set(emits)
     ended = emits["line_version"]["fidelity"]["columns"]["valid_to"]
-    assert ended["bins"] == ["9999-12-30", "9999-12-31"]
-    assert ended["binWeights"] == ["1"]
-    assert any("the day that ends there" in reason for reason in _reasons(tmp_path))
-    _plans(tmp_path)
+    assert ended["bins"] == [
+        "9999-12-31T00:00:00.000Z",
+        "9999-12-31T00:00:00.001Z",
+        "9999-12-31T00:00:00.002Z",
+    ]
+    assert ended["binWeights"] == ["1", "0"]
+    assert any("every row takes it" in reason for reason in _reasons(tmp_path))
+    drawn = _drawn(_plans(tmp_path), "line_version", "valid_to")
+    assert len(drawn) == 20
+    assert set(drawn) == {drawn[0]}
+    assert drawn[0] == "9999-12-31T00:00:00.000Z"
+
+
+def test_a_timestamp_end_within_two_milliseconds_of_the_last_instant_is_refused(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "library.fluid.yml").write_text(_contract(True, "TIMESTAMP"), encoding="utf-8")
+    found = _profile_of("9999-12-31")
+    last = str(253_402_300_799_999)
+    found["tables"]["line_version"]["columns"]["valid_to"]["metrics"] = _metrics(last, last, 20)
+    (tmp_path / "library.profile.json").write_text(json.dumps(found), encoding="utf-8")
+    result = run_init(
+        str(tmp_path / "bundle"),
+        contract=str(tmp_path / "library.fluid.yml"),
+        profile=str(tmp_path / "library.profile.json"),
+    )
+    assert result.exit_code == 1
+    message = " ".join(result.stderr.split())
+    assert "line_version.valid_to" in message
+    assert "publishes one value, the last the calendar holds, on every row" in message
+    assert "write its open end as NULL" in message
+    assert not (tmp_path / "bundle").exists()
 
 
 def test_an_end_column_that_holds_only_the_last_day_gives_the_window_nothing(
@@ -266,7 +323,7 @@ def test_an_end_column_that_holds_only_the_last_day_gives_the_window_nothing(
 ) -> None:
     # The window is the versions' start span: a run reaching the year 9999 would spread every
     # date drawn across the window over eight thousand years.
-    result = _init(tmp_path, required_end=True, last_end="9999-12-31")
+    result = _init(tmp_path, required_end=True, last_end="9999-12-31", end_type="TIMESTAMP")
     assert result.exit_code == 0, result.stderr
     text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
     assert yaml.safe_load(text)["spec"]["timeBounds"] == {
@@ -291,12 +348,15 @@ def test_a_window_given_beside_an_end_column_in_the_year_9999_is_not_refused_for
     _plans(tmp_path)
 
 
-def test_a_null_open_end_is_written_as_it_always_was(tmp_path: Path) -> None:
+def test_an_ordinary_one_value_date_is_drawn_exactly(tmp_path: Path) -> None:
     result = _init(tmp_path, required_end=False, last_end="2025-10-01")
     assert result.exit_code == 0, result.stderr
     emits = _emits(tmp_path)
     assert {"region", "station", "line_version", "reading"} <= set(emits)
     ended = emits["line_version"]["fidelity"]["columns"]["valid_to"]
-    assert ended["bins"] == ["2025-10-01", "2025-10-02"]
-    assert any("the day that starts there" in reason for reason in _reasons(tmp_path))
-    _plans(tmp_path)
+    assert ended["bins"] == ["2025-10-01", "2025-10-02", "2025-10-03"]
+    assert ended["binWeights"] == ["1", "0"]
+    assert any("every row takes it" in reason for reason in _reasons(tmp_path))
+    drawn = _drawn(_plans(tmp_path), "line_version", "valid_to")
+    assert len(drawn) == 20
+    assert set(drawn) == {"2025-10-01"}

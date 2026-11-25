@@ -2458,35 +2458,69 @@ def _shaped_bins(
     plan.choices.append(_SHAPED_REASON)
 
 
+#: What a column's one published value is drawn as, by kind: how far apart two values of the
+#: column's grid are, in the milliseconds its profile is written in (a date moves a whole day,
+#: a timestamp one millisecond).
+_ONE_VALUE_STEP = {LogicalKind.DATE: _DAY_MS, LogicalKind.TIMESTAMP: 1}
+#: The last instant a column holds (9999-12-31T23:59:59.999Z), in milliseconds.
+_LAST_MS = 253_402_300_799_999
+
+
+def _one_value_bins(kind: LogicalKind, value: Decimal) -> Tuple[List[str], List[str]]:
+    """The bins and weights that draw a date or a timestamp as exactly *value*, every row.
+
+    A date and a timestamp take no levels, and a bin of no width is refused, so the value is
+    the first of two grid steps and its bin is half-open: it draws *value* and only *value*,
+    and the second step is the edge that closes it, carrying no weight. ``OverflowError`` when
+    the second step cannot be spelled (the value is too near the last one the column holds).
+    """
+    step = _ONE_VALUE_STEP[kind]
+    edges = [_spell(kind, value + position * step) for position in range(3)]
+    return edges, ["1", "0"]
+
+
+def _unspellable_one_value(ctx: ColumnContext, point: _Point) -> Exception:
+    """The refusal of a date or timestamp that publishes one value too near the last the column holds."""
+    from flux_engine.author.bundle import AuthorError
+
+    kind = ctx.column.logical_type.kind
+    table = ctx.profile_tokens[1] if len(ctx.profile_tokens) > 1 else "the table"
+    last = _spell(kind, Decimal(_LAST_MS))
+    spelled = _spell(kind, point.value)
+    is_last = spelled == last
+    kind_name = "DATE" if kind is LogicalKind.DATE else "TIMESTAMP"
+    one = "one value, the last the calendar holds," if is_last else f"one value, {spelled},"
+    exactly = f"exactly {spelled}" if kind is LogicalKind.DATE else f"{spelled}"
+    ways = "write its open end as NULL, or make the column a TIMESTAMP"
+    if kind is not LogicalKind.DATE:
+        ways = "write its open end as NULL, or as an earlier instant"
+    return AuthorError(
+        f"{printable(table)}.{printable(ctx.column.name)} publishes {one} on every row, and the "
+        f"engine cannot yet write a {kind_name} of {exactly} on every row; {ways}"
+    )
+
+
 def _one_value(ctx: ColumnContext, plan: ColumnPlan, point: _Point) -> None:
-    """One published value: every number takes it; a date or timestamp spans its day."""
+    """One published value: every row takes it, a number as a level, a date or timestamp as a bin."""
     kind = ctx.column.logical_type.kind
     plan.reads.append((point.tokens, "the one value the profile publishes"))
-    if _temporal(kind):
-        try:
-            edges = [_spell(kind, point.value), _spell(kind, point.value + _DAY_MS)]
-            side = "starts"
-        except (OverflowError, ValueError):
-            # The last day a column can hold (9999-12-31, a sentinel open end) has no day after
-            # it to close the span, so the span is the day that ends there instead.
-            edges = [_spell(kind, point.value - _DAY_MS), _spell(kind, point.value)]
-            side = "ends"
-        plan.declaration["bins"] = edges
-        plan.declaration["binWeights"] = ["1"]
-        reason = (
-            f"The profile publishes one value ({point.definition}) and no other order "
-            f"statistic: the values are drawn within the day that {side} there."
-        )
-        plan.labels.append(Label(("bins",), assumed(reason)))
-        plan.labels.append(Label(("binWeights",), assumed(reason)))
-        plan.how = "within one day, from the one value the profile publishes"
-        plan.assumptions.append(reason)
-        return
-    plan.declaration["levels"] = {_spell(kind, point.value): "1"}
     reason = (
         f"The profile publishes one value ({point.definition}) and no other order "
         "statistic: every row takes it."
     )
+    if _temporal(kind):
+        try:
+            edges, weights = _one_value_bins(kind, point.value)
+        except OverflowError:
+            raise _unspellable_one_value(ctx, point) from None
+        plan.declaration["bins"] = edges
+        plan.declaration["binWeights"] = weights
+        plan.labels.append(Label(("bins",), assumed(reason)))
+        plan.labels.append(Label(("binWeights",), assumed(reason)))
+        plan.how = "one value on every row, the one the profile publishes"
+        plan.assumptions.append(reason)
+        return
+    plan.declaration["levels"] = {_spell(kind, point.value): "1"}
     plan.labels.append(Label(("levels",), assumed(reason)))
     plan.how = "one value on every row, the one the profile publishes"
     plan.assumptions.append(reason)
