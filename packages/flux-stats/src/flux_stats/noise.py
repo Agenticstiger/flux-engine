@@ -554,14 +554,11 @@ def check_budget(accounting: Accounting, parts: Sequence[Tuple[str, Spent]]) -> 
 
     Under zero-concentrated DP the parts' rho adds; under approximate DP their epsilon adds and
     their delta adds (basic composition). Each is compared on its own, in exact arithmetic. A
-    release with no noisy part is refused too: its account states a loss nothing spends.
-    ``parts`` pairs each part's place in the document with its :class:`Noise` or
-    :class:`PrivacyShare`.
+    total above what the parts spend is accepted, and so is one with no part at all: a stated loss
+    is an upper bound, and overstating it is the conservative side. The grade does not rest on the
+    block alone (ADR 0020), so a block that nothing spends earns no grade. ``parts`` pairs each
+    part's place in the document with its :class:`Noise` or :class:`PrivacyShare`.
     """
-    if not parts:
-        raise refuse(
-            "profile.privacy", "states a privacy loss that no noisy statistic or clique spends"
-        )
     total = accounting.total
     for key in ("rho", "epsilon", "delta"):
         limit = getattr(total, key)

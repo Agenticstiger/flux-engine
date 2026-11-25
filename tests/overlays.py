@@ -53,6 +53,24 @@ def without_replacements(bundle: Path) -> Path:
     return bundle
 
 
+def with_the_profile_named(bundle: Path, profile_name: str) -> Path:
+    """Write *profile_name* back into the header of each document of *bundle*.
+
+    ``init`` no longer names the profile's file in the header it writes, since the header is part
+    of each document's bytes, so a run recorded before is the run of the bundle whose header names
+    the profile.
+    """
+    for document in sorted(bundle.glob("*.flux.yml")):
+        text, found = re.subn(
+            r"\A# Written by `fluxsim init` from the contract (\S+) and its profile\.\n",
+            lambda match: f"# Written by `fluxsim init` from {match.group(1)} and {profile_name}.\n",
+            document.read_text(encoding="utf-8"),
+        )
+        assert found == 1, document
+        document.write_text(text, encoding="utf-8")
+    return bundle
+
+
 def declare_overlay(bundle: Path, overlay_yaml: str) -> Path:
     """Put *overlay_yaml*, an ``overlay:`` block, under the Simulation's namespace, after its pin."""
     simulation = bundle / "simulation.flux.yml"

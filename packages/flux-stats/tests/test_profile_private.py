@@ -231,12 +231,39 @@ def test_noise_without_a_privacy_block_is_refused() -> None:
     assert "privacy block" in _refused(document)
 
 
-def test_a_privacy_block_that_nothing_spends_is_refused() -> None:
+def test_a_privacy_block_that_nothing_spends_is_accepted() -> None:
+    # A stated loss is an upper bound, and overstating it is the conservative side, so a block
+    # that no statistic or clique spends is read, with no part (ADR 0019, amendment of 2026-11-25).
     def strip(document: Dict[str, Any]) -> None:
         del _table(document)["cliques"]
         del _table(document)["columns"]["region"]["statistics"]
 
-    assert "no noisy statistic or clique spends" in _refused(_edit(strip))
+    profile = parse_profile(_edit(strip))
+    assert profile.accounting is not None and profile.parts == ()
+
+
+def test_a_total_above_what_the_parts_spend_is_accepted() -> None:
+    parse_profile(_edit(lambda d: d["privacy"]["privacyLoss"].update(rho="5")))
+
+    # The same with nothing left to spend it: no noisy statistic and no clique, a positive total.
+    def nothing_noisy(document: Dict[str, Any]) -> None:
+        document["privacy"]["privacyLoss"].update(rho="5")
+        table = _table(document)
+        del table["cliques"]
+        for column in table["columns"].values():
+            column.pop("statistics", None)
+
+    document = _edit(nothing_noisy)
+    assert "noise" not in json.dumps(document)
+    profile = parse_profile(document)
+    assert profile.parts == ()
+    assert profile.accounting is not None and profile.accounting.total.rho == Fraction(5)
+
+
+def test_a_total_below_what_the_parts_spend_is_still_refused() -> None:
+    assert "more than the total rho" in _refused(
+        _edit(lambda d: d["privacy"]["privacyLoss"].update(rho="0.29"))
+    )
 
 
 def test_a_noisy_statistic_in_another_table_than_the_unit_is_refused() -> None:

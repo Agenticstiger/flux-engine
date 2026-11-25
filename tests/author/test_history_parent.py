@@ -204,15 +204,16 @@ def test_a_contract_without_a_to_one_relationship_writes_the_entry_it_always_did
     assert entry["entities"] == 1000
     digests = bundle_digests(tmp_path)
     # Pinned from the files `fluxsim init` wrote for this contract and profile before a history
-    # wrote its parent.
+    # wrote its parent, but for the header, which no longer names the profile's file, and the
+    # unused list, which names a history's tracked column whole.
     assert digests == WITHOUT_A_PARENT
 
 
 WITHOUT_A_PARENT: Dict[str, str] = {
-    "persona.flux.yml": "09abfa26eb21ac0667e7b872c394714fe05f17ae4a6b0a8b687b83d305023ab3",
+    "persona.flux.yml": "74f6062c0e15e70d2689583ad345103c7189b244886c3280c244573b49677755",
     "plans.fluid.yml": "6cb0c570c814e1d9fe3880b64b4f67e36b63428c9e8f6b93104d050e6803f40e",
-    "simulation.flux.yml": "097c90508804f9a2f67379f1949c0c0f5f37c5a5578fe6f1631957fe5e006f16",
-    "world.flux.yml": "9b8d0e5a5cc58cb4743d82eaeb2696bb8cee479486e835def76fc7e93705a17c",
+    "simulation.flux.yml": "efee1fac226a89dfc0e2d0b08e4899652361e17abe915ac359aef7f115dc9a99",
+    "world.flux.yml": "20a3e0be50c0216bb8ef8ac07cdc72b0100a3cf4bddccbb91b7841fcc96b88cc",
 }
 
 

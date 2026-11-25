@@ -278,9 +278,10 @@ def test_the_exposures_over_root_lifetimes_the_run_cannot_meet_are_left_out(jc1:
     within = {entry["relationship"]: entry for entry in _block(jc1)["within"]}
     assert "exposure" not in within["subscription_to_customer"]
     assert "exposure" not in within["order_to_customer"]
-    for pointer in ("/relationships/0/exposure/0/", "/relationships/2/exposure/0/"):
+    # Both counts of an exposure leave with it, so the register names the exposure once.
+    for pointer in ("/relationships/0/exposure/0", "/relationships/2/exposure/0"):
         reasons = _reasons(jc1, pointer)
-        assert len(reasons) == 2 and reasons[0] == reasons[1]
+        assert len(reasons) == 1
         assert "cannot reproduce this exposure's rate under the declared lifetimes" in reasons[0]
         assert "a trial run has children per active day" in reasons[0]
         assert "against the profile's" in reasons[0] and "gap " in reasons[0]
@@ -289,7 +290,7 @@ def test_the_exposures_over_root_lifetimes_the_run_cannot_meet_are_left_out(jc1:
 
 
 def test_the_chained_exposure_keeps_its_note(jc1: Path) -> None:
-    reasons = _reasons(jc1, "/relationships/1/exposure/0/")
+    reasons = _reasons(jc1, "/relationships/1/exposure/0")
     assert reasons and "whose parent's lifetime lies within its own parent's lifetime" in reasons[0]
 
 
@@ -553,6 +554,6 @@ def test_a_profile_whose_history_would_derive_a_hundred_million_rows_is_written_
     assert result.exit_code == 0, result.stderr
     assert elapsed < 45
     assert (directory / "simulation.flux.yml").is_file()
-    reasons = _reasons(directory, "/tables/plan_invoice/calendar/0/")
+    reasons = _reasons(directory, "/tables/plan_invoice/calendar/0")
     assert reasons and all("the trial would generate" in reason for reason in reasons)
     assert "plan_invoice" not in {entry["emit"] for entry in _block(directory).get("rates", [])}

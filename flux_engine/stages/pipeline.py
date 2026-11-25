@@ -135,6 +135,7 @@ from flux_engine.generator.reference import ReferenceRows, build_reference_plan
 from flux_engine.generator.relations import (
     FLX_3403,
     KeySpaceTooSmall,
+    TrackedLevelsCut,
     check_links_resolved,
     history_pick_of,
     relate_plans,
@@ -293,9 +294,12 @@ from flux_engine.stages._range_setters import range_setter_notes, uncut_columns
 from flux_engine.stages.scaling import (
     FLX_3404,
     FLX_3405,
+    ScaleFloor,
     child_rows_note,
+    floor_for_cut,
     key_space_note,
     scale_emit,
+    scale_emits,
     scale_text,
     scaled_rows,
     share_of,
@@ -317,6 +321,7 @@ from flux_engine.world import (
 __all__ = [
     "EmitOutcome",
     "PipelineResult",
+    "PlanEra",
     "advice_notes",
     "compile_declared_fidelity",
     "end_share_notes",
@@ -488,6 +493,8 @@ class PipelineResult:
     cut_ranges: bool = True
     #: The key columns ``--scale`` widened, by exposeId: their contract range is not verified.
     scale_widened: Mapping[str, FrozenSet[str]] = field(default_factory=dict)
+    #: The drawn parents ``--scale`` kept at the rows their children's tracked levels need.
+    scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
 
     def emit(self, expose_id: str) -> EmitOutcome:
         for outcome in self.emits:
@@ -1119,6 +1126,72 @@ def widened_ranges_of(
         within_levels_of(emit, emits, where=where, window=window_of(time_bounds), repair=repair)
         for column, widened in repair.items():
             found[(emit.expose_id, column)] = widened
+    return found
+
+
+def unrepairable_withins_of(
+    emits: Sequence[ResolvedEmit], time_bounds: Optional[Mapping[str, Any]], *, where: str
+) -> Dict[Tuple[str, str], str]:
+    """Why each enforced ``within`` date of *emits* is refused by the plan's check and no wider range repairs it.
+
+    Keyed by ``(exposeId, column)``. A column is listed when :func:`_refuse_empty_intersections`
+    would refuse it even with repair on: the three conditions fail, and the parent's latest
+    start, or a parent's earliest end the check reads, is not declared (:func:`_repaired`).
+    The reason says so, and names the parent's start column when it is that start. A column the
+    plan accepts, or that :func:`widened_ranges_of` lists, is not listed. ``fluxsim init`` writes
+    no ``within`` entry for a listed date.
+    """
+    found: Dict[Tuple[str, str], str] = {}
+    window = window_of(time_bounds)
+    held = {(str(emit.contract_path), emit.expose_id): emit for emit in emits}
+    for emit in emits:
+        bounds = declared_bounds_of(emit)
+        group_of: Dict[str, List[Tuple[WithinLevel, ResolvedEmit]]] = {}
+        for entry in within_entries_of(emit.extension, emit.expose_id):
+            own = lifetime_entries_of(emit.extension, emit.expose_id)[:1]
+            column = own[0].start if entry.lifetime and own else entry.date
+            targets = _targets_along(emit, entry.relationship)
+            parent = held.get((str(emit.contract_path), targets[-1])) if targets else None
+            lifetime = lifetime_entries_of(parent.extension, parent.expose_id)[:1] if parent else ()
+            if column is None or parent is None or not lifetime:
+                continue  # the plan refuses it for what it is: not a range
+            level = WithinLevel(
+                column=column,
+                kind=_kind_of(emit, column),
+                relationship=entry.relationship,
+                start=lifetime[0].start,
+                end=lifetime[0].end,
+                parent_kind=_kind_of(parent, lifetime[0].start),
+                offset=entry.offset,
+                period=entry.lifetime,
+                target=entry.target,
+                bounds=bounds.get(column),
+            )
+            group_of.setdefault(column, []).append((level, parent))
+        for column, group in group_of.items():
+            if all(positive_target(level.target) for level, _ in group):
+                continue
+            terms = _intersection_terms(group, window, where)
+            if terms is None or _repaired(emit, terms, column, {}):
+                continue
+            reason = _empty_intersection_reason(emit, terms)
+            if reason is None:
+                continue
+            starts = sorted(
+                {level.start for level, parent in group if _parent_bounds(parent, where)[0] is None}
+            )
+            if starts:
+                named = ", ".join(repr(start) for start in starts)
+                reason = (
+                    f"the latest start of the parent's lifetime is not declared ({named} declares "
+                    "no range), so an enforced entry could leave a row of the date without a value"
+                )
+            else:
+                reason = (
+                    f"no declared range makes the entry hold on every row: {reason}, so an "
+                    "enforced entry could leave a row of the date without a value"
+                )
+            found[(emit.expose_id, column)] = reason
     return found
 
 
@@ -1792,6 +1865,44 @@ def _memos_for_one_run() -> Iterator[None]:
         clear_generator_memos()
 
 
+@dataclass(frozen=True)
+class PlanEra:
+    """What a recorded plan was made under, so that ``apply`` and ``replay`` run it as it was.
+
+    A new plan takes the defaults; a recorded plan takes what its keys say
+    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges`` and ``plan_scale_floors``).
+
+    *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
+    2026-11-24): every entity, or the entities that can end for a plan without ``historyEndShare``.
+    *cut_ranges* is false for a plan without ``dateRanges`` (ADR 0024): it replays uncut.
+    *tracked_levels* is false for a plan without ``scaleFloors`` (ADR 0017, the amendment of
+    2026-11-25): its tracked foreign keys are not checked and no parent is kept at more rows than
+    the scale gives it. Otherwise a ``--scale`` below 1 that cuts a drawn parent below a key a
+    history's tracked level names runs again with that parent kept at the fewest rows that hold
+    every level; *scale_floors* is what that has settled so far.
+    """
+
+    end_share: str = END_SHARE_OF_ENTITIES
+    cut_ranges: bool = True
+    tracked_levels: bool = True
+    scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
+
+
+def _execute_with_parent_kept(
+    call: Mapping[str, Any], cut: TrackedLevelsCut, declared_emits: Sequence[ResolvedEmit]
+) -> PipelineResult:
+    """Run *call* again with the parent *cut* names kept at the rows its levels need, or refuse as it was.
+
+    The refusal stands (*cut* is raised) at scale 1 or above, for a parent no floor is worked out
+    for and for a refusal the floor already answered.
+    """
+    scale, era = call["scale"], call["era"]
+    kept = None if scale is None else floor_for_cut(declared_emits, era.scale_floors, cut, scale)
+    if kept is None:
+        raise cut
+    return execute(**{**call, "era": replace(era, scale_floors=kept)})
+
+
 def _common_draw_digests(
     common_draws_of: Optional[Path],
     per_emit_digests: Sequence[SeamDigests],
@@ -1850,8 +1961,7 @@ def execute(
     replicate: Optional[Replicate] = None,
     common_draws_of: Optional[Path] = None,
     most_rows: Optional[int] = None,
-    end_share: Optional[str] = None,
-    cut_ranges: bool = True,
+    era: PlanEra = PlanEra(),
 ) -> PipelineResult:
     """Run every stage of the six-step loop's core once, in memory.
 
@@ -1899,12 +2009,7 @@ def execute(
     ``reference: true`` takes its rows from *references* when they are given, and from the
     pinned profile's ``references`` otherwise. Neither is read for a run with no reference expose.
 
-    *cut_ranges* is false for a recorded plan without ``dateRanges`` (ADR 0024): it replays uncut.
-
-    *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
-    2026-11-24): the plan's ``historyEndShare`` (:func:`flux_engine.stages.apply.plan_end_share`)
-    when a recorded plan is executed, so that it replays the allocation it was made with, and
-    ``None`` for a new plan, which takes every entity.
+    *era* is what a recorded plan was made under, so that it replays as it was (:class:`PlanEra`).
 
     *most_rows* bounds the rows the plans of every emit hold together, derived and hidden emits
     included. When their sum is above it, :class:`PlannedRowsAboveCeiling` is raised after the
@@ -1947,13 +2052,13 @@ def execute(
     out from this run's declarations, and a long-lived process that runs
     many bundles keeps none of it past the run.
     """
+    call = dict(locals())  # the arguments, to run again with a parent kept
     require_jobs(jobs)
     # The forkserver's import of what a worker needs takes about 0.3 s; started here it runs
     # beside the load, the compile and the simulation below instead of after them. Nothing
     # starts at one job, and no worker is reserved: the pool is built later, as always.
     start_forkserver_early(jobs)
     run_kernel = _kernels.DEFAULT_KERNEL if kernel is None else kernel
-    run_end_share = END_SHARE_OF_ENTITIES if end_share is None else end_share
     if run_kernel.seed_tree_version != kernel2.SEED_TREE_VERSION:
         # New generation features run on kernel 0.2.0 only: 0.1.0's draws are frozen.
         if scale is not None and scale != 1:
@@ -2013,15 +2118,15 @@ def execute(
                 "require_staged": require_staged,
                 "responses": responses,
                 "replicate": replicate,
-                "end_share": end_share,
-                "cut_ranges": cut_ranges,
+                "era": era,
             },
         )
 
         declared_rows = {emit.expose_id: emit.declared_row_count for emit in resolved_emits}
         widened = _widened_by(resolved_emits, scale)
+        declared_emits = resolved_emits
         if scale is not None and scale != 1:
-            resolved_emits = tuple(scale_emit(emit, scale) for emit in resolved_emits)
+            resolved_emits = scale_emits(resolved_emits, scale, era.scale_floors)
         check_flux_side_rule_ids(resolved_emits, where=cast.simulation_id)
         check_copies_declared(
             simulation,
@@ -2215,21 +2320,23 @@ def execute(
             flag=strict_coverage,
             declared=strict_coverage_declared(simulation, where=cast.simulation_id),
         )
-        with _scale_noted(scale, unscaled_refuses, declared_rows):
-            planned_emits = _planned_with_projections(
-                resolved_emits,
-                seed_digests,
-                cast,
-                simulation,
-                scenario,
-                generator_version_for(run_kernel.seed_tree_version),
-                strict=bool(asked_by),
-                published=published,
-                plugins=plugins,
-                root=root,
-                end_share=run_end_share,
-                cut_ranges=cut_ranges,
-            )
+        try:
+            with _scale_noted(scale, unscaled_refuses, declared_rows):
+                planned_emits = _planned_with_projections(
+                    resolved_emits,
+                    seed_digests,
+                    cast,
+                    simulation,
+                    scenario,
+                    generator_version_for(run_kernel.seed_tree_version),
+                    strict=bool(asked_by),
+                    published=published,
+                    plugins=plugins,
+                    root=root,
+                    era=era,
+                )
+        except TrackedLevelsCut as cut:
+            return _execute_with_parent_kept(call, cut, declared_emits)
         _require_coverage(planned_emits, asked_by)
         lap("plan emits")
         _require_rows_within(planned_emits, most_rows)
@@ -2317,9 +2424,10 @@ def execute(
                 hidden_emits=hidden_emits,
                 responses=_runtime_of(early),
                 replicate=replicate,
-                end_share=run_end_share,
-                cut_ranges=cut_ranges,
+                end_share=era.end_share,
+                cut_ranges=era.cut_ranges,
                 scale_widened=widened,
+                scale_floors=era.scale_floors,
             )
 
         if probing:
@@ -3389,8 +3497,7 @@ def _planned_with_projections(
     published: Optional[Mapping[str, ReferenceRows]],
     root: SeedTreeRoot,
     plugins: Optional[Mapping[str, PluginExpose]] = None,
-    end_share: str = END_SHARE_OF_ENTITIES,
-    cut_ranges: bool = True,
+    era: PlanEra = PlanEra(),
 ) -> Tuple[_PlannedEmit, ...]:
     """Every emit planned and related, a projected emit's rows derived from its history (ADR 0027 section 2).
 
@@ -3415,12 +3522,12 @@ def _planned_with_projections(
             plugins=plugins,
             rows=rows,
             emits=resolved_emits,
-            cut_ranges=cut_ranges,
+            cut_ranges=era.cut_ranges,
         )
 
     guesses = {index: _most_rows(resolved_emits, found) for index, found in projected.items()}
     planned = tuple(plan_at(index, guesses.get(index)) for index in range(len(resolved_emits)))
-    related = _relate_emits(resolved_emits, planned, namespace, end_share)
+    related = _relate_emits(resolved_emits, planned, namespace, era)
 
     def replan(rows: Mapping[int, int]) -> Tuple[_PlannedEmit, ...]:
         """Every emit planned again, the emits *rows* names at those rows, and related once more."""
@@ -3428,7 +3535,7 @@ def _planned_with_projections(
             resolved_emits,
             tuple(plan_at(index, rows.get(index)) for index in range(len(resolved_emits))),
             namespace,
-            end_share,
+            era,
         )
 
     related, shrunk = _settled_histories(resolved_emits, related, guesses, root, replan)
@@ -3624,7 +3731,7 @@ def _relate_emits(
     resolved_emits: Sequence[ResolvedEmit],
     planned_emits: Tuple[_PlannedEmit, ...],
     namespace: Mapping[str, Any],
-    end_share: str = END_SHARE_OF_ENTITIES,
+    era: PlanEra = PlanEra(),
 ) -> Tuple[_PlannedEmit, ...]:
     """Relate the generator-driven emits of each contract that declares keys.
 
@@ -3635,8 +3742,7 @@ def _relate_emits(
     plan the contract relates nothing in comes back unchanged, and so does
     its coverage. Runs after every emit is planned and before any row is
     drawn, so a relationship that cannot hold is refused (``FLX-3403``) with
-    nothing generated. *end_share* is what a history's ``end`` share is a share of
-    (:func:`execute`'s).
+    nothing generated. *era* is :func:`execute`'s.
     """
     groups: Dict[str, List[int]] = {}
     for index, (resolved, planned) in enumerate(zip(resolved_emits, planned_emits, strict=True)):
@@ -3644,7 +3750,7 @@ def _relate_emits(
             groups.setdefault(str(resolved.contract_path), []).append(index)
     related = list(planned_emits)
     for indexes in groups.values():
-        _relate_group(resolved_emits, planned_emits, indexes, related, namespace, end_share)
+        _relate_group(resolved_emits, planned_emits, indexes, related, namespace, era)
     for planned in related:
         if planned.plan is not None:
             check_links_resolved(planned.plan)
@@ -3657,7 +3763,7 @@ def _relate_group(
     indexes: Sequence[int],
     related: List[_PlannedEmit],
     namespace: Mapping[str, Any],
-    end_share: str,
+    era: PlanEra,
 ) -> None:
     """Relate the plans of the emits at *indexes*, one contract's, and set the changed ones in *related*.
 
@@ -3674,7 +3780,7 @@ def _relate_group(
         _counts_of([resolved_emits[index] for index in indexes]),
         resolved_emits[indexes[0]].contract_document,
         namespace,
-        _histories_of([resolved_emits[index] for index in indexes], end_share),
+        _histories_of([resolved_emits[index] for index in indexes], era),
     )
     for index in indexes:
         planned = planned_emits[index]
@@ -3693,14 +3799,16 @@ def _related_of(resolved: ResolvedEmit) -> FrozenSet[str]:
     return related | natural
 
 
-def _histories_of(resolved: Sequence[ResolvedEmit], end_share: str) -> Dict[str, HistoryBinding]:
+def _histories_of(
+    resolved: Sequence[ResolvedEmit], era: PlanEra = PlanEra()
+) -> Dict[str, HistoryBinding]:
     """The history each emit declares, by exposeId, with the scaled entities and the validity columns (ADR 0017).
 
-    The ``end`` of an entry is a share of *end_share* (:func:`execute`'s).
+    The ``end`` of an entry is a share of the *era*'s ``end_share`` (:func:`execute`'s).
     """
     found: Dict[str, HistoryBinding] = {}
     for emit in resolved:
-        entries = history_entries_of(emit.extension, emit.expose_id, end_share=end_share)
+        entries = history_entries_of(emit.extension, emit.expose_id, end_share=era.end_share)
         if not entries:
             continue
         semantics = (
@@ -3716,6 +3824,7 @@ def _histories_of(resolved: Sequence[ResolvedEmit], end_share: str) -> Dict[str,
             ends.get("end"),
             parent_lifetime := _parent_lifetime_of(emit, entries[0], resolved),
             None if parent_lifetime is None else emit.declared_row_count,
+            tracked_levels=era.tracked_levels,
         )
     return found
 

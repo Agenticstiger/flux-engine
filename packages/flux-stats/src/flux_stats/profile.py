@@ -523,7 +523,12 @@ class DatePairEntry:
     start: str
     end: str
     statistics: Tuple[StatisticEntry, ...]
-    order: StatisticEntry
+    order: Optional[StatisticEntry]
+
+    @property
+    def holds_nothing(self) -> bool:
+        """Whether the entry holds only its two columns (:func:`parse_profile`, ``allow_emptied_entries``)."""
+        return self.order is None
 
 
 @dataclass(frozen=True)
@@ -538,7 +543,12 @@ class RelationshipDateEntry:
     parent: str
     child: str
     statistics: Tuple[StatisticEntry, ...]
-    order: StatisticEntry
+    order: Optional[StatisticEntry]
+
+    @property
+    def holds_nothing(self) -> bool:
+        """Whether the entry holds only its two columns (:func:`parse_profile`, ``allow_emptied_entries``)."""
+        return self.order is None
 
 
 @dataclass(frozen=True)
@@ -546,13 +556,19 @@ class CalendarEntry:
     """How the known values of one timestamp column fall by month, day of week and hour of week.
 
     Each is an ungrouped ``levelHistogram/1`` over the levels of :data:`CALENDAR_LEVELS`, read in
-    UTC, or ``None`` when the entry does not hold it; at least one is held (format 1-3-0).
+    UTC, or ``None`` when the entry does not hold it; at least one is held (format 1-3-0), unless the
+    reader was told to accept an entry that holds none (:func:`parse_profile`).
     """
 
     column: str
     month: Optional[StatisticEntry] = None
     day_of_week: Optional[StatisticEntry] = None
     hour_of_week: Optional[StatisticEntry] = None
+
+    @property
+    def holds_nothing(self) -> bool:
+        """Whether the entry holds only its column (:func:`parse_profile`, ``allow_emptied_entries``)."""
+        return self.month is None and self.day_of_week is None and self.hour_of_week is None
 
 
 @dataclass(frozen=True)
@@ -564,15 +580,21 @@ class ExposureEntry:
     known and ``active_days`` the sum, over every parent row whose start is known, of the whole
     days it is active inside the window ``window_start`` to ``window_end`` (milliseconds since the
     epoch, both inclusive of their day). Each is a ``count/1`` metric whose ``value`` is ``None``
-    when the profile withheld it.
+    when the profile withheld it. Both are ``None`` for an entry that holds only its columns and
+    window (:func:`parse_profile`, ``allow_emptied_entries``).
     """
 
     start: str
     end: Optional[str]
-    children: MetricEntry
-    active_days: MetricEntry
+    children: Optional[MetricEntry]
+    active_days: Optional[MetricEntry]
     window_start: int
     window_end: int
+
+    @property
+    def holds_nothing(self) -> bool:
+        """Whether the entry holds neither of its two counts."""
+        return self.children is None and self.active_days is None
 
 
 @dataclass(frozen=True)
@@ -593,8 +615,13 @@ class HistoryColumn:
     text, and counts the next value over the changes where the column moves.
     """
 
-    initial: StatisticEntry
-    transitions: StatisticEntry
+    initial: Optional[StatisticEntry] = None
+    transitions: Optional[StatisticEntry] = None
+
+    @property
+    def holds_nothing(self) -> bool:
+        """Whether the column is named and holds neither statistic (``allow_emptied_entries``)."""
+        return self.initial is None and self.transitions is None
 
 
 @dataclass(frozen=True)
@@ -603,19 +630,26 @@ class HistoryEntry:
 
     ``entity`` names the columns that identify an entity, and ``start`` and ``end`` the timestamp
     columns of a version's validity window. Every statistic is read as a statistic of the document,
-    with its disclosure rule and, where the profile states a privacy block, its noisy cells.
+    with its disclosure rule and, where the profile states a privacy block, its noisy cells. A
+    history that holds nothing (:func:`parse_profile`, ``allow_emptied_entries``) has every
+    statistic ``None``, and each tracked column it names holds nothing.
     """
 
     entity: Tuple[str, ...]
     start: str
     end: str
-    versions_per_entity: StatisticEntry
-    first_start: StatisticEntry
-    version_length: StatisticEntry
-    chain: StatisticEntry
-    last_version: StatisticEntry
+    versions_per_entity: Optional[StatisticEntry] = None
+    first_start: Optional[StatisticEntry] = None
+    version_length: Optional[StatisticEntry] = None
+    chain: Optional[StatisticEntry] = None
+    last_version: Optional[StatisticEntry] = None
     columns: Mapping[str, HistoryColumn] = field(default_factory=lambda: MappingProxyType({}))
     reasons: Optional[StatisticEntry] = None
+
+    @property
+    def holds_nothing(self) -> bool:
+        """Whether the history holds only the columns that name it."""
+        return self.versions_per_entity is None
 
 
 @dataclass(frozen=True)
@@ -827,7 +861,9 @@ def _read_int(text: str) -> int:
     return int(text)
 
 
-def load_profile_text(text: str) -> Tuple[Profile, Dict[str, Any]]:
+def load_profile_text(
+    text: str, *, allow_emptied_entries: bool = False
+) -> Tuple[Profile, Dict[str, Any]]:
     """Read a profile from its JSON text: the profile, and the document it parsed from.
 
     A JSON float, ``NaN``, ``Infinity`` and a key named twice in one object
@@ -835,7 +871,7 @@ def load_profile_text(text: str) -> Tuple[Profile, Dict[str, Any]]:
     exact meaning, and so are an integer longer than any count and nesting
     deeper than the reader can follow. The document is returned beside the
     profile because its canonical digest (``jcs-document``) is what a
-    Simulation pins.
+    Simulation pins. *allow_emptied_entries* is :func:`parse_profile`'s.
     """
     try:
         document = json.loads(
@@ -851,7 +887,10 @@ def load_profile_text(text: str) -> Tuple[Profile, Dict[str, Any]]:
         raise refuse("profile", "the document nests deeper than a profile does") from None
     if _nests_deeper_than(document, _MOST_DEPTH):
         raise refuse("profile", "the document nests deeper than a profile does")
-    return parse_profile(document), document
+    return (
+        parse_profile(document, allow_emptied_entries=allow_emptied_entries),
+        document,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1060,6 +1099,19 @@ def _quantile_level(
     return _unit_interval(raw["level"], f"{where}.level")
 
 
+#: The statistics of a history, and of one tracked column of it; an entry holding none of them holds
+#: nothing (:func:`parse_profile`, ``allow_emptied_entries``).
+_HISTORY_STATISTICS = (
+    "versionsPerEntity",
+    "firstStart",
+    "versionLength",
+    "chain",
+    "lastVersion",
+    "reasons",
+)
+_TRACKED_STATISTICS = ("initial", "transitions")
+
+
 def _exposure_window(value: Any, where: str) -> Tuple[int, int]:
     """An exposure's ``window`` as epoch milliseconds: two integer texts, the start not after the end."""
     window = _mapping(value, where, required=("start", "end"))
@@ -1093,8 +1145,12 @@ class _Reader:
         accounting: Optional[Accounting] = None,
         from_1_3: bool = False,
         from_1_4: bool = False,
+        allow_emptied_entries: bool = False,
     ) -> None:
         self.rules = rules
+        #: Whether an entry that holds only its identity keys (every statistic dropped) is read, as
+        #: an entry that holds nothing, instead of refused (:func:`parse_profile`).
+        self.allow_emptied_entries = allow_emptied_entries
         #: Whether the document names format ``1-3-0``, the only one that holds a ``groupBy`` on
         #: a number column, a ``groupByLink`` or a ``per``.
         self.from_1_3 = from_1_3
@@ -1958,6 +2014,17 @@ class _Reader:
             history=self._history(raw, where, expose_id, domains),
         )
 
+    def _holds_nothing(self, entry: Any, members: Sequence[str]) -> bool:
+        """Whether *entry* holds none of *members* and the reader takes an entry that holds nothing.
+
+        A ``statistics`` list with no item holds nothing, as its items are dropped one by one.
+        """
+        if not self.allow_emptied_entries or not isinstance(entry, Mapping):
+            return False
+        return not any(
+            key in entry and not (key == "statistics" and entry[key] == []) for key in members
+        )
+
     def _calendar(
         self, raw: Mapping[str, Any], where: str, expose_id: str, domains: Mapping[str, Any]
     ) -> Tuple[CalendarEntry, ...]:
@@ -1976,7 +2043,7 @@ class _Reader:
             if domains.get(column) != TIMESTAMP:
                 raise refuse(f"{at}.column", "names no timestamp column of this table")
             held = [key for key in CALENDAR_LEVELS if key in entry]
-            if not held:
+            if not held and not self.allow_emptied_entries:
                 raise refuse(at, "a calendar entry holds at least one of its three histograms")
             read = {
                 key: self._calendar_histogram(entry[key], f"{at}.{key}", key, expose_id)
@@ -2026,13 +2093,22 @@ class _Reader:
         found = []
         for index, item in enumerate(items):
             at = f"{where}.datePairs[{index}]"
-            entry = _mapping(item, at, required=("start", "end", "statistics", "order"))
+            emptied = self._holds_nothing(item, ("statistics", "order"))
+            entry = _mapping(
+                item,
+                at,
+                required=("start", "end") if emptied else ("start", "end", "statistics", "order"),
+                optional=("statistics",) if emptied else (),
+            )
             start, end = _name(entry["start"], f"{at}.start"), _name(entry["end"], f"{at}.end")
             if start == end:
                 raise refuse(at, "a date pair is two different columns")
             for side, column in (("start", start), ("end", end)):
                 if domains.get(column) != TIMESTAMP:
                     raise refuse(f"{at}.{side}", "names no timestamp column of this table")
+            if emptied:
+                found.append(DatePairEntry(start=start, end=end, statistics=(), order=None))
+                continue
             found.append(
                 DatePairEntry(
                     start=start,
@@ -2071,18 +2147,23 @@ class _Reader:
             return None
         here = f"{where}.history"
         self._require_1_3(here, "'history'")
+        emptied = self._history_holds_nothing(raw["history"])
         found = _mapping(
             raw["history"],
             here,
             required=(
-                "entity",
-                "start",
-                "end",
-                "versionsPerEntity",
-                "firstStart",
-                "versionLength",
-                "chain",
-                "lastVersion",
+                ("entity", "start", "end")
+                if emptied
+                else (
+                    "entity",
+                    "start",
+                    "end",
+                    "versionsPerEntity",
+                    "firstStart",
+                    "versionLength",
+                    "chain",
+                    "lastVersion",
+                )
             ),
             optional=("columns", "reasons"),
         )
@@ -2104,6 +2185,7 @@ class _Reader:
                 ("chain", "levelHistogram", CHAIN_LEVELS),
                 ("lastVersion", "levelHistogram", LAST_VERSION_LEVELS),
             )
+            if not emptied
         }
         taken = set(entity) | {start, end}
         columns = self._history_columns(found, here, expose_id, domains, taken)
@@ -2112,13 +2194,22 @@ class _Reader:
             entity=entity,
             start=start,
             end=end,
-            versions_per_entity=shapes["versionsPerEntity"],
-            first_start=shapes["firstStart"],
-            version_length=shapes["versionLength"],
-            chain=shapes["chain"],
-            last_version=shapes["lastVersion"],
+            versions_per_entity=shapes.get("versionsPerEntity"),
+            first_start=shapes.get("firstStart"),
+            version_length=shapes.get("versionLength"),
+            chain=shapes.get("chain"),
+            last_version=shapes.get("lastVersion"),
             columns=MappingProxyType(columns),
             reasons=reasons,
+        )
+
+    def _history_holds_nothing(self, value: Any) -> bool:
+        """Whether a history holds none of its statistics, nor does any tracked column it names."""
+        if not self._holds_nothing(value, _HISTORY_STATISTICS):
+            return False
+        columns = value.get("columns", {})
+        return isinstance(columns, Mapping) and all(
+            self._holds_nothing(each, _TRACKED_STATISTICS) for each in columns.values()
         )
 
     def _history_statistic(
@@ -2170,6 +2261,10 @@ class _Reader:
                 raise refuse(
                     here, "a tracked column is a categorical column that is no key or window column"
                 )
+            if self._holds_nothing(declared[name], _TRACKED_STATISTICS):
+                _mapping(declared[name], here)
+                columns[name] = HistoryColumn()
+                continue
             raw = _mapping(declared[name], here, required=("initial", "transitions"))
             columns[name] = HistoryColumn(
                 initial=self._history_statistic(
@@ -2557,10 +2652,13 @@ class _Reader:
         self, item: Any, at: str, tables: Mapping[str, TableEntry], parent: str
     ) -> ExposureEntry:
         """One ``exposure`` entry at *at*: two different timestamp columns of the parent, two counts and a window."""
+        emptied = self._holds_nothing(item, ("children", "activeDays"))
         entry = _mapping(
             item,
             at,
-            required=("start", "children", "activeDays", "window"),
+            required=(
+                ("start", "window") if emptied else ("start", "children", "activeDays", "window")
+            ),
             optional=("end",),
         )
         names = [_name(entry["start"], f"{at}.start")]
@@ -2573,10 +2671,12 @@ class _Reader:
             if held is None or held.domain != TIMESTAMP:
                 raise refuse(f"{at}.{side}", "names no timestamp column of its parent table")
         window_start, window_end = _exposure_window(entry["window"], f"{at}.window")
-        counts = [
-            self.metric("count", entry[key], f"{at}.{key}", domain=TIMESTAMP)
-            for key in ("children", "activeDays")
-        ]
+        counts: List[Optional[MetricEntry]] = [None, None]
+        if not emptied:
+            counts = [
+                self.metric("count", entry[key], f"{at}.{key}", domain=TIMESTAMP)
+                for key in ("children", "activeDays")
+            ]
         return ExposureEntry(
             start=names[0],
             end=names[1] if len(names) > 1 else None,
@@ -2603,7 +2703,15 @@ class _Reader:
         found = []
         for index, item in enumerate(items):
             at = f"{where}.dates[{index}]"
-            entry = _mapping(item, at, required=("parent", "child", "statistics", "order"))
+            emptied = self._holds_nothing(item, ("statistics", "order"))
+            entry = _mapping(
+                item,
+                at,
+                required=(
+                    ("parent", "child") if emptied else ("parent", "child", "statistics", "order")
+                ),
+                optional=("statistics",) if emptied else (),
+            )
             names = []
             for side, table in (("parent", parent), ("child", child)):
                 name = _name(entry[side], f"{at}.{side}")
@@ -2611,6 +2719,13 @@ class _Reader:
                 if held is None or held.domain != TIMESTAMP:
                     raise refuse(f"{at}.{side}", "names no timestamp column of its table")
                 names.append(name)
+            if emptied:
+                found.append(
+                    RelationshipDateEntry(
+                        parent=names[0], child=names[1], statistics=(), order=None
+                    )
+                )
+                continue
             found.append(
                 RelationshipDateEntry(
                     parent=names[0],
@@ -2824,8 +2939,18 @@ def _check_follows(accounting: Accounting, relationships: Sequence[RelationshipE
             )
 
 
-def parse_profile(document: Any) -> Profile:
-    """Read a parsed profile document whole, or refuse it (``FLX-5036``)."""
+def parse_profile(document: Any, *, allow_emptied_entries: bool = False) -> Profile:
+    """Read a parsed profile document whole, or refuse it (``FLX-5036``).
+
+    An entry of a table or a relationship that is listed whole (a calendar entry, a date pair, a
+    relationship's date pair, an exposure, a history and a tracked column of one) holds statistics
+    its reader requires (PROFILE-SPEC section 5). With *allow_emptied_entries* an entry that holds
+    only the keys that name it, every statistic dropped, is read instead, kept in place with each
+    statistic ``None`` (``holds_nothing``), so the entries after it keep their indices and
+    pointers. An entry that holds some of its statistics, but not all, is refused as before. A
+    caller that sets it owns what an entry that holds nothing means; the default is the strict
+    reading.
+    """
     _require_nfc(document, "profile")
     raw = _mapping(
         document,
@@ -2860,6 +2985,7 @@ def parse_profile(document: Any) -> Profile:
         accounting=accounting,
         from_1_3=raw["_schemaURL"] in _FROM_1_3_0,
         from_1_4=raw["_schemaURL"] == SCHEMA_URL_1_4_0,
+        allow_emptied_entries=allow_emptied_entries,
     )
     if accounting is not None and accounting.follows:
         reader.require_1_4_0("follows", "profile.privacy.privacyUnit.follows")

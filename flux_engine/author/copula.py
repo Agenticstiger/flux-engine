@@ -314,7 +314,8 @@ def declare_copula(
             "with another column that can join one"
         )
     else:
-        _declare(result, published, names, out)
+        ranged = {plan.name for plan in expose.columns if "range" in plan.declaration}
+        _declare(result, published, names, out, ranged)
     result.notes += [
         f"{printable(name)} is not in the copula: {reason}"
         for name, reason in out.by_column.items()
@@ -403,10 +404,19 @@ def _declare(
     published: Mapping[FrozenSet[str], List[_Pair]],
     names: List[str],
     out: _Why,
+    ranged: Set[str],
 ) -> None:
+    """Write the copula of *names*; *ranged* are the columns of the expose that declare a range.
+
+    A rank correlation property compares two columns over their declared ranges, and ``verify``
+    refuses one of a column the block declares no range for (``FLX-5034``). A column drawn evenly
+    over the range its contract declares, with no histogram of its own to give one, declares
+    none: the copula still draws it, and no property scores a pair it is in.
+    """
     measure = _measure_of(names, published) or "kendall"
     pairs: List[Dict[str, Any]] = []
     held: List[Tuple[str, str]] = []
+    unscored: List[Tuple[str, str]] = []
     clamped: List[str] = []
     used: Set[Tuple[str, ...]] = set()
     for first in range(len(names)):
@@ -432,7 +442,10 @@ def _declare(
                 else f"its value is the pair's {_NAMES[measure]} in the table's copula"
             )
             result.reads.append((chosen.tokens, how))
-            result.properties.append(_property(pair, measure, chosen.tokens))
+            if pair[0] in ranged and pair[1] in ranged:
+                result.properties.append(_property(pair, measure, chosen.tokens))
+            else:
+                unscored.append(pair)
             if chosen.released is not None and abs(chosen.released) > 1:
                 clamped.append(
                     f"{_spelled(pair)}: the noisy {_NAMES[measure]} released as "
@@ -446,6 +459,14 @@ def _declare(
     result.measure = measure
     _pass_all(result, published, out, measure, names, used)
     _notes(result, names, measure, held)
+    if unscored:
+        shown = "; ".join(_spelled(pair) for pair in unscored[:_SHOWN])
+        more = f"; and {len(unscored) - _SHOWN} more" if len(unscored) > _SHOWN else ""
+        result.notes.append(
+            f"No property scores {len(unscored)} pair{'s' if len(unscored) != 1 else ''} of the "
+            f"copula's columns ({shown}{more}): a column of each declares no range, which a rank "
+            "correlation is compared over."
+        )
     # A noisy release past the range of a correlation is clamped, and the text says which pair.
     result.notes.extend(clamped)
 

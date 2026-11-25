@@ -24,6 +24,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Added
 
+- `init --json` carries `ledger.unused`, the list an owner can leave out of the profile: an entry the profile reader
+  holds whole (a calendar entry with none of its histograms read, say) is named by its own pointer, so dropping
+  exactly that list leaves a profile the reader accepts. `ledger.statistics` still names each statistic on its own,
+  with its state; dropping every one it calls unused can leave an entry the reader refuses (`FLX-5036`).
+- `FLX-3125`, the refusal of a date or timestamp column that publishes one value the engine cannot yet write on every
+  row, when something the bundle writes needs its table.
 - `init --window START END` sets the run's time window yourself. The dates are `YYYY-MM-DD` (midnight UTC) or RFC 3339
   timestamps, with START before END, and the output names the window under "time window".
 - `init --history FILE` merges a declared history into the bundle: the file's histories, snapshots, events and
@@ -104,24 +110,40 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   profile, so `--profile` is given to `run` and to `apply --run-id`), and a stream below the minimum, from a run that
   pins no profile and declares no plugin, or from a run whose receipt and streams are not its plan's, is refused before
   anything is contacted (`FLX-3512`); declarations Kafka cannot take are `FLX-3513`, a topic that will not take the stream,
-  or a stream this run's receipts record as delivered whose progress the brokers have since dropped, is `FLX-3514`, and a
-  registry subject that cannot carry it is `FLX-3515`. No digest moves. See [Stream a simulation
-  into Kafka](docs/how-to/stream-a-simulation-into-kafka.md) and [ADR
+  or a stream this run's `sink-receipts.json` records as having reached the topic, whole or in part, whose progress the
+  brokers have since dropped while the topic stayed, is `FLX-3514`, and a registry subject that cannot carry it is
+  `FLX-3515`. A receipt records the run's grade, or with `--profile` the weaker of the run's and the profile's, and
+  says which (`gradeSource`). No digest moves. See
+  [Stream a simulation into Kafka](docs/how-to/stream-a-simulation-into-kafka.md) and [ADR
   0038](docs/adr/0038-a-kafka-sink-keys-records-by-entity-delivers-each-stream-exactly-once-and-sends-only-what-its-audience-may-see.md).
-- A sink is now told four more facts about a stream: `StreamContext.privacy_grade`, the grade the run is held to,
+- A sink is now told more about a stream: `StreamContext.privacy_grade`, the grade the run is held to,
   worked out from the run's bound plan, `run-digest.json`, `receipt.json` and bundle as `apply` reads it, and from the
   pinned profile when the command was given it (`RecordedGrade`, which says what is missing or does not check);
   `StreamContext.bundle_directory` and `StreamContext.simulation_id`, which say where the stream's declarations are;
-  and `StreamContext.delivered`, the receipts the run's `sink-receipts.json` already holds for the stream.
-  `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill all four; `apply --run-id` takes `--profile` with
-  `--sink`, for an external audience. They default to `None` (`delivered` to empty), no digest covers them, and the
-  existing sinks ignore them.
+  and `StreamContext.delivered` and `StreamContext.committed`, the receipts the run's `sink-receipts.json` already holds
+  for the stream, whole and so far. A sink that commits what it sends keeps a receipt of the stream so far there after
+  each commit, through `StreamContext.record_committed` (`write_progress`), until the stream's receipt replaces it.
+  Both writers of the file hold an advisory lock on the run directory across each read and write.
+  `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill them all; `apply --run-id` takes `--profile` with
+  `--sink`, for an external audience. They default to `None` (`delivered` and `committed` to empty), no digest covers
+  them, and the existing sinks ignore them. `privacy_grade_of` takes the `receipt.json` document its caller read
+  (`receipt=`), so the streams delivered from a run directory are the ones its checks covered.
 - The page [Where FLUX fits](docs/explanation/compared.md) says what FLUX is good at, where it is not, and how it
   compares with 24 other synthetic and test data tools, with the roadmap for many-core speed, a living clone and
   learned generators. The README gains a short Roadmap section that links to it.
 
 ### Changed
 
+- The engine reads a profile in which an entry holds only the keys that name it, as when a release step drops
+  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place:
+  `init` and `plan` accept it, and a citation at or under such an entry is still refused (`FLX-5036`). The entries
+  are a calendar entry, a date pair, a relationship's date pair, an exposure, a history and a tracked column of
+  one. An entry that holds some of its statistics, but not all, is refused as before. flux-stats' `parse_profile`
+  and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets.
+- A profile's `privacy` block may state more loss than its noisy statistics and cliques spend, including when none
+  remain; a stated loss is an upper bound, and a total below what they spend is still refused (`FLX-5036`). The grade
+  comes from the statistics alone, so a block that nothing spends earns no grade, and `init` notes the stated and
+  spent figures when they differ (`privacyLoss` under `--json`). ADR 0019 is amended.
 - `flux_engine.author.author_bundle` takes one `AuthorInputs` instead of separate arguments.
 - `flux_engine.author.replace` exports `ASSUMPTIONS_REQUEST_PATH` (`requests/assumptions.profile-request.yml`, inside
   the bundle directory) in place of `ASSUMPTIONS_REQUEST_SUFFIX`.
@@ -160,15 +182,29 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Fixed
 
+- An instant before the year 1000 is written with a four-digit year on every platform, as RFC 3339 writes it
+  (`0001-01-01T00:00:00.000Z`). Below 1000 the engine used the platform's `strftime`, and glibc writes the year 1 as
+  `1`: on Linux a TIMESTAMP cell then held no RFC 3339 instant, and `fluxsim init` failed on a run window that starts
+  before 1000, such as one a profile's year grid gives when its first bin, from 0001-01-01, holds records. macOS
+  wrote four digits already, so its output does not change.
+- `verify` no longer refuses (`FLX-5037`) a histogram of a DATE column whose profile grid ends at the calendar's last
+  instant, 253402300799999 milliseconds. A profile spells the last edge of a year grid there and a declaration spells
+  it as the day 9999-12-31; they are one edge. An edge that is not a whole day still matches no declared edge.
+- `verify` no longer refuses (`FLX-5005`, "the two sides group into different sets") a property grouped by a column
+  because a noisy profile lists a level whose noisy counts project to no record and the generated rows hold none of
+  it. A level the profile holds no record of is left out on both sides, as a suppressed group is, and the other groups
+  are compared. A level the profile holds records of that the rows lack is still refused.
 - A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
   the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
   plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
-- The run's window now covers the whole range of every date column, the date range the contract declares, and the
-  bins the column is drawn from, so `init` no longer cuts a column at a window that other columns imply. A column's
-  bins are cut only at a window you pass with `--window`. A contract range that ends in the year 9999 says only that
-  the column holds a date and gives the window nothing: a run's periods step past the window's end, and a window that
-  ends in that year cannot be planned. A contract range that widens the window beyond every span the profile and the
-  bundle give (a loose range such as `between '1900-01-01' and '2100-12-31'`) is named under "time window", a gap at
+- The run's window now covers the whole range of every date column, the date range the contract declares, and the bins
+  the column is drawn from (those that carry weight), so `init` no longer cuts a column at a window that other columns
+  imply. A column's bins are cut only at a window you pass with `--window`. A contract range that ends in the year
+  9999, like a column whose every value is in that year (an open end of 9999-12-31 on every row), says only that the
+  column holds a date and gives the window nothing, nor need a window you pass hold it: a run's periods step past the
+  window's end, and a window that ends in that year cannot be planned. A window that a contract range widens beyond
+  every span the profile and the bundle give (a loose range such as `between '1900-01-01' and '2100-12-31'`), or that
+  comes only from a contract range because neither gives a span, is named under "time window", a gap at
   `/spec/timeBounds` that `--strict` refuses; a date column the profile publishes no order statistic for is drawn
   evenly across the whole window.
 - The parameter register counts the numbers under the namespace keys beside `emits` (`facts`, `links`, `counts`,
@@ -198,18 +234,64 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   versions, so it draws no column; `validate` and `plan` refused it with `FLX-5034`, and a key column with no
   statistics with `FLX-3403`. flux-stats' `parse_fidelity_block` takes `allow_no_columns`, which the engine sets for
   an emit a `snapshots` entry names. Every other emit keeps both refusals.
+- `init --window` no longer writes a register with two entries for one number (`FLX-3105`, "by the same pointer")
+  when the window cuts a date column whose weights rest on one assumption, such as a withheld minimum. The column's
+  one entry names both reasons.
+- A date or timestamp column whose profile publishes one value is drawn as exactly that value on every row, where it
+  was drawn within the day that starts there, so its rows took that day and the next. The register says every row
+  takes it. A DATE column whose one value is 9999-12-30 or 9999-12-31 (the end of every open version, say), or a
+  TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet. When a relationship, a
+  history or a projection needs its table, `init` refuses before it writes anything (`FLX-3125`), names the table and
+  the column, and says to write the open end as NULL, or to make the column a TIMESTAMP; before, it left the table out
+  and its own check then refused the whole init ("the bundle written from these inputs does not validate",
+  `FLX-3403`), writing no bundle. When nothing needs the table, it is left out, as before, and its statistics are
+  listed unused with the reason.
+- `init` no longer writes a bundle the plan refuses with `FLX-6204` when an enforced `within` date's parent has a
+  lifetime whose start declares no range: no widening of the date's range can meet the plan's check then, so the
+  entry is left out and its pair is listed unused, with the reason.
+- `init` no longer names the profile's file in the header of each document it writes, so the same contract and
+  profile give the same bytes, plan digest and `runId` wherever the profile is saved. Every bundle `init` writes from
+  now on differs by that header line, and so by its digests, from one it wrote before for the same inputs; one whose
+  unused list names a whole entry (see below) differs by that list too, and its register is format `1-4-0`. A bundle
+  already written keeps its own.
+- A refused `init` reports its refusal even when a file it wrote cannot be removed while it cleans up, rather than a
+  permission error.
+- `init` no longer turns a table's date pair into a lifetime or a `within` entry on a column the table's history sets
+  (its validity start, its validity end or its activation column). With `--history FILE` it refused with `FLX-6203`
+  ("has more than one source"), and a history the profile carries could be dropped, its statistics listed unused. The
+  pair is now listed unused, since the table's history sets the column, and the history is written. The same holds
+  for a column a history's `events` or `periods` entry sets (an event's date, op, type, image or carried columns, a
+  period's column, overrides or carried columns), and for a relationship whose foreign key such an entry sets, which
+  `plan` refused with `FLX-3403`: the pair is listed unused, naming the entry.
+- `init` no longer gives a parent a start-only lifetime from a relationship date pair that it lists unused: one whose
+  child date a key or a rule of the contract sets, or whose `within` entry it refuses (the child's date ends the
+  child's own lifetime, say). Dropping the listed pair now leaves the bundle as it is.
+- `init` lists a calendar entry, a date pair, an exposure or a history that it reads nothing of as one unused item,
+  at the entry's own pointer, and never lists a member the profile reader requires beside one that it reads. Dropping
+  exactly the listed statistics now leaves a profile the reader accepts (`FLX-5036` refused one before). A register
+  whose unused list names such an entry is format `1-4-0`. An `--allow` that names a member of an entry listed whole
+  no longer matches it: name the entry, or a pointer above it. One that names a required member beside one that is
+  read (a date pair's `order`, an exposure's counts) matches nothing now, since that member is no longer listed, and
+  `--strict` refuses it as stale: drop it.
 - A contract `dependency` beside a history `parent` is accepted when it holds by construction: its `to` columns are
   all foreign-key columns of the `parent` relationship and its `from` columns include the history's natural entity
   column. The parent layout gives every version of an entity one parent, so the dependency is true, draws nothing
   and sets nothing, and `verify` scores it at 100 %. It was `FLX-3403` ("a dependency sets its columns, which the
   layout sets"). Any other dependency on a counted relationship is refused as before, and every emit of a bundle
   with such a dependency keeps the bytes the bundle without it has (ADR 0017, the amendment of 2026-11-25).
-- A tracked foreign key whose level is no key its parent holds is `FLX-3403` at plan. A tracked column writes its
-  level as the cell and takes no parent row, so `--scale` below 1 cut a catalogue's rows and keys and left the
-  levels: `plan --scale 0.25` exited 0 and `verify` scored the link at about a quarter. The refusal names the expose,
-  the column, one such level and the keys the parent holds in that plan, and says to plan without `--scale` or to stop
-  tracking the column. A foreign key that is not tracked takes the nearest key the parent holds and is not refused.
-  Every bundle whose levels are all keys, at any scale, keeps its bytes, and so does every other bundle.
+- A tracked foreign key's levels are keys its parent holds. A tracked column writes its level as the cell and takes
+  no parent row, so `--scale` below 1 cut a catalogue's rows and keys and left the levels: `plan --scale 0.25` exited
+  0 and `verify` scored the link at about a quarter. Below 1 a drawn parent now keeps the fewest rows whose keys hold
+  every level its children track (its key range and `records` bounds move in proportion), `plan` prints a note naming
+  the parent, the rows and the scale, and `plan.json` says `scaleFloors: "trackedLevels"`. A recorded plan with the
+  key replays floored; one without it replays with neither the check nor the floor, byte for byte as it was made, and
+  any other value is `FLX-2102`. A level that is no key of the parent at any row count (off its range, before its
+  first key), a parent that is not a drawn whole-number key over a declared range and a plan at scale 1 are
+  `FLX-3403`, naming the expose, the column, one such level and the keys the parent holds in that plan. A foreign key
+  that is not tracked takes the nearest key the parent holds and is not refused. Every bundle whose levels are all
+  keys, at any scale, keeps its bytes, and so does every other bundle. A floor always keeps more rows than the scale
+  gives the parent (the note and `scaleFloors` appear only then), and `ship`'s EVIDENCE note counts a conditioned
+  floored parent's groups at the rows the run holds.
 - A DATE or TIMESTAMP column is drawn inside the range its contract declares (`validationRules: [{type: range,
   constraint: "between '2001-01-01' and '2005-12-31'"}]`), and `verify` checks the range. Before, a column whose bins
   ran past its range wrote rows outside it and `verify` said `rows: ok`. On kernel 0.2.0 the
@@ -222,9 +304,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `ranges:` line naming the expose, the column, the rows and the range (and `rangeConformance` in `--json`). A run with
   no declared range, or none outside it, prints exactly what it printed before (ADR 0024, the amendment of
   2026-11-25). A strict end (`>`, `<`) is kept strict, one unit inward: `>= '2001-01-01' and < '2006-01-01'` draws
-  and accepts up to 2005-12-31, and `verify` quotes the range as the contract spells it. A strict range that holds no
+  and accepts up to 2005-12-31, and `verify` names each end with its own `>`, `>=`, `<` or `<=`. A strict range that holds no
   day is refused at `plan` (`FLX-3403`). A range with one end (`>= '2024-01-01'`), and one whose high
-  end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
+  end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. A range whose ends meet (`between 'A' and 'A'`) holds that one day, or one instant, and is cut and verified like any other; an empty range (the low end beyond the high end, or equal ends with one strict) is refused at `plan` (`FLX-3403`) naming the column and both ends, whatever sets the column, while a recorded plan without `dateRanges` still replays as it was written. A TIMESTAMP low end between two milliseconds rounds up to the next whole millisecond, so the cut and `verify` never accept an instant below it; a high end between two milliseconds is the millisecond at or below it, whatever its operator, so `< '10:00:00.0005'` holds 10:00:00.000. A low end past the last instant (`>= '9999-12-31T23:59:59.9995Z'`, a strict `> '9999-12-31'` on a DATE) holds no value and is refused at `plan` (`FLX-3403`) like an empty range. `init` reads a range whose ends meet as one unit for its window (one day for a DATE, one millisecond for a TIMESTAMP) instead of refusing the contract, and starts its window at a low end between two milliseconds where `plan`'s range starts. `verify` says which declared ranges it did not check: a key column the scale widens (`ranges: depot.depot_id: not checked at --scale 2: ...`), and, once, the whole run's when its artifacts do not reproduce or the bundle is not the run's (`ranges: not checked: <why>`); neither fails the run, and `--json` lists them under `rangesNotChecked` only when there is one. A run planned before the cut (a plan without `dateRanges`) or on kernel 0.1.0 whose rows lie outside a declared range now fails `verify` where it passed before. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
   key (every plan written before this change) replays with no cut, so its rows and `replay --assert-digest` keep what
   they were, and a plan that cut nothing keeps its bytes and its run id. A column another construct sets (a history's validity start and end, the cells
   an events or periods entry sets, a snapshot's columns, a key, a column a rule, `lifetimes`, `within` or `rates` sets)
@@ -232,6 +314,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   outside the range.
   At `--scale` above 1 `verify` does not count the contract's range of a key column the scale widens, and `plan` prints
   one note naming the column, its range and the scale; a column the scale does not widen stays checked.
+- `init` no longer refuses its own bundle (`FLX-3105`) when it leaves out a table made only of foreign keys, which
+  gives its fidelity block nothing to declare: the `counts` entries into that table are taken back, and the
+  statistics of those relationships are listed unused with the reason. The table is not written, and `init` says so.
+- `init` no longer places a counted child by a parent column that is itself drawn given a column of a linked row,
+  which `plan` refuses (`FLX-3403`): that grouping is listed unused with the reason, and the next usable column, or
+  none, places the child.
+- `init` no longer writes a property over a column that declares neither the range nor the levels it compares over,
+  which `verify` refuses (`FLX-5034`): a grouped histogram or a rank correlation over a number column drawn evenly
+  over its contract's range, or a histogram grouped by a boolean column. The column is drawn as before, and its notes
+  say which property is left out.
 
 ## 0.11.1 - 2026-11-24
 

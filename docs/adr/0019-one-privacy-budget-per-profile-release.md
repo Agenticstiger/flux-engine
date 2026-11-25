@@ -5,7 +5,9 @@
 Accepted 2026-11-21. Builds on the second amendment of
 [ADR 0003](./0003-sdv-bsl-and-aggregate-only-rule.md), which lets a profile carry marginals
 released under differential privacy and says what a run built from them carries. This record
-says how the profile accounts for the loss of that release, and what the engine checks.
+says how the profile accounts for the loss of that release, and what the engine checks. The
+[amendment of 2026-11-25](#amendment-of-2026-11-25) changes one check: a stated loss that nothing
+spends is accepted.
 
 ## Context
 
@@ -42,7 +44,8 @@ one number, and has to be able to see that the parts do not exceed it.
    the total privacy loss and the unit of privacy once (PROFILE-SPEC.md section 3a). Every
    noisy statistic and every noisy clique states its own share of it in its `noise` block.
    A noisy statistic in a profile with no `privacy` block, and a `privacy` block that
-   no statistic spends any of, are refused.
+   no statistic spends any of, are refused. (A `privacy` block that nothing spends is accepted
+   since [the amendment of 2026-11-25](#amendment-of-2026-11-25).)
 2. **The split is over what the profile request asks for.** The profile request
    (PROFILE-REQUEST-SPEC.md) names the statistics a profiler must measure. The profiler
    divides the budget among those it releases noisily, and among the cliques it chooses. The
@@ -133,3 +136,50 @@ one number, and has to be able to see that the parts do not exceed it.
 - **An accountant library (OpenDP, a privacy loss distribution accountant).** Rejected for
   this release: a dependency for an upper bound that addition already gives, and the
   engine would then be computing a guarantee rather than checking a stated one.
+
+## Amendment of 2026-11-25
+
+### Context
+
+A profile released under differential privacy can be made smaller after the release: a step that
+drops each statistic an `init --json` inventory marks unused can drop the only noisy statistic the
+profile held. What is left is a `privacy` block that no statistic or clique spends, and the
+reader refused it (`FLX-5036`, "states a privacy loss that no noisy statistic or clique spends").
+The refusal was the one check that turned away a stated loss above what the parts spend. Every
+other comparison of the check is in one direction: the parts may add up to the total or to less,
+never to more (point 4: "A sum below the total is accepted").
+
+### Decision
+
+1. **A stated loss is an upper bound, and a bound above what is spent is accepted, including
+   when nothing is spent.** The reader no longer refuses a `privacy` block because no noisy
+   statistic, clique or share spends any of it. The check is now the one rule it always stated:
+   the parts add up to at most the total, in rho, in epsilon and in delta, each on its own. A total
+   below what the parts spend (understated) keeps the `FLX-5036` refusal, and so does every other
+   check of point 4. The rule changed outright and is not a reader option: it was refused by that
+   one check and no other, and an option would leave a profile that is valid for the engine
+   refused by every other reader of the format.
+2. **The grade reads the statistics, never the block alone** (ADR 0020). A profile with a block and
+   no noisy statistic or clique is `P1`, with the reason that its account is spent by no noisy
+   statistic or clique, and a profile with exact statistics beside a block grades no better than
+   the same profile without the block. A total above what is spent changes no grade: all
+   statistics noisy under an account is `P3` whatever slack the total leaves. Tests pin both.
+3. **`init` says when the stated loss exceeds what the profile spends.** The output carries one
+   `privacy:` line and an `init --json` `privacyLoss` member (measure, the stated total, what the
+   noise blocks add up to, and the number of parts) when a stated share is above its sum. Both
+   figures are values the profile states: the total, and the shares its `noise` blocks record.
+   Nothing in it depends on the records.
+4. **An entry cut down to its names is read as holding nothing.** The same step can drop every
+   statistic of a calendar entry, a date pair, a relationship's date pair, an exposure, a history
+   or a tracked column of one, which leaves the keys that name it. The profile reader takes
+   `allow_emptied_entries`, off by default and set by the engine: with it such an entry is kept in
+   its place and holds nothing, and a citation at or under it is refused (`FLX-5036`). An entry
+   that holds some of its statistics is refused as before. Unlike point 1 this is an option,
+   because the format itself still requires the statistics of an entry that is published whole.
+
+### Consequences
+
+- A profile released and then cut down by a list of unused statistics is still a profile `init`
+  and `plan` read. If every noisy statistic was cut, the run is graded `P1`, not `P3`.
+- The guarantee the engine reports for a run is still the stated total (point 4), which bounds
+  the loss of every part, spent or not.

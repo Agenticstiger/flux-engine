@@ -2458,28 +2458,75 @@ def _shaped_bins(
     plan.choices.append(_SHAPED_REASON)
 
 
+#: What a column's one published value is drawn as, by kind: how far apart two values of the
+#: column's grid are, in the milliseconds its profile is written in (a date moves a whole day,
+#: a timestamp one millisecond).
+_ONE_VALUE_STEP = {LogicalKind.DATE: _DAY_MS, LogicalKind.TIMESTAMP: 1}
+#: The last instant a column holds (9999-12-31T23:59:59.999Z), in milliseconds.
+_LAST_MS = 253_402_300_799_999
+
+
+def _one_value_bins(kind: LogicalKind, value: Decimal) -> Tuple[List[str], List[str]]:
+    """The bins and weights that draw a date or a timestamp as exactly *value*, every row.
+
+    A date and a timestamp take no levels, and a bin of no width is refused, so the value is
+    the first of two grid steps and its bin is half-open: it draws *value* and only *value*,
+    and the second step is the edge that closes it, carrying no weight. ``OverflowError`` when
+    the second step cannot be spelled (the value is too near the last one the column holds).
+    """
+    step = _ONE_VALUE_STEP[kind]
+    edges = [_spell(kind, value + position * step) for position in range(3)]
+    return edges, ["1", "0"]
+
+
+class UnspellableOneValue(ValueError):
+    """A date or timestamp that publishes one value too near the last the column holds.
+
+    The expose of the column cannot be written, and the message says why. The bundle leaves the
+    expose out, and refuses with this message only when something it writes needs the expose.
+    """
+
+
+def _unspellable_one_value(ctx: ColumnContext, point: _Point) -> Exception:
+    """The refusal of a date or timestamp that publishes one value too near the last the column holds."""
+    kind = ctx.column.logical_type.kind
+    table = ctx.profile_tokens[1] if len(ctx.profile_tokens) > 1 else "the table"
+    last = _spell(kind, Decimal(_LAST_MS))
+    spelled = _spell(kind, point.value)
+    is_last = spelled == last
+    kind_name = "DATE" if kind is LogicalKind.DATE else "TIMESTAMP"
+    one = "one value, the last the calendar holds," if is_last else f"one value, {spelled},"
+    exactly = f"exactly {spelled}" if kind is LogicalKind.DATE else f"{spelled}"
+    ways = "write its open end as NULL, or make the column a TIMESTAMP"
+    if kind is not LogicalKind.DATE:
+        ways = "write its open end as NULL, or as an earlier instant"
+    return UnspellableOneValue(
+        f"{printable(table)}.{printable(ctx.column.name)} publishes {one} on every row, and the "
+        f"engine cannot yet write a {kind_name} of {exactly} on every row; {ways}"
+    )
+
+
 def _one_value(ctx: ColumnContext, plan: ColumnPlan, point: _Point) -> None:
-    """One published value: every number takes it; a date or timestamp spans its day."""
+    """One published value: every row takes it, a number as a level, a date or timestamp as a bin."""
     kind = ctx.column.logical_type.kind
     plan.reads.append((point.tokens, "the one value the profile publishes"))
-    if _temporal(kind):
-        end = point.value + _DAY_MS
-        plan.declaration["bins"] = [_spell(kind, point.value), _spell(kind, end)]
-        plan.declaration["binWeights"] = ["1"]
-        reason = (
-            f"The profile publishes one value ({point.definition}) and no other order "
-            "statistic: the values are drawn within the day that starts there."
-        )
-        plan.labels.append(Label(("bins",), assumed(reason)))
-        plan.labels.append(Label(("binWeights",), assumed(reason)))
-        plan.how = "within one day, from the one value the profile publishes"
-        plan.assumptions.append(reason)
-        return
-    plan.declaration["levels"] = {_spell(kind, point.value): "1"}
     reason = (
         f"The profile publishes one value ({point.definition}) and no other order "
         "statistic: every row takes it."
     )
+    if _temporal(kind):
+        try:
+            edges, weights = _one_value_bins(kind, point.value)
+        except OverflowError:
+            raise _unspellable_one_value(ctx, point) from None
+        plan.declaration["bins"] = edges
+        plan.declaration["binWeights"] = weights
+        plan.labels.append(Label(("bins",), assumed(reason)))
+        plan.labels.append(Label(("binWeights",), assumed(reason)))
+        plan.how = "one value on every row, the one the profile publishes"
+        plan.assumptions.append(reason)
+        return
+    plan.declaration["levels"] = {_spell(kind, point.value): "1"}
     plan.labels.append(Label(("levels",), assumed(reason)))
     plan.how = "one value on every row, the one the profile publishes"
     plan.assumptions.append(reason)
@@ -3794,15 +3841,25 @@ def bound_to_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str]
     total = sum((weight for _, _, weight in kept), Fraction(0))
     plan.declaration["binWeights"] = share_texts([weight / total for _, _, weight in kept])
     _read_shaped(plan, _WINDOW_SHAPED)
-    plan.labels = [
-        label
-        for label in plan.labels
-        if label.tokens[:1] not in (("bins",), ("binWeights",)) or len(label.tokens) != 2
-    ]
-    plan.labels.append(Label(("bins",), assumed(_WINDOW_CLIPPED)))
-    plan.labels.append(Label(("binWeights",), assumed(_WINDOW_CLIPPED)))
+    _label_whole_bins(plan, _WINDOW_CLIPPED)
     plan.assumptions.append(_WINDOW_CLIPPED)
     plan.choices.append(_WINDOW_CLIPPED)
+
+
+def _label_whole_bins(plan: ColumnPlan, reason: str) -> None:
+    """Give the bins and their weights one label each, for *reason*, in place of every label they had.
+
+    The register holds one entry per pointer, so a whole-array label the bins already had is not
+    kept beside the new one: its reason comes first in the new label's, which ends with *reason*.
+    """
+    replaced: Dict[Tuple[str, ...], List[str]] = {("bins",): [], ("binWeights",): []}
+    for label in plan.labels:
+        known = label.basis.reason
+        if label.tokens in replaced and known is not None and known not in replaced[label.tokens]:
+            replaced[label.tokens].append(known)
+    plan.labels = [label for label in plan.labels if label.tokens[:1] not in replaced]
+    for tokens, reasons in replaced.items():
+        plan.labels.append(Label(tokens, assumed(" ".join([*reasons, reason]))))
 
 
 def _draw_clipped(

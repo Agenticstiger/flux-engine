@@ -115,6 +115,7 @@ from flux_engine.stages.timings import lap, timed
 __all__ = [
     "DATE_RANGES_CUT",
     "DATE_RANGES_PLAN_KEY",
+    "SCALE_FLOORS_PLAN_KEY",
     "END_SHARE_PLAN_KEY",
     "GENERATORS_PLAN_KEY",
     "OVERLAY_PLAN_KEY",
@@ -320,6 +321,20 @@ DATE_RANGES_PLAN_KEY = "dateRanges"
 DATE_RANGES_CUT = "cut"
 
 
+#: ``plan.json``'s key for a ``--scale`` below 1 keeping a drawn parent at the rows its children's
+#: tracked levels need (ADR 0017, the amendment of 2026-11-25): ``"trackedLevels"``. Present only
+#: when a parent was kept at more rows than the scale gives it, so every other plan keeps its bytes.
+#: A recorded plan without it replays with no check of tracked levels and no floor
+#: (:func:`flux_engine.stages.apply.plan_scale_floors`), as a plan written before them was made.
+SCALE_FLOORS_PLAN_KEY = "scaleFloors"
+SCALE_FLOORS_TRACKED = "trackedLevels"
+
+
+def _scale_floor_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``scaleFloors``, only for a plan in which some parent was kept above its scaled rows."""
+    return {SCALE_FLOORS_PLAN_KEY: SCALE_FLOORS_TRACKED} if result.scale_floors else {}
+
+
 def _date_range_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     """``dateRanges``, only for a plan in which some column was cut at its contract's range."""
     if not result.cut_ranges:
@@ -426,6 +441,7 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
         **_generator_entries(result),
         **_end_share_entries(result),
         **_date_range_entries(result),
+        **_scale_floor_entries(result),
         **(
             {
                 REFERENCES_PLAN_KEY: {
@@ -911,6 +927,10 @@ def plan_with_result(
                         result.files_not_hashed,
                         tuple(o.coverage for o in result.emits if o.coverage is not None),
                         _not_generated_of(result),
+                    ),
+                    *(
+                        result.scale_floors[name].note(result.scale)
+                        for name in sorted(result.scale_floors)
                     ),
                     *([_staged_line(result, layout)] if staged_path is not None else []),
                     # Parameter register: the shares, for a Simulation that declares a register.

@@ -340,13 +340,12 @@ and '2005-12-31'"}]`. Nothing read it: the column was drawn from its declared st
 run past the range, and `verify` counted only the rows' number and width, so a run could write most of a
 column outside its contract and pass. The profiler refuses the same rows (`FLX-5005`).
 
-**The range is read once, as the profiler reads it.** `CompiledColumn.declared_range` holds the
+**The range is read once, in the profiler's spelling.** `CompiledColumn.declared_range` holds the
 `(low, high)` milliseconds `declared_range_bounds` gives (`between 'A' and 'B'`, or `>=`, `>`, `<=`, `<` joined
 by `and`; an ISO date is midnight UTC, a timestamp RFC 3339; anything else declares nothing). Each end is
 optional: `>= '2024-01-01'` is a range, as a one-sided INT or DECIMAL range is, and a high end in the year
 9999 or later is the open-end spelling and so no high end (`between '2024-01-01' and '9999-12-31'` is
-`>= '2024-01-01'`). A rule with neither end declares nothing, and nor does one whose low end is not before
-its high end. `declared_instants`, which `init` reads for its window, keeps its rule: both ends, the high end
+`>= '2024-01-01'`). A rule with neither end declares nothing. A range whose ends meet and are both inclusive (`between 'A' and 'A'`) holds that one day or instant. A range that holds no instant (its low end beyond its high end, or equal ends with one strict) is `FLX-3403` at `plan`, naming the column and both ends, on every kernel and for a column something else sets; a recorded plan without `dateRanges` never read it. A timestamp end between two milliseconds is read to the millisecond: a low end rounds up and a high end rounds down, so the range never holds an instant outside what the contract names. `declared_instants`, which `init` reads for its window, keeps its rule: both ends, the high end
 before the year 9999. A DATE holds the days from the first at or after the low end to the last at or before
 the high end.
 
@@ -408,12 +407,13 @@ that is no key, and a scale of 1 or below keep the check.
 
 **`verify` checks the range.** For each emit of the run, the rows of a DATE, TIMESTAMP, INT or DECIMAL column
 whose contract declares a range are counted against it (NULL is never outside; numbers read the range as
-`author/ranges.py` does; a strict end of any column is strict, and the line quotes the range as the contract spells
-it, `>= 2001-01-01 and < 2006-01-01`, while the `plan` note names the inclusive ends drawn, 2001-01-01 to 2005-12-31). A column with rows outside adds one line under `rows:`
-and the run fails:
+`author/ranges.py` does; a strict end of any column is strict). A column with rows outside adds one line under
+`rows:` and the run fails; `<range>` names the ends the contract declares, each `>=`, `>`, `<=` or `<` as its
+rule has it (`>= 2001-01-01 and < 2006-01-01`, or `>= 2024-01-01` alone), while the `plan` note names the
+inclusive ends drawn (2001-01-01 to 2005-12-31):
 
 ```
-  ranges: <expose>.<column>: <n> of <rows> rows are outside the declared range (>= <low> and <= <high>)
+  ranges: <expose>.<column>: <n> of <rows> rows are outside the declared range (<range>)
 ```
 
 and the JSON envelope's `rangeConformance` holds `{"ok": false, "problems": [...]}`. A run whose contract

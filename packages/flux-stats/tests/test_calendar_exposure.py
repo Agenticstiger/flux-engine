@@ -26,6 +26,7 @@ from flux_stats.profile import (  # noqa: E402
     MAX_CALENDAR_ENTRIES,
     MAX_EXPOSURES,
     SCHEMA_URL_1_2_0,
+    load_profile_text,
     parse_profile,
 )
 from flux_stats.request import (  # noqa: E402
@@ -264,6 +265,68 @@ def test_a_broken_member_is_refused_naming_where(
     change: Callable[[Dict[str, Any]], None], fragment: str
 ) -> None:
     assert fragment in _refused(_edit(change))
+
+
+def _emptied(document: Dict[str, Any]) -> None:
+    """The first calendar entry without its histograms: the entry a release step leaves."""
+    document["tables"]["payment"]["calendar"][0] = {"column": "paid_at"}
+
+
+def test_an_entry_with_no_histogram_is_refused_by_default() -> None:
+    assert "at least one of its three histograms" in _refused(_edit(_emptied))
+    with pytest.raises(FluxError) as refused:
+        parse_profile(_edit(_emptied), allow_emptied_entries=False)
+    assert refused.value.code.code == "FLX-5036"
+
+
+def test_an_entry_with_no_histogram_is_kept_in_place_when_the_reader_accepts_it() -> None:
+    profile = parse_profile(_edit(_emptied), allow_emptied_entries=True)
+    empty, partial = profile.tables["payment"].calendar
+    assert empty.column == "paid_at"
+    assert (empty.month, empty.day_of_week, empty.hour_of_week) == (None, None, None)
+    # The entries after it keep their place, and what they hold.
+    assert partial.column == "settled_at" and partial.month is not None
+
+
+def test_loading_the_text_passes_the_option_on() -> None:
+    text = json.dumps(_edit(_emptied))
+    with pytest.raises(FluxError):
+        load_profile_text(text)
+    profile, document = load_profile_text(text, allow_emptied_entries=True)
+    assert document["tables"]["payment"]["calendar"][0] == {"column": "paid_at"}
+    assert profile.tables["payment"].calendar[0].month is None
+
+
+@pytest.mark.parametrize(
+    ("change", "fragment"),
+    [
+        pytest.param(_set("calendar", "extra", 1), "extra", id="unknown-key"),
+        pytest.param(_set("calendar", "column", "amount"), "calendar[0].column", id="not-a-time"),
+        pytest.param(_duplicate_column, "names one column twice", id="one-column-twice"),
+        pytest.param(_level("month", ["a", "b"]), "calendar[0].month.levels", id="other-levels"),
+    ],
+)
+def test_the_option_loosens_no_other_rule_of_a_calendar_entry(
+    change: Callable[[Dict[str, Any]], None], fragment: str
+) -> None:
+    with pytest.raises(FluxError) as refused:
+        parse_profile(_edit(change), allow_emptied_entries=True)
+    assert fragment in str(refused.value)
+
+
+def test_an_empty_entry_still_names_a_timestamp_column_once() -> None:
+    def change(document: Dict[str, Any]) -> None:
+        _emptied(document)
+        document["tables"]["payment"]["calendar"][1] = {"column": "paid_at"}
+
+    with pytest.raises(FluxError, match="names one column twice"):
+        parse_profile(_edit(change), allow_emptied_entries=True)
+
+    def not_a_timestamp(document: Dict[str, Any]) -> None:
+        document["tables"]["payment"]["calendar"][0] = {"column": "amount"}
+
+    with pytest.raises(FluxError, match=r"calendar\[0\]\.column"):
+        parse_profile(_edit(not_a_timestamp), allow_emptied_entries=True)
 
 
 def test_the_schema_refuses_a_malformed_member_too() -> None:

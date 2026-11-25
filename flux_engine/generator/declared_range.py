@@ -54,6 +54,7 @@ __all__ = [
     "RangeCut",
     "cut_statistics",
     "range_text",
+    "refuse_empty_range",
     "declared_ranges_of",
     "range_cut_notes",
     "range_phrase",
@@ -80,6 +81,9 @@ class RangeCut:
 
 #: What stands for an end the contract does not declare, in either unit: beyond any date.
 _UNBOUNDED = 10**18
+
+#: The last millisecond a value holds: 9999-12-31T23:59:59.999Z.
+_LAST_MS = (date.max.toordinal() - DATE_EPOCH_ORDINAL + 1) * _DAY_MS - 1
 
 
 def range_phrase(low: str, high: str) -> str:
@@ -170,6 +174,66 @@ def _range_text(column: CompiledColumn) -> Tuple[str, str]:
 def range_text(column: CompiledColumn) -> Optional[Tuple[str, str]]:
     """The ends of *column*'s declared range as its values are spelled, or ``None`` for none."""
     return None if column.declared_range is None else _range_text(column)
+
+
+def _contract_end(column: CompiledColumn, value: int, strict: bool, *, low: bool) -> str:
+    """One end of the declared range as the contract spells it: the operator and the date or instant.
+
+    A low end past the last instant is spelled as ``>`` the last instant, which is what it holds.
+    """
+    exact = value - 1 if strict and low else value + 1 if strict else value
+    operator = ">" if low else "<"
+    if exact > _LAST_MS:
+        exact, operator, strict = _LAST_MS, ">", True
+    if column.logical_type.kind is LogicalKind.DATE and exact % _DAY_MS == 0:
+        text = date.fromordinal(exact // _DAY_MS + DATE_EPOCH_ORDINAL).isoformat()
+    else:
+        text = format_rfc3339_ms(exact)
+    return f"{operator}{'' if strict else '='} {text}"
+
+
+def _past_the_last_instant(column: CompiledColumn, low: int) -> bool:
+    """Whether a low end of *low* milliseconds leaves no instant, or no whole day for a DATE, to hold."""
+    if low > _LAST_MS:
+        return True
+    return column.logical_type.kind is LogicalKind.DATE and -(-low // _DAY_MS) * _DAY_MS > _LAST_MS
+
+
+def refuse_empty_range(expose_id: str, column: CompiledColumn, *, cutting: bool = True) -> None:
+    """Refuse (``FLX-3403``) a column whose contract range holds no instant: its low end lies beyond its high end.
+
+    The range's ends are the inclusive ``(low, high)`` milliseconds of
+    :attr:`CompiledColumn.declared_range`, with a strict end already moved inward, so an empty range
+    (``low > high``, or equal ends with one strict) is ``low > high`` here. A low end past the last
+    instant (or, for a DATE, the last day) holds no value either, whatever the high end. Whatever
+    draws the column, nothing could lie inside it, and every row would fail the contract's own check.
+    *cutting* is false for a recorded plan without ``dateRanges``, which never read the range:
+    nothing is refused.
+    """
+    declared = column.declared_range
+    if not cutting or declared is None or declared[0] is None:
+        return
+    past = _past_the_last_instant(column, declared[0])
+    if declared[1] is not None and declared[0] <= declared[1] and not past:
+        return
+    if declared[1] is None and not past:
+        return
+    from flux_engine.generator.relations import FLX_3403
+
+    strict_low, strict_high = column.declared_range_strict
+    ends = [_contract_end(column, declared[0], strict_low, low=True)]
+    if declared[1] is not None:
+        ends.append(_contract_end(column, declared[1], strict_high, low=False))
+    reason = (
+        "its low end lies past the last instant"
+        if past and (declared[1] is None or declared[0] <= declared[1])
+        else "its low end lies beyond its high end"
+    )
+    raise FluxError(
+        FLX_3403,
+        f"{expose_id}.{column.name}: the contract's range ({' and '.join(ends)}) holds no value: "
+        f"{reason}; correct the range in the contract",
+    )
 
 
 def cut_statistics(

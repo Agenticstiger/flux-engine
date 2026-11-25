@@ -54,12 +54,13 @@ patch:
 
 #: ``init`` without ``--overlay`` writes these bytes for the orders contract and profile: the
 #: simulation differs from what it was before by the ``replacedBy`` of each assumption, and by the
-#: ``amount`` histogram property, which the profile has no statistic to score (it is left out).
+#: ``amount`` histogram property, which the profile has no statistic to score (it is left out), and
+#: each document by its header, which no longer names the profile's file.
 UNCHANGED = {
     "orders.fluid.yaml": "65cf48e26642e0f7b0664ad134157292c2a3c20226214c95d895a25f9fdb8be2",
-    "persona.flux.yml": "5c3d197e5e2eef3ddbf27d04598d8d5b8d06046a92e6b291607a4843f65a7fe9",
-    "simulation.flux.yml": "86d720467a1f2fd68b00074626dcdaaf29fd105c90ae9bb2da28ccf02e6d0f08",
-    "world.flux.yml": "11ab31f09ec872c9efe5e253069797d47fe65578f7419477c4e00911f667efde",
+    "persona.flux.yml": "df39c8a70a44a947445827a6c844014636971aec1e4877a1516af42b1391662b",
+    "simulation.flux.yml": "9131587b411f026de3a944a90fe855e2cb5ee10be8b33ca6c0db0fca7fcfe492",
+    "world.flux.yml": "08b6c2dda4defc044dbd29cc08a42eea427f3c0a7eaeff5f1b827311a616b205",
 }
 
 
@@ -434,3 +435,89 @@ def test_an_overlay_that_restates_the_mean_is_the_mean_the_run_passes_its_own_ch
     code, out = _cli(capsys, "verify", str(bundle), "--run-id", run_id, *common)
     assert code == 0, out
     assert "outside the declared margin" not in out
+
+
+# ---------------------------------------------------------------------------
+# A profile with a calendar entry that holds none of its histograms
+# ---------------------------------------------------------------------------
+
+#: A patch that leaves the calendar alone: the members are twice as many.
+MORE_MEMBERS = "name: more-members\npatch:\n  tables:\n    member:\n      rowCount: 200\n"
+EMPTIED_ENTRY = "/tables/member/calendar/0"
+
+
+@pytest.fixture
+def _no_trial(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read what ``init`` declares from the small hand-written library, before the bundle's trial."""
+    from flux_engine.author import bundle as authoring
+
+    monkeypatch.setattr(authoring, "_refuse_unless_reproduced", lambda *args, **kwargs: None)
+
+
+def _emptied_library(root: Path) -> Tuple[Path, Path]:
+    """The library's contract and its profile, with the first calendar entry of the members emptied."""
+    from tests.cli.test_init_ledger_entries import CONTRACT, _emptied_profile
+
+    contract = root / "library.fluid.yaml"
+    contract.write_text(CONTRACT, encoding="utf-8")
+    profile = root / "library.profile.json"
+    profile.write_text(json.dumps(_emptied_profile()), encoding="utf-8")
+    return contract, profile
+
+
+def _bundle_over_an_emptied_entry(root: Path) -> Tuple[Path, Path, Any]:
+    contract, profile = _emptied_library(root)
+    result = run_init(
+        str(root / "bundles"),
+        contract=str(contract),
+        profile=str(profile),
+        overlays=(_file(root, "more.yml", MORE_MEMBERS),),
+    )
+    return root / "bundles" / "more-members", profile, result
+
+
+def _plan_over(bundle: Path, profile: Path, root: Path) -> Any:
+    from flux_engine.core.kernels import KERNEL_V2
+    from flux_engine.stages.plan import plan
+
+    return plan(
+        bundle, state_dir=root / "state", profile=profile, kernel=KERNEL_V2.version, stage=False
+    )
+
+
+@pytest.mark.usefixtures("_no_trial")
+def test_an_overlay_that_leaves_an_emptied_calendar_entry_alone_is_accepted_by_init_and_plan(
+    tmp_path: Path,
+) -> None:
+    bundle, profile, result = _bundle_over_an_emptied_entry(tmp_path)
+    assert result.exit_code == 0, result.stderr
+    block = _simulation(bundle)["extensions"][NAMESPACE]
+    assert block["overlay"]["patch"] == {"tables": {"member": {"rowCount": 200}}}
+    # The entry stays in the profile the bundle pins, holding none of its histograms.
+    assert json.loads(profile.read_text(encoding="utf-8"))["tables"]["member"]["calendar"][0] == {
+        "column": "renewed_on"
+    }
+    planned = _plan_over(bundle, profile, tmp_path)
+    assert planned.success, planned.stderr
+
+
+@pytest.mark.usefixtures("_no_trial")
+def test_an_overlay_citation_into_an_emptied_calendar_entry_is_refused_at_plan(
+    tmp_path: Path,
+) -> None:
+    bundle, profile, result = _bundle_over_an_emptied_entry(tmp_path)
+    assert result.exit_code == 0, result.stderr
+    document = _simulation(bundle)
+    register = document["extensions"][NAMESPACE]["parameters"]
+    (cited,) = [entry for entry in register if entry["source"] == "overlay"]
+    # The one number the overlay changed now cites the emptied entry, which it did not change.
+    cited["statistic"] = {"pointer": EMPTIED_ENTRY + "/month"}
+    (bundle / "simulation.flux.yml").write_text(
+        yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+    )
+    planned = _plan_over(bundle, profile, tmp_path)
+    assert not planned.success
+    assert planned.error_code == "FLX-5036", planned.stderr
+    assert (
+        EMPTIED_ENTRY in planned.stderr and "which holds none of its statistics" in planned.stderr
+    )

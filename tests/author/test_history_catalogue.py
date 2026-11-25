@@ -177,7 +177,8 @@ def test_a_foreign_key_into_a_table_that_is_not_released_whole_is_carried(tmp_pa
     assert "the emit declares no levels for the column, so it is carried" in state["note"]
     digests = bundle_digests(tmp_path)
     # Pinned from the files `fluxsim init` wrote for this contract and profile before a foreign key
-    # into a reference table was tracked.
+    # into a reference table was tracked, but for the header, which no longer names the profile's
+    # file, and the unused list, which names a history's tracked column whole.
     assert digests == WITHOUT_TRACKING
 
 
@@ -189,10 +190,10 @@ def test_the_written_bundle_validates_and_resolves(tmp_path: Path) -> None:
 
 #: sha256 of each file `fluxsim init` wrote for the profile that does not release `product` whole.
 WITHOUT_TRACKING: Dict[str, str] = {
-    "persona.flux.yml": "09abfa26eb21ac0667e7b872c394714fe05f17ae4a6b0a8b687b83d305023ab3",
+    "persona.flux.yml": "74f6062c0e15e70d2689583ad345103c7189b244886c3280c244573b49677755",
     "plans.fluid.yml": "13f3fbf211036962d53bcfc096eafb36463f913e12d60b9f2cb8587d0e8e8882",
-    "simulation.flux.yml": "f0717377bc2099f674a38f2a3de089c30f968824e30395192ec580090ed7ce4b",
-    "world.flux.yml": "9b8d0e5a5cc58cb4743d82eaeb2696bb8cee479486e835def76fc7e93705a17c",
+    "simulation.flux.yml": "6148ad202078a977497c5eea8f7aa498556fffa75cbf23d262272acc5cad1935",
+    "world.flux.yml": "20a3e0be50c0216bb8ef8ac07cdc72b0100a3cf4bddccbb91b7841fcc96b88cc",
 }
 
 

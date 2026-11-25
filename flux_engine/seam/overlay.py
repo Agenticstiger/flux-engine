@@ -402,7 +402,7 @@ def overlaid_profile(
 
     document = overlaid_document(profile, overlay, code=code)
     try:
-        return parse_profile(document), document
+        return parse_profile(document, allow_emptied_entries=True), document
     except FluxError as error:
         # The reader's words quote a key of the patch as it was written, and a key may carry a
         # newline or a terminal escape: the message holds it quoted.

@@ -76,6 +76,7 @@ from flux_engine.seam.coverage import printable
 from flux_stats import registry as _stats_registry
 from flux_stats.cliques import CLIQUE_DEFINITION, CLIQUE_DEFINITION_2
 from flux_stats.rank_correlation import RANK_IDENTIFIERS
+from flux_stats.spelling import refuse as _refuse_profile
 
 __all__ = [
     "DEFINITIONS_ADDED_1_4",
@@ -127,7 +128,12 @@ FLX_3113 = register(
     "that pointer in the profile it is handed. The pointer has to reach a statistic or a "
     "metric (or a part of one) whose `definition` is the one the entry names, or a "
     "table's `rowCount`, and nothing on the way may be withheld. A statistic listed in "
-    "extensions['com.agentics.flux/1'].unused is read the same way. A profile overlay "
+    "extensions['com.agentics.flux/1'].unused is read the same way, and may also name an "
+    "entry of the profile that holds statistics, whole, by the pointer of the entry and "
+    "with no `definition`: a calendar entry, a date pair, an exposure, a history, or one "
+    "tracked column of a history. An item that gives a `definition` at such a pointer is "
+    "refused, as is one that gives a `definition` at a table the profile publishes whole "
+    "under `references`, which is named by its pointer alone. A profile overlay "
     "adds two causes: a `profile` entry that cites a number the declared overlay changed, "
     "which names the overlay and has to say `source: overlay` with the overlay's name, "
     "and an `overlay` entry whose pointer reaches no statistic of the overlaid profile "
@@ -1135,13 +1141,25 @@ class ParameterRegister:
 
 
 def _adds_1_4(register: ParameterRegister) -> bool:
-    """Whether *register* counts a number at a position format 1-4-0 added, or cites a definition it added."""
+    """Whether *register* uses what format 1-4-0 added.
+
+    That is a number counted at a position the format added, a citation of a definition it added,
+    or an ``unused`` item that names a whole entry of the profile (a calendar entry, a date pair,
+    an exposure, a history or a tracked column of one).
+    """
     citations = [entry.citation for entry in register.entries]
     citations.extend(entry.replaced_by for entry in register.entries)
     citations.extend(item.citation for item in register.unused or ())
-    return any(registered.number.added_1_4 for registered in register.numbers) or any(
-        citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
-        for citation in citations
+    return (
+        any(registered.number.added_1_4 for registered in register.numbers)
+        or any(
+            citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
+            for citation in citations
+        )
+        or any(
+            item.citation.definition is None and _names_whole_entry(item.citation.tokens)
+            for item in register.unused or ()
+        )
     )
 
 
@@ -1619,6 +1637,47 @@ def _is_reference_entry(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> 
     )
 
 
+#: The statistics a history holds, and a tracked column of one, beside the keys that name them.
+_HISTORY_MEMBERS = (
+    "versionsPerEntity",
+    "firstStart",
+    "versionLength",
+    "chain",
+    "lastVersion",
+    "reasons",
+)
+_TRACKED_MEMBERS = ("initial", "transitions")
+
+#: The entries of a format 1-3-0 profile the reader refuses without some of their statistics: what
+#: each is called, the shape of the pointer at one (a ``None`` is any one token) and the keys of the
+#: statistics it holds. A list of unused statistics may name one whole, since leaving out a member of
+#: it alone leaves a document the reader refuses. The engine reads one that holds none of its
+#: statistics as an entry that holds nothing (the profile reader's ``allow_emptied_entries``).
+_ENTRY_KINDS: Tuple[Tuple[str, Tuple[Optional[str], ...], Tuple[str, ...]], ...] = (
+    ("calendar entry", ("tables", None, "calendar", None), ("month", "dayOfWeek", "hourOfWeek")),
+    ("date pair", ("tables", None, "datePairs", None), ("statistics", "order")),
+    ("history", ("tables", None, "history"), _HISTORY_MEMBERS),
+    ("tracked column", ("tables", None, "history", "columns", None), _TRACKED_MEMBERS),
+    ("date pair", ("relationships", None, "dates", None), ("statistics", "order")),
+    ("exposure", ("relationships", None, "exposure", None), ("children", "activeDays")),
+)
+_WHOLE_ENTRIES: Tuple[Tuple[Optional[str], ...], ...] = tuple(shape for _, shape, _ in _ENTRY_KINDS)
+
+
+def _names_whole_entry(tokens: Tuple[str, ...]) -> bool:
+    """Whether *tokens* have the shape of a pointer at an entry of :data:`_WHOLE_ENTRIES`."""
+    return any(
+        len(tokens) == len(shape)
+        and all(want is None or want == token for want, token in zip(shape, tokens, strict=True))
+        for shape in _WHOLE_ENTRIES
+    )
+
+
+def _is_whole_entry(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> bool:
+    """Whether *tokens* name an entry of format 1-3-0 that holds statistics, as a whole."""
+    return _names_whole_entry(tokens) and isinstance(_resolve(profile, tokens), Mapping)
+
+
 def _published(chain: Sequence[Tuple[Any, Tuple[str, ...]]]) -> bool:
     """Whether the profile published what the chain from a statistic to the target reaches.
 
@@ -1693,8 +1752,10 @@ def _check_entry_citation(
             raise FluxError(
                 FLX_3113, f"{at} cites an overlay, and no overlaid profile was handed to read it"
             )
+        _refuse_empty_entry_citation(entry.citation, overlay[1], at)
         _check_citation(entry.citation, overlay[1], at)
         return
+    _refuse_empty_entry_citation(entry.citation, profile, at)
     _check_citation(entry.citation, profile, at)
     if overlay is not None and changed_by_overlay(profile, overlay[1], entry.citation.tokens):
         raise FluxError(
@@ -1751,10 +1812,96 @@ def check_profile_citations(
     # unused are the ones that profile publishes: a statistic the overlay restated is one of them.
     unused_in = overlay[1] if overlay is not None else profile
     for item in register_.unused or ():
+        if _names_what_an_empty_entry_dropped(item.citation, unused_in):
+            continue  # nothing reads an entry that holds nothing, so listing it as unused is true
         _check_citation(
             item.citation,
             unused_in,
             f"{item.label or f'{where}: unused[{item.index}]'}.statistic",
+            whole_entries=True,
+        )
+
+
+def _holds(entry: Mapping[str, Any], key: str) -> bool:
+    """Whether *entry* holds the statistic *key*: a ``statistics`` list with no item holds none."""
+    return any(nfc(str(each)) == key for each in entry) and not (
+        key == "statistics" and entry.get(key) == []
+    )
+
+
+def _holds_nothing(kind: str, entry: Mapping[str, Any], members: Sequence[str]) -> bool:
+    """Whether *entry* holds none of *members*, and for a history, no tracked column holds one."""
+    if any(_holds(entry, key) for key in members):
+        return False
+    if kind != "history":
+        return True
+    columns = entry.get("columns")
+    return not isinstance(columns, Mapping) or not any(
+        isinstance(each, Mapping) and any(_holds(each, key) for key in _TRACKED_MEMBERS)
+        for each in columns.values()
+    )
+
+
+def _emptied_entry(
+    citation: Citation, profile: Mapping[str, Any]
+) -> Optional[Tuple[str, Tuple[str, ...], Tuple[str, ...]]]:
+    """The entry *citation* reaches into when that entry holds nothing: its kind, tokens and members.
+
+    The outermost one: a tracked column under a history that holds nothing is part of it. The
+    engine reads an entry of :data:`_ENTRY_KINDS` that holds none of its statistics as an entry
+    that holds nothing (the profile reader's ``allow_emptied_entries``), so a pointer at the entry
+    or anything under it reaches no statistic. ``None`` when the pointer is under no such entry.
+    """
+    tokens = citation.tokens
+    for depth in range(1, len(tokens) + 1):
+        for kind, shape, members in _ENTRY_KINDS:
+            if len(shape) != depth or any(
+                want is not None and want != token
+                for want, token in zip(shape, tokens, strict=False)
+            ):
+                continue
+            try:
+                entry = _resolve(profile, tokens[:depth])
+            except LookupError:
+                continue
+            if isinstance(entry, Mapping) and _holds_nothing(kind, entry, members):
+                return kind, tokens[:depth], members
+    return None
+
+
+def _names_what_an_empty_entry_dropped(citation: Citation, profile: Mapping[str, Any]) -> bool:
+    """Whether *citation* names an entry that holds nothing whole, or one of the keys it dropped."""
+    found = _emptied_entry(citation, profile)
+    if found is None:
+        return False
+    kind, entry, members = found
+    rest = citation.tokens[len(entry) :]
+    if not rest or nfc(rest[0]) in members:
+        return True
+    # A history names its tracked columns, each of which holds nothing with it.
+    return (
+        kind == "history"
+        and rest[0] == "columns"
+        and len(rest) <= 3
+        and (len(rest) < 3 or nfc(rest[2]) in _TRACKED_MEMBERS)
+    )
+
+
+def _refuse_empty_entry_citation(citation: Citation, profile: Mapping[str, Any], at: str) -> None:
+    """Refuse (``FLX-5036``) a citation at or under an entry that holds none of its statistics.
+
+    A number cited there rests on a statistic the profile does not publish, and the rule of the
+    profile format (each of these entries holds statistics) is what an entry read as holding
+    nothing leaves unmet, so a citation into it is refused by that rule, naming the entry.
+    """
+    found = _emptied_entry(citation, profile)
+    if found is not None:
+        kind, entry, members = found
+        raise _refuse_profile(
+            f"{at}.pointer",
+            f"cites {kind} {printable(render_pointer(entry))}, which holds none of its statistics "
+            f"({', '.join(members)}); the engine reads such an entry as holding nothing, so "
+            "nothing can be cited under it",
         )
 
 
@@ -1797,9 +1944,15 @@ def check_contract_citations(
             ) from None
 
 
-def _check_citation(citation: Citation, profile: Mapping[str, Any], at: str) -> None:
-    """Refuse (``FLX-3113``) a citation, named *at*, that the pinned *profile* does not publish."""
-    landing = _landing(citation, profile, at)
+def _check_citation(
+    citation: Citation, profile: Mapping[str, Any], at: str, *, whole_entries: bool = False
+) -> None:
+    """Refuse (``FLX-3113``) a citation, named *at*, that the pinned *profile* does not publish.
+
+    A citation of an entry that holds statistics (a calendar entry, a date pair, an exposure, a
+    history) is read only with *whole_entries*, which only a statistic listed as unused has.
+    """
+    landing = _landing(citation, profile, at, whole_entries=whole_entries)
     if landing is None:
         return
     found, chain = landing
@@ -1827,7 +1980,7 @@ def _check_citation(citation: Citation, profile: Mapping[str, Any], at: str) -> 
 
 
 def _landing(
-    citation: Citation, profile: Mapping[str, Any], at: str
+    citation: Citation, profile: Mapping[str, Any], at: str, *, whole_entries: bool = False
 ) -> Optional[Tuple[Optional[str], List[Tuple[Any, Tuple[str, ...]]]]]:
     """Where *citation* lands: :func:`_cited_statistic`'s answer, or ``None`` for a ``rowCount``.
 
@@ -1847,6 +2000,14 @@ def _landing(
                 raise FluxError(
                     FLX_3113,
                     f"{at} is a table published whole under references, which has no "
+                    "definition; drop 'definition'",
+                )
+            return None
+        if whole_entries and _is_whole_entry(profile, citation.tokens):
+            if citation.definition is not None:
+                raise FluxError(
+                    FLX_3113,
+                    f"{at} is an entry of the profile that holds statistics, which has no "
                     "definition; drop 'definition'",
                 )
             return None

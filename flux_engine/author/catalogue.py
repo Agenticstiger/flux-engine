@@ -41,6 +41,7 @@ from flux_engine.author.given import (
     _parent_levels,
     _Table,
     _table,
+    note_no_range,
 )
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.coverage import printable
@@ -196,6 +197,8 @@ def _linked_property(
     }
     labels: List[Label] = []
     if table.numeric:
+        if note_no_range(child):
+            return None, None
         document: Dict[str, Any] = {
             "property": "marginalHistogram",
             "column": child.name,

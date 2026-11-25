@@ -85,6 +85,16 @@ class DatedExpose:
     #: Every column the bundle writes for it, or ``None`` when that is not checked: a dwell
     #: family is given one of them.
     columns: Optional[FrozenSet[str]] = None
+    #: Its columns that the history written for it, or the projection entry (``events`` or
+    #: ``periods``) of a history written for it, sets, each with the sentence that says so: the
+    #: validity start and end and the ``activation`` column of a history, the date column, the
+    #: period column and the columns a projection entry takes from its history. A lifetime or a
+    #: ``within`` entry would be a second source for them.
+    history: Mapping[str, str] = field(default_factory=dict)
+    #: Its columns that a projection entry sets, each with the sentence that says so. A ``within``
+    #: entry reads through a relationship, and the plan refuses one whose foreign-key column the
+    #: entry sets, since the cell then holds the history's value, not the row the relationship drew.
+    projected_keys: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -448,6 +458,9 @@ class _Declarer:
         self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]] = []
         #: expose -> (start, end or None, the declaration)
         self.lifetimes: Dict[str, Dict[str, Any]] = {}
+        #: The exposes whose lifetime is only a start a relationship's date pair offered: one is
+        #: kept only while a within entry reads it.
+        self.start_only: set[str] = set()
         #: A written within entry's id -> (the entry, its profile relationship's index, its parent).
         self.origin: Dict[int, Tuple[Dict[str, Any], int, str]] = {}
 
@@ -510,6 +523,16 @@ class _Declarer:
             return f"the contract declares no DATE or TIMESTAMP column {missing[0]!r} for it"
         return None
 
+    def _history_sets(self, expose: str, column: str) -> Optional[str]:
+        """Why a date of an expose is set by its history or a projection of it, or ``None``."""
+        return self.exposes[expose].history.get(column)
+
+    def _set_already(self, expose: str, column: str) -> Optional[str]:
+        """Why a date of an expose is set by its history, a key or a rule of the contract, or ``None``."""
+        if column in self.exposes[expose].blocked:
+            return f"a key or a rule of the contract already sets {column!r}"
+        return self._history_sets(expose, column)
+
     def lifetimes_of_tables(self) -> None:
         tables = self.profile.get("tables")
         for expose, table in (tables.items() if isinstance(tables, Mapping) else ()):
@@ -558,6 +581,10 @@ class _Declarer:
         reversed_pair = forward < ORDER_HOLDS_AT_LEAST or reverse > forward
         start, end = (pair.second, pair.first) if reversed_pair else (pair.first, pair.second)
         reason = self._usable(expose, pair.first, pair.second)
+        if reason is None:
+            reason = self._history_sets(expose, pair.first) or self._history_sets(
+                expose, pair.second
+            )
         if reason is None and held.kinds[pair.first] is not held.kinds[pair.second]:
             reason = "a lifetime's end is the same kind of column as its start"
         if reason is None and end in held.blocked:
@@ -922,8 +949,18 @@ class _Declarer:
                 reason = "the contract declares no to-one relationship of these two exposes"
             elif parent_table == child_table:
                 reason = "a table's rows within the lifetime of its own rows are not declared"
+            else:
+                reason = self._key_set_by_projection(child_table, relationship)
             listed.append((index, parent_table, (child_table, relationship), pairs, reason))
         return listed
+
+    def _key_set_by_projection(self, child_table: str, relationship: Any) -> Optional[str]:
+        """Why a relationship cannot be read, when a projection entry sets a foreign key of its child, or ``None``."""
+        held = self.exposes[child_table].projected_keys
+        for column in relationship.from_columns:
+            if column in held:
+                return held[column]
+        return None
 
     def _dated_sides(
         self, entry: Any
@@ -984,6 +1021,7 @@ class _Declarer:
             self._offer_starts(best, parent_table, child_table, pairs)
         for parent_table, (_, start) in best.items():
             self.lifetimes[parent_table] = {"emit": parent_table, "start": start}
+            self.start_only.add(parent_table)
 
     def _offer_starts(
         self,
@@ -998,6 +1036,10 @@ class _Declarer:
             if order is None or not order.holds(order.same + order.after):
                 continue
             if self._usable(parent_table, pair.first) or self._usable(child_table, pair.second):
+                continue
+            if self._history_sets(parent_table, pair.first) is not None:
+                continue
+            if self._set_already(child_table, pair.second) is not None:
                 continue
             rows = order.same + order.after
             if parent_table not in best or rows > best[parent_table][0]:
@@ -1021,6 +1063,11 @@ class _Declarer:
         for pair in ends:
             if id(pair) not in read_ends:
                 self._reject_end(pair)
+        # A start a pair offered dates nothing when no within entry reads it: the pair is unused
+        # (the entry it would date was refused, with the reason), so the start goes with it.
+        read = {self.origin[id(entry)][2] for entry in entries}
+        for parent_table in sorted(self.start_only - read):
+            del self.lifetimes[parent_table]
         self._declare_exposures(entries)
         return entries
 
@@ -1208,7 +1255,9 @@ class _Declarer:
         if parent_life is None or parent_life["start"] != pair.first:
             self.reject(
                 pair,
-                f"{pair.first!r} does not start a lifetime the bundle declares for "
+                self._history_sets(parent_table, pair.first)
+                or self._set_already(child_table, pair.second)
+                or f"{pair.first!r} does not start a lifetime the bundle declares for "
                 f"{parent_table!r}",
             )
             return None
@@ -1256,8 +1305,8 @@ class _Declarer:
         reason = self._usable(child_table, column)
         if reason is None:
             reason = self.declined_within.get((child_table, column))
-        if reason is None and column in self.exposes[child_table].blocked:
-            reason = f"a key or a rule of the contract already sets {column!r}"
+        if reason is None:
+            reason = self._set_already(child_table, column)
         if reason is None and child_life is not None and child_life.get("end") == column:
             reason = f"{column!r} is the end of the lifetime of {child_table!r}"
         return reason

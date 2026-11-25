@@ -23,6 +23,7 @@ from jsonschema import Draft202012Validator
 
 from flux_engine.evidence.register import (
     REGISTER_SCHEMA_URL,
+    REGISTER_SCHEMA_URL_1_2,
     REGISTER_SCHEMA_URL_1_3,
     REGISTER_SCHEMA_URL_1_4,
     build_register_document,
@@ -153,6 +154,33 @@ def test_a_replacement_or_an_unused_item_that_names_a_new_definition_is_format_1
     document = build_register_document(_register(unused=[item]))
     assert document["_schemaURL"] == REGISTER_SCHEMA_URL_1_4
     Draft202012Validator(SCHEMA_1_4).validate(document)
+
+
+@pytest.mark.parametrize(
+    "pointer",
+    [
+        "/tables/t/calendar/0",
+        "/tables/t/datePairs/1",
+        "/tables/t/history",
+        "/tables/t/history/columns/c",
+        "/relationships/0/dates/0",
+        "/relationships/0/exposure/0",
+    ],
+)
+def test_an_unused_item_that_names_a_whole_entry_is_format_1_4_0(pointer: str) -> None:
+    item = {"statistic": {"pointer": pointer}, "reason": "Nothing the entry holds is read."}
+    document = build_register_document(_register(unused=[item]))
+    assert document["_schemaURL"] == REGISTER_SCHEMA_URL_1_4
+    Draft202012Validator(SCHEMA_1_4).validate(document)
+
+
+def test_an_unused_item_that_names_a_member_of_an_entry_keeps_format_1_2_0() -> None:
+    item = {
+        "statistic": {"pointer": "/tables/t/calendar/0/dayOfWeek"},
+        "reason": "No rule reads the day of the week.",
+    }
+    document = build_register_document(_register(unused=[item]))
+    assert document["_schemaURL"] == REGISTER_SCHEMA_URL_1_2
 
 
 @pytest.mark.parametrize("definition", ["cliqueMarginal/1", "mean/1"])
