@@ -215,15 +215,14 @@ FLX_3403 = register(
     "one DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no room "
     "inside timeBounds for an entity's versions, when a tracked column is not categorical, names "
     "an undeclared level or has no transition row for a level a chain can reach, when a tracked "
-    "column that is a foreign key has a level that is no key its parent holds in the plan (a "
-    "--scale below 1 cuts the parent's keys and leaves the levels), or when its parent is not a "
-    "to-one relationship. A history's parent.lifetime is refused when the parent emit declares no "
-    "lifetimes entry, or declares a history of its own that sets a lifetime column (a validity, "
-    "activation, tracked, end or rule-set column), which then differs between a parent's versions; "
-    "when the parent's lifetime leaves no room for one version of an entity (the message names "
-    "`history(<emit>).parent.lifetime`, the entity count and the parents' lifetimes); or when the "
-    "rows of the histories that keep to their parent's lifetime still move after one pass for "
-    "every emit (a history under a history that holds fewer rows than it declares is laid out "
+    "foreign key has a level that is no key its parent holds in the plan, or when its parent is "
+    "not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
+    "declares no lifetimes entry, or declares a history of its own that sets a lifetime column (a "
+    "validity, activation, tracked, end or rule-set column), which then differs between a parent's "
+    "versions; when the parent's lifetime leaves no room for one version of an entity (the message "
+    "names `history(<emit>).parent.lifetime`, the entity count and the parents' lifetimes); or "
+    "when the rows of the histories that keep to their parent's lifetime still move after one pass "
+    "for every emit (a history under a history that holds fewer rows than it declares is laid out "
     "after it). An asOf entry is refused when its relationship does not reach the natural entity "
     "of an emit that declares a history, its date is not a DATE or TIMESTAMP column, or a rule "
     "sets a column the contract requires from a row read as of a date where its entity has no "
@@ -245,8 +244,8 @@ FLX_3403 = register(
     "given a column the entry sets, which the draw would read as the level it drew; the message "
     "names both columns. A DATE or TIMESTAMP column drawn from declared statistics is refused when "
     "its contract's `range` rule holds none of the dates it is drawn from, or would cut the bins "
-    "of a column another column is drawn given; so is a column whose `range` rule is empty (its "
-    "low end beyond its high end); the message names the column and the range.",
+    "of a column another column is drawn given; so is an empty `range` rule (no value lies between "
+    "its ends); the message names the column and the range.",
 )
 
 #: Domain-separation label of a key layout's permutation key.
