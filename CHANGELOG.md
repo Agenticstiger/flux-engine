@@ -131,13 +131,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
 - The run's window now covers the whole range of every date column, the date range the contract declares, and the
   bins the column is drawn from, so `init` no longer cuts a column at a window that other columns imply. A column's
-  bins are cut only at a window you pass with `--window`. A contract range that ends in the year 9999 says only that
-  the column holds a date and gives the window nothing: a run's periods step past the window's end, and a window that
-  ends in that year cannot be planned. A window that a contract range widens beyond every span the profile and the
-  bundle give (a loose range such as `between '1900-01-01' and '2100-12-31'`), or that comes only from a contract
-  range because neither gives a span, is named under "time window", a gap at `/spec/timeBounds` that `--strict`
-  refuses; a date column the profile publishes no order statistic for is drawn
-  evenly across the whole window.
+  bins are cut only at a window you pass with `--window`. A contract range that ends in the year 9999, like a column
+  whose every value is in that year (an open end of 9999-12-31 on every row), says only that the column holds a date
+  and gives the window nothing: a run's periods step past the window's end, and a window that ends in that year
+  cannot be planned. A window that a contract range widens beyond every span the profile and the bundle give (a
+  loose range such as `between '1900-01-01' and '2100-12-31'`), or that comes only from a contract range because
+  neither gives a span, is named under "time window", a gap at `/spec/timeBounds` that `--strict` refuses; a date
+  column the profile publishes no order statistic for is drawn evenly across the whole window.
 - The parameter register counts the numbers under the namespace keys beside `emits` (`facts`, `links`, `counts`,
   `history`, `events`, `periods`, `lifetimes`, `within`, `rates`, `conditions`) and of the copula, and `init` gives
   each one a source. A copula's values cite the rank correlation of their pair, and a binned clique's numbers cite the
@@ -165,6 +165,18 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   versions, so it draws no column; `validate` and `plan` refused it with `FLX-5034`, and a key column with no
   statistics with `FLX-3403`. flux-stats' `parse_fidelity_block` takes `allow_no_columns`, which the engine sets for
   an emit a `snapshots` entry names. Every other emit keeps both refusals.
+- `init --window` no longer writes a register with two entries for one number (`FLX-3105`, "by the same pointer")
+  when the window cuts a date column whose weights rest on one assumption, such as a withheld minimum. The column's
+  one entry names both reasons.
+- `init` no longer leaves out a table whose date column holds one value, 9999-12-31 (the end of every open version,
+  say), which made it refuse a table that refers to it with `FLX-3403`. The column is drawn within the day that ends
+  there, stated as an assumption.
+- `init` no longer names the profile's file in the header of each document it writes, so the same contract and
+  profile give the same bytes, plan digest and `runId` wherever the profile is saved. Every bundle `init` writes from
+  now on differs by that header line, and so by its digests, from one it wrote before for the same inputs; a bundle
+  already written keeps its own.
+- A refused `init` reports its refusal even when a file it wrote cannot be removed while it cleans up, rather than a
+  permission error.
 
 ## 0.11.1 - 2026-11-24
 
