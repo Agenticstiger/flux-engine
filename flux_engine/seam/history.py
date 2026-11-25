@@ -944,10 +944,51 @@ def _check_ends(
                 "so an open version cannot leave it NULL",
             )
         return
-    if _instant(entry.open_end, kind) is None:
+    sentinel = _instant(entry.open_end, kind)
+    if sentinel is None:
         raise FluxError(
             refusal,
             f"{at}.openEnd {entry.open_end!r} is not a {kind.value} (the end column's type)",
+        )
+    _check_sentinel(entry, target, kind, sentinel, at, refusal)
+
+
+def _check_sentinel(
+    entry: HistoryEntry,
+    target: HistoryTarget,
+    kind: LogicalKind,
+    sentinel: int,
+    at: str,
+    refusal: ErrorCode,
+) -> None:
+    """Refuse an ``openEnd`` a closed version's end can equal, so that it would read as open.
+
+    The open end is a value no version's real end takes, as dbt's ``dbt_valid_to_current`` is a far
+    future day (``9999-12-31``) no snapshot row closes on. Before ``until`` a closed version may end
+    there. Under ``nextStart`` a closed version ends where the next one starts, which may be any day
+    of ``timeBounds`` up to its end, so an ``openEnd`` inside the window could be a closed end, and
+    a projection that reads the version up to the window's end would read it closed there. A value
+    at or after the year 9999, which a contract's range reads as an open end
+    (:data:`~flux_engine.seam.range_rules.WINDOW_END_LIMIT_MS`), is after any window.
+    """
+    until = _instant(entry.until, kind)
+    if until is not None and sentinel < until:
+        raise FluxError(
+            refusal,
+            f"{at}.openEnd {entry.open_end!r} is before until {entry.until!r}, where a closed "
+            "version can end, so such a version would read as open; set an openEnd after the "
+            "window, such as 9999-12-31, or none, which leaves an open version's end NULL",
+        )
+    if entry.chain != "nextStart" or target.window is None:
+        return
+    low, high = (_in_unit(edge, kind) for edge in target.window)
+    if low <= sentinel <= high:
+        raise FluxError(
+            refusal,
+            f"{at}.openEnd {entry.open_end!r} is inside timeBounds, where a nextStart version "
+            "ends on the next version's start, so a closed version could hold it and an open one "
+            "would read as closed inside the window; set an openEnd after timeBounds.end, such as "
+            "9999-12-31, or none",
         )
 
 
@@ -1170,7 +1211,8 @@ def check_history(entry: HistoryEntry, target: HistoryTarget, *, refusal: ErrorC
     ``weight``; an ``until`` that is not a value of the start's type, is after ``timeBounds.end``
     or is not after ``timeBounds.start``; a ``start`` bin edge outside ``[timeBounds.start,
     until]``; ``dayBefore`` on TIMESTAMP columns; an ``openEnd`` that does not read as the end
-    column's type, or none on an end column the contract requires; an ``activation`` column not of
+    column's type, that is before ``until`` or, under ``nextStart``, inside ``timeBounds``, or none
+    on an end column the contract requires; an ``activation`` column not of
     the start's type; a tracked column that is not categorical or declares a ``nullFraction``; a
     level a ``transitions`` or ``initial`` names that the column does not declare; ``reasons``
     naming a column that is not tracked; an ``end`` ``value`` that is not a level of its column or

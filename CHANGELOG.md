@@ -302,6 +302,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   over its contract's range, or a histogram grouped by a boolean column. The column is drawn as before, and its notes
   say which property is left out.
 
+- A history's `openEnd` could be a value a closed version ends on, and `verify` read NULL and the value alike as
+  open, so an end column that mixed the two, or a closed version that held the value, passed. `plan` now refuses
+  (`FLX-3403`) an `openEnd` before `until` and, under `nextStart`, one inside `timeBounds`; a value in the year 9999
+  or later is after every window. `verify` adds `history:open_end`: with an `openEnd`, no end is NULL and only an
+  entity's last version carries the value; without one, the line is present only when some end is in the year 9999
+  or later, and such an end fails it (ADR 0017, the amendment of 2026-11-25). No generated row moves.
+
 ## 0.11.1 - 2026-11-24
 
 Fixes for the findings of the 0.11.0 inspection. No digest moves, except for a bundle that hit the copula overflow
