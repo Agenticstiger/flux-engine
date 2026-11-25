@@ -3132,6 +3132,9 @@ def _author_with_fallbacks(inputs: AuthorInputs, fallbacks: _Fallbacks) -> Autho
         return _author_bundle(inputs, fallbacks)
     except _ProjectionRefused as refused:
         projection = str(refused)
+    except _HistoryRefused as refused:
+        # The bundle holds no projection, so the history is the layer the plan refuses.
+        return _author_bundle(inputs, fallbacks, str(refused))
     try:
         return _author_bundle(inputs, fallbacks, None, projection)
     except _HistoryRefused as refused:
