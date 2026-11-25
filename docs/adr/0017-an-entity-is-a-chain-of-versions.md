@@ -528,7 +528,12 @@ entity in place of one (`counts.pass_excess` is both), so the emit keeps its dec
 rooms' order. An entity that takes more than the shape's largest count does so only for the versions another entity
 lost. Only when no entity has room left do the rows shrink: the history then has fewer rows than declared, the
 shortfall. `plan`, `apply` and `verify` count the rows it has: the emit is planned again at them, and a layout is
-always worked out from the declared rows. A history whose parent is itself such a history reads the
+always worked out from the declared rows. The shortfall is no refusal and is recorded: the emit's entry in `plan.json`
+holds `declaredRows`, the rows the contract declares after `--scale`, and `shortfall`, the rows missing from `generator.rows`,
+and only an emit whose shortfall is above zero has the two keys, so every other plan keeps its bytes and its run id.
+`planDigest` covers them. `fluxsim verify` reads them back and prints one line for that emit, `shortfall <emit>: <rows>
+rows written of <declaredRows> declared (<shortfall> short)` (`historyShortfalls` in `--json`), and no line for a run
+with none. A history whose parent is itself such a history reads the
 rows its parent holds, so it is laid out after the parent is planned at them, in as many passes as there are emits
 and one; a count still moving after that is `FLX-3403`. Since the count never exceeds the room, the fit (section 4, point 4) never
 fails and the chain ends by `limit`.
@@ -563,7 +568,7 @@ bin by bin but read on demand, in whole numbers, by bisection over the bins that
 full table gives for every draw. Plan time therefore grows linearly with the entities and logarithmically with the
 bins, and does not grow with the number of distinct parent lifetimes beyond that. The cap-and-pass costs one sort per
 round, and a round that finds no entity under its cap ends it. `plan` also notes how many entities were capped, how many versions moved and any
-shortfall (the room, point 2).
+shortfall (the room, point 2); the shortfall is also in the plan document, as point 2 says.
 
 **4. The `activation` column** holds the first start, as section 5 says, so it keeps to the same bound.
 
@@ -650,3 +655,39 @@ its values. `init` now tracks it:
   hold entities.
 - **What moves.** A bundle for a contract with such a foreign key in a history whose profile publishes its
   `initial` and `transitions`. Every other bundle keeps its bytes.
+
+## Amendment of 2026-11-25: a dependency beside a history parent
+
+A history with a `parent` lays its entities out over the parent's rows (ADR 0016), so every version of an entity
+carries the one parent its entity has. The relationship's foreign key is a function of the natural entity, and a
+contract `dependency` that says so is true before it is read. It was `FLX-3403`, since a dependency sets its `to`
+columns and the layout sets them too. FLUID's by-entity copy needs exactly this dependency to make a copied column
+legal.
+
+- **What is accepted.** A `dependency` on the history's emit whose `to` columns are all foreign-key columns of
+  `parent.relationship` and whose `from` columns include the natural entity's column. The layout sets the columns;
+  the rule is kept for `verify` and draws nothing, so every emit has the bytes of the same bundle without it. The
+  plan lists it as laid out by the parent layout.
+- **What stays refused.** A dependency whose `from` lacks the natural entity's column, one whose `to` adds a column
+  the layout does not set, and one whose `to` column declares a `nullFraction`, as any dependency on a counted
+  relationship (`FLX-3403`).
+- **What moves.** Nothing already accepted: a bundle with no such dependency keeps its bytes.
+
+## Amendment of 2026-11-25: a tracked foreign key's levels are keys its parent holds
+
+A tracked column writes the level it is at as the cell and takes no parent row. For a foreign key that makes every
+level a value of the parent's key only while the parent's rows hold it, which nothing checked: `--scale` below 1 cuts
+a drawn catalogue's rows and its key range and leaves the levels, so a link the bundle held at scale 1 broke at
+scale 0.25 with the plan still exiting 0.
+
+- **The check.** `plan` refuses (`FLX-3403`) a tracked column that is the one column of a to-one relationship when a
+  level it declares is no key of the parent's column in this plan: for a drawn parent, a value its ordered key
+  layout does not take; for a reference expose, a value it does not publish. The message names the expose, the
+  column, the first such level and the keys the parent holds (`keys 101 to 107, 7 rows`), so a scaled plan shows
+  the cut, and says to plan without `--scale` or to stop tracking the column.
+- **What is not refused.** A foreign key that is not tracked: a `declared` pick takes the nearest key the parent
+  holds (`KeyGrid.row_near`), so its link holds at any scale. A parent whose key is an identifier or a several-column
+  key, and a relationship of several columns, are not asked.
+- **What moves.** Nothing for a bundle whose levels are all keys of the parent, at any scale, and nothing for a
+  bundle with no tracked foreign key. A bundle with a level that is no key is refused at plan where it ran before
+  with a link below 100 %.

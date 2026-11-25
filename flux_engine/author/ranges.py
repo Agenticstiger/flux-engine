@@ -19,7 +19,9 @@ import math
 import re
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, Mapping, Optional, Tuple
+
+from flux_engine.seam.range_rules import and_parts as _and_parts
 
 __all__ = ["LONGEST_NUMBER", "RangeRule", "column_range", "grid_bounds", "parse_range"]
 
@@ -62,25 +64,6 @@ def _number(text: str) -> Optional[Fraction]:
         return Fraction(text)
     except (ValueError, ZeroDivisionError):
         return None
-
-
-def _and_parts(text: str) -> List[str]:
-    """*text* cut at each word ``and``, in any case, in one pass over its words.
-
-    The same parts as splitting at whitespace, ``and``, whitespace; a regular
-    expression for that backtracks over a long run of spaces, and a contract
-    can hold one.
-    """
-    parts: List[str] = []
-    words: List[str] = []
-    for word in text.split():
-        if word.lower() == "and":
-            parts.append(" ".join(words))
-            words = []
-        else:
-            words.append(word)
-    parts.append(" ".join(words))
-    return parts
 
 
 def parse_range(constraint: Any) -> Optional[RangeRule]:

@@ -537,7 +537,8 @@ def parent_bound_notes(expose_id: str, chain: "HistoryPlan") -> List[str]:
     the versions that moved to entities with room to spare (a shortfall too, the declared rows the
     parents leave no room for), and the count of entities forced to end with their parent in one
     version, whose one version is the ending version itself and carries the end value from its
-    start (ADR 0017, amendment of 2026-11-24). Advice only: no plan document or digest carries it.
+    start (ADR 0017, amendment of 2026-11-24). Advice only, except the shortfall, which the plan
+    document records too (``declaredRows`` and ``shortfall``).
     """
     notes: List[str] = []
     cut = chain.cut

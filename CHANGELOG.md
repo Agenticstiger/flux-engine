@@ -51,7 +51,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   versions than it was given is capped at that room, and the versions it loses go one at a time to the entities
   with the most room left (the allotment `one_to_one` uses, with a cap for each entity), so the emit keeps its
   declared rows; only when no entity has room left does the history hold fewer rows, and plan, apply and verify
-  count the rows it has; a history under such a history is laid out after it. A parent that leaves no room for even one version is `FLX-3403` at plan, naming
+  count the rows it has. That shortfall is recorded: the emit's entry in `plan.json` holds `declaredRows` and
+  `shortfall` (only for an emit with a shortfall above zero, so every other plan keeps its bytes and run id; the plan
+  digest covers them), and `fluxsim verify` prints one line, `shortfall <emit>: <rows> rows written of <declaredRows>
+  declared (<shortfall> short)`, for it (`historyShortfalls` in `--json`). A history under such a history is laid out
+  after it. A parent that leaves no room for even one version is `FLX-3403` at plan, naming
   `history(<emit>).parent.lifetime`, how many entities it is and their parents' lifetimes. A history without the
   key keeps every byte. A parent that declares a history of its own must carry the lifetime columns (a column its
   history sets, or a rule sets, can differ between versions): `FLX-3403` at plan names the emit and the columns.
@@ -191,6 +195,40 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   versions, so it draws no column; `validate` and `plan` refused it with `FLX-5034`, and a key column with no
   statistics with `FLX-3403`. flux-stats' `parse_fidelity_block` takes `allow_no_columns`, which the engine sets for
   an emit a `snapshots` entry names. Every other emit keeps both refusals.
+- A contract `dependency` beside a history `parent` is accepted when it holds by construction: its `to` columns are
+  all foreign-key columns of the `parent` relationship and its `from` columns include the history's natural entity
+  column. The parent layout gives every version of an entity one parent, so the dependency is true, draws nothing
+  and sets nothing, and `verify` scores it at 100 %. It was `FLX-3403` ("a dependency sets its columns, which the
+  layout sets"). Any other dependency on a counted relationship is refused as before, and every emit of a bundle
+  with such a dependency keeps the bytes the bundle without it has (ADR 0017, the amendment of 2026-11-25).
+- A tracked foreign key whose level is no key its parent holds is `FLX-3403` at plan. A tracked column writes its
+  level as the cell and takes no parent row, so `--scale` below 1 cut a catalogue's rows and keys and left the
+  levels: `plan --scale 0.25` exited 0 and `verify` scored the link at about a quarter. The refusal names the expose,
+  the column, one such level and the keys the parent holds in that plan, and says to plan without `--scale` or to stop
+  tracking the column. A foreign key that is not tracked takes the nearest key the parent holds and is not refused.
+  Every bundle whose levels are all keys, at any scale, keeps its bytes, and so does every other bundle.
+- A DATE or TIMESTAMP column is drawn inside the range its contract declares (`validationRules: [{type: range,
+  constraint: "between '2001-01-01' and '2005-12-31'"}]`), and `verify` checks the range. Before, a column whose bins
+  ran past its range wrote rows outside it and `verify` said `rows: ok`. On kernel 0.2.0 the
+  column's declared statistics are cut at the range before the draw: a `range` is intersected, a bin is cut at the
+  range's ends and keeps weight in proportion to the width it keeps, and a bin outside is dropped. `plan` prints one
+  note for each cut column. A range that holds none of the column's dates is refused (`FLX-3403`), as is a cut of the
+  bins of a column another column is drawn given. A column whose statistics lie inside its range keeps its bytes, and
+  so does a run on kernel 0.1.0; a column the cut changes has a new `generatorDigest`, plan digest and `runId`. `verify`
+  counts the rows of a DATE, TIMESTAMP, INT or DECIMAL column outside the range its contract declares and fails with a
+  `ranges:` line naming the expose, the column, the rows and the range (and `rangeConformance` in `--json`). A run with
+  no declared range, or none outside it, prints exactly what it printed before (ADR 0024, the amendment of
+  2026-11-25). A strict end (`>`, `<`) is kept strict, one unit inward: `>= '2001-01-01' and < '2006-01-01'` draws
+  and accepts up to 2005-12-31, and `verify` quotes the range as the contract spells it. A strict range that holds no
+  day is refused at `plan` (`FLX-3403`). A range with one end (`>= '2024-01-01'`), and one whose high
+  end is in the year 9999 (the open-end spelling), is cut and verified at the end it declares. An INT or DECIMAL column whose contract name is not in NFC keeps its range. A plan that cut a column says so with `dateRanges: "cut"` in `plan.json`; a recorded plan without the
+  key (every plan written before this change) replays with no cut, so its rows and `replay --assert-digest` keep what
+  they were, and a plan that cut nothing keeps its bytes and its run id. A column another construct sets (a history's validity start and end, the cells
+  an events or periods entry sets, a snapshot's columns, a key, a column a rule, `lifetimes`, `within` or `rates` sets)
+  is not cut and is never `FLX-3403`: `plan` prints one note naming what sets it, and `verify` still counts its rows
+  outside the range.
+  At `--scale` above 1 `verify` does not count the contract's range of a key column the scale widens, and `plan` prints
+  one note naming the column, its range and the scale; a column the scale does not widen stays checked.
 
 ## 0.11.1 - 2026-11-24
 

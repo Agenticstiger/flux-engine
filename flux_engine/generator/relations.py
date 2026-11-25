@@ -188,60 +188,62 @@ __all__ = [
 FLX_3403 = register(
     "FLX-3403",
     "the related tables cannot be generated as declared",
-    "FLUX generates the exposes of one contract together: every key the contract declares is "
-    "laid out from the row index and never repeats, and every foreign key takes a key its "
-    "parent's rows hold. A relationship whose target the Simulation does not generate from "
-    "statistics, a key whose declared range or bins hold fewer values than its rows, a "
-    "one_to_one child with more rows than its parent, a nullFraction on a key column or on a "
-    "relationship whose joinType is inner, a key declared with a draw that would repeat values, "
-    "column types that differ between a foreign key and its target, a key column nothing "
-    "produces, and two relationships that set one column without one implying the other are "
-    "refused before any row is drawn. So are the declarations that shape how children are "
-    "placed: a counts entry whose minChildren the child rows or the shape cannot meet (too few "
-    "child rows for the eligible parents, or above what the shape allows), whose parentWhen "
-    "leaves no parent eligible or reads beyond the parent's own row, or sits on a relationship "
-    "the layout cannot place (a key, a bridge side, an implied or weighted relationship); a "
-    "required sum, min or max over the children with no ifNone where a parent can have no "
-    "children, which would leave it NULL; a link condition on an inner relationship, on a key, "
-    "or on a relationship another one implies; a bridge whose side is named twice, is "
-    "one_to_one, carries a nullFraction or has more rows than the pairs of its parents; and a "
-    "weight on a relationship that cannot pick parents by one, on a non-numeric parent column, "
-    "or with negative or all-zero published values. A reference expose is refused when a "
-    "published cell does not fit its column (a decimal with too many digits, a number outside "
-    "its type's range). The message names the expose, the column or relationship, and the change "
-    "to make (for a parentWhen with no eligible parent, the condition too). A history is refused "
-    "when its emit has no validity window (one natural entity with a start and an end of one "
-    "DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no room inside "
-    "timeBounds for an entity's versions, when a tracked column is not categorical, names an "
-    "undeclared level or has no transition row for a level a chain can reach, or when its parent "
-    "is not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
-    "declares no lifetimes entry, or declares a history of its own that sets a lifetime column "
-    "(a validity, activation, tracked, end or rule-set column), which then differs between a "
-    "parent's versions; when the parent's lifetime leaves no room for one version of an entity "
-    "(the message names `history(<emit>).parent.lifetime`, the entity count and the parents' "
-    "lifetimes); or when the rows of the histories that keep to their parent's lifetime still "
-    "move after one pass for every emit (a history under a history that holds fewer rows than it "
-    "declares is laid out after it). An asOf entry is refused when its relationship does not "
-    "reach the natural entity of an emit that declares a history, its date is not a DATE or "
-    "TIMESTAMP column, or a rule sets a column the contract requires from a row read as of a "
-    "date where its entity has no version, which would write NULL. A snapshots, events or "
-    "periods entry is refused when its of names no emit with a history (or the emit itself), "
-    "when a column it names is missing from the history's emit or differs in type, when the "
-    "projected emit has rows of its own, when an events type has no reason text, when a before "
-    "or after column maps a column the contract requires and the kept ops leave NULL, when a "
-    "when reads a column the version does not hold, or reads the history's end column where the "
-    "history does not carry it (a rule, link or the history sets it), or when a periods entry "
-    "has no grain, no timeBounds, or more periods than a run holds, a `from` before "
-    "`timeBounds.start`'s day, a `from` or `through` not before `timeBounds.end` or not a "
-    "`YYYY-MM-DD` text, or a `through` before the `from`. A DATE or TIMESTAMP column of a "
-    "history's emit is refused when it declares no range or bins, or a range or bins outside "
-    "timeBounds, as is a relationship whose parent is a periodic emit. A copy through a "
-    "sharedColumns entry into another relationship's foreign key is refused when the "
+    "FLUX generates the exposes of one contract together: every key the contract declares is laid "
+    "out from the row index and never repeats, and every foreign key takes a key its parent's rows "
+    "hold. A relationship whose target the Simulation does not generate from statistics, a key "
+    "whose declared range or bins hold fewer values than its rows, a one_to_one child with more "
+    "rows than its parent, a nullFraction on a key column or on a relationship whose joinType is "
+    "inner, a key declared with a draw that would repeat values, column types that differ between "
+    "a foreign key and its target, a key column nothing produces, and two relationships that set "
+    "one column without one implying the other are refused before any row is drawn. So are the "
+    "declarations that shape how children are placed: a counts entry whose minChildren the child "
+    "rows or the shape cannot meet (too few child rows for the eligible parents, or above what the "
+    "shape allows), whose parentWhen leaves no parent eligible or reads beyond the parent's own "
+    "row, or sits on a relationship the layout cannot place (a key, a bridge side, an implied or "
+    "weighted relationship); a required sum, min or max over the children with no ifNone where a "
+    "parent can have no children, which would leave it NULL; a link condition on an inner "
+    "relationship, on a key, or on a relationship another one implies; a bridge whose side is "
+    "named twice, is one_to_one, carries a nullFraction or has more rows than the pairs of its "
+    "parents; and a weight on a relationship that cannot pick parents by one, on a non-numeric "
+    "parent column, or with negative or all-zero published values. A reference expose is refused "
+    "when a published cell does not fit its column (a decimal with too many digits, a number "
+    "outside its type's range). The message names the expose, the column or relationship, and the "
+    "change to make (for a parentWhen with no eligible parent, the condition too). A history is "
+    "refused when its emit has no validity window (one natural entity with a start and an end of "
+    "one DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no room "
+    "inside timeBounds for an entity's versions, when a tracked column is not categorical, names "
+    "an undeclared level or has no transition row for a level a chain can reach, when a tracked "
+    "column that is a foreign key has a level that is no key its parent holds in the plan (a "
+    "--scale below 1 cuts the parent's keys and leaves the levels), or when its parent is not a "
+    "to-one relationship. A history's parent.lifetime is refused when the parent emit declares no "
+    "lifetimes entry, or declares a history of its own that sets a lifetime column (a validity, "
+    "activation, tracked, end or rule-set column), which then differs between a parent's versions; "
+    "when the parent's lifetime leaves no room for one version of an entity (the message names "
+    "`history(<emit>).parent.lifetime`, the entity count and the parents' lifetimes); or when the "
+    "rows of the histories that keep to their parent's lifetime still move after one pass for "
+    "every emit (a history under a history that holds fewer rows than it declares is laid out "
+    "after it). An asOf entry is refused when its relationship does not reach the natural entity "
+    "of an emit that declares a history, its date is not a DATE or TIMESTAMP column, or a rule "
+    "sets a column the contract requires from a row read as of a date where its entity has no "
+    "version, which would write NULL. A snapshots, events or periods entry is refused when its of "
+    "names no emit with a history (or the emit itself), when a column it names is missing from the "
+    "history's emit or differs in type, when the projected emit has rows of its own, when an "
+    "events type has no reason text, when a before or after column maps a column the contract "
+    "requires and the kept ops leave NULL, when a when reads a column the version does not hold, "
+    "or reads the history's end column where the history does not carry it (a rule, link or the "
+    "history sets it), or when a periods entry has no grain, no timeBounds, or more periods than a "
+    "run holds, a `from` before `timeBounds.start`'s day, a `from` or `through` not before "
+    "`timeBounds.end` or not a `YYYY-MM-DD` text, or a `through` before the `from`. A DATE or "
+    "TIMESTAMP column of a history's emit is refused when it declares no range or bins, or a range "
+    "or bins outside timeBounds, as is a relationship whose parent is a periodic emit. A copy "
+    "through a sharedColumns entry into another relationship's foreign key is refused when the "
     "relationship it goes through reaches an emit that declares a history or is projected from "
-    "one, whose rows hold a version's cells, not the pick the copy follows; the message names "
-    "both relationships. An events or periods entry is also refused when a column of its emit is "
-    "drawn given a column the entry sets, which the draw would read as the level it drew; the "
-    "message names both columns.",
+    "one, whose rows hold a version's cells, not the pick the copy follows; the message names both "
+    "relationships. An events or periods entry is also refused when a column of its emit is drawn "
+    "given a column the entry sets, which the draw would read as the level it drew; the message "
+    "names both columns. A DATE or TIMESTAMP column drawn from declared statistics is refused when "
+    "its contract's `range` rule holds none of the dates it is drawn from, or would cut the bins "
+    "of a column another column is drawn given; the message names the column and the range.",
 )
 
 #: Domain-separation label of a key layout's permutation key.
@@ -563,6 +565,14 @@ class KeyGrid:
             return low
         below, above = units - self.units_at(low), self.units_at(high) - units
         return low if below <= above else high
+
+    def holds(self, value: Any) -> bool:
+        """Whether some row's key is *value*: the nearest row's key is the value itself."""
+        try:
+            units = _units_of_value(self.kind, self.exponent, value)
+        except (ArithmeticError, AttributeError, TypeError, ValueError):
+            return False
+        return self.units_at(self.row_near(value)) == units
 
     def as_document(self) -> Dict[str, Any]:
         return {
@@ -4304,7 +4314,9 @@ def _check_weights(
                 "column, or another is given it; a weight picks the parent on its own"
             )
         if plan.rules is not None and any(
-            set(relationship.from_columns) & set(rule.foreign_columns) for rule in plan.rules.rules
+            set(relationship.from_columns) & set(rule.foreign_columns)
+            for rule in plan.rules.rules
+            if not rule.by_layout
         ):
             raise _refuse(f"{where}, but a dependency sets its columns")
         target = plans[relationship.target]
@@ -4486,7 +4498,12 @@ def _check_counts(
         {link.relationship for link in plan.rules.links} if plan.rules is not None else set()
     )
     determined = (
-        {column for rule in plan.rules.rules for column in rule.foreign_columns}
+        {
+            column
+            for rule in plan.rules.rules
+            if not rule.by_layout
+            for column in rule.foreign_columns
+        }
         if plan.rules is not None
         else set()
     )
@@ -5427,6 +5444,18 @@ def _plain_part(plan: "_rows.GeneratorPlan", column_plan: "_rows.ColumnPlan") ->
     )
 
 
+def _key_span(parent: Union[KeyGrid, ReferenceColumn]) -> str:
+    """The keys a parent holds in a plan, for a refusal: ``keys 101 to 107, 7 rows``."""
+    rows = parent.rows
+    noun = "row" if rows == 1 else "rows"
+    if isinstance(parent, KeyGrid):  # an ordered layout: the first row's key is the lowest
+        return f"keys {parent.value_at(0)} to {parent.value_at(rows - 1)}, {rows} {noun}"
+    held = [value for value in parent.values if value is not None]
+    if not held:
+        return f"no key, {rows} {noun}"
+    return f"keys {min(held)} to {max(held)}, {rows} {noun}"
+
+
 def _check_declared_keys(
     plan: "_rows.GeneratorPlan",
     first: "_rows.ColumnPlan",
@@ -5457,6 +5486,48 @@ def _check_declared_keys(
                     f"{where} points at {relationship.target!r}, a reference expose, and column "
                     f"{first.column.name!r} declares a level that is no key it publishes; every "
                     "declared level is a key of the reference expose"
+                )
+
+
+def _check_tracked_keys(
+    shape: _Shape, column: str, view: Callable[[str, Sequence[str]], ParentView]
+) -> None:
+    """Refuse (``FLX-3403``) a tracked foreign key one of whose levels is no key its parent holds.
+
+    A tracked column writes the level it is at as the cell and takes no parent row, so the cell
+    is a key of the parent only while the parent's rows hold that level. The parent's keys are
+    the ones in this plan: a ``--scale`` below 1 cuts the parent's rows and its key range and
+    leaves the levels, so the refusal shows the cut in the span it names. A pick that takes the
+    nearest key (``declared``) never writes a level, so it holds at any scale and is not asked.
+    """
+    relationship = shape.owners.get(column)
+    if (
+        relationship is None
+        or relationship.name in shape.absorbed
+        or len(relationship.from_columns) != 1
+    ):
+        return
+    parent = view(relationship.target, relationship.to_columns).driver(relationship.to_columns[0])
+    if not isinstance(parent, (KeyGrid, ReferenceColumn)):
+        return
+    statistics = shape.plan.column_plan(column).statistics
+    with localcontext(_rows._KERNEL_CONTEXT):
+        for level in _rows._level_names(statistics):
+            try:
+                held = parent.holds(
+                    _rows._level_to_value(level, shape.plan.column_plan(column).column)
+                )
+            except (ArithmeticError, ValueError, FluxError):
+                held = False
+            if not held:
+                raise _refuse(
+                    f"expose {shape.plan.expose.expose_id!r} column {column!r} is tracked by "
+                    f"its history over levels and points at {relationship.target!r}, but level "
+                    f"{level!r} is no key {relationship.target!r} holds in this plan "
+                    f"({_key_span(parent)}); a tracked foreign key writes its "
+                    "level as the key, so every level is a key of its parent: plan without "
+                    "--scale, which cuts the parent's keys, or stop tracking the column so "
+                    "its foreign key takes the nearest key the parent holds"
                 )
 
 
@@ -5568,6 +5639,7 @@ class _Resolver:
             if column == getattr(history, role):
                 return ChainColumn(role, history.pick)
         if column in history.tracked:
+            _check_tracked_keys(shape, column, self.view)
             return self._tracked(shape, history.tracked.index(column))
         return None
 

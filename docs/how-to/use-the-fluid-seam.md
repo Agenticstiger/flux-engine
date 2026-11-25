@@ -114,6 +114,8 @@ reproducible: not checked | validity: not asserted
 ...
 ```
 
+A `range` rule in a column's `validationRules` is checked as well. A DATE or TIMESTAMP column that declares one is drawn inside it on kernel 0.2.0, and `verify` counts the rows of a DATE, TIMESTAMP, INT or DECIMAL column outside it: a column with rows outside adds a `ranges:` line under `rows: ok`, naming the table, the column, how many rows and the range, and the run fails. A run with none outside prints no such line.
+
 ## What the engine does with a column
 
 - **Types.** The engine renders each value as the column's declared type. `DECIMAL(18,4)` and `TIMESTAMP` values are strings, as above. A value that does not fit, such as a decimal too large for its declared precision, fails the run with FLX-3003. An `INT` column needs a source that is a whole number on every row, such as a count: mapped onto anything else, such as an amount, it stops planning with FLX-3303.
