@@ -152,6 +152,15 @@ def test_a_window_that_is_not_read_is_refused(start: str, end: str) -> None:
         parse_window(start, end)
 
 
+@pytest.mark.parametrize("end", ["9999-12-31", "9999-01-01", "9999-06-30T12:00:00Z"])
+def test_a_window_that_ends_in_the_year_9999_is_refused(end: str) -> None:
+    # The year 9999 spells an open end, as in a declared range, and a run's periods step past the
+    # end of its window, into a year no date holds.
+    with pytest.raises(WindowError, match=r"END '9999-.*' is in the year 9999, which spells"):
+        parse_window("2024-01-01", end)
+    assert parse_window("2024-01-01", "9998-12-31")[1] == "9998-12-31T00:00:00.000Z"
+
+
 # -- the hull ---------------------------------------------------------------------------------------
 
 
@@ -277,7 +286,13 @@ def test_window_needs_the_contract_and_the_profile(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "window", [("soon", "2024-01-01"), ("2024-02-01", "2024-01-01"), ("0000-01-01", "2024-01-01")]
+    "window",
+    [
+        ("soon", "2024-01-01"),
+        ("2024-02-01", "2024-01-01"),
+        ("0000-01-01", "2024-01-01"),
+        ("2024-01-01", "9999-12-31"),
+    ],
 )
 def test_a_bad_window_is_exit_2_and_names_the_value(tmp_path: Path, window: Any) -> None:
     result = run_init(
