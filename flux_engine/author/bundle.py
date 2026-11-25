@@ -3642,7 +3642,9 @@ def _refuse_a_window_that_misses_ranges(
 
     A range (published, widened to a parent's lifetime, or declared by the contract) is not cut:
     a property's bins partition it. A window that leaves it would put rows outside
-    ``spec.timeBounds``, so it is refused, naming each column, its range and the window.
+    ``spec.timeBounds``, so it is refused, naming each column, its range and the window. A range
+    that starts at or after :data:`WINDOW_END_LIMIT_MS` is not one a window can hold, and the
+    window ``init`` works out leaves it out too (:func:`_spans_of`), so it refuses nothing.
     """
     low, high = instant_ms(window[0]), instant_ms(window[1])
     if low is None or high is None:
@@ -3654,7 +3656,7 @@ def _refuse_a_window_that_misses_ranges(
             if expose.kinds.get(column.name) not in DATE_KINDS:
                 continue
             for first, last in _declared_ranges_of(expose, column, planned.contract):
-                if first < low or last > high:
+                if first < WINDOW_END_LIMIT_MS and (first < low or last > high):
                     missed.append(
                         f"{expose.expose_id}.{column.name} ranges "
                         f"{format_rfc3339_ms(first)} to {format_rfc3339_ms(last)}"

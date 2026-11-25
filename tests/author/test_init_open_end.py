@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 import yaml
@@ -146,13 +146,16 @@ def _number(high: int, count: int) -> Dict[str, Any]:
     return {"domain": "number", "metrics": _metrics("1", str(high), count)}
 
 
-def _profile_of(last_end: str) -> Dict[str, Any]:
+def _profile_of(last_end: str, first_end: Optional[str] = None) -> Dict[str, Any]:
     """The profile of a world of 2 regions, 3 stations (rowCount withheld) and 20 versions of a line.
 
     The versions' end column publishes one date, *last_end*: every version of the table is open.
+    With *first_end*, it publishes that date as its minimum and *last_end* as its maximum.
     """
     year, month, day = (int(part) for part in last_end.split("-"))
     ended = _ms(year, month, day)
+    year, month, day = (int(part) for part in (first_end or last_end).split("-"))
+    earliest = _ms(year, month, day)
     found = _profile(history=False)
     found["disclosureRules"]["acro-default"]["minimumCell"] = 5
     found["tables"] = {
@@ -171,7 +174,7 @@ def _profile_of(last_end: str) -> Dict[str, Any]:
                     "domain": "timestamp",
                     "metrics": _metrics(_ms(2025, 1, 1), _ms(2025, 9, 1), 20),
                 },
-                "valid_to": {"domain": "timestamp", "metrics": _metrics(ended, ended, 20)},
+                "valid_to": {"domain": "timestamp", "metrics": _metrics(earliest, ended, 20)},
                 "tier": {
                     "domain": "category",
                     "statistics": [_levels(["basic", "plus", "pro"], [10, 6, 4], 20)],
@@ -185,15 +188,23 @@ def _profile_of(last_end: str) -> Dict[str, Any]:
     return found
 
 
-def _init(tmp_path: Path, *, required_end: bool, last_end: str) -> Any:
+def _init(
+    tmp_path: Path,
+    *,
+    required_end: bool,
+    last_end: str,
+    first_end: Optional[str] = None,
+    window: Optional[Tuple[str, str]] = None,
+) -> Any:
     (tmp_path / "library.fluid.yml").write_text(_contract(required_end), encoding="utf-8")
     (tmp_path / "library.profile.json").write_text(
-        json.dumps(_profile_of(last_end)), encoding="utf-8"
+        json.dumps(_profile_of(last_end, first_end)), encoding="utf-8"
     )
     return run_init(
         str(tmp_path / "bundle"),
         contract=str(tmp_path / "library.fluid.yml"),
         profile=str(tmp_path / "library.profile.json"),
+        window=window,
     )
 
 
@@ -262,6 +273,22 @@ def test_an_end_column_that_holds_only_the_last_day_gives_the_window_nothing(
         "start": "2025-01-01T00:00:00.000Z",
         "end": "2025-09-01T00:00:00.000Z",
     }
+
+
+def test_a_window_given_beside_an_end_column_in_the_year_9999_is_not_refused_for_it(
+    tmp_path: Path,
+) -> None:
+    # Two end dates, both in the year 9999, give the column a range. The window init works out
+    # leaves that range out, so a window given with --window is not refused for leaving it out.
+    result = _init(
+        tmp_path,
+        required_end=True,
+        last_end="9999-12-31",
+        first_end="9999-12-30",
+        window=("2025-01-01", "2025-12-31"),
+    )
+    assert result.exit_code == 0, result.stderr
+    _plans(tmp_path)
 
 
 def test_a_null_open_end_is_written_as_it_always_was(tmp_path: Path) -> None:
