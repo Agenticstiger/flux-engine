@@ -233,9 +233,12 @@ for a table that a unit follows into (ADR 0037).
 9. **The engine reads each new part with the noise floor of the amendment above.** `fluxsim init` reads a noisy
    history member through its point estimate, and only its cells above `noise_floor` over all its cells carry
    weight; a member with none above it says nothing and is read as withheld. A `nullCount/2` gives a nullable
-   column the NULL share its estimate states when its NULL cell stands clear of the floor over the two cells;
-   otherwise the share is unknown, and the middle of the interval the release allows, 0 to the NULL cell's
-   estimate plus the floor over the rows, is assumed and named. `fluxsim calibrate --fit` leaves out a noisy rate
+   column the NULL share its estimate states when its NULL cell stands clear of the floor over the two cells.
+   Otherwise the release cannot tell the count from none, and no null is drawn, as for a null count withheld as
+   small, with an assumption that names the interval the release allows, 0 to the NULL cell's estimate plus the
+   floor over the rows: a column that declares a share is never the column another is drawn given, a clique
+   column or a tracked one. A column a clique draws holds no null, so a released share of one is set aside and
+   named, and the cliques are drawn. `fluxsim calibrate --fit` leaves out a noisy rate
    whose unit's records, the sum of its two cells, are at most twice the floor over every cell of its statistic
    (a sum that noise alone made passes that only when one of its two cells passes the floor), with a note
    (`FLX-3707` naming them when none is left), and weighs

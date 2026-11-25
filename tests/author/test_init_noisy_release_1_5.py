@@ -7,9 +7,10 @@
 A history member released with noise is read through its point estimate, and only its cells that
 stand clear of the noise (:func:`flux_stats.noise.noise_floor` over all its cells) carry weight; a
 member with no cell clear of it says nothing and is read as withheld. A ``nullCount/2`` gives a
-nullable column its share of NULL rows when its NULL cell stands clear of the noise, and otherwise
-the middle of the interval the release allows, as a labelled assumption (ADR 0019, amendments of
-2026-11-25).
+nullable column its share of NULL rows when its NULL cell stands clear of the noise. Otherwise the
+release cannot tell the count from none, and no null is drawn, as for a null count withheld as
+small, with an assumption that names the interval the release allows. A column a clique draws holds
+no null, so a released share of one is set aside (ADR 0019, amendments of 2026-11-25).
 """
 
 from __future__ import annotations
@@ -23,8 +24,10 @@ from typing import Any, Dict, Iterable, Optional
 import pytest
 import yaml
 
+import tests.author.test_cliques as private_cliques
 import tests.author.test_history_date_pairs as tiers
 import tests.author.test_init_noise_floor as library
+from flux_engine.author.columns import _share_text
 from flux_engine.cli._init import run_init
 from flux_engine.stages.plan import plan
 from flux_stats.noise import noise_floor
@@ -179,13 +182,74 @@ def test_a_null_count_clear_of_the_noise_gives_the_share_it_states(tmp_path: Pat
     _plans(tmp_path)
 
 
-def test_a_null_count_inside_the_noise_is_an_assumed_share_named_with_its_interval(
+def test_a_null_count_inside_the_noise_draws_no_null_and_names_its_interval(
     tmp_path: Path,
 ) -> None:
     result = _init(tmp_path, _with_null_count("990", "6"), LIBRARY_CONTRACT)
     floor = noise_floor("gaussian", Fraction("2.5"), 2)
     upper = (6 + floor) / 996
-    share = Fraction(_left_on(tmp_path)["nullFraction"])
-    assert abs(share - upper / 2) < Fraction(1, 10**8)
+    assert _left_on(tmp_path)["nullFraction"] == "0"
     assert "The released null count stands inside the noise" in result.stdout
+    assert f"the release allows 0 to {_share_text(upper)} of the rows" in result.stdout
+    states = {e["pointer"]: e["state"] for e in result.artifacts["ledger"]["statistics"]}
+    assert states["/tables/member/columns/left_on/statistics/0"] == "used"
+    _plans(tmp_path)
+
+
+#: The cliques' contract with ``channel``, a column both cliques hold, allowed to be NULL.
+NULLABLE_CHANNEL = private_cliques.CONTRACT.replace(
+    "type: \"enum('online','store')\", required: true",
+    "type: \"enum('online','store')\", required: false",
+)
+
+
+def _clique_release(known: str, null: str) -> Dict[str, Any]:
+    """The cliques' private release with a noisy count of ``channel``'s known and NULL rows."""
+    profile = copy.deepcopy(private_cliques.EXAMPLE)
+    profile["_schemaURL"] = SCHEMA_URL_1_5_0
+    profile["tables"]["subscriber"]["columns"]["channel"]["statistics"] = [
+        {
+            "definition": "nullCount/2",
+            "sampleSize": {"min": 10000, "max": 99999},
+            "disclosure": "noisy",
+            "levels": ["known", "null"],
+            "noise": {"mechanism": "gaussian", "scale": "2.24", "privacyLoss": {"rho": "0.1"}},
+            "groups": [{"group": "", "status": "F", "noisyCounts": [known, null]}],
+        }
+    ]
+    return profile
+
+
+def _channel(tmp_path: Path) -> Dict[str, Any]:
+    column: Dict[str, Any] = _block(tmp_path)["emits"]["subscriber"]["fidelity"]["columns"][
+        "channel"
+    ]
+    return column
+
+
+def test_a_clique_column_whose_null_count_is_inside_the_noise_keeps_its_clique(
+    tmp_path: Path,
+) -> None:
+    assert "required: false" in NULLABLE_CHANNEL
+    result = _init(tmp_path, _clique_release("14000", "3"), NULLABLE_CHANNEL)
+    channel = _channel(tmp_path)
+    assert channel["given"] == "plan" and "nullFraction" not in channel
+    assert "The released null count stands inside the noise" in result.stdout
+    states = {e["pointer"]: e["state"] for e in result.artifacts["ledger"]["statistics"]}
+    assert states["/tables/subscriber/cliques/1"] == "used"
+    assert states["/tables/subscriber/columns/channel/statistics/0"] == "used"
+    _plans(tmp_path)
+
+
+def test_a_clique_column_sets_a_released_null_share_aside_and_keeps_its_clique(
+    tmp_path: Path,
+) -> None:
+    result = _init(tmp_path, _clique_release("13000", "1000"), NULLABLE_CHANNEL)
+    channel = _channel(tmp_path)
+    assert channel["given"] == "plan" and "nullFraction" not in channel
+    entries = {e["pointer"]: e for e in result.artifacts["ledger"]["statistics"]}
+    assert entries["/tables/subscriber/cliques/1"]["state"] == "used"
+    held = entries["/tables/subscriber/columns/channel/statistics/0"]
+    assert held["state"] != "used"
+    assert "a clique column holds no null" in json.dumps(held)
     _plans(tmp_path)

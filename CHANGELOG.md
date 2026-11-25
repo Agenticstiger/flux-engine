@@ -40,8 +40,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `fluxsim init` reads a private release's noisy history and noisy null counts (profile format 1-5-0). A noisy history
   member is read through its point estimate, its cells inside the noise (`noise_floor` over all its cells) carrying no
   weight; one with no cell clear of it is read as withheld. A `nullCount/2` gives a nullable column the NULL share its
-  estimate states when the NULL cell stands clear of the noise, and otherwise the middle of the interval the release
-  allows, as a labelled assumption that names the interval.
+  estimate states when the NULL cell stands clear of the noise. Otherwise the release cannot tell the count from none,
+  and no nulls are drawn, as for a null count withheld as small, with an assumption that names the interval the release
+  allows; the column can still be one another is drawn given, a clique column or a tracked one. A column a clique draws
+  holds no null, so a released share of one is set aside, named in the ledger, and the cliques are drawn.
 - `fluxsim calibrate --fit` reads a noisy query rate (profile format 1-5-0) through its point estimate. A rate whose
   unit's records, the sum of its two cells, are at most twice the noise floor over every cell of its statistic is left
   out, with a note in the fit's output (`noiseNotes` in `--json`), and a

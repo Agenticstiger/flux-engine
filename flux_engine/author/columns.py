@@ -490,9 +490,11 @@ def _released_null_share(ctx: ColumnContext, plan: ColumnPlan, categorical: bool
     Its two cells, the rows where the column is known and where it is NULL, are read through their
     point estimate. When the NULL cell stands clear of the noise (:func:`flux_stats.noise.noise_floor`
     over the two cells, ADR 0019, amendment of 2026-11-25), the share is that estimate. When it does
-    not, the share is unknown: the release allows any share from 0 to the NULL cell's estimate plus
-    the floor, over the rows, and the middle of that interval is assumed, with a note naming it.
-    Returns whether the column had one to read.
+    not, the release cannot tell the count from none: it allows any share from 0 to the NULL cell's
+    estimate plus the floor, over the rows. Then no null is drawn, as for a null count withheld as
+    small, with an assumption that names the interval: a column that declares a share is never the
+    column another is drawn given, a clique column or a tracked one. Returns whether the column had
+    one to read.
     """
     floors = dict(ctx.noise_floors)
     clears = dict(ctx.noise_clear)
@@ -514,16 +516,14 @@ def _released_null_share(ctx: ColumnContext, plan: ColumnPlan, categorical: bool
             plan.labels.append(Label(("nullFraction",), from_profile(tokens, _NULL_COUNT_2)))
             return True
         upper = min(Fraction(1), (null + floors[index]) / rows) if rows else Fraction(1)
-        share = upper / 2
-        if categorical and share == 0:
-            return True
         reason = (
-            "The released null count stands inside the noise, so the share of rows that hold a "
-            f"null is unknown: the release allows 0 to {_share_text(upper)}, and the middle of "
-            "that is assumed."
+            "The released null count stands inside the noise, so it cannot be told from none: the "
+            f"release allows 0 to {_share_text(upper)} of the rows to hold a null, and no nulls "
+            "are drawn."
         )
-        plan.declaration["nullFraction"] = _share_text(share)
-        plan.labels.append(Label(("nullFraction",), assumed(reason)))
+        if not categorical:
+            plan.declaration["nullFraction"] = "0"
+            plan.labels.append(Label(("nullFraction",), assumed(reason)))
         plan.assumptions.append(reason)
         plan.reads.append(
             (tokens, "inside the noise, it bounds the share of rows that hold a null")
