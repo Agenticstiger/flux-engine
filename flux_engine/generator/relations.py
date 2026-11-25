@@ -227,7 +227,8 @@ FLX_3403 = register(
     "projected emit declares rows of its own, when an events type has no text for a reason "
     "its events carry, when a before or after column maps a column the contract requires "
     "that the kept ops would leave NULL, when a when reads a column the version does not "
-    "hold, or when a periods entry has no grain, no timeBounds, or more periods than a run "
+    "hold, or reads the history's end column where the history does not carry it (a rule, a "
+    "link or the history sets the column), or when a periods entry has no grain, no timeBounds, or more periods than a run "
     "holds, or a `from` before `timeBounds.start`'s day, or a `from` or `through` that is not "
     "before `timeBounds.end` or not a `YYYY-MM-DD` text, or a `through` before the `from`. A "
     "DATE or TIMESTAMP column of a history's emit is refused when it declares no "
@@ -2627,6 +2628,37 @@ def _check_histories(
         except FluxError:
             raise _refuse(f"{where}: {expose_id!r} has no start column {binding.start!r}") from None
         chain_unit_kind(kind)
+        _refuse_rules_on_end_column(where, binding, plan)
+
+
+def _refuse_rules_on_end_column(
+    where: str, binding: HistoryBinding, plan: "_rows.GeneratorPlan"
+) -> None:
+    """Refuse (``FLX-6203``) a rule that sets the column ``end.column`` names (ADR 0017, ADR 0027).
+
+    The history writes ``end.value`` into the column on an ending version and a drawn level on the
+    others, and the rows are held to that, so a rule on the column, whatever its ``when``, would be
+    a second source for it.
+    """
+    end = binding.entry.end
+    rules = plan.rules
+    if end is None or end.column is None or rules is None:
+        return
+    setters: Dict[str, str] = {}
+    for rule in rules.rules:
+        for column in (*rule.determines, *rule.to_columns):
+            setters.setdefault(column, f"the rule {rule.id!r}")
+    for column in rules.determined:
+        setters.setdefault(column, "a rule")
+    if end.column in setters:
+        from flux_engine.expr2.errors import FLX_6203
+
+        raise FluxError(
+            FLX_6203,
+            f"column {end.column!r} has more than one source: {where} sets it as its end column "
+            f"(end.column), and {setters[end.column]} sets it too; leave the column to the "
+            "history, or name another column in end.column",
+        )
 
 
 def _refuse_history_targets(

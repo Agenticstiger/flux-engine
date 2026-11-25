@@ -199,8 +199,10 @@ FLX_6203 = register(
     "Every value has one source (EXPR-SPEC-2 §9). A `derive` together with a `generates` "
     "on the same column, two `generates` on one column, a `dependency`'s `to` column that "
     "another rule or dependency also determines, or a scenario mapping on a column that "
-    "a rule determines are two sources, whatever their `when`s. Several `derive` rules on one "
-    "column are one source.",
+    "a rule determines are two sources, whatever their `when`s. So is a rule on the column "
+    "a history's `end.column` names, which the history sets: its end value on an ending "
+    "version and a drawn level on the others. Several `derive` rules on one column are one "
+    "source.",
 )
 FLX_6204 = register(
     "FLX-6204",

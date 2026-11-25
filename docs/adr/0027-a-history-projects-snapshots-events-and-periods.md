@@ -325,6 +325,11 @@ was one of the others, so a kind could not leave out the ending versions by name
   It is known at plan time where every level gives one result, as `status <> 'retired'` does: false on an
   ending version, true on every other. Where the results differ for some version, the `when` is `FLX-3403`, naming
   the kind (or the events entry) and the column and saying that the result depends on a drawn value.
+- **One source.** A rule that sets the end column (a `derive`, a dependency's `to`, a FLUX-side rule or a copy) is
+  `FLX-6203` at plan, naming the column and the rule, whatever its `when`: the history writes `end.value` there and
+  a drawn level elsewhere, and `history:ended_is_last` holds the rows to it, so the rule would be a second source and
+  a `when` would read the draw, not the rule. A column the history does not carry (and does not track) is `FLX-3403`
+  where a `when` reads it.
 - **Opt-in.** A `when` that does not name the end column is as section 4 and 5 say, and keeps its bytes.
 
 ## Amendment of 2026-11-24: from and through on a periods entry

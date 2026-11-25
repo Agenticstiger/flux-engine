@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Container, Optional, Tuple
 
 import numpy as np
 
+from flux_engine.core.errors import FluxError
 from flux_engine.expr2.check import Checked
 from flux_engine.generator import rows as _rows
 from flux_engine.generator.history import HistoryPlan
@@ -60,9 +61,23 @@ class DrawnEnd:
         end: Optional[HistoryEnd],
         tracked: Container[str],
     ) -> Optional["DrawnEnd"]:
-        """The drawn end column of *end*, or ``None`` when it has none or tracks it."""
+        """The drawn end column of *end*, or ``None`` when it has none or tracks it.
+
+        Refused (``FLX-3403``) when the column is neither tracked nor carried: the history's
+        first-version cells are the levels the column draws, and a column something else sets
+        holds no such level.
+        """
         if end is None or end.column is None or end.value is None or end.column in tracked:
             return None
+        from flux_engine.generator.relations import FLX_3403, carried_columns
+
+        if end.column not in carried_columns(history):
+            raise FluxError(
+                FLX_3403,
+                f"history ({history.expose.expose_id}).end.column {end.column!r} is not carried: "
+                "a rule, a link or the history sets it, so a when that reads it has no drawn "
+                "level to read",
+            )
         return cls(history, chain, end.column, end.value)
 
     def is_read_by(self, checked: Checked) -> bool:

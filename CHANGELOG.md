@@ -59,7 +59,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `status`), so a kind can leave out the ending versions: `status <> 'retired'`. On an ending version the column
   holds the end value and on any other a drawn level, so the predicate is known at plan time only where every level
   the column can draw gives the same answer; where they differ it is `FLX-3403`, naming the kind and the column
-  (ADR 0027, the amendment of 2026-11-24). A `when` that does not name the column keeps its bytes.
+  (ADR 0027, the amendment of 2026-11-24). A contract rule that sets the end column is `FLX-6203` at `plan`, as a
+  rule on a column the projection sets is: the history writes the end value there, and the rows are held to it. A
+  `when` that does not name the column keeps its bytes.
 - A `sharedColumns` copy into the foreign key of another relationship sets that relationship's pick, under
   `copies: true` on kernel 0.2.0. A trip that copies `depot_id` through its vehicle takes the
   depot the vehicle has, so the two agree on every row and a rule over `depot.<column>` reads that
