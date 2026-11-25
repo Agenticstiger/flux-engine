@@ -125,10 +125,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Changed
 
-- The engine reads a profile whose calendar entry holds none of its three histograms, as when a release step drops
-  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place: `init`
-  and `plan` accept it, and a citation into such an entry is still refused (`FLX-5036`). flux-stats' `parse_profile`
-  and `load_profile_text` take `allow_empty_calendar_entries`, off by default, which the engine sets.
+- The engine reads a profile in which an entry holds only the keys that name it, as when a release step drops
+  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place:
+  `init` and `plan` accept it, and a citation at or under such an entry is still refused (`FLX-5036`). The entries
+  are a calendar entry, a date pair, a relationship's date pair, an exposure, a history and a tracked column of
+  one. An entry that holds some of its statistics, but not all, is refused as before. flux-stats' `parse_profile`
+  and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets.
 - A profile's `privacy` block may state more loss than its noisy statistics and cliques spend, including when none
   remain; a stated loss is an upper bound, and a total below what they spend is still refused (`FLX-5036`). The grade
   comes from the statistics alone, so a block that nothing spends earns no grade, and `init` notes the stated and

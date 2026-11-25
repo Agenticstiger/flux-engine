@@ -169,6 +169,13 @@ never to more (point 4: "A sum below the total is accepted").
    noise blocks add up to, and the number of parts) when a stated share is above its sum. Both
    figures are values the profile states: the total, and the shares its `noise` blocks record.
    Nothing in it depends on the records.
+4. **An entry cut down to its names is read as holding nothing.** The same step can drop every
+   statistic of a calendar entry, a date pair, a relationship's date pair, an exposure, a history
+   or a tracked column of one, which leaves the keys that name it. The profile reader takes
+   `allow_emptied_entries`, off by default and set by the engine: with it such an entry is kept in
+   its place and holds nothing, and a citation at or under it is refused (`FLX-5036`). An entry
+   that holds some of its statistics is refused as before. Unlike point 1 this is an option,
+   because the format itself still requires the statistics of an entry that is published whole.
 
 ### Consequences
 
