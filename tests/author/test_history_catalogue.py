@@ -177,8 +177,8 @@ def test_a_foreign_key_into_a_table_that_is_not_released_whole_is_carried(tmp_pa
     assert "the emit declares no levels for the column, so it is carried" in state["note"]
     digests = bundle_digests(tmp_path)
     # Pinned from the files `fluxsim init` wrote for this contract and profile before a foreign key
-    # into a reference table was tracked, but for the header, which no longer names the profile's file, and the unused list, which names a
-    # history's tracked column whole.
+    # into a reference table was tracked, but for the header, which no longer names the profile's
+    # file, and the unused list, which names a history's tracked column whole.
     assert digests == WITHOUT_TRACKING
 
 

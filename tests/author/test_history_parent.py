@@ -204,8 +204,8 @@ def test_a_contract_without_a_to_one_relationship_writes_the_entry_it_always_did
     assert entry["entities"] == 1000
     digests = bundle_digests(tmp_path)
     # Pinned from the files `fluxsim init` wrote for this contract and profile before a history
-    # wrote its parent, but for the header, which no longer names the profile's file, and the unused list, which names a
-    # history's tracked column whole.
+    # wrote its parent, but for the header, which no longer names the profile's file, and the
+    # unused list, which names a history's tracked column whole.
     assert digests == WITHOUT_A_PARENT
 
 

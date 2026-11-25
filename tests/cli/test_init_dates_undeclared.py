@@ -9,11 +9,14 @@ Pinned here, from a small hand-written profile of format 1-3-0:
 * a child date's entry is enforced against its parent's lifetime, and the plan checks that the
   declared ranges leave no row without a value. When the parent's start column declares no range, no
   widening of the child's range makes that check hold, so the entry is left out and the pair is
-  recorded unused with the reason.
+  recorded unused with the reason;
+* an entry that asks for violating rows (a positive target) is not asked to hold on every row, so
+  the same world with a pair broken on some rows writes it, with its target.
 """
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict
 
@@ -177,3 +180,25 @@ def test_the_same_date_is_written_when_the_start_declares_its_range(tmp_path: Pa
     written = Written(tmp_path, LIBRARY, _library_profile(_stamp()))
     assert [entry["date"] for entry in written.within] == ["borrowed_on"]
     assert written.unused("/relationships/0/dates/0") == []
+
+
+def test_a_date_whose_order_is_broken_on_some_rows_is_written_with_its_target(
+    tmp_path: Path,
+) -> None:
+    # The same world, but 20 of the 400 loans fall before their member's joining date. The entry
+    # then asks for violating rows (a positive target), so the plan's check does not ask the
+    # entry to hold on every row and the undeclared start is no reason to leave it out.
+    profile = _library_profile(_withheld())
+    profile["relationships"][0]["dates"] = [
+        _link_pair("joined_on", "borrowed_on", _levels(after=300, before=20, same=80))
+    ]
+    written = Written(tmp_path, LIBRARY, profile)
+    assert [entry["date"] for entry in written.within] == ["borrowed_on"]
+    assert Decimal(written.within[0]["target"]) > 0
+    assert written.unused("/relationships/0/dates/0") == []
+    planned = plan_stage(
+        str(written.directory),
+        state_dir=str(tmp_path / "state"),
+        profile=str(written.profile_path),
+    )
+    assert planned.exit_code == 0, planned.stderr

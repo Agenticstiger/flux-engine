@@ -79,7 +79,8 @@ def _profile(history_children: bool = False, *, snapshot_children: bool = True) 
     if history_children:
         profile["relationships"].append(_relationship())
     if snapshot_children:
-        # One row per plan, so these are plans per account: 100 accounts hold one, 200 two, 100 three to five.
+        # One row per plan, so these are plans per account: 100 accounts hold one, 200 two, 100
+        # three to five.
         profile["relationships"].append(
             {
                 "parent": {"table": "account", "columns": ["account_id"]},
