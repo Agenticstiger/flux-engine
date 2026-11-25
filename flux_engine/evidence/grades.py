@@ -262,7 +262,7 @@ def _decimal(value: Fraction) -> str:
 def _read(profile: Mapping[str, Any]) -> Optional[Profile]:
     """The profile as its reader reads it, or ``None`` when the reader refuses it."""
     try:
-        return parse_profile(profile)
+        return parse_profile(profile, allow_empty_calendar_entries=True)
     except FluxError:
         return None
 

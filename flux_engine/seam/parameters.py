@@ -75,7 +75,9 @@ from flux_engine.core.errors import ErrorCode, FluxError, register
 from flux_engine.seam.coverage import printable
 from flux_stats import registry as _stats_registry
 from flux_stats.cliques import CLIQUE_DEFINITION, CLIQUE_DEFINITION_2
+from flux_stats.profile import CALENDAR_LEVELS
 from flux_stats.rank_correlation import RANK_IDENTIFIERS
+from flux_stats.spelling import refuse as _refuse_profile
 
 __all__ = [
     "DEFINITIONS_ADDED_1_4",
@@ -1737,8 +1739,10 @@ def _check_entry_citation(
             raise FluxError(
                 FLX_3113, f"{at} cites an overlay, and no overlaid profile was handed to read it"
             )
+        _refuse_empty_calendar_citation(entry.citation, overlay[1], at)
         _check_citation(entry.citation, overlay[1], at)
         return
+    _refuse_empty_calendar_citation(entry.citation, profile, at)
     _check_citation(entry.citation, profile, at)
     if overlay is not None and changed_by_overlay(profile, overlay[1], entry.citation.tokens):
         raise FluxError(
@@ -1795,11 +1799,60 @@ def check_profile_citations(
     # unused are the ones that profile publishes: a statistic the overlay restated is one of them.
     unused_in = overlay[1] if overlay is not None else profile
     for item in register_.unused or ():
+        if _names_what_an_empty_entry_dropped(item.citation, unused_in):
+            continue  # nothing reads an entry that holds nothing, so listing it as unused is true
         _check_citation(
             item.citation,
             unused_in,
             f"{item.label or f'{where}: unused[{item.index}]'}.statistic",
             whole_entries=True,
+        )
+
+
+def _in_empty_calendar_entry(citation: Citation, profile: Mapping[str, Any]) -> Optional[str]:
+    """The pointer of the calendar entry *citation* reaches into when that entry holds nothing.
+
+    A calendar entry of a table is ``/tables/<id>/calendar/<index>``. The engine reads one that
+    holds none of its three histograms as an entry that holds nothing (the profile reader's
+    ``allow_empty_calendar_entries``), so a pointer at the entry or anything under it reaches no
+    statistic. ``None`` when the pointer is not under a calendar entry, or the entry holds one.
+    """
+    tokens = citation.tokens
+    if len(tokens) < 4 or tokens[0] != "tables" or tokens[2] != "calendar":
+        return None
+    try:
+        entry = _resolve(profile, tokens[:4])
+    except LookupError:
+        return None
+    if not isinstance(entry, Mapping) or any(nfc(str(key)) in CALENDAR_LEVELS for key in entry):
+        return None
+    return render_pointer(tokens[:4])
+
+
+def _names_what_an_empty_entry_dropped(citation: Citation, profile: Mapping[str, Any]) -> bool:
+    """Whether *citation* names a calendar entry that holds nothing whole, or one of its histograms."""
+    tokens = citation.tokens
+    return _in_empty_calendar_entry(citation, profile) is not None and (
+        len(tokens) == 4 or tokens[4] in CALENDAR_LEVELS
+    )
+
+
+def _refuse_empty_calendar_citation(
+    citation: Citation, profile: Mapping[str, Any], at: str
+) -> None:
+    """Refuse (``FLX-5036``) a citation into a calendar entry that holds none of its histograms.
+
+    A number cited there rests on a histogram the profile does not publish, and the calendar rule
+    (a calendar entry holds at least one of its three histograms) is what an entry read as holding
+    nothing leaves unmet, so a citation into it is refused by that rule, naming the entry.
+    """
+    entry = _in_empty_calendar_entry(citation, profile)
+    if entry is not None:
+        raise _refuse_profile(
+            f"{at}.pointer",
+            f"cites calendar entry {printable(entry)}, which holds none of its three histograms; "
+            "a calendar entry holds at least one of month, dayOfWeek and hourOfWeek, and the "
+            "engine reads one with none as holding nothing, so nothing can be cited under it",
         )
 
 

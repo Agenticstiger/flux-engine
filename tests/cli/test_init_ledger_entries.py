@@ -35,12 +35,15 @@ from flux_engine.author.ledger import Ledger
 from flux_engine.cli._init import run_init
 from flux_engine.seam.parameters import (
     FLX_3113,
+    Citation,
     ParameterRegister,
+    Source,
     _check_citation,
     check_profile_citations,
     parse_pointer,
     read_unused_block,
 )
+from flux_engine.seam.profile import load_profile
 from flux_engine.stages.plan import plan as plan_stage
 from flux_stats.errors import FluxError
 from flux_stats.profile import SCHEMA_URL_1_4_0, load_profile_text
@@ -816,22 +819,63 @@ def test_the_json_ledger_lists_what_an_owner_can_leave_out_as_the_register_does(
     _read(_drop(profile, [item["pointer"] for item in ledger["unused"]]))
 
 
+def _unused_members(written: "Authored", entry: str) -> List[str]:
+    return [
+        item["pointer"]
+        for item in written.result.artifacts["ledger"]["statistics"]
+        if item["state"] == "unused" and item["pointer"].startswith(entry + "/")
+    ]
+
+
+def _plan(written: "Authored", tmp_path: Path) -> Any:
+    return plan_stage(
+        str(written.directory),
+        state_dir=str(tmp_path / "state"),
+        profile=str(written.profile_path),
+    )
+
+
 def test_the_statistics_of_the_json_ledger_name_each_member_of_a_whole_entry_on_its_own(
     tmp_path: Path,
 ) -> None:
-    # The inventory is per statistic, with the state each was given. An entry the reader holds
-    # whole is not droppable by those pointers: that is what ``ledger.unused`` is for.
+    # The inventory is per statistic, with the state each was given. Dropping every member it
+    # calls unused leaves an entry that holds none of its histograms: the strict reader of
+    # flux-stats refuses it, and the engine reads it as an entry that holds nothing, so the
+    # profile still inits and plans.
     profile = _date_profile()
-    written = Authored(tmp_path, profile, DATE_CONTRACT)
+    written = Authored(tmp_path / "first", profile, DATE_CONTRACT)
     assert written.result.exit_code == 0, written.result.stderr
-    members = [
-        entry["pointer"]
-        for entry in written.result.artifacts["ledger"]["statistics"]
-        if entry["state"] == "unused" and entry["pointer"].startswith(_ENTRY + "/")
-    ]
+    members = _unused_members(written, _ENTRY)
     assert members == [f"{_ENTRY}/month", f"{_ENTRY}/dayOfWeek"]
+    dropped = _drop(profile, members)
     with pytest.raises(FluxError, match="holds at least one of its three histograms"):
-        _read(_drop(profile, members))
+        _read(dropped)
+    assert dropped["tables"]["member"]["calendar"] == [{"column": "renewed_on"}]
+    second = Authored(tmp_path / "second", dropped, DATE_CONTRACT)
+    assert second.result.exit_code == 0, second.result.stderr
+    planned = _plan(second, tmp_path / "second")
+    assert planned.exit_code == 0, planned.stderr
+
+
+def test_a_released_calendar_dropped_member_by_member_is_read_by_init_and_plan(
+    tmp_path: Path,
+) -> None:
+    # A released profile's calendar of an entry nothing reads, dropped statistic by statistic the way
+    # a release step drops what the inventory marks unused, is read by init and plan as it is.
+    profile = _released_library("released", "released")
+    contract = _RELEASED_CONTRACT
+    # The loans' own calendar is read by nothing: no step of the bundle sets a borrowing date.
+    first = Authored(tmp_path / "first", profile, contract)
+    assert first.result.exit_code == 0, first.result.stderr
+    entry = "/tables/loan/calendar/0"
+    members = _unused_members(first, entry)
+    assert members, "the loans' calendar is expected to be read by nothing"
+    dropped = _drop(profile, members)
+    assert dropped["tables"]["loan"]["calendar"] == [{"column": "borrowed_at"}]
+    second = Authored(tmp_path / "second", dropped, contract)
+    assert second.result.exit_code == 0, second.result.stderr
+    planned = _plan(second, tmp_path / "second")
+    assert planned.exit_code == 0, planned.stderr
 
 
 # -- a pointer of the register at a whole entry ------------------------------------------------
@@ -892,3 +936,122 @@ def test_a_pointer_that_is_no_statistic_and_no_whole_entry_is_still_refused(poin
     with pytest.raises(FluxError) as raised:
         _check_unused(_profile(), [pointer])
     assert raised.value.code.code == "FLX-3113"
+
+
+# -- a calendar entry that holds nothing: nothing reads it, and a citation into it is refused -----
+
+
+def _emptied_profile() -> Dict[str, Any]:
+    """The library with the first calendar entry of ``member`` holding none of its histograms."""
+    return _drop(
+        _profile(),
+        [f"/tables/member/calendar/0/{key}" for key in ("month", "dayOfWeek", "hourOfWeek")],
+    )
+
+
+def _cites(pointer: str, definition: Optional[str] = "levelHistogram/1") -> ParameterRegister:
+    entry = SimpleNamespace(
+        citation=Citation(pointer=pointer, tokens=parse_pointer(pointer), definition=definition),
+        source=Source.PROFILE,
+        label=None,
+        index=0,
+    )
+    return cast(ParameterRegister, SimpleNamespace(entries=(entry,), unused=None))
+
+
+def test_the_engine_keeps_an_emptied_calendar_entry_in_place() -> None:
+    profile = _emptied_profile()
+    assert profile["tables"]["member"]["calendar"][0] == {"column": "renewed_on"}
+    read, _ = load_profile_text(json.dumps(profile), allow_empty_calendar_entries=True)
+    calendar = read.tables["member"].calendar
+    assert [entry.column for entry in calendar] == ["renewed_on", "last_visit"]
+    assert (calendar[0].month, calendar[0].day_of_week, calendar[0].hour_of_week) == (
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "pointer",
+    [
+        "/tables/member/calendar/0/month",
+        "/tables/member/calendar/0/hourOfWeek",
+        "/tables/member/calendar/0",
+    ],
+)
+def test_a_citation_into_a_calendar_entry_that_holds_nothing_is_refused_by_the_calendar_rule(
+    pointer: str,
+) -> None:
+    with pytest.raises(FluxError) as raised:
+        check_profile_citations(_cites(pointer), _emptied_profile(), where="sim-x")
+    assert raised.value.code.code == "FLX-5036"
+    message = str(raised.value)
+    assert "/tables/member/calendar/0" in message
+    assert "holds none of its three histograms" in message
+    assert "at least one of month, dayOfWeek and hourOfWeek" in message
+
+
+def test_a_citation_into_a_calendar_entry_that_holds_a_histogram_is_still_read_as_before() -> None:
+    check_profile_citations(_cites("/tables/member/calendar/0/month"), _profile(), where="sim-x")
+    # The second entry of the emptied profile still holds its month.
+    check_profile_citations(
+        _cites("/tables/member/calendar/1/month"), _emptied_profile(), where="sim-x"
+    )
+
+
+@pytest.mark.parametrize(
+    "pointer",
+    [
+        "/tables/member/calendar/0",
+        "/tables/member/calendar/0/month",
+        "/tables/member/calendar/0/dayOfWeek",
+        "/tables/member/calendar/0/hourOfWeek",
+    ],
+)
+def test_an_unused_item_may_name_a_calendar_entry_that_holds_nothing_or_a_member_of_it(
+    pointer: str,
+) -> None:
+    _check_unused(_emptied_profile(), [pointer])
+
+
+def test_an_unused_item_that_is_no_member_of_an_empty_calendar_entry_is_still_refused() -> None:
+    with pytest.raises(FluxError) as raised:
+        _check_unused(_emptied_profile(), ["/tables/member/calendar/0/column"])
+    assert raised.value.code.code == "FLX-3113"
+
+
+def test_a_bundle_that_reads_a_calendar_histogram_is_refused_against_a_profile_that_dropped_it(
+    tmp_path: Path,
+) -> None:
+    profile = _profile()
+    month = _stat("month", _months(m3=300, m10=100, m1=40))
+    hours = _stat("hourOfWeek", [10 if day < 5 else 1 for day in range(7) for _ in range(24)])
+    # The bundle sets the loan's borrowed date, so its rates cite the month of this calendar entry.
+    profile["tables"]["loan"]["calendar"] = [
+        _calendar("borrowed_at", month=month, hourOfWeek=hours)
+    ]
+    written = Authored(tmp_path, profile)
+    assert written.result.exit_code == 0, written.result.stderr
+    cited = [
+        entry["statistic"]["pointer"]
+        for entry in written.simulation["extensions"][NAMESPACE]["parameters"]
+        if entry.get("source") == "profile"
+    ]
+    assert any(pointer.startswith("/tables/loan/calendar/0/") for pointer in cited)
+    # Plan the same bundle against the profile with that entry emptied. The pin is moved to the
+    # emptied profile, so the digest is no reason to refuse and the citation is.
+    emptied = _drop(profile, [f"/tables/loan/calendar/0/{key}" for key in ("month", "hourOfWeek")])
+    emptied_path = tmp_path / "emptied.profile.json"
+    emptied_path.write_text(json.dumps(emptied), encoding="utf-8")
+    pinned = load_profile(emptied_path).digest.value
+    simulation_path = written.directory / "simulation.flux.yml"
+    document = written.simulation
+    document["extensions"][NAMESPACE]["profile"] = {"digest": pinned}
+    simulation_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    planned = plan_stage(
+        str(written.directory), state_dir=str(tmp_path / "state"), profile=str(emptied_path)
+    )
+    assert planned.exit_code != 0
+    assert "FLX-5036" in planned.stderr
+    assert "/tables/loan/calendar/0" in planned.stderr

@@ -682,7 +682,9 @@ of the profile's unit of privacy.
 **`calendar`** (format `1-3-0`) is a list of `{ "column", "month", "dayOfWeek", "hourOfWeek" }`, at
 most 1 024 of them and at most one per column. `column` is a `timestamp` column of the table (a
 DATE column is a `timestamp` here too, §7). Each of `month`, `dayOfWeek` and `hourOfWeek` is
-optional and at least one is present. Each is exactly one ungrouped `levelHistogram/1` of the
+optional and at least one is present; the engine reads an entry that holds none as one that holds
+nothing, kept in its place, and a citation into it is refused (`FLX-5036`). Each is exactly one
+ungrouped `levelHistogram/1` of the
 column's known values, read in UTC, over exactly these levels, written with leading zeros so that
 their code point order is their number's: `month` over `01` to `12`; `dayOfWeek` over `1` to `7`,
 the ISO 8601 day of the week with Monday `1`; `hourOfWeek` over `000` to `167`, the hour counted
