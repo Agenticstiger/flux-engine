@@ -25,7 +25,7 @@ import json
 from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pytest
 import yaml
@@ -338,7 +338,13 @@ def _profile(
 class Written:
     """The result of ``fluxsim init`` on a contract and a profile."""
 
-    def __init__(self, root: Path, contract: str, profile: Dict[str, Any]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        contract: str,
+        profile: Dict[str, Any],
+        window: Optional[Tuple[str, str]] = None,
+    ) -> None:
         root.mkdir(parents=True, exist_ok=True)
         self.directory = root / "bundle"
         contract_path = root / "dated.fluid.yaml"
@@ -346,7 +352,10 @@ class Written:
         self.profile_path = root / "dated.profile.json"
         self.profile_path.write_text(json.dumps(profile), encoding="utf-8")
         self.result = run_init(
-            str(self.directory), contract=str(contract_path), profile=str(self.profile_path)
+            str(self.directory),
+            contract=str(contract_path),
+            profile=str(self.profile_path),
+            window=window,
         )
         assert self.result.exit_code == 0, self.result.stderr
         self.simulation = yaml.safe_load(
@@ -376,8 +385,19 @@ class Written:
         ]
 
 
-def _written(tmp_path: Path, profile: Dict[str, Any], contract: str = CONTRACT) -> Written:
-    return Written(tmp_path, contract, profile)
+def _iso(milliseconds: int) -> str:
+    return datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+def _written(
+    tmp_path: Path,
+    profile: Dict[str, Any],
+    contract: str = CONTRACT,
+    window: Optional[Tuple[str, str]] = None,
+) -> Written:
+    return Written(tmp_path, contract, profile, window)
 
 
 HOLDS = _levels(after=60, before=0, same=40)
@@ -472,9 +492,12 @@ def test_an_end_whose_maximum_lies_after_the_window_is_kept(tmp_path: Path) -> N
     # refused by plan (ADR 0024 section 4).
     pair = _pair("signed_up", "closed_at", HOLDS, edges=(0, 400, 800), counts=(50, 50))
     late = _stamp(high=END + 400 * DAY, maximum_only=True)
-    written = _written(tmp_path, _profile(customer=[pair], closed_at=late))
+    # The window spans every published range, the late maximum too, so the run's window is given:
+    # a window of the other columns' span leaves the end's maximum after it.
+    window = (_iso(START), _iso(END))
+    written = _written(tmp_path, _profile(customer=[pair], closed_at=late), window=window)
     assert written.lifetimes["customer"]["endPastWindow"] == "kept"
-    inside = _written(tmp_path / "b", _profile(customer=[pair]))
+    inside = _written(tmp_path / "b", _profile(customer=[pair]), window=window)
     assert "endPastWindow" not in inside.lifetimes["customer"]
 
 
@@ -1450,10 +1473,10 @@ def test_a_widened_child_date_the_table_has_no_other_property_for_is_not_dated(
 
 
 def test_a_widened_range_is_recorded_in_the_used_note_of_its_statistic(tmp_path: Path) -> None:
-    from flux_engine.author.bundle import author_bundle
+    from flux_engine.author.bundle import AuthorInputs, author_bundle
 
     written = _written(tmp_path, _late_child_profile())
-    authored = author_bundle(tmp_path / "dated.fluid.yaml", written.profile_path)
+    authored = author_bundle(AuthorInputs(tmp_path / "dated.fluid.yaml", written.profile_path))
     notes = [
         entry.note
         for entry in authored.ledger

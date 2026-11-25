@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict
 
-import yaml
+from tests.bundles import edit_simulation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "consumers"
@@ -53,8 +53,6 @@ def copy_fit_bundle(root: Path) -> Path:
     """A copy of the fixture bundle under *root* that a fit can move, as described above."""
     bundle = root / "bundle"
     shutil.copytree(FIXTURES / "bundle", bundle)
-    path = bundle / SIMULATION
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    _assume_nulls(document["extensions"][NAMESPACE], document["id"])
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    return bundle
+    return edit_simulation(
+        bundle, lambda document: _assume_nulls(document["extensions"][NAMESPACE], document["id"])
+    )

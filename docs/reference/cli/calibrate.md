@@ -8,7 +8,7 @@ editLink: false
 
 # `fluxsim calibrate`
 
-Read a Playback's declared scorecard and report the credibility and grade it carries; no fitting is performed. With --fit, fit the parameters a bundle's consumers calibration block declares to the rates of its calibration queries (CMA-ES, from the [calibrate] extra), and write the result as a calibration patch, DIR.patch.json, beside the output.
+Read a Playback's declared scorecard and report the credibility and grade it carries; no fitting is performed. With --fit, fit the parameters a bundle's consumers calibration block declares to the rates of its calibration queries (CMA-ES, from the [calibrate] extra), and write the result as a calibration patch, DIR.patch.json, beside the output. A bundle that declares no held-out query is fitted without a held-out check, and the output says so.
 
 ## Synopsis
 
@@ -43,7 +43,7 @@ fluxsim calibrate --fit ./bundle --profile pinned.profile.json --held-out held-o
 | `--dry-run` |  | print the scorecard without writing calibration-provenance.json (default) |
 | `--write` |  | write calibration-provenance.json into the run directory |
 | `--run-id` | `RUN_ID` | required without --dry-run |
-| `--fit` | `BUNDLE` | fit the declared parameters of this bundle to its calibration queries instead of reading a declared scorecard; needs --profile, --held-out and --out |
+| `--fit` | `BUNDLE` | fit the declared parameters of this bundle to its calibration queries instead of reading a declared scorecard; needs --profile and --out, and --held-out when the bundle declares a held-out query |
 | `--profile` | `PATH` | with --fit: the profile the Simulation pins, whose queries section holds the targets the fit reads; refused when its digest is not the pinned one |
 | `--out` | `DIR` | with --fit: where the calibration patch (DIR.patch.json) and, only when the held-out error holds, the calibrated bundle (DIR) are written; neither may exist |
 | `--max-evaluations` | `N` | with --fit: raise the evaluations a fit may run above the engine's 64, up to 4096, for a bundle whose calibration block declares no evaluations; a bundle's own value is kept and may only lower the ceiling |

@@ -23,7 +23,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
-import yaml
 
 pytest.importorskip("sqlglot")
 pytest.importorskip("duckdb")
@@ -32,7 +31,11 @@ pytest.importorskip("cma")
 
 from flux_engine.calibrate.fit import FitRequest, run_fit  # noqa: E402
 from flux_engine.stages.run import run, run_on_common_draws  # noqa: E402
-from tests.calibrate._fit_bundle import NAMESPACE, SIMULATION, copy_fit_bundle  # noqa: E402
+from tests.bundles import edit_simulation  # noqa: E402
+from tests.calibrate._fit_bundle import (  # noqa: E402
+    NAMESPACE,
+    copy_fit_bundle,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -45,13 +48,12 @@ RENEWED = 4  # the position of `renewed` in a row of the `subscriptions` emit
 
 def bundle_with_nulls(root: Path, nulls: str) -> Path:
     """The fit fixture with the share of ``renewed`` left NULL set to *nulls*."""
-    bundle = copy_fit_bundle(root)
-    path = bundle / SIMULATION
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    columns = document["extensions"][NAMESPACE]["emits"]["subscriptions"]["fidelity"]["columns"]
-    columns["renewed"]["nullFraction"] = nulls
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    return bundle
+
+    def change(document: Dict[str, Any]) -> None:
+        emit = document["extensions"][NAMESPACE]["emits"]["subscriptions"]
+        emit["fidelity"]["columns"]["renewed"]["nullFraction"] = nulls
+
+    return edit_simulation(copy_fit_bundle(root), change)
 
 
 def rows_of(bundle: Path, state: Path, draws_of: Optional[Path] = None) -> List[List[Any]]:

@@ -14,7 +14,13 @@ from flux_engine.cli._output import _finish
 from flux_engine.cli._parser import Example
 
 EXAMPLES: Dict[str, Tuple[Example, ...]] = {
-    "validate": (Example("fluxsim validate ./bundle", "check a bundle; nothing is written"),),
+    "validate": (
+        Example("fluxsim validate ./bundle", "check a bundle; nothing is written"),
+        Example(
+            "fluxsim validate ./bundle --profile profile.json",
+            "also refuse what plan refuses about the profile the bundle pins (FLX-3105, 3109, 3110, 3113)",
+        ),
+    ),
 }
 
 
@@ -29,6 +35,18 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         ),
     )
     validate_p.add_argument("bundle", help=_BUNDLE_HELP)
+    validate_p.add_argument(
+        "--profile",
+        default=None,
+        metavar="PATH",
+        help=(
+            "the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, "
+            "as plan does, an overlay or a parameter of the register that names a table or column "
+            "it does not describe, and a profile that is not the pinned one (FLX-3105, 3109, "
+            "3110, 3113); a profile given to a Simulation that pins none and the grade floor "
+            "(FLX-4005) are left to plan; without it no profile is read"
+        ),
+    )
     _add_json_flag(validate_p)
 
     validate_p.set_defaults(stage_name="validate")
@@ -37,4 +55,4 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 def _cmd_validate(args: argparse.Namespace) -> int:
     from flux_engine.stages.validate import validate
 
-    return _finish(args, validate(args.bundle))
+    return _finish(args, validate(args.bundle, profile=args.profile))

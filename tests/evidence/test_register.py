@@ -342,3 +342,29 @@ def test_the_example_record_beside_the_spec_validates_and_reads_back() -> None:
     summary = parse_register(text)
     assert summary.declared == 35
     assert dict(summary.counts) == {"profile": 3, "assumption": 2, "default": 30}
+
+
+def test_the_note_of_a_1_4_0_record_says_it_counts_the_namespace_keys() -> None:
+    from flux_engine.evidence.register import REGISTER_SCHEMA_URL_1_4
+    from flux_engine.seam.parameters import SOURCES_1_4
+
+    document = build_register_document(_register())
+    document["_schemaURL"] = REGISTER_SCHEMA_URL_1_4
+    for source in SOURCES_1_4:
+        document["counts"].setdefault(source.value, 0)
+    summary = parse_register(json.dumps(document))
+    assert summary.counts_namespace_keys
+    note = render_register_note(summary)
+    assert (
+        "rows and the rules). It counts the numbers of the namespace's other keys too (such as "
+        "`counts`, `history`, `within` and the sentinels of `links`). It does not count seeds, a "
+        "sweep, or the fidelity block's `encoding` and `budget`, so the run reads numbers this "
+        "report does not show."
+    ) in note
+    assert "or the namespace's own declarations" not in note
+
+
+def test_the_note_of_an_earlier_record_keeps_its_wording() -> None:
+    summary = parse_register(render_register(_register()))
+    assert not summary.counts_namespace_keys
+    assert "or the namespace's own declarations of how rows relate" in render_register_note(summary)

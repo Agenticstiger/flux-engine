@@ -34,7 +34,7 @@ import yaml
 
 from flux_engine.author.columns import ASSUMED_CHECK_REASON
 from flux_engine.cli._init import run_init
-from flux_engine.evidence.register import REGISTER_SCHEMA_URL_1_3
+from flux_engine.evidence.register import REGISTER_SCHEMA_URL_1_3, REGISTER_SCHEMA_URL_1_4
 from flux_engine.seam.parameters import parse_pointer
 from flux_engine.stages.run import run
 from flux_engine.stages.validate import validate
@@ -114,6 +114,7 @@ def test_the_bundle_holds_the_contract_unchanged_and_three_documents(orders: Aut
     assert names == [
         "orders.fluid.yaml",
         "persona.flux.yml",
+        "requests",
         "simulation.flux.yml",
         "world.flux.yml",
     ]
@@ -282,6 +283,8 @@ def test_the_same_inputs_write_the_same_bytes(tmp_path: Path, orders: Authored) 
     again = tmp_path / "again"
     assert _init(again, ORDERS_CONTRACT, ORDERS_PROFILE).exit_code == 0
     for path in orders.bundle.iterdir():
+        if path.is_dir():
+            continue
         assert (again / path.name).read_bytes() == path.read_bytes(), path.name
 
 
@@ -327,7 +330,7 @@ def test_an_enum_the_contract_declares_is_cited_from_the_contract(keyed: Authore
     for token in parse_pointer(cited[0]["contract"]["pointer"]):
         node = node[int(token)] if isinstance(node, list) else node[token]
     assert node == "enum('DE','FR','GB','IE')"
-    assert keyed.record["_schemaURL"] == REGISTER_SCHEMA_URL_1_3
+    assert keyed.record["_schemaURL"] == REGISTER_SCHEMA_URL_1_4
     assert keyed.record["counts"]["contract"] == 1
 
 

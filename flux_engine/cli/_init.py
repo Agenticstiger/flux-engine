@@ -17,7 +17,7 @@ import json
 import shlex
 import shutil
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -152,6 +152,8 @@ def run_init(
     request: Optional[str] = None,
     overlays: Tuple[str, ...] = (),
     consumers: Optional[str] = None,
+    window: Optional[Tuple[str, str]] = None,
+    history: Optional[str] = None,
 ) -> StageResult:
     """Scaffold *directory* and report it as a :class:`StageResult`.
 
@@ -165,17 +167,44 @@ def run_init(
     formed in those cases, which is what exit ``2`` is reserved for, so a
     wrapper can tell "pick another name" from "fix the invocation".
     """
-    from flux_engine.starter import PURPOSES, ScaffoldError, scaffold
-
     if not directory.strip():
         return StageResult(
             stage="init",
             exit_code=2,
             stderr="init: say where to write the project, for example `fluxsim init demo`",
         )
-    needs_contract = _needs_contract(profile, consumers, contract)
-    if needs_contract is not None:
-        return needs_contract
+    for refused in (
+        _needs_contract(profile, consumers, contract),
+        _request_refused(contract, profile, request),
+        _flags_refused(contract, profile, strict, allow),
+        _overlays_need_inputs(overlays, contract, profile),
+    ):
+        if refused is not None:
+            return refused
+    given = _window_given(window, contract, profile)
+    if isinstance(given, StageResult):
+        return given
+    declared = _history_declared(history, contract, profile, window)
+    if isinstance(declared, StageResult):
+        return declared
+    if contract is not None and profile is not None:
+        asked = _AuthorRequest(
+            contract, profile, strict, allow, consumers=consumers, window=given, history=declared
+        )
+        if overlays:
+            return run_author_overlays(directory, asked, overlays)
+        return run_author(directory, asked)
+    if contract is not None:
+        from flux_engine.cli._request import run_request
+
+        return run_request(directory, contract, request, consumers=consumers)
+    return _starter_written(directory)
+
+
+def _request_refused(
+    contract: Optional[str], profile: Optional[str], request: Optional[str]
+) -> Optional[StageResult]:
+    """The refusal (exit ``2``) of ``--request`` without ``--contract`` or beside ``--profile``."""
     if request is not None and profile is not None:
         return StageResult(
             stage="init",
@@ -189,10 +218,19 @@ def run_init(
         return StageResult(
             stage="init",
             exit_code=2,
-            stderr="init: --request needs --contract, which the profile request is made from",
+            stderr=("init: --request needs --contract, which the profile request is made from"),
         )
-    if (strict or allow) and contract is None:
-        flag = "--strict" if strict else "--allow"
+    return None
+
+
+def _flags_refused(
+    contract: Optional[str], profile: Optional[str], strict: bool, allow: Tuple[str, ...]
+) -> Optional[StageResult]:
+    """The refusal (exit ``2``) of ``--strict`` or ``--allow`` where there is no bundle to check."""
+    if not (strict or allow):
+        return None
+    flag = "--strict" if strict else "--allow"
+    if contract is None:
         return StageResult(
             stage="init",
             exit_code=2,
@@ -201,8 +239,7 @@ def run_init(
                 "starter project has no profile to check"
             ),
         )
-    if (strict or allow) and profile is None:
-        flag = "--strict" if strict else "--allow"
+    if profile is None:
         return StageResult(
             stage="init",
             exit_code=2,
@@ -211,7 +248,7 @@ def run_init(
                 "with no profile, init writes the profile request, and there is no bundle to check"
             ),
         )
-    if allow and not strict:
+    if not strict:
         return StageResult(
             stage="init",
             exit_code=2,
@@ -220,27 +257,13 @@ def run_init(
                 "--allow"
             ),
         )
-    refused = _overlays_need_inputs(overlays, contract, profile)
-    if refused is not None:
-        return refused
-    if contract is not None and profile is not None:
-        if overlays:
-            return run_author_overlays(
-                directory,
-                contract,
-                profile,
-                overlays,
-                strict=strict,
-                allow=allow,
-                consumers=consumers,
-            )
-        return run_author(
-            directory, contract, profile, strict=strict, allow=allow, consumers=consumers
-        )
-    if contract is not None:
-        from flux_engine.cli._request import run_request
+    return None
 
-        return run_request(directory, contract, request, consumers=consumers)
+
+def _starter_written(directory: str) -> StageResult:
+    """Write the starter project into *directory* and say what was written and what to run next."""
+    from flux_engine.starter import PURPOSES, ScaffoldError, scaffold
+
     try:
         names = scaffold(Path(directory))
     except ScaffoldError as error:
@@ -263,6 +286,76 @@ def run_init(
         _artifacts={"directory": directory, "files": list(names), "next": steps},
         stdout="\n".join(lines),
     )
+
+
+def _window_given(
+    window: Optional[Tuple[str, str]], contract: Optional[str], profile: Optional[str]
+) -> Any:
+    """The window ``--window`` gives as RFC 3339 texts, ``None`` without it, or the refusal (exit ``2``)."""
+    from flux_engine.author.window import WindowError, parse_window
+    from flux_engine.seam.coverage import printable
+
+    if window is None:
+        return None
+    if contract is None or profile is None:
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --window sets the run window of a bundle written from --contract and "
+                "--profile; pass both, for example `fluxsim init bundle --contract "
+                "contract.orders.fluid.yaml --profile orders.profile.json --window 2025-01-01 "
+                "2025-12-31`"
+            ),
+        )
+    try:
+        return parse_window(window[0], window[1])
+    except WindowError as error:
+        return StageResult(stage="init", exit_code=2, stderr=f"init: {printable(str(error))}")
+
+
+def _history_declared(
+    history: Optional[str],
+    contract: Optional[str],
+    profile: Optional[str],
+    window: Optional[Tuple[str, str]],
+) -> Any:
+    """The history file ``--history`` names, read; ``None`` without it; or the refusal.
+
+    Exit ``2`` when it comes without ``--contract`` and ``--profile``, or when the file's
+    ``timeBounds`` and ``--window`` both give the window. Exit ``1`` when the file cannot be read or
+    holds what a history file may not; the message names it.
+    """
+    from flux_engine.author.declared_history import DeclaredHistoryError, read_history_file
+    from flux_engine.seam.coverage import printable
+
+    if history is None:
+        return None
+    if contract is None or profile is None:
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                "init: --history declares the history of a bundle written from --contract and "
+                "--profile; pass both, for example `fluxsim init bundle --contract "
+                "contract.orders.fluid.yaml --profile orders.profile.json --history "
+                "history.yml`"
+            ),
+        )
+    try:
+        declared = read_history_file(Path(history))
+    except DeclaredHistoryError as error:
+        return StageResult(stage="init", exit_code=1, stderr=f"init: --history {error}")
+    if declared.time_bounds is not None and window is not None:
+        return StageResult(
+            stage="init",
+            exit_code=2,
+            stderr=(
+                f"init: {printable(declared.name)} gives the window in timeBounds and --window "
+                "gives it too; give the window once"
+            ),
+        )
+    return declared
 
 
 def _overlays_need_inputs(
@@ -501,34 +594,66 @@ def _consumer_report_document(bundle: Any) -> Dict[str, Any]:
     return {"consumers": bundle.consumers.as_document()}
 
 
-def _authored(
-    contract: str,
-    profile: str,
-    overlay: Optional[Any],
-    *,
-    strict: bool,
-    allow: Tuple[str, ...],
-    consumers: Optional[str] = None,
-) -> Any:
-    """The checked bundle for *contract* and *profile* (with *overlay*), or the refusal to report.
+@dataclass(frozen=True)
+class _AuthorRequest:
+    """What ``init`` writes a bundle from: the two documents as named, and the options that shape it."""
+
+    contract: str
+    profile: str
+    strict: bool = False
+    allow: Tuple[str, ...] = ()
+    consumers: Optional[str] = None
+    window: Optional[Tuple[str, str]] = None
+    history: Optional[Any] = None
+
+
+def _authored(asked: _AuthorRequest, overlay: Optional[Any]) -> Any:
+    """The checked bundle for the contract and profile of *asked* (with *overlay*), or the refusal to report.
 
     Exit ``1`` when an input cannot be used (the message names it and, for a refusal the engine
-    shares, its ``FLX`` code), when no expose can be written, or when *strict* refuses an unused
-    statistic or a gap that no *allow* pointer accepts (ADR 0014). Nothing is written here.
+    shares, its ``FLX`` code), when no expose can be written, or when *asked* is strict and refuses
+    an unused statistic or a gap that no allow pointer accepts (ADR 0014). Nothing is written here.
     """
-    from flux_engine.author import AuthorError, author_bundle, strict_findings
+    from flux_engine.author import AuthorError, AuthorInputs, author_bundle
     from flux_engine.core.errors import FluxError
-    from flux_engine.seam.coverage import printable
 
     try:
         bundle = author_bundle(
-            Path(contract), Path(profile), overlay, consumers_path=_maybe_path(consumers)
+            AuthorInputs(
+                Path(asked.contract),
+                Path(asked.profile),
+                overlay,
+                _maybe_path(asked.consumers),
+                asked.window,
+                asked.history,
+            )
         )
-    except AuthorError as error:
+    except (AuthorError, FluxError, OSError) as error:
+        return _authoring_refused(error, asked.contract)
+    refused = _strict_refused(bundle, asked.allow) if asked.strict else None
+    return bundle if refused is None else refused
+
+
+def _authoring_refused(error: Exception, contract: str) -> StageResult:
+    """The refusal to report (exit ``1``) for an input the bundle could not be authored from."""
+    from flux_engine.author import AuthorError
+    from flux_engine.core.errors import FluxError
+    from flux_engine.seam.coverage import printable
+
+    if isinstance(error, AuthorError):
         # A refusal can quote the contract (a column name, a FLUX message about it): no
         # control character of it reaches the terminal.
+        code = getattr(error, "code", None)
+        if isinstance(code, str):
+            return StageResult(
+                stage="init",
+                exit_code=1,
+                _artifacts={"code": code},
+                stderr=f"init: {printable(str(error))}",
+                error_code=code,
+            )
         return StageResult(stage="init", exit_code=1, stderr=f"init: {printable(str(error))}")
-    except FluxError as error:
+    if isinstance(error, FluxError):
         if error.code.code == "FLX-3109":
             # The profile could not be read. FLX-3109's title is about a pin and a profile
             # that do not pair, which says nothing here, so its detail is the message.
@@ -540,55 +665,51 @@ def _authored(
             stderr=f"init: {printable(str(error))}",
             error_code=error.code.code,
         )
-    except OSError as error:
+    assert isinstance(error, OSError)
+    return StageResult(
+        stage="init",
+        exit_code=1,
+        stderr=(
+            f"init: cannot read {printable(str(error.filename or contract))}: "
+            f"{error.strerror or error}"
+        ),
+    )
+
+
+def _strict_refused(bundle: Any, allow: Tuple[str, ...]) -> Optional[StageResult]:
+    """The refusal when ``--strict`` finds an unused statistic or a gap no *allow* pointer accepts."""
+    from flux_engine.author import strict_findings
+    from flux_engine.seam.coverage import printable
+
+    try:
+        findings = strict_findings(bundle, allow)
+    except ValueError as error:
         return StageResult(
             stage="init",
-            exit_code=1,
-            stderr=(
-                f"init: cannot read {printable(str(error.filename or contract))}: "
-                f"{error.strerror or error}"
-            ),
+            exit_code=2,
+            stderr=f"init: --allow takes a JSON Pointer (RFC 6901): {printable(str(error))}",
         )
-    if strict:
-        try:
-            findings = strict_findings(bundle, allow)
-        except ValueError as error:
-            return StageResult(
-                stage="init",
-                exit_code=2,
-                stderr=f"init: --allow takes a JSON Pointer (RFC 6901): {printable(str(error))}",
-            )
-        if findings.refused:
-            return StageResult(
-                stage="init",
-                exit_code=1,
-                _artifacts={
-                    "strict": {
-                        "unused": [
-                            {"pointer": pointer, "definition": definition, "reason": reason}
-                            for pointer, definition, reason in findings.unused
-                        ],
-                        "gaps": [
-                            {"pointer": gap.pointer, "reason": gap.reason} for gap in findings.gaps
-                        ],
-                        "staleAllow": list(findings.stale),
-                    }
-                },
-                stderr=_strict_refusal(findings),
-            )
-    return bundle
+    if not findings.refused:
+        return None
+    return StageResult(
+        stage="init",
+        exit_code=1,
+        _artifacts={
+            "strict": {
+                "unused": [
+                    {"pointer": pointer, "definition": definition, "reason": reason}
+                    for pointer, definition, reason in findings.unused
+                ],
+                "gaps": [{"pointer": gap.pointer, "reason": gap.reason} for gap in findings.gaps],
+                "staleAllow": list(findings.stale),
+            }
+        },
+        stderr=_strict_refusal(findings),
+    )
 
 
-def run_author(
-    directory: str,
-    contract: str,
-    profile: str,
-    *,
-    strict: bool = False,
-    allow: Tuple[str, ...] = (),
-    consumers: Optional[str] = None,
-) -> StageResult:
-    """Write a bundle for the data *contract* and *profile* describe into *directory*.
+def run_author(directory: str, asked: _AuthorRequest) -> StageResult:
+    """Write a bundle for the data the contract and profile of *asked* describe into *directory*.
 
     Exit ``1`` when an input cannot be used (the message names it and, for a
     refusal the engine shares, its ``FLX`` code), when no expose can be written,
@@ -598,47 +719,36 @@ def run_author(
     """
     from flux_engine.starter import ScaffoldError, write_project
 
-    bundle = _authored(contract, profile, None, strict=strict, allow=allow, consumers=consumers)
+    bundle = _authored(asked, None)
     if isinstance(bundle, StageResult):
         return bundle
-    asked = _request_path(directory, bundle)
-    if isinstance(asked, StageResult):
-        return asked
+    request = _request_path(directory, bundle)
     try:
         names = write_project(Path(directory), lambda: bundle.files)
     except ScaffoldError as error:
         return StageResult(stage="init", exit_code=1, stderr=f"init: {error}")
-    written = _write_request(asked, bundle)
+    written = _write_request(request, bundle)
     if isinstance(written, StageResult):
-        _remove(Path(directory), names)
+        _remove(Path(directory), names, request)
         return written
-    return _described(directory, bundle, names, contract, profile, written)
+    return _described(directory, bundle, names, asked.contract, asked.profile, written)
 
 
-def _request_path(directory: str, bundle: Any) -> Any:
-    """Where the profile request for the bundle's assumptions goes, or the refusal when it is taken.
+def _request_path(directory: str, bundle: Any) -> Optional[Path]:
+    """Where the profile request for the bundle's assumptions goes: inside *directory*, or ``None``.
 
-    Beside *directory*, named after it, with the suffix ``.assumptions.profile-request.yml`` (ADR
-    0030 section 8): ``None`` when no assumption has a statistic to replace it. A file that exists
-    is never overwritten, so it is refused before the bundle is written.
+    ``None`` when no assumption has a statistic to replace it. The file is
+    ``requests/assumptions.profile-request.yml`` under the bundle directory (ADR 0030 section 8,
+    amended 2026-11-24), so it is created and removed with the bundle: ``write_project`` refuses a
+    directory that holds anything, so nothing here is ever overwritten. It is in a subdirectory
+    because the loader refuses any other file at the top of a bundle directory (``FLX-3108``,
+    ADR 0006) and reads no deeper, so ``inputDigest`` does not cover it.
     """
-    from flux_engine.author.replace import ASSUMPTIONS_REQUEST_SUFFIX
-    from flux_engine.cli._request import default_request_path
-    from flux_engine.seam.coverage import printable
+    from flux_engine.author.replace import ASSUMPTIONS_REQUEST_PATH
 
     if bundle.assumptions_request is None:
         return None
-    target = default_request_path(directory, ASSUMPTIONS_REQUEST_SUFFIX)
-    if target.exists() or target.is_symlink():
-        return StageResult(
-            stage="init",
-            exit_code=1,
-            stderr=(
-                f"init: {printable(str(target))} exists, and init never overwrites; move it away "
-                "or write the bundle elsewhere"
-            ),
-        )
-    return target
+    return Path(directory) / ASSUMPTIONS_REQUEST_PATH
 
 
 def _write_request(target: Optional[Path], bundle: Any) -> Any:
@@ -650,6 +760,7 @@ def _write_request(target: Optional[Path], bundle: Any) -> Any:
     if target is None:
         return None
     try:
+        target.parent.mkdir(exist_ok=True)
         _write_new(target, render_request(bundle.assumptions_request).encode("utf-8"))
     except OSError as error:
         return StageResult(
@@ -660,14 +771,32 @@ def _write_request(target: Optional[Path], bundle: Any) -> Any:
     return target
 
 
-def _remove(directory: Path, names: Tuple[str, ...]) -> None:
-    """Remove the files *names* ``init`` wrote into *directory*, and the directory when it is empty."""
-    for name in names:
-        (directory / name).unlink(missing_ok=True)
+def _rmdir_if_empty(directory: Path) -> None:
+    """Remove *directory* when it is empty.
+
+    Cleanup is best effort: a directory that is already gone, still holds something or cannot be
+    removed (a permission refused, say) is left as it is, so the refusal that led here is the one
+    reported.
+    """
     try:
         directory.rmdir()
     except OSError:
         pass
+
+
+def _remove_request(request: Path) -> None:
+    """Remove a profile *request* ``init`` wrote, and the directory it went in when that is empty."""
+    request.unlink(missing_ok=True)
+    _rmdir_if_empty(request.parent)
+
+
+def _remove(directory: Path, names: Tuple[str, ...], request: Optional[Path] = None) -> None:
+    """Remove the files *names* ``init`` wrote into *directory* and its *request*, and the directory when it is empty."""
+    for name in names:
+        (directory / name).unlink(missing_ok=True)
+    if request is not None:
+        _remove_request(request)
+    _rmdir_if_empty(directory)
 
 
 def _read_overlays(files: Tuple[str, ...]) -> Any:
@@ -708,21 +837,11 @@ def _read_overlays(files: Tuple[str, ...]) -> Any:
     return overlays
 
 
-def _authored_each(
-    contract: str,
-    profile: str,
-    overlays: List[Any],
-    *,
-    strict: bool,
-    allow: Tuple[str, ...],
-    consumers: Optional[str] = None,
-) -> Any:
+def _authored_each(asked: _AuthorRequest, overlays: List[Any]) -> Any:
     """The checked bundle of each overlay, or the first refusal, which names the overlay."""
     bundles: List[Any] = []
     for overlay in overlays:
-        bundle = _authored(
-            contract, profile, overlay, strict=strict, allow=allow, consumers=consumers
-        )
+        bundle = _authored(asked, overlay)
         if isinstance(bundle, StageResult):
             if bundle.stderr:
                 bundle = replace(
@@ -733,18 +852,15 @@ def _authored_each(
     return bundles
 
 
-def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -> StageResult:
+def _written_each(root: Path, bundles: List[Any], asked: _AuthorRequest) -> StageResult:
     """Write each bundle into *root*, named after its overlay, with the request for its assumptions.
 
-    Every request path is checked before the first bundle is written, and when a directory or a
+    When a directory or a
     file cannot be written, everything this call wrote is removed.
     """
     from flux_engine.starter import ScaffoldError, write_project
 
-    asked = [_request_path(str(root / bundle.overlay.name), bundle) for bundle in bundles]
-    for refused in asked:
-        if isinstance(refused, StageResult):
-            return refused
+    requests = [_request_path(str(root / bundle.overlay.name), bundle) for bundle in bundles]
     written: List[Tuple[Path, bool, Tuple[str, ...], Optional[Path]]] = []
     results: List[StageResult] = []
 
@@ -755,9 +871,9 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
             if not was_there:
                 shutil.rmtree(path, ignore_errors=True)
             if request is not None:
-                request.unlink(missing_ok=True)
+                _remove_request(request)
 
-    for bundle, request in zip(bundles, asked, strict=True):
+    for bundle, request in zip(bundles, requests, strict=True):
         target = root / bundle.overlay.name
         existed = target.exists()
         try:
@@ -766,11 +882,13 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
             undo()
             return StageResult(stage="init", exit_code=1, stderr=f"init: {error}")
         placed = _write_request(request, bundle)
-        written.append((target, existed, names, placed if isinstance(placed, Path) else None))
+        written.append((target, existed, names, request))
         if isinstance(placed, StageResult):
             undo()
             return placed
-        results.append(_described(str(target), bundle, names, contract, profile, placed))
+        results.append(
+            _described(str(target), bundle, names, asked.contract, asked.profile, placed)
+        )
     return StageResult(
         stage="init",
         exit_code=0,
@@ -784,14 +902,7 @@ def _written_each(root: Path, bundles: List[Any], contract: str, profile: str) -
 
 
 def run_author_overlays(
-    directory: str,
-    contract: str,
-    profile: str,
-    overlay_files: Tuple[str, ...],
-    *,
-    strict: bool = False,
-    allow: Tuple[str, ...] = (),
-    consumers: Optional[str] = None,
+    directory: str, asked: _AuthorRequest, overlay_files: Tuple[str, ...]
 ) -> StageResult:
     """Write one bundle per overlay of *overlay_files* into *directory*, each in a directory named after it.
 
@@ -806,12 +917,10 @@ def run_author_overlays(
     overlays = _read_overlays(overlay_files)
     if isinstance(overlays, StageResult):
         return overlays
-    bundles = _authored_each(
-        contract, profile, overlays, strict=strict, allow=allow, consumers=consumers
-    )
+    bundles = _authored_each(asked, overlays)
     if isinstance(bundles, StageResult):
         return bundles
-    done = _written_each(Path(directory), bundles, contract, profile)
+    done = _written_each(Path(directory), bundles, asked)
     if done.exit_code != 0:
         return done
     heading = f"created {len(bundles)} bundles in {printable(directory)}, one for each overlay:"
@@ -994,6 +1103,7 @@ def _described(
             },
             "simulationId": bundle.simulation_id,
             "profileDigest": bundle.profile_digest,
+            **({"historyFile": bundle.history_file} if bundle.history_file is not None else {}),
             **({"assumptionsRequest": str(request)} if request is not None else {}),
             **(
                 {"overlay": {"name": bundle.overlay.name, "digest": bundle.overlay.digest.value}}

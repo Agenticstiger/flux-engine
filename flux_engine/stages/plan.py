@@ -117,6 +117,7 @@ __all__ = [
     "PROFILE_PIN_KEY",
     "SCORECARD_PLAN_KEY",
     "build_plan_document",
+    "check_simulation_against_profile",
     "column_provenance_text",
     "parameter_register_text",
     "plan",
@@ -515,23 +516,40 @@ def plan(
 def _check_against_profile(result: "_pipeline.PipelineResult", pinned: Optional[Any]) -> None:
     """Read the overlay and the register's citations in the profile ``plan`` is handed (``FLX-3105``, ``FLX-3113``).
 
-    The Simulation's overlay has to make a profile the reader accepts. A number said to come from
-    the profile has to cite a statistic the pinned profile publishes, and one said to come from the
-    overlay a statistic of the overlaid profile; a number the overlay changed is not cited as the
-    profile's. Checked here, the one stage that is always handed the profile a run is planned
-    against.
+    Checked here, the one stage that is always handed the profile a run is planned against;
+    ``validate --profile`` runs the same check (:func:`check_simulation_against_profile`).
+    """
+    check_simulation_against_profile(
+        result.cast.simulation, result.cast.simulation_id, result.parameters, pinned
+    )
+
+
+def check_simulation_against_profile(
+    simulation: Mapping[str, Any],
+    where: str,
+    parameters: Optional[Any],
+    pinned: Optional[Any],
+) -> None:
+    """Refuse a Simulation that the profile it pins does not describe (``FLX-3105``, ``FLX-3113``).
+
+    The Simulation's overlay has to make a profile the reader accepts, so an overlay that names a
+    table or column the profile lacks is refused. A number said to come from the profile has to
+    cite a statistic the pinned profile publishes, and one said to come from the overlay a
+    statistic of the overlaid profile; a number the overlay changed is not cited as the profile's.
+    A table or column of the contract that the profile does not describe is refused here, by the
+    citation that reaches it. *parameters* is the Simulation's parameter register, or ``None``
+    when it declares none; *pinned* is the profile it pins, or ``None`` when it has none.
     """
     if pinned is None:
         return
-    simulation, where = result.cast.simulation, result.cast.simulation_id
     overlay = declared_overlay(simulation, where=where)
     overlaid = None
     if overlay is not None:
         profile, overlaid = overlaid_profile(pinned.document, overlay, code=FLX_3105)
         check_restated_means(profile, overlay, code=FLX_3402)
-    if result.parameters is not None:
+    if parameters is not None:
         check_profile_citations(
-            result.parameters,
+            parameters,
             pinned.document,
             where=where,
             overlay=(overlay.name, overlaid) if overlay is not None and overlaid else None,

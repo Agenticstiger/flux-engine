@@ -29,8 +29,8 @@ from typing import Any, Dict, List, Optional
 import pytest
 import yaml
 
-from flux_engine.cli._init import run_init
 from flux_engine.stages.run import run
+from tests.bundles import init_from_texts
 
 pytestmark = pytest.mark.integration
 
@@ -181,13 +181,7 @@ def _init(tmp_path: Path, profile: Dict[str, Any], *, counted: bool = True) -> A
     contract = CONTRACT
     if not counted:
         profile, contract = _uncounted(profile), NULLABLE
-    (tmp_path / "shop.fluid.yaml").write_text(contract, encoding="utf-8")
-    (tmp_path / "shop.profile.json").write_text(json.dumps(profile), encoding="utf-8")
-    result = run_init(
-        str(tmp_path / "bundle"),
-        contract=str(tmp_path / "shop.fluid.yaml"),
-        profile=str(tmp_path / "shop.profile.json"),
-    )
+    result = init_from_texts(tmp_path, contract, profile, ("shop.fluid.yaml", "shop.profile.json"))
     assert result.exit_code == 0, result.stderr
     return result
 

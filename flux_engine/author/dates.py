@@ -97,6 +97,12 @@ class DateDeclarations:
     unused: List[_Note]
     #: The ``rates`` entries, one per column a calendar shapes.
     rates: List[Dict[str, Any]] = field(default_factory=list)
+    #: What each written number rests on: the entry, the member of it (tokens below the entry), the
+    #: statistic of the profile it was read from (tokens into the profile) and the sentence that
+    #: says how. The entry is one of ``lifetimes``, ``within`` or ``rates``, by identity.
+    cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]] = field(
+        default_factory=list
+    )
 
 
 def window_end_ms(end: str) -> int:
@@ -300,6 +306,51 @@ def _duration(
     return _histogram_member(kept_edges, kept_weights, upper=False)
 
 
+def _lifetime_citations(
+    entry: Dict[str, Any],
+    pair: _Pair,
+    family: Optional["_Family"],
+    how: Tuple[str, Optional[str]],
+) -> List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]]:
+    """What each number of a lifetime *entry* rests on: its target, its duration and its states.
+
+    *how* is the sentence for the target, and the one for the duration's histogram when it has one.
+    """
+    order_how, how_plain = how
+    histogram = pair.histogram
+    found: List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]] = []
+    if "target" in entry:
+        found.append((entry, ("target",), pair.tokens + ("order",), order_how))
+    if histogram is not None and how_plain is not None:
+        member = ("duration", "otherwise") if family is not None else ("duration",)
+        found.append((entry, member, pair.tokens + ("statistics", str(histogram.index)), how_plain))
+    if family is not None:
+        tokens = pair.tokens + ("statistics", str(family.index))
+        found.append((entry, ("duration", "states"), tokens, family.note))
+    return found
+
+
+def _lifetime_duration(
+    plain: Optional[Dict[str, Any]], family: Optional["_Family"]
+) -> Optional[Dict[str, Any]]:
+    """The ``duration`` of a lifetime: its dwell family over the *plain* histogram, or just that histogram."""
+    if family is None:
+        return plain
+    duration: Dict[str, Any] = {"given": family.given, "states": family.states}
+    if plain is not None:
+        duration["otherwise"] = plain
+    return duration
+
+
+def _plain_how(plain: Optional[Dict[str, Any]], family: Optional["_Family"]) -> Optional[str]:
+    """How the *plain* histogram of a lifetime is read, or ``None`` when it gives no duration."""
+    if plain is None:
+        return None
+    if family is not None:
+        return "the dwell of a row whose state is not listed, cut at day 0"
+    return "the duration of the lifetime, cut at day 0"
+
+
 def _cut(histogram: _Histogram, reversed_pair: bool) -> Optional[Dict[str, Any]]:
     """A histogram of a pair's days as a duration, oriented as the lifetime reads it and cut at day 0."""
     if reversed_pair:
@@ -332,11 +383,16 @@ class _Pair:
     histogram: Optional[_Histogram]
 
     def statistic_tokens(self) -> List[Tuple[str, ...]]:
-        statistics = self.item.get("statistics")
-        return [
-            self.tokens + ("statistics", str(index))
-            for index, _ in enumerate(statistics if isinstance(statistics, list) else ())
-        ] + [self.tokens + ("order",)]
+        return statistic_tokens(self.item, self.tokens) + [self.tokens + ("order",)]
+
+
+def statistic_tokens(item: Mapping[str, Any], tokens: Tuple[str, ...]) -> List[Tuple[str, ...]]:
+    """The profile pointer of each statistic of a ``datePairs`` or ``relationships`` entry, as tokens."""
+    statistics = item.get("statistics")
+    return [
+        tokens + ("statistics", str(index))
+        for index, _ in enumerate(statistics if isinstance(statistics, list) else ())
+    ]
 
 
 def _pair(
@@ -389,6 +445,7 @@ class _Declarer:
         self.minimum_cell = minimum_cell
         self.used: List[_Note] = []
         self.unused: List[_Note] = []
+        self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Tuple[str, ...], str]] = []
         #: expose -> (start, end or None, the declaration)
         self.lifetimes: Dict[str, Dict[str, Any]] = {}
         #: A written within entry's id -> (the entry, its profile relationship's index, its parent).
@@ -518,15 +575,9 @@ class _Declarer:
         order = pair.order
         assert order is not None
         entry: Dict[str, Any] = {"emit": expose, "start": start, "end": end}
-        plain: Optional[Dict[str, Any]] = None
-        if pair.histogram is not None:
-            plain = _cut(pair.histogram, reversed_pair)
+        plain = _cut(pair.histogram, reversed_pair) if pair.histogram is not None else None
         family, family_unused = self._family(expose, pair, start, end, reversed_pair)
-        duration: Optional[Dict[str, Any]] = plain
-        if family is not None:
-            duration = {"given": family.given, "states": family.states}
-            if plain is not None:
-                duration["otherwise"] = plain
+        duration = _lifetime_duration(plain, family)
         if duration is None:
             # An end drawn from its own statistics is ordered after its start only by chance, so
             # the lifetime keeps its start, which children can still be dated after.
@@ -547,29 +598,20 @@ class _Declarer:
             else f"{start!r} starts the lifetime"
         )
         used_how: Dict[int, str] = {}
-        unused_why: Dict[int, str] = {}
+        unused_why: Dict[int, str] = dict(family_unused)
         if family is not None:
             used_how[family.index] = family.note
-        unused_why.update(family_unused)
-        how_plain: Optional[str] = None
-        if plain is not None:
-            how_plain = (
-                "the dwell of a row whose state is not listed, cut at day 0"
-                if family is not None
-                else "the duration of the lifetime, cut at day 0"
-            )
-        elif pair.histogram is not None:
+        how_plain = _plain_how(plain, family)
+        if plain is None and pair.histogram is not None:
             unused_why[pair.histogram.index] = (
                 "the histogram holds no days from 0 up, so no duration is drawn from it"
             )
-        self.keep(
-            pair,
+        order_how = (
             f"{orientation}, and the share of rows that break its order is the target "
-            f"({target or '0'}%)",
-            how_plain,
-            used_how,
-            unused_why,
+            f"({target or '0'}%)"
         )
+        self.cited.extend(_lifetime_citations(entry, pair, family, (order_how, how_plain)))
+        self.keep(pair, order_how, how_plain, used_how, unused_why)
 
     def _family(
         self, expose: str, pair: _Pair, start: str, end: str, reversed_pair: bool
@@ -851,15 +893,14 @@ class _Declarer:
                 self.unused.append((tokens, factor))
                 continue
             entry[key] = factor
-            self.used.append(
-                (
-                    tokens,
-                    f"the weight of each {key} level of {column!r}: its count over the times the "
-                    "level occurs in the window, scaled so the largest is 1; a suppressed cell takes "
-                    "the smallest positive weight published, and a level the window does not hold "
-                    "takes 1",
-                )
+            how = (
+                f"the weight of each {key} level of {column!r}: its count over the times the "
+                "level occurs in the window, scaled so the largest is 1; a suppressed cell takes "
+                "the smallest positive weight published, and a level the window does not hold "
+                "takes 1"
             )
+            self.used.append((tokens, how))
+            self.cited.append((entry, (key,), tokens, how))
         return entry if len(entry) > 2 else None
 
     # -- relationships -------------------------------------------------------
@@ -1237,16 +1278,19 @@ class _Declarer:
             return broken, None
         return broken + Fraction(end_pair.order.after, end_pair.order.total), end_pair
 
-    def _keep_within(
-        self, entry: Mapping[str, Any], pair: _Pair, end_pair: Optional[_Pair]
-    ) -> None:
+    def _keep_within(self, entry: Dict[str, Any], pair: _Pair, end_pair: Optional[_Pair]) -> None:
         offset = "offset" in entry
-        self.keep(
-            pair,
+        order_how = (
             "the share of rows before the parent's start, with the share after its end, is the "
-            "target of the entry",
-            "the offset of the date from the parent's start" if offset else None,
+            "target of the entry"
         )
+        offset_how = "the offset of the date from the parent's start"
+        if "target" in entry:
+            self.cited.append((entry, ("target",), pair.tokens + ("order",), order_how))
+        if offset and pair.histogram is not None:
+            tokens = pair.tokens + ("statistics", str(pair.histogram.index))
+            self.cited.append((entry, ("offset",), tokens, offset_how))
+        self.keep(pair, order_how, offset_how if offset else None)
         if end_pair is not None and end_pair.order is not None:
             self.used.append(
                 (
@@ -1457,10 +1501,12 @@ def declare_dates(
     declarer.start_only_lifetimes()
     within = declarer.within_entries()
     lifetimes = list(declarer.lifetimes.values())
+    rates = declarer.rates_entries(lifetimes, within)
     return DateDeclarations(
         lifetimes=lifetimes,
         within=within,
         used=declarer.used,
         unused=declarer.unused,
-        rates=declarer.rates_entries(lifetimes, within),
+        rates=rates,
+        cited=declarer.cited,
     )

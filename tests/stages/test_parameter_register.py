@@ -156,6 +156,23 @@ def test_a_bundle_that_declares_no_register_plans_to_the_bytes_it_had(undeclared
     assert not undeclared.record.exists()
 
 
+def test_a_register_of_a_simulation_that_declares_none_of_the_counted_keys_keeps_its_digests(
+    declared: Run,
+) -> None:
+    """Counting the numbers of ``counts``, ``history`` and the like moves no bundle that has none.
+
+    The two digests are the ones the engine before that change gave this bundle (0.11.1), read by
+    planning it with that engine's code.
+    """
+    document = declared.plan_document
+    assert document["planDigest"] == (
+        "sha256:392b242119b75993ac6aa91f15d4751eb5bc6b2a484c2935d0384fb9f3822603"
+    )
+    assert document["parameterRegisterDigest"] == (
+        "sha256:bb15382cc640dd77bd35b327189c98c2a6cef50b88f1f10e161f6e3f39e891b7"
+    )
+
+
 def test_a_run_with_no_register_is_verified_and_shipped_as_before(
     undeclared: Run, tmp_path: Path
 ) -> None:

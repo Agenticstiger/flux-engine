@@ -152,6 +152,7 @@ def test_each_overlay_gets_a_bundle_in_a_directory_named_after_it(
         assert sorted(path.name for path in (root / name).iterdir()) == [
             "orders.fluid.yaml",
             "persona.flux.yml",
+            "requests",
             "simulation.flux.yml",
             "world.flux.yml",
         ]
@@ -342,6 +343,7 @@ def test_without_an_overlay_init_writes_the_bytes_it_wrote_before(tmp_path: Path
     found = {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (tmp_path / "bundle").iterdir()
+        if path.is_file()
     }
     assert found == UNCHANGED
     assert "with the overlay" not in result.stdout and "overlay" not in dict(result.artifacts)

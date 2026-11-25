@@ -1,4 +1,4 @@
-# Parameter register: normative specification (format 1-3-0)
+# Parameter register: normative specification (format 1-4-0)
 
 A parameter register says what each number a run reads rests on. A number
 comes from a statistic of the profile the Simulation pins (PROFILE-SPEC.md),
@@ -10,10 +10,15 @@ shares. Format 1-1-0 adds the contract source to format 1-0-0, format
 1-2-0 adds the statistics of the pinned profile that no number rests on
 (sections 1.1 and 7). Format 1-3-0 adds the overlay source and the statistic
 that would replace an assumption (sections 1.2 and 1.3), calibrated values and
-the response estimates the engine derives at plan time (section 8).
+the response estimates the engine derives at plan time (section 8). Format 1-4-0 adds no
+member and no source: it counts more positions and lets a citation name more definitions
+(section 7).
 
 Normative files beside this page:
 
+- [`parameter-register-1-4.schema.json`](parameter-register-1-4.schema.json):
+  the JSON Schema of a format 1-4-0 record, whose `$id` is
+  `https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-4-0/FluxParameterRegister.json`.
 - [`parameter-register-1-3.schema.json`](parameter-register-1-3.schema.json):
   the JSON Schema of a format 1-3-0 record, whose `$id` is
   `https://agenticstiger.github.io/flux/engine/spec/parameter-register/1-3-0/FluxParameterRegister.json`.
@@ -210,7 +215,7 @@ A number that is a setting and not a statistic has none: a tolerance, the bounds
 committed state, a check's budget and a template default. The index `<i>` of a statistic is its
 place in the request `init` writes for the same assumptions, whose statistics are in identifier
 order, so a profiler that writes the profile from the request lists them there. `init` writes the
-request beside the bundle as `<name>.assumptions.profile-request.yml`, a profile request
+request inside the bundle directory as `requests/assumptions.profile-request.yml`, a profile request
 (PROFILE-REQUEST-SPEC.md, format 1-0-0) for exactly the statistics the entries name. Running `init`
 again with a profile that publishes them turns each of those assumptions into a `profile` citation.
 
@@ -264,19 +269,55 @@ and `budget` (when the check runs), the namespace's `profile`,
 `strictCoverage` and `parameters`, other namespaces, and anything outside
 `spec` and this namespace, such as `metadata`, `agentPolicy` and `skills`.
 
-Also not counted are the numbers of the namespace's own declarations of how rows relate and
-fall in time, and of what a patch or a consumer asks for: `facts`, `links`, `bridges`,
-`counts`, `history`, `asOf`, `snapshots`, `events`, `periods`, `copies`, `generators`,
-`lifetimes`, `within`, `rates`, `conditions`, `overlay`, `consumers`, `responses`,
-`forecasts` and `privacy`. A number there is read by the run but has no entry and no share in
-the record, so a calibration cannot name it (`FLX-3706`). Counting one would change the record, and with it the plan's
-`parameterRegisterDigest`, of every run whose Simulation declares the key, so a position
-joins the table above only in a new format.
+The namespace's declarations of how rows relate and fall in time sit beside `emits` and name
+positions of their own, which join the table above in format 1-4-0: counting one would change the
+record, and with it the plan's `parameterRegisterDigest`, of every run whose Simulation declares
+the key, so a position joins only in a new format. A number counts there when it is an integer, a decimal, or text read as a
+finite decimal, as above. `<n>` is an index of the key's list:
 
-The numbers of the fidelity block's `copula` (`rankCorrelations.pairs[].value`,
-SEAM-FIDELITY-SPEC.md section 2), which sits beside the positions above and joins none of them, are not counted either, and a citation may
-not name the definitions `kendallTau/1` and `spearmanRho/1` or `cliqueMarginal/2`. Counting the copula's values,
-with the rank correlation each rests on, would be a new register format. The register stays at format `1-3-0`.
+| Position | What it is |
+|---|---|
+| `facts[<n>].tolerance` | a fact's tolerance |
+| `links[<n>].sentinels.<column>` | a sentinel's text, when it reads as a number |
+| `counts[<n>].minChildren`, `.tolerance` | the least children of a parent, and the check's tolerance |
+| `counts[<n>].children.levels[]`, `.levelWeights[]`, `.bins[]`, `.binWeights[]` | the classes of children per parent, and their weights |
+| `counts[<n>].childrenGiven.<class>[]` | the weights of each class of the given column |
+| `history[<n>].entities` | the number of entities |
+| `history[<n>].parent.minChildren`, `.parent.children.levels[]`, `.levelWeights[]`, `.bins[]`, `.binWeights[]` | the parent's children, as `counts` holds them |
+| `history[<n>].versions.levels[]`, `.levelWeights[]`, `.bins[]`, `.binWeights[]` | the classes of versions per entity, and their weights |
+| `history[<n>].start.bins[]`, `.binWeights[]`, `.length.bins[]`, `.binWeights[]` | the histograms of the first start and of a version's length |
+| `history[<n>].tracked[].initial.levelWeights[]`, `.transitions.<level>.<level>` | a tracked column's first-level weights and its moves |
+| `history[<n>].reasons.levelWeights[]`, `.end.share` | the share of changes each column makes, and the share of histories that end |
+| `events[<n>].lag.bins[]`, `.binWeights[]` | an event's lag |
+| `periods[<n>].kinds[].count`, `.count.levels[]`, `.count.levelWeights[]` | the rows a period holds, as one number or as classes with weights |
+| `lifetimes[<n>].target` | the share of rows that may break the lifetime's order |
+| `lifetimes[<n>].duration.bins[]`, `.binWeights[]`, `.open`, `.mean`, and the same under `.duration.states.<state>` and `.duration.otherwise` | a duration's histogram or exponential, or a dwell family's |
+| `within[<n>].target`, `.offset.bins[]`, `.offset.binWeights[]` | a date's target share and its offset from the lifetime |
+| `rates[<n>].month[]`, `.dayOfWeek[]`, `.hourOfWeek[]` | the seasonal weights |
+| `conditions.<exposeId>[<n>].count` | the rows of a group |
+| `emits.<exposeId>.fidelity.copula.rankCorrelations.pairs[].value` | a pair's rank correlation (SEAM-FIDELITY-SPEC.md section 2) |
+
+A `levels` list that names the levels of a column, as `history[<n>].tracked[].initial` and
+`.reasons` do, holds names and is not counted, nor are `values` of a `conditions` group, an
+`overrides` of a periods kind or `end.value`, which are values of a column.
+
+Not counted are the namespace's declarations of what a patch or a consumer asks for, and the ones
+that hold no number: `bridges`, `asOf`, `snapshots`, `copies`, `generators`, `overlay`,
+`consumers`, `responses`, `forecasts` and `privacy`. A number there is read by the run but has no
+entry and no share in the record, so a calibration cannot name it (`FLX-3706`).
+
+**Counting a position changes the record of a run that declares it.** The numbers of a key a
+Simulation does not declare are not there to count, so a run that declares none of the keys above
+keeps its record, bytes and digest, and the format it had. A run that declares one counts its
+numbers, its record is format `1-4-0`, and its `parameterRegisterDigest`, and so its plan's
+digest, differ from what the engine before format 1-4-0 recorded. A number no entry names is a `default`, as every
+other is.
+
+A citation may name the definitions of the rank correlations, `kendallTau/1` and `spearmanRho/1`,
+and of a clique marginal, `cliqueMarginal/1` and `cliqueMarginal/2`, as it names any other
+registered definition (section 3). A record that cites `kendallTau/1`, `spearmanRho/1` or
+`cliqueMarginal/2`, in an entry, a `replacedBy` or an `unused` item, is format `1-4-0`; one that
+cites only `cliqueMarginal/1`, which an earlier format already allowed, keeps its format.
 
 The record lists the numbers by document, documents in NFC order of their ids,
 and within a document in key order (Unicode code points, mapping by mapping;
@@ -290,7 +331,7 @@ come from, and an `overlay` entry's where in the overlaid profile:
 | Key | Holds |
 |---|---|
 | `pointer` | An RFC 6901 JSON Pointer into the pinned profile. |
-| `definition` | The registered definition the pointer lands in: a statistic (`mean/1`, `marginalHistogram/1`, `levelHistogram/1`, `support/1`, `correlation/1`, `quantile/1`, `quantile/2`) or a column metric (`count/1`, `nullCount/1`, `distinctCount/1`, `sum/1`, `min/1`, `max/1`, `quantiles/1`). A table's `rowCount` has none, and neither has an entry of `references` (`/references/<expose>`, a table published whole), which an `unused` item may name. |
+| `definition` | The registered definition the pointer lands in: a statistic (`mean/1`, `marginalHistogram/1`, `levelHistogram/1`, `support/1`, `correlation/1`, `quantile/1`, `quantile/2`, `kendallTau/1`, `spearmanRho/1`, `cliqueMarginal/1`, `cliqueMarginal/2`) or a column metric (`count/1`, `nullCount/1`, `distinctCount/1`, `sum/1`, `min/1`, `max/1`, `quantiles/1`). A table's `rowCount` has none, and neither has an entry of `references` (`/references/<expose>`, a table published whole), which an `unused` item may name. |
 
 `plan` is always handed the profile a Simulation pins (PROFILE-SPEC.md
 section 6), and it reads every citation in it, or in the overlaid profile for an
@@ -344,13 +385,13 @@ handed the profile, write the same bytes.
 | Key | Holds |
 |---|---|
 | `_producer` | A URI naming the tool that wrote the record. |
-| `_schemaURL` | The schema's `$id`. The format version is part of it: format 1-3-0 when an entry cites an overlay, names a replacement or is a calibrated value, or the register holds a response estimate (sections 1.2, 1.3 and 8), format 1-2-0 when the Simulation lists unused statistics, format 1-1-0 when an entry names the contract, and format 1-0-0 otherwise, so a register that uses none of a later format's additions is recorded as it was before, with its bytes. |
+| `_schemaURL` | The schema's `$id`. The format version is part of it: format 1-4-0 when the register counts a number at a position of the table of the namespace's other keys or of the copula (section 2), or an entry cites `kendallTau/1`, `spearmanRho/1` or `cliqueMarginal/2` (section 7), format 1-3-0 when an entry cites an overlay, names a replacement or is a calibrated value, or the register holds a response estimate (sections 1.2, 1.3 and 8), format 1-2-0 when the Simulation lists unused statistics, format 1-1-0 when an entry names the contract, and format 1-0-0 otherwise, so a register that uses none of a later format's additions is recorded as it was before, with its bytes. |
 | `simulationId` | The Simulation. |
 | `profile` | `{"digest": ...}`, the pinned profile's digest, or `null`. |
 | `declared` | How many numbers the register counts. |
-| `counts` | `profile`, `assumption` and `default`, `contract` in formats 1-1-0 and later, and `overlay` and `calibrated` in format 1-3-0: how many numbers rest on each. They add up to `declared`. |
-| `entries` | The entries as declared, each with its `index` in the list, its `document`, `pointer` and `source`, and its `statistic`, `contract`, `overlay`, `calibration`, `reason` or `replacedBy`. Format 1-3-0 lists the response estimates after them (section 8.2). |
-| `unused` | Formats 1-2-0 and 1-3-0, when the Simulation lists them: the statistics of the pinned profile no number rests on, as the Simulation lists them, each `{"statistic": {"pointer", "definition"}, "reason"}` (section 1.1). |
+| `counts` | `profile`, `assumption` and `default`, `contract` in formats 1-1-0 and later, and `overlay` and `calibrated` in formats 1-3-0 and 1-4-0: how many numbers rest on each. They add up to `declared`. |
+| `entries` | The entries as declared, each with its `index` in the list, its `document`, `pointer` and `source`, and its `statistic`, `contract`, `overlay`, `calibration`, `reason` or `replacedBy`. Formats 1-3-0 and 1-4-0 list the response estimates after them (section 8.2). |
+| `unused` | Formats 1-2-0, 1-3-0 and 1-4-0, when the Simulation lists them: the statistics of the pinned profile no number rests on, as the Simulation lists them, each `{"statistic": {"pointer", "definition"}, "reason"}` (section 1.1). |
 | `parameters` | Every counted number: `document`, `kind`, `pointer`, `value` (the number as declared, in the canonical decimal spelling of KERNEL-SPEC section 2.1: no exponent, the declared scale kept, so `1e4` is `10000` and `.50` is `0.50`), `source` and `entry`, the index of the entry that decided it, or `null` for a default no entry names. |
 
 A profile statistic is cited by a pointer and a definition, beside the pinned
@@ -386,7 +427,7 @@ the run as `column-provenance.json` is by `columnProvenanceDigest`.
 parameters: 35 declared -- 3 from the pinned profile, 2 assumed, 30 default
 ```
 
-A register of format 1-3-0 gives the overlay's share after the contract's:
+A register of format 1-3-0 or 1-4-0 gives the overlay's share after the contract's:
 `parameters: 35 declared -- 3 from the pinned profile, 1 from the contract, 4 from the
 overlay, 2 assumed, 25 default`. A register with a contract entry gives the contract's share after the
 profile's: `parameters: 35 declared -- 3 from the pinned profile, 1 from the
@@ -442,6 +483,13 @@ predates it refuses the record rather than reads it as something else.
   and cites none stays at its earlier format. This format is shared within one release: a later
   addition to 1-3-0 extends the sources and members here. A reader of 1-3-0 reads the earlier
   formats too.
+- **Format 1-4-0** adds no source and no member, and its counts name the six sources of 1-3-0. It
+  counts the numbers at the positions of the table of the namespace's other keys and of the
+  copula (section 2), and a citation may name `kendallTau/1`, `spearmanRho/1` and
+  `cliqueMarginal/2`. A record names 1-4-0 only when it counts a number at one of those positions
+  or an entry, a `replacedBy` or an `unused` item names one of those definitions, so every other
+  register keeps the format and the bytes it had, with its digests. A reader of 1-4-0 reads the
+  earlier formats too.
 - A source added later follows the same rule. Moving the block from the
 extension namespace into the FLUX specification is a change of where it is
 declared, not of what it means.

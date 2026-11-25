@@ -185,7 +185,7 @@ unused (no number rests on these; the register lists them):
   - /tables/orders/columns/country/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
   - /tables/orders/columns/created_at/metrics/count (count/1): no rule of fluxsim init reads this statistic for this column
   - /tables/orders/columns/created_at/metrics/distinctCount (distinctCount/1): no rule of fluxsim init reads this statistic for this column
-a profile of the contract would replace assumptions (bundle.assumptions.profile-request.yml asks a profiler for them):
+a profile of the contract would replace assumptions (bundle/requests/assumptions.profile-request.yml asks a profiler for them):
   - /tables/orders/columns/amount/metrics/nullCount (nullCount/1): 1 assumed number
   - /tables/orders/columns/amount/statistics/0 (marginalHistogram/1): 8 assumed numbers
   - /tables/orders/columns/country/statistics/0 (levelHistogram/1): 1 assumed number
@@ -371,6 +371,15 @@ assumed time window is in the command's output and nowhere else. Here no time co
 publishes its range, because no single instant is held by ten orders, and `created_at`
 is drawn within the run's `timeBounds`.
 
+When some columns do publish a range, the run's `timeBounds` span all of them: the earliest start
+to the latest end of every date column's published range, of the date range its contract column
+declares (a `range` rule such as `between '2020-01-01' and '2026-12-31'` or `>= '2020-01-01' and
+<= '2026-12-31'`), and of the bins, levels and range the column itself is drawn from. No column's
+bins are cut. To choose the window yourself, pass `--window START END`, two dates
+(`YYYY-MM-DD`, midnight UTC) or RFC 3339 timestamps with START before END. The Simulation's
+`timeBounds` are exactly those, a date column's bins that leave them are cut at them (and the
+column says so), and the output notes the window under "time window".
+
 The register is the `parameters` list in `simulation.flux.yml`. Each entry names a
 number by a JSON Pointer and gives its source: a pointer into the profile and the
 statistic it lands in, a pointer into the contract, or a reason:
@@ -402,13 +411,13 @@ Most assumptions are the answer to a question a profiler can measure: how many r
 levels, which histogram, how many nulls. Each assumed number of that kind says which statistic
 would replace it, in `replacedBy` on its register entry (a pointer and a definition into a
 profile of the contract), and the ledger lists the statistics with how many numbers each would
-replace. `init` also writes `bundle.assumptions.profile-request.yml` beside the bundle, a
+replace. `init` also writes `requests/assumptions.profile-request.yml` inside the bundle, a
 [profile request](../spec/PROFILE-REQUEST-SPEC.md) for exactly those statistics, which a
 profiler measures where the data lives. Run `init` again with the profile it writes, and each
 number a statistic answers is cited as the profile's. A tolerance, the bounds of a committed
 state and the other settings have no statistic that replaces them, so they name none. The
-request is never written over a file that exists, and when it is taken `init` writes nothing
-(see [PARAMETER-REGISTER-SPEC.md](../spec/PARAMETER-REGISTER-SPEC.md) section 1.3).
+request is part of the directory `init` writes, so it is created and removed with it, and the
+loader and `inputDigest` do not read it (see [PARAMETER-REGISTER-SPEC.md](../spec/PARAMETER-REGISTER-SPEC.md) section 1.3).
 
 ## 4a. A profile released under differential privacy
 
@@ -565,7 +574,8 @@ needs kernel 0.2.0.
 Nothing is written when:
 
 - the directory holds anything, or cannot be written;
-- `--contract` comes without `--profile`, or the reverse, or `--overlay` comes without both (exit 2);
+- `--contract` comes without `--profile`, or the reverse, or `--overlay` or `--window` comes without both (exit 2);
+- a `--window` value is not a date or an RFC 3339 timestamp in the years 1 to 9999, or START is not before END (exit 2);
 - an overlay file is refused by the reader, two files name one overlay, an overlay names a table the profile does not hold, or an overlay gives a table with a history another `rowCount`;
 - the profile cannot be read ([FLX-3109](../reference/errors/FLX-3109.md)) or is not a
   profile ([FLX-5036](../reference/errors/FLX-5036.md));

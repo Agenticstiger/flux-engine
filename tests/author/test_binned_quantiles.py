@@ -18,8 +18,9 @@ from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 
-from flux_engine.author.columns import ColumnPlan
+from flux_engine.author.columns import ColumnPlan, bound_to_window
 from flux_engine.author.fill import drawn_mean
+from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.parameters import Source
 from tests.author.test_columns import _metric, _plan, _sources
 
@@ -335,3 +336,27 @@ def test_a_foreign_key_reads_its_binned_quantile() -> None:
     }
     plan = _plan("int", entry, foreign="parent.id")
     assert _statistic(0) in _reads(plan)
+
+
+def test_a_published_max_that_a_window_cut_keeps_is_read_with_the_cut() -> None:
+    """The max closes the ladder's top; the window then cuts the bins, and the max is still read."""
+    entry = {
+        "domain": "timestamp",
+        "metrics": {
+            "min": _metric("min/1", status="A"),
+            "max": _metric("max/1", "1788220800000"),  # 2026-09-01
+        },
+        "statistics": [
+            {**_binned(_DATE_LADDER, 2, 250, 500), "level": "0.25"},
+            {**_binned(_DATE_LADDER, 4, 500, 800), "level": "0.75"},
+        ],
+    }
+    plan = _plan("date", entry)
+    assert plan.declaration["bins"][-1] == "2026-09-01"
+    assert _metric_tokens("max") in _cited(plan)
+    bound_to_window(plan, LogicalKind.DATE, ("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z"))
+    assert plan.declaration["bins"] == ["2026-01-01", "2026-09-01"]
+    # The bins that rest on the max now carry the window's label, so the read says so.
+    assert _metric_tokens("max") not in _cited(plan)
+    assert _metric_tokens("max") in _reads(plan)
+    assert _statistic(1) in _reads(plan)

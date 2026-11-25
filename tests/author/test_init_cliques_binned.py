@@ -412,7 +412,7 @@ def test_cliques_of_both_definitions_arrange_into_one_tree(
     assert all(row["outcome"] == "within" for row in _verified(tmp_path).values())
 
 
-def test_the_ledger_names_a_pair_and_a_clique_the_registers_unused_list_cannot_hold(
+def test_the_ledger_and_the_registers_unused_list_both_name_a_pair_a_clique_draws(
     tmp_path: Path, data: List[rp.Row]
 ) -> None:
     document = _document(data, ["amount", "balance"], ranks=True)
@@ -422,8 +422,9 @@ def test_the_ledger_names_a_pair_and_a_clique_the_registers_unused_list_cannot_h
     # The pair of two columns a clique draws is passed over, with its reason, in the ledger.
     note = _ledger(result, "columnPairs/0/statistics/0")
     assert note["state"] == "unused" and "a clique draws it" in note["note"]
-    # The register cites no definition it does not hold, so it lists neither.
+    # The register holds the definitions of a rank correlation and of a binned clique, so its
+    # unused list names the pair too.
     text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
     unused = yaml.safe_load(text)["extensions"][NAMESPACE]["unused"]
     named = {item["statistic"].get("definition") for item in unused}
-    assert not named & {"kendallTau/1", "spearmanRho/1", "cliqueMarginal/2"}
+    assert "kendallTau/1" in named

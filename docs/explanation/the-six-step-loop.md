@@ -25,6 +25,8 @@ Every artifact of a run lives in `.flux/runs/<runId>/`. The golden baseline that
 
 `validate` reads the bundle and writes nothing.
 
+It reads no profile unless it is given one. `fluxsim validate . --profile orders.profile.json` also refuses, with the code `plan` gives, a profile that lacks a table or column the bundle's parameters cite.
+
 ```console
 $ fluxsim validate .
 .: valid -- 9 FLUX document(s), 1 FLUID contract(s), 1 Simulation(s)

@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
-import yaml
 
 from flux_engine.cli._init import run_init
 from flux_engine.core.grades import Pattern
@@ -29,6 +28,7 @@ from flux_engine.stages.replay import replay
 from flux_engine.stages.run import run
 from flux_engine.stages.ship import ship
 from flux_engine.stages.validate import validate
+from tests.bundles import edit_simulation as _edit
 
 pytestmark = pytest.mark.integration
 
@@ -65,13 +65,6 @@ def _bundle(
     if privacy is not None:
         _edit(tmp_path / "bundle", lambda d: d["extensions"][NAMESPACE].update(privacy=privacy))
     return tmp_path / "bundle"
-
-
-def _edit(bundle: Path, change: Any) -> None:
-    path = bundle / "simulation.flux.yml"
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    change(document)
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
 
 
 def _planned(bundle: Path, tmp_path: Path, state: str = "state") -> Any:

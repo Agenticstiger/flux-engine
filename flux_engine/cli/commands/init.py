@@ -54,8 +54,8 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "the profile's published aggregates, with every number labelled in its parameter "
             "register (from the profile, from the contract, or assumed, with the reason). "
             "Each assumed number a profile statistic would answer names it, and the profile "
-            "request for exactly those statistics is written beside the directory, named after "
-            "it with the suffix .assumptions.profile-request.yml. "
+            "request for exactly those statistics is written inside the directory, as "
+            "requests/assumptions.profile-request.yml. "
             "With --contract and no profile, write the profile request instead: the list of "
             "statistics and fact shares a profiler must measure for that contract, to run "
             "init again with. A profile with date pairs, calendars or exposure also gives "
@@ -65,6 +65,16 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         ),
     )
     init_p.add_argument("directory", help="where to write the project (created if missing)")
+    _add_input_options(init_p)
+    _add_check_options(init_p)
+    _add_shape_options(init_p)
+    _add_json_flag(init_p)
+
+    init_p.set_defaults(stage_name="init")
+
+
+def _add_input_options(init_p: argparse.ArgumentParser) -> None:
+    """The options that name what a bundle is written from."""
     init_p.add_argument(
         "--contract",
         default=None,
@@ -122,6 +132,10 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "--contract and the sql extra"
         ),
     )
+
+
+def _add_check_options(init_p: argparse.ArgumentParser) -> None:
+    """The options that check a bundle as it is written."""
     init_p.add_argument(
         "--strict",
         action="store_true",
@@ -142,9 +156,34 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "accepts nothing"
         ),
     )
-    _add_json_flag(init_p)
 
-    init_p.set_defaults(stage_name="init")
+
+def _add_shape_options(init_p: argparse.ArgumentParser) -> None:
+    """The options that set the run window and give a declared history."""
+    init_p.add_argument(
+        "--window",
+        nargs=2,
+        default=None,
+        metavar=("START", "END"),
+        help=(
+            "the run's window, written as the Simulation's spec.timeBounds: two dates "
+            "(YYYY-MM-DD, read as midnight UTC) or RFC 3339 timestamps, START before END; "
+            "without it the window spans every date column's published range, the contract's "
+            "declared date ranges and each date column's own bins; a date column's bins that "
+            "leave a window given here are cut at it (needs --contract and --profile)"
+        ),
+    )
+    init_p.add_argument(
+        "--history",
+        default=None,
+        metavar="FILE",
+        help=(
+            "with --contract and --profile: a YAML file of a declared history and its "
+            "projections (the namespace's history, snapshots, events, periods and asOf, and an "
+            "optional timeBounds), merged into the bundle in place of the ones init would infer; "
+            "counted layouts, exact allotments and the ended status's weight are written to fit it"
+        ),
+    )
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -160,6 +199,8 @@ def _cmd_init(args: argparse.Namespace) -> int:
             request=args.request,
             overlays=tuple(args.overlay or ()),
             consumers=args.consumers,
+            window=tuple(args.window) if args.window else None,
+            history=args.history,
         ),
         as_json=args.json,
     )

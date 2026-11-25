@@ -30,10 +30,11 @@ register format 1-2-0)::
 its list of entries. It is every number the register counts (:func:`declared_numbers`):
 every JSON number under ``spec`` in each document of the run's cast and in each
 Playback bound to its World, and every number at a position the engine's own
-namespace names (:data:`ENGINE_BLOCK_NUMBERS`). The numbers of the namespace's
-other keys (``counts``, ``history``, ``lifetimes`` and the like) are not counted,
-because counting one would change the record, and the plan's digest of it, of every
-run that declares the key. A number no entry names is a ``default``, decided by the
+namespace names (:data:`ENGINE_BLOCK_NUMBERS`): the numbers of ``emits`` and the scorecard's
+thresholds, of the keys beside ``emits`` that declare how rows relate and fall in time
+(``counts``, ``history``, ``lifetimes``, ``within``, ``rates``, ``conditions`` and the like) and
+of the fidelity block's ``copula``. The numbers of what a patch or a consumer asks for are not
+counted. A number no entry names is a ``default``, decided by the
 engine rather than by an entry, as an SDMX observation with no status reads as
 normal. So the shares always add up to every number the register counts, and a
 register that names one number cannot report that number as all of them.
@@ -73,10 +74,13 @@ from flux_engine.core.canonical import canonicalise, nfc
 from flux_engine.core.errors import ErrorCode, FluxError, register
 from flux_engine.seam.coverage import printable
 from flux_stats import registry as _stats_registry
-from flux_stats.cliques import CLIQUE_DEFINITION
+from flux_stats.cliques import CLIQUE_DEFINITION, CLIQUE_DEFINITION_2
+from flux_stats.rank_correlation import RANK_IDENTIFIERS
 
 __all__ = [
+    "DEFINITIONS_ADDED_1_4",
     "ENGINE_BLOCK_NUMBERS",
+    "NUMBERS_ADDED_1_4",
     "MOST_GIVEN",
     "FLX_3113",
     "FLX_3716",
@@ -87,6 +91,7 @@ __all__ = [
     "SOURCES_1_0",
     "SOURCES_1_2",
     "SOURCES_1_3",
+    "SOURCES_1_4",
     "UNUSED_KEY",
     "Calibration",
     "Citation",
@@ -105,6 +110,7 @@ __all__ = [
     "changed_by_overlay",
     "check_contract_citations",
     "check_profile_citations",
+    "cited_definition",
     "declared_numbers",
     "parse_pointer",
     "read_parameters_block",
@@ -187,6 +193,9 @@ SOURCES_1_3: Tuple["Source", ...] = (
     Source.CALIBRATED,
 )
 
+#: The sources of register format 1-4-0, in report order: those of format 1-3-0.
+SOURCES_1_4: Tuple["Source", ...] = SOURCES_1_3
+
 #: Every key one register entry may carry. Closed, as the namespace is.
 _ENTRY_KEYS: FrozenSet[str] = frozenset(
     {
@@ -221,6 +230,65 @@ NOT_PARAMETERS: FrozenSet[Tuple[str, Tuple[str, ...]]] = frozenset(
         ("Experiment", ("spec", "assignment", "seed")),
     }
 )
+
+
+def _shape(*prefix: str) -> Tuple[Tuple[str, ...], ...]:
+    """The numbers of a shape over counts at *prefix*: ``{levels, levelWeights}`` or ``{bins, binWeights}``."""
+    return (
+        prefix + ("levels", "#"),
+        prefix + ("levelWeights", "#"),
+        prefix + ("bins", "#"),
+        prefix + ("binWeights", "#"),
+    )
+
+
+def _histogram(*prefix: str) -> Tuple[Tuple[str, ...], ...]:
+    return (prefix + ("bins", "#"), prefix + ("binWeights", "#"))
+
+
+def _dwell(*prefix: str) -> Tuple[Tuple[str, ...], ...]:
+    """A dwell: a histogram with an ``open`` weight, or an exponential's ``mean`` and ``open``."""
+    return (*_histogram(*prefix), prefix + ("open",), prefix + ("mean",))
+
+
+#: Where the namespace's other keys hold a number (ADR 0016, 0017, 0022, 0024, 0025, 0027, 0028):
+#: ``facts``, ``counts``, ``history``, the projections, ``lifetimes``, ``within``, ``rates``,
+#: ``conditions`` and the sentinels of ``links``. Each key's closed key set is the one its reader
+#: reads, and a test keeps the two in step. A ``levels`` list over the levels of a column is names,
+#: not numbers, and so is not here.
+_OTHER_KEYS: Tuple[Tuple[str, ...], ...] = (
+    ("facts", "#", "tolerance"),
+    ("links", "#", "sentinels", "*"),
+    ("counts", "#", "minChildren"),
+    ("counts", "#", "tolerance"),
+    *_shape("counts", "#", "children"),
+    ("counts", "#", "childrenGiven", "*", "#"),
+    ("history", "#", "entities"),
+    ("history", "#", "parent", "minChildren"),
+    *_shape("history", "#", "parent", "children"),
+    *_shape("history", "#", "versions"),
+    *_histogram("history", "#", "start"),
+    *_histogram("history", "#", "length"),
+    ("history", "#", "tracked", "#", "initial", "levelWeights", "#"),
+    ("history", "#", "tracked", "#", "transitions", "*", "*"),
+    ("history", "#", "reasons", "levelWeights", "#"),
+    ("history", "#", "end", "share"),
+    *_histogram("events", "#", "lag"),
+    ("periods", "#", "kinds", "#", "count"),
+    ("periods", "#", "kinds", "#", "count", "levels", "#"),
+    ("periods", "#", "kinds", "#", "count", "levelWeights", "#"),
+    ("lifetimes", "#", "target"),
+    *_dwell("lifetimes", "#", "duration"),
+    *_dwell("lifetimes", "#", "duration", "states", "*"),
+    *_dwell("lifetimes", "#", "duration", "otherwise"),
+    ("within", "#", "target"),
+    *_histogram("within", "#", "offset"),
+    ("rates", "#", "month", "#"),
+    ("rates", "#", "dayOfWeek", "#"),
+    ("rates", "#", "hourOfWeek", "#"),
+    ("conditions", "*", "#", "count"),
+)
+
 
 #: Where the engine's namespace holds a number, relative to the namespace.
 #: ``*`` is any key of a mapping and ``#`` any index of a list. The fidelity
@@ -261,6 +329,19 @@ ENGINE_BLOCK_NUMBERS: Tuple[Tuple[str, ...], ...] = (
     ("scorecard", "thresholds", "dimensions", "*", "*"),
     ("scorecard", "thresholds", "tables", "*", "*"),
 )
+
+#: The positions register format 1-4-0 adds: the copula's rank correlations
+#: (SEAM-FIDELITY-SPEC.md section 2) and the numbers of the keys beside ``emits``. A record that
+#: counts a number at one is format 1-4-0.
+NUMBERS_ADDED_1_4: Tuple[Tuple[str, ...], ...] = (
+    ("emits", "*", "fidelity", "copula", "rankCorrelations", "pairs", "#", "value"),
+    *_OTHER_KEYS,
+)
+ENGINE_BLOCK_NUMBERS = ENGINE_BLOCK_NUMBERS + NUMBERS_ADDED_1_4
+
+#: The definitions a citation could not name before register format 1-4-0 (``cliqueMarginal/1``
+#: was always citable, and a record that names it keeps its format).
+DEFINITIONS_ADDED_1_4: FrozenSet[str] = frozenset({*RANK_IDENTIFIERS, CLIQUE_DEFINITION_2})
 
 #: The most columns a ``given`` may list (docs/spec/SEAM-FIDELITY-SPEC.md section 2). A column
 #: drawn given several columns nests its weight table one mapping deeper for each, so the numbers
@@ -388,6 +469,9 @@ class DeclaredNumber:
     kind: str
     tokens: Tuple[str, ...]
     value: str
+    #: Whether the number sits at a position register format 1-4-0 added
+    #: (:data:`NUMBERS_ADDED_1_4`).
+    added_1_4: bool = False
 
     @property
     def pointer(self) -> str:
@@ -511,8 +595,29 @@ def _engine_block_numbers(
             continue
         text = _number_text(value, strings=True)
         if text is not None:
-            numbers.append(DeclaredNumber(doc_id, kind, path, text))
+            added = any(_matches(marks, pattern) for pattern in NUMBERS_ADDED_1_4)
+            numbers.append(DeclaredNumber(doc_id, kind, path, text, added))
     return numbers
+
+
+def counted_positions(block: Any, keys: FrozenSet[str]) -> List[Tuple[str, ...]]:
+    """The paths, relative to the namespace *block*, of every counted number under one of its *keys*.
+
+    The positions are those :func:`declared_numbers` counts, found in the document itself, so a
+    number added to a key's closed set is found without a list of members kept beside it.
+    """
+    if not isinstance(block, Mapping):
+        return []
+    found: List[Tuple[str, ...]] = []
+    for path, marks, value in _leaves(block, (), ()):
+        if (
+            path[:1]
+            and path[0] in keys
+            and any(_matches(marks, item) for item in ENGINE_BLOCK_NUMBERS)
+        ):
+            if _number_text(value, strings=True) is not None:
+                found.append(path)
+    return found
 
 
 def declared_numbers(
@@ -608,11 +713,12 @@ class UnusedStatistic:
 
 
 def _registered_identifiers() -> FrozenSet[str]:
-    """Every statistic and metric definition a profile can hold, and a clique marginal's."""
+    """Every statistic and metric definition a profile can hold, a clique marginal's and a rank correlation's."""
     return (
         frozenset(entry.identifier for entry in _stats_registry.definitions())
         | frozenset(metric.identifier for metric in _stats_registry.metrics())
-        | frozenset({CLIQUE_DEFINITION})
+        | frozenset({CLIQUE_DEFINITION, CLIQUE_DEFINITION_2})
+        | RANK_IDENTIFIERS
     )
 
 
@@ -993,6 +1099,11 @@ class ParameterRegister:
         )
 
     @property
+    def uses_1_4_additions(self) -> bool:
+        """Whether the register uses anything format 1-4-0 adds, and so is recorded as 1-4-0."""
+        return _adds_1_4(self)
+
+    @property
     def lists_unused(self) -> bool:
         """Whether the Simulation lists the profile's unused statistics: register format 1-2-0."""
         return self.unused is not None
@@ -1006,9 +1117,11 @@ class ParameterRegister:
         """The sources the register's format knows, in report order.
 
         ``contract`` only when an entry names it or the register is of format
-        1-2-0, and ``overlay`` and ``calibrated`` only in format 1-3-0, so a register that
+        1-2-0, and ``overlay`` and ``calibrated`` only in format 1-3-0 and later, so a register that
         uses none of the later additions is reported, recorded and counted exactly as it was.
         """
+        if self.uses_1_4_additions:
+            return SOURCES_1_4
         if self.uses_1_3_additions:
             return SOURCES_1_3
         return SOURCES_1_2 if self.uses_contract or self.lists_unused else SOURCES_1_0
@@ -1019,6 +1132,17 @@ class ParameterRegister:
         for registered in self.numbers:
             counts[registered.source.value] += 1
         return counts
+
+
+def _adds_1_4(register: ParameterRegister) -> bool:
+    """Whether *register* counts a number at a position format 1-4-0 added, or cites a definition it added."""
+    citations = [entry.citation for entry in register.entries]
+    citations.extend(entry.replaced_by for entry in register.entries)
+    citations.extend(item.citation for item in register.unused or ())
+    return any(registered.number.added_1_4 for registered in register.numbers) or any(
+        citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
+        for citation in citations
+    )
 
 
 def _within(prefix: Tuple[str, ...], path: Tuple[str, ...]) -> bool:
@@ -1464,6 +1588,17 @@ def _cited_statistic(
             if isinstance(definition, str) and nfc(definition) in identifiers:
                 return nfc(definition), chain[position:]
     return None, chain
+
+
+def cited_definition(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> Optional[str]:
+    """The registered definition a citation of *tokens* lands in, or ``None`` when it lands in none.
+
+    ``None`` too when the pointer reaches nothing. The one a ``profile`` entry names is this one.
+    """
+    try:
+        return _cited_statistic(profile, tokens)[0]
+    except LookupError:
+        return None
 
 
 def _is_row_count(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> bool:

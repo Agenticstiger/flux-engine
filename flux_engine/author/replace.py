@@ -40,15 +40,15 @@ from flux_stats.request import (
 )
 
 __all__ = [
-    "ASSUMPTIONS_REQUEST_SUFFIX",
+    "ASSUMPTIONS_REQUEST_PATH",
     "Replacement",
     "replacement_request",
     "replacements_for",
 ]
 
-#: What the request is named after the bundle directory: ``demo`` gives
-#: ``demo.assumptions.profile-request.yml``, beside it and never inside it.
-ASSUMPTIONS_REQUEST_SUFFIX = ".assumptions.profile-request.yml"
+#: Where the request goes inside the bundle directory. A subdirectory, because the loader refuses
+#: any other file at the top of a bundle directory (ADR 0006) and reads no deeper.
+ASSUMPTIONS_REQUEST_PATH = "requests/assumptions.profile-request.yml"
 
 _ORDERED = frozenset({NUMBER, TIMESTAMP})
 _EVERY = frozenset({CATEGORY, NUMBER, TIMESTAMP})

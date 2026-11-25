@@ -176,7 +176,7 @@
     "class": "_FluxArgumentParser",
     "prog": "fluxsim init",
     "usage": null,
-    "description": "Write a small FLUX bundle and its FLUID contract into a directory, so a first run needs nothing else checked out. With --contract and --profile, write a bundle for your own data instead: the contract, and a Simulation declared from the profile's published aggregates, with every number labelled in its parameter register (from the profile, from the contract, or assumed, with the reason). Each assumed number a profile statistic would answer names it, and the profile request for exactly those statistics is written beside the directory, named after it with the suffix .assumptions.profile-request.yml. With --contract and no profile, write the profile request instead: the list of statistics and fact shares a profiler must measure for that contract, to run init again with. A profile with date pairs, calendars or exposure also gives the Simulation lifetimes, within entries, rates and exposure: docs/how-to/keep-dates-inside-their-parents-lifetime.md reads them. The directory must not exist yet, or must be empty: nothing is ever overwritten.",
+    "description": "Write a small FLUX bundle and its FLUID contract into a directory, so a first run needs nothing else checked out. With --contract and --profile, write a bundle for your own data instead: the contract, and a Simulation declared from the profile's published aggregates, with every number labelled in its parameter register (from the profile, from the contract, or assumed, with the reason). Each assumed number a profile statistic would answer names it, and the profile request for exactly those statistics is written inside the directory, as requests/assumptions.profile-request.yml. With --contract and no profile, write the profile request instead: the list of statistics and fact shares a profiler must measure for that contract, to run init again with. A profile with date pairs, calendars or exposure also gives the Simulation lifetimes, within entries, rates and exposure: docs/how-to/keep-dates-inside-their-parents-lifetime.md reads them. The directory must not exist yet, or must be empty: nothing is ever overwritten.",
     "epilog": null,
     "formatter_class": "_HelpFormatter",
     "defaults": {
@@ -346,6 +346,39 @@
         "choices": null
       },
       {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--window"
+        ],
+        "dest": "window",
+        "nargs": 2,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the run's window, written as the Simulation's spec.timeBounds: two dates (YYYY-MM-DD, read as midnight UTC) or RFC 3339 timestamps, START before END; without it the window spans every date column's published range, the contract's declared date ranges and each date column's own bins; a date column's bins that leave a window given here are cut at it (needs --contract and --profile)",
+        "metavar": [
+          "START",
+          "END"
+        ],
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--history"
+        ],
+        "dest": "history",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "with --contract and --profile: a YAML file of a declared history and its projections (the namespace's history, snapshots, events, periods and asOf, and an optional timeBounds), merged into the bundle in place of the ones init would infer; counted layouts, exact allotments and the ended status's weight are written to fit it",
+        "metavar": "FILE",
+        "choices": null
+      },
+      {
         "class": "_StoreTrueAction",
         "option_strings": [
           "-j",
@@ -377,6 +410,10 @@
       {
         "command": "fluxsim validate ./bundle",
         "note": "check a bundle; nothing is written"
+      },
+      {
+        "command": "fluxsim validate ./bundle --profile profile.json",
+        "note": "also refuse what plan refuses about the profile the bundle pins (FLX-3105, 3109, 3110, 3113)"
       }
     ],
     "docs_url": "https://agenticstiger.github.io/flux/engine/reference/cli/validate.html",
@@ -409,6 +446,21 @@
         "required": true,
         "help": "path to the FLUX bundle directory",
         "metavar": null,
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--profile"
+        ],
+        "dest": "profile",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": null,
+        "required": false,
+        "help": "the profile document the Simulation pins (docs/spec/PROFILE-SPEC.md): also refuse, as plan does, an overlay or a parameter of the register that names a table or column it does not describe, and a profile that is not the pinned one (FLX-3105, 3109, 3110, 3113); a profile given to a Simulation that pins none and the grade floor (FLX-4005) are left to plan; without it no profile is read",
+        "metavar": "PATH",
         "choices": null
       },
       {
@@ -2195,7 +2247,7 @@
     "class": "_FluxArgumentParser",
     "prog": "fluxsim calibrate",
     "usage": null,
-    "description": "Read a Playback's declared scorecard and report the credibility and grade it carries; no fitting is performed. With --fit, fit the parameters a bundle's consumers calibration block declares to the rates of its calibration queries (CMA-ES, from the [calibrate] extra), and write the result as a calibration patch, DIR.patch.json, beside the output.",
+    "description": "Read a Playback's declared scorecard and report the credibility and grade it carries; no fitting is performed. With --fit, fit the parameters a bundle's consumers calibration block declares to the rates of its calibration queries (CMA-ES, from the [calibrate] extra), and write the result as a calibration patch, DIR.patch.json, beside the output. A bundle that declares no held-out query is fitted without a held-out check, and the output says so.",
     "epilog": null,
     "formatter_class": "_HelpFormatter",
     "defaults": {
@@ -2318,7 +2370,7 @@
         "default": "None",
         "type": null,
         "required": false,
-        "help": "fit the declared parameters of this bundle to its calibration queries instead of reading a declared scorecard; needs --profile, --held-out and --out",
+        "help": "fit the declared parameters of this bundle to its calibration queries instead of reading a declared scorecard; needs --profile and --out, and --held-out when the bundle declares a held-out query",
         "metavar": "BUNDLE",
         "choices": null
       },

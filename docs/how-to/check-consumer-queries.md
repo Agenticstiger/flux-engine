@@ -410,6 +410,12 @@ and of the profile that held the targets, and the held-out profile with its larg
 met. The calibrated bundle pins the profile that held its targets, so the privacy grade is the pinned
 profile's, and the patch, being a declaration, enters no grade.
 
+A bundle that declares no held-out query needs no `--held-out`. `calibrate --fit` fits it anyway, writes the
+patch, and says that no held-out check was made because the bundle declares no held-out query; with nothing
+to hold the result to, the bundle is not called calibrated, so no bundle is written and the command exits 1.
+A `--held-out` file given to such a bundle is not read, and the output says so. A bundle that does declare a
+held-out query is refused without `--held-out`, as before.
+
 ## Limits to know
 
 - A fit runs the bundle once per candidate. The engine's ceiling is 64 evaluations, and

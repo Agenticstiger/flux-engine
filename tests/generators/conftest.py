@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 from flux_engine.generators import registry
+from tests.bundles import edit_simulation
 
 PACKAGE = "fxgenpkg"
 GROUP = registry.ENTRY_POINT_GROUP
@@ -285,7 +286,6 @@ def add_invariants(bundle: Path, invariants: str) -> None:
 
 def edit_emit(bundle: Path, change: Any) -> None:
     """Change the fixture's emit block (``extensions[namespace].emits[expose]``) with *change*."""
-    path = bundle / "simulation.flux.yml"
-    document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    change(document["extensions"][NAMESPACE]["emits"][EXPOSE])
-    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    edit_simulation(
+        bundle, lambda document: change(document["extensions"][NAMESPACE]["emits"][EXPOSE])
+    )

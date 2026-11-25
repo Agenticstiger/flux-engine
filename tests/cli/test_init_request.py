@@ -6,12 +6,14 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from pathlib import Path
 
 import pytest
 
+import flux_engine.cli._request as request_module
 from flux_engine.cli._init import run_init
 from flux_stats.request import load_request_text
 
@@ -232,3 +234,29 @@ def test_the_request_file_starts_with_a_header_naming_what_it_is_and_its_spec(
 
     request = load_request_text(text)
     assert load_request_text(render_request(request)) == request
+
+
+def test_a_directory_that_cannot_be_removed_does_not_change_the_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The request cannot be written, so init removes what it wrote; a refused rmdir is not an error."""
+    profile = FIXTURES / "author" / "orders.profile.json"
+
+    def full(path: Path, data: bytes) -> None:
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(request_module, "_write_new", full)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    expected = run_init(str(plain / "b"), contract=str(ORDERS), profile=str(profile))
+    assert expected.exit_code == 1 and "No space left on device" in expected.stderr
+
+    def refuse(self: Path) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(Path, "rmdir", refuse)
+    stubborn = tmp_path / "stubborn"
+    stubborn.mkdir()
+    result = run_init(str(stubborn / "b"), contract=str(ORDERS), profile=str(profile))
+    assert result.exit_code == expected.exit_code
+    assert result.stderr == expected.stderr.replace(str(plain), str(stubborn))

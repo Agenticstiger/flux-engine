@@ -45,7 +45,8 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "it carries; no fitting is performed. With --fit, fit the parameters a bundle's "
             "consumers calibration block declares to the rates of its calibration queries "
             "(CMA-ES, from the [calibrate] extra), and write the result as a calibration patch, "
-            "DIR.patch.json, beside the output."
+            "DIR.patch.json, beside the output. A bundle that declares no held-out query is fitted "
+            "without a held-out check, and the output says so."
         ),
     )
     calibrate_p.add_argument("bundle", nargs="?", default=None, help=_BUNDLE_HELP)
@@ -72,7 +73,8 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         metavar="BUNDLE",
         help=(
             "fit the declared parameters of this bundle to its calibration queries instead of "
-            "reading a declared scorecard; needs --profile, --held-out and --out"
+            "reading a declared scorecard; needs --profile and --out, and --held-out when the "
+            "bundle declares a held-out query"
         ),
     )
     calibrate_p.add_argument(
@@ -123,7 +125,10 @@ _FIT_ONLY = (
 
 
 def check_fit_options(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
-    """``--fit`` takes the bundle itself and needs ``--profile``, ``--held-out`` and ``--out``; the rest belong to it."""
+    """``--fit`` takes the bundle itself and needs ``--profile`` and ``--out``; the rest belong to it.
+
+    ``--held-out`` is needed only by a bundle that declares a held-out query; the fit says so once it has read the bundle.
+    """
     if args.fit is None:
         stray = [flag for name, flag in _FIT_ONLY if getattr(args, name) is not None]
         if stray:
@@ -135,7 +140,7 @@ def check_fit_options(args: argparse.Namespace, parser: argparse.ArgumentParser)
         parser.error("--fit takes the bundle itself (--fit BUNDLE); drop the positional bundle")
     missing = [
         flag
-        for name, flag in (("profile", "--profile"), ("held_out", "--held-out"), ("out", "--out"))
+        for name, flag in (("profile", "--profile"), ("out", "--out"))
         if getattr(args, name) is None
     ]
     if missing:
@@ -213,6 +218,8 @@ def _fit_lines(outcome: Any) -> Any:
         f"wrote {outcome.patch_path} ({outcome.patch_digest})",
     ]
     gate = outcome.gate
+    if outcome.held_out_note is not None:
+        lines.append(outcome.held_out_note)
     if gate is not None:
         lines.append(f"grade: pinned profile {gate.pinned_grade}, held-out profile {gate.grade}")
         for query in gate.queries:
@@ -235,7 +242,7 @@ def _not_calibrated(outcome: Any) -> Any:
     if not outcome.operations:
         reason = "no candidate beat the start point, so no value moved"
     elif gate is None:
-        reason = "no held-out profile was given"
+        reason = outcome.held_out_note or "no held-out profile was given"
     elif not gate.queries:
         reason = "no held-out query has a target"
     else:
@@ -253,7 +260,7 @@ def _cmd_fit(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     from flux_engine.api.stages import StageResult
-    from flux_engine.calibrate.fit import FitRequest, run_fit
+    from flux_engine.calibrate.fit import FitRequest, HeldOutNeeded, run_fit
     from flux_engine.core.errors import FluxError
 
     request = FitRequest(
@@ -268,6 +275,13 @@ def _cmd_fit(args: argparse.Namespace) -> int:
     )
     try:
         outcome = run_fit(request)
+    except HeldOutNeeded as error:
+        return _print_result(
+            StageResult(
+                stage="calibrate", exit_code=2, stderr=f"fluxsim calibrate: error: {error}"
+            ),
+            as_json=args.json,
+        )
     except FluxError as error:
         return _print_result(
             StageResult(
@@ -286,6 +300,7 @@ def _cmd_fit(args: argparse.Namespace) -> int:
         "evaluations": outcome.result.evaluations,
         "gaps": outcome.patch["gaps"],
         "heldOut": _gate_document(outcome),
+        "heldOutNote": outcome.held_out_note,
         "calibrated": outcome.calibrated,
         "bundle": str(outcome.bundle.path) if outcome.bundle is not None else None,
     }

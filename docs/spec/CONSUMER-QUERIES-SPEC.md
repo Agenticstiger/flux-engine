@@ -456,8 +456,9 @@ fixed by [SCORECARD-SPEC.md](./SCORECARD-SPEC.md) section 3a. In outline:
   profile's (ADR 0020, rule 2).
 
 The pinned profile must not name a held-out query (`FLX-3701`), and the held-out profile must not name a
-calibration query, nor be given when the bundle declares no held-out query (`FLX-3702`). Either is refused
-before anything runs, naming the query. Without the `sql` extra the dimension is `not measured`, with the
+calibration query, nor be given to `verify` or `ship` when the bundle declares no held-out query (`FLX-3702`).
+Either is refused before anything runs, naming the query. `calibrate --fit` on a bundle that declares no
+held-out query runs without `--held-out` and does not read one (section 8). Without the `sql` extra the dimension is `not measured`, with the
 command that installs it, and a threshold declared on it then fails as any unmet threshold does. `ship`
 counts the queries with the same functions and flags. A `ship` that reads a held-out profile (`--held-out`)
 grades it as it grades the pinned one, states the weakest grade of every profile it read in the "Privacy
@@ -468,7 +469,9 @@ minimum grade to that weakest grade: a ship whose held-out profile is below a co
 ## 8. The calibration patch
 
 `fluxsim calibrate --fit BUNDLE --profile PROFILE --held-out FILE --out DIR` fits the numbers the
-`calibration` block names to the rates of the calibration queries. It needs the `calibrate` extra, which adds
+`calibration` block names to the rates of the calibration queries. On a bundle that declares no held-out
+query, `--held-out` is not needed and the file is not read: the fit runs, and its output says that no held-out
+check was made. It needs the `calibrate` extra, which adds
 `cma==4.6.0` to the `sql` extra (`FLX-3708`).
 
 **The block.** `calibration` holds at most 64 `parameters`, and `evaluations`, `scale`, `heldOutTolerance` and

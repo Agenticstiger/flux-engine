@@ -17,10 +17,12 @@ Pinned here, through ``fluxsim init`` and the seam:
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+import yaml
 
 from flux_engine.seam.history import history_entries_of
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
@@ -220,7 +222,7 @@ def test_an_expose_that_misses_a_column_of_the_history_is_unused_and_keeps_its_r
 
 
 def _bundle_notes(tmp_path: Path, *names: str) -> List[str]:
-    from flux_engine.author.bundle import author_bundle
+    from flux_engine.author.bundle import AuthorInputs, author_bundle
 
     contract = tmp_path / "plans.fluid.yml"
     contract.write_text(CONTRACT.read_text(encoding="utf-8"), encoding="utf-8")
@@ -228,7 +230,7 @@ def _bundle_notes(tmp_path: Path, *names: str) -> List[str]:
 
     profile = tmp_path / "plans.profile.json"
     profile.write_text(json.dumps(_profile_with(*names)), encoding="utf-8")
-    bundle = author_bundle(contract, profile)
+    bundle = author_bundle(AuthorInputs(contract, profile))
     return [f"{subject}: {sentence}" for subject, sentence in bundle.notes]
 
 
@@ -317,3 +319,73 @@ def test_a_projection_the_plan_refuses_is_not_written_and_the_history_stays(
     assert "history" in namespace
     notes = "\n".join(_bundle_notes(tmp_path, "plan_current"))
     assert "plan_current: projection" in notes and "FLX-3403: a projection is refused" in notes
+
+
+@pytest.mark.parametrize("marker", [b"\n    snapshots:", b"\n    history:"])
+def test_a_refusal_with_a_given_window_is_reported_not_retried_away(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, marker: bytes
+) -> None:
+    from flux_engine.author import bundle as authoring
+    from flux_engine.cli._init import run_init
+
+    real = authoring._check
+
+    def refuse_layers(
+        files: Any, profile: Any, references: Any = None, overlay: Any = None
+    ) -> None:
+        if any(marker in entry.data for entry in files):
+            raise authoring.AuthorError("FLX-3403: the layers are refused")
+        real(files, profile, references, overlay=overlay)
+
+    monkeypatch.setattr(authoring, "_check", refuse_layers)
+    (tmp_path / "plans.fluid.yml").write_text(
+        CONTRACT.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (tmp_path / "plans.profile.json").write_text(
+        json.dumps(_profile_with("plan_current")), encoding="utf-8"
+    )
+    result = run_init(
+        str(tmp_path / "bundle"),
+        contract=str(tmp_path / "plans.fluid.yml"),
+        profile=str(tmp_path / "plans.profile.json"),
+        window=("2000-01-01", "2030-01-01"),
+    )
+    assert result.exit_code == 1, result.stdout
+    assert "FLX-3403: the layers are refused" in (result.stderr or "")
+    assert "window given with --window" in (result.stderr or "")
+    assert not (tmp_path / "bundle").exists()
+
+
+# -- a contract date range that only says "a date" gives the window nothing ---------------------
+
+OPEN_ENDED = "between '1900-01-01' and '9999-12-31'"
+
+
+def _with_signed_on_range(constraint: str) -> str:
+    document = yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))
+    for expose in document["exposes"]:
+        for column in expose["contract"]["schema"]:
+            if column["name"] == "signed_on":
+                column["validationRules"] = [{"type": "range", "constraint": constraint}]
+    return yaml.safe_dump(document, sort_keys=False)
+
+
+def test_a_contract_range_ending_in_year_9999_leaves_the_window_plannable(
+    tmp_path: Path,
+) -> None:
+    _init(tmp_path, _profile_with(*WRITTEN), _with_signed_on_range(OPEN_ENDED))
+    bounds = _namespace_spec(tmp_path)["timeBounds"]
+    assert int(bounds["end"][:4]) < 9999
+    outcome = plan(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "plans.profile.json",
+        stage=False,
+    )
+    assert outcome.success, outcome.stderr
+
+
+def _namespace_spec(tmp_path: Path) -> Dict[str, Any]:
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    found: Dict[str, Any] = yaml.safe_load(text)["spec"]
+    return found

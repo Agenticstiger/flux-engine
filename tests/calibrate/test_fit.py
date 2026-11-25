@@ -51,6 +51,7 @@ from flux_engine.calibrate.search import CmaCalibrator, Evaluation, cma_seed  # 
 from flux_engine.cli import main  # noqa: E402
 from flux_engine.core.errors import FluxError  # noqa: E402
 from flux_engine.seam.parameters import Source  # noqa: E402
+from tests.bundles import edit_simulation  # noqa: E402
 from tests.calibrate._fit_bundle import (  # noqa: E402
     NAMESPACE,
     NULLS,
@@ -71,10 +72,7 @@ def copy_bundle(root: Path, change: Optional[Any] = None) -> Path:
     """A copy of the bundle a fit can move (:mod:`tests.calibrate._fit_bundle`), edited by *change*."""
     bundle = copy_fit_bundle(root)
     if change is not None:
-        path = bundle / SIMULATION
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        change(document["extensions"][NAMESPACE])
-        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        edit_simulation(bundle, lambda document: change(document["extensions"][NAMESPACE]))
     return bundle
 
 
@@ -84,7 +82,7 @@ def request(bundle: Path, root: Path, **more: Any) -> FitRequest:
         profile=PROFILE,
         out=root / "calibrated",
         state_dir=root / "state",
-        **more,
+        **{"held_out": HELD_OUT, **more},
     )
 
 
@@ -552,7 +550,7 @@ def test_the_command_reports_a_refusal_with_its_code(
     [
         ["--fit", "b", "--out", "o"],
         ["--fit", "b", "--profile", "p"],
-        ["--fit", "b", "--profile", "p", "--out", "o"],
+        ["--fit", "b", "--held-out", "h"],
         ["b", "--fit", "b", "--profile", "p", "--out", "o"],
         ["b", "--profile", "p"],
         ["b", "--out", "o"],

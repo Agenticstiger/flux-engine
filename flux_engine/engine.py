@@ -80,6 +80,7 @@ async def validate(
     bundle_directory: Union[str, Path],
     *,
     tolerate_additive: bool = True,
+    profile: Union[str, Path, None] = None,
     timeout: Optional[float] = None,
 ) -> StageResult:
     """``fluxsim validate``, off the event loop."""
@@ -89,6 +90,7 @@ async def validate(
         "validate",
         bundle_directory=bundle_directory,
         tolerate_additive=tolerate_additive,
+        profile=profile,
     )
 
 
