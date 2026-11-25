@@ -816,3 +816,32 @@ versions named an entity that it did not hold.
   entity's column or whose `to` names another column. A `nullFraction` on the column refuses the parent as before.
 - **What moves.** A bundle `init` writes for a contract with such a dependency. Every other bundle keeps its bytes,
   and no plan changes: the generator and replay of recorded plans are untouched.
+
+## Amendment of 2026-11-25: `init` writes the activation and the end a contract's lifecycle declares
+
+FLUID 0.7.7 declares on the natural entity of a model with a validity window how its versions begin and
+end, as `lifecycle`: `activation`, a column of the expose and of the window's type that holds the start of the
+entity's first version on every version; `endMarker`, a column and a value, the value an ending version holds
+and no earlier version does (dbt's `hard_deletes: new_record`); and `currentFlag`, a column and a value that one
+version of each entity holds, its last. Section 13 wrote neither `activation` nor a `finalVersion`, since a profile
+says which column holds an entity's first start no more than which value marks an end. The contract does.
+
+- **`activation`.** `init` writes the declared column as the entry's `activation` when the expose has it at the
+  window's type and it is no key, no validity column and no column a rule, a dependency or a copy sets. Every version
+  of an entity then holds its first start (section 5). Otherwise none is written, and the assumptions say which
+  of these it fails.
+- **`endMarker`.** When the column declares the value as a level, besides one with a weight, and is no key, no
+  validity column, no column a rule sets, declares no `nullFraction`, is drawn given no column and no column is
+  drawn given it, `init` writes `end: {mode: finalVersion, share, column, value}`. `share` is the closed share of
+  last versions that `closeLast` took, a share of every entity (the amendment of 2026-11-24). Where the profile
+  tracks the column, its first values and moves are written without the value, which only the ending version holds
+  (section 5); a tracked column with no published first value is carried instead, and a carried column's weight for
+  the value becomes 0. The change into the value is no change reason, so the profile's `reasons` share of that
+  column, which counted it, is written as published. When no last version is closed, or the contract's column or
+  value does not fit, the end is what section 13 wrote, `closeLast` or none, with the reason.
+- **`currentFlag`.** The engine has no construct that sets a value on an entity's last version alone: a window over
+  siblings (EXPR-SPEC-2 section 5) partitions by a to-one relationship, and an entity's natural key is never a
+  relationship's column on a history's emit (section 3), so no window spans exactly an entity's versions; `previous`
+  reads backwards only; and `history:one_current` checks an open end, not a column. `init` writes nothing for it, the column keeps its own draw, and the assumptions say so.
+- **What does not move.** A contract with no `lifecycle` gives the bundle it gave before. Each member the
+  entry does not use is named in the assumptions with its reason, as ADR 0014 requires.

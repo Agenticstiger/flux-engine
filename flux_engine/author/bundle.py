@@ -2800,6 +2800,7 @@ def _histories(
             _refuse_an_unset_open_end(expose, written)
         if written.entry is not None:
             result.entries.append(written.entry)
+            _ended_status(expose, written.entry)
             restate_assumptions(expose)
             reads.release(expose.expose_id, written)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)

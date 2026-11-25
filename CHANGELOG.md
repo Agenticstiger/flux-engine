@@ -86,6 +86,15 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `support`, evenly, and is refused (`FLX-3403`) with neither, as a version's value no level names is. A plan with
   such a column says `projectedGivens: "afterOverrides"`; a plan that says `"afterProjection"`, or has no key, replays
   as it was made. A column drawn `given` the period column is still refused.
+- `fluxsim init` reads the `lifecycle` a FLUID 0.7.7 contract declares on a versioned table's natural entity. An
+  `activation` column that the expose has, at the validity window's type, becomes the history's `activation`, so
+  every version of an entity holds its first start. An `endMarker` becomes the history's `end` as `finalVersion`
+  with that column and value, at the closed share of last versions that `closeLast` used, and the profile's
+  published moves between the column's levels are written without the marker's level, which only the ending
+  version holds. A column or value the expose lacks, or an `activation` of another type, keeps what `init`
+  wrote before and says why in its assumptions. A `currentFlag` is not written: no construct of the engine puts a
+  value on an entity's last version alone, so the column keeps its own draw, and `init` says so. Before, `init` wrote
+  neither member and always wrote `closeLast` (ADR 0017, amendment of 2026-11-25).
 
 ### Changed
 
