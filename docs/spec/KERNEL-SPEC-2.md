@@ -623,6 +623,39 @@ rule sets takes, on every version, the value its own cell draws on the entity's 
 cells are never drawn, which moves no draw, since every cell has its own counter. A foreign key other than the
 parent's is picked on the first version row and carried too. Rules run on each version row after these values.
 
+**The parent bound.** An entry with `parent.lifetime: true` keeps each entity to the lifetime `[ps, pe]` of its parent
+row (ADR 0017, amendment of 2026-11-24). `ps` and `pe` are the parent's start and last-day cells in the chain's unit
+(a DATE end covers its whole day, so a millisecond chain reads it to the last millisecond of that day); `ps` is absent
+for a NULL start, and `pe` when there is no end, the end is NULL or it is before `ps`, and an absent bound cuts
+nothing. The parents' lifetimes are final cells read at plan time, so the entities per parent (above) are worked out
+first. Every array below is a plan-time array over the entities, which a slice, `--jobs`, `--shard`, the column path and
+the per-row path read alike. A bundle that does not declare the key keeps every byte.
+
+- *The limit.* The chain of entity `e` must end at `limit = min(until, pe)`, which is `until` when `pe` is absent.
+  With `z = 1` when an ended entity's last version is closed (`closeLast`, or no `end`, where only the forced
+  entities below end), and `z = 0` otherwise, the entity's chain holds `room - z - 1` versions at most, where
+  `room = limit - a` and `a` is its first start.
+- *The interval.* The first start is drawn as above, at position 0 of its `history` path, from the part of `start`
+  inside `[max(first, ps), limit - (c + z) - 1]` when that is not empty, with `first` the window's first unit,
+  so an entity whose parent cuts nothing draws what it draws without the key. Otherwise it is drawn inside
+  `[max(first, ps), limit - z - 2]`, the room for one version. When that too is empty for any entity, the plan is
+  `FLX-3403`, naming `history(<emit>).parent.lifetime`, the number of such entities and the ranges of their parents'
+  starts and last days. An empty `J` for the whole history is refused as it is without the key.
+- *The room.* `V` is worked out as above, with `expected` each entity's `limit - a`, so the rank coupling reads the
+  limit. Each count is then capped at `room - z - 1`, and the `L` versions above the caps go one at a time to the
+  entities under their cap, in rounds: a round gives one to each entity still under its cap, in order of
+  `room` descending and entity index ascending, until the `L` are placed or no entity is under its cap
+  (the allotment `counts._capped` makes for a `one_to_one` relationship, with a cap for each entity). The `L'` that
+  found none are the shortfall, and the layout holds `N - L'` rows: the emit is planned at them, so its plan, its
+  rows and its verification count the rows it has, and `V` is always worked out from the declared `N`.
+- *The forced entities.* An entity whose `pe` is at or before `until` is forced to end whatever its count: under
+  `finalVersion` its final version starts the day before `pe` at the latest and carries `value`, under `closeLast` or
+  with no `end` its last version closes the day before `pe` at the latest. With `f` forced entities and `n` as in
+  the ended allocation (`E'` counting the forced entities too), the others end by
+  `permute/2(K_end, E'', r) < n - f`, with `E''` the eligible entities that are not forced and `r` the rank among
+  them, and when `f` is at least `n` every forced entity ends and no other does. Without a forced entity this is the
+  ended allocation unchanged.
+
 **The paths.** The counter of the `history` path is `(entity, 0, draw, attempt)` and of the `change` path
 `(entity, version, draw, attempt)`, by section 2's ordinal parts.
 
