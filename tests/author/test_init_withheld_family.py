@@ -573,3 +573,94 @@ def test_a_property_every_column_of_which_is_kept_is_left_as_it_is() -> None:
     _drop_unkept_properties(expose)
     assert expose.properties == before
     assert expose.assumptions == []
+
+
+def test_an_expose_left_with_no_property_takes_the_first_assumed_check() -> None:
+    """When the guard drops an expose's last property, the first column that can carries the check."""
+    plain = ColumnPlan("age", {"bins": ["0", "9"], "binWeights": ["1"]})
+    unranged = ColumnPlan("visits", {"bins": ["0", "9"], "binWeights": ["1"]}, mean_published=True)
+    expose = _declared(plain, unranged)
+    expose.properties = [_property(property="marginalHistogram", column="visits", bins=["0", "9"])]
+    _drop_unkept_properties(expose)
+    # age publishes no mean, so the check falls to visits, which takes its bins as its range
+    (fallback,) = expose.properties
+    assert fallback.document["property"] == "mean" and fallback.document["column"] == "visits"
+    assert unranged.declaration["range"] == {"min": "0", "max": "9"}
+    assert "range" not in plain.declaration
+    said = [sentence for subject, sentence in expose.assumptions if subject == "visits"]
+    assert any("FLX-5034" in sentence for sentence in said)
+    assert any("the check reads this assumed one" in sentence for sentence in said)
+
+
+def test_an_expose_with_no_column_to_check_is_left_with_no_property() -> None:
+    expose = _declared(ColumnPlan("visits", {"bins": ["0", "9"], "binWeights": ["1"]}))
+    expose.properties = [_property(property="marginalHistogram", column="visits", bins=["0", "9"])]
+    _drop_unkept_properties(expose)
+    assert expose.properties == []
+
+
+# ---------------------------------------------------------------------------
+# Each defence on its own: the writers, and the guard behind them
+# ---------------------------------------------------------------------------
+
+#: A world for each writer that leaves out a property over a column with no range or levels.
+WRITERS = {
+    # the copula's rank correlations, of columns drawn over their contract ranges
+    "copula": replace(
+        BASE, age_histogram=False, visits_histogram=False, rank_pair=True, noisy=True
+    ),
+    # a grouped histogram of a column drawn given a column of its own row
+    "given": replace(BASE, age_histogram=False, age_given="tier"),
+    # a grouped histogram of a column drawn given a column of a linked row
+    "catalogue": replace(BASE, age_histogram=False, age_given="zone"),
+    # a histogram grouped by a boolean column, which declares no levels
+    "boolean": replace(BASE, histograms=frozenset({"loan_member"}), tier_given_active=True),
+}
+
+#: The check each writer makes, stubbed to make the property anyway: (module, name, stub).
+CHECKS = {
+    "given": ("flux_engine.author.given", "note_no_range", lambda child: False),
+    "catalogue": ("flux_engine.author.catalogue", "note_no_range", lambda child: False),
+    "boolean": ("flux_engine.author.given", "note_no_levels", lambda child, parent: False),
+}
+
+
+def _written(world: World, root: Path) -> Any:
+    """Init *world* into *root*; it writes a bundle, and the bundle plans."""
+    contract, profile, bundle = (
+        root / "library.fluid.yaml",
+        root / "library.profile.json",
+        root / "b",
+    )
+    contract.write_text(_contract(world), encoding="utf-8")
+    profile.write_text(json.dumps(_profile(world)), encoding="utf-8")
+    result = run_init(str(bundle), contract=str(contract), profile=str(profile))
+    assert result.exit_code == 0, result.stderr
+    planned = plan(bundle, state_dir=root / "state", profile=profile, stage=False)
+    assert planned.success, planned.stderr
+    return result
+
+
+@pytest.mark.parametrize("writer", sorted(WRITERS))
+def test_each_writer_leaves_its_property_out_with_the_guard_stubbed_out(
+    writer: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With no guard behind it, a writer that made the property would leave a bundle its own
+    # validation refuses (FLX-5034): the writer alone keeps the bundle plannable.
+    import flux_engine.author.bundle as authoring
+
+    monkeypatch.setattr(authoring, "_drop_unkept_properties", lambda authored: None)
+    result = _written(WRITERS[writer], tmp_path)
+    assert "(FLX-5034)" not in result.stdout
+
+
+@pytest.mark.parametrize("writer", sorted(CHECKS))
+def test_the_guard_drops_a_property_a_writer_makes_without_its_check(
+    writer: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The writer's own check stubbed away, it makes the property: the guard is what leaves it out,
+    # with its note, and the bundle still plans.
+    module, name, stub = CHECKS[writer]
+    monkeypatch.setattr(module + "." + name, stub)
+    result = _written(WRITERS[writer], tmp_path)
+    assert "(FLX-5034)" in result.stdout
