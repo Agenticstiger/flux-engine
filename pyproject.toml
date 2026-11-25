@@ -133,9 +133,9 @@ publish = [
 ]
 # The Kafka sink (flux_engine.sinks.kafka): idempotent transactional producers, the admin
 # client and the schema registry's Avro and JSON Schema serializers, over librdkafka.
-# Apache-2.0. Imported only when the sink is selected, never on the CLI's cold path
-# (tests/test_startup_budget.py), and no core module may import it (the "only the Kafka
-# sink may import confluent_kafka" contract below). Servers, registry and credentials
+# Apache-2.0. Imported only when the sink is selected: importing the engine, its CLI or
+# its sinks package loads none of it (tests/test_startup_budget.py), and no core module may
+# import it (the "only the Kafka sink may import confluent_kafka" contract below). Servers, registry and credentials
 # come from the person's options and environment, never from the contract.
 kafka = [
   "confluent-kafka[avro,json]>=2.16.2,<3",
