@@ -76,7 +76,7 @@ def test_the_example_reads_with_its_noisy_members_and_null_counts() -> None:
     assert entry.chain.noise is not None
     tier = entry.columns["tier"]
     assert tier.initial.noise is not None and tier.transitions.noise is not None
-    assert len(profile.parts) == 8  # six noisy members and two null counts
+    assert len(profile.parts) == 11  # six members, two null counts, three queries
     counts = profile.tables["member"].columns["segment"].null_counts
     assert len(counts) == 1 and NULL_COUNT_LEVELS == ("known", "null")
     assert counts[0].group.noisy == (Fraction("4412.6"), Fraction("587.9"))

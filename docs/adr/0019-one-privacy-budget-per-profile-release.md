@@ -219,6 +219,16 @@ for a table that a unit follows into (ADR 0037).
 7. **Format.** A document that holds a noisy history member or a `nullCount/2` names `1-5-0`, and one that names an
    earlier format and holds one is refused (`FLX-5036`). Documents of `1-4-0` and earlier read exactly as before.
 
+8. **A query's rate may carry noise, and its query states a `unit`.** A `queries[]` statistic (a `levelHistogram/1`
+   over `["false", "true"]`) may carry a `noise` block, with its groups in the noisy form. A noisy query states its
+   `unit`: `{ "table": T }`, a row-keeping filter (records are rows of `T`, charge `m_T`), or `{ "table": T, "by":
+   [columns] }`, where `by` is the child columns of a relationship from a parent `P` into `T` that the unit follows,
+   or into a table it does not reach (one group is one row of `P`, charge `m_P`, 1 when `P` is the expose) or `T`'s
+   history entity (charge `m_T`, under the history's whole-entity obligation). Both cells are a count table, L1 = L2 =
+   the charge, and each query states its own share. A noisy query with no unit, another unit, a charge of 0 or an
+   earlier format is refused (`FLX-5036`), naming the query. A run whose queries are all noisy no longer loses P3 for
+   them.
+
 ### Consequences
 
 - The noise of a history grows with the cap `maxChildren` of its table, as a count's does: a larger bound on how

@@ -34,6 +34,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - flux-stats reads profile format 1-5-0: a noisy history member is charged `m_T` and refused outside a table the unit
   follows into, a column's `nullCount/2` is read into `ColumnEntry.null_counts`, and a history whose every member is
   noisy no longer keeps a run from P3. Before, a `noise` block on any history member was refused in every format.
+- Profile format 1-5-0 lets a query's rate carry noise: the query states its `unit` (a table's rows, groups of them by the
+  child columns of a followed relationship, or a history's entities), which gives the charge, and flux-stats reads, checks
+  and charges it. A noisy query in an earlier format is refused as before. `fluxsim calibrate` does not read noisy rates yet.
 - The profile-request reader and writer read and write format 1-3-0 (`history` on a table, `nullCount/2` on a column).
   `init` asks for them, in the request it writes beside a bundle, only when the profile it was given is a private
   release, and every other request keeps its format and bytes.

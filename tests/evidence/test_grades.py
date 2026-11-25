@@ -382,7 +382,7 @@ def _noisy_history_example() -> Dict[str, Any]:
     version = document["tables"]["card_version"]["history"]["versionLength"]
     version["noise"] = {"mechanism": "gaussian", "scale": "8", "privacyLoss": {"rho": "0.125"}}
     version["groups"] = [{"group": "", "status": "F", "noisyCounts": ["251.5", "348.2", "250.6"]}]
-    document["privacy"]["privacyLoss"]["rho"] = "1.125"
+    document["privacy"]["privacyLoss"]["rho"] = "1.5"
     return document
 
 
@@ -404,7 +404,7 @@ def test_a_noisy_null_count_does_not_keep_a_profile_from_p3() -> None:
     document = _noisy_history_example()
     graded = grade_profile(document, pinned=True)
     assert graded.pattern is Pattern.P3
-    assert graded.accounting is not None and graded.accounting.parts == 9
+    assert graded.accounting is not None and graded.accounting.parts == 12
 
 
 # ---------------------------------------------------------------------------

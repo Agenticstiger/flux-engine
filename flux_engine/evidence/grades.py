@@ -75,7 +75,7 @@ __all__ = [
 ]
 
 #: The sections of a profile whose statistics cannot carry a ``noise`` block.
-_NOT_NOISY_SECTIONS = ("queries", "invariants", "references")
+_NOT_NOISY_SECTIONS = ("invariants", "references")
 
 #: What the declaration about structure covers (``publicStructure``), for the reason a profile that
 #: does not make it is not ``P3``. A profile that names format 1-4-0 declares more.
@@ -484,6 +484,23 @@ def _history_released_exact(history: Any) -> bool:
     return any(not (isinstance(member, Mapping) and "noise" in member) for member in members)
 
 
+def _queries_released_exact(queries: Any) -> bool:
+    """Whether the ``queries`` section holds a statistic released without noise (format 1-5-0 allows it)."""
+    if not queries:
+        return False
+    if not isinstance(queries, list):
+        return True
+    return any(
+        not isinstance(query, Mapping)
+        or not query.get("statistics")
+        or any(
+            not (isinstance(statistic, Mapping) and "noise" in statistic)
+            for statistic in query["statistics"]
+        )
+        for query in queries
+    )
+
+
 def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> ProfileGrade:
     """Grade a run from the document of the profile it pins (``None`` when it pins none).
 
@@ -583,6 +600,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
                 isinstance(s, Mapping) and "noise" not in s for s in column.get("statistics") or ()
             )
     exact["other"] |= any(profile.get(section) for section in _NOT_NOISY_SECTIONS)
+    exact["other"] |= _queries_released_exact(profile.get("queries"))
     relationships = profile.get("relationships")
     for index, relationship in enumerate(relationships if isinstance(relationships, list) else ()):
         if not isinstance(relationship, Mapping):

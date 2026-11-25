@@ -12,7 +12,7 @@
   "privacy": {
     "measure": "zeroConcentratedDP",
     "privacyLoss": {
-      "rho": "1"
+      "rho": "1.5"
     },
     "privacyUnit": {
       "expose": "member",
@@ -80,6 +80,9 @@
     },
     "card_version": {
       "columns": {
+        "card_no": {
+          "domain": "category"
+        },
         "member_id": {
           "domain": "category"
         },
@@ -126,7 +129,7 @@
       },
       "history": {
         "entity": [
-          "member_id"
+          "card_no"
         ],
         "start": "valid_from",
         "end": "valid_to",
@@ -373,6 +376,134 @@
         ]
       },
       "statistics": []
+    }
+  ],
+  "queries": [
+    {
+      "name": "card_rows_that_lapsed",
+      "unit": {
+        "table": "card_version"
+      },
+      "statistics": [
+        {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "false",
+            "true"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "noisy",
+          "noise": {
+            "mechanism": "gaussian",
+            "scale": "8",
+            "privacyLoss": {
+              "rho": "0.125"
+            }
+          },
+          "groups": [
+            {
+              "group": "basic",
+              "status": "F",
+              "noisyCounts": [
+                "3204.6",
+                "1411.2"
+              ]
+            },
+            {
+              "group": "plus",
+              "status": "F",
+              "noisyCounts": [
+                "2120.8",
+                "388.4"
+              ]
+            }
+          ],
+          "groupBy": "tier"
+        }
+      ]
+    },
+    {
+      "name": "members_with_a_lapsed_card",
+      "unit": {
+        "table": "card_version",
+        "by": [
+          "member_id"
+        ]
+      },
+      "statistics": [
+        {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "false",
+            "true"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "noisy",
+          "noise": {
+            "mechanism": "gaussian",
+            "scale": "2",
+            "privacyLoss": {
+              "rho": "0.125"
+            }
+          },
+          "groups": [
+            {
+              "group": "",
+              "status": "F",
+              "noisyCounts": [
+                "4120.2",
+                "880.7"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cards_that_lapsed",
+      "unit": {
+        "table": "card_version",
+        "by": [
+          "card_no"
+        ]
+      },
+      "statistics": [
+        {
+          "definition": "levelHistogram/1",
+          "levels": [
+            "false",
+            "true"
+          ],
+          "sampleSize": {
+            "min": 1000,
+            "max": 9999
+          },
+          "disclosure": "noisy",
+          "noise": {
+            "mechanism": "gaussian",
+            "scale": "8",
+            "privacyLoss": {
+              "rho": "0.125"
+            }
+          },
+          "groups": [
+            {
+              "group": "",
+              "status": "F",
+              "noisyCounts": [
+                "3011.9",
+                "1250.4"
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

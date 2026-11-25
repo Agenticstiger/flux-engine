@@ -148,6 +148,7 @@ __all__ = [
     "Noise",
     "PairEntry",
     "PeriodEntry",
+    "QueryUnit",
     "Profile",
     "ProfileGroup",
     "QueryEntry",
@@ -208,6 +209,8 @@ _FORMS_OF_1_5_0: Mapping[str, str] = MappingProxyType(
     {
         "nullCount": "a nullCount/2 statistic",
         "noisyHistory": "a noise block on a member of a history",
+        "queryUnit": "a unit on a query",
+        "noisyQuery": "a noise block on a query's statistic",
     }
 )
 
@@ -711,11 +714,26 @@ class RelationshipEntry:
 
 
 @dataclass(frozen=True)
+class QueryUnit:
+    """The records a query's rate counts (format 1-5-0): rows of ``table``, or groups of them.
+
+    Without ``by`` a record is a row of ``table`` (a row-keeping filter). With ``by``, the columns of
+    ``table`` that group its rows, a record is one group: the rows of one parent row of a
+    relationship, or one entity of the table's ``history``.
+    """
+
+    table: str
+    by: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class QueryEntry:
     """A query's rate: how many records it matches, over a two-level count."""
 
     name: str
     statistics: Tuple[StatisticEntry, ...]
+    #: The unit of the records counted (format 1-5-0); required when a statistic carries noise.
+    unit: Optional[QueryUnit] = None
 
 
 @dataclass(frozen=True)
@@ -2793,16 +2811,118 @@ class _Reader:
             raise refuse(f"{where}.dates", "names one pair twice")
         return tuple(found)
 
-    def query(self, value: Any, where: str) -> QueryEntry:
-        raw = _mapping(value, where, required=("name", "statistics"))
+    def query(
+        self,
+        value: Any,
+        where: str,
+        tables: Mapping[str, TableEntry] = MappingProxyType({}),
+        relationships: Sequence[RelationshipEntry] = (),
+    ) -> QueryEntry:
+        """A query's rate; in format 1-5-0 it may state its ``unit`` and carry noise.
+
+        A noisy statistic needs the unit, which says how many records one unit of privacy changes:
+        rows of a table (``m_T``), groups of its rows by the columns of a followed relationship
+        (``m_P`` of the parent), or its history's entities (``m_T``). Both cells of the rate are a
+        count table, so each is charged that figure (PROFILE-SPEC.md section 3a).
+        """
+        raw = _mapping(value, where, required=("name", "statistics"), optional=("unit",))
+        name = _name(raw["name"], f"{where}.name")
+        unit = self._query_unit(raw["unit"], f"{where}.unit") if "unit" in raw else None
+        noisy = any(
+            isinstance(item, Mapping) and "noise" in item
+            for item in _list(raw["statistics"], f"{where}.statistics")
+        )
+        charge_of: Optional[Callable[[str], _Charge]] = None
+        if noisy:
+            at = f"{where}.statistics"
+            self.require_1_5_0("noisyQuery", at)
+            if unit is None:
+                raise refuse(f"{where}.unit", f"query {name!r} is noisy and states no unit")
+            charge = self._query_charge(unit, where, name, tables, relationships)
+            charge_of = lambda _at: charge  # noqa: E731
         statistics = self.statistics(
-            raw["statistics"], f"{where}.statistics", kinds=_QUERY_KINDS, query_group=True
+            raw["statistics"],
+            f"{where}.statistics",
+            kinds=_QUERY_KINDS,
+            query_group=True,
+            charge_of=charge_of,
         )
         if any(statistic.levels != QUERY_LEVELS for statistic in statistics):
             raise refuse(
                 f"{where}.statistics", f"a query's rate counts the levels {list(QUERY_LEVELS)}"
             )
-        return QueryEntry(name=_name(raw["name"], f"{where}.name"), statistics=statistics)
+        return QueryEntry(name=name, statistics=statistics, unit=unit)
+
+    def _query_unit(self, value: Any, where: str) -> QueryUnit:
+        """The shape of a query's ``unit`` (format 1-5-0): a table, and optionally columns to group by."""
+        self.require_1_5_0("queryUnit", where)
+        raw = _mapping(value, where, required=("table",), optional=("by",))
+        by: Tuple[str, ...] = ()
+        if "by" in raw:
+            by = tuple(read_texts(raw["by"], f"{where}.by"))
+            if not by or len(set(by)) != len(by):
+                raise refuse(f"{where}.by", "names distinct columns, at least one")
+        return QueryUnit(table=_name(raw["table"], f"{where}.table"), by=by)
+
+    def _query_charge(
+        self,
+        unit: QueryUnit,
+        where: str,
+        name: str,
+        tables: Mapping[str, TableEntry],
+        relationships: Sequence[RelationshipEntry],
+    ) -> _Charge:
+        """The sensitivity of a noisy query over *unit*: a count table, L1 = L2 = the unit's reach.
+
+        ``{table}``: ``m_T``. With ``by``, the child columns of a listed relationship from a parent
+        ``P`` into the table: one group is one row of ``P``, ``m_P``; or the table's ``history``
+        entity columns: ``m_T``, under the history's whole-entity obligation (a profiler's, stated
+        and not checked). Anything else, an unknown table or column, or a figure of 0 (a table the
+        unit does not reach), is refused, naming the query and no value.
+        """
+        accounting = self._require_account(f"{where}.unit")
+        refused = f"query {name!r} states a unit that does not give a charge: "
+        entry = tables.get(unit.table)
+        if entry is None:
+            raise refuse(f"{where}.unit.table", refused + "its table is not in the profile")
+        if not set(unit.by) <= set(entry.columns):
+            raise refuse(f"{where}.unit.by", refused + "a column is not one of its table")
+        reach = accounting.reach(unit.table)
+        if not unit.by:
+            charges = [reach]
+        else:
+            charges = []
+            for link in relationships:
+                if link.child_table == unit.table and link.child_columns == unit.by:
+                    key = (link.parent_table, link.parent_columns, unit.table, link.child_columns)
+                    followed = any(
+                        (f.parent_table, f.parent_columns, f.child_table, f.child_columns) == key
+                        for f in accounting.follows
+                    )
+                    # A group leaves with its unit whole only when the table's rows follow their
+                    # parent row, or are the same in every neighbouring data set.
+                    if followed or reach == 0:
+                        charges.append(accounting.reach(link.parent_table))
+                    break
+            history = entry.history
+            if history is not None and history.entity == unit.by:
+                charges.append(reach)
+            if not charges:
+                raise refuse(
+                    f"{where}.unit.by",
+                    refused
+                    + "its columns are neither the child columns of a followed relationship "
+                    "into the table (or into a table the unit does not reach) nor its history's "
+                    "entity",
+                )
+        charge = next((figure for figure in charges if figure >= 1), 0)
+        if charge < 1:
+            raise refuse(
+                f"{where}.unit",
+                refused + "the unit of privacy does not reach it, so the profile does not state "
+                "how many records one unit contributes",
+            )
+        return _Charge(Fraction(charge), Fraction(charge * charge))
 
     def invariant(self, value: Any, where: str) -> InvariantEntry:
         """A declared fact's share: exactly one ungrouped ``levelHistogram/1`` over false and true."""
@@ -3047,7 +3167,7 @@ def parse_profile(document: Any, *, allow_empty_calendar_entries: bool = False) 
         for index, item in enumerate(_list(raw.get("relationships", []), "profile.relationships"))
     )
     queries = tuple(
-        reader.query(item, f"profile.queries[{index}]")
+        reader.query(item, f"profile.queries[{index}]", tables, relationships)
         for index, item in enumerate(_list(raw.get("queries", []), "profile.queries"))
     )
     if len({query.name for query in queries}) != len(queries):
