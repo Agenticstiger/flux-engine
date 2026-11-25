@@ -602,7 +602,12 @@ def _delivered(
     """*applied*, then every stream of its run into *target* when one was asked for."""
     if target is None or not applied.success:
         return applied
-    from flux_engine.stages.deliver import deliver_run, receipt_line, write_receipts
+    from flux_engine.stages.deliver import (
+        deliver_run,
+        receipt_line,
+        write_progress,
+        write_receipts,
+    )
 
     layout = RunLayout.for_state_dir(
         Path(state_dir) if state_dir is not None else Path(".flux"), applied.artifacts["run_id"]
@@ -616,6 +621,7 @@ def _delivered(
             target=target,
             record=lambda receipt: write_receipts(layout, [receipt]),
             profile=profile,
+            record_committed=lambda receipt: write_progress(layout, receipt),
         )
     except FluxError as error:
         artifacts["sinks"] = {"ran": True, "ok": False, "sink": target.name}
