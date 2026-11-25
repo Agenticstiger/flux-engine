@@ -160,6 +160,15 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   a noisy history or date pair with a member gone fell to `P1`. The grade now counts the members that are left. In
   `flux_stats`, `holds_nothing` of a date pair, a relationship's date pair and a history is true only when no member is
   left.
+- `init` draws a DATE column that the profile gives no distribution (a private release that publishes nothing for the
+  table, or a released histogram that is noise everywhere) where the contract's derives over it stay inside their
+  declared range. A `derive` that is `DAYS_BETWEEN`, `MONTHS_BETWEEN` or `YEARS_BETWEEN` of a date literal and the
+  column, in either argument order, whose derived column declares a `range` rule, bounds the draw to the dates the
+  engine's own evaluator keeps in that range; the column is declared as one bin over them, cut to the run's window and
+  to its own range, and labelled an assumption that names the derive. Two derives intersect; an empty intersection, or
+  a bound with no end to draw to, keeps the even draw and the report says why. Before, the column was drawn evenly
+  over the whole window and `verify` reported most rows of the derived column outside its range (ADR 0014, the
+  amendment of 2026-11-25).
 
 ## 0.12.1 - 2026-11-26
 

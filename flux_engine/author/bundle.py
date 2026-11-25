@@ -116,6 +116,7 @@ from flux_engine.author.derived import (
     contract_guarded,
     numeric,
 )
+from flux_engine.author.derived_dates import bound_derived_dates
 from flux_engine.author.exact import EXACT_HOW, allot_small_tables
 from flux_engine.author.given import choose_givens
 from flux_engine.author.history import (
@@ -4541,6 +4542,12 @@ def _bundle_window(
             draw_in_window(column, expose.kinds[column.name], window)
         # A column drawn over its whole range, its range and the window apart, says so.
         restate_assumptions(expose)
+    bound_derived_dates(
+        planned.authored,
+        planned.contract,
+        window,
+        lambda expose, column: _declared_ranges_of(expose, column, planned.contract),
+    )
     if given_window is not None:
         for expose in authored:
             for column in expose.columns:

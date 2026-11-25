@@ -77,6 +77,7 @@ __all__ = [
     "count_cells",
     "declared_span",
     "copy_column",
+    "declare_one_bin",
     "determine_column",
     "draw_within_key",
     "PerEntity",
@@ -232,6 +233,9 @@ class ColumnPlan:
     #: No bin of that histogram stands clear of the noise, so the column is drawn evenly within
     #: the run's window once it is known (:func:`draw_in_window`).
     drawn_in_window: bool = False
+    #: The profile gives the column no distribution (it withheld every order statistic), so it is
+    #: drawn evenly within the run's window with no declaration of its own.
+    even_in_window: bool = False
     #: Every row holds the open end the contract declares, so the table's history sets the column
     #: and it declares no draw; without a history the bundle cannot write it.
     open_end_only: bool = False
@@ -1495,6 +1499,7 @@ def _ordered(ctx: ColumnContext, plan: ColumnPlan) -> None:
     if points and _one_bound(ctx, plan, points):
         return
     if _temporal(kind):
+        plan.even_in_window = True
         plan.how = "uniform within the run's time window: the profile publishes no order statistic"
         plan.assumptions.append(
             "The profile withheld every order statistic, so it is drawn within the run's "
@@ -1935,6 +1940,22 @@ def draw_in_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str])
             low, high = max(low, first), min(high, last)
         else:
             low, high, outside = first, last, True
+    read = _NOISE_OUTSIDE_WINDOW_READ if outside else _NOISE_EVERYWHERE_READ
+    declare_one_bin(plan, kind, low, high, read)
+    if outside:
+        plan.assumptions = [
+            _NOISE_OUTSIDE_WINDOW if sentence == _NOISE_EVERYWHERE else sentence
+            for sentence in plan.assumptions
+        ]
+
+
+def declare_one_bin(plan: ColumnPlan, kind: LogicalKind, low: int, high: int, reason: str) -> None:
+    """Declare the column as one bin over ``[low, high)`` (milliseconds) with weight 1, as an assumption.
+
+    A DATE column's bin runs over the whole days inside it, so every day it draws lies inside it,
+    and a bin with no width is one unit wide. Any bins and weights the plan declared are replaced,
+    and their labels with them; *reason* is the assumption both new labels cite.
+    """
     step = _DAY_MS if kind is LogicalKind.DATE else 1
     if kind is LogicalKind.DATE:
         low, high = -(-low // _DAY_MS) * _DAY_MS, high // _DAY_MS * _DAY_MS
@@ -1943,14 +1964,8 @@ def draw_in_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str])
     plan.declaration["bins"] = [_spell(kind, Decimal(low)), _spell(kind, Decimal(high))]
     plan.declaration["binWeights"] = ["1"]
     plan.labels = [label for label in plan.labels if label.tokens[:1] not in _BIN_LABELS]
-    read = _NOISE_OUTSIDE_WINDOW_READ if outside else _NOISE_EVERYWHERE_READ
-    plan.labels.append(Label(("bins",), assumed(read)))
-    plan.labels.append(Label(("binWeights",), assumed(read)))
-    if outside:
-        plan.assumptions = [
-            _NOISE_OUTSIDE_WINDOW if sentence == _NOISE_EVERYWHERE else sentence
-            for sentence in plan.assumptions
-        ]
+    plan.labels.append(Label(("bins",), assumed(reason)))
+    plan.labels.append(Label(("binWeights",), assumed(reason)))
 
 
 _BIN_LABELS = (("bins",), ("binWeights",))
