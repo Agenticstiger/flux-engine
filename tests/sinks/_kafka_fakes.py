@@ -201,8 +201,10 @@ class FakeBroker:
         self.producers: List[FakeTxn] = []
         self.producer_options: List[Dict[str, Any]] = []
         self.failures: List[Failure] = []
+        #: A fault for the producer of one topic's stream, taken before ``failures``.
+        self.failing_topics: Dict[str, Failure] = {}
         self.closes = 0
-        self.cluster = "fake-cluster"
+        self.cluster: Optional[str] = "fake-cluster"
         self._open: Dict[str, FakeTxn] = {}
 
     def add_topic(self, topic: str, *, partitions: Optional[int] = None, **configs: str) -> None:
@@ -246,7 +248,10 @@ class FakeBroker:
         if earlier is not None:
             earlier.fenced = True
             earlier.pending = []
-        failure = self.failures.pop(0) if self.failures else None
+        # The id ends with the topic: flux-sink.<run id>.<digest prefix>.<topic>.
+        failure = self.failing_topics.pop(transactional_id.split(".", 3)[-1], None)
+        if failure is None and self.failures:
+            failure = self.failures.pop(0)
         producer = FakeTxn(self, transactional_id, group, failure)
         self._open[transactional_id] = producer
         self.producers.append(producer)
