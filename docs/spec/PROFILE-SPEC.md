@@ -378,11 +378,13 @@ statistics and in the cliques and, in format `1-4-0`, the `selection` and `domai
 and is compared with its total on its own. The reader refuses the document (`FLX-5036`) when:
 
 - a `noise` block, a clique or a `cliqueSelection` appears and there is no `privacy` block;
-- a `privacy` block appears and no statistic, clique or share spends any of it;
 - a part is not in the measure of the total (a `rho` under approximate DP, say);
 - the parts add up to more than the total.
 
-A sum below the total is accepted. The reader does not check that a mechanism of the stated kind
+A sum below the total is accepted, and so is a `privacy` block that no statistic, clique or share
+spends any of: a stated loss is an upper bound, and overstating it is the conservative side, while a
+total below what the parts spend is refused. The grade comes from the statistics and never from the
+block alone, so a block that nothing spends earns no grade (ADR 0020). The reader does not check that a mechanism of the stated kind
 and scale made the numbers: it reads numbers, not samplers.
 
 ### A unit that follows its child rows (format `1-4-0`)

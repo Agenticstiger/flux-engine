@@ -459,6 +459,57 @@ def _grade_shortfalls(
     return grade.value, below
 
 
+def _privacy_overstated(profile: str) -> Optional[Dict[str, Any]]:
+    """The stated loss and what the profile's noise blocks spend, when the stated loss is the larger.
+
+    Both are values the profile states: the ``privacy`` block's total, and the sum of the ``noise``
+    blocks' shares (ADR 0019). Nothing here depends on the records. A total above what is spent is
+    accepted, a bound that is not tight, and this says by how much. ``None`` when the profile states
+    no loss, the reader refuses it, or the loss is spent in full.
+    """
+    from fractions import Fraction
+
+    from flux_engine.core.errors import FluxError
+    from flux_engine.evidence.grades import accounting_of
+    from flux_engine.seam.profile import load_profile
+
+    try:
+        account = accounting_of(load_profile(Path(profile)).document)
+    except (FluxError, OSError, ValueError):
+        return None
+    if account is None:
+        return None
+    try:
+        over = [
+            key
+            for key, stated in account.total.items()
+            if Fraction(account.spent.get(key, "0")) < Fraction(stated)
+        ]
+    except (ValueError, ZeroDivisionError):
+        return None
+    if not over:
+        return None
+    return {
+        "measure": account.measure,
+        "stated": {key: account.total[key] for key in over},
+        "spent": {key: account.spent.get(key, "0") for key in over},
+        "parts": account.parts,
+    }
+
+
+def _privacy_lines(overstated: Optional[Dict[str, Any]]) -> List[str]:
+    """One line saying the profile states more privacy loss than its noise blocks spend."""
+    if overstated is None:
+        return []
+    stated = ", ".join(f"{key} {value}" for key, value in overstated["stated"].items())
+    spent = ", ".join(f"{key} {value}" for key, value in overstated["spent"].items())
+    return [
+        f"privacy: the profile states a loss of {stated} and its noisy statistics and cliques "
+        f"spend {spent}; a stated loss above what is spent is accepted, and the grade reads the "
+        "statistics, not the stated loss"
+    ]
+
+
 def _parameters_line(counts: Dict[str, int]) -> str:
     """The register's shares, worded as ``plan`` words them."""
     declared = sum(counts.values())
@@ -1077,6 +1128,9 @@ def _described(
             "projection's own checks hold it to, so its fidelity block lists no property"
         )
     grade, below = _grade_shortfalls(contract, profile, bundle)
+    overstated = _privacy_overstated(profile)
+    if overstated is not None:
+        lines += [""] + _privacy_lines(overstated)
     steps = [] if below else _next_run(directory, profile)
     if below:
         # `plan` refuses this bundle (FLX-4005), so no run command is offered for it.
@@ -1113,6 +1167,7 @@ def _described(
                     for short_expose, short_column, short_label, short_minimum in below
                 ],
             },
+            **({"privacyLoss": overstated} if overstated is not None else {}),
             "simulationId": bundle.simulation_id,
             "profileDigest": bundle.profile_digest,
             **({"historyFile": bundle.history_file} if bundle.history_file is not None else {}),
