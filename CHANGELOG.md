@@ -178,6 +178,17 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   already written keeps its own.
 - A refused `init` reports its refusal even when a file it wrote cannot be removed while it cleans up, rather than a
   permission error.
+- `init` no longer turns a table's date pair into a lifetime or a `within` entry on a column the table's history sets
+  (its validity start, its validity end or its activation column). With `--history FILE` it refused with `FLX-6203`
+  ("has more than one source"), and a history the profile carries could be dropped, its statistics listed unused. The
+  pair is now listed unused, since the table's history sets the column, and the history is written.
+- `init` no longer gives a parent a start-only lifetime from a relationship date pair whose child date a key or a
+  rule of the contract sets, while it listed that same pair unused.
+- `init` lists a calendar entry, a date pair, an exposure or a history that it reads nothing of as one unused item,
+  at the entry's own pointer, and never lists a member the profile reader requires beside one that it reads. Dropping
+  exactly the listed statistics now leaves a profile the reader accepts (`FLX-5036` refused one before). A register
+  whose unused list names such an entry is format `1-4-0`. An `--allow` that names a member of an entry listed whole
+  no longer matches it: name the entry, or a pointer above it.
 
 ## 0.11.1 - 2026-11-24
 
