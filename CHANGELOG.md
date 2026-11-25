@@ -95,6 +95,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   wrote before and says why in its assumptions. A `currentFlag` is not written: no construct of the engine puts a
   value on an entity's last version alone, so the column keeps its own draw, and `init` says so. Before, `init` wrote
   neither member and always wrote `closeLast` (ADR 0017, amendment of 2026-11-25).
+- `fluxsim init` tracks a whole-number foreign key whose profile publishes it as a category. When the table's
+  history lists the column, the profile publishes few whole-number levels for it, and the table it references is not
+  released whole and has no published min and max for its key, `init` declares those levels on the column with their
+  published weights, so the history writes its `initial` and `transitions`. The referenced key is laid out as the
+  published levels, one value per row, so every generated value of the column is a key of that table. When the
+  levels span more values than the table writes rows, or the key is a foreign key itself, the column stays carried
+  and the ledger names what to change (publish fewer levels or more rows). Before, `init` declared nothing for such a
+  column and the history carried it (ADR 0017, amendment of 2026-11-25).
 
 ### Changed
 

@@ -556,6 +556,8 @@ def _refusal_of(
     given: FrozenSet[str],
 ) -> Optional[str]:
     """Why a candidate column cannot be tracked in this emit, or ``None``."""
+    if plan is not None and plan.levels_refused is not None and _levels_of(plan) is None:
+        return plan.levels_refused
     if plan is None or _levels_of(plan) is None:
         return "the emit declares no levels for the column, so it is carried"
     return _held_back(name, plan, source, fixed, given)

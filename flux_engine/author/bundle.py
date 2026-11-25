@@ -1002,6 +1002,110 @@ class _Link:
         return self.kind in numbers and self.parent_kind in numbers
 
 
+def _track_foreign_keys(
+    exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys], profile: Mapping[str, Any]
+) -> None:
+    """Draw a whole-number foreign key a history tracks over the levels its profile publishes.
+
+    A foreign key into a table that is not released whole, whose profile publishes it as a category
+    (few whole-number levels) and lists it among the columns of the table's history, was a
+    placeholder: the history had no levels to move it between, so it carried the column. It is
+    drawn over those levels instead (:func:`flux_engine.author.columns.plan_column` with
+    ``int_levels``), when the keys can hold them: the key it references is an assumed span, no
+    foreign key itself, and the levels of every column that references it lie inside as many
+    consecutive values as it has rows, which :func:`_span_keys` then lays the key over. Any other
+    foreign key keeps the plan it had.
+    """
+    if keys is None:
+        return
+    by_id = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
+    for expose in exposes:
+        table = profile.get("tables", {}).get(expose.expose_id)
+        history = table.get("history") if isinstance(table, Mapping) else None
+        tracked = history.get("columns") if isinstance(history, Mapping) else None
+        if expose.skipped is not None or expose.reference or not isinstance(tracked, Mapping):
+            continue
+        for relationship in keys.expose(expose.expose_id).relationships:
+            target = by_id.get(relationship.target)
+            if (
+                target is None
+                or target.reference
+                or relationship.cardinality != "many_to_one"
+                or len(relationship.from_columns) != 1
+                or len(relationship.to_columns) != 1
+                or relationship.from_columns[0] not in tracked
+            ):
+                continue
+            _track_foreign_key(
+                exposes,
+                keys,
+                expose,
+                relationship.from_columns[0],
+                target,
+                relationship.to_columns[0],
+            )
+
+
+def _track_foreign_key(
+    exposes: Sequence[AuthoredExpose],
+    keys: ContractKeys,
+    expose: AuthoredExpose,
+    column: str,
+    target: AuthoredExpose,
+    to_column: str,
+) -> None:
+    """Swap one foreign key's placeholder for its published levels, if the key they reference holds them."""
+    context = expose.contexts.get(column)
+    positions = {plan.name: place for place, plan in enumerate(expose.columns)}
+    parents = {plan.name: plan for plan in target.columns}
+    parent = parents.get(to_column)
+    if (
+        context is None
+        or parent is None
+        or column not in positions
+        or not expose.columns[positions[column]].placeholder
+        or not parent.key_span
+        or expose.kinds[column] is not LogicalKind.INT
+        or target.kinds[to_column] is not LogicalKind.INT
+        or column in expose.drawn_by_cliques
+        or column in expose.derives
+        or column in expose.copies
+        or column in expose.dependents
+        or context.foreign is None
+        or few_int_levels(context.entry, context.range_rule) is None
+    ):
+        return
+    before = expose.columns[positions[column]]
+    trial = plan_column(replace(context, int_levels=True))
+    if trial.placeholder or not trial.declaration.get("levels"):
+        return
+    expose.columns[positions[column]] = trial
+    links = _links(exposes, keys)
+    values = [
+        value for link in links if link.parent is parent for value in declared_span(link.child)
+    ]
+    if not values:
+        expose.columns[positions[column]] = before
+        return
+    low, high = min(values), max(values)
+    why = None
+    if any(link.child is parent for link in links):
+        why = f"{printable(to_column)} of {printable(target.expose_id)} is a foreign key itself"
+    elif high - low + 1 > target.rows:
+        why = (
+            f"the levels of the columns that reference {printable(to_column)} of "
+            f"{printable(target.expose_id)} span {high - low + 1:f} values and the table writes "
+            f"{target.rows} rows: publish fewer levels or more rows"
+        )
+    elif max(abs(low), abs(max(high, low + target.rows - 1))) > JCS_MAX_SAFE_INTEGER:
+        why = f"the levels are beyond the integers a row of {printable(target.expose_id)} carries"
+    if why is not None:
+        expose.columns[positions[column]] = before
+        before.levels_refused = f"{why}, so the column is carried"
+        return
+    expose.contexts[column] = replace(context, int_levels=True)
+
+
 def _span_keys(exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys]) -> None:
     """Keep each number foreign key inside the span of the key it references.
 
@@ -3666,6 +3770,7 @@ def _draw_and_link(
     """Span the keys of the drawn exposes, lay their relationships out and link their givens."""
     try:
         _with_edge_rows(reading, keys, drawn)
+        _track_foreign_keys(drawn, keys, reading.profile)
         _span_keys(drawn, keys)
         for expose in drawn:
             for plan in expose.columns:

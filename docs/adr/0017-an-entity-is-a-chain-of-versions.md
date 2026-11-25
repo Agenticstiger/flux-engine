@@ -845,3 +845,21 @@ says which column holds an entity's first start no more than which value marks a
   reads backwards only; and `history:one_current` checks an open end, not a column. `init` writes nothing for it, the column keeps its own draw, and the assumptions say so.
 - **What does not move.** A contract with no `lifecycle` gives the bundle it gave before. Each member the
   entry does not use is named in the assumptions with its reason, as ADR 0014 requires.
+
+## Amendment of 2026-11-25: `init` tracks a whole-number foreign key published as a category
+
+Section 13 tracked a column only when the emit declared levels for it, or when it was a foreign key into a table
+the profile releases whole, whose keys became its levels. A whole-number foreign key into a table that is not
+released whole declared none, because its category was read only for text columns, so the history carried it.
+
+- **Levels.** A foreign key (one column, to-one) that the history lists, that no rule, dependency or copy sets and
+  no clique draws, whose profile publishes at most 64 whole-number levels (`levelHistogram/1` or `support/1`), and
+  that references a table not released whole, declares those levels with their published weights, as any column
+  drawn over few integer levels does. The history then tracks it by section 5 like any categorical column.
+- **The keys.** The referenced key must hold every level. It is laid out as the span of the levels of all the
+  columns that reference it (the rule that widens an assumed key to its foreign keys), which is one value per row
+  when the levels lie inside as many consecutive values as the table has rows. When they span more values than the
+  table writes rows, when the key's own min and max are published, or when the key is a foreign key itself, no level
+  is declared, the column is carried as before, and the ledger says what to change.
+- **What does not move.** A column that is no foreign key, a foreign key whose published levels are not whole
+  numbers, and a table released whole (section 13's own route) give the bundle they gave before.
