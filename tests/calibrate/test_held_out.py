@@ -412,6 +412,27 @@ def test_a_held_out_profile_given_to_a_bundle_with_no_held_out_query_is_not_read
     assert (tmp_path / "calibrated.patch.json").is_file()
 
 
+def test_a_held_out_profile_given_to_a_bundle_with_no_held_out_query_is_never_opened(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    missing = tmp_path / "no-such-profile.json"
+    bundle = without_held_out_query(tmp_path)
+    status = fit_command(bundle, tmp_path, "--held-out", str(missing))
+    captured = capsys.readouterr()
+    assert status == 1 and "FLX-3712" in captured.err and "FLX-3109" not in captured.err
+    assert fit_module.NO_HELD_OUT_QUERY_GIVEN in captured.out
+    assert (tmp_path / "calibrated.patch.json").is_file() and not (tmp_path / "calibrated").exists()
+    second = tmp_path / "second"
+    second.mkdir()
+    status = fit_command(
+        without_held_out_query(second), second, "--held-out", str(missing), "--json"
+    )
+    document = json.loads(capsys.readouterr().out)
+    assert status == 1 and document["artifacts"]["heldOut"] is None
+    assert document["artifacts"]["heldOutNote"] == fit_module.NO_HELD_OUT_QUERY_GIVEN
+    assert "FLX-3109" not in json.dumps(document)
+
+
 def test_a_bundle_with_a_held_out_query_still_needs_a_held_out_profile(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -430,7 +451,10 @@ def test_a_held_out_profile_that_is_not_a_file_is_refused_before_any_run(tmp_pat
 def test_the_library_refuses_a_held_out_query_with_no_held_out_profile(tmp_path: Path) -> None:
     with pytest.raises(HeldOutNeeded):
         run_fit(request(make(tmp_path), tmp_path, None))
-    assert not (tmp_path / "calibrated.patch.json").exists()
+    assert (
+        not (tmp_path / "calibrated.patch.json").exists() and not (tmp_path / "calibrated").exists()
+    )
+    assert not (tmp_path / "state").exists()
 
 
 def test_nothing_is_left_under_the_state_directory(passed: Dict[str, Any]) -> None:

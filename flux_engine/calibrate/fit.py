@@ -571,7 +571,11 @@ def _write_bundle(
 
 def run_fit(request: FitRequest) -> FitOutcome:
     """Fit the bundle's declared parameters, write the patch, check the held-out queries and, when they hold,
-    write the calibrated bundle. See the module docstring."""
+    write the calibrated bundle. See the module docstring.
+
+    Raises ``HeldOutNeeded`` (no ``FLX`` code; the command reports it as it reports a missing option,
+    exit status 2) when the bundle declares a held-out query and the request names no held-out
+    profile, before anything runs."""
     from flux_engine.consumers.check import SQLGLOT_VERSION
     from flux_engine.consumers.runner import QueryRunner
     from flux_engine.stages._queries import effective_limits
