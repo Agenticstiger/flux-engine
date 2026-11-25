@@ -243,6 +243,9 @@ class ColumnPlan:
     #: Why a foreign key whose profile publishes its levels is not drawn over them, so that a
     #: history carries it: what the person can change to have it tracked.
     levels_refused: Optional[str] = None
+    #: The end levels of a foreign key's published levels that its plan leaves out, so that the key
+    #: it references can hold the rest; a history leaves them out of its first values and moves.
+    dropped_levels: Tuple[str, ...] = ()
     #: Statistics of the profile the rules read without citing them, each with how they
     #: shaped, bounded or checked the declaration (the ledger marks them used).
     reads: List[Tuple[Tuple[str, ...], str]] = field(default_factory=list)

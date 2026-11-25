@@ -10,7 +10,7 @@ import json
 from collections import Counter
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 import yaml
@@ -107,10 +107,12 @@ def _moves(levels: List[str]) -> Dict[str, List[int]]:
     return rows
 
 
-def _profile_of(levels: List[str], plan_rows: int = 25) -> Dict[str, Any]:
+def _profile_of(
+    levels: List[str], plan_rows: int = 25, shares: Optional[List[int]] = None
+) -> Dict[str, Any]:
     base = _profile()
     version = base["tables"]["plan_version"]
-    shares = [100 + 10 * position for position in range(len(levels))]
+    shares = shares or [100 + 10 * position for position in range(len(levels))]
     total = sum(shares)
     version["history"]["columns"] = {
         "plan_id": {
@@ -222,19 +224,44 @@ def test_every_generated_foreign_key_is_a_key_of_the_catalogue(tmp_path: Path) -
     assert distance < Fraction(1, 10)
 
 
-def test_a_catalogue_with_fewer_rows_than_levels_keeps_the_column_carried(tmp_path: Path) -> None:
+def test_a_catalogue_with_one_row_fewer_than_the_levels_drops_the_small_end_level(
+    tmp_path: Path,
+) -> None:
     levels = [str(key) for key in range(11, 37)]
-    result = _init(tmp_path, _profile_of(levels))
+    shares = [40] * 25 + [17]
+    result = _init(tmp_path, _profile_of(levels, shares=shares))
+    namespace = _namespace(tmp_path)
+    column = namespace["emits"]["membership_version"]["fidelity"]["columns"]["plan_id"]
+    assert list(column["levels"]) == PLAN_IDS
+    assert sum(Fraction(share) for share in column["levels"].values()) == 1
+    assert namespace["emits"]["plan"]["fidelity"]["columns"]["plan_id"]["bins"] == ["11", "35"]
+    tracked = {item["column"]: item for item in namespace["history"][0]["tracked"]}
+    assert tracked["plan_id"]["initial"]["levels"] == PLAN_IDS
+    assert "36" not in tracked["plan_id"]["transitions"]
+    assert all("36" not in row for row in tracked["plan_id"]["transitions"].values())
+    note = "plan writes 25 rows, so the foreign key keeps 11..35 and drops 36 (1.7 % of the rows)"
+    assert note in result.stdout
+    verified, versions, plans = _run(tmp_path)
+    assert "integrity membership_version.plan -> plan: found 1850 of 1850 (100.00%)" in (
+        verified.stdout
+    )
+    assert {row[5] for row in versions} <= {row[0] for row in plans}
+
+
+def test_dropping_more_than_a_twentieth_of_the_rows_keeps_the_column_carried(
+    tmp_path: Path,
+) -> None:
+    levels = [str(key) for key in range(11, 38)]
+    result = _init(tmp_path, _profile_of(levels, shares=[40] * 27))
     namespace = _namespace(tmp_path)
     assert "levels" not in namespace["emits"]["membership_version"]["fidelity"]["columns"].get(
         "plan_id", {}
     )
-    assert "history" in namespace
     assert not namespace["history"][0].get("tracked")
     pointer = "/tables/membership_version/history/columns/plan_id/transitions"
     state = {entry["pointer"]: entry for entry in result.artifacts["ledger"]["statistics"]}[pointer]
     assert state["state"] == "unused"
-    assert "span 26 values and the table writes 25 rows" in state["note"]
+    assert "would drop 7.4 % of the rows, more than 5 %" in state["note"]
     assert "publish fewer levels or more rows" in state["note"]
 
 

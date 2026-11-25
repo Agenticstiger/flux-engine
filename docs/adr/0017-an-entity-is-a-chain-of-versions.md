@@ -858,8 +858,12 @@ released whole declared none, because its category was read only for text column
   drawn over few integer levels does. The history then tracks it by section 5 like any categorical column.
 - **The keys.** The referenced key must hold every level. It is laid out as the span of the levels of all the
   columns that reference it (the rule that widens an assumed key to its foreign keys), which is one value per row
-  when the levels lie inside as many consecutive values as the table has rows. When they span more values than the
-  table writes rows, when the key's own min and max are published, or when the key is a foreign key itself, no level
+  when the levels lie inside as many consecutive values as the table has rows. When they span more, the end levels
+  are dropped one at a time, the one with the smaller published share first and the higher value on a tie, until
+  they fit, provided the dropped levels hold at most 5 % of the rows together; the others take their shares
+  renormalised, the history's first values and moves are written without the dropped levels, the column's
+  `levelHistogram` property is not written (the profile's histogram counts the dropped levels), and the assumptions
+  name the dropped levels and their share. Above 5 %, when the key's own min and max are published, or when the key is a foreign key itself, no level
   is declared, the column is carried as before, and the ledger says what to change.
 - **What does not move.** A column that is no foreign key, a foreign key whose published levels are not whole
   numbers, and a table released whole (section 13's own route) give the bundle they gave before.

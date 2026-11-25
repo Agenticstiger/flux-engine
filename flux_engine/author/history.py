@@ -445,6 +445,7 @@ def _level_weights(
     *,
     own: Optional[str] = None,
     ended: Optional[str] = None,
+    dropped: Sequence[str] = (),
 ) -> Optional[Dict[str, Fraction]]:
     """The weight of each level of a level histogram's group; the levels *own* and *ended* are zero.
 
@@ -455,7 +456,7 @@ def _level_weights(
     cells = count_cells(group, "levelCounts")
     if not isinstance(levels, list) or len(cells) != len(levels):
         return None
-    for zeroed in (own, ended):
+    for zeroed in (own, ended, *dropped):
         if zeroed is not None and zeroed in levels:
             position = levels.index(zeroed)
             cells[position] = replace(cells[position], count=0)
@@ -486,6 +487,7 @@ def _rows(
     pointer: Tuple[str, ...],
     source: HistorySource,
     ended: Optional[str] = None,
+    dropped: Sequence[str] = (),
 ) -> Dict[str, Dict[str, str]]:
     """Each level's weights of the levels it moves to, for each group that moves.
 
@@ -496,9 +498,11 @@ def _rows(
         if not isinstance(group, Mapping) or group.get("status") != _FREE:
             continue
         level = str(group.get("group"))
-        if level == ended:
+        if level == ended or level in dropped:
             continue
-        weights = _level_weights(node, group, pointer, source, own=level, ended=ended)
+        weights = _level_weights(
+            node, group, pointer, source, own=level, ended=ended, dropped=dropped
+        )
         if weights is None:
             continue
         moved = {
@@ -525,11 +529,17 @@ def _reachable(start: Sequence[str], rows: Mapping[str, Mapping[str, str]]) -> L
 
 
 def _initial(
-    node: Any, pointer: Tuple[str, ...], source: HistorySource, ended: Optional[str] = None
+    node: Any,
+    pointer: Tuple[str, ...],
+    source: HistorySource,
+    ended: Optional[str] = None,
+    dropped: Sequence[str] = (),
 ) -> Optional[Dict[str, Any]]:
     group = _group(node)
     weights = (
-        _level_weights(node, group, pointer, source, ended=ended) if group is not None else None
+        _level_weights(node, group, pointer, source, ended=ended, dropped=dropped)
+        if group is not None
+        else None
     )
     if not weights:
         return None
@@ -593,6 +603,7 @@ def _track_one(
     source: HistorySource,
     declared: Tuple[str, ...],
     ended: Optional[str] = None,
+    dropped: Sequence[str] = (),
 ) -> Dict[str, Any]:
     """The ``tracked`` item of one column, or :class:`_Skip` with why it is carried.
 
@@ -603,8 +614,8 @@ def _track_one(
     moves = entry.get("transitions")
     if not isinstance(moves, Mapping) or not _moves(moves):
         raise _Skip("no published change moves the column, so it is carried")
-    rows = _rows(moves, base + ("transitions",), source, ended)
-    initial = _initial(entry.get("initial"), base + ("initial",), source, ended)
+    rows = _rows(moves, base + ("transitions",), source, ended, dropped)
+    initial = _initial(entry.get("initial"), base + ("initial",), source, ended, dropped)
     if ended is not None and initial is None:
         raise _Skip(
             f"no first value is published, and the column's own weights would give {ended!r}, "
@@ -696,7 +707,9 @@ def _track_candidate(
     assert plan is not None
     try:
         ended = end_marker[1] if end_marker is not None and end_marker[0] == name else None
-        item = _track_one(name, entry, where, source, keys or _levels_of(plan) or (), ended)
+        item = _track_one(
+            name, entry, where, source, keys or _levels_of(plan) or (), ended, plan.dropped_levels
+        )
     except _Skip as skipped:
         return str(skipped)
     if keys:

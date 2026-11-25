@@ -1089,21 +1089,83 @@ def _track_foreign_key(
         return
     low, high = min(values), max(values)
     why = None
-    if any(link.child is parent for link in links):
+    if (
+        high - low + 1 > target.rows
+        and len(values) == len(declared_span(trial))
+        and not any(link.child is parent for link in links)
+    ):
+        why = _trim_levels(trial, target.rows, target.expose_id)
+        if why is None:
+            values = declared_span(trial)
+            low, high = min(values), max(values)
+    if why is None and any(link.child is parent for link in links):
         why = f"{printable(to_column)} of {printable(target.expose_id)} is a foreign key itself"
-    elif high - low + 1 > target.rows:
+    elif why is None and high - low + 1 > target.rows:
         why = (
             f"the levels of the columns that reference {printable(to_column)} of "
             f"{printable(target.expose_id)} span {high - low + 1:f} values and the table writes "
             f"{target.rows} rows: publish fewer levels or more rows"
         )
-    elif max(abs(low), abs(max(high, low + target.rows - 1))) > JCS_MAX_SAFE_INTEGER:
+    elif (
+        why is None and max(abs(low), abs(max(high, low + target.rows - 1))) > JCS_MAX_SAFE_INTEGER
+    ):
         why = f"the levels are beyond the integers a row of {printable(target.expose_id)} carries"
     if why is not None:
         expose.columns[positions[column]] = before
         before.levels_refused = f"{why}, so the column is carried"
         return
     expose.contexts[column] = replace(context, int_levels=True)
+
+
+#: The most of a column's published rows its end levels may take from it, so that it fits the
+#: rows of the table it references.
+_MOST_TRIMMED = Fraction(1, 20)
+
+
+def _trim_levels(plan: ColumnPlan, rows: int, table: str) -> Optional[str]:
+    """Drop the end levels of a foreign key's span until it fits *rows*; why not, else ``None``.
+
+    Each step drops the end level with the smaller published share, the higher value on a tie, and
+    the levels it drops may hold at most :data:`_MOST_TRIMMED` of the rows together. The
+    others take their shares, renormalised, and the plan says so as an assumption.
+    """
+    shares = {int(level): Fraction(text) for level, text in plan.declaration["levels"].items()}
+    kept = sorted(shares)
+    dropped: List[int] = []
+    while kept[-1] - kept[0] + 1 > rows and len(kept) > 1:
+        end = kept[0] if shares[kept[0]] < shares[kept[-1]] else kept[-1]
+        kept.remove(end)
+        dropped.append(end)
+    lost = sum((shares[level] for level in dropped), Fraction(0))
+    if kept[-1] - kept[0] + 1 > rows or lost > _MOST_TRIMMED:
+        return (
+            f"the levels span more values than {printable(table)} writes rows ({rows}), and "
+            f"dropping end levels to fit would drop {float(lost) * 100:.1f} % of the rows, more "
+            f"than {float(_MOST_TRIMMED) * 100:.0f} %: publish fewer levels or more rows"
+        )
+    names = ", ".join(str(level) for level in sorted(dropped))
+    reason = (
+        f"{printable(table)} writes {rows} rows, so the foreign key keeps {kept[0]}..{kept[-1]} "
+        f"and drops {names} ({float(lost) * 100:.1f} % of the rows): the others take their shares, "
+        "renormalised."
+    )
+    texts = share_texts([shares[level] / (1 - lost) for level in kept])
+    levels = [str(level) for level in kept]
+    plan.declaration["levels"] = dict(zip(levels, texts, strict=True))
+    plan.declaration["support"] = {"values": levels}
+    plan.declaration["maxCardinality"] = len(levels)
+    plan.level_names = tuple(levels)
+    plan.dropped_levels = tuple(str(level) for level in sorted(dropped))
+    # The profile's histogram counts the dropped levels too, so the property cannot be scored.
+    plan.properties = [
+        item for item in plan.properties if item.document.get("property") != "levelHistogram"
+    ]
+    plan.labels = [
+        label for label in plan.labels if label.tokens[:1] not in (("levels",), ("maxCardinality",))
+    ] + [Label((name,), assumed(reason)) for name in ("levels", "maxCardinality")]
+    plan.assumptions.append(reason)
+    plan.choices.append(reason)
+    return None
 
 
 def _span_keys(exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys]) -> None:

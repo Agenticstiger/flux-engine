@@ -100,9 +100,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   released whole and has no published min and max for its key, `init` declares those levels on the column with their
   published weights, so the history writes its `initial` and `transitions`. The referenced key is laid out as the
   published levels, one value per row, so every generated value of the column is a key of that table. When the
-  levels span more values than the table writes rows, or the key is a foreign key itself, the column stays carried
-  and the ledger names what to change (publish fewer levels or more rows). Before, `init` declared nothing for such a
-  column and the history carried it (ADR 0017, amendment of 2026-11-25).
+  levels span more values than the table writes rows, `init` drops end levels one at a time (the one with the smaller
+  published share, the higher value on a tie) until they fit, while the dropped levels hold at most 5 % of the rows
+  together; the others take their shares renormalised, the history's first values and moves leave the dropped levels
+  out, and the assumptions name them and their share. Past 5 %, or when the key is a foreign key itself, the column
+  stays carried and the ledger names what to change (publish fewer levels or more rows). Before, `init` declared
+  nothing for such a column and the history carried it (ADR 0017, amendment of 2026-11-25).
 
 ### Changed
 
