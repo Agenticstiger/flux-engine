@@ -33,6 +33,7 @@ the help.
 - [Seal and score a prediction](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/seal-and-score-a-prediction.md): register a prediction before the outcome, score it later, publish an outcomes-only record.
 - [Ship with evidence](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/ship-with-evidence.md): pack a run into an evidence archive, pass the fidelity gate, sign it, use the JSON output in CI.
 - [Size a run, split it and time it](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/size-and-split-a-run.md): plan at a multiple of the size, generate in shares, see where the time went.
+- [Stream a simulation into Kafka](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/stream-a-simulation-into-kafka.md): send a run's streams to Kafka topics with the `--sink kafka:` option, keyed by entity, with registry schemas and exactly-once delivery.
 - [Use the FLUID seam](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/use-the-fluid-seam.md): change a contract, carry its new digest into the Simulation, check the emitted rows.
 - [Write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/write-a-bundle-from-a-profile.md): turn a contract and a profile into a bundle, see what each number rests on, then run and ship it.
 

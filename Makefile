@@ -43,8 +43,8 @@
         test test-fast test-fast-cov test-fast-shard test-fast-cov-shard coverage-combine fast-partition \
         fast-durations test-vectors test-digests test-determinism \
         test-slow test-slow-acceptance test-slow-rest test-slow-rest-shard slow-durations slow-partition \
-        describe gate-conform packaging-smoke test-stats-alone lineage-extra publish-extra third-party-licenses \
-        release-guard first-run docs-gen docs-check docs-test help-snapshots check bench
+        describe gate-conform packaging-smoke test-stats-alone lineage-extra publish-extra kafka-extra kafka-integration \
+        third-party-licenses release-guard first-run docs-gen docs-check docs-test help-snapshots check bench
 
 # Local runs use the repository virtualenv. CI installs into the runner's own
 # interpreter and sets BIN= (empty) in the workflow env, so every tool below
@@ -166,7 +166,7 @@ SLOW_REST := -m slow --ignore=tests/acceptance --ignore=tests/golden
 # misses and a `fluxsim run` subprocess killed on its timeout. A gate that fails
 # on a configuration nothing ships is worse than no gate, so ci-local now runs
 # the CI selections and `test` stays available for a developer who wants it.
-ci-local: lineage-extra publish-extra lint format-check typecheck imports register-lint guardrail skills-check reuse \
+ci-local: lineage-extra publish-extra kafka-extra lint format-check typecheck imports register-lint guardrail skills-check reuse \
           proof-guard describe gate-conform slow-partition fast-partition test-fast-cov test-digests \
           test-slow-acceptance test-slow-rest packaging-smoke test-stats-alone
 
@@ -526,6 +526,34 @@ publish-extra:
 	$(BIN)pytest $(OFFLINE) -m "not slow" -rs --junitxml=$(CI_SCRATCH)/publish-extra.xml tests/sinks/test_iceberg.py tests/sinks/test_delta.py tests/sinks/test_object_targets.py
 	$(BIN)python -c "import sys, xml.etree.ElementTree as E; s = [c.get('name') for c in E.parse('$(CI_SCRATCH)/publish-extra.xml').iter('testcase') if c.find('skipped') is not None]; sys.exit('publish-extra: tests skipped: ' + ', '.join(s)) if s else print('publish-extra: no test skipped')"
 
+# ------------------------------------------------------------ Kafka extra
+# Mirrors the `Kafka extra` job. Every other target runs without
+# confluent-kafka, so the Kafka sink's registry and producer tests skip and
+# mypy does not see the library's annotations. This one needs the `kafka`
+# extra (`uv sync --extra dev --extra kafka`), type-checks the sink against the
+# library, runs the sink's tests, and fails when the library cannot be
+# imported or when any of those tests skips, so a mirror run cannot pass by
+# skipping them. The tests that start a broker in Docker are not among them.
+KAFKA_EXTRA_TESTS = $(filter-out tests/sinks/test_kafka_integration.py,$(wildcard tests/sinks/test_kafka_*.py)) \
+	tests/stages/test_deliver_privacy_grade.py
+kafka-extra:
+	$(BIN)python -c "import confluent_kafka.schema_registry.avro, confluent_kafka.schema_registry.json_schema" || { echo "kafka-extra needs the kafka extra: uv sync --extra dev --extra kafka" >&2; exit 1; }
+	$(BIN)mypy flux_engine/sinks/kafka.py $(wildcard flux_engine/sinks/_kafka_*.py)
+	$(BIN)pytest $(OFFLINE) -m "not slow" -rs --junitxml=$(CI_SCRATCH)/kafka-extra.xml $(KAFKA_EXTRA_TESTS)
+	$(BIN)python -c "import sys, xml.etree.ElementTree as E; s = [c.get('name') for c in E.parse('$(CI_SCRATCH)/kafka-extra.xml').iter('testcase') if c.find('skipped') is not None]; sys.exit('kafka-extra: tests skipped: ' + ', '.join(s)) if s else print('kafka-extra: no test skipped')"
+
+# ------------------------------------------------------ Kafka integration
+# Mirrors the `Kafka integration` workflow, .github/workflows/kafka-integration.yml.
+# The sink against a real Apache Kafka broker and a Karapace registry that the
+# tests start in Docker. Not part of `make ci-local`: it needs Docker and the
+# `kafka` extra. The suite skips itself when Docker is not running, so this
+# fails when any test skips or when none ran, and a run without Docker cannot
+# pass.
+kafka-integration:
+	@mkdir -p $(CI_SCRATCH)
+	$(BIN)pytest $(OFFLINE) -m slow -rs tests/sinks/test_kafka_integration.py --junitxml=$(CI_SCRATCH)/kafka-integration.xml
+	$(BIN)python -c "import sys, xml.etree.ElementTree as E; t = list(E.parse('$(CI_SCRATCH)/kafka-integration.xml').iter('testcase')); s = [c.get('name') for c in t if c.find('skipped') is not None]; sys.exit('kafka-integration: tests skipped: ' + ', '.join(s)) if s else sys.exit('kafka-integration: no test ran') if not t else print('kafka-integration: %d tests ran, none skipped' % len(t))"
+
 # ------------------------------------------------------------ First run
 # Mirrors the `First run` workflow, .github/workflows/first-run.yml. It is its
 # own workflow and not part of `ci-local`: it needs `uv` on PATH, and what it
@@ -580,7 +608,7 @@ help-snapshots:
 # write (tests/bench): needs the accuracy group for pytest-benchmark
 # (`uv sync --extra dev --group accuracy`). One process, because
 # pytest-benchmark switches itself off under xdist. FLUX_BENCH_ROWS sets the
-# stream length (default 20000).
+# stream length (default 20000 for the file sinks, 100000 for the Kafka sink).
 bench:
 	$(BIN)pytest tests/bench -m slow -p no:xdist -p no:cacheprovider --benchmark-only \
 	  --benchmark-columns=min,mean,max,rounds --benchmark-sort=name

@@ -77,6 +77,12 @@ LICENSE_NOTES: Dict[str, Tuple[str, str, str]] = {
         "Apache-2.0",
         "[publish]: writes one Iceberg table per stream through a catalogue",
     ),
+    "confluent-kafka": (
+        "confluent-kafka",
+        "Apache-2.0",
+        "[kafka]: produces each stream to Kafka and writes values through a schema registry; its "
+        "wheels bundle librdkafka (BSD-2-Clause)",
+    ),
     "deltalake": (
         "deltalake",
         "Apache-2.0",

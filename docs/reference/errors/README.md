@@ -112,6 +112,10 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-3509](./FLX-3509.md) | a sink target carries user information, a query or a fragment |
 | [FLX-3510](./FLX-3510.md) | an object store target does not name a usable bucket and prefix |
 | [FLX-3511](./FLX-3511.md) | a catalogue configuration file sits in the current directory |
+| [FLX-3512](./FLX-3512.md) | a Kafka target's audience needs a stronger privacy grade than the run has |
+| [FLX-3513](./FLX-3513.md) | a stream's declarations do not say how to write it to Kafka |
+| [FLX-3514](./FLX-3514.md) | a Kafka topic will not take the stream as it is |
+| [FLX-3515](./FLX-3515.md) | a registry subject cannot carry the stream |
 | [FLX-3601](./FLX-3601.md) | the consumers block is not a mapping of the keys it carries |
 | [FLX-3602](./FLX-3602.md) | a consumers dialect is not one the engine reads |
 | [FLX-3603](./FLX-3603.md) | a consumers asOf is not a date |

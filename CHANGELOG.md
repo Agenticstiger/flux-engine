@@ -85,6 +85,33 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   as its levels and takes its `initial` and `transitions` from the history statistic. A key that is not published, or
   a change that names no key, leaves the column carried, with the reason in the ledger (ADR 0017, the amendment of
   2026-11-24).
+- A Kafka sink: `fluxsim run --sink kafka:HOST:PORT[,HOST:PORT...]` (and `fluxsim apply --sink`) delivers every stream
+  to Kafka topics, from the optional `flux-sim-engine[kafka]` extra. Records are keyed by their entity and partitioned
+  as a Java producer would, carry the event's time as their timestamp, and are written as rows or, for a history's
+  change events, in Debezium's envelope with tombstones, as plain JSON or through a schema registry (a subject the
+  contract names, or one derived from the columns). Each stream is delivered exactly once in one transaction per
+  stream, unless `commit-every` is given, that also commits its progress, so a retried delivery resumes where it
+  stopped; `transaction-timeout` (900 seconds by default) bounds a transaction, and an unpaced stream that cannot fit
+  in one is refused rather than left to the brokers. `pace=realtime` and `pace=xN` send a stream at its event-time
+  rate without changing a byte of what it holds. Without a registry a value is compact JSON in the stream's column
+  order; with one, Avro and JSON Schema values are written behind the registry's framing without a lookup per record,
+  and batches are compressed (`compression=none|gzip|snappy|lz4|zstd`, `lz4` by default). Every target declares its
+  audience, `internal` (needs a run graded P1 or better) or `external` (needs P3 or better, worked out from the pinned
+  profile, so `--profile` is given to `run` and to `apply --run-id`), and a stream below the minimum, from a run that
+  pins no profile and declares no plugin, or from a run whose receipt and streams are not its plan's, is refused before
+  anything is contacted (`FLX-3512`); declarations Kafka cannot take are `FLX-3513`, a topic that will not take the stream,
+  or a stream this run's receipts record as delivered whose progress the brokers have since dropped, is `FLX-3514`, and a
+  registry subject that cannot carry it is `FLX-3515`. No digest moves. See [Stream a simulation
+  into Kafka](docs/how-to/stream-a-simulation-into-kafka.md) and [ADR
+  0038](docs/adr/0038-a-kafka-sink-keys-records-by-entity-delivers-each-stream-exactly-once-and-sends-only-what-its-audience-may-see.md).
+- A sink is now told four more facts about a stream: `StreamContext.privacy_grade`, the grade the run is held to,
+  worked out from the run's bound plan, `run-digest.json`, `receipt.json` and bundle as `apply` reads it, and from the
+  pinned profile when the command was given it (`RecordedGrade`, which says what is missing or does not check);
+  `StreamContext.bundle_directory` and `StreamContext.simulation_id`, which say where the stream's declarations are;
+  and `StreamContext.delivered`, the receipts the run's `sink-receipts.json` already holds for the stream.
+  `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill all four; `apply --run-id` takes `--profile` with
+  `--sink`, for an external audience. They default to `None` (`delivered` to empty), no digest covers them, and the
+  existing sinks ignore them.
 
 ### Changed
 
