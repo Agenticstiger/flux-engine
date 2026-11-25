@@ -3366,8 +3366,18 @@ def _planned_with_projections(
     guesses = {index: _most_rows(resolved_emits, found) for index, found in projected.items()}
     planned = tuple(plan_at(index, guesses.get(index)) for index in range(len(resolved_emits)))
     related = _relate_emits(resolved_emits, planned, namespace, end_share)
-    shrunk = _shrunk_histories(related, root)
-    if not projected and not shrunk:
+
+    def replan(rows: Mapping[int, int]) -> Tuple[_PlannedEmit, ...]:
+        """Every emit planned again, the emits *rows* names at those rows, and related once more."""
+        return _relate_emits(
+            resolved_emits,
+            tuple(plan_at(index, rows.get(index)) for index in range(len(resolved_emits))),
+            namespace,
+            end_share,
+        )
+
+    related, shrunk = _settled_histories(resolved_emits, related, guesses, root, replan)
+    if not projected:
         return related
     counts = {
         index: derived_rows(
@@ -3378,12 +3388,18 @@ def _planned_with_projections(
         )
         for index, found in projected.items()
     }
-    if shrunk or any(counts[index] != guesses[index] for index in counts):
-        counts.update(shrunk)
-        replanned = tuple(plan_at(index, counts.get(index)) for index in range(len(resolved_emits)))
-        related = _relate_emits(resolved_emits, replanned, namespace, end_share)
-    if not projected:
-        return related
+    if any(counts[index] != guesses[index] for index in counts):
+        related = replan({**shrunk, **counts})
+    return _with_projected_plans(resolved_emits, related, projected, root)
+
+
+def _with_projected_plans(
+    resolved_emits: Sequence[ResolvedEmit],
+    related: Sequence[_PlannedEmit],
+    projected: Mapping[int, Tuple[str, str, str]],
+    root: SeedTreeRoot,
+) -> Tuple[_PlannedEmit, ...]:
+    """Each emit in *projected* with the plan derived from its history's layouts, and the others as they are."""
     return tuple(
         (
             replace(
@@ -3405,22 +3421,97 @@ def _planned_with_projections(
     )
 
 
-def _shrunk_histories(related: Sequence[_PlannedEmit], root: SeedTreeRoot) -> Dict[int, int]:
+def _settled_histories(
+    resolved_emits: Sequence[ResolvedEmit],
+    related: Tuple[_PlannedEmit, ...],
+    guesses: Mapping[int, int],
+    root: SeedTreeRoot,
+    replan: Callable[[Mapping[int, int]], Tuple[_PlannedEmit, ...]],
+) -> Tuple[Tuple[_PlannedEmit, ...], Dict[int, int]]:
+    """The emits related after every history that holds fewer rows than it declares is planned at them.
+
+    Each pass plans again the histories :func:`_shrunk_histories` finds, with *replan*, which can
+    move the rows of another history, so the passes go on until none is found; the rows of every
+    emit that shrank come back with the plans. More passes than there are emits is refused.
+    """
+    shrunk: Dict[int, int] = {}
+    for _ in range(len(resolved_emits) + 1):
+        found = _shrunk_histories(resolved_emits, related, root)
+        if not found:
+            return related, shrunk
+        shrunk.update(found)
+        related = replan({**guesses, **shrunk})
+    raise FluxError(
+        FLX_3403,
+        "the rows of the histories that keep to their parent's lifetime are still changing "
+        f"after {len(resolved_emits) + 1} passes ({sorted(shrunk.items())}); "
+        "a history whose parent is a history that holds fewer rows than it declares cannot be laid out",
+    )
+
+
+def _shrunk_histories(
+    resolved_emits: Sequence[ResolvedEmit], related: Sequence[_PlannedEmit], root: SeedTreeRoot
+) -> Dict[int, int]:
     """The rows of each history that keeps to its parent's lifetime and holds fewer than it declares.
 
     The parents' lifetimes can leave no entity room for a version the layout was asked for, and the
     layout then holds fewer rows (ADR 0017, amendment of 2026-11-24). Its emit is planned again at
     the rows it holds, so that plan, apply and verify count the same rows.
+
+    A history whose parent is itself a history that keeps to its parent's lifetime reads the
+    parent's rows, which are the rows the parent's layout holds only once the parent is planned at
+    them. Such a history is laid out in the pass after the one that settles its parent: a history is
+    left out of a pass when a parent of it, or of a parent, is found to hold fewer rows in it.
     """
+    bound = {
+        index
+        for index, planned in enumerate(related)
+        if planned.plan is not None
+        and (pick := history_pick_of(planned.plan)) is not None
+        and pick.parent_lifetime is not None
+    }
     found: Dict[int, int] = {}
-    for index, planned in enumerate(related):
-        plan = planned.plan
-        pick = None if plan is None else history_pick_of(plan)
-        if plan is not None and pick is not None and pick.parent_lifetime is not None:
-            held = chain_of(plan, root).rows
-            if held != plan.rows:
-                found[index] = held
+    left_out: Set[int] = set()  # the histories that are not laid out in this pass
+    visited: Set[int] = set()
+
+    def visit(index: int) -> None:
+        if index in visited:
+            return
+        visited.add(index)
+        above = _parent_emit_of(resolved_emits, index)
+        if above is not None and above in bound:
+            visit(above)
+            if above in found or above in left_out:
+                left_out.add(index)
+                return
+        plan = _plan_of(related[index])
+        held = chain_of(plan, root).rows
+        if held != plan.rows:
+            found[index] = held
+
+    for index in sorted(bound):
+        visit(index)
     return found
+
+
+def _parent_emit_of(resolved_emits: Sequence[ResolvedEmit], index: int) -> Optional[int]:
+    """The position of the emit the ``parent`` relationship of the history at *index* reaches."""
+    emit = resolved_emits[index]
+    entries = history_entries_of(emit.extension, emit.expose_id)
+    if not entries or entries[0].parent is None or emit.keys is None:
+        return None
+    reached = next(
+        (
+            relationship.target
+            for relationship in emit.keys.relationships
+            if relationship.name == entries[0].parent.relationship
+        ),
+        None,
+    )
+    for position, other in enumerate(resolved_emits):
+        if reached is not None and nfc(other.expose_id) == nfc(reached):
+            return position
+    return None
 
 
 def _plan_of(planned: _PlannedEmit) -> GeneratorPlan:

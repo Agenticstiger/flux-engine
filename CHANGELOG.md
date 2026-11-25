@@ -51,7 +51,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   versions than it was given is capped at that room, and the versions it loses go one at a time to the entities
   with the most room left (the allotment `one_to_one` uses, with a cap for each entity), so the emit keeps its
   declared rows; only when no entity has room left does the history hold fewer rows, and plan, apply and verify
-  count the rows it has. A parent that leaves no room for even one version is `FLX-3403` at plan, naming
+  count the rows it has; a history under such a history is laid out after it. A parent that leaves no room for even one version is `FLX-3403` at plan, naming
   `history(<emit>).parent.lifetime`, how many entities it is and their parents' lifetimes. A history without the
   key keeps every byte. A parent that declares a history of its own must carry the lifetime columns (a column its
   history sets, or a rule sets, can differ between versions): `FLX-3403` at plan names the emit and the columns.

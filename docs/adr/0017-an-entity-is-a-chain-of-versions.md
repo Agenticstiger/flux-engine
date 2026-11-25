@@ -528,7 +528,9 @@ entity in place of one (`counts.pass_excess` is both), so the emit keeps its dec
 rooms' order. An entity that takes more than the shape's largest count does so only for the versions another entity
 lost. Only when no entity has room left do the rows shrink: the history then has fewer rows than declared, the
 shortfall. `plan`, `apply` and `verify` count the rows it has: the emit is planned again at them, and a layout is
-always worked out from the declared rows. Since the count never exceeds the room, the fit (section 4, point 4) never
+always worked out from the declared rows. A history whose parent is itself such a history reads the
+rows its parent holds, so it is laid out after the parent is planned at them, in as many passes as there are emits
+and one; a count still moving after that is `FLX-3403`. Since the count never exceeds the room, the fit (section 4, point 4) never
 fails and the chain ends by `limit`.
 
 **3. The ending.** An entity whose parent's last day `pe` is at or before `until` is *forced* to end:
