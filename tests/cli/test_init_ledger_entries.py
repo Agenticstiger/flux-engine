@@ -962,7 +962,7 @@ def _cites(pointer: str, definition: Optional[str] = "levelHistogram/1") -> Para
 def test_the_engine_keeps_an_emptied_calendar_entry_in_place() -> None:
     profile = _emptied_profile()
     assert profile["tables"]["member"]["calendar"][0] == {"column": "renewed_on"}
-    read, _ = load_profile_text(json.dumps(profile), allow_empty_calendar_entries=True)
+    read, _ = load_profile_text(json.dumps(profile), allow_emptied_entries=True)
     calendar = read.tables["member"].calendar
     assert [entry.column for entry in calendar] == ["renewed_on", "last_visit"]
     assert (calendar[0].month, calendar[0].day_of_week, calendar[0].hour_of_week) == (
@@ -988,8 +988,8 @@ def test_a_citation_into_a_calendar_entry_that_holds_nothing_is_refused_by_the_c
     assert raised.value.code.code == "FLX-5036"
     message = str(raised.value)
     assert "/tables/member/calendar/0" in message
-    assert "holds none of its three histograms" in message
-    assert "at least one of month, dayOfWeek and hourOfWeek" in message
+    assert "holds none of its statistics" in message
+    assert "month, dayOfWeek, hourOfWeek" in message
 
 
 def test_a_citation_into_a_calendar_entry_that_holds_a_histogram_is_still_read_as_before() -> None:

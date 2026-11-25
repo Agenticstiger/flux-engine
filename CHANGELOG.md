@@ -131,10 +131,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Changed
 
-- The engine reads a profile whose calendar entry holds none of its three histograms, as when a release step drops
-  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place: `init`
-  and `plan` accept it, and a citation into such an entry is still refused (`FLX-5036`). flux-stats' `parse_profile`
-  and `load_profile_text` take `allow_empty_calendar_entries`, off by default, which the engine sets.
+- The engine reads a profile in which an entry holds only the keys that name it, as when a release step drops
+  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place:
+  `init` and `plan` accept it, and a citation at or under such an entry is still refused (`FLX-5036`). The entries
+  are a calendar entry, a date pair, a relationship's date pair, an exposure, a history and a tracked column of
+  one. An entry that holds some of its statistics, but not all, is refused as before. flux-stats' `parse_profile`
+  and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets.
 - A profile's `privacy` block may state more loss than its noisy statistics and cliques spend, including when none
   remain; a stated loss is an upper bound, and a total below what they spend is still refused (`FLX-5036`). The grade
   comes from the statistics alone, so a block that nothing spends earns no grade, and `init` notes the stated and
@@ -177,6 +179,18 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Fixed
 
+- An instant before the year 1000 is written with a four-digit year on every platform, as RFC 3339 writes it
+  (`0001-01-01T00:00:00.000Z`). Below 1000 the engine used the platform's `strftime`, and glibc writes the year 1 as
+  `1`: on Linux a TIMESTAMP cell then held no RFC 3339 instant, and `fluxsim init` failed on a run window that starts
+  before 1000, such as one a profile's year grid gives when its first bin, from 0001-01-01, holds records. macOS
+  wrote four digits already, so its output does not change.
+- `verify` no longer refuses (`FLX-5037`) a histogram of a DATE column whose profile grid ends at the calendar's last
+  instant, 253402300799999 milliseconds. A profile spells the last edge of a year grid there and a declaration spells
+  it as the day 9999-12-31; they are one edge. An edge that is not a whole day still matches no declared edge.
+- `verify` no longer refuses (`FLX-5005`, "the two sides group into different sets") a property grouped by a column
+  because a noisy profile lists a level whose noisy counts project to no record and the generated rows hold none of
+  it. A level the profile holds no record of is left out on both sides, as a suppressed group is, and the other groups
+  are compared. A level the profile holds records of that the rows lack is still refused.
 - A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
   the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
   plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
