@@ -190,7 +190,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `init` no longer turns a table's date pair into a lifetime or a `within` entry on a column the table's history sets
   (its validity start, its validity end or its activation column). With `--history FILE` it refused with `FLX-6203`
   ("has more than one source"), and a history the profile carries could be dropped, its statistics listed unused. The
-  pair is now listed unused, since the table's history sets the column, and the history is written.
+  pair is now listed unused, since the table's history sets the column, and the history is written. The same holds
+  for a column a history's `events` or `periods` entry sets (an event's date, op, type, image or carried columns, a
+  period's column, overrides or carried columns), and for a relationship whose foreign key such an entry sets, which
+  `plan` refused with `FLX-3403`: the pair is listed unused, naming the entry.
 - `init` no longer gives a parent a start-only lifetime from a relationship date pair that it lists unused: one whose
   child date a key or a rule of the contract sets, or whose `within` entry it refuses (the child's date ends the
   child's own lifetime, say). Dropping the listed pair now leaves the bundle as it is.
