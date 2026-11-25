@@ -510,6 +510,12 @@ class _Declarer:
             return f"the contract declares no DATE or TIMESTAMP column {missing[0]!r} for it"
         return None
 
+    def _set_already(self, expose: str, column: str) -> Optional[str]:
+        """Why a date of an expose is set by a key or a rule of the contract, or ``None``."""
+        if column in self.exposes[expose].blocked:
+            return f"a key or a rule of the contract already sets {column!r}"
+        return None
+
     def lifetimes_of_tables(self) -> None:
         tables = self.profile.get("tables")
         for expose, table in (tables.items() if isinstance(tables, Mapping) else ()):
@@ -999,6 +1005,8 @@ class _Declarer:
                 continue
             if self._usable(parent_table, pair.first) or self._usable(child_table, pair.second):
                 continue
+            if self._set_already(child_table, pair.second) is not None:
+                continue
             rows = order.same + order.after
             if parent_table not in best or rows > best[parent_table][0]:
                 best[parent_table] = (rows, pair.first)
@@ -1208,7 +1216,8 @@ class _Declarer:
         if parent_life is None or parent_life["start"] != pair.first:
             self.reject(
                 pair,
-                f"{pair.first!r} does not start a lifetime the bundle declares for "
+                self._set_already(child_table, pair.second)
+                or f"{pair.first!r} does not start a lifetime the bundle declares for "
                 f"{parent_table!r}",
             )
             return None
@@ -1256,8 +1265,8 @@ class _Declarer:
         reason = self._usable(child_table, column)
         if reason is None:
             reason = self.declined_within.get((child_table, column))
-        if reason is None and column in self.exposes[child_table].blocked:
-            reason = f"a key or a rule of the contract already sets {column!r}"
+        if reason is None:
+            reason = self._set_already(child_table, column)
         if reason is None and child_life is not None and child_life.get("end") == column:
             reason = f"{column!r} is the end of the lifetime of {child_table!r}"
         return reason
