@@ -43,12 +43,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   estimate states when the NULL cell stands clear of the noise. Otherwise the release cannot tell the count from none,
   and no nulls are drawn, as for a null count withheld as small, with an assumption that names the interval the release
   allows; the column can still be one another is drawn given, a clique column or a tracked one. A column a clique draws
-  holds no null, so a released share of one is set aside, named in the ledger, and the cliques are drawn.
+  holds no null, so a released share of one is set aside, named in the ledger with the share, and the cliques are drawn;
+  `--strict` refuses it as an unused statistic.
 - `fluxsim calibrate --fit` reads a noisy query rate (profile format 1-5-0) through its point estimate. A rate whose
   unit's records, the sum of its two cells, are at most twice the noise floor over every cell of its statistic is left
-  out, with a note in the fit's output (`noiseNotes` in `--json`), and a
-  profile whose rates are all inside it gives `FLX-3707` naming them. Each query's squared gaps weigh the inverse of its
-  rate's variance, scaled so the least noisy weighs 1, as an exact rate does.
+  out, with a note in the fit's output (`noiseNotes` in `--json`), and a profile whose rates are all inside it gives
+  `FLX-3707` naming them. Each query's squared gaps weigh the inverse of its rate's variance, scaled so the least noisy
+  weighs 1, as an exact rate does.
 - The profile-request reader and writer read and write format 1-3-0 (`history` on a table, `nullCount/2` on a column).
   `init` asks for them, in the request it writes beside a bundle, only when the profile it was given is a private
   release, and every other request keeps its format and bytes.

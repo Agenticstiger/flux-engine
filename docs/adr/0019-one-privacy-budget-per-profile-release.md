@@ -244,8 +244,12 @@ for a table that a unit follows into (ADR 0037).
    Otherwise the release cannot tell the count from none, and no null is drawn, as for a null count withheld as
    small, with an assumption that names the interval the release allows, 0 to the NULL cell's estimate plus the
    floor over the rows: a column that declares a share is never the column another is drawn given, a clique
-   column or a tracked one. A column a clique draws holds no null, so a released share of one is set aside and
-   named, and the cliques are drawn. `fluxsim calibrate --fit` leaves out a noisy rate
+   column or a tracked one. A clique column holds no null, so the request init writes names as `cliqueColumns`
+   only the columns the contract requires, and a profiler releases a column the contract leaves optional over its
+   known values, outside the cliques. A release that still puts a column with a clear NULL cell in a clique that
+   init draws has that share set aside, named in the ledger with the share, and the cliques are drawn; `--strict`
+   refuses it, naming the column's statistic and the share, as a known loss. `fluxsim calibrate --fit` leaves out
+   a noisy rate
    whose unit's records, the sum of its two cells, are at most twice the floor over every cell of its statistic
    (a sum that noise alone made passes that only when one of its two cells passes the floor), with a note
    (`FLX-3707` naming them when none is left), and weighs

@@ -252,4 +252,46 @@ def test_a_clique_column_sets_a_released_null_share_aside_and_keeps_its_clique(
     held = entries["/tables/subscriber/columns/channel/statistics/0"]
     assert held["state"] != "used"
     assert "a clique column holds no null" in json.dumps(held)
+    assert _share_text(Fraction(1000, 14000)) in held["note"]
     _plans(tmp_path)
+
+
+def _strict(tmp_path: Path, profile: Dict[str, Any], allow: Iterable[str] = ()) -> Any:
+    tmp_path.mkdir()
+    (tmp_path / "c.fluid.yaml").write_text(NULLABLE_CHANNEL, encoding="utf-8")
+    (tmp_path / "p.json").write_text(json.dumps(profile), encoding="utf-8")
+    return run_init(
+        str(tmp_path / "bundle"),
+        contract=str(tmp_path / "c.fluid.yaml"),
+        profile=str(tmp_path / "p.json"),
+        strict=True,
+        allow=tuple(allow),
+    )
+
+
+#: What the strict run of the cliques' release refuses besides a null count: its own gaps.
+_CLIQUE_GAPS = (
+    "/extensions/com.agentics.flux~11/emits/subscriber/rows",
+    "/extensions/com.agentics.flux~11/emits/subscriber/fidelity/columns/subscriber_id",
+    "/spec/timeBounds",
+)
+
+
+def test_strict_refuses_a_released_null_share_a_clique_sets_aside_naming_it(
+    tmp_path: Path,
+) -> None:
+    pointer = "/tables/subscriber/columns/channel/statistics/0"
+    refused = _strict(tmp_path / "a", _clique_release("13000", "1000"), _CLIQUE_GAPS)
+    assert refused.exit_code != 0
+    (line,) = [text for text in refused.stderr.splitlines() if pointer in text]
+    assert line.lstrip().startswith(f"unused {pointer} (nullCount/2)")
+    assert "a clique column holds no null" in line
+    assert _share_text(Fraction(1000, 14000)) in line
+    accepted = _strict(tmp_path / "b", _clique_release("13000", "1000"), _CLIQUE_GAPS + (pointer,))
+    assert accepted.exit_code == 0, accepted.stderr
+    # Inside the noise no share is drawn, so none is set aside: the assumption is a gap instead.
+    inside = _strict(tmp_path / "c", _clique_release("14000", "3"), _CLIQUE_GAPS)
+    assert f"unused {pointer}" not in inside.stderr
+    assert "gap /extensions/com.agentics.flux~11/emits/subscriber/fidelity/columns/channel: " in (
+        inside.stderr
+    )

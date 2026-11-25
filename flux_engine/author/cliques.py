@@ -93,7 +93,7 @@ _NO_BINNED_PARENT = (
 #: Why a column a clique draws sets aside the share of NULL rows a ``nullCount/2`` states.
 _CLIQUE_HOLDS_NO_NULL = (
     "a clique draws this column, and a clique column holds no null (FLX-3402), so the share of "
-    "rows that hold a null that this count states is not drawn"
+    "its rows that hold a null, {share}, that this count states is not drawn"
 )
 
 
@@ -158,7 +158,8 @@ def _set_aside_released_nulls(plan: ColumnPlan) -> None:
     A private release states its cliques and a column's noisy count of known and NULL rows apart
     (profile format 1-5-0), and the request init writes asks for both. The clique decides how the
     column is drawn, and a clique column holds no null, so the share is set aside, the count is
-    named as passed over, and the cliques are drawn.
+    named as passed over with the share, and the cliques are drawn: ``--strict`` refuses the
+    bundle for it, as for any statistic it does not use.
     """
     cited = [
         label.basis.statistic[0]
@@ -169,9 +170,10 @@ def _set_aside_released_nulls(plan: ColumnPlan) -> None:
     ]
     if not cited:
         return
-    plan.declaration.pop("nullFraction", None)
+    share = plan.declaration.pop("nullFraction", None)
     plan.labels = [label for label in plan.labels if label.tokens != ("nullFraction",)]
-    plan.passed.extend((tokens, _CLIQUE_HOLDS_NO_NULL) for tokens in cited)
+    reason = _CLIQUE_HOLDS_NO_NULL.format(share=share)
+    plan.passed.extend((tokens, reason) for tokens in cited)
 
 
 def _without_binned(
