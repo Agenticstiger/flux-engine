@@ -56,7 +56,7 @@ from ._fleet import (
     rows,
     run_bundle,
 )
-from .test_declared_range_replay import _recorded_digest
+from .test_declared_range_replay import recorded_digest
 
 pytestmark = pytest.mark.integration
 
@@ -218,7 +218,7 @@ def test_the_floored_run_is_the_same_bytes_at_any_job_count(tmp_path: Path) -> N
         assert one.emit_path(expose_id).read_bytes() == four.emit_path(expose_id).read_bytes()
     assert len(rows(one, CATALOGUE)) == len(KEYS)
     # A plan that floored replays floored: the check and the floor are worked out again.
-    digest = _recorded_digest(tmp_path / "one", one.run_id)
+    digest = recorded_digest(tmp_path / "one", one.run_id)
     again = replay(
         target, run_id=one.run_id, assert_digest=digest, state_dir=tmp_path / "one", jobs=4
     )
@@ -283,7 +283,7 @@ def test_a_plan_recorded_without_the_marker_replays_as_it_was_made(
     assert KEY not in load_recorded_plan(layout)
     assert len(rows(layout, CATALOGUE)) == 7
     recorded = layout.emit_path(HISTORY).read_bytes()
-    digest = _recorded_digest(state, layout.run_id)
+    digest = recorded_digest(state, layout.run_id)
     for jobs in (1, 4):
         replayed = replay(
             target, run_id=layout.run_id, assert_digest=digest, state_dir=state, jobs=jobs

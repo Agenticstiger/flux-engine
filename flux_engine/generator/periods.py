@@ -48,7 +48,13 @@ from flux_engine.generator import rows as _rows
 from flux_engine.generator.counts import CountClass, classes_of, digest_key, slot_values
 from flux_engine.generator.history import HistoryPlan
 from flux_engine.generator.paths import KIND_PATH_SHAPE, kind_path
-from flux_engine.generator.rows import GeneratorPlan, cells_before_rules, generate_row_slice
+from flux_engine.generator.rows import (
+    GeneratorPlan,
+    cells_before_rules,
+    generate_row_slice,
+    held_levels,
+    own_plan_of,
+)
 from flux_engine.generator.versionview import DAY_MS, VersionView, unit_value, view_of
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
 from flux_engine.seam.projections import PeriodKind, PeriodsEntry
@@ -496,11 +502,24 @@ def periods_rows(
     entry = projection.entry
     if start == stop:
         return ()
-    held, versions, kinds = _row_plan(layout, start, stop)
-    # The emit's own cells, before its rules: they run over the row once the period, the
-    # version's columns and the kind's overrides are set (projections.projection_rows).
-    own = cells_before_rules(replace(plan, projection=None), start, stop, root=root)
+    periods, versions, kinds = _row_plan(layout, start, stop)
     names = [column.column.name for column in plan.columns]
+    low, history_rows, named = _history_cells(projection, names, entry, versions, root)
+    # The emit's own cells, before its rules: they run over the row once the period, the
+    # version's columns and the kind's overrides are set (projections.projection_rows). A column
+    # drawn given a column of the version reads the version's level (ADR 0027, the amendment of
+    # 2026-11-25).
+    own_plan = own_plan_of(plan)
+    held = held_levels(
+        own_plan,
+        {
+            names[index]: [history_rows[version - low][source] for version in versions]
+            for index, source in named
+            if names[index] in projection.held
+        },
+        projection.fallback,
+    )
+    own = cells_before_rules(own_plan, start, stop, root=root, held=held)
     position = names.index(entry.column)
     kind = plan.column_plan(entry.column).column.logical_type.kind
     assert kind is LogicalKind.DATE
@@ -512,9 +531,8 @@ def periods_rows(
                 for name, text in declared.overrides
             }
         )
-    low, history_rows, named = _history_cells(projection, names, entry, versions, root)
     found = []
-    for row, period, which, version in zip(own, held, kinds, versions, strict=True):
+    for row, period, which, version in zip(own, periods, kinds, versions, strict=True):
         cells = list(row)
         for index, source in named:
             cells[index] = history_rows[version - low][source]

@@ -131,6 +131,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `--sink`, for an external audience. They default to `None` (`delivered` and `committed` to empty), no digest covers
   them, and the existing sinks ignore them. `privacy_grade_of` takes the `receipt.json` document its caller read
   (`receipt=`), so the streams delivered from a run directory are the ones its checks covered.
+- The page [Where FLUX fits](docs/explanation/compared.md) says what FLUX is good at, where it is not, and how it
+  compares with 24 other synthetic and test data tools, with the roadmap for many-core speed, a living clone and
+  learned generators. The README gains a short Roadmap section that links to it.
 
 ### Changed
 
@@ -203,8 +206,22 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   it. A level the profile holds no record of is left out on both sides, as a suppressed group is, and the other groups
   are compared. A level the profile holds records of that the rows lack is still refused.
 - A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
-  the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
-  plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
+  the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. A
+  column drawn `given` a column of the version is now drawn after the projection, given the level the version
+  holds, so `tier` given `model` follows the `model` each row carries; a plan with such a column says
+  `projectedGivens: "afterProjection"` (plan.json states only that key; the generator document the plan's digest
+  covers names the held columns as `heldGivens`), and a recorded plan without the key replays the draw it was made
+  with. Where the column of the version holds a value no level of the emit's names (a `nullFraction`, a rule, a
+  relationship or the history's `end` sets it, or the history draws other levels), the column drawn `given` it is
+  drawn from the marginal the declarations imply: its parent's level weights (the emit's, else the history's) taken
+  through its table, summed exactly and normalised, with no new declaration and nothing fitted. Where the parent
+  declares no level weights it is drawn from its own declared `support`, equal weights, which must name the levels its
+  table names (and `maxCardinality` with it). The plan prints one note for each such column saying which, and
+  `fallbackGivens` and `fallbackMarginals` in the generator document name the parents and the shares, so the digest
+  covers them. The plan refuses, `FLX-3403` naming both columns and the entry, what that cannot serve: a column drawn
+  `given` the `op`, `at`, `date`, `type` or period column, a kind's override or an image, one with `allocation: exact`,
+  and one drawn `given` a column of the version the history may fill with such a value when neither level weights for
+  the parent nor a support naming its table's levels serve (ADR 0027, the amendments of 2026-11-24 and 2026-11-25).
 - The run's window now covers the whole range of every date column, the date range the contract declares, and the bins
   the column is drawn from (those that carry weight), so `init` no longer cuts a column at a window that other columns
   imply. A column's bins are cut only at a window you pass with `--window`. A contract range that ends in the year
