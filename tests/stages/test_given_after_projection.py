@@ -69,6 +69,7 @@ def given_bundle(
     support: bool = False,
     bare: bool = False,
     size: Tuple[int, int] = (200, 60),
+    tiers: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> Path:
     """A fleet bundle whose *projection* draws ``tier`` given *parent* (and ``band`` given ``tier``).
 
@@ -78,7 +79,7 @@ def given_bundle(
     declares the distribution it is drawn from where ``model`` holds no level a table row names.
     With *bare*, ``model`` declares no level weights (a support of its levels), in the emit and in
     the history unless *history* replaces it.
-    *size* is the history's versions and entities.
+    *size* is the history's versions and entities. *tiers* replaces the table ``tier`` is drawn by.
     """
     target = _fleet.bundle(tmp_path, versions=size[0], entities=size[1])
     contract = yaml.safe_load((target / _fleet.CONTRACT).read_text("utf-8"))
@@ -100,7 +101,7 @@ def given_bundle(
     if bare:
         declared["model"] = _bare_model()
     declared.setdefault("model", {"levels": dict(LEVELS)})
-    declared["tier"] = {"given": parent, "levelWeightsGiven": TIERS}
+    declared["tier"] = {"given": parent, "levelWeightsGiven": tiers or TIERS}
     if support:
         declared["tier"].update({"support": {"values": list(SUPPORT)}, "maxCardinality": 2})
     if chain:
@@ -602,6 +603,34 @@ def test_a_plan_says_which_distribution_a_fallback_column_is_drawn_from(
         notes = [note for note in pipeline.advice_notes(result) if f"{projection}.tier" in note]
         assert notes == [said + tail]
         assert result.emit(projection).plan.projection.fallback == ("model",)  # type: ignore[union-attr]
+
+
+#: A table of counts, not of shares: the rows are read as shares, each over its own total.
+COUNT_TIERS = {
+    "sedan": {"a": "3", "b": "1"},
+    "van": {"a": "1", "b": "1"},
+    "truck": {"a": "1", "b": "9"},
+}
+
+
+@pytest.mark.parametrize("projection", PROJECTIONS)
+def test_a_given_table_of_counts_is_read_as_shares_in_the_implied_marginal(
+    tmp_path: Path, projection: str
+) -> None:
+    # 0.5 * 3/4 + 0.3 * 1/2 + 0.2 * 1/10 = 109/200 of the unnamed rows are ``a``.
+    target = given_bundle(tmp_path, projection, size=(3000, 300), tiers=COUNT_TIERS)
+    _edited(target, _history_rule)
+    plan = pipeline.execute(target, kernel=KERNEL_V2).emit(projection).plan
+    assert plan.as_document()["projection"]["fallbackMarginals"] == {
+        "tier": {"a": "109/200", "b": "91/200"}
+    }
+    rows = _fallback_run(target, tmp_path, projection)
+    unnamed = [row for row in rows if row["model"] not in LEVELS]
+    assert len(unnamed) >= 500
+    expected = 109 / 200
+    drawn = sum(row["tier"] == "a" for row in unnamed)
+    z = (drawn - len(unnamed) * expected) / math.sqrt(len(unnamed) * expected * (1 - expected))
+    assert abs(z) < Z_LIMIT, (drawn, len(unnamed), z)
 
 
 def test_a_fallback_column_changes_the_generator_digest(tmp_path: Path) -> None:
