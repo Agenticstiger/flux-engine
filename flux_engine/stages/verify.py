@@ -2122,14 +2122,35 @@ def packed_emit(
     return PackedEmit(header=header, rows=tuple(tuple(row) for row in rows))
 
 
+def _range_lines(range_problems: Sequence[str]) -> List[str]:
+    """A line only for a column with rows outside the range its contract declares.
+
+    A run with none prints what it printed before the contract's ranges were read.
+    """
+    return [f"  ranges: {problem}" for problem in range_problems]
+
+
+def _shortfall_lines(
+    shortfalls: Optional[Mapping[str, Mapping[str, int]]],
+) -> List[str]:
+    """A line only for a history that holds fewer rows than it declares (ADR 0017).
+
+    A run with none prints what it printed before the plan recorded the shortfall.
+    """
+    return [
+        f"  shortfall {expose_id}: {found['rows']} rows written of {found['declaredRows']} "
+        f"declared ({found['shortfall']} short)"
+        for expose_id, found in (shortfalls or {}).items()
+    ]
+
+
 def _leg_lines(
     golden: Mapping[str, Any],
-    *,
     artifact_mismatches: Sequence[str],
     row_problems: Sequence[str],
     vector_failures: int,
     fidelity_outcomes: Mapping[str, Any],
-    range_problems: Sequence[str] = (),
+    extra_lines: Sequence[str] = (),
 ) -> List[str]:
     """One human line per leg, under the headline.
 
@@ -2165,9 +2186,7 @@ def _leg_lines(
         if not row_problems
         else f"  rows: {len(row_problems)} problem(s) -- {row_problems[0]}"
     )
-    # A line only for a column with rows outside the range its contract declares: a run with none
-    # prints what it printed before the contract's ranges were read.
-    lines.extend(f"  ranges: {problem}" for problem in range_problems)
+    lines.extend(extra_lines)
     lines.append(f"  rfc-04 vectors: {vector_failures} failure(s)")
     for expose_id, outcome in sorted(fidelity_outcomes.items()):
         status = outcome.get("status", "unknown")
@@ -2923,6 +2942,28 @@ def _update_golden_baseline(loaded: _Loaded, legs: _Legs, *, reason: Optional[st
     )
 
 
+def _history_shortfalls(plan_document: Mapping[str, Any]) -> Dict[str, Dict[str, int]]:
+    """Each emit the plan records as holding fewer rows than it declares: the declared rows, the written ones and the gap.
+
+    Read from ``plan.json``, whose emit entries carry ``declaredRows`` and ``shortfall`` only for a
+    history with a shortfall above zero (:func:`flux_engine.stages.plan._shortfall_entry`).
+    """
+    return {
+        expose_id: {
+            "declaredRows": entry["declaredRows"],
+            "rows": entry["generator"]["rows"],
+            "shortfall": entry["shortfall"],
+        }
+        for expose_id, entry in (plan_document.get("emits") or {}).items()
+        if isinstance(entry, Mapping) and entry.get("shortfall", 0) > 0
+    }
+
+
+def _shortfall_artifact(shortfalls: Mapping[str, Mapping[str, int]]) -> Dict[str, Any]:
+    """``historyShortfalls`` for a run with one, so the JSON envelope says what the human lines say."""
+    return {"historyShortfalls": {k: dict(v) for k, v in shortfalls.items()}} if shortfalls else {}
+
+
 def _range_artifact(range_problems: Sequence[str]) -> Dict[str, Any]:
     """The ``rangeConformance`` artifact key: present only when rows lie outside a declared range."""
     if not range_problems:
@@ -2953,6 +2994,7 @@ def _verdict(
     receipt, run_digest = loaded.receipt, loaded.run_digest
     artifact_mismatches, artifacts_leg = legs.artifact_mismatches, legs.artifacts_leg
     row_problems, range_problems = legs.row_problems, legs.range_problems
+    shortfalls = _history_shortfalls(loaded.recorded_plan)
     vector_failures, vector_messages = legs.vector_failures, legs.vector_messages
     fidelity_outcomes, against = legs.fidelity_outcomes, legs.against
     scorecard_extra = against.artifact()
@@ -3074,6 +3116,7 @@ def _verdict(
             "artifactComponents": artifacts_leg,
             "rowConformance": {"ok": not row_problems, "problems": row_problems},
             **_range_artifact(range_problems),
+            **_shortfall_artifact(shortfalls),
             "rfc04": {"failures": vector_failures, "messages": vector_messages},
             "fidelity": fidelity_outcomes,
             **scorecard_extra,
@@ -3093,7 +3136,7 @@ def _verdict(
                     row_problems=row_problems,
                     vector_failures=vector_failures,
                     fidelity_outcomes=fidelity_outcomes,
-                    range_problems=range_problems,
+                    extra_lines=[*_range_lines(range_problems), *_shortfall_lines(shortfalls)],
                 ),
                 *([f"  {render_register_line(register.summary)}"] if register is not None else []),
                 *against.lines(),

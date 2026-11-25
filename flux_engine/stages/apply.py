@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, TypeGuard, Union
 
 from flux_engine.api.lineage import LineageEvent, LineageEventType
 from flux_engine.api.stages import StageResult
@@ -119,6 +119,7 @@ __all__ = [
     "plan_date_ranges",
     "plan_end_share",
     "plan_kernel",
+    "require_plan_shortfalls",
     "require_run_digest_binds_plan",
     "write_run",
 ]
@@ -188,6 +189,7 @@ def load_recorded_plan(layout: RunLayout) -> Dict[str, Any]:
     plan_kernel(document)
     plan_end_share(document)
     plan_date_ranges(document)
+    require_plan_shortfalls(document)
     return document
 
 
@@ -267,6 +269,55 @@ def _marker_named(plan_document: Mapping[str, Any], key: str, known: str, withou
             f"plan without the key {without}); plan again with this engine",
         )
     return True
+
+
+def _is_count(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def require_plan_shortfalls(plan_document: Mapping[str, Any]) -> None:
+    """Refuse (``FLX-2102``) a recorded plan whose emit states a shortfall that does not hold together.
+
+    ``plan`` writes ``declaredRows`` and ``shortfall`` on an emit only when a history holds fewer
+    rows than it declares (:func:`flux_engine.stages.plan._shortfall_entry`), so an entry has both
+    or neither; both are counts, the shortfall is above zero, and the declared rows less the rows
+    the emit's generator writes are the shortfall. ``verify`` prints them as read, so a plan whose
+    digest was recomputed after an edit is refused here, before anything reads them.
+    """
+    emits = plan_document.get("emits")
+    if not isinstance(emits, Mapping):
+        return
+    for expose_id, entry in emits.items():
+        if not isinstance(entry, Mapping) or not ({"declaredRows", "shortfall"} & set(entry)):
+            continue
+        why = _shortfall_fault(entry)
+        if why is not None:
+            raise FluxError(
+                FLX_2102,
+                f"the recorded plan's emit {_short_repr(expose_id)} states declaredRows "
+                f"{_short_repr(entry.get('declaredRows'))} and shortfall "
+                f"{_short_repr(entry.get('shortfall'))}, which do not hold together: {why}; the "
+                "plan was edited or written by an incompatible version, so plan again with this "
+                "engine",
+            )
+
+
+def _shortfall_fault(entry: Mapping[str, Any]) -> Optional[str]:
+    """Why an emit entry's ``declaredRows`` and ``shortfall`` do not hold together, or ``None``."""
+    if "declaredRows" not in entry or "shortfall" not in entry:
+        return "it states one of declaredRows and shortfall without the other"
+    declared, short = entry["declaredRows"], entry["shortfall"]
+    if not _is_count(declared) or not _is_count(short):
+        return "declaredRows and shortfall must both be whole numbers"
+    if short <= 0:
+        return "a shortfall must be above zero"
+    generator = entry.get("generator")
+    written = generator.get("rows") if isinstance(generator, Mapping) else None
+    if not _is_count(written):
+        return "its generator does not state the rows it writes"
+    if declared - written != short:
+        return f"declaredRows less the generator's rows {_short_repr(written)} is not the shortfall"
+    return None
 
 
 def require_run_digest_binds_plan(

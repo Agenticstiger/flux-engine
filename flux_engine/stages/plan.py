@@ -72,7 +72,7 @@ from flux_engine.evidence.register import (
     render_register,
     render_register_line,
 )
-from flux_engine.generator.relations import ForeignKey
+from flux_engine.generator.relations import ForeignKey, history_pick_of
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.generators import environment as _environment
 from flux_engine.lineage.emitter import dataset_for_expose
@@ -202,6 +202,23 @@ def _derived_rows_entry(
         "rows": plan.rows,
         "rowsFrom": {"of": projection.of, "projection": projection.kind},
     }
+
+
+def _shortfall_entry(
+    outcome: Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"],
+) -> Dict[str, Any]:
+    """``declaredRows`` and ``shortfall`` of a history that holds fewer rows than it declares (ADR 0017).
+
+    A history that keeps to its parent's lifetime holds fewer rows than the contract declares when
+    no entity has room left for a version; the emit's ``generator.rows`` is what it holds. The two
+    keys say what was declared and how many rows are missing, and only an emit with a shortfall
+    above zero has them, so every other plan keeps its bytes and its planDigest. The digest covers
+    them, and ``verify`` reports them from the plan.
+    """
+    pick = None if outcome.plan is None else history_pick_of(outcome.plan)
+    if pick is None or pick.declared_rows is None or pick.declared_rows <= pick.rows:
+        return {}
+    return {"declaredRows": pick.declared_rows, "shortfall": pick.declared_rows - pick.rows}
 
 
 def column_provenance_text(result: "_pipeline.PipelineResult") -> str:
@@ -473,6 +490,9 @@ def _plan_emits(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
             "declaresFidelity": outcome.resolved.fidelity is not None,
             "generator": _fidelity_summary(outcome),
             **_derived_rows_entry(outcome),
+            # A history that holds fewer rows than it declares says what it declared and by how
+            # many it fell short; any other emit has no key, so its plan keeps its bytes.
+            **_shortfall_entry(outcome),
             # An emit that declares a copula records its shrinkage and its factor's digest (ADR
             # 0035 decision 5); any other emit has no key, so its plan keeps its bytes.
             **_copula_entry(outcome),

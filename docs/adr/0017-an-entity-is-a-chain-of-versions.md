@@ -528,7 +528,12 @@ entity in place of one (`counts.pass_excess` is both), so the emit keeps its dec
 rooms' order. An entity that takes more than the shape's largest count does so only for the versions another entity
 lost. Only when no entity has room left do the rows shrink: the history then has fewer rows than declared, the
 shortfall. `plan`, `apply` and `verify` count the rows it has: the emit is planned again at them, and a layout is
-always worked out from the declared rows. A history whose parent is itself such a history reads the
+always worked out from the declared rows. The shortfall is no refusal and is recorded: the emit's entry in `plan.json`
+holds `declaredRows`, the rows the contract declares after `--scale`, and `shortfall`, the rows missing from `generator.rows`,
+and only an emit whose shortfall is above zero has the two keys, so every other plan keeps its bytes and its run id.
+`planDigest` covers them. `fluxsim verify` reads them back and prints one line for that emit, `shortfall <emit>: <rows>
+rows written of <declaredRows> declared (<shortfall> short)` (`historyShortfalls` in `--json`), and no line for a run
+with none. A history whose parent is itself such a history reads the
 rows its parent holds, so it is laid out after the parent is planned at them, in as many passes as there are emits
 and one; a count still moving after that is `FLX-3403`. Since the count never exceeds the room, the fit (section 4, point 4) never
 fails and the chain ends by `limit`.
@@ -563,7 +568,7 @@ bin by bin but read on demand, in whole numbers, by bisection over the bins that
 full table gives for every draw. Plan time therefore grows linearly with the entities and logarithmically with the
 bins, and does not grow with the number of distinct parent lifetimes beyond that. The cap-and-pass costs one sort per
 round, and a round that finds no entity under its cap ends it. `plan` also notes how many entities were capped, how many versions moved and any
-shortfall (the room, point 2).
+shortfall (the room, point 2); the shortfall is also in the plan document, as point 2 says.
 
 **4. The `activation` column** holds the first start, as section 5 says, so it keeps to the same bound.
 
