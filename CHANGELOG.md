@@ -111,8 +111,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   pins no profile and declares no plugin, or from a run whose receipt and streams are not its plan's, is refused before
   anything is contacted (`FLX-3512`); declarations Kafka cannot take are `FLX-3513`, a topic that will not take the stream,
   or a stream this run's `sink-receipts.json` records as having reached the topic, whole or in part, whose progress the
-  brokers have since dropped, is `FLX-3514`, and a registry subject that cannot carry it is `FLX-3515`. A receipt
-  records the run's grade, or with `--profile` the weaker of the run's and the profile's. No digest moves. See
+  brokers have since dropped while the topic stayed, is `FLX-3514`, and a registry subject that cannot carry it is
+  `FLX-3515`. A receipt records the run's grade, or with `--profile` the weaker of the run's and the profile's, and
+  says which (`gradeSource`). No digest moves. See
   [Stream a simulation into Kafka](docs/how-to/stream-a-simulation-into-kafka.md) and [ADR
   0038](docs/adr/0038-a-kafka-sink-keys-records-by-entity-delivers-each-stream-exactly-once-and-sends-only-what-its-audience-may-see.md).
 - A sink is now told more about a stream: `StreamContext.privacy_grade`, the grade the run is held to,
@@ -122,6 +123,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   and `StreamContext.delivered` and `StreamContext.committed`, the receipts the run's `sink-receipts.json` already holds
   for the stream, whole and so far. A sink that commits what it sends keeps a receipt of the stream so far there after
   each commit, through `StreamContext.record_committed` (`write_progress`), until the stream's receipt replaces it.
+  Both writers of the file hold an advisory lock on the run directory across each read and write.
   `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill them all; `apply --run-id` takes `--profile` with
   `--sink`, for an external audience. They default to `None` (`delivered` and `committed` to empty), no digest covers
   them, and the existing sinks ignore them. `privacy_grade_of` takes the `receipt.json` document its caller read

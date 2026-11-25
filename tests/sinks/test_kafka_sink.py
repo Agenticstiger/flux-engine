@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import subprocess
 import sys
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -212,6 +214,7 @@ REFUSED: Sequence[Any] = [
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "0"}, "transaction-timeout"),
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "abc"}, "transaction-timeout"),
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "2147484"}, "2147483"),
+    (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "2147483.5"}, "2147483000 ms"),
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "0.999"}, "at least 1 second"),
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "0.5"}, "1000 ms"),
     (
@@ -1036,6 +1039,7 @@ def test_the_receipt_says_what_was_written_and_holds_no_credential(
     assert writer["shape"] == "debezium" and writer["value"] == "json" and writer["key"] == "string"
     assert writer["topic"] == "sim.device_change" and writer["partitions"] == 3
     assert writer["audience"] == "internal" and writer["privacyGrade"] == "P1"
+    assert writer["gradeSource"] == "plan"
     assert writer["partitioner"] == "murmur2_random" and writer["pace"] == "max"
     assert writer["compression"] == "lz4"
     assert writer["records"] == len(broker.read("sim.device_change")) and writer["skipped"] == 0
@@ -1910,6 +1914,7 @@ def test_a_forged_p0_plan_is_read_as_p1_for_an_internal_target(
     writers = [receipt["writer"] for receipt in result.artifacts["sinks"]["receipts"]]
     assert {writer["privacyGrade"] for writer in writers} == {"P1"}
     assert all("profileGrade" not in writer for writer in writers)
+    assert {writer["gradeSource"] for writer in writers} == {"plan"}
 
 
 def test_an_internal_receipt_records_the_profiles_grade_when_the_plans_is_better(
@@ -1921,6 +1926,7 @@ def test_an_internal_receipt_records_the_profiles_grade_when_the_plans_is_better
     writers = [receipt["writer"] for receipt in result.artifacts["sinks"]["receipts"]]
     assert {writer["profileGrade"] for writer in writers} == {"P1"}
     assert {writer["privacyGrade"] for writer in writers} == {"P1"}
+    assert {writer["gradeSource"] for writer in writers} == {"profile"}
 
 
 def _other_run(root: Path) -> RunLayout:
@@ -2009,6 +2015,7 @@ def test_an_external_target_takes_a_run_the_pinned_profile_grades_p3(
         assert receipt.writer["audience"] == "external"
         # The plan records P1 and the profile grades P3: the receipt records the weaker.
         assert receipt.writer["privacyGrade"] == "P1" and receipt.writer["profileGrade"] == "P3"
+        assert receipt.writer["gradeSource"] == "profile"
 
 
 def test_a_bundle_that_is_not_the_plans_has_no_grade(kept: Kept, tmp_path: Path) -> None:
@@ -2189,6 +2196,32 @@ def test_a_stream_delivered_is_refused_after_the_brokers_drop_its_progress(recor
     assert "topic-prefix" in text and "sink-receipts.json" in text
     _nothing_sent_since(broker, calls, sent)
     assert all(p.closed for p in broker.producers)
+
+
+def test_a_new_cluster_that_keeps_the_cluster_id_and_holds_no_topic_is_delivered(
+    recorded: Kept,
+) -> None:
+    _delivered_and_recorded(recorded, FakeBroker())
+    # A cluster made again from scratch under the same id, as a fixed CLUSTER_ID gives.
+    fresh = FakeBroker()
+    receipts = deliver(recorded, fresh)
+    assert len(receipts) == 6 and all(r.writer["records"] > 0 for r in receipts)
+    assert {r.writer["clusterId"] for r in receipts} == {"fake-cluster"}
+
+
+def test_a_topic_that_was_already_there_under_the_same_cluster_id_is_still_guarded(
+    recorded: Kept,
+) -> None:
+    _delivered_and_recorded(recorded, FakeBroker())
+    fresh = FakeBroker()
+    for topic in TOPICS:
+        fresh.add_topic(
+            topic, cleanup_policy="compact" if topic == "sim.device_current" else "delete"
+        )
+    with pytest.raises(FluxError) as caught:
+        deliver(recorded, fresh)
+    assert caught.value.code.code == "FLX-3514"
+    assert not [c for c in fresh.calls if c[0] in ("create", "begin", "commit")]
 
 
 def test_a_stream_is_still_skipped_while_the_brokers_hold_its_progress(recorded: Kept) -> None:
@@ -2514,6 +2547,63 @@ def test_a_part_the_run_cannot_record_stops_the_delivery_and_a_retry_resumes_aft
     receipts = _keeping(recorded, broker, options, clock=_TickingClock(0.25))
     change = next(r for r in receipts if r.table == "sim.device_change")
     assert change.writer["skipped"] == committed
+
+
+_WRITER = textwrap.dedent("""
+    import sys, time
+    from pathlib import Path
+    from flux_engine.sinks.receipts import SinkReceipt
+    from flux_engine.stages import deliver as stage
+    from flux_engine.stages.layout import RunLayout
+
+    state, run_id, target, go = sys.argv[1:5]
+    real = stage._recorded_document
+
+    def slow(layout):
+        found = real(layout)
+        time.sleep(0.4)  # the time another writer has to read the same document
+        return found
+
+    stage._recorded_document = slow
+    while not Path(go).exists():
+        time.sleep(0.005)
+    stage.write_progress(
+        RunLayout.for_state_dir(state, run_id),
+        SinkReceipt(
+            sink="kafka",
+            run_id=run_id,
+            expose_id="site",
+            output_digest="sha256:" + "1" * 64,
+            rows=3,
+            target=target,
+            table="sim.site",
+            writer={"committed": 1},
+        ),
+    )
+""")
+
+
+def test_two_processes_writing_one_runs_receipts_keep_each_others_entries(
+    recorded: Kept, tmp_path: Path
+) -> None:
+    from flux_engine.core.target_label import target_label
+
+    layout = recorded.layout
+    state = layout.run_dir.parents[1]
+    go = tmp_path / "go"
+    targets = ("127.0.0.1:9092", "127.0.0.2:9092")
+    writers = [
+        subprocess.Popen(
+            [sys.executable, "-I", "-c", _WRITER, str(state), layout.run_id, target, str(go)]
+        )
+        for target in targets
+    ]
+    go.touch()
+    assert [writer.wait(timeout=120) for writer in writers] == [0, 0]
+    document = json.loads(layout.sink_receipts_path.read_text(encoding="utf-8"))
+    assert {entry["target"] for entry in document["progress"]} == {
+        target_label("kafka", target) for target in targets
+    }
 
 
 def test_apply_keeps_how_far_a_stream_was_committed_and_refuses_it_after_the_drop(

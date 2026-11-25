@@ -55,7 +55,9 @@ An internal audience is held to that grade. An external audience is held to a gr
 profile itself, as `ship` works it out, so `--profile` must be given to `run` and to `apply --run-id`, and must be the
 profile the Simulation pins (`FLX-3109`, `FLX-3110`). The receipt's writer records it as `profileGrade`, and its
 `privacyGrade` is then the weaker of the run's grade and that one, so a receipt never records a better grade than
-the profile gives, for either audience. A plan alone never unlocks an external target.
+the profile gives, for either audience. Its `gradeSource` says where the grade comes from: `profile` then, and
+`plan` when no profile graded the run, so a grade read from the run's own files alone is not taken for one checked
+against the profile. A plan alone never unlocks an external target.
 
 The gate fails closed: a run that pins no profile and declares no plugin has no grade and goes to no Kafka target; a
 plan, run digest or receipt that does not check, a bundle that is not the plan's, or a stream handed no grade at all
@@ -242,14 +244,19 @@ stream so far under `progress`, counting the records committed; the sink hands t
 (`StreamContext.record_committed`) once the brokers have committed, and the stream's own receipt replaces every such
 entry of that stream on that cluster when it lands. The engine hands each stream what the record
 holds for it (`StreamContext.delivered` and `StreamContext.committed`; only the sink that needs them reads them). When
-the brokers hold no progress for a stream and an entry of the same sink and topic counts records sent, skipped or
-committed there, on the same cluster, the stream is refused with `FLX-3514` before anything is sent. An entry is about
+the stream's topic is already there, the brokers hold no progress for the stream and an entry of the same sink and
+topic counts records sent, skipped or committed there, on the same cluster, the stream is refused with `FLX-3514`
+before anything is sent. A topic the delivery has to create holds nothing to duplicate, so a cluster made again under
+the id it had (a fixed `CLUSTER_ID`, a recreated compose cluster) is delivered to. An entry is about
 the same cluster when it names the cluster id the brokers name (`clusterId`), however the target was written; when the
 entry or the brokers name none, when it names the same target. The message says the brokers no longer hold the
 progress, that sending again would duplicate what reached the topic, and the two ways to do that on purpose: another
 `topic-prefix`, or removing that stream's entry from `sink-receipts.json`. The bounds that remain: without the local
 record (another machine, or a removed run directory) a re-send after the retention duplicates, and a part is recorded
 just after the brokers commit it, so a delivery stopped between the two leaves that last part out of the record.
+Every write of the record (a receipt, a part) holds an advisory lock across its read, change and write: `fcntl.flock`
+on the run directory, or `msvcrt.locking` on a lock file beside it where there is no `fcntl`. Two deliveries of one
+run, to two targets say, therefore keep each other's entries.
 
 The progress also records a fingerprint (16 hex digits of a digest) of the settings that decide a record's bytes
 beside its row: the key columns and the key format, the event-time column and its default, and the value form
@@ -285,8 +292,9 @@ Every record carries headers that label it synthetic and name its stream: `flux.
 its partition count, the shape (`debezium` or `row`), the value format and subject, the key format, the pace, the
 compression, the transactions, the records sent and skipped as already delivered, the audience, the grade and, when
 the command was given the pinned profile, the grade worked out from it (`profileGrade`); the grade is then the weaker
-of the run's and that one. A stream that stopped after committing part of itself has, under `progress` instead, a
-receipt of the stream so far that counts the records `committed`. Neither holds a credential.
+of the run's and that one, and `gradeSource` says which it was held to (`profile` or `plan`). A stream that stopped
+after committing part of itself has, under `progress` instead, a receipt of the stream so far that counts the records
+`committed`. Neither holds a credential.
 
 ### 12. Credentials and options
 

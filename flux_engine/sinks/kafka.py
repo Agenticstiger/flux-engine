@@ -53,8 +53,9 @@ The brokers drop that progress after ``offsets.retention.minutes`` (7 days by de
 keeps its own record in ``sink-receipts.json``: each stream's receipt, and after every commit a
 receipt of the stream so far (handed over in ``StreamContext.delivered`` and
 ``StreamContext.committed``). A stream that record says reached this topic of this cluster, whole
-or in part, is then refused (``FLX-3514``) rather than sent again. An entry is about this cluster
-when it names the cluster id the brokers name, or, when either names none, the same target.
+or in part, is then refused (``FLX-3514``) rather than sent again, unless its topic is not there
+yet: a topic the delivery creates holds nothing to send twice. An entry is about this cluster when
+it names the cluster id the brokers name, or, when either names none, the same target.
 Without that record (another machine, a removed run directory) a re-send after the retention
 duplicates.
 
@@ -166,7 +167,7 @@ _AGE_EVERY = 1024
 #: The share of ``transaction-timeout`` an unpaced stream's single transaction may use up.
 _TRANSACTION_SHARE = 0.9
 
-#: The longest ``transaction-timeout`` the producer takes: an int32 of milliseconds.
+#: The longest ``transaction-timeout``, in whole seconds, the producer's int32 of milliseconds holds.
 MAX_TRANSACTION_TIMEOUT = 2147483
 #: The shortest ``transaction-timeout`` the producer takes, in seconds: 1000 milliseconds.
 MIN_TRANSACTION_TIMEOUT = 1
@@ -495,7 +496,7 @@ class KafkaSettings:
             raise FluxError(
                 FLX_3504,
                 f"the option transaction-timeout is at most {MAX_TRANSACTION_TIMEOUT} seconds "
-                "(2147483647 ms, the producer's limit)",
+                f"({MAX_TRANSACTION_TIMEOUT * 1000} ms, within the producer's limit of 2147483647 ms)",
             )
         interval = commit_every if commit_every is not None else (1.0 if pace.paced else None)
         if interval is not None and interval > transaction_timeout / 3:
@@ -798,7 +799,7 @@ class KafkaSink:
             engine_version=_engine_version(),
         )
         broker = self._owner.broker
-        self._info = self._topic(broker)
+        self._info, created = self._topic(broker)
         self._limits = self._limits_of(self._info)
         self._serialize = self._serializer()
         self._fingerprint = self._settings_fingerprint()
@@ -832,7 +833,10 @@ class KafkaSink:
             self._done, self._complete = found.records, found.complete
             if found.complete:
                 self._skipped = found.records
-        else:
+        elif not created:
+            # A topic this delivery created holds nothing to send twice, so only a topic that was
+            # already there is held to the run's record: a cluster made again under the id it had
+            # (a fixed CLUSTER_ID, a recreated compose cluster) is delivered to.
             self._refuse_lost_progress(broker)
         if self._complete:
             producer, self._producer = self._producer, None
@@ -967,9 +971,11 @@ class KafkaSink:
 
     # -- topic, schema -----------------------------------------------------------
 
-    def _topic(self, broker: Broker) -> TopicInfo:
+    def _topic(self, broker: Broker) -> Tuple[TopicInfo, bool]:
+        """The stream's topic, checked, and whether this delivery created it."""
         shape, settings = self.shape, self._settings
         info = broker.describe(shape.topic)
+        created = info is None
         if info is None:
             info = broker.create(
                 shape.topic,
@@ -991,7 +997,7 @@ class KafkaSink:
                 f"(cleanup.policy={info.configs.get('cleanup.policy', 'delete')}); set "
                 "cleanup.policy=compact, or choose another topic with --sink-opt topic.EXPOSE=NAME",
             )
-        return info
+        return info, created
 
     def _serializer(self) -> ValueSerializer:
         settings = self._settings
@@ -1224,6 +1230,13 @@ class KafkaSink:
                 continue
         return weakest(grades)
 
+    def _grade_source(self) -> str:
+        """Where the receipt's grade comes from: ``profile`` when it was held to the grade worked out
+        from the pinned profile the command was given, ``plan`` when it is the run's own record
+        alone, which whoever runs the engine can rewrite."""
+        held = self.context.privacy_grade
+        return "profile" if held is not None and held.profile_grade is not None else "plan"
+
     def _make_receipt(self) -> SinkReceipt:
         shape, settings = self.shape, self._settings
         writer: Dict[str, Any] = {
@@ -1239,6 +1252,7 @@ class KafkaSink:
             "skipped": self._skipped,
             "audience": settings.audience,
             "privacyGrade": self._receipt_grade().value,
+            "gradeSource": self._grade_source(),
             "partitioner": "murmur2_random",
         }
         cluster = self._owner.broker.cluster_id()

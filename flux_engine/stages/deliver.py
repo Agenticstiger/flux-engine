@@ -32,6 +32,9 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -692,21 +695,64 @@ def _same_place(entry: Mapping[str, Any], receipt: Mapping[str, Any]) -> bool:
     return _key(dict(entry)) == _key(dict(receipt))
 
 
+@contextmanager
+def _receipts_held(layout: RunLayout) -> Iterator[None]:
+    """Hold the run's lock on ``sink-receipts.json`` while it is read, changed and written again.
+
+    Two deliveries of one run, to two targets say, each rewrite the whole file, after every commit
+    for a sink that commits in parts; without the lock one can drop the other's entries, and with
+    them the record that keeps a stream from being sent twice. The lock is advisory, taken by every
+    writer of the file and no reader (the file is replaced whole): ``fcntl.flock`` on the run
+    directory, so the directory holds no file of its own for it, or, where there is no ``fcntl``,
+    ``msvcrt.locking`` on the first byte of a lock file beside it. These are the calls py-filelock
+    (MIT) makes on each platform.
+    """
+    if sys.platform == "win32":  # pragma: no cover - the CI matrix runs Linux and macOS
+        import msvcrt
+
+        lock = layout.run_dir.parent / f".{layout.run_id}.sink-receipts.lock"
+        descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        finally:
+            os.close(descriptor)
+    else:
+        import fcntl
+
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(layout.run_dir, flags)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
 def write_receipts(layout: RunLayout, receipts: Sequence[SinkReceipt]) -> Path:
     """Merge *receipts* into ``<run>/sink-receipts.json``; returns its path.
 
     A stream's receipt replaces every entry ``progress`` held for that stream in that place
-    (:func:`write_progress`, :func:`_same_place`).
+    (:func:`write_progress`, :func:`_same_place`). The file is read and written under the run's
+    lock (:func:`_receipts_held`).
     """
-    existing = _recorded_document(layout)
-    entries, progress = _by_key(existing, "receipts"), _by_key(existing, "progress")
-    for receipt in receipts:
-        document = receipt.as_document()
-        entries[_key(document)] = document
-        progress = {
-            key: entry for key, entry in progress.items() if not _same_place(entry, document)
-        }
-    return _write_document(layout, entries, progress)
+    with _receipts_held(layout):
+        existing = _recorded_document(layout)
+        entries, progress = _by_key(existing, "receipts"), _by_key(existing, "progress")
+        for receipt in receipts:
+            document = receipt.as_document()
+            entries[_key(document)] = document
+            progress = {
+                key: entry for key, entry in progress.items() if not _same_place(entry, document)
+            }
+        return _write_document(layout, entries, progress)
 
 
 def write_progress(layout: RunLayout, receipt: SinkReceipt) -> Path:
@@ -717,13 +763,15 @@ def write_progress(layout: RunLayout, receipt: SinkReceipt) -> Path:
     stream's own receipt replaces it in turn (:func:`write_receipts`). ``FLX-3505`` when the file
     cannot be written: the delivery stops there, and the part just committed is not in the record,
     so the message says to deliver again while the destination still holds the stream's progress.
+    The file is read and written under the run's lock (:func:`_receipts_held`).
     """
-    existing = _recorded_document(layout)
-    entries, progress = _by_key(existing, "receipts"), _by_key(existing, "progress")
     document = receipt.as_document()
-    progress[_key(document)] = document
     try:
-        return _write_document(layout, entries, progress)
+        with _receipts_held(layout):
+            existing = _recorded_document(layout)
+            entries, progress = _by_key(existing, "receipts"), _by_key(existing, "progress")
+            progress[_key(document)] = document
+            return _write_document(layout, entries, progress)
     except OSError as error:
         raise FluxError(
             FLX_3505,
