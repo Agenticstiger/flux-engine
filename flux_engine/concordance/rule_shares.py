@@ -63,6 +63,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    Union,
 )
 
 from flux_engine.concordance.history_checks import (
@@ -89,6 +90,7 @@ from flux_engine.expr2.rows import Rows
 from flux_engine.expr2.rules import aggregate_tree, check_flux_side_rule
 from flux_engine.expr2.scope import Model
 from flux_engine.expr2.types import ColumnType, Kind
+from flux_engine.generator.associations import DEGREE_TOLERANCE, degree_overlap
 from flux_engine.generator.rules import (
     FORM_DEPENDENCY,
     FORM_DERIVE,
@@ -97,6 +99,7 @@ from flux_engine.generator.rules import (
     sentinel_value,
 )
 from flux_engine.seam.asof import asof_entries_of
+from flux_engine.seam.associations import AssociationEntry, association_entries_of
 from flux_engine.seam.bridges import BridgeEntry, bridge_entries_of
 from flux_engine.seam.counts import CountsEntry
 from flux_engine.seam.facts import fact_name
@@ -125,7 +128,9 @@ ORIGIN_SHARED = "shared"
 
 #: The names of the lines a link's configuration earns (the origin is the bundle's): the line of a
 #: conditional link is ``link:<relationship>``, that of a sentinel ``sentinel:<relationship>.<column>``
-#: and that of a bridge ``bridge:<a>,<b>``.
+#: and that of a bridge ``bridge:<a>,<b>``. An association's lines are ``association:<a>,<b>.pairs``
+#: and ``association:<a>,<b>.rows:<side>``.
+ASSOCIATION_RULE_PREFIX = "association:"
 BRIDGE_RULE_PREFIX = "bridge:"
 COUNTS_RULE_PREFIX = "counts:"
 #: The line an as-of link earns, ``asOf:<relationship>.<date>``: how many rows read a version.
@@ -402,7 +407,9 @@ def _condition_share(entry: LinkEntry, rows: Rows, expose_id: str, model: Model)
     return Holds(satisfied, covered)
 
 
-def _bridge_share(entry: BridgeEntry, rows: Rows, expose_id: str, model: Model) -> Holds:
+def _bridge_share(
+    entry: Union[BridgeEntry, AssociationEntry], rows: Rows, expose_id: str, model: Model
+) -> Holds:
     """A bridge: of every row, the share whose pair of parent keys occurs once (ADR 0022 section 8)."""
     scope = model.exposes[expose_id]
     columns = [name for side in entry.relationships for name in scope.links[side].from_columns]
@@ -577,11 +584,25 @@ def tables_needed(
             needed.add(link.target)  # an as-of link is measured on the rows it reads
     needed |= _projection_reads(extension, model, expose_id)
     needed |= _parent_lifetime_reads(extension, model, expose_id)
+    needed |= _association_reads(extension, model, expose_id)
     for counts_entry in counts:
         link = model.exposes[nfc(expose_id)].links.get(counts_entry.relationship)
         if link is not None and _scored_counts(counts_entry):
             needed.add(link.target)  # the minimum and the condition are scored on the parents' rows
     return needed
+
+
+def _association_reads(
+    extension: Optional[Mapping[str, Any]], model: Model, expose_id: str
+) -> Set[str]:
+    """The parents of an association's two sides: each side's rows per parent are counted on them."""
+    links = model.exposes[nfc(expose_id)].links
+    return {
+        links[name].target
+        for association in association_entries_of(extension, expose_id)
+        for name in association.relationships
+        if name in links
+    }
 
 
 def _parent_lifetime_reads(
@@ -740,6 +761,7 @@ def rule_shares(
     _score_copies(scoring)
     _score_links(scoring)
     _score_bridges(scoring)
+    _score_associations(scoring)
     _score_counts(scoring)
     _score_history(scoring)
     _score_asof(scoring)
@@ -935,6 +957,44 @@ def _score_bridges(scoring: _Scoring) -> None:
             holds,
             True,
         )
+
+
+def _score_associations(scoring: _Scoring) -> None:
+    """Score the expose's association (ADR 0039): no pair repeats, and each side's rows per parent.
+
+    ``.pairs``, when the association is ``distinct``, is the share of rows whose pair occurs once,
+    as a bridge's line is. ``.rows:<side>``, for a side whose ``counts`` entry declares a shape,
+    holds ``1 - d`` with ``d`` the total variation distance between the side's parents counted into
+    the shape's classes and its weights (:func:`flux_engine.generator.associations.degree_overlap`),
+    met when ``d`` is at most the entry's tolerance (``0.10`` when it declares none).
+    """
+    for entry in association_entries_of(scoring.source.extension, scoring.target):
+        prefix = f"{ASSOCIATION_RULE_PREFIX}{','.join(entry.relationships)}"
+        if entry.distinct:
+            holds = _bridge_share(entry, scoring.rows, scoring.target, scoring.model)
+            scoring.add(f"{prefix}.pairs", FORM_CHECK, ORIGIN_BUNDLE, holds, True)
+        counts = {item.relationship: item for item in scoring.source.counts}
+        for name in entry.relationships:
+            held = counts.get(name)
+            if held is None or held.children is None:
+                continue
+            degrees = _children_per_parent(held, scoring.rows, scoring.target, scoring.model)
+            overlap = degree_overlap([children for children, _ in degrees], held.children)
+            if overlap is None:
+                continue
+            allowed = Fraction(Decimal(held.tolerance)) if held.tolerance else DEGREE_TOLERANCE
+            scoring.found.append(
+                RuleShare(
+                    expose_id=scoring.target,
+                    rule_id=nfc(f"{prefix}.rows:{name}"),
+                    form=FORM_CHECK,
+                    origin=ORIGIN_BUNDLE,
+                    holds=Holds(*overlap),
+                    enforced=scoring.source.generated,
+                    target=Fraction(0),
+                    allowed=allowed,
+                )
+            )
 
 
 def _scored_counts(entry: CountsEntry) -> bool:

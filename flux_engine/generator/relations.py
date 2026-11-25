@@ -109,6 +109,7 @@ from flux_engine.core.rng import DrawStream, bernoulli, bounded_uint, uniform53
 from flux_engine.core.seedtree import SeedTreeRoot, digest_bytes, path_label
 from flux_engine.expr2.errors import FLX_6106, FLX_6208, FLX_6210, Expr2Error
 from flux_engine.generator import rows as _rows
+from flux_engine.generator.associations import PairedSide, paired_sides, pairing_for
 from flux_engine.generator.counts import (
     CountedLayout,
     CountedPick,
@@ -159,6 +160,11 @@ from flux_engine.generator.rules import (
     parent_condition,
 )
 from flux_engine.generator.statistics import DATE_EPOCH_ORDINAL
+from flux_engine.seam.associations import (
+    ASSOCIATIONS_KEY,
+    AssociationEntry,
+    association_entries_of,
+)
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
 from flux_engine.seam.counts import CountsEntry
 from flux_engine.seam.keys import ContractKeys, ExposeKeys, Relationship
@@ -204,41 +210,41 @@ FLX_3403 = register(
     "row, or sits on a relationship the layout cannot place (a key, a bridge side, an implied or "
     "weighted relationship); a required sum, min or max over the children with no ifNone where a "
     "parent can have no children, which would leave it NULL; a link condition on an inner "
-    "relationship, on a key, or on a relationship another one implies; a bridge whose side is "
-    "named twice, is one_to_one, carries a nullFraction or has more rows than the pairs of its "
-    "parents; and a weight on a relationship that cannot pick parents by one, on a non-numeric "
-    "parent column, or with negative or all-zero published values. A reference expose is refused "
-    "when a published cell does not fit its column (a decimal with too many digits, a number "
-    "outside its type's range). The message names the expose, the column or relationship, and the "
-    "change to make (for a parentWhen with no eligible parent, the condition too). A history is "
-    "refused when its emit has no validity window (one natural entity with a start and an end of "
-    "one DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no room "
-    "inside timeBounds for an entity's versions, when a tracked column is not categorical, names "
-    "an undeclared level or has no transition row for a level a chain can reach, when a tracked "
-    "foreign key has a level that is no key its parent holds in the plan, or when its parent is "
-    "not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
-    "declares no lifetimes entry, or declares a history of its own that sets a lifetime column (a "
-    "validity, activation, tracked, end or rule-set column), which then differs between a parent's "
-    "versions; when the parent's lifetime leaves no room for one version of an entity (the message "
-    "names `history(<emit>).parent.lifetime`, the entity count and the parents' lifetimes); or "
-    "when the rows of the histories that keep to their parent's lifetime still move after one pass "
-    "for every emit (a history under a history that holds fewer rows than it declares is laid out "
-    "after it). An asOf entry is refused when its relationship does not reach the natural entity "
-    "of an emit that declares a history, its date is not a DATE or TIMESTAMP column, or a rule "
-    "sets a column the contract requires from a row read as of a date where its entity has no "
-    "version, which would write NULL. A snapshots, events or periods entry is refused when its of "
-    "names no emit with a history (or the emit itself), when a column it names is missing from the "
-    "history's emit or differs in type, when the projected emit has rows of its own, when an "
-    "events type has no reason text, when a before or after column maps a column the contract "
-    "requires and the kept ops leave NULL, when a when reads a column the version does not hold, "
-    "or reads the history's end column where the history does not carry it (a rule, link or the "
-    "history sets it), or when a periods entry has no grain, no timeBounds, or more periods than a "
-    "run holds, a `from` before `timeBounds.start`'s day, a `from` or `through` not before "
-    "`timeBounds.end` or not a `YYYY-MM-DD` text, or a `through` before the `from`. A DATE or "
-    "TIMESTAMP column of a history's emit is refused when it declares no range or bins, or a range "
-    "or bins outside timeBounds, as is a relationship whose parent is a periodic emit. A copy "
-    "through a sharedColumns entry into another relationship's foreign key is refused when the "
-    "relationship it goes through reaches an emit that declares a history or is projected from "
+    "relationship, on a key, or on a relationship another one implies; a bridge or an association "
+    "whose side is named twice, is one_to_one, carries a nullFraction or has more rows than the "
+    "pairs of its parents; and a weight on a relationship that cannot pick parents by one, on a "
+    "non-numeric parent column, or with negative or all-zero published values. A reference expose "
+    "is refused when a published cell does not fit its column (a decimal with too many digits, a "
+    "number outside its type's range). The message names the expose, the column or relationship, "
+    "and the change to make (for a parentWhen with no eligible parent, the condition too). A "
+    "history is refused when its emit has no validity window (one natural entity with a start and "
+    "an end of one DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no "
+    "room inside timeBounds for an entity's versions, when a tracked column is not categorical, "
+    "names an undeclared level or has no transition row for a level a chain can reach, when a "
+    "tracked foreign key has a level that is no key its parent holds in the plan, or when its "
+    "parent is not a to-one relationship. A history's parent.lifetime is refused when the parent "
+    "emit declares no lifetimes entry, or declares a history of its own that sets a lifetime "
+    "column (a validity, activation, tracked, end or rule-set column), which then differs between "
+    "a parent's versions; when the parent's lifetime leaves no room for one version of an entity "
+    "(the message names `history(<emit>).parent.lifetime`, the entity count and the parents' "
+    "lifetimes); or when the rows of the histories that keep to their parent's lifetime still move "
+    "after one pass for every emit (a history under a history that holds fewer rows than it "
+    "declares is laid out after it). An asOf entry is refused when its relationship does not reach "
+    "the natural entity of an emit that declares a history, its date is not a DATE or TIMESTAMP "
+    "column, or a rule sets a column the contract requires from a row read as of a date where its "
+    "entity has no version, which would write NULL. A snapshots, events or periods entry is "
+    "refused when its of names no emit with a history (or the emit itself), when a column it names "
+    "is missing from the history's emit or differs in type, when the projected emit has rows of "
+    "its own, when an events type has no reason text, when a before or after column maps a column "
+    "the contract requires and the kept ops leave NULL, when a when reads a column the version "
+    "does not hold, or reads the history's end column where the history does not carry it (a rule, "
+    "link or the history sets it), or when a periods entry has no grain, no timeBounds, or more "
+    "periods than a run holds, a `from` before `timeBounds.start`'s day, a `from` or `through` not "
+    "before `timeBounds.end` or not a `YYYY-MM-DD` text, or a `through` before the `from`. A DATE "
+    "or TIMESTAMP column of a history's emit is refused when it declares no range or bins, or a "
+    "range or bins outside timeBounds, as is a relationship whose parent is a periodic emit. A "
+    "copy through a sharedColumns entry into another relationship's foreign key is refused when "
+    "the relationship it goes through reaches an emit that declares a history or is projected from "
     "one, whose rows hold a version's cells, not the pick the copy follows; the message names both "
     "relationships. An events or periods entry is also refused when a column of its emit is drawn "
     "given a column the entry sets, which the draw would read as the level it drew; the message "
@@ -1372,6 +1378,8 @@ class RelationReader:
         known = self._layouts.get(address)
         if known is not None:
             return known
+        if driver.counted.paired is not None:
+            return self._layouts.setdefault(address, self._paired(owner, driver.counted))
         root = self.root
         shape = driver.counted.shape()
         condition = driver.counted.parent_when
@@ -1431,6 +1439,13 @@ class RelationReader:
             _LAYOUTS[held] = found
         self._layouts[address] = found
         return found
+
+    def _paired(self, owner: _Owner, counted: CountedPick) -> CountedLayout:
+        """One side of an association's pairing (ADR 0039), worked out once per process."""
+        assert counted.paired is not None
+        address = (owner.sim_id, owner.expose_id, owner.seam_digest)
+        pairing = pairing_for(self.root, address, counted.child_rows, counted.paired)
+        return pairing.side(counted.paired.side)
 
     def _chain_of(self, owner: _Owner, pick: HistoryPick) -> HistoryPlan:
         """The version layout of *owner*'s history, worked out once per process (ADR 0017 section 3).
@@ -2460,6 +2475,8 @@ class _Shape:
     history: Optional[_HistoryShape] = None
     #: The copy that sets each relationship's pick, by relationship (ADR 0022 section 4).
     copied: Mapping[str, PickCopy] = field(default_factory=dict)
+    #: Each side of the emit's association, by relationship (ADR 0039).
+    paired: Mapping[str, PairedSide] = field(default_factory=dict)
 
     @property
     def columns(self) -> Tuple[str, ...]:
@@ -2534,11 +2551,15 @@ def relate_plans(
     statistics, has no ``timeBounds`` or no natural entity, a natural entity another key or a
     relationship also sets, a layout of no entity for its rows or of no parent for its entities,
     and an empty first-start interval. Kernel 0.1.0 refuses it (``FLX-3105``).
+
+    An ``associations`` entry of *namespace* pairs both relationships of its emit on the counted
+    layout (ADR 0039, :func:`_paired_shapes` says what it refuses).
     """
     declared = _declared_relationships(keys)
     bridges = bridges or {}
     weights = weights or {}
-    counts = counts or {}
+    associations = _associations_of(namespace or {})
+    counts = _with_association_sides(counts or {}, associations)
     hooked = _hooked(plans, keys, namespace or {})
     histories = histories or {}
     periodic = _periodic_emits(namespace or {})
@@ -2567,6 +2588,7 @@ def relate_plans(
         for expose_id in sorted(plans)
     }
     _refuse_copies_into_histories(shapes, histories, _projected_emits(namespace or {}))
+    shapes = _paired_shapes(shapes, keys, associations, (hooked, histories))
     related = _with_drivers(plans, _Resolver(shapes))
     _check_asof_reads(related, keys)
     return _attach_sums(_attach_reads(_link_givens(related, keys), keys))
@@ -2948,6 +2970,70 @@ def _split_history_parents(
             hooked.get(expose_id, {}).get(name),
         )
     return kept_counts, kept_hooks, parents
+
+
+def _associations_of(namespace: Mapping[str, Any]) -> Dict[str, AssociationEntry]:
+    """The association of each emit the namespace's ``associations`` key names, by exposeId."""
+    raw = namespace.get(ASSOCIATIONS_KEY)
+    found: Dict[str, AssociationEntry] = {}
+    for item in raw if isinstance(raw, (list, tuple)) else ():
+        if isinstance(item, Mapping) and isinstance(item.get("emit"), str):
+            for entry in association_entries_of({ASSOCIATIONS_KEY: [item]}, item["emit"]):
+                found[entry.emit] = entry
+    return found
+
+
+def _with_association_sides(
+    counts: Mapping[str, Mapping[str, CountsEntry]], associations: Mapping[str, AssociationEntry]
+) -> Dict[str, Mapping[str, CountsEntry]]:
+    """*counts* with an entry that declares nothing for each side of an association that has none.
+
+    Both sides of an association are on the counted layout (ADR 0039): a side with no ``counts``
+    entry spreads its rows as evenly as whole counts allow, and every check of an entry applies.
+    """
+    found: Dict[str, Mapping[str, CountsEntry]] = {k: dict(v) for k, v in counts.items()}
+    for expose_id, entry in associations.items():
+        held = dict(found.get(expose_id, {}))
+        for name in entry.relationships:
+            held.setdefault(name, CountsEntry(emit=expose_id, relationship=name))
+        found[expose_id] = held
+    return found
+
+
+def _paired_shapes(
+    shapes: Dict[str, _Shape],
+    keys: ContractKeys,
+    associations: Mapping[str, AssociationEntry],
+    held: Tuple[Mapping[str, Mapping[str, Any]], Mapping[str, HistoryBinding]],
+) -> Dict[str, _Shape]:
+    """*shapes* with each association's sides (ADR 0039).
+
+    Every refusal of a ``counts`` entry applies to each side; ``FLX-3403`` also refuses a side with
+    a ``parentWhen``, a ``given``, an expected-count hook or a ``one_to_one`` cardinality, and an
+    emit that declares a history.
+    """
+    if not associations:
+        return shapes
+    hooked, histories = held
+    found = dict(shapes)
+    for expose_id, entry in sorted(associations.items()):
+        shape = shapes[expose_id]  # _check_counted refused an emit with no plan
+        if expose_id in histories:
+            raise _refuse(
+                f"expose {expose_id!r} declares an association and a history; an association's "
+                "rows are pairs, not versions of an entity"
+            )
+        relationships = {item.name: item for item in keys.expose(expose_id).relationships}
+        parents = {
+            name: shapes[item.target].plan.rows
+            for name, item in relationships.items()
+            if item.target in shapes
+        }
+        sides = paired_sides(
+            entry, relationships, shape.counts, parents, frozenset(hooked.get(expose_id, {}))
+        )
+        found[expose_id] = replace(shape, paired=sides)
+    return found
 
 
 def _history_shape_of(
@@ -3464,6 +3550,13 @@ def _check_summed(
             FLX_6210,
             f"{where}, whose relationship is not on the counted layout; lay {child}.{relationship} "
             "out with a counts entry",
+        )
+    paired = None if driver.counted is None else driver.counted.paired
+    if paired is not None and paired.side == 1:
+        raise Expr2Error(
+            FLX_6210,
+            f"{where}, which is the second side of an association: its rows are paired through "
+            "its stubs and hold no run of children; summarise over the first side",
         )
     _check_summary_nulls(plans[parent], child, relationship, driver.counted)
 
@@ -5829,6 +5922,7 @@ class _Resolver:
             expected_count=None if bound is None else bound[1],
             hook=None if bound is None else bound[0],
             one_to_one=relationship.cardinality == "one_to_one",
+            paired=shape.paired.get(relationship.name),
             **_given_members(entry, given),
         )
 

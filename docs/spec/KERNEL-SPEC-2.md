@@ -326,7 +326,7 @@ is laid out by section 8.1:
 
 A conditional link (KERNEL-SPEC §8.2, the Simulation's `links` key) and a bridge table's pair layout (the `bridges` key,
 with `permute/2` and `flux-key/2` as above) are generated under `0.2.0` only; kernel `0.1.0` refuses either key with
-`FLX-3105`, naming the kernel.
+`FLX-3105`, naming the kernel. So is an association table (the `associations` key, section 8.7).
 
 ### 8.1 Children per parent: the counted layout
 
@@ -846,6 +846,48 @@ multiplication and one addition per term, looping over the terms, with no matrix
 could reorder a sum, and the same probes per row, so it equals the per-row path bit for bit, thresholds that tie
 or are infinite included. A row's values depend on its ordinal alone, so `--jobs 1` and `--jobs 4` give the same
 digests, the shards of `--shard I/N` concatenate to the whole run, and `--scale` changes only the number of rows.
+
+### 8.7 Association tables (ADR 0039)
+
+An emit that an `associations` entry names, `{emit, relationships: [a, b], distinct}`, puts both relationships on
+the counted layout and pairs them. All arithmetic is on exact integers; `E` is the emit's rows, `P_a` and `P_b` the
+two parents' rows.
+
+1. **Degrees.** `d_a` is section 8.1's layout of `E` child rows over `P_a` parents under the key of the `count` path of
+   `a` and the shape of `a`'s `counts` entry (none: every rank weighs 1), with its `minChildren`; `d_b` likewise. Both
+   sum to `E`.
+2. **Caps** (`distinct` only; `E > P_a * P_b` is `FLX-3403`). Each `d_a[p]` above `P_b` is cut to `P_b`; the excess
+   `X` goes, in rounds, to the parents under the cap: weights `w_p = d_a[p]` for a parent under it and `0` otherwise
+   (every parent under it weighs 1 when they all weigh 0), `floor(X * w_p / W)` each and the `X - sum` parents with the
+   largest remainders one more, a tie to the lower row, each gain cut to the parent's room, until none is left. Then
+   `d_b` against `P_a` the same way.
+3. **Gale-Ryser** (`distinct` only). With `b` the second side sorted in decreasing order, the gap is
+   `max(0, max_k (b_1 + ... + b_k - sum_p min(d_a[p], k)))` over `k = 1 .. P_b`. While the gap `g` is above 0, `g` moves
+   are made, each taking a row from the first parent of most rows of `d_b` (the lowest row among equals) to the first
+   parent of fewest, and the gap is taken again.
+4. **Pairs.** `o_a`, `o_b` are the offsets (the sum of the counts before each parent). Row `r`'s first-side parent is
+   the `p` with `o_a[p] <= r < o_a[p] + d_a[p]`, and its second-side parent the last `q` with `o_b[q] <= s`,
+   `s = permute/2(K, E, r)`, `K` the key of the path `("sim", sim_id, "gen", exposeId, "associate", a, b, "stubs")`:
+   `sha256("flux-seed/2" NUL root NUL key_label(path))`, as section 8.1 derives a count key.
+5. **Repair** (`distinct` only). A row is *repeated* when an earlier row holds its pair; the pairs held so at the start
+   are the *repeated pairs*. For each repeated row `r` in row order, for `t = 0 .. 63`, the partner is
+   `s = permute/2(K', E, (64 r + t) mod E)` with `K'` the key of the path ending `"switches"`; with `(a, b)` and
+   `(a', b')` the two rows' pairs, the switch is made when `s` is not a repeated row still waiting, `a != a'`,
+   `b != b'`, `(a', b')` is no repeated pair, and neither `(a, b')` nor `(a', b)` is held: the rows become `(a, b')` and
+   `(a', b)`, and `r` stops waiting. The rows still waiting are then placed: their second-side parents form a
+   multiset of stubs; their first-side parents, most waiting rows first (the lower row on a tie), each take, for their
+   rows in row order, the parents of the stubs left that they do not pair with, most stubs first (the lower row on a
+   tie). When a parent finds fewer such stubs than rows, every row's second-side parent is laid out again: first-side
+   parents in decreasing order of `d_a` (the lower row on a tie) each take the `d_a[p]` second-side parents with the
+   most stubs left (the lower row on a tie), held by its rows in ascending order of `permute/2(K, P_b, q)`.
+
+With `distinct: false` steps 2, 3 and 5 are skipped and a row's parents are a function of its index alone. The repair
+reads every row; each process that writes the emit works it out once, so `--jobs`, chunking and `--shard` keep the
+bytes. The `associate` path is a key only, with no draw.
+
+**Section 12.** The `associate` path is additive: the literal `associate` stands after `exposeId` where no other shape
+has it, only a bundle that declares `associations` reads it, nothing that exists moves, and
+`tests/vectors/kernel2-association-vectors.json` holds its keys and five layouts.
 
 ## 9. What stays as KERNEL-SPEC states it
 

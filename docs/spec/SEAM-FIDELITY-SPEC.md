@@ -430,7 +430,9 @@ statistic for, since `verify` would refuse it (`FLX-5037`).
 value, so it draws no column of its own and an empty `columns` is legal. A property that names a column still needs
 that column's declaration (`FLX-5034`). Such an emit's columns are exempt from the check that a drawn column declares a
 range, support, levels, rate or bins (`FLX-3402`), and from the related-tables check that a key column declares a draw
-(`FLX-3403`); every other emit keeps both.
+(`FLX-3403`); every other emit keeps both. An emit an `associations` entry names (ADR 0039) may declare an empty
+`columns` too: the pairing sets both its foreign keys, so a table of two foreign keys and no other column draws no column
+of its own.
 
 **A DATE column's bounds are days.** A `range` bound or a `bins` edge of a column whose declared type is DATE is
 spelled `YYYY-MM-DD`, or as a whole number of days since 1970-01-01 (the two spell the same bound: `2026-01-01`

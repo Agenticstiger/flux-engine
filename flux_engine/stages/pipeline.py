@@ -50,7 +50,12 @@ from typing import (
     Union,
 )
 
-from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity, names_a_snapshot
+from flux_engine.concordance.compiler import (
+    CompiledFidelity,
+    compile_fidelity,
+    may_declare_no_column,
+    names_a_snapshot,
+)
 from flux_engine.concordance.predicate import (
     DeclaredExpose,
     FidelityBlock,
@@ -1828,7 +1833,7 @@ def _parsed_fidelity(resolved: ResolvedEmit) -> FidelityBlock:
     return parse_fidelity_block(
         canonicalise(resolved.written_fidelity),
         expose=_declared_contract(resolved)[1],
-        allow_no_columns=names_a_snapshot(resolved.extension),
+        allow_no_columns=may_declare_no_column(resolved.extension),
     )
 
 
