@@ -664,3 +664,110 @@ def test_the_empty_ranges_are_ranges_to_declared_range_bounds_and_none_to_declar
         entry = {"validationRules": _range_rule(rule)}
         assert declared_range_bounds(entry) is not None
         assert declared_instants(entry) is None
+
+
+_MOMENT = int(datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp()) * 1000
+_DAY_BINS = {"bins": ["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"], "binWeights": ["1"]}
+
+
+def test_a_low_end_between_two_milliseconds_rounds_up_and_a_high_end_rounds_down() -> None:
+    entry = {
+        "validationRules": _range_rule(
+            ">= '2024-01-01T00:00:00.000500Z' and <= '2024-01-01T00:00:01.000900Z'"
+        )
+    }
+    assert declared_range_bounds(entry) == RangeBounds(_MOMENT + 1, _MOMENT + 1000, False, False)
+    # `init` keeps its reading: both ends floored.
+    assert declared_instants(entry) == (_MOMENT, _MOMENT + 1000)
+
+
+def test_a_strict_low_end_between_two_milliseconds_holds_from_the_next_millisecond() -> None:
+    entry = {"validationRules": _range_rule("> '2024-01-01T00:00:00.000500Z'")}
+    assert declared_range_bounds(entry) == RangeBounds(_MOMENT + 1, None, False, False)
+    whole = {"validationRules": _range_rule("> '2024-01-01T00:00:00.001Z'")}
+    assert declared_range_bounds(whole) == RangeBounds(_MOMENT + 1, None, True, False)
+
+
+def test_a_low_end_between_two_milliseconds_is_cut_and_verified_above_the_floored_instant() -> None:
+    plan = _plan(_DAY_BINS, ">= '2024-01-01T00:00:00.000500Z'", column_type="TIMESTAMP", rows=2000)
+    bins = plan.columns[0].statistics.bins
+    assert bins is not None and int(bins[0]) == _MOMENT + 1
+    assert min(row[0] for row in generate_rows(plan, root=_root(plan))) >= _MOMENT + 1
+    column = expose_from_schema(
+        [
+            {
+                "name": "shipped_on",
+                "type": "TIMESTAMP",
+                "validationRules": _range_rule(">= '2024-01-01T00:00:00.000500Z'"),
+            }
+        ]
+    )
+    [held] = declared_ranges_of({}, column)
+    floored, rounded = "2024-01-01T00:00:00.000Z", "2024-01-01T00:00:00.001Z"
+    assert range_problems("t", ["shipped_on"], [[floored], [rounded]], [held]) == [
+        f"t.shipped_on: 1 of 2 rows are outside the declared range ({held.text})"
+    ]
+
+
+def test_a_high_end_with_a_fraction_still_floors() -> None:
+    plan = _plan(_DAY_BINS, "<= '2024-01-01T00:00:01.000900Z'", column_type="TIMESTAMP", rows=2000)
+    bins = plan.columns[0].statistics.bins
+    assert bins is not None and int(bins[-1]) == _MOMENT + 1000
+
+
+def _ts_ms(text: str) -> int:
+    return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()) * 1000
+
+
+@pytest.mark.parametrize("operator", ["<", "<="])
+def test_a_high_end_between_two_milliseconds_is_the_millisecond_at_or_below_it(
+    operator: str,
+) -> None:
+    high = _ts_ms("2003-05-05T10:00:00Z")
+    entry = {
+        "name": "shipped_on",
+        "type": "TIMESTAMP",
+        "validationRules": _range_rule(f"{operator} '2003-05-05T10:00:00.0005Z'"),
+    }
+    assert declared_range_bounds(entry) == RangeBounds(None, high, False, False)
+    assert expose_from_schema([entry]).columns[0].declared_range == (None, high)
+
+
+def test_a_range_from_a_millisecond_to_the_fraction_above_it_holds_that_millisecond() -> None:
+    rule = ">= '2003-05-05T10:00:00Z' and < '2003-05-05T10:00:00.0005Z'"
+    instant = _ts_ms("2003-05-05T10:00:00Z")
+    declared = {"bins": ["2003-01-01T00:00:00Z", "2004-01-01T00:00:00Z"], "binWeights": ["1"]}
+    plan = _plan(declared, rule, column_type="TIMESTAMP")
+    assert plan.columns[0].column.declared_range == (instant, instant)
+    assert len({row[0] for row in generate_rows(plan, root=_root(plan))}) == 1
+
+
+def test_a_date_range_below_midnight_and_a_fraction_holds_that_day() -> None:
+    rule = ">= '2003-05-05' and < '2003-05-06T00:00:00.0005Z'"
+    assert set(_values(_plan(PAST, rule))) <= {date(2003, 5, 5), date(2003, 5, 6)}
+    assert date(2003, 5, 6) in set(_values(_plan(PAST, rule, rows=4000)))
+
+
+@pytest.mark.parametrize(
+    ("column_type", "rule", "spelled"),
+    [
+        ("TIMESTAMP", ">= '9999-12-31T23:59:59.9995Z'", "> 9999-12-31T23:59:59.999Z"),
+        ("TIMESTAMP", "> '9999-12-31T23:59:59.999Z'", "> 9999-12-31T23:59:59.999Z"),
+        ("DATE", "> '9999-12-31'", "> 9999-12-31"),
+        ("DATE", ">= '9999-12-31T00:00:00.0005Z'", ">= 9999-12-31T00:00:00.001Z"),
+    ],
+)
+@pytest.mark.parametrize("with_bins", [True, False])
+def test_a_low_end_past_the_last_instant_is_flx_3403_naming_the_column_and_the_end(
+    column_type: str, rule: str, spelled: str, with_bins: bool
+) -> None:
+    # A column cut by the range and one that declares no statistics.
+    suffix = "" if column_type == "DATE" else "T00:00:00Z"
+    declared = (
+        {"bins": ["9999-12-30" + suffix, "9999-12-31" + suffix], "binWeights": ["1"]}
+        if with_bins
+        else {}
+    )
+    held = re.escape(f"widget_stream.shipped_on: the contract's range ({spelled}) holds no value")
+    with pytest.raises(FluxError, match=f"FLX-3403.*{held}"):
+        _plan(declared, rule, column_type=column_type)

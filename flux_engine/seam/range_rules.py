@@ -78,11 +78,8 @@ def and_parts(text: str) -> List[str]:
     return parts
 
 
-def _instant(text: Any) -> Optional[Tuple[int, bool]]:
-    """``(milliseconds, has_fraction)`` of an instant, floored to the millisecond, or ``None``.
-
-    ``has_fraction`` says the instant lies between two whole milliseconds, so the floor is below it.
-    """
+def _moment(text: Any) -> Optional[datetime]:
+    """The UTC instant of an ISO date or RFC 3339 timestamp, or ``None`` for text that is neither."""
     if not isinstance(text, str):
         return None
     clean = text.strip()
@@ -91,16 +88,9 @@ def _instant(text: Any) -> Optional[Tuple[int, bool]]:
             moment = datetime.combine(date.fromisoformat(clean), datetime.min.time())
         else:
             moment = datetime.fromisoformat(clean.replace("Z", "+00:00").replace("z", "+00:00"))
-        if moment.tzinfo is None:
-            moment = moment.replace(tzinfo=timezone.utc)
-        elapsed = moment - _EPOCH
-        milliseconds = elapsed // timedelta(milliseconds=1)
-        fractional = elapsed % timedelta(milliseconds=1) != timedelta(0)
-    except (ValueError, OverflowError):
+    except ValueError:
         return None
-    if not _FIRST_MS <= milliseconds <= _LAST_MS:
-        return None
-    return milliseconds, fractional
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
 
 
 def instant_ms(text: Any) -> Optional[int]:
@@ -109,8 +99,22 @@ def instant_ms(text: Any) -> Optional[int]:
     A date is midnight UTC and a timestamp with no offset is UTC. Text that is neither, and an
     instant outside the years 1 to 9999 in UTC, is not read. A fraction of a millisecond is floored.
     """
-    found = _instant(text)
-    return None if found is None else found[0]
+    moment = _moment(text)
+    if moment is None:
+        return None
+    try:
+        milliseconds = (moment - _EPOCH) // timedelta(milliseconds=1)
+    except OverflowError:
+        return None
+    if not _FIRST_MS <= milliseconds <= _LAST_MS:
+        return None
+    return milliseconds
+
+
+def _between_milliseconds(text: Any) -> bool:
+    """Whether *text* names an instant between two whole milliseconds, which :func:`instant_ms` floors."""
+    moment = _moment(text)
+    return moment is not None and moment.microsecond % 1000 != 0
 
 
 class RangeBounds(NamedTuple):
@@ -141,42 +145,77 @@ def _tighter(
     return (milliseconds, strict) if (milliseconds > kept) == above else (kept, kept_strict)
 
 
-def _read_bounds(column: Any, *, round_low_up: bool) -> Optional[RangeBounds]:
-    """:func:`declared_range_bounds`, with the low end's sub-millisecond fraction rounded up or floored."""
-    rules = column.get("validationRules") if isinstance(column, Mapping) else None
-    low: Optional[Tuple[int, bool]] = None
-    high: Optional[Tuple[int, bool]] = None
-    for rule in rules if isinstance(rules, list) else ():
-        if not isinstance(rule, Mapping) or str(rule.get("type") or "").lower() != "range":
-            continue
-        constraint = rule.get("constraint")
-        if not isinstance(constraint, str):
-            continue
-        pairs: List[Tuple[str, Optional[Tuple[int, bool]]]] = []
-        between = _BETWEEN.match(constraint)
-        if between:
-            first = next(text for text in between.groups()[:3] if text is not None)
-            second = next(text for text in between.groups()[3:] if text is not None)
-            pairs = [(">=", _instant(first)), ("<=", _instant(second))]
-        else:
-            for part in and_parts(constraint):
-                bound = _BOUND.match(part)
-                if not bound:
-                    return None
-                text = next(item for item in bound.groups()[1:] if item is not None)
-                pairs.append((bound.group(1), _instant(text)))
-        for operator, found in pairs:
-            if found is None:
+class _End(NamedTuple):
+    """One end a rule sets: which side, the millisecond, and whether it is strict."""
+
+    low: bool
+    milliseconds: int
+    strict: bool
+
+
+def _end_of(operator: str, text: str, *, round_low_up: bool) -> Optional[_End]:
+    """The end one spelled bound sets, or ``None`` when its instant is not read."""
+    milliseconds = instant_ms(text)
+    if milliseconds is None:
+        return None
+    low, strict = operator in (">", ">="), operator in (">", "<")
+    if round_low_up and _between_milliseconds(text):
+        # A low end's next whole millisecond is already beyond the instant, strict or not; a
+        # high end's millisecond at or below it is already short of the instant, strict or not.
+        milliseconds, strict = (milliseconds + 1 if low else milliseconds), False
+    return _End(low, milliseconds, strict)
+
+
+def _rule_ends(constraint: str, *, round_low_up: bool) -> Optional[List[_End]]:
+    """The ends one ``range`` rule's text sets, or ``None`` when the text is not read."""
+    between = _BETWEEN.match(constraint)
+    if between:
+        first = next(text for text in between.groups()[:3] if text is not None)
+        second = next(text for text in between.groups()[3:] if text is not None)
+        spelled = [(">=", first), ("<=", second)]
+    else:
+        spelled = []
+        for part in and_parts(constraint):
+            bound = _BOUND.match(part)
+            if not bound:
                 return None
-            milliseconds, fractional = found
-            strict = operator in (">", "<")
-            if operator in (">", ">="):
-                if round_low_up and fractional:
-                    # The next whole millisecond is already beyond the instant, strict or not.
-                    milliseconds, strict = milliseconds + 1, False
-                low = _tighter(low, milliseconds, strict, above=True)
-            else:
-                high = _tighter(high, milliseconds, strict, above=False)
+            spelled.append((bound.group(1), next(i for i in bound.groups()[1:] if i is not None)))
+    ends: List[_End] = []
+    for operator, text in spelled:
+        end = _end_of(operator, text, round_low_up=round_low_up)
+        if end is None:
+            return None
+        ends.append(end)
+    return ends
+
+
+def _range_constraints(column: Any) -> List[str]:
+    """The text of each ``range`` rule of a schema column."""
+    rules = column.get("validationRules") if isinstance(column, Mapping) else None
+    return [
+        rule["constraint"]
+        for rule in (rules if isinstance(rules, list) else ())
+        if isinstance(rule, Mapping)
+        and str(rule.get("type") or "").lower() == "range"
+        and isinstance(rule.get("constraint"), str)
+    ]
+
+
+def _column_ends(column: Any, *, round_low_up: bool) -> Optional[List[_End]]:
+    """The ends every ``range`` rule of a column sets, or ``None`` when a rule's text is not read."""
+    found: List[_End] = []
+    for constraint in _range_constraints(column):
+        ends = _rule_ends(constraint, round_low_up=round_low_up)
+        if ends is None:
+            return None
+        found.extend(ends)
+    return found
+
+
+def _bounds_of(
+    low: Optional[Tuple[int, bool]], high: Optional[Tuple[int, bool]]
+) -> Optional[RangeBounds]:
+    """The :class:`RangeBounds` of the tightest low and high ends, or ``None`` when neither is declared."""
     if high is not None and high[0] >= WINDOW_END_LIMIT_MS:
         high = None
     if low is None and high is None:
@@ -189,6 +228,21 @@ def _read_bounds(column: Any, *, round_low_up: bool) -> Optional[RangeBounds]:
     )
 
 
+def _read_bounds(column: Any, *, round_low_up: bool) -> Optional[RangeBounds]:
+    """:func:`declared_range_bounds`, with the low end's sub-millisecond fraction rounded up or floored."""
+    ends = _column_ends(column, round_low_up=round_low_up)
+    if ends is None:
+        return None
+    low: Optional[Tuple[int, bool]] = None
+    high: Optional[Tuple[int, bool]] = None
+    for end in ends:
+        if end.low:
+            low = _tighter(low, end.milliseconds, end.strict, above=True)
+        else:
+            high = _tighter(high, end.milliseconds, end.strict, above=False)
+    return _bounds_of(low, high)
+
+
 def declared_range_bounds(column: Any) -> Optional[RangeBounds]:
     """The range a date or timestamp column's ``range`` rules declare, each end optional, or ``None``.
 
@@ -199,9 +253,10 @@ def declared_range_bounds(column: Any) -> Optional[RangeBounds]:
     meet and one is strict (the run refuses it, ``FLX-3403``); an inclusive range whose ends meet
     holds that one instant. An end is strict when the rule that sets it is ``>`` or ``<``: the range holds the instants beyond it and not the instant itself. An end
     between two milliseconds is read to the millisecond: a low end rounds up, so the range never holds
-    an instant below it, and a high end rounds down.
+    an instant below it, and a high end rounds down, so it never holds one above it; a fraction
+    makes either end inclusive.
     """
-    return _read_bounds(column, round_low_up=False)
+    return _read_bounds(column, round_low_up=True)
 
 
 def declared_instants(column: Any) -> Optional[Tuple[int, int]]:
