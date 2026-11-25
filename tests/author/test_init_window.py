@@ -18,6 +18,7 @@ from flux_engine.author.window import (
     WINDOW_END_LIMIT_MS,
     WindowError,
     declared_instants,
+    declared_window,
     instant_ms,
     parse_window,
 )
@@ -76,6 +77,18 @@ def test_a_date_range_is_read_in_each_spelling(constraint: str) -> None:
 def test_a_timestamp_with_no_offset_is_utc() -> None:
     found = declared_instants(_rule("between '2020-01-01T06:00:00' and '2020-01-01T08:30:00Z'"))
     assert found == (_ms("2020-01-01") + 6 * 3_600_000, _ms("2020-01-01") + 8.5 * 3_600_000)
+
+
+def test_a_low_end_between_two_milliseconds_starts_the_window_where_plan_does() -> None:
+    column = _rule(">= '2020-01-01T00:00:00.0005Z' and <= '2020-01-02T00:00:00Z'")
+    # `declared_instants` keeps its reading (the low end floored); the window rounds it up.
+    assert declared_instants(column) == (_ms("2020-01-01"), _ms("2020-01-02"))
+    assert declared_window(column, LogicalKind.TIMESTAMP) == (
+        _ms("2020-01-01T00:00:00.001Z"),
+        _ms("2020-01-02"),
+    )
+    whole = _rule(">= '2020-01-01T00:00:00Z' and <= '2020-01-02T00:00:00Z'")
+    assert declared_window(whole, LogicalKind.TIMESTAMP) == declared_instants(whole)
 
 
 def test_several_rules_tighten_each_side() -> None:

@@ -47,12 +47,16 @@ def declared_window(column: Any, kind: Optional[LogicalKind]) -> Optional[Tuple[
 
     :func:`declared_instants`' reading, and for an inclusive range whose ends meet, the one unit it
     holds as ``plan`` reads it: ``[D, D + 1 day)`` for a DATE, ``[T, T + 1 ms)`` for a TIMESTAMP. A
-    range whose ends meet and one is strict holds nothing, and gives the window nothing.
+    range whose ends meet and one is strict holds nothing, and gives the window nothing. A low end
+    between two milliseconds starts the window at the next one, where ``plan``'s range starts.
     """
     found = declared_instants(column)
-    if found is not None:
-        return found
     bounds = declared_range_bounds(column)
+    if found is not None:
+        # A low end between two milliseconds: `declared_instants` floors it, `plan` rounds it up,
+        # and the window starts where plan's range does.
+        low = found[0] if bounds is None or bounds.low is None else max(found[0], bounds.low)
+        return (low, found[1]) if low < found[1] else None
     if (
         bounds is None
         or bounds.low is None

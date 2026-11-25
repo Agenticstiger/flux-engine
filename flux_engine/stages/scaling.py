@@ -477,7 +477,7 @@ def floor_for_cut(
     parent = next((emit for emit in emits if emit.expose_id == asked.parent), None)
     named = f"{asked.child}.{asked.column}"
     held = floors.get(asked.parent)
-    if scale >= 1 or parent is None or (held is not None and named in held.tracked_by):
+    if parent is None or (held is not None and named in held.tracked_by):
         return None
     levels = tuple(sorted({*(held.levels if held else ()), *asked.levels}))
     rows = floored_rows(parent, asked.key, levels, scale)
