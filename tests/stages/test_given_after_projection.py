@@ -62,10 +62,8 @@ def given_bundle(
     parent: str = "model",
     chain: bool = False,
     history: Optional[Dict[str, Any]] = None,
-    name: str = "bundle",
     support: bool = False,
-    versions: int = 200,
-    entities: int = 60,
+    size: Tuple[int, int] = (200, 60),
 ) -> Path:
     """A fleet bundle whose *projection* draws ``tier`` given *parent* (and ``band`` given ``tier``).
 
@@ -73,16 +71,14 @@ def given_bundle(
     about; the periodic emit holds one already. *history* replaces the history's ``model``, which
     the contract then leaves optional, and so does the projection's. With *support*, ``tier``
     declares the distribution it is drawn from where ``model`` holds no level a table row names.
+    *size* is the history's versions and entities.
     """
-    target = _fleet.bundle(tmp_path, name=name, versions=versions, entities=entities)
+    target = _fleet.bundle(tmp_path, versions=size[0], entities=size[1])
     contract = yaml.safe_load((target / _fleet.CONTRACT).read_text("utf-8"))
-    if history is not None:
-        kept = _fleet.expose(contract, _fleet.HISTORY)["contract"]["schema"]
-        next(column for column in kept if column["name"] == "model")["required"] = False
-    schema = _fleet.expose(contract, projection)["contract"]["schema"]
     added = ["tier", "band"] if chain else ["tier"]
     if projection == _fleet.EVENTS:
         added.insert(0, "model")
+    schema = _fleet.expose(contract, projection)["contract"]["schema"]
     schema.extend(_schema_column(column) for column in added)
     if history is not None:
         for exposed in contract["exposes"]:
@@ -103,6 +99,15 @@ def given_bundle(
     if history is not None:
         emits[_fleet.HISTORY]["fidelity"]["columns"]["model"] = history
     path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    return target
+
+
+def same_run_bundle(tmp_path: Path, projection: str, fallback: bool) -> Path:
+    """A bundle with a chain below ``tier``, whose ``model`` is a level on each row or, as a fallback, not."""
+    if not fallback:
+        return given_bundle(tmp_path, projection, chain=True)
+    target = given_bundle(tmp_path, projection, chain=True, support=True, size=(300, 80))
+    _edited(target, _history_rule)
     return target
 
 
@@ -139,26 +144,33 @@ def test_a_chain_below_a_column_of_the_version_follows_the_row(
     assert all(row["band"] == ("x" if row["tier"] == "a" else "y") for row in rows)
 
 
+FALLBACK = pytest.mark.parametrize("fallback", [False, True], ids=["held", "fallback"])
+
+
+@FALLBACK
 @pytest.mark.parametrize("projection", PROJECTIONS)
 def test_the_draw_after_the_projection_is_one_run_at_one_job_and_four(
-    projection: str, tmp_path: Path
+    projection: str, fallback: bool, tmp_path: Path
 ) -> None:
-    assert_same_run_at_one_and_four_jobs(given_bundle(tmp_path, projection), kernel=KERNEL_V2)
+    target = same_run_bundle(tmp_path, projection, fallback)
+    assert_same_run_at_one_and_four_jobs(target, kernel=KERNEL_V2)
 
 
+@FALLBACK
 @pytest.mark.parametrize("projection", PROJECTIONS)
 def test_the_draw_after_the_projection_is_one_run_in_shares(
-    projection: str, tmp_path: Path
+    projection: str, fallback: bool, tmp_path: Path
 ) -> None:
-    target = given_bundle(tmp_path, projection, chain=True)
+    target = same_run_bundle(tmp_path, projection, fallback)
     assert_shares_join_to_the_run(target, tmp_path, _fleet.run_bundle, 3, [projection])
 
 
+@FALLBACK
 @pytest.mark.parametrize("projection", PROJECTIONS)
 def test_both_kernel_paths_draw_the_same_rows_after_the_projection(
-    projection: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    projection: str, fallback: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    target = given_bundle(tmp_path, projection, chain=True)
+    target = same_run_bundle(tmp_path, projection, fallback)
 
     def lines() -> Any:
         return pipeline.execute(target, kernel=KERNEL_V2).emit(projection).writer.lines()
@@ -372,7 +384,7 @@ def _history_rule(document: Dict[str, Any]) -> None:
 def test_a_version_column_a_rule_of_the_history_sets_draws_from_the_columns_own_distribution(
     tmp_path: Path, projection: str
 ) -> None:
-    target = given_bundle(tmp_path, projection, support=True, versions=600, entities=120)
+    target = given_bundle(tmp_path, projection, support=True, size=(600, 120))
     _edited(target, _history_rule)
     rows = _fallback_run(target, tmp_path, projection)
     assert _own_share(rows)[0] >= MOST_FEW
@@ -383,9 +395,7 @@ def test_a_version_column_with_a_level_the_emit_does_not_name_draws_from_the_col
     tmp_path: Path, projection: str
 ) -> None:
     history = {"levels": {"sedan": "0.35", "van": "0.25", "bus": "0.4"}}
-    target = given_bundle(
-        tmp_path, projection, history=history, support=True, versions=600, entities=120
-    )
+    target = given_bundle(tmp_path, projection, history=history, support=True, size=(600, 120))
     rows = _fallback_run(target, tmp_path, projection)
     assert {row["model"] for row in rows} >= {"sedan", "van", "bus"}
     _own_share(rows)
@@ -396,9 +406,7 @@ def test_a_version_column_the_history_may_leave_null_draws_from_the_columns_own_
     tmp_path: Path, projection: str
 ) -> None:
     history = {"levels": dict(LEVELS), "nullFraction": "0.4"}
-    target = given_bundle(
-        tmp_path, projection, history=history, support=True, versions=600, entities=120
-    )
+    target = given_bundle(tmp_path, projection, history=history, support=True, size=(600, 120))
     rows = _fallback_run(target, tmp_path, projection)
     assert any(row["model"] is None for row in rows)
     _own_share(rows)
@@ -408,7 +416,7 @@ def test_a_version_column_the_history_may_leave_null_draws_from_the_columns_own_
 def test_a_version_column_a_relationship_of_the_history_sets_draws_from_the_columns_own_distribution(
     tmp_path: Path, projection: str
 ) -> None:
-    target = given_bundle(tmp_path, projection, support=True, versions=600, entities=120)
+    target = given_bundle(tmp_path, projection, support=True, size=(600, 120))
     _with_model_catalogue(target)
     rows = _fallback_run(target, tmp_path, projection)
     # The key of a catalogue is an identifier, which no level names: every row holds such a value.
@@ -523,35 +531,6 @@ def test_a_support_that_leaves_out_a_level_of_the_table_is_no_distribution_of_it
         "its support names ['a', 'b', 'c'] and its table ['a', 'b']",
     ):
         assert word in text, text
-
-
-@pytest.mark.parametrize("projection", PROJECTIONS)
-def test_a_fallback_run_is_one_run_at_one_job_and_four(projection: str, tmp_path: Path) -> None:
-    target = given_bundle(tmp_path, projection, support=True, versions=300, entities=80)
-    _edited(target, _history_rule)
-    assert_same_run_at_one_and_four_jobs(target, kernel=KERNEL_V2)
-
-
-@pytest.mark.parametrize("projection", PROJECTIONS)
-def test_a_fallback_run_is_one_run_in_shares(projection: str, tmp_path: Path) -> None:
-    target = given_bundle(tmp_path, projection, support=True, chain=True, versions=300, entities=80)
-    _edited(target, _history_rule)
-    assert_shares_join_to_the_run(target, tmp_path, _fleet.run_bundle, 3, [projection])
-
-
-@pytest.mark.parametrize("projection", PROJECTIONS)
-def test_both_kernel_paths_draw_the_same_fallback_rows(
-    projection: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    target = given_bundle(tmp_path, projection, support=True, chain=True, versions=300, entities=80)
-    _edited(target, _history_rule)
-
-    def lines() -> Any:
-        return pipeline.execute(target, kernel=KERNEL_V2).emit(projection).writer.lines()
-
-    by_columns, by_rows, taken = _both(monkeypatch, lines)
-    assert any(taken)
-    assert by_columns == by_rows
 
 
 @pytest.mark.parametrize("projection", PROJECTIONS)

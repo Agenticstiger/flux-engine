@@ -134,12 +134,12 @@ class ProjectionPlan:
             "ended": self.ended,
             "history": self.history.digest().value,
         }
-        if self.entry is not None:
-            document["entry"] = self.entry.as_member()
-        if self.held:
-            document["heldGivens"] = list(self.held)
-        if self.fallback:
-            document["fallbackGivens"] = list(self.fallback)
+        optional = {
+            "entry": None if self.entry is None else self.entry.as_member(),
+            "heldGivens": list(self.held) or None,
+            "fallbackGivens": list(self.fallback) or None,
+        }
+        document.update({key: value for key, value in optional.items() if value is not None})
         return document
 
 
