@@ -221,7 +221,9 @@ def test_a_snapshot_that_is_no_counted_child_writes_the_bundle_it_always_did(
 
 
 #: sha256 of each file `fluxsim init` wrote for this contract and profile before a counted
-#: projection was written.
+#: projection was written. The bundle includes the history `parent` that the commit "feat(init):
+#: write a history's parent from its many-to-one relationship" writes, so these digests cannot be
+#: recreated on main, which has no such `parent`.
 WITHOUT_COUNTS: Dict[str, str] = {
     "persona.flux.yml": "09abfa26eb21ac0667e7b872c394714fe05f17ae4a6b0a8b687b83d305023ab3",
     "plans.fluid.yml": "f50c1adff7eeae2f5dca996a48fa329ca9704765f408013097d796d5cee73e53",
