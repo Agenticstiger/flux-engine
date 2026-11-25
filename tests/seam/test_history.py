@@ -493,16 +493,6 @@ REFUSED: List[Tuple[str, Change, str]] = [
         "openEnd 'never' is not a DATE",
     ),
     (
-        "an openEnd before until",
-        lambda: entry_with(openEnd="2026-09-01"),
-        "openEnd '2026-09-01' is before until '2026-09-30'",
-    ),
-    (
-        "an openEnd inside the window under nextStart",
-        lambda: entry_with(openEnd="2026-09-30"),
-        "openEnd '2026-09-30' is inside timeBounds",
-    ),
-    (
         "an activation of another type",
         lambda: entry_with(activation="seats"),
         "activation names 'seats'",
@@ -673,8 +663,31 @@ REFUSED: List[Tuple[str, Change, str]] = [
 ]
 
 
+#: The open end's refusals (ADR 0017, the amendment of 2026-11-25): an ``until`` in its year, and an
+#: ``openEnd`` a closed version could hold.
+OPEN_END_REFUSED: List[Tuple[str, Change, str]] = [
+    (
+        "an until in the year 9999",
+        lambda: entry_with(until="9999-12-31"),
+        "until '9999-12-31' is in the year 9999",
+    ),
+    (
+        "an openEnd before until",
+        lambda: entry_with(openEnd="2026-09-01"),
+        "openEnd '2026-09-01' is before until '2026-09-30'",
+    ),
+    (
+        "an openEnd inside the window under nextStart",
+        lambda: entry_with(openEnd="2026-09-30"),
+        "openEnd '2026-09-30' is inside timeBounds",
+    ),
+]
+
+
 @pytest.mark.parametrize(
-    ("change", "fragment"), [(c, f) for _, c, f in REFUSED], ids=[name for name, _, _ in REFUSED]
+    ("change", "fragment"),
+    [(c, f) for _, c, f in REFUSED + OPEN_END_REFUSED],
+    ids=[name for name, _, _ in REFUSED + OPEN_END_REFUSED],
 )
 def test_a_refused_entry_is_flx_3403_naming_the_entry_and_the_key(
     tmp_path: Path, change: Change, fragment: str

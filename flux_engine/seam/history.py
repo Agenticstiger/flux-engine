@@ -56,6 +56,7 @@ from flux_engine.seam.dates import LifetimeEntry, WithinEntry
 from flux_engine.seam.hidden import HiddenColumn, with_hidden_columns
 from flux_engine.seam.keys import ExposeKeys, Relationship, window_ends
 from flux_engine.seam.links import LinkEntry
+from flux_engine.seam.range_rules import WINDOW_END_LIMIT_MS
 
 __all__ = [
     "END_SHARE_OF_ELIGIBLE",
@@ -909,6 +910,15 @@ def _check_dates(
         )
     if target.window is None:
         raise FluxError(refusal, f"{at}.until needs the Simulation's spec.timeBounds")
+    if until >= _in_unit(WINDOW_END_LIMIT_MS, kind):
+        # A day in the year 9999 is the open-end spelling (a contract's range reads it so), and a
+        # chain or a periodic step past it leaves the calendar.
+        raise FluxError(
+            refusal,
+            f"{at}.until {entry.until!r} is in the year 9999, which reads as an open end, not a "
+            "horizon: set until to the last instant a version may start, before the year 9999, "
+            "and write the open end with openEnd (such as 9999-12-31)",
+        )
     low, high = (_in_unit(edge, kind) for edge in target.window)
     if until > high:
         raise FluxError(refusal, f"{at}.until {entry.until!r} is after timeBounds.end")

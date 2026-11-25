@@ -308,6 +308,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   or later is after every window. `verify` adds `history:open_end`: with an `openEnd`, no end is NULL and only an
   entity's last version carries the value; without one, the line is present only when some end is in the year 9999
   or later, and such an end fails it (ADR 0017, the amendment of 2026-11-25). No generated row moves.
+- A history's `until` in the year 9999 is now refused at `plan` (`FLX-3403`): a day in that year is the open-end
+  spelling, which a contract's range reads as an open end, and a periodic step past it leaves the calendar. The
+  message says to set `until` to the last instant a version may start and to write the open end with `openEnd`.
 
 ## 0.11.1 - 2026-11-24
 

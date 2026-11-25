@@ -724,5 +724,8 @@ they are updated by hand), and SQLMesh's SCD type 2 kinds write NULL only. The v
   is in the year 9999 or later, an open end the entry does not declare, and an entity with one fails it. The check
   is the one dbt-utils' `mutually_exclusive_ranges` leaves to the author: it fails a NULL upper bound outright, and
   this line says which spelling of the open end the table uses.
+- **An `until` in the year 9999.** `until` is the horizon versions start before, not an open end: one in the year
+  9999 is `FLX-3403` at plan, pointing at `openEnd` for the open end. A periodic step past such a horizon would
+  leave the calendar.
 - **What moves.** No row: the generator already writes the value on every open version and NULL nowhere. A run whose
   entry declares `openEnd` gains the line in its report; an entry that a closed version could end on is refused.
