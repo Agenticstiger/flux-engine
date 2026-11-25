@@ -229,6 +229,29 @@ def test_a_plan_recorded_before_the_reorder_replays_its_own_bytes(
         assert layout.emit_path(_fleet.PERIODIC).read_bytes() == recorded
 
 
+@pytest.mark.parametrize(
+    ("parent", "role"), [("op", "its op column"), ("before_model", "a before image")]
+)
+def test_a_plan_recorded_without_the_marker_still_refuses_a_given_over_an_op_or_an_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parent: str, role: str
+) -> None:
+    target = given_bundle(tmp_path, _fleet.EVENTS, parent=parent)
+    if parent == "op":
+        path, document = _simulation(target)
+        emit = document["extensions"][_fleet.NAMESPACE]["emits"][_fleet.EVENTS]
+        emit["fidelity"]["columns"]["tier"]["levelWeightsGiven"] = {"c": {"a": "1", "b": "0"}}
+        path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    called = pipeline._planned_with_projections
+
+    def before(*args: Any, **options: Any) -> Any:
+        return called(*args, **{**options, "era": pipeline.PlanEra(projected_givens=False)})
+
+    monkeypatch.setattr(pipeline, "_planned_with_projections", before)
+    text = _refusal(target)
+    for word in (f"({_fleet.EVENTS})", "'tier'", f"'{parent}'", role):
+        assert word in text, text
+
+
 def test_a_new_plan_replays_the_draw_after_the_projection(tmp_path: Path) -> None:
     target = given_bundle(tmp_path, _fleet.EVENTS)
     state = tmp_path / "state"
