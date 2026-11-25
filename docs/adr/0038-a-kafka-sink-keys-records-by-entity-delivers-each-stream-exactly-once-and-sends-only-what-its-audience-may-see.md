@@ -213,7 +213,8 @@ producer again and sends nothing. A stream unpaced (`pace=max`) is one transacti
 when every row arrived and every record was acknowledged, and aborted otherwise.
 
 A transaction is bounded by `transaction-timeout=SECONDS` (900 by default, Kafka's default for the brokers'
-`transaction.max.timeout.ms`), which is the producer's `transaction.timeout.ms` and no longer depends on `timeout`.
+`transaction.max.timeout.ms`; at least 1, the producer's minimum of 1000 ms), which is the producer's
+`transaction.timeout.ms` and no longer depends on `timeout`.
 A brokers' setting below it fails the producer's `init_transactions` with `FLX-3505`, naming both
 `transaction-timeout` and `transaction.max.timeout.ms`. An unpaced stream that is not given `commit-every` must fit in
 its one transaction: when the open transaction reaches 90% of `transaction-timeout` (checked every 1,024 records and
@@ -289,7 +290,8 @@ environment's proxies (`HTTP_PROXY`, `ALL_PROXY`) and would send the `Authorizat
 for a registry on this machine. An `http` registry, on this machine or another, is allowed only without credentials.
 `ssl-ca-location` and `registry-ca-location` name certificate files. A credential over `SASL_PLAINTEXT`, allowed only
 on this machine, needs `sasl-mechanism=SCRAM-SHA-256` or `SCRAM-SHA-512`: `PLAIN` sends the password itself and is
-`FLX-3504`, as is a `transaction-timeout` above 2147483 seconds (librdkafka's int32 of milliseconds). When a
+`FLX-3504`, as is a `transaction-timeout` below 1 second or above 2147483 seconds (librdkafka takes 1000 ms to an
+int32 of milliseconds). When a
 credential goes over `SASL_PLAINTEXT` on this machine, the first request of every client reads the brokers the cluster
 advertises (the admin client's metadata, the producer's before `init_transactions` and the progress consumer's before
 its read), and one that is not a loopback address is `FLX-3504` before anything else is asked. A name is this machine
@@ -309,7 +311,7 @@ The options are `audience`, `registry`, `registry-auth-env`, `registry-ca-locati
 `sasl-mechanism`, `sasl-username-env`, `sasl-password-env` and `ssl-ca-location`. Their numbers are bounded, each
 refusal `FLX-3504` naming the option and the limit: `partitions` at most 2147483647, `replication-factor` at most
 32767, `pace=xN` with N at least 0.001, `commit-every` at least 0.1 seconds, `timeout` at most 3600 seconds and
-`transaction-timeout` at most 2147483 seconds. librdkafka's log lines go through the same scrubber as an error.
+`transaction-timeout` from 1 to 2147483 seconds. librdkafka's log lines go through the same scrubber as an error.
 
 Metadata that is not yet settled is waited out, up to `timeout`: a retriable error on a topic or a partition (a leader
 not yet elected) and a topic the configuration read does not yet know right after it was created. A flush that still

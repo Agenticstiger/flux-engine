@@ -41,7 +41,8 @@ stream's column order.
 **Exactly once.** One idempotent transactional producer per stream and run, under a stable
 ``transactional.id``. An unpaced stream is one transaction, the whole stream, unless
 ``commit-every`` is given; then it also commits every that many seconds. A transaction may stay
-open for ``transaction-timeout`` seconds (900 by default, as the brokers allow), and an unpaced
+open for ``transaction-timeout`` seconds (900 by default, as the brokers allow; at least 1, the
+producer's minimum), and an unpaced
 stream that cannot finish inside it is refused rather than left to the brokers' timeout. Each
 transaction also commits the stream's progress as an offset of a consumer group of the same name,
 so a retried delivery resumes after its last committed record and a second delivery of a finished
@@ -164,6 +165,8 @@ _TRANSACTION_SHARE = 0.9
 
 #: The longest ``transaction-timeout`` the producer takes: an int32 of milliseconds.
 MAX_TRANSACTION_TIMEOUT = 2147483
+#: The shortest ``transaction-timeout`` the producer takes, in seconds: 1000 milliseconds.
+MIN_TRANSACTION_TIMEOUT = 1
 SCRAM_MECHANISMS: Tuple[str, ...] = ("SCRAM-SHA-256", "SCRAM-SHA-512")
 SECURITY_PROTOCOLS: Tuple[str, ...] = ("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
 SASL_MECHANISMS: Tuple[str, ...] = ("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512")
@@ -479,6 +482,12 @@ class KafkaSettings:
             else None
         )
         transaction_timeout = _seconds(fixed, "transaction-timeout", 900.0)
+        if transaction_timeout < MIN_TRANSACTION_TIMEOUT:
+            raise FluxError(
+                FLX_3504,
+                f"the option transaction-timeout is at least {MIN_TRANSACTION_TIMEOUT} second "
+                "(1000 ms, the producer's minimum)",
+            )
         if transaction_timeout > MAX_TRANSACTION_TIMEOUT:
             raise FluxError(
                 FLX_3504,

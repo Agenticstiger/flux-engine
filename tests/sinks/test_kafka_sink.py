@@ -212,6 +212,8 @@ REFUSED: Sequence[Any] = [
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "0"}, "transaction-timeout"),
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "abc"}, "transaction-timeout"),
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "2147484"}, "2147483"),
+    (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "0.999"}, "at least 1 second"),
+    (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "0.5"}, "1000 ms"),
     (
         BOOTSTRAP,
         {"audience": "internal", "pace": "x2", "transaction-timeout": "2"},
@@ -1261,6 +1263,15 @@ def test_the_producer_carries_the_transaction_timeout_and_sends_no_metrics(
     assert consumer_conf["enable.metrics.push"] is False
     _producer_of(monkeypatch, {"transaction-timeout": "120.5", "timeout": "500"})
     assert _Recorder.configs[0]["transaction.timeout.ms"] == 120_500
+
+
+def test_the_least_transaction_timeout_is_the_producers_one_second(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = KafkaSettings.parse(BOOTSTRAP, {**INTERNAL, "transaction-timeout": "1"})
+    assert settings.transaction_timeout == 1.0
+    _producer_of(monkeypatch, {"transaction-timeout": "1"})
+    assert _Recorder.configs[0]["transaction.timeout.ms"] == 1000
 
 
 def test_brokers_that_refuse_the_transaction_timeout_are_told_what_to_lower(
