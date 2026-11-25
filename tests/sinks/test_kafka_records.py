@@ -290,6 +290,35 @@ def test_an_update_has_the_key_and_the_previous_values_before() -> None:
     assert record.value["op"] == "u"
 
 
+def test_an_update_carries_no_copied_column_but_the_key_before_and_every_one_after() -> None:
+    # A column the history copies by name and that is not a key (a status here) is the new
+    # version's: the change's `before` holds only the key and what `before` maps, and `after`
+    # holds the whole new version.
+    shape = shape_of(
+        [("id", "INT"), ("status", "STRING"), ("op", "STRING"), ("recorded_on", "DATE")],
+        key=["id"],
+        timestamp="recorded_on",
+        envelope=Envelope(
+            op_column="op",
+            date_column="recorded_on",
+            at_column=None,
+            fields=(("id", "INT"), ("status", "STRING")),
+            before={},
+            after={},
+            copied={"id": "id", "status": "status"},
+            key_fields=("id",),
+            extra=(),
+            table="thing_history",
+        ),
+    )
+    (update,) = build(shape, [17, "closed", "u", "2024-03-05"])
+    assert update.value is not None
+    assert update.value["before"] == {"id": 17, "status": None}
+    assert update.value["after"] == {"id": 17, "status": "closed"}
+    delete, _ = build(shape, [17, "closed", "d", "2024-03-06"], 1)
+    assert delete.value is not None and delete.value["before"] == {"id": 17, "status": "closed"}
+
+
 def test_a_delete_has_the_last_version_before_and_a_tombstone_after() -> None:
     records = build(shapes_cache()["device_change"], event("d", "v2", None), 4)
     assert len(records) == 2
