@@ -134,7 +134,7 @@ from flux_engine.author.projection import (
 )
 from flux_engine.author.ranges import column_range
 from flux_engine.author.replace import replacements_for
-from flux_engine.author.window import declared_instants, instant_ms
+from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_instants, instant_ms
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
@@ -1138,9 +1138,12 @@ def _time_bounds(
     The hull runs from the earliest start to the latest end of each column's published range
     (``time_span``), of its own bins, levels and range as declared, of the range its contract
     column declares, and of each *declared* span (a history file's start bins and ``until``), so
-    no column's bins leave it. A contract range that reaches beyond every span the profile and the
-    bundle give, or the hull of contract ranges alone, is a ``time window`` note, which is a gap
-    at ``/spec/timeBounds``. With nothing to go on, a year is assumed.
+    no column's bins leave it. A column whose every value lies at or after
+    :data:`WINDOW_END_LIMIT_MS` (an open end of 9999-12-31 on every row) gives the window nothing,
+    as a contract range that ends there gives nothing. A contract range that reaches beyond every
+    span the profile and the bundle give, or the hull of contract ranges alone, is a ``time
+    window`` note, which is a gap at ``/spec/timeBounds``. With nothing to go on, a year is
+    assumed.
     """
     if given is not None:
         return given, None
@@ -1222,6 +1225,10 @@ def _spans_of(
         )
     if instants:
         found.append((min(instants), max(instants)))
+    if found and min(first for first, _ in found) >= WINDOW_END_LIMIT_MS:
+        # Every value is in the year 9999 (an open end of 9999-12-31 on every row, say): like a
+        # contract range that ends there, it says only that the column holds a date.
+        found = []
     context = expose.contexts.get(column.name)
     try:
         schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]

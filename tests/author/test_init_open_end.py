@@ -250,6 +250,20 @@ def test_a_required_end_that_holds_the_last_day_is_spanned_by_the_day_that_ends_
     _plans(tmp_path)
 
 
+def test_an_end_column_that_holds_only_the_last_day_gives_the_window_nothing(
+    tmp_path: Path,
+) -> None:
+    # The window is the versions' start span: a run reaching the year 9999 would spread every
+    # date drawn across the window over eight thousand years.
+    result = _init(tmp_path, required_end=True, last_end="9999-12-31")
+    assert result.exit_code == 0, result.stderr
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    assert yaml.safe_load(text)["spec"]["timeBounds"] == {
+        "start": "2025-01-01T00:00:00.000Z",
+        "end": "2025-09-01T00:00:00.000Z",
+    }
+
+
 def test_a_null_open_end_is_written_as_it_always_was(tmp_path: Path) -> None:
     result = _init(tmp_path, required_end=False, last_end="2025-10-01")
     assert result.exit_code == 0, result.stderr
