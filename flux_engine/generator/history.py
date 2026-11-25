@@ -1176,6 +1176,9 @@ class HistoryBinding:
     #: The emit's rows as declared (after ``--scale``), for an entry that declares
     #: ``parent.lifetime``: the layout is worked out from them and may hold fewer.
     declared_rows: Optional[int] = None
+    #: Whether a tracked foreign key's levels are checked against its parent's keys (false replays
+    #: a recorded plan that never checked them).
+    tracked_levels: bool = True
 
 
 def plan_history(

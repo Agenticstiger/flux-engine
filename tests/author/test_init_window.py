@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -17,12 +18,16 @@ from flux_engine.author.window import (
     WINDOW_END_LIMIT_MS,
     WindowError,
     declared_instants,
+    declared_window,
     instant_ms,
     parse_window,
 )
 from flux_engine.cli._init import run_init
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
+from flux_engine.stages.apply import apply
+from flux_engine.stages.plan import plan
+from flux_engine.stages.verify import verify
 
 from .test_init_from_profile import _simulation
 
@@ -72,6 +77,18 @@ def test_a_date_range_is_read_in_each_spelling(constraint: str) -> None:
 def test_a_timestamp_with_no_offset_is_utc() -> None:
     found = declared_instants(_rule("between '2020-01-01T06:00:00' and '2020-01-01T08:30:00Z'"))
     assert found == (_ms("2020-01-01") + 6 * 3_600_000, _ms("2020-01-01") + 8.5 * 3_600_000)
+
+
+def test_a_low_end_between_two_milliseconds_starts_the_window_where_plan_does() -> None:
+    column = _rule(">= '2020-01-01T00:00:00.0005Z' and <= '2020-01-02T00:00:00Z'")
+    # `declared_instants` keeps its reading (the low end floored); the window rounds it up.
+    assert declared_instants(column) == (_ms("2020-01-01"), _ms("2020-01-02"))
+    assert declared_window(column, LogicalKind.TIMESTAMP) == (
+        _ms("2020-01-01T00:00:00.001Z"),
+        _ms("2020-01-02"),
+    )
+    whole = _rule(">= '2020-01-01T00:00:00Z' and <= '2020-01-02T00:00:00Z'")
+    assert declared_window(whole, LogicalKind.TIMESTAMP) == declared_instants(whole)
 
 
 def test_several_rules_tighten_each_side() -> None:
@@ -467,3 +484,70 @@ def test_a_loose_contract_range_is_the_window_and_a_gap_that_strict_refuses(
     )
     assert strict.exit_code != 0
     assert "gap /spec/timeBounds" in (strict.stderr or "")
+
+
+def _written_with_created_at_rule(tmp_path: Path, constraint: str, kind: str = "timestamp") -> Any:
+    text = CONTRACT.read_text(encoding="utf-8").replace(
+        "      type: timestamp\n      required: false\n",
+        f"      type: {kind}\n      required: false\n      validationRules:\n"
+        "      - type: range\n"
+        f'        constraint: "{constraint}"\n',
+    )
+    contract = tmp_path / "orders.fluid.yaml"
+    contract.write_text(text, encoding="utf-8")
+    return run_init(str(tmp_path / "bundle"), contract=str(contract), profile=str(PROFILE))
+
+
+def test_a_timestamp_range_whose_ends_meet_is_a_one_millisecond_window(tmp_path: Path) -> None:
+    result = _written_with_created_at_rule(
+        tmp_path, "between '2020-02-01T10:00:00Z' and '2020-02-01T10:00:00Z'"
+    )
+    assert result.exit_code == 0, result.stderr
+    bounds = _simulation(tmp_path / "bundle")["spec"]["timeBounds"]
+    assert (bounds["start"], bounds["end"]) == (
+        "2020-02-01T10:00:00.000Z",
+        "2020-02-01T10:00:00.001Z",
+    )
+    state = tmp_path / "state"
+    planned = plan(tmp_path / "bundle", state_dir=state, kernel="0.2.0", profile=PROFILE)
+    assert planned.success, planned.stderr
+    run_id = str(planned.artifacts["run_id"])
+    assert apply(tmp_path / "bundle", state_dir=state, run_id=run_id).success
+    checked = verify(tmp_path / "bundle", state_dir=state, run_id=run_id)
+    assert checked.success, checked.stdout + checked.stderr
+    lines = (state / "runs" / run_id / "emits" / "orders.ndjson").read_text().splitlines()
+    held = {
+        cell
+        for line in lines
+        for cell in json.loads(line)
+        if isinstance(cell, str) and cell.startswith("2020-")
+    }
+    assert held == {"2020-02-01T10:00:00.000Z"}
+
+
+def test_a_date_range_whose_ends_meet_is_a_one_day_window(tmp_path: Path) -> None:
+    result = _written_with_created_at_rule(
+        tmp_path, "between '2020-02-01' and '2020-02-01'", "date"
+    )
+    assert result.exit_code == 0, result.stderr
+    bounds = _simulation(tmp_path / "bundle")["spec"]["timeBounds"]
+    assert (bounds["start"], bounds["end"]) == (
+        "2020-02-01T00:00:00.000Z",
+        "2020-02-02T00:00:00.000Z",
+    )
+    state = tmp_path / "state"
+    planned = plan(tmp_path / "bundle", state_dir=state, kernel="0.2.0", profile=PROFILE)
+    assert planned.success, planned.stderr
+    run_id = str(planned.artifacts["run_id"])
+    assert apply(tmp_path / "bundle", state_dir=state, run_id=run_id).success
+    checked = verify(tmp_path / "bundle", state_dir=state, run_id=run_id)
+    assert checked.success, checked.stdout + checked.stderr
+    lines = (state / "runs" / run_id / "emits" / "orders.ndjson").read_text().splitlines()
+    held = {cell for line in lines for cell in json.loads(line) if str(cell).startswith("2020-")}
+    assert held == {"2020-02-01"}
+
+
+def test_a_range_whose_strict_ends_meet_is_still_refused_by_init(tmp_path: Path) -> None:
+    result = _written_with_created_at_rule(tmp_path, "> '2020-02-01' and < '2020-02-01'", "date")
+    assert result.exit_code == 1
+    assert "FLX-3403" in (result.stderr or "")

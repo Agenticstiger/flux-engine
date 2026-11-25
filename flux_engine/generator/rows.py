@@ -102,7 +102,12 @@ from flux_engine.generator.copula import (
     plan_copula_draw,
     read_copula,
 )
-from flux_engine.generator.declared_range import RangeCut, cut_statistics, refuse_cut_parents
+from flux_engine.generator.declared_range import (
+    RangeCut,
+    cut_statistics,
+    refuse_cut_parents,
+    refuse_empty_range,
+)
 from flux_engine.generator.families import (
     FLX_3401,
     ColumnType,
@@ -654,6 +659,7 @@ def build_plan(
     made_by_plugin = frozenset(plugin.names) if plugin is not None else frozenset()
     for column in expose.columns:
         declared = statistics[column.name]
+        refuse_empty_range(expose.expose_id, column, cutting=uncut is not None)
         if column.name in made_by_plugin:
             plans.append(
                 ColumnPlan(
