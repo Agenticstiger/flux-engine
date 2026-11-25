@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import tracemalloc
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -35,7 +36,7 @@ pytestmark = pytest.mark.integration
 LONG_WINDOW = "7023-01-01T00:00:00Z"
 
 
-def _plan(target: Path, state: Path, **options: object) -> object:
+def _plan(target: Path, state: Path, **options: Any) -> Any:
     return plan_module.plan(
         target, state_dir=state, kernel=_fleet.KERNEL_V2.version, stage=False, **options
     )

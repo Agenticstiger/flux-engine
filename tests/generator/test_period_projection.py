@@ -140,7 +140,7 @@ def periods_plan(
     found = PeriodsEntry(
         emit=PERIODIC, of=EMIT, column="month", grain=grain, match=match, **options
     )
-    return project_plan(plan, PERIODS_KEY, EMIT, found, plans[EMIT], root_for(seed))
+    return project_plan(plan, (PERIODS_KEY, EMIT, found), plans[EMIT], root_for(seed))
 
 
 def period_rows(plan: GeneratorPlan, seed: int = 5) -> List[Dict[str, Any]]:

@@ -59,7 +59,9 @@ from flux_engine.seam.projections import (
 __all__ = [
     "KINDS",
     "ProjectionKind",
+    "NEW_PLAN_BOUNDS",
     "ProjectionPlan",
+    "RunBounds",
     "chain_of",
     "derived_rows",
     "refuse_rows",
@@ -113,6 +115,10 @@ class ProjectionPlan:
     #: :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`). An acceptance bound, no
     #: part of the rows, so the plan records it apart (``maxRows``) and not in this member.
     budget: Optional[int] = field(default=None, compare=False)
+    #: A periods entry's first and last period day, from the contract's range on the period column
+    #: (:func:`~flux_engine.generator.periods.period_range`); ``None`` where the range cuts nothing
+    #: or the plan does not hold the column to it (ADR 0024, the amendment of 2026-11-25).
+    clip: Optional[Tuple[Optional[str], Optional[str]]] = None
 
     def as_document(self) -> Dict[str, Any]:
         """The ``projection`` member of the plan's document: where the rows come from."""
@@ -124,7 +130,26 @@ class ProjectionPlan:
         }
         if self.entry is not None:
             document["entry"] = self.entry.as_member()
+        if self.clip is not None:
+            document["periodRange"] = list(self.clip)
         return document
+
+
+@dataclass(frozen=True)
+class RunBounds:
+    """What a run holds its projections to: the periodic rows' budget, and the period column's range.
+
+    ``budget`` is :attr:`ProjectionPlan.budget`; ``ranges`` cuts a periods entry's periods at the
+    period column's contract range (ADR 0024, the amendment of 2026-11-25), which a recorded plan
+    without ``rangeSetters`` does not.
+    """
+
+    budget: Optional[int] = None
+    ranges: bool = False
+
+
+#: What a new plan holds its projections to: the default budget, and the columns' ranges.
+NEW_PLAN_BOUNDS = RunBounds(ranges=True)
 
 
 @dataclass(frozen=True)
@@ -168,9 +193,10 @@ def chain_of(history: GeneratorPlan, root: SeedTreeRoot) -> HistoryPlan:
         history.expose.expose_id,
         pick.entry,
         kind=pick.kind,
-        rows=pick.rows,
+        rows=pick.laid_rows,
         entities=pick.entities,
         time_bounds=(pick.window_start,),
+        ranged=pick.ranged,
     )
 
 
@@ -252,9 +278,10 @@ def _entry_of_key(
 
 
 def _projection(
-    key: str, of: str, options: Any, history: GeneratorPlan, plan: GeneratorPlan
+    found: Tuple[str, str, Any], history: GeneratorPlan, plan: GeneratorPlan, bounds: RunBounds
 ) -> ProjectionPlan:
     """The projection of *plan*'s emit, after the checks that need the history's plan."""
+    key, of, options = found
     if key not in KINDS:
         raise _refuse(f"{key} ({plan.expose.expose_id}) has no generator")
     if key == SNAPSHOTS_KEY:
@@ -266,7 +293,20 @@ def _projection(
             )
         return ProjectionPlan(key, of, history, options)
     _refuse_rules_on_projected_cells(key, options, history, plan)
-    return ProjectionPlan(key, of, history, entry=options, window=plan.time_bounds)
+    clip = None
+    if key == PERIODS_KEY and bounds.ranges and plan.time_bounds is not None:
+        declared = plan.column_plan(options.column).column.declared_range
+        if declared is not None and options.grain is not None:
+            clip = _periods.period_range(options, plan.time_bounds, declared)
+    return ProjectionPlan(
+        key,
+        of,
+        history,
+        entry=options,
+        window=plan.time_bounds,
+        budget=bounds.budget,
+        clip=clip,
+    )
 
 
 def projected_cells(
@@ -435,39 +475,35 @@ def _count(key: str, chain: Any, projection: ProjectionPlan, plan: GeneratorPlan
 
 
 def derived_rows(
-    key: str,
-    of: str,
-    options: Any,
+    found: Tuple[str, str, Any],
     history: GeneratorPlan,
     plan: GeneratorPlan,
     root: SeedTreeRoot,
-    *,
-    budget: Optional[int] = None,
+    bounds: RunBounds = RunBounds(),
 ) -> int:
     """The number of rows *plan*'s emit takes from *history*, worked out from the plan alone.
 
-    *budget* bounds the rows a periodic emit is estimated to derive (:attr:`ProjectionPlan.budget`).
+    *found* is the entry's key, its ``of`` and its options (:func:`projection_of`); *bounds* is
+    what the run holds a projection to (:class:`RunBounds`).
     """
-    projection = replace(_projection(key, of, options, history, plan), root=root, budget=budget)
-    return _count(key, chain_of(history, root), projection, plan)
+    projection = replace(_projection(found, history, plan, bounds), root=root)
+    return _count(found[0], chain_of(history, root), projection, plan)
 
 
 def project_plan(
     plan: GeneratorPlan,
-    key: str,
-    of: str,
-    options: Any,
+    found: Tuple[str, str, Any],
     history: GeneratorPlan,
     root: SeedTreeRoot,
-    *,
-    budget: Optional[int] = None,
+    bounds: RunBounds = RunBounds(),
 ) -> GeneratorPlan:
     """*plan* as a projected emit's: its ``rows`` the derived count, and the projection attached.
 
-    *budget* is :func:`derived_rows`' and stays on the projection, so the rows' pass reads it too.
+    *found* and *bounds* are :func:`derived_rows`'; the bounds stay on the projection, so the rows'
+    pass reads them too.
     """
-    projection = replace(_projection(key, of, options, history, plan), budget=budget)
-    count = _count(key, chain_of(history, root), replace(projection, root=root), plan)
+    projection = _projection(found, history, plan, bounds)
+    count = _count(found[0], chain_of(history, root), replace(projection, root=root), plan)
     return replace(plan, rows=count, projection=projection)
 
 

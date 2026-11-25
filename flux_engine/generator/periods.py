@@ -63,6 +63,7 @@ __all__ = [
     "clear_layouts",
     "count",
     "estimated_pairs",
+    "period_range",
     "layout_of",
     "period_grid",
     "periods_rows",
@@ -164,6 +165,75 @@ def period_count(
         else:
             high = middle
     return high
+
+
+def _day_text(milliseconds: int, *, up: bool) -> Optional[str]:
+    """The day of *milliseconds*, the first at or after it when *up*, else the last at or before it."""
+    days = -(-milliseconds // DAY_MS) if up else milliseconds // DAY_MS
+    try:
+        return date.fromordinal(days + _EPOCH_ORDINAL).isoformat()
+    except (ValueError, OverflowError):
+        return None
+
+
+def _day_before(text: str) -> Optional[str]:
+    found = _day_of(text)
+    return None if found == date.min else (found - timedelta(days=1)).isoformat()
+
+
+def _earlier(first: Optional[str], second: Optional[str]) -> Optional[str]:
+    """The earlier of two days, ``None`` being no bound."""
+    return second if first is None else first if second is None else min(first, second)
+
+
+def period_range(
+    entry: PeriodsEntry, window: Tuple[int, int], declared: Tuple[Optional[int], Optional[int]]
+) -> Optional[Tuple[Optional[str], Optional[str]]]:
+    """The days of the period column's range that cut the periods (ADR 0024, the amendment of 2026-11-25).
+
+    *declared* is the column's range in milliseconds. A period is kept when its first day lies in
+    it: ``(low, high)`` are the range's first and last days, each ``None`` where it drops no period,
+    and the whole is ``None`` when it drops none. A range no period of the entry starts in is
+    ``FLX-3403``.
+    """
+    grain = str(entry.grain)
+    low = None if declared[0] is None else _day_text(declared[0], up=True)
+    high = None if declared[1] is None else _day_text(declared[1], up=False)
+    total = period_count(grain, window, entry.from_day, entry.through_day)
+    through = _earlier(entry.through_day, high)
+    kept = period_count(grain, window, entry.from_day, through)
+    before = _before(entry, window, low, through)
+    if total and kept <= before:
+        raise _refuse(
+            f"periods ({entry.emit}): the contract's range on the period column "
+            f"{entry.column!r} ({low or ''} to {high or ''}) holds the first day of none of the "
+            f"{total} periods of the window; widen the range, or move the window or the entry's "
+            "from and through to meet it"
+        )
+    cut = (low if before else None, high if kept < total else None)
+    return None if cut == (None, None) else cut
+
+
+def _before(
+    entry: PeriodsEntry, window: Tuple[int, int], low: Optional[str], through: Optional[str]
+) -> int:
+    """The periods that start before the day *low*, of those that start on or before *through*."""
+    if low is None:
+        return 0
+    last = _day_before(low)
+    if last is None:
+        return 0
+    return period_count(str(entry.grain), window, entry.from_day, _earlier(through, last))
+
+
+def _clipped(entry: PeriodsEntry, projection: "ProjectionPlan") -> Tuple[PeriodsEntry, int]:
+    """*entry* with its ``through`` at the period column's range, and the periods before its low end."""
+    if projection.clip is None:
+        return entry, 0
+    assert projection.window is not None
+    low, high = projection.clip
+    clipped = replace(entry, through_day=_earlier(entry.through_day, high))
+    return clipped, _before(clipped, projection.window, low, clipped.through_day)
 
 
 def _refuse_many_periods(entry: PeriodsEntry, grain: str, window: Tuple[int, int]) -> None:
@@ -449,7 +519,7 @@ def _per_period(layout_parts: Dict[str, Any], kinds: Tuple[_Kind, ...]) -> "np.n
 
 
 def _build(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
-    entry = _entry_of(projection)
+    entry, skipped = _clipped(_entry_of(projection), projection)
     assert projection.root is not None and projection.window is not None
     view = view_of(projection.history, chain, projection.root)
     _refuse_many_periods(entry, str(entry.grain), projection.window)
@@ -458,6 +528,7 @@ def _build(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
     days, begins, ends = period_grid(
         str(entry.grain), projection.window, entry.from_day, entry.through_day
     )
+    days, begins, ends = days[skipped:], begins[skipped:], ends[skipped:]
     first, last = _runs(entry.match, begins, ends, valid_from, valid_to)
     where = f"periods ({entry.emit})"
     declared = entry.kinds or (PeriodKind(),)

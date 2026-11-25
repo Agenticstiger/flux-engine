@@ -100,6 +100,8 @@ from flux_engine.stages.plan import (
     DATE_RANGES_PLAN_KEY,
     END_SHARE_PLAN_KEY,
     MAX_ROWS_PLAN_KEY,
+    RANGE_SETTERS_HELD,
+    RANGE_SETTERS_PLAN_KEY,
     REFERENCES_PLAN_KEY,
     SCALE_FLOORS_PLAN_KEY,
     SCALE_FLOORS_TRACKED,
@@ -123,6 +125,7 @@ __all__ = [
     "plan_date_ranges",
     "plan_scale_floors",
     "plan_max_rows",
+    "plan_range_setters",
     "plan_end_share",
     "plan_kernel",
     "require_plan_shortfalls",
@@ -197,6 +200,7 @@ def load_recorded_plan(layout: RunLayout) -> Dict[str, Any]:
     plan_date_ranges(document)
     plan_scale_floors(document)
     plan_max_rows(document)
+    plan_range_setters(document)
     require_plan_shortfalls(document)
     return document
 
@@ -274,6 +278,18 @@ def plan_scale_floors(plan_document: Mapping[str, Any]) -> bool:
     """
     return _marker_named(
         plan_document, SCALE_FLOORS_PLAN_KEY, SCALE_FLOORS_TRACKED, "checks no tracked level"
+    )
+
+
+def plan_range_setters(plan_document: Mapping[str, Any]) -> bool:
+    """Whether a recorded plan keeps its setters to the columns' ranges, or the refusal (``FLX-2102``).
+
+    A plan with ``rangeSetters`` says ``"held"`` (ADR 0024, the amendment of 2026-11-25): a history,
+    its projections and a periods entry keep to the contract's ranges on the columns they set. A
+    plan without it replays as it was made. Any other value is refused as ``historyEndShare`` is.
+    """
+    return _marker_named(
+        plan_document, RANGE_SETTERS_PLAN_KEY, RANGE_SETTERS_HELD, "holds no setter to a range"
     )
 
 
@@ -823,6 +839,7 @@ def _apply(
                     cut_ranges=plan_date_ranges(plan_document),
                     tracked_levels=plan_scale_floors(plan_document),
                     periodic_rows=plan_max_rows(plan_document),
+                    hold_ranges=plan_range_setters(plan_document),
                 ),
                 shard=shares,
                 references=plan_document.get(REFERENCES_PLAN_KEY),

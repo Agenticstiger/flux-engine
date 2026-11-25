@@ -318,6 +318,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the grain, the window, the estimate and the budget. `fluxsim plan --max-rows N` sets another budget, up to
   10,000,000,000; `plan.json` records it as `maxRows` and `apply --run-id` holds the run to it. A plan with the
   default budget keeps its bytes (ADR 0027, the amendment of 2026-11-25).
+- A contract's date range on a history's validity column, or on a column that copies a version's start or end (an
+  events entry's `at`, and its `date` without a `lag`), was only noted: the history wrote versions outside it and
+  `verify` failed the run. The range is now a bound every entity of the history shares, as a parent's lifetime is:
+  every start and closed end lies inside it, an open last version stays open, and rows no entity has room for are a
+  recorded shortfall. A range on a periods entry's period column keeps the periods whose first day lies in it.
+  Only a range that does not meet the window is refused (`FLX-3403`). Such a plan records `rangeSetters: "held"`;
+  a recorded plan without it replays as it was made (ADR 0024, the amendment of 2026-11-25).
 
 ## 0.11.1 - 2026-11-24
 

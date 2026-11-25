@@ -361,9 +361,35 @@ def _date_range_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
 MAX_ROWS_PLAN_KEY = "maxRows"
 
 
+#: ``plan.json``'s key for a history and a periods entry keeping to the contract's ranges on the
+#: columns they set (ADR 0024, the amendment of 2026-11-25): ``"held"``. Present only when a range cut
+#: a history's layout or a periods entry's periods, so every other plan keeps its bytes and its
+#: planDigest. A recorded plan without it replays as it was made
+#: (:func:`flux_engine.stages.apply.plan_range_setters`).
+RANGE_SETTERS_PLAN_KEY = "rangeSetters"
+RANGE_SETTERS_HELD = "held"
+
+
+def _range_setter_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``rangeSetters``, only for a plan in which a range cut a history or a periods entry."""
+    if not result.bounds.ranges:
+        return {}
+    outcomes: List[Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"]] = [
+        *result.emits,
+        *result.hidden_emits,
+    ]
+    plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
+    held = any(
+        ((pick := history_pick_of(plan)) is not None and pick.ranged is not None)
+        or (plan.projection is not None and plan.projection.clip is not None)
+        for plan in plans
+    )
+    return {RANGE_SETTERS_PLAN_KEY: RANGE_SETTERS_HELD} if held else {}
+
+
 def _max_rows_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     """``maxRows``, only for a plan whose periodic rows' budget is not the default."""
-    budget = result.periodic_rows
+    budget = result.bounds.budget
     if budget is None or budget == DEFAULT_PERIODIC_ROWS:
         return {}
     return {MAX_ROWS_PLAN_KEY: budget}
@@ -471,6 +497,7 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
         **_date_range_entries(result),
         **_scale_floor_entries(result),
         **_max_rows_entries(result),
+        **_range_setter_entries(result),
         **(
             {
                 REFERENCES_PLAN_KEY: {
@@ -833,7 +860,7 @@ def plan_with_result(
             replicate=replicate,
             common_draws_of=common_draws_of,
             most_rows=most_rows,
-            era=_pipeline.PlanEra(periodic_rows=_periodic_budget(max_rows)),
+            era=_pipeline.PlanEra(periodic_rows=_periodic_budget(max_rows), hold_ranges=True),
         )
         pinned, document, digested = planned_record(result)
     except FluxError as error:
