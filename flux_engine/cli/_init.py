@@ -459,6 +459,57 @@ def _grade_shortfalls(
     return grade.value, below
 
 
+def _privacy_overstated(profile: str) -> Optional[Dict[str, Any]]:
+    """The stated loss and what the profile's noise blocks spend, when the stated loss is the larger.
+
+    Both are values the profile states: the ``privacy`` block's total, and the sum of the ``noise``
+    blocks' shares (ADR 0019). Nothing here depends on the records. A total above what is spent is
+    accepted, a bound that is not tight, and this says by how much. ``None`` when the profile states
+    no loss, the reader refuses it, or the loss is spent in full.
+    """
+    from fractions import Fraction
+
+    from flux_engine.core.errors import FluxError
+    from flux_engine.evidence.grades import accounting_of
+    from flux_engine.seam.profile import load_profile
+
+    try:
+        account = accounting_of(load_profile(Path(profile)).document)
+    except (FluxError, OSError, ValueError):
+        return None
+    if account is None:
+        return None
+    try:
+        over = [
+            key
+            for key, stated in account.total.items()
+            if Fraction(account.spent.get(key, "0")) < Fraction(stated)
+        ]
+    except (ValueError, ZeroDivisionError):
+        return None
+    if not over:
+        return None
+    return {
+        "measure": account.measure,
+        "stated": {key: account.total[key] for key in over},
+        "spent": {key: account.spent.get(key, "0") for key in over},
+        "parts": account.parts,
+    }
+
+
+def _privacy_lines(overstated: Optional[Dict[str, Any]]) -> List[str]:
+    """One line saying the profile states more privacy loss than its noise blocks spend."""
+    if overstated is None:
+        return []
+    stated = ", ".join(f"{key} {value}" for key, value in overstated["stated"].items())
+    spent = ", ".join(f"{key} {value}" for key, value in overstated["spent"].items())
+    return [
+        f"privacy: the release's loss is the stated {stated}; the noisy statistics and cliques this "
+        f"profile still holds spend {spent} of it, and a statistic dropped from it after the "
+        "release spent its share all the same; the grade reads the statistics, not the stated loss"
+    ]
+
+
 def _parameters_line(counts: Dict[str, int]) -> str:
     """The register's shares, worded as ``plan`` words them."""
     declared = sum(counts.values())
@@ -784,16 +835,28 @@ def _rmdir_if_empty(directory: Path) -> None:
         pass
 
 
+def _unlink_if_there(path: Path) -> None:
+    """Remove the file *path* if it is there; best effort, like :func:`_rmdir_if_empty`.
+
+    A file that cannot be removed (a permission refused, say) is left as it is, so the refusal
+    that led to the cleanup is the one reported.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _remove_request(request: Path) -> None:
     """Remove a profile *request* ``init`` wrote, and the directory it went in when that is empty."""
-    request.unlink(missing_ok=True)
+    _unlink_if_there(request)
     _rmdir_if_empty(request.parent)
 
 
 def _remove(directory: Path, names: Tuple[str, ...], request: Optional[Path] = None) -> None:
     """Remove the files *names* ``init`` wrote into *directory* and its *request*, and the directory when it is empty."""
     for name in names:
-        (directory / name).unlink(missing_ok=True)
+        _unlink_if_there(directory / name)
     if request is not None:
         _remove_request(request)
     _rmdir_if_empty(directory)
@@ -867,7 +930,7 @@ def _written_each(root: Path, bundles: List[Any], asked: _AuthorRequest) -> Stag
     def undo() -> None:
         for path, was_there, files, request in written:
             for name in files:
-                (path / name).unlink(missing_ok=True)
+                _unlink_if_there(path / name)
             if not was_there:
                 shutil.rmtree(path, ignore_errors=True)
             if request is not None:
@@ -1065,6 +1128,9 @@ def _described(
             "projection's own checks hold it to, so its fidelity block lists no property"
         )
     grade, below = _grade_shortfalls(contract, profile, bundle)
+    overstated = _privacy_overstated(profile)
+    if overstated is not None:
+        lines += [""] + _privacy_lines(overstated)
     steps = [] if below else _next_run(directory, profile)
     if below:
         # `plan` refuses this bundle (FLX-4005), so no run command is offered for it.
@@ -1101,6 +1167,7 @@ def _described(
                     for short_expose, short_column, short_label, short_minimum in below
                 ],
             },
+            **({"privacyLoss": overstated} if overstated is not None else {}),
             "simulationId": bundle.simulation_id,
             "profileDigest": bundle.profile_digest,
             **({"historyFile": bundle.history_file} if bundle.history_file is not None else {}),
@@ -1118,6 +1185,12 @@ def _described(
             "ledger": {
                 "counts": bundle.ledger.counts(),
                 "statistics": [entry.as_document() for entry in bundle.ledger],
+                # What an owner can leave out: the register's list, an entry whose members are
+                # all unused named whole (the statistics above name each member on its own).
+                "unused": [
+                    {"pointer": entry.pointer, "definition": entry.definition, "reason": entry.note}
+                    for entry in bundle.ledger.unused_entries()
+                ],
                 "replacedBy": [
                     {"pointer": pointer, "definition": definition, "assumptions": count}
                     for pointer, definition, count in bundle.ledger.replacements

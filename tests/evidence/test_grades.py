@@ -169,6 +169,55 @@ def test_a_profile_with_no_account_is_p1_whatever_its_statistics() -> None:
     assert grade_profile(document, pinned=True).pattern is Pattern.P1
 
 
+def _exact_beside_a_block() -> Dict[str, Any]:
+    """The private profile with its noisy cliques gone and an exact row count in their place."""
+    document = _private()
+    for table in document["tables"].values():
+        table.pop("cliques")
+        table["rowCount"] = 9195
+    return document
+
+
+def test_exact_statistics_beside_a_privacy_block_grade_no_better_than_without_the_block() -> None:
+    with_block = _exact_beside_a_block()
+    without = copy.deepcopy(with_block)
+    without.pop("privacy")
+    blocked = grade_profile(with_block, pinned=True)
+    plain = grade_profile(without, pinned=True)
+    assert blocked.pattern is Pattern.P1 and plain.pattern is Pattern.P1
+    assert at_least(plain.pattern, blocked.pattern)
+    assert any("row count" in reason for reason in blocked.reasons)
+    # The reader accepts the block that nothing spends, and the grade says nothing spends it.
+    assert blocked.accounting is not None and blocked.accounting.parts == 0
+    assert any("spent by no noisy statistic or clique" in reason for reason in blocked.reasons)
+
+
+@pytest.mark.parametrize("rho", ["0.0001", "0.3", "1000000"])
+def test_no_profile_reaches_p3_because_a_privacy_block_is_present(rho: str) -> None:
+    # Whatever loss the block states, a profile with no noisy statistic or clique is not P3: the
+    # grade comes from the statistics, and the block alone is a statement nothing backs.
+    for statistics in ("none", "exact"):
+        document = _private()
+        for table in document["tables"].values():
+            table.pop("cliques")
+            if statistics == "exact":
+                table["rowCount"] = 9195
+        document["privacy"]["privacyLoss"] = {"rho": rho}
+        graded = grade_profile(document, pinned=True)
+        assert graded.pattern is Pattern.P1, statistics
+        assert graded.accounting is not None and graded.accounting.parts == 0
+
+
+def test_an_overstated_loss_over_noisy_statistics_does_not_change_the_grade() -> None:
+    # The grade follows the statistics: all noisy under an account is P3 whatever slack the total
+    # leaves, and one exact statistic is P1 whatever the total.
+    stated = _private()
+    stated["privacy"]["privacyLoss"] = {"rho": "100"}
+    assert grade_profile(stated, pinned=True).pattern is Pattern.P3
+    stated["tables"]["subscriber"]["rowCount"] = 9195
+    assert grade_profile(stated, pinned=True).pattern is Pattern.P1
+
+
 def test_the_section_states_the_p3_guarantee_as_the_profiles_and_in_nists_terms() -> None:
     text = render_privacy_section(RunGrade(grade_profile(_private(), pinned=True)))
     assert text.startswith("Run grade: **P3 (differentially private marginals)**.")

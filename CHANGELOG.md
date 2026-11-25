@@ -24,6 +24,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Added
 
+- `init --json` carries `ledger.unused`, the list an owner can leave out of the profile: an entry the profile reader
+  holds whole (a calendar entry with none of its histograms read, say) is named by its own pointer, so dropping
+  exactly that list leaves a profile the reader accepts. `ledger.statistics` still names each statistic on its own,
+  with its state; dropping every one it calls unused can leave an entry the reader refuses (`FLX-5036`).
+- `FLX-3125`, the refusal of a date or timestamp column that publishes one value the engine cannot yet write on every
+  row, when something the bundle writes needs its table.
 - `init --window START END` sets the run's time window yourself. The dates are `YYYY-MM-DD` (midnight UTC) or RFC 3339
   timestamps, with START before END, and the output names the window under "time window".
 - `init --history FILE` merges a declared history into the bundle: the file's histories, snapshots, events and
@@ -119,6 +125,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Changed
 
+- The engine reads a profile whose calendar entry holds none of its three histograms, as when a release step drops
+  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place: `init`
+  and `plan` accept it, and a citation into such an entry is still refused (`FLX-5036`). flux-stats' `parse_profile`
+  and `load_profile_text` take `allow_empty_calendar_entries`, off by default, which the engine sets.
+- A profile's `privacy` block may state more loss than its noisy statistics and cliques spend, including when none
+  remain; a stated loss is an upper bound, and a total below what they spend is still refused (`FLX-5036`). The grade
+  comes from the statistics alone, so a block that nothing spends earns no grade, and `init` notes the stated and
+  spent figures when they differ (`privacyLoss` under `--json`). ADR 0019 is amended.
 - `flux_engine.author.author_bundle` takes one `AuthorInputs` instead of separate arguments.
 - `flux_engine.author.replace` exports `ASSUMPTIONS_REQUEST_PATH` (`requests/assumptions.profile-request.yml`, inside
   the bundle directory) in place of `ASSUMPTIONS_REQUEST_SUFFIX`.
@@ -160,12 +174,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
   the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
   plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
-- The run's window now covers the whole range of every date column, the date range the contract declares, and the
-  bins the column is drawn from, so `init` no longer cuts a column at a window that other columns imply. A column's
-  bins are cut only at a window you pass with `--window`. A contract range that ends in the year 9999 says only that
-  the column holds a date and gives the window nothing: a run's periods step past the window's end, and a window that
-  ends in that year cannot be planned. A contract range that widens the window beyond every span the profile and the
-  bundle give (a loose range such as `between '1900-01-01' and '2100-12-31'`) is named under "time window", a gap at
+- The run's window now covers the whole range of every date column, the date range the contract declares, and the bins
+  the column is drawn from (those that carry weight), so `init` no longer cuts a column at a window that other columns
+  imply. A column's bins are cut only at a window you pass with `--window`. A contract range that ends in the year
+  9999, like a column whose every value is in that year (an open end of 9999-12-31 on every row), says only that the
+  column holds a date and gives the window nothing, nor need a window you pass hold it: a run's periods step past the
+  window's end, and a window that ends in that year cannot be planned. A window that a contract range widens beyond
+  every span the profile and the bundle give (a loose range such as `between '1900-01-01' and '2100-12-31'`), or that
+  comes only from a contract range because neither gives a span, is named under "time window", a gap at
   `/spec/timeBounds` that `--strict` refuses; a date column the profile publishes no order statistic for is drawn
   evenly across the whole window.
 - The parameter register counts the numbers under the namespace keys beside `emits` (`facts`, `links`, `counts`,
@@ -195,6 +211,44 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   versions, so it draws no column; `validate` and `plan` refused it with `FLX-5034`, and a key column with no
   statistics with `FLX-3403`. flux-stats' `parse_fidelity_block` takes `allow_no_columns`, which the engine sets for
   an emit a `snapshots` entry names. Every other emit keeps both refusals.
+- `init --window` no longer writes a register with two entries for one number (`FLX-3105`, "by the same pointer")
+  when the window cuts a date column whose weights rest on one assumption, such as a withheld minimum. The column's
+  one entry names both reasons.
+- A date or timestamp column whose profile publishes one value is drawn as exactly that value on every row, where it
+  was drawn within the day that starts there, so its rows took that day and the next. The register says every row
+  takes it. A DATE column whose one value is 9999-12-30 or 9999-12-31 (the end of every open version, say), or a
+  TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet. When a relationship, a
+  history or a projection needs its table, `init` refuses before it writes anything (`FLX-3125`), names the table and
+  the column, and says to write the open end as NULL, or to make the column a TIMESTAMP; before, it left the table out
+  and wrote a bundle the plan refused with `FLX-3403`. When nothing needs the table, it is left out, as before, and
+  its statistics are listed unused with the reason.
+- `init` no longer writes a bundle the plan refuses with `FLX-6204` when an enforced `within` date's parent has a
+  lifetime whose start declares no range: no widening of the date's range can meet the plan's check then, so the
+  entry is left out and its pair is listed unused, with the reason.
+- `init` no longer names the profile's file in the header of each document it writes, so the same contract and
+  profile give the same bytes, plan digest and `runId` wherever the profile is saved. Every bundle `init` writes from
+  now on differs by that header line, and so by its digests, from one it wrote before for the same inputs; one whose
+  unused list names a whole entry (see below) differs by that list too, and its register is format `1-4-0`. A bundle
+  already written keeps its own.
+- A refused `init` reports its refusal even when a file it wrote cannot be removed while it cleans up, rather than a
+  permission error.
+- `init` no longer turns a table's date pair into a lifetime or a `within` entry on a column the table's history sets
+  (its validity start, its validity end or its activation column). With `--history FILE` it refused with `FLX-6203`
+  ("has more than one source"), and a history the profile carries could be dropped, its statistics listed unused. The
+  pair is now listed unused, since the table's history sets the column, and the history is written. The same holds
+  for a column a history's `events` or `periods` entry sets (an event's date, op, type, image or carried columns, a
+  period's column, overrides or carried columns), and for a relationship whose foreign key such an entry sets, which
+  `plan` refused with `FLX-3403`: the pair is listed unused, naming the entry.
+- `init` no longer gives a parent a start-only lifetime from a relationship date pair that it lists unused: one whose
+  child date a key or a rule of the contract sets, or whose `within` entry it refuses (the child's date ends the
+  child's own lifetime, say). Dropping the listed pair now leaves the bundle as it is.
+- `init` lists a calendar entry, a date pair, an exposure or a history that it reads nothing of as one unused item,
+  at the entry's own pointer, and never lists a member the profile reader requires beside one that it reads. Dropping
+  exactly the listed statistics now leaves a profile the reader accepts (`FLX-5036` refused one before). A register
+  whose unused list names such an entry is format `1-4-0`. An `--allow` that names a member of an entry listed whole
+  no longer matches it: name the entry, or a pointer above it. One that names a required member beside one that is
+  read (a date pair's `order`, an exposure's counts) matches nothing now, since that member is no longer listed, and
+  `--strict` refuses it as stale: drop it.
 - A contract `dependency` beside a history `parent` is accepted when it holds by construction: its `to` columns are
   all foreign-key columns of the `parent` relationship and its `from` columns include the history's natural entity
   column. The parent layout gives every version of an entity one parent, so the dependency is true, draws nothing

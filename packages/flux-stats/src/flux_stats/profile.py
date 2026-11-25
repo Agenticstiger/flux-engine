@@ -546,7 +546,8 @@ class CalendarEntry:
     """How the known values of one timestamp column fall by month, day of week and hour of week.
 
     Each is an ungrouped ``levelHistogram/1`` over the levels of :data:`CALENDAR_LEVELS`, read in
-    UTC, or ``None`` when the entry does not hold it; at least one is held (format 1-3-0).
+    UTC, or ``None`` when the entry does not hold it; at least one is held (format 1-3-0), unless the
+    reader was told to accept an entry that holds none (:func:`parse_profile`).
     """
 
     column: str
@@ -827,7 +828,9 @@ def _read_int(text: str) -> int:
     return int(text)
 
 
-def load_profile_text(text: str) -> Tuple[Profile, Dict[str, Any]]:
+def load_profile_text(
+    text: str, *, allow_empty_calendar_entries: bool = False
+) -> Tuple[Profile, Dict[str, Any]]:
     """Read a profile from its JSON text: the profile, and the document it parsed from.
 
     A JSON float, ``NaN``, ``Infinity`` and a key named twice in one object
@@ -835,7 +838,7 @@ def load_profile_text(text: str) -> Tuple[Profile, Dict[str, Any]]:
     exact meaning, and so are an integer longer than any count and nesting
     deeper than the reader can follow. The document is returned beside the
     profile because its canonical digest (``jcs-document``) is what a
-    Simulation pins.
+    Simulation pins. *allow_empty_calendar_entries* is :func:`parse_profile`'s.
     """
     try:
         document = json.loads(
@@ -851,7 +854,10 @@ def load_profile_text(text: str) -> Tuple[Profile, Dict[str, Any]]:
         raise refuse("profile", "the document nests deeper than a profile does") from None
     if _nests_deeper_than(document, _MOST_DEPTH):
         raise refuse("profile", "the document nests deeper than a profile does")
-    return parse_profile(document), document
+    return (
+        parse_profile(document, allow_empty_calendar_entries=allow_empty_calendar_entries),
+        document,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1093,8 +1099,12 @@ class _Reader:
         accounting: Optional[Accounting] = None,
         from_1_3: bool = False,
         from_1_4: bool = False,
+        allow_empty_calendar_entries: bool = False,
     ) -> None:
         self.rules = rules
+        #: Whether a calendar entry that holds none of its three histograms is read, as an entry
+        #: that holds nothing, instead of refused (:func:`parse_profile`).
+        self.allow_empty_calendar_entries = allow_empty_calendar_entries
         #: Whether the document names format ``1-3-0``, the only one that holds a ``groupBy`` on
         #: a number column, a ``groupByLink`` or a ``per``.
         self.from_1_3 = from_1_3
@@ -1976,7 +1986,7 @@ class _Reader:
             if domains.get(column) != TIMESTAMP:
                 raise refuse(f"{at}.column", "names no timestamp column of this table")
             held = [key for key in CALENDAR_LEVELS if key in entry]
-            if not held:
+            if not held and not self.allow_empty_calendar_entries:
                 raise refuse(at, "a calendar entry holds at least one of its three histograms")
             read = {
                 key: self._calendar_histogram(entry[key], f"{at}.{key}", key, expose_id)
@@ -2824,8 +2834,15 @@ def _check_follows(accounting: Accounting, relationships: Sequence[RelationshipE
             )
 
 
-def parse_profile(document: Any) -> Profile:
-    """Read a parsed profile document whole, or refuse it (``FLX-5036``)."""
+def parse_profile(document: Any, *, allow_empty_calendar_entries: bool = False) -> Profile:
+    """Read a parsed profile document whole, or refuse it (``FLX-5036``).
+
+    A calendar entry holds at least one of its three histograms (PROFILE-SPEC section 5). With
+    *allow_empty_calendar_entries* an entry that holds none is read instead, kept in place as a
+    :class:`CalendarEntry` with every histogram ``None``, so the entries after it keep their
+    indices and pointers. A caller that sets it owns what an entry that holds nothing means; the
+    default is the strict reading.
+    """
     _require_nfc(document, "profile")
     raw = _mapping(
         document,
@@ -2860,6 +2877,7 @@ def parse_profile(document: Any) -> Profile:
         accounting=accounting,
         from_1_3=raw["_schemaURL"] in _FROM_1_3_0,
         from_1_4=raw["_schemaURL"] == SCHEMA_URL_1_4_0,
+        allow_empty_calendar_entries=allow_empty_calendar_entries,
     )
     if accounting is not None and accounting.follows:
         reader.require_1_4_0("follows", "profile.privacy.privacyUnit.follows")

@@ -378,11 +378,13 @@ statistics and in the cliques and, in format `1-4-0`, the `selection` and `domai
 and is compared with its total on its own. The reader refuses the document (`FLX-5036`) when:
 
 - a `noise` block, a clique or a `cliqueSelection` appears and there is no `privacy` block;
-- a `privacy` block appears and no statistic, clique or share spends any of it;
 - a part is not in the measure of the total (a `rho` under approximate DP, say);
 - the parts add up to more than the total.
 
-A sum below the total is accepted. The reader does not check that a mechanism of the stated kind
+A sum below the total is accepted, and so is a `privacy` block that no statistic, clique or share
+spends any of: a stated loss is an upper bound, and overstating it is the conservative side, while a
+total below what the parts spend is refused. The grade comes from the statistics and never from the
+block alone, so a block that nothing spends earns no grade (ADR 0020). The reader does not check that a mechanism of the stated kind
 and scale made the numbers: it reads numbers, not samplers.
 
 ### A unit that follows its child rows (format `1-4-0`)
@@ -682,7 +684,9 @@ of the profile's unit of privacy.
 **`calendar`** (format `1-3-0`) is a list of `{ "column", "month", "dayOfWeek", "hourOfWeek" }`, at
 most 1 024 of them and at most one per column. `column` is a `timestamp` column of the table (a
 DATE column is a `timestamp` here too, §7). Each of `month`, `dayOfWeek` and `hourOfWeek` is
-optional and at least one is present. Each is exactly one ungrouped `levelHistogram/1` of the
+optional and at least one is present; the engine reads an entry that holds none as one that holds
+nothing, kept in its place, and a citation into it is refused (`FLX-5036`). Each is exactly one
+ungrouped `levelHistogram/1` of the
 column's known values, read in UTC, over exactly these levels, written with leading zeros so that
 their code point order is their number's: `month` over `01` to `12`; `dayOfWeek` over `1` to `7`,
 the ISO 8601 day of the week with Monday `1`; `hourOfWeek` over `000` to `167`, the hour counted

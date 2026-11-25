@@ -88,6 +88,7 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | [FLX-3122](./FLX-3122.md) | a plan that declares a generator plugin must stage its rows |
 | [FLX-3123](./FLX-3123.md) | a generator plugin's run is committed from its stage, never generated again |
 | [FLX-3124](./FLX-3124.md) | a generator plugin could not be loaded |
+| [FLX-3125](./FLX-3125.md) | a date or timestamp column publishes one value the engine cannot yet write on every row |
 | [FLX-3201](./FLX-3201.md) | row carries a column the expose does not declare |
 | [FLX-3202](./FLX-3202.md) | row is missing a required column |
 | [FLX-3203](./FLX-3203.md) | positional row does not match the declared column count |

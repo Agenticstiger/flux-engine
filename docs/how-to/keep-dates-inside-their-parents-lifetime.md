@@ -200,9 +200,8 @@ created bundle from billing.fluid.yaml and billing.profile.json (4 files):
 ...
 profile: 40 statistics -- 37 used, 3 unused, 0 withheld
 unused (no number rests on these; the register lists them):
-  - /tables/customer/calendar/0/dayOfWeek (levelHistogram/1): rates shape only a date a within entry or a duration sets, and none of the bundle's does for this column
-  - /tables/customer/datePairs/1/statistics/0 (marginalHistogram/1): its order holds on 55% of the rows where both dates are known, below the bar of 90%
-  - /tables/customer/datePairs/1/order (levelHistogram/1): its order holds on 55% of the rows where both dates are known, below the bar of 90%
+  - /tables/customer/calendar/0: rates shape only a date a within entry or a duration sets, and none of the bundle's does for this column
+  - /tables/customer/datePairs/1: its order holds on 55% of the rows where both dates are known, below the bar of 90%
 ...
 next:
   fluxsim run bundle --profile billing.profile.json

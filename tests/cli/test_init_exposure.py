@@ -62,12 +62,13 @@ def test_an_exposure_over_a_lifetime_cut_to_its_parents_is_not_declared(written:
 
 
 def test_the_exposure_it_leaves_out_is_unused_with_the_numbers_of_the_trial(written: Path) -> None:
+    # Both counts leave with the exposure, so the register lists the entry once.
     reasons = [
         item["reason"]
         for item in _block(written)["unused"]
-        if item["statistic"]["pointer"].startswith("/relationships/1/exposure/0/")
+        if item["statistic"]["pointer"] == "/relationships/1/exposure/0"
     ]
-    assert len(reasons) == 2 and reasons[0] == reasons[1]
+    assert len(reasons) == 1
     assert (
         "the run cannot reproduce this exposure's rate under the declared lifetimes" in reasons[0]
     )
@@ -151,7 +152,7 @@ def test_a_bundle_over_the_trial_cap_leaves_out_the_exposure_its_trial_fails(
     reasons = [
         item["reason"]
         for item in block["unused"]
-        if item["statistic"]["pointer"].startswith("/relationships/1/exposure/0/")
+        if item["statistic"]["pointer"] == "/relationships/1/exposure/0"
     ]
     assert reasons
     assert "children per active day" in reasons[0]

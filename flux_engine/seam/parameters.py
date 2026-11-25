@@ -75,7 +75,9 @@ from flux_engine.core.errors import ErrorCode, FluxError, register
 from flux_engine.seam.coverage import printable
 from flux_stats import registry as _stats_registry
 from flux_stats.cliques import CLIQUE_DEFINITION, CLIQUE_DEFINITION_2
+from flux_stats.profile import CALENDAR_LEVELS
 from flux_stats.rank_correlation import RANK_IDENTIFIERS
+from flux_stats.spelling import refuse as _refuse_profile
 
 __all__ = [
     "DEFINITIONS_ADDED_1_4",
@@ -127,7 +129,12 @@ FLX_3113 = register(
     "that pointer in the profile it is handed. The pointer has to reach a statistic or a "
     "metric (or a part of one) whose `definition` is the one the entry names, or a "
     "table's `rowCount`, and nothing on the way may be withheld. A statistic listed in "
-    "extensions['com.agentics.flux/1'].unused is read the same way. A profile overlay "
+    "extensions['com.agentics.flux/1'].unused is read the same way, and may also name an "
+    "entry of the profile that holds statistics, whole, by the pointer of the entry and "
+    "with no `definition`: a calendar entry, a date pair, an exposure, a history, or one "
+    "tracked column of a history. An item that gives a `definition` at such a pointer is "
+    "refused, as is one that gives a `definition` at a table the profile publishes whole "
+    "under `references`, which is named by its pointer alone. A profile overlay "
     "adds two causes: a `profile` entry that cites a number the declared overlay changed, "
     "which names the overlay and has to say `source: overlay` with the overlay's name, "
     "and an `overlay` entry whose pointer reaches no statistic of the overlaid profile "
@@ -1135,13 +1142,25 @@ class ParameterRegister:
 
 
 def _adds_1_4(register: ParameterRegister) -> bool:
-    """Whether *register* counts a number at a position format 1-4-0 added, or cites a definition it added."""
+    """Whether *register* uses what format 1-4-0 added.
+
+    That is a number counted at a position the format added, a citation of a definition it added,
+    or an ``unused`` item that names a whole entry of the profile (a calendar entry, a date pair,
+    an exposure, a history or a tracked column of one).
+    """
     citations = [entry.citation for entry in register.entries]
     citations.extend(entry.replaced_by for entry in register.entries)
     citations.extend(item.citation for item in register.unused or ())
-    return any(registered.number.added_1_4 for registered in register.numbers) or any(
-        citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
-        for citation in citations
+    return (
+        any(registered.number.added_1_4 for registered in register.numbers)
+        or any(
+            citation is not None and citation.definition in DEFINITIONS_ADDED_1_4
+            for citation in citations
+        )
+        or any(
+            item.citation.definition is None and _names_whole_entry(item.citation.tokens)
+            for item in register.unused or ()
+        )
     )
 
 
@@ -1619,6 +1638,33 @@ def _is_reference_entry(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> 
     )
 
 
+#: The entries of a format 1-3-0 profile the reader refuses without some of their statistics, by the
+#: shape of the pointer at one: a ``None`` is any one token. A list of unused statistics may name
+#: one whole, since leaving out a member of it alone leaves a document the reader refuses.
+_WHOLE_ENTRIES: Tuple[Tuple[Optional[str], ...], ...] = (
+    ("tables", None, "calendar", None),
+    ("tables", None, "datePairs", None),
+    ("tables", None, "history"),
+    ("tables", None, "history", "columns", None),
+    ("relationships", None, "dates", None),
+    ("relationships", None, "exposure", None),
+)
+
+
+def _names_whole_entry(tokens: Tuple[str, ...]) -> bool:
+    """Whether *tokens* have the shape of a pointer at an entry of :data:`_WHOLE_ENTRIES`."""
+    return any(
+        len(tokens) == len(shape)
+        and all(want is None or want == token for want, token in zip(shape, tokens, strict=True))
+        for shape in _WHOLE_ENTRIES
+    )
+
+
+def _is_whole_entry(profile: Mapping[str, Any], tokens: Tuple[str, ...]) -> bool:
+    """Whether *tokens* name an entry of format 1-3-0 that holds statistics, as a whole."""
+    return _names_whole_entry(tokens) and isinstance(_resolve(profile, tokens), Mapping)
+
+
 def _published(chain: Sequence[Tuple[Any, Tuple[str, ...]]]) -> bool:
     """Whether the profile published what the chain from a statistic to the target reaches.
 
@@ -1693,8 +1739,10 @@ def _check_entry_citation(
             raise FluxError(
                 FLX_3113, f"{at} cites an overlay, and no overlaid profile was handed to read it"
             )
+        _refuse_empty_calendar_citation(entry.citation, overlay[1], at)
         _check_citation(entry.citation, overlay[1], at)
         return
+    _refuse_empty_calendar_citation(entry.citation, profile, at)
     _check_citation(entry.citation, profile, at)
     if overlay is not None and changed_by_overlay(profile, overlay[1], entry.citation.tokens):
         raise FluxError(
@@ -1751,10 +1799,60 @@ def check_profile_citations(
     # unused are the ones that profile publishes: a statistic the overlay restated is one of them.
     unused_in = overlay[1] if overlay is not None else profile
     for item in register_.unused or ():
+        if _names_what_an_empty_entry_dropped(item.citation, unused_in):
+            continue  # nothing reads an entry that holds nothing, so listing it as unused is true
         _check_citation(
             item.citation,
             unused_in,
             f"{item.label or f'{where}: unused[{item.index}]'}.statistic",
+            whole_entries=True,
+        )
+
+
+def _in_empty_calendar_entry(citation: Citation, profile: Mapping[str, Any]) -> Optional[str]:
+    """The pointer of the calendar entry *citation* reaches into when that entry holds nothing.
+
+    A calendar entry of a table is ``/tables/<id>/calendar/<index>``. The engine reads one that
+    holds none of its three histograms as an entry that holds nothing (the profile reader's
+    ``allow_empty_calendar_entries``), so a pointer at the entry or anything under it reaches no
+    statistic. ``None`` when the pointer is not under a calendar entry, or the entry holds one.
+    """
+    tokens = citation.tokens
+    if len(tokens) < 4 or tokens[0] != "tables" or tokens[2] != "calendar":
+        return None
+    try:
+        entry = _resolve(profile, tokens[:4])
+    except LookupError:
+        return None
+    if not isinstance(entry, Mapping) or any(nfc(str(key)) in CALENDAR_LEVELS for key in entry):
+        return None
+    return render_pointer(tokens[:4])
+
+
+def _names_what_an_empty_entry_dropped(citation: Citation, profile: Mapping[str, Any]) -> bool:
+    """Whether *citation* names a calendar entry that holds nothing whole, or one of its histograms."""
+    tokens = citation.tokens
+    return _in_empty_calendar_entry(citation, profile) is not None and (
+        len(tokens) == 4 or tokens[4] in CALENDAR_LEVELS
+    )
+
+
+def _refuse_empty_calendar_citation(
+    citation: Citation, profile: Mapping[str, Any], at: str
+) -> None:
+    """Refuse (``FLX-5036``) a citation into a calendar entry that holds none of its histograms.
+
+    A number cited there rests on a histogram the profile does not publish, and the calendar rule
+    (a calendar entry holds at least one of its three histograms) is what an entry read as holding
+    nothing leaves unmet, so a citation into it is refused by that rule, naming the entry.
+    """
+    entry = _in_empty_calendar_entry(citation, profile)
+    if entry is not None:
+        raise _refuse_profile(
+            f"{at}.pointer",
+            f"cites calendar entry {printable(entry)}, which holds none of its three histograms; "
+            "a calendar entry holds at least one of month, dayOfWeek and hourOfWeek, and the "
+            "engine reads one with none as holding nothing, so nothing can be cited under it",
         )
 
 
@@ -1797,9 +1895,15 @@ def check_contract_citations(
             ) from None
 
 
-def _check_citation(citation: Citation, profile: Mapping[str, Any], at: str) -> None:
-    """Refuse (``FLX-3113``) a citation, named *at*, that the pinned *profile* does not publish."""
-    landing = _landing(citation, profile, at)
+def _check_citation(
+    citation: Citation, profile: Mapping[str, Any], at: str, *, whole_entries: bool = False
+) -> None:
+    """Refuse (``FLX-3113``) a citation, named *at*, that the pinned *profile* does not publish.
+
+    A citation of an entry that holds statistics (a calendar entry, a date pair, an exposure, a
+    history) is read only with *whole_entries*, which only a statistic listed as unused has.
+    """
+    landing = _landing(citation, profile, at, whole_entries=whole_entries)
     if landing is None:
         return
     found, chain = landing
@@ -1827,7 +1931,7 @@ def _check_citation(citation: Citation, profile: Mapping[str, Any], at: str) -> 
 
 
 def _landing(
-    citation: Citation, profile: Mapping[str, Any], at: str
+    citation: Citation, profile: Mapping[str, Any], at: str, *, whole_entries: bool = False
 ) -> Optional[Tuple[Optional[str], List[Tuple[Any, Tuple[str, ...]]]]]:
     """Where *citation* lands: :func:`_cited_statistic`'s answer, or ``None`` for a ``rowCount``.
 
@@ -1847,6 +1951,14 @@ def _landing(
                 raise FluxError(
                     FLX_3113,
                     f"{at} is a table published whole under references, which has no "
+                    "definition; drop 'definition'",
+                )
+            return None
+        if whole_entries and _is_whole_entry(profile, citation.tokens):
+            if citation.definition is not None:
+                raise FluxError(
+                    FLX_3113,
+                    f"{at} is an entry of the profile that holds statistics, which has no "
                     "definition; drop 'definition'",
                 )
             return None

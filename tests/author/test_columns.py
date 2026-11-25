@@ -302,6 +302,81 @@ def test_a_timestamp_range_is_rfc3339_and_spans_the_run() -> None:
     assert plan.time_span == (1782864000000, 1790812799000)
 
 
+def _one_day(day: str) -> Dict[str, Any]:
+    """The entry of a date column whose profile publishes *day* as its min and max and nothing else."""
+    from flux_engine.core.clock import parse_rfc3339_ms
+
+    milliseconds = str(parse_rfc3339_ms(f"{day}T00:00:00Z"))
+    return {
+        "domain": "timestamp",
+        "metrics": {"min": _metric("min/1", milliseconds), "max": _metric("max/1", milliseconds)},
+    }
+
+
+@pytest.mark.parametrize(
+    ("declared", "day", "bins"),
+    [
+        ("date", "2025-10-01", ["2025-10-01", "2025-10-02", "2025-10-03"]),
+        (
+            "timestamp",
+            "2025-10-01",
+            ["2025-10-01T00:00:00.000Z", "2025-10-01T00:00:00.001Z", "2025-10-01T00:00:00.002Z"],
+        ),
+        ("date", "9999-12-29", ["9999-12-29", "9999-12-30", "9999-12-31"]),
+        (
+            "timestamp",
+            "9999-12-31",
+            ["9999-12-31T00:00:00.000Z", "9999-12-31T00:00:00.001Z", "9999-12-31T00:00:00.002Z"],
+        ),
+    ],
+)
+def test_one_published_day_is_drawn_as_that_value_on_every_row(
+    declared: str, day: str, bins: List[str]
+) -> None:
+    # A date and a timestamp take no levels: the value is a bin of one grid step, closed by a
+    # second step that carries no weight, so every row draws the first edge and only it.
+    plan = _plan(declared, _one_day(day))
+    assert plan.declaration["bins"] == bins
+    assert plan.declaration["binWeights"] == ["1", "0"]
+    assert any("every row takes it" in sentence for sentence in plan.assumptions)
+    assert plan.how == "one value on every row, the one the profile publishes"
+    assert _sources(plan)[("bins",)] is Source.ASSUMPTION
+    assert _sources(plan)[("binWeights",)] is Source.ASSUMPTION
+
+
+@pytest.mark.parametrize(
+    ("declared", "value", "named"),
+    [
+        ("date", "9999-12-31T00:00:00Z", "a DATE of exactly 9999-12-31"),
+        ("date", "9999-12-30T00:00:00Z", "a DATE of exactly 9999-12-30"),
+        ("timestamp", "9999-12-31T23:59:59.999Z", "a TIMESTAMP of 9999-12-31T23:59:59.999Z"),
+        ("timestamp", "9999-12-31T23:59:59.998Z", "a TIMESTAMP of 9999-12-31T23:59:59.998Z"),
+    ],
+)
+def test_a_value_too_near_the_last_the_column_holds_is_refused(
+    declared: str, value: str, named: str
+) -> None:
+    # The value, a step and a second step must all be spelled. A sentinel open end such as
+    # 9999-12-31 cannot be, so the column cannot be drawn exactly. Its plan says so, naming the
+    # table and the column: the bundle then leaves the table out, or refuses the whole init when
+    # something it writes needs the table (tests/author/test_init_open_end.py).
+    from flux_engine.author.columns import UnspellableOneValue
+    from flux_engine.core.clock import parse_rfc3339_ms
+
+    milliseconds = str(parse_rfc3339_ms(value))
+    entry = {
+        "domain": "timestamp",
+        "metrics": {"min": _metric("min/1", milliseconds), "max": _metric("max/1", milliseconds)},
+    }
+    with pytest.raises(UnspellableOneValue) as raised:
+        _plan(declared, entry)
+    message = str(raised.value)
+    assert message.startswith("orders.c publishes one value")
+    assert named in message
+    assert "on every row" in message
+    assert "write its open end as NULL" in message
+
+
 def test_an_integer_key_is_an_assumed_span_the_check_does_not_read() -> None:
     plan = _plan("int", {"domain": "number", "metrics": {}}, key=True, rows=50)
     assert plan.declaration["bins"] == ["1", "50"]

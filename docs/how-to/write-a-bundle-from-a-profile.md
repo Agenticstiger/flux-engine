@@ -216,7 +216,12 @@ bundle rests on it, a rule read it, a property is scored against it, or the bund
 checked against it), unused, or withheld (the profile published no value). Each unused
 one is named with the reason no rule reads it, and the Simulation lists them under
 `unused` beside the register: `plan`, `verify` and `ship` count them, and `ship` names
-each one under "What Was Not Proven" in `EVIDENCE.md`.
+each one under "What Was Not Proven" in `EVIDENCE.md`. In `--json`, `ledger.statistics` names
+each statistic on its own, with its state, and `ledger.unused` is the Simulation's list: what an
+owner can leave out of the profile. Where the profile reader needs one of an entry's statistics
+(a calendar entry holds at least one of its three histograms), `ledger.unused` names the whole
+entry when none of it is read, so a profile with exactly those pointers dropped is one the reader
+accepts. Drop that list, not every statistic marked unused.
 
 `--strict` turns the ledger into a gate. It writes nothing, and exits 1, when a statistic
 is unused or an assumption stands in for something the profile

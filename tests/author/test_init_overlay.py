@@ -54,12 +54,13 @@ patch:
 
 #: ``init`` without ``--overlay`` writes these bytes for the orders contract and profile: the
 #: simulation differs from what it was before by the ``replacedBy`` of each assumption, and by the
-#: ``amount`` histogram property, which the profile has no statistic to score (it is left out).
+#: ``amount`` histogram property, which the profile has no statistic to score (it is left out), and
+#: each document by its header, which no longer names the profile's file.
 UNCHANGED = {
     "orders.fluid.yaml": "65cf48e26642e0f7b0664ad134157292c2a3c20226214c95d895a25f9fdb8be2",
-    "persona.flux.yml": "5c3d197e5e2eef3ddbf27d04598d8d5b8d06046a92e6b291607a4843f65a7fe9",
-    "simulation.flux.yml": "86d720467a1f2fd68b00074626dcdaaf29fd105c90ae9bb2da28ccf02e6d0f08",
-    "world.flux.yml": "11ab31f09ec872c9efe5e253069797d47fe65578f7419477c4e00911f667efde",
+    "persona.flux.yml": "df39c8a70a44a947445827a6c844014636971aec1e4877a1516af42b1391662b",
+    "simulation.flux.yml": "9131587b411f026de3a944a90fe855e2cb5ee10be8b33ca6c0db0fca7fcfe492",
+    "world.flux.yml": "08b6c2dda4defc044dbd29cc08a42eea427f3c0a7eaeff5f1b827311a616b205",
 }
 
 
