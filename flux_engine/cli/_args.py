@@ -377,7 +377,7 @@ def _add_sink(parser: argparse.ArgumentParser, *, when: str) -> None:
             f"also write every stream to a sink, {when}: "
             "parquet:DIR or arrow-ipc:DIR (a directory, or an s3://, gs://, az:// or abfs:// "
             "prefix), adbc:DRIVER, iceberg:CATALOG/NAMESPACE or delta:DIR (a directory or an "
-            "object store URL) (`fluxsim plugins` lists them)"
+            "object store URL) or kafka:HOST:PORT[,HOST:PORT...] (`fluxsim plugins` lists them)"
         ),
     )
     parser.add_argument(

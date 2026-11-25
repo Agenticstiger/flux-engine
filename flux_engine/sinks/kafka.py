@@ -154,6 +154,9 @@ _AGE_EVERY = 1024
 #: The share of ``transaction-timeout`` an unpaced stream's single transaction may use up.
 _TRANSACTION_SHARE = 0.9
 
+#: The longest ``transaction-timeout`` the producer takes: an int32 of milliseconds.
+MAX_TRANSACTION_TIMEOUT = 2147483
+SCRAM_MECHANISMS: Tuple[str, ...] = ("SCRAM-SHA-256", "SCRAM-SHA-512")
 SECURITY_PROTOCOLS: Tuple[str, ...] = ("PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL")
 SASL_MECHANISMS: Tuple[str, ...] = ("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512")
 VALUE_FORMATS: Tuple[str, ...] = ("avro", "json")
@@ -421,6 +424,12 @@ class KafkaSettings:
                 "a credential goes only over TLS: use security-protocol SASL_SSL, or point the "
                 "target at this machine",
             )
+        if sasl and protocol == "SASL_PLAINTEXT" and (mechanism or "PLAIN") not in SCRAM_MECHANISMS:
+            raise FluxError(
+                FLX_3504,
+                "PLAIN sends the password itself, so over SASL_PLAINTEXT use "
+                "sasl-mechanism=SCRAM-SHA-256 or SCRAM-SHA-512, or security-protocol=SASL_SSL",
+            )
         if mechanism is not None and not sasl:
             raise FluxError(FLX_3504, "the option sasl-mechanism needs the sasl-*-env options")
         if mechanism is not None and mechanism not in SASL_MECHANISMS:
@@ -433,6 +442,12 @@ class KafkaSettings:
         pace = parse_pace(text_option(fixed, "pace"))
         commit_every = _seconds(fixed, "commit-every", 1.0) if "commit-every" in fixed else None
         transaction_timeout = _seconds(fixed, "transaction-timeout", 900.0)
+        if transaction_timeout > MAX_TRANSACTION_TIMEOUT:
+            raise FluxError(
+                FLX_3504,
+                f"the option transaction-timeout is at most {MAX_TRANSACTION_TIMEOUT} seconds "
+                "(2147483647 ms, the producer's limit)",
+            )
         interval = commit_every if commit_every is not None else (1.0 if pace.paced else None)
         if interval is not None and interval > transaction_timeout / 3:
             raise FluxError(
@@ -1030,7 +1045,13 @@ class KafkaSink:
             value = [shape.subject.value_format.lower(), shape.subject.subject]
         else:
             value = [settings.value_format, f"{shape.topic}-value"]
-        document = {"key": list(shape.key_columns), "keyFormat": shape.key_format, "value": value}
+        document = {
+            "key": list(shape.key_columns),
+            "keyFormat": shape.key_format,
+            "value": value,
+            "timestamp": [shape.timestamp_column, shape.timestamp_default],
+            "pinnedVersion": shape.subject.version if shape.subject is not None else None,
+        }
         return sha256_hex(canonical_bytes(document))[:16]
 
     # -- the receipt -------------------------------------------------------------

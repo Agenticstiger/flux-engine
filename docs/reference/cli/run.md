@@ -50,7 +50,7 @@ fluxsim run ./bundle --sink adbc:duckdb --sink-opt uri=./sim.duckdb
 | `--verify` |  | run `fluxsim verify` on the applied run |
 | `--ship` |  | run `fluxsim ship` on the applied run; requires -o |
 | `-o, --out-dir` | `OUT_DIR` | directory the evidence archive and its statements are written to (required with --ship) |
-| `--sink` | `NAME:TARGET` | also write every stream to a sink, after verify and before ship: parquet:DIR or arrow-ipc:DIR (a directory, or an s3://, gs://, az:// or abfs:// prefix), adbc:DRIVER, iceberg:CATALOG/NAMESPACE or delta:DIR (a directory or an object store URL) (`fluxsim plugins` lists them) |
+| `--sink` | `NAME:TARGET` | also write every stream to a sink, after verify and before ship: parquet:DIR or arrow-ipc:DIR (a directory, or an s3://, gs://, az:// or abfs:// prefix), adbc:DRIVER, iceberg:CATALOG/NAMESPACE or delta:DIR (a directory or an object store URL) or kafka:HOST:PORT[,HOST:PORT...] (`fluxsim plugins` lists them) |
 | `--sink-opt` | `KEY=VALUE` | a --sink setting, repeatable, for example row-group-size=100000 or uri=sim.duckdb; never a password: pass uri-env=VAR instead |
 | `--committed-slice` | `EXPOSE_ID=file://PATH` | the committed real-data slice one expose's fidelity check is measured against, as EXPOSE_ID=file://PATH; repeatable, once per expose; the file holds one JSON object per line, keyed by the expose's contract column names (e.g. {"subscriber_id": "s-1", "amount": "12.50"}) |
 | `--update-golden` |  | record this run as the golden baseline (requires --reason) |

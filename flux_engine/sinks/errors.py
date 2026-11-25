@@ -236,8 +236,8 @@ FLX_3513: ErrorCode = register(
     "with no event time (pass --sink-opt timestamp.EXPOSE=COLUMN), an events entry without an "
     "op column, a key of several columns with key-format=string (use key-format=json), a null "
     "key value or a null event time in a row, an op that is not c, u or d, two streams on one "
-    "topic, an events column named like a field of the envelope's source, and a topic name "
-    "Kafka does not allow. The message names the expose, the column, the row's position and the "
+    "topic, a topic that a contract binding of another expose names, an events column named "
+    "like a field of the envelope's source, and a topic name Kafka does not allow. The message names the expose, the column, the row's position and the "
     "option that would fix it, never a value of the data. Nothing was written.",
 )
 
@@ -247,10 +247,14 @@ FLX_3514: ErrorCode = register(
     "The record timestamp is the event's time, and the sink never moves a record's bytes to fit "
     "a topic. A topic whose message.timestamp.type is LogAppendTime would replace event time "
     "with the time of the write, a snapshot's topic must be compacted, and a timestamp outside "
-    "the topic's message.timestamp.before.max.ms or after.max.ms, or below zero, is refused by "
-    "the brokers. The message names the topic and the limit. Configure the topic for the "
-    "backfill (CreateTime, compaction, wider timestamp limits), choose another topic with "
-    "--sink-opt topic.EXPOSE=NAME, or run a window nearer the present.",
+    "the topic's message.timestamp.before.max.ms or after.max.ms, or at or below zero (the brokers "
+    "refuse a negative timestamp and a producer reads 0 as the current time), is refused. An "
+    "unpaced stream without commit-every is one transaction, and one that cannot finish within "
+    "transaction-timeout is aborted. The message names the topic and the limit. Configure the "
+    "topic for the backfill (CreateTime, compaction, wider timestamp limits), choose another "
+    "topic with --sink-opt topic.EXPOSE=NAME, run a window nearer the present, or for a stream "
+    "that is too long for one transaction raise transaction-timeout (and the brokers' "
+    "transaction.max.timeout.ms) or pass commit-every=SECONDS to commit it as it goes.",
 )
 
 FLX_3515: ErrorCode = register(
@@ -259,8 +263,9 @@ FLX_3515: ErrorCode = register(
     "A stream whose contract names a registry subject is written against that subject, and the "
     "sink never registers a schema under it. That needs --sink-opt registry=URL, an Avro or "
     "JSON subject (a Protobuf subject and a Glue registry are not supported in this version), "
-    "a column for every field of the subject, a field for every column, and a value each "
-    "field's type holds exactly. The message names the subject, the field or the column, never "
+    "a column for every field of the subject, a field for every column, a value each field's "
+    "type holds exactly (a decimal within its precision and scale, an Avro int or long within "
+    "its range), and a derived <topic>-value subject that no contract binding names. The message names the subject, the field or the column, never "
     "a value. Name the registry, change the contract's subject or its columns to agree, or "
     "write the stream without a registry subject. Nothing was written.",
 )

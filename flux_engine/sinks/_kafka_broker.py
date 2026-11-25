@@ -467,8 +467,9 @@ class ConfluentBroker:
         }
 
     def close(self) -> None:
-        """Drop the admin client; the next call opens a new one."""
+        """Drop the admin client; the next call opens a new one and checks the brokers again."""
         self._admin = None
+        self._brokers_checked = False
 
 
 class _ConfluentTxn:

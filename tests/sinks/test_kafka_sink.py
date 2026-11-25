@@ -202,6 +202,7 @@ REFUSED: Sequence[Any] = [
     (BOOTSTRAP, {"audience": "internal", "commit-every": "301"}, "transaction-timeout"),
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "0"}, "transaction-timeout"),
     (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "abc"}, "transaction-timeout"),
+    (BOOTSTRAP, {"audience": "internal", "transaction-timeout": "2147484"}, "2147483"),
     (
         BOOTSTRAP,
         {"audience": "internal", "pace": "x2", "transaction-timeout": "2"},
@@ -307,6 +308,36 @@ def test_registry_urls_are_checked_one_by_one_and_kept_as_a_list() -> None:
     assert parsed.registry == "http://127.0.0.1:8081,http://localhost:8082"
 
 
+@pytest.mark.parametrize("extra", [{"sasl-mechanism": "PLAIN"}, {}])
+def test_plain_over_sasl_plaintext_is_refused_even_on_this_machine(extra: Dict[str, str]) -> None:
+    with pytest.raises(FluxError) as caught:
+        KafkaSettings.parse(
+            "localhost:9092",
+            {
+                "audience": "internal",
+                "sasl-username-env": "U",
+                "sasl-password-env": "P",
+                "security-protocol": "SASL_PLAINTEXT",
+                **extra,
+            },
+        )
+    assert caught.value.code.code == "FLX-3504"
+    assert "SCRAM-SHA-256" in str(caught.value) and "SASL_SSL" in str(caught.value)
+
+
+def test_plain_over_sasl_ssl_is_accepted() -> None:
+    parsed = KafkaSettings.parse(
+        "broker.example.com:9093",
+        {
+            "audience": "internal",
+            "sasl-username-env": "U",
+            "sasl-password-env": "P",
+            "sasl-mechanism": "PLAIN",
+        },
+    )
+    assert parsed.security_protocol == "SASL_SSL" and parsed.sasl_mechanism == "PLAIN"
+
+
 def test_a_credential_on_this_machine_may_travel_without_tls() -> None:
     parsed = KafkaSettings.parse(
         "localhost:9092",
@@ -315,11 +346,12 @@ def test_a_credential_on_this_machine_may_travel_without_tls() -> None:
             "sasl-username-env": "U",
             "sasl-password-env": "P",
             "security-protocol": "SASL_PLAINTEXT",
+            "sasl-mechanism": "SCRAM-SHA-256",
             "registry": "http://127.0.0.1:8081",
             "registry-auth-env": "R",
         },
     )
-    assert parsed.security_protocol == "SASL_PLAINTEXT" and parsed.sasl_mechanism == "PLAIN"
+    assert parsed.security_protocol == "SASL_PLAINTEXT" and parsed.sasl_mechanism == "SCRAM-SHA-256"
 
 
 @pytest.mark.parametrize(
@@ -354,6 +386,7 @@ def test_the_factory_reads_no_environment_variable_and_contacts_nothing(
             "sasl-username-env": "FLUX_TEST_KAFKA_USER",
             "sasl-password-env": "FLUX_TEST_KAFKA_PASS",
             "security-protocol": "SASL_PLAINTEXT",
+            "sasl-mechanism": "SCRAM-SHA-256",
         },
     )
     assert built.settings.sasl_username_env == "FLUX_TEST_KAFKA_USER"
@@ -973,6 +1006,7 @@ def test_the_receipt_says_what_was_written_and_holds_no_credential(
         "sasl-username-env": "FLUX_TEST_KAFKA_USER",
         "sasl-password-env": "FLUX_TEST_KAFKA_PASS",
         "security-protocol": "SASL_PLAINTEXT",
+        "sasl-mechanism": "SCRAM-SHA-256",
     }
     receipts = deliver(kept, broker, options)
     change = next(r for r in receipts if r.expose_id == "device_change")
@@ -1004,6 +1038,7 @@ def test_a_missing_credential_variable_is_named_and_nothing_is_contacted(
                 "sasl-username-env": "FLUX_TEST_KAFKA_MISSING",
                 "sasl-password-env": "FLUX_TEST_KAFKA_PASS",
                 "security-protocol": "SASL_PLAINTEXT",
+                "sasl-mechanism": "SCRAM-SHA-256",
             },
         )
     assert caught.value.code.code == "FLX-3504"
@@ -1082,6 +1117,7 @@ def test_the_registry_scrubs_a_delivery_error_of_credentials_and_not_of_plain_op
             "sasl-username-env": "FLUX_TEST_KAFKA_USER",
             "sasl-password-env": "FLUX_TEST_KAFKA_PASS",
             "security-protocol": "SASL_PLAINTEXT",
+            "sasl-mechanism": "SCRAM-SHA-256",
         },
     )
     monkeypatch.setenv("FLUX_TEST_KAFKA_USER", "svc-account-name")
@@ -1322,6 +1358,15 @@ def test_a_stream_delivered_with_other_key_settings_is_refused(kept: Kept) -> No
     deliver(kept, broker)
 
 
+def test_a_stream_delivered_with_another_event_time_column_is_refused(kept: Kept) -> None:
+    broker = FakeBroker()
+    deliver(kept, broker)
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, broker, {"timestamp.device_change": "changed_at"})
+    assert caught.value.code.code == "FLX-3504"
+    assert "other key or value settings" in str(caught.value)
+
+
 def test_a_sink_that_fails_to_open_lets_go_of_its_producer_and_clients(kept: Kept) -> None:
     broker = FakeBroker()
     deliver(kept, broker)
@@ -1461,6 +1506,7 @@ def test_credentials_in_the_clear_are_refused_when_a_broker_is_not_on_this_machi
         "sasl-username-env": "U",
         "sasl-password-env": "P",
         "security-protocol": "SASL_PLAINTEXT",
+        "sasl-mechanism": "SCRAM-SHA-256",
     }
     settings = KafkaSettings.parse("localhost:9092", {**INTERNAL, **sasl})
     assert settings.client().loopback_only
@@ -1475,6 +1521,26 @@ def test_credentials_in_the_clear_are_refused_when_a_broker_is_not_on_this_machi
     local = _Admin(hosts=("127.0.0.1", "localhost"))
     ok = _adapter(monkeypatch, local, sasl | {"security-protocol": "SASL_PLAINTEXT"})
     assert ok.describe("t") is not None
+
+
+def test_every_stream_checks_the_advertised_brokers_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sasl = {
+        "sasl-username-env": "U",
+        "sasl-password-env": "P",
+        "security-protocol": "SASL_PLAINTEXT",
+        "sasl-mechanism": "SCRAM-SHA-256",
+    }
+    admin = _Admin(hosts=("127.0.0.1",))
+    broker = _adapter(monkeypatch, admin, sasl)
+    broker.describe("t")
+    admin.hosts = ("127.0.0.1", "kafka-2.internal.example")
+    broker.describe("t")  # the same stream's admin client is not read again
+    broker.close()
+    with pytest.raises(FluxError) as caught:
+        broker.describe("t")  # the next stream's is
+    assert caught.value.code.code == "FLX-3504"
 
 
 def test_a_leader_that_is_not_yet_elected_is_waited_out(monkeypatch: pytest.MonkeyPatch) -> None:

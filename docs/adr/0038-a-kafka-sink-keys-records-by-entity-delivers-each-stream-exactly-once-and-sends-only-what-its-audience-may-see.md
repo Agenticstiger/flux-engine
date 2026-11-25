@@ -206,8 +206,9 @@ and a partial one resumes after its last committed record. A read-committed cons
 failure, a forced abort and a second delivery of the same run.
 
 The progress also records a fingerprint (16 hex digits of a digest) of the settings that decide a record's bytes
-beside its row: the key columns and the key format, and the value form (plain JSON, or the registry's value format and
-subject, never the schema id). A stream found complete or partial under another fingerprint is refused with
+beside its row: the key columns and the key format, the event-time column and its default, and the value form
+(plain JSON, or the registry's value format, subject and a contract subject's pinned version, never the schema id).
+A stream found complete or partial under another fingerprint is refused with
 `FLX-3504`, since resuming or skipping it would mix two shapes in one topic: deliver it to another topic
 (`topic-prefix` or `topic.EXPOSE`), or delete the topic and the consumer group.
 
@@ -244,13 +245,15 @@ environment variables `sasl-username-env` and `sasl-password-env` name, with `se
 `sasl-mechanism` (`PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`); the registry's basic credentials come from the
 variable `registry-auth-env` names, as `USER:PASSWORD`. A credential is sent only over TLS (`SASL_SSL`, an `https`
 registry) unless every server it goes to is this machine's loopback address. `ssl-ca-location` and
-`registry-ca-location` name certificate files. When a credential goes over `SASL_PLAINTEXT` on this machine, the
+`registry-ca-location` name certificate files. A credential over `SASL_PLAINTEXT`, allowed only on this machine, needs
+`sasl-mechanism=SCRAM-SHA-256` or `SCRAM-SHA-512`: `PLAIN` sends the password itself and is `FLX-3504`, as is a
+`transaction-timeout` above 2147483 seconds (librdkafka's int32 of milliseconds). When a credential goes over `SASL_PLAINTEXT` on this machine, the
 first request of every stream reads the brokers the cluster advertises, and one that is not a loopback address is
 `FLX-3504` before anything else is asked: the bootstrap servers may be local while the brokers they name are not, and
 the credential would go to them in the clear. `registry` may name several URLs, separated by commas, as the
 registry client fails over between them; each is checked by the same rules, and a credential goes over `http` only to
-URLs that are all on this machine. The registry client carries the `timeout` option, is opened once per target and
-closed when the target's streams are done, and every client is told not to send the brokers metrics of its own
+URLs that are all on this machine. The registry client carries the `timeout` option, is opened when a stream needs it and
+closed when that stream's delivery ends, and every client is told not to send the brokers metrics of its own
 (`enable.metrics.push` off, KIP-714). A missing variable is `FLX-3504`, naming the variable and never a
 value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to
 the `flux_engine.sinks.kafka` logger, never to the terminal directly.

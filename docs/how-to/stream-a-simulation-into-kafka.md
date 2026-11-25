@@ -36,7 +36,7 @@ Check the broker's advertised listeners and the registry's bootstrap address aga
 The examples use a device-telemetry bundle like the one in [Project a history](./project-a-history.md): a history `device_version` (natural entity `device_id`) under a parent `site`, its snapshot `device_current`, its change events `device_change` (columns `event_id`, `device_id`, `op`, `changed_at`, `recorded_at`, `before_firmware`, `after_firmware`), its periodic rows `device_month`, and a table `reading`. Name the sink and the bootstrap servers with `--sink kafka:HOST:PORT[,HOST:PORT...]`, and say who will read the topics:
 
 ```text
-fluxsim run . --sink kafka:localhost:9092 --sink-opt audience=internal
+fluxsim run . --profile ../devices.profile.json --sink kafka:localhost:9092 --sink-opt audience=internal
 ```
 
 The bundle must pin a privacy profile, or the run records no grade and the sink refuses every stream (see the audience gate below). The Simulation pins it under its extension block:
@@ -48,7 +48,7 @@ extensions:
       digest: sha256:7716a97db17142ffc32bb0f76a69f8906aea29cf844a801eed1c6d078a170298
 ```
 
-Replace the digest with the one of your own profile. The target is the bootstrap servers and nothing else. The sink connects to those brokers and to the registry you name with `registry`, and to nothing else: an address, a topic or a credential written in the contract is never contacted.
+Replace the digest with the one of your own profile. The profile file itself is passed with `--profile` and lives outside the bundle, so a run that pins a profile needs `--profile PATH` too (without it the run stops with `FLX-3109`). The target is the bootstrap servers and nothing else. The sink connects to those brokers and to the registry you name with `registry`, and to nothing else: an address, a topic or a credential written in the contract is never contacted.
 
 Everything that needs no network is checked first: the options when the target is opened, before the run, and then the audience gate and each stream's declarations before any row is sent. A refusal at that point has written nothing.
 
@@ -68,7 +68,7 @@ The grades compare in the order of [ADR 0020](../adr/0020-privacy-grades.md): `P
 A stream's topic is a prefix and a name. The name is `topic.EXPOSE=NAME`, else the topic the contract binds the expose to when it is bound to Kafka, else the expose id. The prefix is `topic-prefix`, `sim.` by default, and it may not be empty, so a synthetic topic never has the name of the topic the contract declares. With the defaults the bundle's streams go to `sim.device_change`, `sim.device_current` and so on. Two streams of one delivery may not share a topic, and the name must be one Kafka allows (`FLX-3513`).
 
 ```text
-fluxsim run . --sink kafka:localhost:9092 --sink-opt audience=internal \
+fluxsim run . --profile ../devices.profile.json --sink kafka:localhost:9092 --sink-opt audience=internal \
   --sink-opt topic-prefix=synthetic. --sink-opt topic.device_change=changes
 ```
 
@@ -121,7 +121,7 @@ A snapshot is the table's first load in the same envelope, with `op` `r`, `befor
 Without a registry, a value is the compact JSON of its object, which needs nothing to read: no spaces, text as it is, and the fields in the order the stream declares them (a row's columns in header order; an envelope as `before`, `after`, `source`, `op`, `ts_ms`). With `registry=URL`, values go through confluent-kafka's registry serializers, and there are two cases.
 
 ```text
-fluxsim run . --sink kafka:localhost:9092 --sink-opt audience=internal \
+fluxsim run . --profile ../devices.profile.json --sink kafka:localhost:9092 --sink-opt audience=internal \
   --sink-opt registry=http://localhost:8081
 ```
 
@@ -136,7 +136,7 @@ The producer is idempotent and transactional, with a `transactional.id` that is 
 
 Each transaction also commits the stream's progress: an offset, under a consumer group named like the `transactional.id`, on partition 0 of the topic, whose value and metadata count the records sent, the order they went in and whether the stream is complete. It commits with the records or not at all. A delivery that starts reads it. A complete stream is not sent again, and a partial one resumes after its last committed record, so running the same command again after a failure sends what is missing and nothing twice.
 
-To deliver a run again, to the same topics, send it with the same key and value settings. The progress also records the settings that decide a record's bytes (the key columns and format, and the value format and subject), and a stream delivered under other ones is refused with `FLX-3504`, since its topic would hold two shapes. Deliver it to another topic with `topic-prefix` or `topic.EXPOSE`, or delete the topic and the consumer group the message names.
+To deliver a run again, to the same topics, send it with the same key and value settings. The progress also records the settings that decide a record's bytes (the key columns and format, the event-time column and its default, and the value format, subject and pinned version), and a stream delivered under other ones is refused with `FLX-3504`, since its topic would hold two shapes. Deliver it to another topic with `topic-prefix` or `topic.EXPOSE`, or delete the topic and the consumer group the message names.
 
 Read with `isolation.level=read_committed` to see each record once. Java's consumer reads `read_uncommitted` unless told otherwise, and it would see the records of an aborted attempt.
 
@@ -145,7 +145,7 @@ Read with `isolation.level=read_committed` to see each record once. Java's consu
 `pace=max`, the default, sends as fast as the brokers take, in the stream's order. `pace=realtime` and `pace=xN` (N a positive number; `x2` is twice as fast as real time) hold the stream until its last row, put its records in event-time order while keeping each entity's order, and send each one when the wall clock, counted from the first record, reaches its offset from the first event time divided by N.
 
 ```text
-fluxsim run . --sink kafka:localhost:9092 --sink-opt audience=internal \
+fluxsim run . --profile ../devices.profile.json --sink kafka:localhost:9092 --sink-opt audience=internal \
   --sink-opt pace=x3600 --sink-opt commit-every=2
 ```
 
@@ -173,13 +173,13 @@ A credential is never an option (`FLX-3508`) and never part of the target. SASL 
 ```text
 export KAFKA_USER=...
 export KAFKA_PASSWORD=...
-fluxsim run . --sink kafka:broker-1.example.org:9093 --sink-opt audience=external \
+fluxsim run . --profile ../devices.profile.json --sink kafka:broker-1.example.org:9093 --sink-opt audience=external \
   --sink-opt security-protocol=SASL_SSL --sink-opt sasl-mechanism=SCRAM-SHA-512 \
   --sink-opt sasl-username-env=KAFKA_USER --sink-opt sasl-password-env=KAFKA_PASSWORD \
   --sink-opt ssl-ca-location=/etc/ssl/kafka-ca.pem
 ```
 
-A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless every server it goes to is this machine's loopback address. With `SASL_PLAINTEXT` the sink also reads the brokers the cluster advertises and refuses (`FLX-3504`) one that is not on this machine. `registry` may list several URLs separated by commas, each checked the same way. `ssl-ca-location` and `registry-ca-location` name certificate files. A missing variable is `FLX-3504`, naming the variable and never a value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to the `flux_engine.sinks.kafka` logger, never straight to the terminal.
+A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless every server it goes to is this machine's loopback address. Over `SASL_PLAINTEXT`, which is allowed only there, use `sasl-mechanism=SCRAM-SHA-256` or `SCRAM-SHA-512`: `PLAIN` sends the password itself and is refused (`FLX-3504`). With `SASL_PLAINTEXT` the sink also reads the brokers the cluster advertises and refuses (`FLX-3504`) one that is not on this machine. `registry` may list several URLs separated by commas, each checked the same way. `ssl-ca-location` and `registry-ca-location` name certificate files. A missing variable is `FLX-3504`, naming the variable and never a value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to the `flux_engine.sinks.kafka` logger, never straight to the terminal.
 
 ## The options
 
@@ -192,7 +192,7 @@ A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless ever
 | `timestamp.EXPOSE` | the timestamp column |
 | `value-format` | `json` for a derived JSON Schema instead of Avro |
 | `pace`, `commit-every` | `max`, `realtime` or `xN`; and the seconds between transactions (1 by default for a paced stream; an unpaced stream is one transaction unless `commit-every` is given) |
-| `transaction-timeout` | the seconds a transaction may stay open, 900 by default; at most the brokers' `transaction.max.timeout.ms` |
+| `transaction-timeout` | the seconds a transaction may stay open, 900 by default; at most the brokers' `transaction.max.timeout.ms`, and at most 2147483 |
 | `compression` | `none`, `gzip`, `snappy`, `lz4` (the default) or `zstd`: the codec of the producer's batches |
 | `partitions`, `replication-factor` | for a topic the sink creates |
 | `timeout` | the time limit for a broker or registry call |
