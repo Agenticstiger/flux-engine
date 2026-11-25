@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flux-sim-engine"
-version = "0.11.1"
+version = "0.12.0"
 description = "FLUX Simulation Engine: the runtime for FLUX bundles -- deterministic, governed simulation under a referenced FLUID contract."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -90,7 +90,7 @@ dependencies = [
   # range with no floor or no ceiling, and one that does not admit the
   # flux-stats version in packages/flux-stats.
   # Inside the repository the uv workspace below resolves it to the member.
-  "flux-stats>=0.11,<0.12",
+  "flux-stats>=0.12,<0.13",
 ]
 
 [project.optional-dependencies]

@@ -20,7 +20,10 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.12.0 - 2026-11-25
+
+A Kafka sink, `fluxsim init --window` and `--history`, `validate --profile`, history and periods declarations
+on kernel 0.2.0, and fixes to `init`, history projection, date ranges and `verify`.
 
 ### Added
 
