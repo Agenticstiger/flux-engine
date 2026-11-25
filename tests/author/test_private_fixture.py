@@ -80,8 +80,8 @@ def test_init_notes_a_stated_loss_above_what_the_noise_blocks_spend(tmp_path: Pa
         "spent": {"rho": "0.2"},
         "parts": 2,
     }
-    assert "privacy: the profile states a loss of rho 0.3 and its noisy" in result.stdout
-    assert "spend rho 0.2" in result.stdout
+    assert "privacy: the release's loss is the stated rho 0.3;" in result.stdout
+    assert "still holds spend rho 0.2 of it" in result.stdout
 
 
 def test_init_notes_nothing_when_the_stated_loss_is_spent_in_full(tmp_path: Path) -> None:
@@ -96,7 +96,7 @@ def test_init_notes_nothing_when_the_stated_loss_is_spent_in_full(tmp_path: Path
     )
     assert result.exit_code == 0, result.stderr
     assert "privacyLoss" not in result.artifacts
-    assert "privacy: the profile states" not in result.stdout
+    assert "privacy: the release's loss" not in result.stdout
 
 
 @pytest.mark.parametrize("jobs", [1, 3])

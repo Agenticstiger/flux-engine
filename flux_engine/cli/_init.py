@@ -504,9 +504,9 @@ def _privacy_lines(overstated: Optional[Dict[str, Any]]) -> List[str]:
     stated = ", ".join(f"{key} {value}" for key, value in overstated["stated"].items())
     spent = ", ".join(f"{key} {value}" for key, value in overstated["spent"].items())
     return [
-        f"privacy: the profile states a loss of {stated} and its noisy statistics and cliques "
-        f"spend {spent}; a stated loss above what is spent is accepted, and the grade reads the "
-        "statistics, not the stated loss"
+        f"privacy: the release's loss is the stated {stated}; the noisy statistics and cliques this "
+        f"profile still holds spend {spent} of it, and a statistic dropped from it after the "
+        "release spent its share all the same; the grade reads the statistics, not the stated loss"
     ]
 
 
