@@ -366,3 +366,65 @@ def test_a_parent_lifetime_the_versioned_parent_carries_plans(tmp_path: Path) ->
         stage=False,
     )
     assert planned.success, planned.stderr
+
+
+def _share(
+    until: str,
+    parent: Dict[str, Any],
+    rows: Any,
+) -> Any:
+    from flux_engine.concordance.history_checks import within_parent_share
+    from flux_engine.expr2.scope import Versions
+    from flux_engine.seam.history import Histogram, HistoryEntry, HistoryParent
+
+    entry = HistoryEntry(
+        emit=EMIT,
+        entities=1,
+        length=Histogram(("30", "90"), ("1",)),
+        until=until,
+        parent=HistoryParent("depot", lifetime=True),
+    )
+    versions = Versions(("vehicle",), "valid_from", "valid_to")
+    found = within_parent_share(entry, rows, versions, {(1,): parent}, ("depot",), ("o", "c"))
+    return found.satisfied, found.total
+
+
+@pytest.mark.parametrize(
+    ("started", "closed", "held"),
+    [
+        (
+            "2024-06-30T10:00:00",
+            "2024-06-30T18:00:00",
+            1,
+        ),  # the parent's last day, to its last instant
+        ("2024-06-30T10:00:00", "2024-06-30T23:59:59.999999", 1),  # its very last microsecond
+        ("2024-06-30T10:00:00", "2024-07-01T00:00:00", 0),  # closed after the parent's last instant
+        ("2024-07-01T00:00:00", "2024-07-01T06:00:00", 0),  # starts the day after
+    ],
+)
+def test_a_timestamp_chain_under_a_date_parent_end_holds_to_the_end_of_that_day(
+    started: str, closed: str, held: int
+) -> None:
+    from datetime import datetime, timezone
+
+    def at(text: str) -> datetime:
+        return datetime.fromisoformat(text).replace(tzinfo=timezone.utc)
+
+    rows = [{"vehicle": 1, "depot": 1, "valid_from": at(started), "valid_to": at(closed)}]
+    parent = {"o": date(2024, 1, 1), "c": date(2024, 6, 30)}
+    assert _share("2024-12-31T00:00:00Z", parent, rows) == (held, 1)
+
+
+@pytest.mark.parametrize(("started", "held"), [(date(2024, 6, 30), 1), (date(2024, 7, 1), 0)])
+def test_a_date_chain_may_start_on_its_parents_last_day_and_not_after_it(
+    started: date, held: int
+) -> None:
+    rows = [{"vehicle": 1, "depot": 1, "valid_from": started, "valid_to": started}]
+    parent = {"o": date(2024, 1, 1), "c": date(2024, 6, 30)}
+    assert _share("2024-12-31", parent, rows) == (held, 1)
+
+
+def test_a_parent_that_ends_before_it_starts_reads_as_open() -> None:
+    rows = [{"vehicle": 1, "depot": 1, "valid_from": date(2024, 2, 1), "valid_to": None}]
+    parent = {"o": date(2024, 1, 1), "c": date(2023, 12, 1)}
+    assert _share("2024-12-31", parent, rows) == (1, 1)

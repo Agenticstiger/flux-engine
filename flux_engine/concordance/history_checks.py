@@ -233,27 +233,11 @@ def history_shares(
     return tuple(lines)
 
 
-def _day(value: Any) -> date:
-    return value.date() if isinstance(value, datetime) else value
+def _facts() -> Any:
+    """The date facts, imported when first read: ``date_facts`` imports ``rule_shares``, which imports this module."""
+    from flux_engine.concordance import date_facts
 
-
-def at_or_after_start(value: Any, start: Any) -> bool:
-    """Whether *value* is not before a lifetime's *start* (a DATE start bounds a timestamp from its midnight)."""
-    if isinstance(value, datetime):
-        bound = (
-            start
-            if isinstance(start, datetime)
-            else datetime.combine(start, time.min, value.tzinfo)
-        )
-        return bool(value >= bound)
-    return bool(_day(start) <= value)
-
-
-def at_or_before_end(value: Any, end: Any) -> bool:
-    """Whether *value* is not after a lifetime's *end*: a DATE end holds up to the end of its day."""
-    if isinstance(value, datetime):
-        return bool(value <= end) if isinstance(end, datetime) else bool(value.date() <= end)
-    return bool(value <= _day(end))
+    return date_facts
 
 
 def _last_instant(end: Any, like: Any) -> Any:
@@ -266,11 +250,6 @@ def _last_instant(end: Any, like: Any) -> Any:
     if isinstance(like, datetime) and not isinstance(end, datetime):
         return datetime.combine(end, time(23, 59, 59, 999000), like.tzinfo)
     return end
-
-
-def lifetime_open(start: Any, end: Any) -> bool:
-    """Whether a lifetime is open: no end, or an end before its start."""
-    return end is None or not at_or_after_start(end, start)
 
 
 def _within_parent_holds(
@@ -293,15 +272,15 @@ def _within_parent_holds(
     if start is None or versions.end is None:
         return None
     first = ordered[0].get(versions.start)
-    if first is None or not at_or_after_start(first, start):
+    if first is None or not _facts().at_or_after_start(first, start):
         return False
     stop = None if lifetime[1] is None else parent.get(lifetime[1])
-    if stop is None or lifetime_open(start, stop):
+    if stop is None or _facts().is_open(start, stop):
         return _open_last_kept(ordered, versions, entry, sentinel)
     if not _ends_by(ordered, (versions.start, versions.end), stop, sentinel):
         return False
     until = _instant(entry.until, first)
-    if until is not None and not at_or_before_end(_last_instant(stop, until), until):
+    if until is not None and not _facts().at_or_before_end(_last_instant(stop, until), until):
         # The parent ended after the horizon: nothing forces the entity to end.
         return _open_last_kept(ordered, versions, entry, sentinel)
     return chain_ended(ordered, versions, entry, sentinel)
@@ -324,9 +303,9 @@ def _ends_by(ordered: Sequence[_Row], columns: Tuple[str, str], stop: Any, senti
     """Whether no version starts after *stop* and every closed end is at or before it."""
     for row in ordered:
         begun, closed = row.get(columns[0]), row.get(columns[1])
-        if begun is None or not at_or_before_end(begun, stop):
+        if begun is None or not _facts().at_or_before_end(begun, stop):
             return False
-        if not is_open(closed, sentinel) and not at_or_before_end(closed, stop):
+        if not is_open(closed, sentinel) and not _facts().at_or_before_end(closed, stop):
             return False
     return True
 
