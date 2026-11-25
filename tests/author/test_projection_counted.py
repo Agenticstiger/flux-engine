@@ -223,12 +223,13 @@ def test_a_snapshot_that_is_no_counted_child_writes_the_bundle_it_always_did(
 #: sha256 of each file `fluxsim init` wrote for this contract and profile before a counted
 #: projection was written. The bundle includes the history `parent` that the commit "feat(init):
 #: write a history's parent from its many-to-one relationship" writes, so these digests cannot be
-#: recreated on main, which has no such `parent`.
+#: recreated on main, which has no such `parent`. Its header names no profile file, and its unused
+#: list names a history's tracked column whole.
 WITHOUT_COUNTS: Dict[str, str] = {
-    "persona.flux.yml": "09abfa26eb21ac0667e7b872c394714fe05f17ae4a6b0a8b687b83d305023ab3",
+    "persona.flux.yml": "74f6062c0e15e70d2689583ad345103c7189b244886c3280c244573b49677755",
     "plans.fluid.yml": "f50c1adff7eeae2f5dca996a48fa329ca9704765f408013097d796d5cee73e53",
-    "simulation.flux.yml": "8e7d0acc907fcfbfd26cc9e298a97acd5185fc39ae6968195fcba2c81a19e74b",
-    "world.flux.yml": "9b8d0e5a5cc58cb4743d82eaeb2696bb8cee479486e835def76fc7e93705a17c",
+    "simulation.flux.yml": "263b4653bd06d3622dcc42bf4735ead9ddf0a0dd2d64a85491722f423a82826c",
+    "world.flux.yml": "20a3e0be50c0216bb8ef8ac07cdc72b0100a3cf4bddccbb91b7841fcc96b88cc",
 }
 
 
