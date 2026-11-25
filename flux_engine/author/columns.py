@@ -175,6 +175,10 @@ class ColumnContext:
     #: ``statistics``: whether each cell of its ungrouped histogram stands clear of the noise
     #: (:func:`flux_stats.noise.noise_floor`, ADR 0019, amendment of 2026-11-25).
     noise_clear: Tuple[Tuple[int, Tuple[bool, ...]], ...] = ()
+    #: The open end (milliseconds) the contract declares when this column is the end of a validity
+    #: window whose table publishes a history: an open version's end holds it, and the history
+    #: sets it, so a column that publishes only that value needs no draw of its own.
+    open_end: Optional[int] = None
 
     @property
     def contract_tokens(self) -> Tuple[str, ...]:
@@ -224,6 +228,9 @@ class ColumnPlan:
     #: No bin of that histogram stands clear of the noise, so the column is drawn evenly within
     #: the run's window once it is known (:func:`draw_in_window`).
     drawn_in_window: bool = False
+    #: Every row holds the open end the contract declares, so the table's history sets the column
+    #: and it declares no draw; without a history the bundle cannot write it.
+    open_end_only: bool = False
     #: The declaration is a placeholder: the profile published nothing it could rest on.
     placeholder: bool = False
     #: A number key whose span is assumed, so the foreign keys that reference it may
@@ -2580,9 +2587,13 @@ def _unspellable_one_value(ctx: ColumnContext, point: _Point) -> Exception:
     kind_name = "DATE" if kind is LogicalKind.DATE else "TIMESTAMP"
     one = "one value, the last the calendar holds," if is_last else f"one value, {spelled},"
     exactly = f"exactly {spelled}" if kind is LogicalKind.DATE else f"{spelled}"
-    ways = "write its open end as NULL, or make the column a TIMESTAMP"
+    declare = (
+        f"when the column ends a validity window, declare {spelled} as the window's openEnd on "
+        "its end dimension, so the table's history writes it"
+    )
+    ways = f"{declare}; or write its open end as NULL, or make the column a TIMESTAMP"
     if kind is not LogicalKind.DATE:
-        ways = "write its open end as NULL, or as an earlier instant"
+        ways = f"{declare}; or write its open end as NULL, or as an earlier instant"
     return UnspellableOneValue(
         f"{printable(table)}.{printable(ctx.column.name)} publishes {one} on every row, and the "
         f"engine cannot yet write a {kind_name} of {exactly} on every row; {ways}"
@@ -2598,6 +2609,13 @@ def _one_value(ctx: ColumnContext, plan: ColumnPlan, point: _Point) -> None:
         "statistic: every row takes it."
     )
     if _temporal(kind):
+        if ctx.open_end is not None and int(point.value) >= ctx.open_end:
+            plan.open_end_only = True
+            plan.how = (
+                "the open end the contract declares, on every row: every version is open, and "
+                "the table's history sets it"
+            )
+            return
         try:
             edges, weights = _one_value_bins(kind, point.value)
         except OverflowError:

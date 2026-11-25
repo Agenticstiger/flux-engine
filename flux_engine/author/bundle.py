@@ -118,6 +118,7 @@ from flux_engine.author.history import (
     HistorySource,
     Published,
     declare_date_ranges,
+    declared_end,
     decline_history,
     restate_assumptions,
     write_history,
@@ -588,6 +589,7 @@ def _plan_expose(
             range_rule=column_range(schema[position]),
             asked_levels=_levels_asked(asked, column.name),
             noise_clear=_noise_clear(noisy, expose_id, column.name),
+            open_end=_open_end_ms(expose, column.name) if "history" in table else None,
         )
         if _draws_int_levels(context, grouping, set_by_rules):
             context = replace(context, int_levels=True)
@@ -1432,15 +1434,37 @@ def _spans_of(
         found = []
     context = expose.contexts.get(column.name)
     try:
-        schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
+        contract_expose = contract["exposes"][expose.index]  # type: ignore[index]
+        schema = contract_expose["contract"]["schema"]
         contract_range = (
             declared_window(schema[context.schema_index], expose.kinds.get(column.name))
             if context
             else None
         )
     except (KeyError, IndexError, TypeError):
-        contract_range = None
+        contract_expose, contract_range = None, None
+    open_end = _open_end_ms(contract_expose, column.name)
+    if open_end is not None:
+        # The end of a validity window that declares its open end: an open version holds that
+        # value, which marks no instant, so it gives the window nothing, as a value in the year
+        # 9999 does (ADR 0017 section 11).
+        below = [moment for moment in instants if moment < open_end]
+        found = [
+            (first, last if last < open_end else max(below, default=first))
+            for first, last in found
+            if first < open_end
+        ]
+        if contract_range is not None and contract_range[1] >= open_end:
+            contract_range = None
     return found, contract_range
+
+
+def _open_end_ms(contract_expose: Optional[Mapping[str, Any]], column: str) -> Optional[int]:
+    """The open end the contract declares for *column*, as milliseconds, when it is the window's end."""
+    if not isinstance(contract_expose, Mapping):
+        return None
+    value = declared_end(contract_expose, column).get("openEnd")
+    return instant_ms(value) if isinstance(value, str) else None
 
 
 def _owner(contract: Mapping[str, Any]) -> Tuple[str, Optional[Tuple[str, str]]]:
@@ -2595,6 +2619,8 @@ def _histories(
             catalogues=reads.catalogues(held),
         )
         written = write_history(source) if declined is None else decline_history(source, declined)
+        if written.entry is None:
+            _refuse_an_unset_open_end(expose, written)
         if written.entry is not None:
             result.entries.append(written.entry)
             restate_assumptions(expose)
@@ -2606,6 +2632,25 @@ def _histories(
             [(f"{expose.expose_id}: {subject}", text) for subject, text in written.notes]
         )
     return result
+
+
+def _refuse_an_unset_open_end(expose: AuthoredExpose, written: Any) -> None:
+    """Refuse an expose whose end column holds the declared open end on every row, with no history.
+
+    Such a column declares no draw (:attr:`ColumnPlan.open_end_only`): the history writes the open
+    end on every open version. Without one, no draw the engine has spells the value, so the bundle
+    is refused, naming the column and why no history is written.
+    """
+    for plan in expose.columns:
+        if plan.open_end_only:
+            why = "; ".join(
+                reason for pointer, reason in written.unused if pointer[-1] == "history"
+            )
+            raise AuthorError(
+                f"{printable(expose.expose_id)}.{printable(plan.name)} holds the open end the "
+                "contract declares on every row, which only the table's history writes, and no "
+                "history is written" + (f": {why}" if why else "")
+            )
 
 
 #: Why no counts entry lays out a projected emit's relationships.

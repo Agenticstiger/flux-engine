@@ -252,6 +252,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the column, its range and the window, before writing anything. Such a range marks no data (an open end spelled
   before the year 9999, or a placeholder such as 0001-01-01); write an open end in the year 9999, which no window
   reads. A shorter range that widens the window is still a note and a gap at `/spec/timeBounds`.
+- `init` writes the open end and the chain a contract declares on its validity window's end (FLUID 0.7.7
+  `validityParams.openEnd` and `chain`) into the table's history (ADR 0017, amendment of 2026-11-25). A required end
+  column no longer keeps the history out when the contract declares its open end, and open versions end on exactly
+  that value, `9999-12-31` included; an end column that publishes only that value is written by the history. The
+  open end gives the run's window nothing. A declared `chain` sets the entry's chain, and `none` writes no history,
+  with the reason. Without an open end, a required end column's reason says to declare one, and `FLX-3125` names
+  declaring it first.
 - `init` reads a date or timestamp histogram released with noise only where its counts stand clear of the noise,
   above `sqrt(2v(5 + ceil(ln m)))` for Gaussian noise of variance `v` over `m` bins (ADR 0019, the second amendment
   of 2026-11-25). A bin below that floor carries no weight in the draw, and the run's window is the hull of the

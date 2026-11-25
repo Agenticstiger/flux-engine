@@ -1314,7 +1314,8 @@ def check_history_dates(
     history sets it (its start, its end, its activation or a key) or another source does:
     *other_sourced* is the columns a rule, a dependency or a copy sets, which are never drawn
     (EXPR-SPEC-2 section 9). A history that sets a column still refuses a draw it declares outside
-    the window. ``openEnd`` is no declared range and is not read. Every other emit keeps the
+    the window. ``openEnd`` is no declared range and is not read, and on the end column an edge at
+    or past it, the value an open version holds, is not read either. Every other emit keeps the
     warning of ``fluxsim validate``. *hidden* is the emit's hidden columns: the expose is compiled
     with them, as the plan compiles it, so a statistic for one is not refused as naming a column
     the expose lacks.
@@ -1336,6 +1337,12 @@ def check_history_dates(
         declared = statistics[column.name]
         low, high = (_in_unit(edge, kind) for edge in target.window)
         edges = drawn_edges(declared)
+        if column.name == target.end and entry.open_end is not None:
+            # An open version's end holds the open end, which marks no date: an edge at or past
+            # it (a published maximum that is the open end, say) is not read.
+            sentinel = _instant(entry.open_end, kind)
+            if sentinel is not None:
+                edges = tuple(edge for edge in edges if edge < sentinel)
         if not edges and column.name not in sets:
             raise FluxError(
                 refusal,

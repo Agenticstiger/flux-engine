@@ -724,3 +724,33 @@ bins carry weight only inside the window. The grid placed no row outside the win
   bins unless the history or another source sets it (`FLX-3403`).
 - **What moves.** Nothing already planned. This changes what `plan` accepts and not what the generator draws, so a plan
   recorded before replays to its recorded digest, and a bundle accepted before keeps its run digest.
+
+## Amendment of 2026-11-25: `init` writes the open end and the chain a contract declares
+
+FLUID 0.7.7 declares a versioned table's conventions on its validity window's end dimension:
+`validityParams.openEnd`, the value an open version's end holds (`null` or a literal of the end
+column's type), and `validityParams.chain`, how a closed version's end meets the same entity's next
+start (`nextStart`, `dayBefore` or `none`). Section 13 wrote neither, so a history whose end column
+the contract requires was never written: an open version had nothing to hold.
+
+- **`openEnd`.** `init` copies a declared literal into the entry's `openEnd`, so an end column the
+  contract requires no longer keeps the history out, and each open version ends on exactly that
+  value. A required end column with no `openEnd`, or a `null` one, still writes no history, and the
+  reason says to declare the value. The value is never read from the profile: a value the data
+  holds is not a declaration of what it means.
+- **The window.** The declared open end marks no instant, so it gives the run's window nothing, as a
+  value in the year 9999 does: a published maximum that is the open end does not stretch the window
+  or `until`, and a contract range that ends at it is no range of dates (the 300-year rule of
+  `init` does not refuse it). Section 11 does not read an edge of the end column at or past its
+  `openEnd`.
+- **An end that holds only the open end.** A column whose only published value is the declared open
+  end declares no draw: the history writes it on every open version. Without a history to write
+  it, `init` refuses the bundle and says why no history is written, since no draw spells such a
+  value on every row (`FLX-3125`, whose message now names declaring `openEnd` first).
+- **`chain`.** A declared `nextStart` or `dayBefore` sets the entry's chain, whatever share of
+  consecutive versions meets so in the profile, and the ledger records that share beside it. A
+  declared `none` (versions that need not meet), and `dayBefore` on TIMESTAMP columns, write no
+  history, with the reason: the engine generates neither.
+- **What does not move.** A contract that declares neither key reads as before, so its bundle is
+  unchanged.
+
