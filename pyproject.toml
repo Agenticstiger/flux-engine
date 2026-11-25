@@ -70,13 +70,14 @@ dependencies = [
   # declared here, not whatever happens to be in the environment. The range is
   # the supported one: flux_engine.spec refuses an installed flux_spec outside
   # it rather than silently substituting a different enforcement decision,
-  # and there is no copy to fall back to (ADR 0005). The floor is 0.5.4, the
-  # first release that reads a bundle's files as UTF-8 whatever the locale, as
-  # the engine's own pre-reads of them do; 0.5.3 was the first whose FLUID
-  # 0.7.7 preview accepts every enum level this engine reads (a quoted level
-  # may hold any character but a control character, its own quote doubled).
+  # and there is no copy to fall back to (ADR 0005). The floor is 0.5.5, the
+  # first release whose FLUID 0.7.7 preview declares a versioned table's open
+  # end and version chain (validityParams.openEnd and chain), which init reads
+  # into a history; 0.5.4 was the first that reads a bundle's files as UTF-8
+  # whatever the locale, as the engine's own pre-reads of them do, and 0.5.3
+  # the first whose preview accepts every enum level this engine reads.
   # docs/reference/schemas.md documents the floor.
-  "flux-spec>=0.5.4,<0.6",
+  "flux-spec>=0.5.5,<0.6",
   # flux-stats: the statistic registry, the fixed-point grid and the FLX code
   # catalog, released from this repository (packages/flux-stats, ADR 0009) so
   # that a profiler can form the fidelity statistics where the data lives

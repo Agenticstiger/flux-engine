@@ -128,6 +128,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Changed
 
+- The engine needs `flux-spec>=0.5.5,<0.6` (was `>=0.5.4`). 0.5.5's FLUID 0.7.7 preview declares a versioned
+  table's open end and version chain (`validityParams.openEnd` and `chain`), which `fluxsim init` reads into a
+  history; under 0.5.4 a contract that declared either was refused by validation.
 - The engine reads a profile whose calendar entry holds none of its three histograms, as when a release step drops
   every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place: `init`
   and `plan` accept it, and a citation into such an entry is still refused (`FLX-5036`). flux-stats' `parse_profile`

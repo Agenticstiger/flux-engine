@@ -1120,7 +1120,7 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'dev'", specifier = ">=2.0.1,<2.1" },
     { name = "duckdb", marker = "extra == 'sql'", specifier = ">=2.0.1,<2.1" },
     { name = "flux-sim-engine", extras = ["sql"], marker = "extra == 'calibrate'" },
-    { name = "flux-spec", specifier = ">=0.5.4,<0.6" },
+    { name = "flux-spec", specifier = ">=0.5.5,<0.6" },
     { name = "flux-stats", editable = "packages/flux-stats" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
@@ -1162,16 +1162,16 @@ mutation = [{ name = "mutmut", specifier = "==3.8.1" }]
 
 [[package]]
 name = "flux-spec"
-version = "0.5.4"
+version = "0.5.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pyyaml" },
     { name = "rfc8785" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/e8/b33819b73e83b1478c5c5eeb9ad30f16d9c0a86e53ddc442ca89abfdc9a0/flux_spec-0.5.4.tar.gz", hash = "sha256:06074ea3721aebaf07351ffa5a3aac651b68ead190d013bf86eba278ae0b230c", size = 363519, upload-time = "2026-11-19T07:04:45.285Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/0a/8e138f6508a71ec178f666cc4e009dc5a621f5504bfe87457bf36c59ff5e/flux_spec-0.5.5.tar.gz", hash = "sha256:33e019c168bd4affede7047af7f18491bdd04fbf5b6a2e9054a6bd3b9b2593c4", size = 381634, upload-time = "2026-11-25T16:36:44.218Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/00/ef490938233c1920efe17dd352ba6b05a34767a3b16fbc0f50082478d49d/flux_spec-0.5.4-py3-none-any.whl", hash = "sha256:36e3cb97be4a5db6a63a9cd941656c6ff9aa463ef93e6ad10887d959fc726675", size = 363476, upload-time = "2026-11-19T07:04:43.734Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/34/38141b719e8a50743781942fd0e071857a3ec2b1c5cf4b94ac15aa77cded/flux_spec-0.5.5-py3-none-any.whl", hash = "sha256:5f7076120d01d27ff6371ca12f9b9e9723c5cf0c155237a9355db2e6e03a3a5c", size = 385404, upload-time = "2026-11-25T16:36:42.985Z" },
 ]
 
 [[package]]
