@@ -23,6 +23,7 @@ from __future__ import annotations
 import collections
 import json
 import shutil
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -354,3 +355,21 @@ def test_a_worker_reads_the_pairing_the_run_worked_out(
     membership = next(plan for plan in plans if plan.expose.expose_id == "membership")
     found = associations.plan_pairing(membership, outcome.root)
     assert found is not None and found[1] is pairing
+
+
+def test_a_side_named_in_another_unicode_form_is_the_same_relationship(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The contract spells the relationship composed and the association decomposed: names are
+    # read in one normal form, so the association still finds its side.
+    composed = unicodedata.normalize("NFC", "membr\u00e9")
+    decomposed = unicodedata.normalize("NFD", composed)
+    assert composed != decomposed
+    contract = _CONTRACT_TEXT.replace("name: member,", f"name: {composed},")
+    assert contract != _CONTRACT_TEXT
+    monkeypatch.setattr(f"{__name__}._CONTRACT_TEXT", contract)
+    declared = ASSOCIATION.replace("[member, club]", f"[{decomposed}, club]") + COUNTS.replace(
+        "relationship: member,", f"relationship: {composed},"
+    )
+    pairs = _pairs(pipeline.execute(_bundle(tmp_path, "forms", declared), kernel=KERNEL_V2))
+    assert len(pairs) == len(set(pairs)) == ROWS

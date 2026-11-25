@@ -143,7 +143,11 @@ def bound_into_h(entries: Sequence[AssociationEntry], emit: str) -> Optional[Lis
 def association_entries_of(
     extension: Optional[Mapping[str, Any]], emit: str
 ) -> Tuple[AssociationEntry, ...]:
-    """The association an emit's bound extension holds (the member :func:`bound_into_h` made)."""
+    """The association an emit's bound extension holds (the member :func:`bound_into_h` made).
+
+    The names are read in NFC, as :func:`read_associations_block` reads them, so an entry taken
+    from the namespace as authored names the relationships the contract declares.
+    """
     raw = extension.get(ASSOCIATIONS_KEY) if extension is not None else None
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         return ()
@@ -154,7 +158,7 @@ def association_entries_of(
             found.append(
                 AssociationEntry(
                     emit=nfc(emit),
-                    relationships=(str(first), str(second)),
+                    relationships=(nfc(str(first)), nfc(str(second))),
                     distinct=bool(item.get("distinct", True)),
                 )
             )
