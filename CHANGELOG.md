@@ -182,13 +182,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   (its validity start, its validity end or its activation column). With `--history FILE` it refused with `FLX-6203`
   ("has more than one source"), and a history the profile carries could be dropped, its statistics listed unused. The
   pair is now listed unused, since the table's history sets the column, and the history is written.
-- `init` no longer gives a parent a start-only lifetime from a relationship date pair whose child date a key or a
-  rule of the contract sets, while it listed that same pair unused.
+- `init` no longer gives a parent a start-only lifetime from a relationship date pair that it lists unused: one whose
+  child date a key or a rule of the contract sets, or whose `within` entry it refuses (the child's date ends the
+  child's own lifetime, say). Dropping the listed pair now leaves the bundle as it is.
 - `init` lists a calendar entry, a date pair, an exposure or a history that it reads nothing of as one unused item,
   at the entry's own pointer, and never lists a member the profile reader requires beside one that it reads. Dropping
   exactly the listed statistics now leaves a profile the reader accepts (`FLX-5036` refused one before). A register
   whose unused list names such an entry is format `1-4-0`. An `--allow` that names a member of an entry listed whole
-  no longer matches it: name the entry, or a pointer above it.
+  no longer matches it: name the entry, or a pointer above it. One that names a required member beside one that is
+  read (a date pair's `order`, an exposure's counts) matches nothing now, since that member is no longer listed, and
+  `--strict` refuses it as stale: drop it.
 
 ## 0.11.1 - 2026-11-24
 
