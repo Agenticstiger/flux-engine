@@ -121,6 +121,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Changed
 
+- The engine reads a profile whose calendar entry holds none of its three histograms, as when a release step drops
+  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place: `init`
+  and `plan` accept it, and a citation into such an entry is still refused (`FLX-5036`). flux-stats' `parse_profile`
+  and `load_profile_text` take `allow_empty_calendar_entries`, off by default, which the engine sets.
+- A profile's `privacy` block may state more loss than its noisy statistics and cliques spend, including when none
+  remain; a stated loss is an upper bound, and a total below what they spend is still refused (`FLX-5036`). The grade
+  comes from the statistics alone, so a block that nothing spends earns no grade, and `init` notes the stated and
+  spent figures when they differ (`privacyLoss` under `--json`). ADR 0019 is amended.
 - `flux_engine.author.author_bundle` takes one `AuthorInputs` instead of separate arguments.
 - `flux_engine.author.replace` exports `ASSUMPTIONS_REQUEST_PATH` (`requests/assumptions.profile-request.yml`, inside
   the bundle directory) in place of `ASSUMPTIONS_REQUEST_SUFFIX`.
