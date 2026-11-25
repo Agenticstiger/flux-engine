@@ -48,6 +48,12 @@ so a retried delivery resumes after its last committed record and a second deliv
 stream sends nothing. The producer is opened (which fences an earlier one) before the progress is
 read. A read committed consumer sees each record once.
 
+The brokers drop that progress after ``offsets.retention.minutes`` (7 days by default). A stream
+the run's own receipts (``sink-receipts.json``, handed over in ``StreamContext.delivered``) say
+was delivered to this topic of this cluster is then refused (``FLX-3514``) rather than sent again;
+without those receipts (another machine, a removed run directory) a re-send after the retention
+duplicates.
+
 **Pace.** ``pace=realtime`` or ``pace=xN`` sends each record when the wall clock reaches its event
 time (divided by N), in event-time order within each key's order, and commits at least every
 ``commit-every`` seconds (1 by default). Keys, values, timestamps and headers are the same at every pace.
@@ -76,6 +82,7 @@ from flux_engine.api.emit import EmitHeader
 from flux_engine.core.canonical import canonical_bytes, sha256_hex
 from flux_engine.core.errors import FluxError
 from flux_engine.core.grades import Pattern
+from flux_engine.core.target_label import target_label
 from flux_engine.seam.emit import FLX_3301
 from flux_engine.sinks._kafka_broker import (
     COMPRESSIONS,
@@ -163,6 +170,15 @@ SASL_MECHANISMS: Tuple[str, ...] = ("PLAIN", "SCRAM-SHA-256", "SCRAM-SHA-512")
 VALUE_FORMATS: Tuple[str, ...] = ("avro", "json")
 PROGRESS_VERSION = 1
 
+#: The bounds of the numeric options: a topic's partition count is an int32, its replication factor
+#: an int16, ``commit-every`` is at least a tenth of a second and ``timeout`` at most an hour.
+MAX_PARTITIONS = 2147483647
+MAX_REPLICATION_FACTOR = 32767
+MIN_COMMIT_EVERY = 0.1
+MAX_TIMEOUT = 3600
+#: The most a paced stream may hold in memory, as serialized keys and values, before it is sent.
+MAX_PACED_BUFFER = 1 << 30
+
 _LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", re.ASCII)
 _SECONDS = re.compile(r"[0-9]+(?:\.[0-9]+)?", re.ASCII)
 
@@ -219,14 +235,34 @@ def _hostname(name: str) -> bool:
     return len(name) <= 253 and all(_LABEL.fullmatch(label) for label in name.split("."))
 
 
-def _seconds(options: Mapping[str, str], key: str, default: float) -> float:
+def _seconds(
+    options: Mapping[str, str],
+    key: str,
+    default: float,
+    *,
+    least: float = 0.0,
+    most: Optional[float] = None,
+) -> float:
     raw = options.get(key)
     if raw is None:
         return default
     text = raw.strip()
     if _SECONDS.fullmatch(text) is None or Fraction(text) <= 0:
         raise FluxError(FLX_3504, f"{key} must be a positive number of seconds")
-    return float(Fraction(text))
+    value = Fraction(text)
+    if value < Fraction(str(least)):
+        raise FluxError(FLX_3504, f"{key} is at least {least:g} seconds")
+    if most is not None and value > Fraction(str(most)):
+        raise FluxError(FLX_3504, f"{key} is at most {most:g} seconds")
+    return float(value)
+
+
+def _bounded(options: Mapping[str, str], key: str, *, most: int) -> Optional[int]:
+    """A positive integer option of at most *most*; ``FLX-3504`` naming the option and the limit."""
+    value = int_option(options, key, None)
+    if value is not None and value > most:
+        raise FluxError(FLX_3504, f"{key} is at most {most}")
+    return value
 
 
 def _family(options: Mapping[str, str], prefix: str) -> Dict[str, str]:
@@ -437,7 +473,11 @@ class KafkaSettings:
         if ssl_ca is not None and protocol not in ("SSL", "SASL_SSL"):
             raise FluxError(FLX_3504, "the option ssl-ca-location needs a TLS security-protocol")
         pace = parse_pace(text_option(fixed, "pace"))
-        commit_every = _seconds(fixed, "commit-every", 1.0) if "commit-every" in fixed else None
+        commit_every = (
+            _seconds(fixed, "commit-every", 1.0, least=MIN_COMMIT_EVERY)
+            if "commit-every" in fixed
+            else None
+        )
         transaction_timeout = _seconds(fixed, "transaction-timeout", 900.0)
         if transaction_timeout > MAX_TRANSACTION_TIMEOUT:
             raise FluxError(
@@ -466,9 +506,9 @@ class KafkaSettings:
             commit_every=commit_every,
             transaction_timeout=transaction_timeout,
             compression=compression,
-            partitions=int_option(fixed, "partitions", None),
-            replication_factor=int_option(fixed, "replication-factor", None),
-            timeout=_seconds(fixed, "timeout", 30.0),
+            partitions=_bounded(fixed, "partitions", most=MAX_PARTITIONS),
+            replication_factor=_bounded(fixed, "replication-factor", most=MAX_REPLICATION_FACTOR),
+            timeout=_seconds(fixed, "timeout", 30.0, most=MAX_TIMEOUT),
             security_protocol=protocol,
             sasl_mechanism=(mechanism or "PLAIN") if sasl else None,
             sasl_username_env=user_env,
@@ -691,6 +731,7 @@ class KafkaSink:
         self._producer: Optional[TxnProducer] = None
         self._builder: Optional[RecordBuilder] = None
         self._buffer: List[Tuple[KafkaRecord, Optional[bytes]]] = []
+        self._buffered = 0
 
     # -- identity ---------------------------------------------------------------
 
@@ -779,9 +820,46 @@ class KafkaSink:
             self._done, self._complete = found.records, found.complete
             if found.complete:
                 self._skipped = found.records
+        else:
+            self._refuse_lost_progress(broker)
         if self._complete:
             producer, self._producer = self._producer, None
             producer.close()
+
+    def _refuse_lost_progress(self, broker: Broker) -> None:
+        """``FLX-3514`` when the run's receipts say this stream was delivered and the brokers no
+        longer hold its progress.
+
+        The progress is a consumer group's committed offset, which the brokers drop after
+        ``offsets.retention.minutes`` (7 days by default); sending the stream again then would
+        duplicate it. A receipt of another cluster says nothing about this one.
+        """
+        shape = self.shape
+        label = target_label(self.name, self._settings.target)
+        cluster = broker.cluster_id()
+        for entry in self.context.delivered:
+            writer = entry.get("writer")
+            if (
+                entry.get("sink") != self.name
+                or entry.get("target") != label
+                or entry.get("table") != shape.topic
+                or not isinstance(writer, Mapping)
+            ):
+                continue
+            counts = [writer.get(name) for name in ("records", "skipped")]
+            if not any(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in counts):
+                continue
+            then = writer.get("clusterId")
+            if isinstance(then, str) and cluster is not None and then != cluster:
+                continue
+            raise FluxError(
+                FLX_3514,
+                f"topic {shape.topic!r}: this run's receipts say expose {shape.expose_id!r} was "
+                "delivered to it, and the brokers no longer hold the stream's progress (it "
+                "expires after offsets.retention.minutes, 7 days by default); sending the stream "
+                "again would duplicate what was delivered. To deliver it again on purpose, use "
+                "another topic-prefix, or remove this stream's entry from sink-receipts.json",
+            )
 
     def write(self, row: Sequence[object]) -> None:
         """Take one rendered row: send its records now (unpaced) or keep them for ``close``."""
@@ -801,6 +879,14 @@ class KafkaSink:
                 body = record.value
                 value = None if body is None else serialize(body, topic=topic)
                 if self._paced:
+                    self._buffered += len(record.key) + (0 if value is None else len(value))
+                    if self._buffered > MAX_PACED_BUFFER:
+                        raise FluxError(
+                            FLX_3504,
+                            f"expose {self.shape.expose_id!r}: a paced stream is held in memory "
+                            f"until its last row and this one is past {MAX_PACED_BUFFER} bytes of "
+                            "keys and values; deliver it with pace=max",
+                        )
                     # The bytes are kept; the dict they came from is not.
                     self._buffer.append((record._replace(value=None), value))
                     continue
@@ -1027,6 +1113,7 @@ class KafkaSink:
             finally:
                 self._owner.serdes.close()
         self._buffer = []
+        self._buffered = 0
 
     def _settings_fingerprint(self) -> str:
         """The first 16 hex digits of a digest of what decides a record's bytes besides its row.
@@ -1070,6 +1157,9 @@ class KafkaSink:
             "privacyGrade": self.grade.value,
             "partitioner": "murmur2_random",
         }
+        cluster = self._owner.broker.cluster_id()
+        if cluster is not None:
+            writer["clusterId"] = cluster
         held = self.context.privacy_grade
         if held is not None and held.profile_grade is not None:
             # The grade worked out from the pinned profile the command was given; an external

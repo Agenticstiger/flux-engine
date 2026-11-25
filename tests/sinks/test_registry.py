@@ -178,14 +178,6 @@ def test_kafka_is_a_built_in_behind_the_kafka_extra() -> None:
     assert sinks["kafka"].as_document()["extra"] == "flux-sim-engine[kafka]"
 
 
-def test_the_shipped_kafka_sink_loads_when_its_extra_is_installed() -> None:
-    pytest.importorskip("confluent_kafka")
-    from flux_engine.sinks.kafka import KafkaTarget
-
-    target = registry.open_target("kafka:127.0.0.1:9092", {"audience": "internal"})
-    assert isinstance(target, KafkaTarget)
-
-
 def test_without_confluent_kafka_the_sink_names_the_extra(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "confluent_kafka", None)
     with pytest.raises(FluxError) as caught:

@@ -342,6 +342,7 @@ def deliver(
     sink can find a stream's declarations. Neither changes a row.
     """
     grade = _grade_for(layout, bundle_directory, profile)
+    recorded = _recorded_receipts(layout) if layout is not None else []
     contexts = [
         StreamContext(
             run_id=run_id,
@@ -352,6 +353,7 @@ def deliver(
             privacy_grade=grade,
             bundle_directory=bundle_directory,
             simulation_id=getattr(outcome.resolved, "simulation_id", None),
+            delivered=_delivered_of(recorded, outcome.resolved.expose_id),
         )
         for outcome in result.emits
     ]
@@ -425,6 +427,7 @@ def deliver_run(
     }
     reported = run_receipt["emits"]
     grade = privacy_grade_of(layout, bundle_directory, profile=profile)
+    recorded = _recorded_receipts(layout)
     streams = []
     for expose_id in sorted(reported):
         entry = resolved.get(expose_id)
@@ -466,6 +469,7 @@ def deliver_run(
             privacy_grade=grade,
             bundle_directory=bundle_directory,
             simulation_id=simulation_id,
+            delivered=_delivered_of(recorded, expose_id),
         )
         streams.append((header, data, context))
     sinks = _sinks_for(target, [context for _, _, context in streams])
@@ -586,23 +590,42 @@ def _key(entry: Dict[str, Any]) -> Tuple[str, str, str, str, str]:
     )
 
 
-def write_receipts(layout: RunLayout, receipts: Sequence[SinkReceipt]) -> Path:
-    """Merge *receipts* into ``<run>/sink-receipts.json``; returns its path."""
+def _recorded_receipts(layout: RunLayout) -> List[Dict[str, Any]]:
+    """The receipts ``<run>/sink-receipts.json`` holds, or none.
+
+    Read without following a link, and ignored when it is not a regular file, is unreadable, is
+    not this document's version or names another run.
+    """
     path = layout.sink_receipts_path
-    entries: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
     try:
         existing = json.loads(read_text_nofollow(path)) if is_regular_file(path) else None
     except (OSError, ValueError):
-        existing = None
-    if (
+        return []
+    if not (
         isinstance(existing, dict)
         and existing.get("version") == RECEIPTS_VERSION
         and existing.get("runId") == layout.run_id
     ):
-        previous = existing.get("receipts")
-        for entry in previous if isinstance(previous, list) else []:
-            if isinstance(entry, dict):
-                entries[_key(entry)] = entry
+        return []
+    previous = existing.get("receipts")
+    return (
+        [entry for entry in previous if isinstance(entry, dict)]
+        if isinstance(previous, list)
+        else []
+    )
+
+
+def _delivered_of(recorded: Sequence[Dict[str, Any]], expose_id: str) -> Tuple[Dict[str, Any], ...]:
+    """The recorded receipts of one expose."""
+    return tuple(entry for entry in recorded if entry.get("exposeId") == expose_id)
+
+
+def write_receipts(layout: RunLayout, receipts: Sequence[SinkReceipt]) -> Path:
+    """Merge *receipts* into ``<run>/sink-receipts.json``; returns its path."""
+    path = layout.sink_receipts_path
+    entries: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
+    for entry in _recorded_receipts(layout):
+        entries[_key(entry)] = entry
     for receipt in receipts:
         document = receipt.as_document()
         entries[_key(document)] = document

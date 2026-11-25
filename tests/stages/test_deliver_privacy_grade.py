@@ -11,16 +11,16 @@ Pinned here:
   the bundle and the Simulation's id;
 * a run that pins no profile records no grade, and the context says why;
 * a plan edited after the run is not believed, and the context names the check it failed;
-* a sink that ignores the new fields writes what it wrote before.
+* a sink that ignores the new fields writes what it wrote before
+  (``test_deliver_file_sink_unchanged.py``, which needs pyarrow and so is not run with the Kafka extra).
 """
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List
 
 import pytest
 
@@ -159,52 +159,3 @@ def test_a_damaged_run_directory_gives_no_grade_and_raises_nothing(tmp_path: Pat
     recorded = privacy_grade_of(layout, bundle)
     assert recorded.grade is None and recorded.problem
     assert "run-digest.json" in recorded.problem and "FileNotFoundError" in recorded.problem
-
-
-class _Stripped:
-    """A target that hands its sink the context as it was before the new fields."""
-
-    def __init__(self, inner: Any) -> None:
-        self.inner = inner
-        self.name = inner.name
-
-    def sink_for(self, context: StreamContext) -> Any:
-        return self.inner.sink_for(
-            dataclasses.replace(
-                context, privacy_grade=None, bundle_directory=None, simulation_id=None
-            )
-        )
-
-
-def test_a_file_sink_writes_the_same_files_and_receipt_with_or_without_the_new_fields(
-    tmp_path: Path,
-) -> None:
-    pytest.importorskip("pyarrow")
-    from flux_engine.sinks.registry import open_target
-    from flux_engine.stages.deliver import deliver_run
-
-    bundle, state = _bundle(tmp_path), tmp_path / "state"
-    result = run(bundle, state_dir=state, profile=PROFILE)
-    assert result.success, result.stderr
-    layout = RunLayout.for_state_dir(state, result.artifacts["plan"]["run_id"])
-
-    def receipts(directory: Path, strip: bool) -> List[Mapping[str, Any]]:
-        target: Any = open_target(f"parquet:{directory}")
-        if strip:
-            target = _Stripped(target)
-        delivered = deliver_run(layout, bundle, target=target)
-        files = {
-            str(path.relative_to(directory)): path.read_bytes()
-            for path in sorted(directory.rglob("*"))
-            if path.is_file()
-        }
-        documents = [
-            {key: value for key, value in item.as_document().items() if key != "target"}
-            for item in delivered
-        ]
-        return [{"receipts": documents, "files": files}]
-
-    with_fields = receipts(tmp_path / "a", strip=False)
-    without = receipts(tmp_path / "b", strip=True)
-    assert with_fields == without
-    assert with_fields[0]["files"], "the sink wrote files"

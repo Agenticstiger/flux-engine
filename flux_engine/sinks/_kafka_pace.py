@@ -27,10 +27,13 @@ from flux_engine.core.errors import FluxError
 from flux_engine.sinks._kafka_records import KafkaRecord
 from flux_engine.sinks.errors import FLX_3504
 
-__all__ = ["Pace", "Pacer", "parse_pace", "scheduled_times", "time_order"]
+__all__ = ["MIN_SPEED", "Pace", "Pacer", "parse_pace", "scheduled_times", "time_order"]
 
 _SPEED = re.compile(r"x([0-9]+(?:\.[0-9]+)?)", re.ASCII)
-_FORMS = "max, realtime, or xN with N a positive number (x2, x0.5)"
+_FORMS = "max, realtime, or xN with N a number of at least 0.001 (x2, x0.5)"
+
+#: The slowest ``xN`` takes: a thousandth of real time.
+MIN_SPEED = Fraction(1, 1000)
 
 
 @dataclass(frozen=True)
@@ -55,7 +58,7 @@ def parse_pace(value: Optional[str]) -> Pace:
     match = _SPEED.fullmatch(value)
     if match is not None:
         speed = Fraction(match.group(1))
-        if speed > 0:
+        if speed >= MIN_SPEED:
             return Pace(value, speed)
     raise FluxError(FLX_3504, f"the option pace takes {_FORMS}, not {value!r}")
 

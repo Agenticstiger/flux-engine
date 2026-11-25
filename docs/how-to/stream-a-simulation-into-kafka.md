@@ -144,20 +144,22 @@ The producer is idempotent and transactional, with a `transactional.id` that is 
 
 Each transaction also commits the stream's progress: an offset, under a consumer group named like the `transactional.id`, on partition 0 of the topic, whose value and metadata count the records sent, the order they went in and whether the stream is complete. It commits with the records or not at all. A delivery that starts reads it. A complete stream is not sent again, and a partial one resumes after its last committed record, so running the same command again after a failure sends what is missing and nothing twice.
 
+The brokers drop that progress after `offsets.retention.minutes` (7 days by default). A stream that the run's own `sink-receipts.json` records as delivered to that topic of that cluster is then refused (`FLX-3514`) before anything is sent, since sending it again would duplicate it. To deliver it again on purpose, use another `topic-prefix`, or remove that stream's entry from `sink-receipts.json`. This holds only where the receipts are: from another machine, or after the run directory was removed, a re-send after the retention duplicates.
+
 To deliver a run again, to the same topics, send it with the same key and value settings. The progress also records the settings that decide a record's bytes (the key columns and format, the event-time column and its default, and the value format, subject and pinned version), and a stream delivered under other ones is refused with `FLX-3504`, since its topic would hold two shapes. Deliver it to another topic with `topic-prefix` or `topic.EXPOSE`, or delete the topic and the consumer group the message names.
 
 Read with `isolation.level=read_committed` to see each record once. Java's consumer reads `read_uncommitted` unless told otherwise, and it would see the records of an aborted attempt.
 
 ## Pace a stream
 
-`pace=max`, the default, sends as fast as the brokers take, in the stream's order. `pace=realtime` and `pace=xN` (N a positive number; `x2` is twice as fast as real time) hold the stream until its last row, put its records in event-time order while keeping each entity's order, and send each one when the wall clock, counted from the first record, reaches its offset from the first event time divided by N.
+`pace=max`, the default, sends as fast as the brokers take, in the stream's order. `pace=realtime` and `pace=xN` (N a number of at least 0.001; `x2` is twice as fast as real time) hold the stream until its last row, put its records in event-time order while keeping each entity's order, and send each one when the wall clock, counted from the first record, reaches its offset from the first event time divided by N.
 
 ```text
 fluxsim run . --profile ../devices.profile.json --sink kafka:localhost:9092 --sink-opt audience=internal \
   --sink-opt pace=x3600 --sink-opt commit-every=2
 ```
 
-A paced stream commits a transaction at least every `commit-every` seconds (1 by default) and before any wait longer than that, so a read-committed consumer sees records as they are sent, and each transaction carries the progress above. A delivery resumes only in the order it began: a paced delivery and an unpaced one of the same stream do not mix (`FLX-3504`). Keys, values, timestamps and headers are the same at every pace and every `--jobs`. Pacing chooses when a record is sent and never what it holds. A paced stream is held in memory until its last row arrives, and streams are delivered one after another, so pacing orders the records within a stream and not across streams.
+A paced stream commits a transaction at least every `commit-every` seconds (1 by default) and before any wait longer than that, so a read-committed consumer sees records as they are sent, and each transaction carries the progress above. A delivery resumes only in the order it began: a paced delivery and an unpaced one of the same stream do not mix (`FLX-3504`). Keys, values, timestamps and headers are the same at every pace and every `--jobs`. Pacing chooses when a record is sent and never what it holds. A paced stream is held in memory until its last row arrives (one whose keys and values pass 1 GiB is refused with `FLX-3504`, before anything is sent: use `pace=max`), and streams are delivered one after another, so pacing orders the records within a stream and not across streams.
 
 ## Performance
 
@@ -187,7 +189,7 @@ fluxsim run . --profile ../devices.profile.json --sink kafka:broker-1.example.or
   --sink-opt ssl-ca-location=/etc/ssl/kafka-ca.pem
 ```
 
-A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless every server it goes to is this machine's loopback address. Over `SASL_PLAINTEXT`, which is allowed only there, use `sasl-mechanism=SCRAM-SHA-256` or `SCRAM-SHA-512`: `PLAIN` sends the password itself and is refused (`FLX-3504`). With `SASL_PLAINTEXT` the sink also reads the brokers the cluster advertises and refuses (`FLX-3504`) one that is not on this machine. `registry` may list several URLs separated by commas, each checked the same way. `ssl-ca-location` and `registry-ca-location` name certificate files. A missing variable is `FLX-3504`, naming the variable and never a value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to the `flux_engine.sinks.kafka` logger, never straight to the terminal.
+A credential is sent only over TLS (`SASL_SSL`, an `https` registry), except a SASL credential to brokers that are all on this machine's loopback addresses. The registry's credential never goes in clear: with `registry-auth-env` every registry URL must be `https` (`FLX-3504`), because the registry client follows the environment's proxies (`HTTP_PROXY`, `ALL_PROXY`) and would send the header to a proxy in clear even for a registry on this machine. An `http` registry is for one without credentials. Over `SASL_PLAINTEXT`, which is allowed only there, use `sasl-mechanism=SCRAM-SHA-256` or `SCRAM-SHA-512`: `PLAIN` sends the password itself and is refused (`FLX-3504`). With `SASL_PLAINTEXT` the sink also reads the brokers the cluster advertises, on every client it opens (the admin client, the producer and the progress consumer), and refuses (`FLX-3504`) one that is not on this machine. A name counts as this machine only when it resolves and every address it resolves to is loopback: `localhost` is not trusted by its spelling, and `0.0.0.0` or a name that does not resolve is not loopback. `registry` may list several URLs separated by commas, each checked the same way (with `registry-auth-env`, all `https`). `ssl-ca-location` and `registry-ca-location` name certificate files. A missing variable is `FLX-3504`, naming the variable and never a value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to the `flux_engine.sinks.kafka` logger, never straight to the terminal, and each line is scrubbed of the credentials like an error.
 
 ## The options
 
@@ -199,11 +201,11 @@ A credential is sent only over TLS (`SASL_SSL`, an `https` registry) unless ever
 | `key.EXPOSE`, `key-format` | the key columns, and `string` or `json` |
 | `timestamp.EXPOSE` | the timestamp column |
 | `value-format` | `json` for a derived JSON Schema instead of Avro |
-| `pace`, `commit-every` | `max`, `realtime` or `xN`; and the seconds between transactions (1 by default for a paced stream; an unpaced stream is one transaction unless `commit-every` is given) |
+| `pace`, `commit-every` | `max`, `realtime` or `xN` (N at least 0.001); and the seconds between transactions (at least 0.1; 1 by default for a paced stream; an unpaced stream is one transaction unless `commit-every` is given) |
 | `transaction-timeout` | the seconds a transaction may stay open, 900 by default; at most the brokers' `transaction.max.timeout.ms`, and at most 2147483 |
 | `compression` | `none`, `gzip`, `snappy`, `lz4` (the default) or `zstd`: the codec of the producer's batches |
-| `partitions`, `replication-factor` | for a topic the sink creates |
-| `timeout` | the time limit for a broker or registry call |
+| `partitions`, `replication-factor` | for a topic the sink creates; at most 2147483647 and 32767 |
+| `timeout` | the time limit for a broker or registry call, in seconds; at most 3600 |
 | `security-protocol`, `sasl-mechanism`, `sasl-username-env`, `sasl-password-env`, `ssl-ca-location` | the connection |
 
 Any other option is `FLX-3504`, as for every sink.

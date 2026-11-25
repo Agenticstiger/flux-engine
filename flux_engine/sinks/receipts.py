@@ -89,6 +89,11 @@ class StreamContext:
         them there. It never says what grade the run has. No digest covers it.
     simulation_id
         The Simulation the run realises, or ``None`` when the caller does not say.
+    delivered
+        The receipts the run's ``sink-receipts.json`` already holds for this stream's expose, as
+        their documents (any sink, any target), or empty. A sink whose destination keeps its own
+        record of what it received may compare it with this one. Every other sink ignores it.
+        No digest covers it.
     """
 
     run_id: str
@@ -99,6 +104,7 @@ class StreamContext:
     privacy_grade: Optional[RecordedGrade] = None
     bundle_directory: Optional[Path] = None
     simulation_id: Optional[str] = None
+    delivered: Tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         if isinstance(self.rows, bool) or not isinstance(self.rows, int) or self.rows < 0:

@@ -12,6 +12,7 @@ are in ``test_kafka_integration.py``.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import sys
 from dataclasses import dataclass
@@ -30,7 +31,7 @@ from flux_engine.sinks.kafka import Clock, KafkaSettings, KafkaSink, KafkaTarget
 from flux_engine.sinks.receipts import RecordedGrade, SinkReceipt, StreamContext
 from flux_engine.sinks.registry import known_of, open_target
 from flux_engine.stages.apply import apply
-from flux_engine.stages.deliver import deliver_run, privacy_grade_of
+from flux_engine.stages.deliver import deliver_run, privacy_grade_of, write_receipts
 from flux_engine.stages.layout import RunLayout, run_id_for
 from flux_engine.stages.run import run
 
@@ -223,7 +224,7 @@ REFUSED: Sequence[Any] = [
             "registry": "http://127.0.0.1:8081,http://other.example:8081",
             "registry-auth-env": "X",
         },
-        "only over https",
+        "every registry URL to be https",
     ),
     (
         BOOTSTRAP,
@@ -244,7 +245,7 @@ REFUSED: Sequence[Any] = [
     (
         BOOTSTRAP,
         {"audience": "internal", "registry": "http://r.example.com", "registry-auth-env": "X"},
-        "only over https",
+        "every registry URL to be https",
     ),
     (
         BOOTSTRAP,
@@ -309,11 +310,11 @@ def test_registry_urls_are_checked_one_by_one_and_kept_as_a_list() -> None:
         BOOTSTRAP,
         {
             "audience": "internal",
-            "registry": "http://127.0.0.1:8081/,http://localhost:8082",
+            "registry": "https://127.0.0.1:8081/,https://localhost:8082",
             "registry-auth-env": "R",
         },
     )
-    assert parsed.registry == "http://127.0.0.1:8081,http://localhost:8082"
+    assert parsed.registry == "https://127.0.0.1:8081,https://localhost:8082"
 
 
 @pytest.mark.parametrize("extra", [{"sasl-mechanism": "PLAIN"}, {}])
@@ -356,7 +357,6 @@ def test_a_credential_on_this_machine_may_travel_without_tls() -> None:
             "security-protocol": "SASL_PLAINTEXT",
             "sasl-mechanism": "SCRAM-SHA-256",
             "registry": "http://127.0.0.1:8081",
-            "registry-auth-env": "R",
         },
     )
     assert parsed.security_protocol == "SASL_PLAINTEXT" and parsed.sasl_mechanism == "SCRAM-SHA-256"
@@ -371,6 +371,14 @@ def test_a_credential_option_is_refused_by_the_registry(option: str) -> None:
         open_target(f"kafka:{BOOTSTRAP}", {"audience": "internal", option: "hunter2hunter2"})
     assert caught.value.code.code == "FLX-3508"
     assert "hunter2hunter2" not in str(caught.value)
+
+
+def test_the_shipped_kafka_sink_loads_when_its_extra_is_installed() -> None:
+    pytest.importorskip("confluent_kafka")
+    from flux_engine.sinks.kafka import KafkaTarget
+
+    target = open_target("kafka:127.0.0.1:9092", {"audience": "internal"})
+    assert isinstance(target, KafkaTarget)
 
 
 def test_a_missing_extra_is_refused_before_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1062,7 +1070,7 @@ def test_the_registry_gets_its_credential_from_the_named_variable(
     receipts = deliver(
         kept,
         FakeBroker(),
-        {"registry": "http://127.0.0.1:8081", "registry-auth-env": "FLUX_TEST_REGISTRY_LOGIN"},
+        {"registry": "https://127.0.0.1:8081", "registry-auth-env": "FLUX_TEST_REGISTRY_LOGIN"},
         serdes=serdes,
     )
     assert {call[2] for call in serdes.calls} == {"svc:s3cr3t-registry-value"}
@@ -1532,7 +1540,7 @@ def test_credentials_in_the_clear_are_refused_when_a_broker_is_not_on_this_machi
     assert ok.describe("t") is not None
 
 
-def test_every_stream_checks_the_advertised_brokers_again(
+def test_every_read_of_metadata_checks_the_advertised_brokers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sasl = {
@@ -1545,11 +1553,159 @@ def test_every_stream_checks_the_advertised_brokers_again(
     broker = _adapter(monkeypatch, admin, sasl)
     broker.describe("t")
     admin.hosts = ("127.0.0.1", "kafka-2.internal.example")
-    broker.describe("t")  # the same stream's admin client is not read again
-    broker.close()
     with pytest.raises(FluxError) as caught:
-        broker.describe("t")  # the next stream's is
+        broker.describe("t")  # a later read is checked too
     assert caught.value.code.code == "FLX-3504"
+
+
+class _Advertising(_Recorder):
+    """A producer and a consumer whose metadata names the brokers a test gives."""
+
+    hosts: Sequence[str] = ("127.0.0.1",)
+    calls: List[str] = []
+
+    def list_topics(self, topic: Optional[str] = None, timeout: float = 0) -> Any:
+        from types import SimpleNamespace
+
+        type(self).calls.append("list_topics")
+        return SimpleNamespace(
+            brokers={i: SimpleNamespace(host=host) for i, host in enumerate(type(self).hosts)},
+            cluster_id="cluster-a",
+        )
+
+    def init_transactions(self, timeout: float) -> None:
+        type(self).calls.append("init_transactions")
+
+    def committed(self, partitions: Any, timeout: float = 0) -> List[Any]:
+        from types import SimpleNamespace
+
+        type(self).calls.append("committed")
+        return [SimpleNamespace(error=None, offset=-1001, metadata=None)]
+
+    def close(self) -> None:
+        pass
+
+
+SASL_PLAINTEXT: Mapping[str, str] = {
+    "sasl-username-env": "U",
+    "sasl-password-env": "P",
+    "security-protocol": "SASL_PLAINTEXT",
+    "sasl-mechanism": "SCRAM-SHA-256",
+}
+
+
+def _advertising_broker(
+    monkeypatch: pytest.MonkeyPatch, hosts: Sequence[str], options: Mapping[str, str]
+) -> ConfluentBroker:
+    pytest.importorskip("confluent_kafka")
+    import confluent_kafka
+
+    _Advertising.hosts, _Advertising.calls, _Recorder.configs = hosts, [], []
+    monkeypatch.setattr(confluent_kafka, "Producer", _Advertising)
+    monkeypatch.setattr(confluent_kafka, "Consumer", _Advertising)
+    settings = KafkaSettings.parse(BOOTSTRAP, {**INTERNAL, **options})
+    return ConfluentBroker(settings.client(), lambda: Credentials(), lambda: [])
+
+
+def test_the_producers_advertised_brokers_are_checked_before_it_is_initialised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker = _advertising_broker(monkeypatch, ("127.0.0.1", "kafka-2.example.org"), SASL_PLAINTEXT)
+    with pytest.raises(FluxError) as caught:
+        broker.transactional_producer("id", "id")
+    assert caught.value.code.code == "FLX-3504" and "kafka-2.example.org" in str(caught.value)
+    assert _Advertising.calls == ["list_topics"]
+    local = _advertising_broker(monkeypatch, ("127.0.0.1", "localhost"), SASL_PLAINTEXT)
+    local.transactional_producer("id", "id")
+    assert _Advertising.calls == ["list_topics", "init_transactions"]
+    plain = _advertising_broker(monkeypatch, ("kafka-2.example.org",), {})
+    plain.transactional_producer("id", "id")
+    assert _Advertising.calls == ["init_transactions"]  # no credential in the clear: no check
+
+
+def test_the_progress_consumers_advertised_brokers_are_checked_before_it_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    broker = _advertising_broker(monkeypatch, ("kafka-2.example.org",), SASL_PLAINTEXT)
+    with pytest.raises(FluxError) as caught:
+        broker.progress("g", "t")
+    assert caught.value.code.code == "FLX-3504"
+    assert _Advertising.calls == ["list_topics"]
+    local = _advertising_broker(monkeypatch, ("127.0.0.1",), SASL_PLAINTEXT)
+    assert local.progress("g", "t") is None
+    assert _Advertising.calls == ["list_topics", "committed"]
+
+
+def test_the_cluster_id_is_the_one_the_metadata_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    broker = _advertising_broker(monkeypatch, ("127.0.0.1",), {})
+    assert broker.cluster_id() is None
+    broker.progress("g", "t")
+    assert broker.cluster_id() is None  # no credential in the clear: the metadata is not read
+    sasl = _advertising_broker(monkeypatch, ("127.0.0.1",), SASL_PLAINTEXT)
+    sasl.progress("g", "t")
+    assert sasl.cluster_id() == "cluster-a"
+
+
+# -- what is this machine ----------------------------------------------------------------------
+
+
+def test_a_name_is_this_machine_only_when_every_address_it_resolves_to_is_loopback(
+    _fixed_resolver: Dict[str, List[str]],
+) -> None:
+    from flux_engine.sinks._kafka_broker import is_loopback
+
+    _fixed_resolver.update(
+        {
+            "both": ["127.0.0.1", "10.0.0.5"],
+            "mapped": ["::ffff:127.0.0.1"],
+            "mapped-away": ["::ffff:10.0.0.5"],
+            "anywhere": ["0.0.0.0"],
+            "empty": [],
+            "localhost": ["10.0.0.9"],
+        }
+    )
+    assert not is_loopback("localhost")  # the spelling is not trusted
+    assert not is_loopback("both") and not is_loopback("anywhere") and not is_loopback("empty")
+    assert is_loopback("mapped") and not is_loopback("mapped-away")
+    assert not is_loopback("nowhere.example")  # does not resolve
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("127.0.0.1", True),
+        ("127.9.9.9", True),
+        ("::1", True),
+        ("[::1]", True),
+        ("::ffff:127.0.0.1", True),
+        ("[::ffff:127.0.0.1]", True),
+        ("::ffff:10.0.0.1", False),
+        ("0.0.0.0", False),
+        ("10.0.0.1", False),
+        ("localhost", True),  # the table of this test file says so
+    ],
+)
+def test_a_literal_address_needs_no_lookup(
+    host: str, expected: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from flux_engine.sinks import _kafka_broker
+
+    resolved = _kafka_broker._resolve
+    lookups: List[str] = []
+    monkeypatch.setattr(
+        _kafka_broker, "_resolve", lambda name: lookups.append(name) or resolved(name)
+    )
+    assert _kafka_broker.is_loopback(host) is expected
+    assert lookups == ([host] if host == "localhost" else [])
+
+
+def test_a_target_whose_name_resolves_elsewhere_may_not_carry_a_credential_in_the_clear(
+    _fixed_resolver: Dict[str, List[str]],
+) -> None:
+    _fixed_resolver["localhost"] = ["192.0.2.7"]
+    with pytest.raises(FluxError) as caught:
+        KafkaSettings.parse("localhost:9092", {**INTERNAL, **SASL_PLAINTEXT})
+    assert caught.value.code.code == "FLX-3504" and "only over TLS" in str(caught.value)
 
 
 def test_a_leader_that_is_not_yet_elected_is_waited_out(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1851,3 +2007,299 @@ def test_apply_run_id_takes_a_profile_with_a_sink_and_refuses_it_without(
     assert result.success, result.stderr
     writers = [receipt["writer"] for receipt in result.artifacts["sinks"]["receipts"]]
     assert {writer["profileGrade"] for writer in writers} == {"P1"}
+
+
+# -- the registry's credential ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "registry", ["http://localhost:8081", "http://127.0.0.1:8081", "http://[::1]:8081"]
+)
+def test_the_registry_credential_never_goes_over_http_even_to_this_machine(registry: str) -> None:
+    with pytest.raises(FluxError) as caught:
+        KafkaSettings.parse(BOOTSTRAP, {**INTERNAL, "registry": registry, "registry-auth-env": "R"})
+    assert caught.value.code.code == "FLX-3504"
+    text = str(caught.value)
+    assert "https" in text and "proxy" in text and "every request" in text
+
+
+def test_the_registry_credential_goes_over_https_and_http_stays_for_loopback_without_one() -> None:
+    options = {**INTERNAL, "registry-auth-env": "R"}
+    parsed = KafkaSettings.parse(BOOTSTRAP, {**options, "registry": "https://localhost:8081"})
+    assert parsed.registry_auth_env == "R" and parsed.registry == "https://localhost:8081"
+    plain = KafkaSettings.parse(BOOTSTRAP, {**INTERNAL, "registry": "http://localhost:8081"})
+    assert plain.registry == "http://localhost:8081" and plain.registry_auth_env is None
+
+
+# -- bounds ----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "limit"),
+    [
+        ("partitions", "2147483648", "2147483647"),
+        ("replication-factor", "32768", "32767"),
+        ("pace", "x0.0009", "0.001"),
+        ("pace", "x0.0000000001", "0.001"),
+        ("commit-every", "0.09", "0.1"),
+        ("timeout", "3601", "3600"),
+    ],
+)
+def test_a_number_past_its_bound_is_refused_naming_the_option_and_the_limit(
+    option: str, value: str, limit: str
+) -> None:
+    with pytest.raises(FluxError) as caught:
+        KafkaSettings.parse(BOOTSTRAP, {**INTERNAL, option: value})
+    assert caught.value.code.code == "FLX-3504"
+    assert option in str(caught.value) and limit in str(caught.value)
+
+
+def test_a_number_on_its_bound_is_accepted() -> None:
+    parsed = KafkaSettings.parse(
+        BOOTSTRAP,
+        {
+            **INTERNAL,
+            "partitions": "2147483647",
+            "replication-factor": "32767",
+            "pace": "x0.001",
+            "commit-every": "0.1",
+            "timeout": "3600",
+        },
+    )
+    assert (parsed.partitions, parsed.replication_factor) == (2147483647, 32767)
+    assert parsed.pace.speed is not None and float(parsed.pace.speed) == 0.001
+    assert (parsed.commit_every, parsed.timeout) == (0.1, 3600.0)
+
+
+def test_a_paced_stream_that_would_be_held_past_the_cap_is_refused_before_anything_is_sent(
+    kept: Kept, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(kafka, "MAX_PACED_BUFFER", 2000)
+    broker = FakeBroker()
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, broker, {"pace": "x100000"})
+    assert caught.value.code.code == "FLX-3504"
+    assert "pace=max" in str(caught.value) and "2000" in str(caught.value)
+    assert all(not broker.read(topic) for topic in broker.topics)
+    assert not [call for call in broker.calls if call[0] in ("begin", "commit")]
+
+
+def test_the_cap_on_a_paced_stream_is_one_gibibyte() -> None:
+    assert kafka.MAX_PACED_BUFFER == 1 << 30
+
+
+# -- the log ---------------------------------------------------------------------------------
+
+
+def test_a_credential_in_a_librdkafka_log_line_is_masked(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from flux_engine.sinks._kafka_broker import _SCRUBBER, LOGGER
+
+    monkeypatch.setenv("FLUX_TEST_SASL_USER", "svc-user")
+    monkeypatch.setenv("FLUX_TEST_SASL_PASS", "p4ss-w0rd-value")
+    settings = KafkaSettings.parse(
+        BOOTSTRAP,
+        {
+            **INTERNAL,
+            **SASL_PLAINTEXT,
+            "sasl-username-env": "FLUX_TEST_SASL_USER",
+            "sasl-password-env": "FLUX_TEST_SASL_PASS",
+        },
+    )
+    broker = ConfluentBroker(
+        settings.client(),
+        lambda: kafka.read_credentials(settings),
+        lambda: kafka.known_strings_of(settings),
+    )
+    broker._conf()
+    try:
+        with caplog.at_level(logging.DEBUG, logger=LOGGER.name):
+            LOGGER.warning(
+                "%s [thrd:app]: SASL login as %s failed", "rdkafka#producer-1", "svc-user"
+            )
+            LOGGER.error("authentication with p4ss-w0rd-value was refused")
+        shown = " ".join(record.getMessage() for record in caplog.records)
+        assert "p4ss-w0rd-value" not in shown and "svc-user" not in shown
+        assert "SASL login as" in shown and "FLUX_TEST_SASL_PASS" in shown
+    finally:
+        broker.close()
+    assert broker not in _SCRUBBER.owners  # closing the broker lets the logger go
+
+
+# -- progress the brokers dropped ---------------------------------------------------------------
+
+
+@pytest.fixture
+def recorded(kept: Kept) -> Any:
+    """The kept run, with no receipts before the test and none after it."""
+    path = kept.layout.sink_receipts_path
+    path.unlink(missing_ok=True)
+    yield kept
+    path.unlink(missing_ok=True)
+
+
+def _delivered_and_recorded(kept: Kept, broker: FakeBroker) -> None:
+    write_receipts(kept.layout, deliver(kept, broker))
+
+
+def _nothing_sent_since(broker: FakeBroker, calls: int, logs: Mapping[str, int]) -> None:
+    assert not [c for c in broker.calls[calls:] if c[0] in ("begin", "commit")]
+    assert {topic: len(broker.read(topic)) for topic in broker.logs} == dict(logs)
+
+
+def test_a_stream_delivered_is_refused_after_the_brokers_drop_its_progress(recorded: Kept) -> None:
+    broker = FakeBroker()
+    _delivered_and_recorded(recorded, broker)
+    sent = {topic: len(broker.read(topic)) for topic in broker.logs}
+    calls = len(broker.calls)
+    broker.drop_progress()
+    with pytest.raises(FluxError) as caught:
+        deliver(recorded, broker)
+    assert caught.value.code.code == "FLX-3514"
+    text = str(caught.value)
+    assert "offsets.retention.minutes" in text and "duplicate" in text
+    assert "topic-prefix" in text and "sink-receipts.json" in text
+    _nothing_sent_since(broker, calls, sent)
+    assert all(p.closed for p in broker.producers)
+
+
+def test_a_stream_is_still_skipped_while_the_brokers_hold_its_progress(recorded: Kept) -> None:
+    broker = FakeBroker()
+    _delivered_and_recorded(recorded, broker)
+    receipts = deliver(recorded, broker)
+    assert all(r.writer["records"] == 0 and r.writer["skipped"] > 0 for r in receipts)
+
+
+def test_a_skip_that_sent_nothing_still_keeps_the_stream_guarded(recorded: Kept) -> None:
+    broker = FakeBroker()
+    _delivered_and_recorded(recorded, broker)
+    write_receipts(recorded.layout, deliver(recorded, broker))  # a skip replaces the entries
+    broker.drop_progress()
+    with pytest.raises(FluxError) as caught:
+        deliver(recorded, broker)
+    assert caught.value.code.code == "FLX-3514"
+
+
+def test_another_cluster_holds_none_of_it_and_is_delivered(recorded: Kept) -> None:
+    broker = FakeBroker()
+    _delivered_and_recorded(recorded, broker)
+    other = FakeBroker()
+    other.cluster = "another-cluster"
+    receipts = deliver(recorded, other)
+    assert receipts and all(r.writer["records"] > 0 for r in receipts)
+    assert {r.writer["clusterId"] for r in receipts} == {"another-cluster"}
+
+
+def test_a_run_with_no_receipts_is_delivered_after_the_drop(recorded: Kept) -> None:
+    broker = FakeBroker()
+    deliver(recorded, broker)  # delivered, and no receipt kept
+    broker.drop_progress()
+    assert all(r.writer["records"] > 0 for r in deliver(recorded, broker))
+
+
+def test_the_ways_out_deliver_the_stream_on_purpose(recorded: Kept) -> None:
+    broker = FakeBroker()
+    _delivered_and_recorded(recorded, broker)
+    broker.drop_progress()
+    receipts = deliver(recorded, broker, {"topic-prefix": "again."})
+    assert {r.table for r in receipts} == {t.replace("sim.", "again.") for t in TOPICS}
+    recorded.layout.sink_receipts_path.unlink()
+    assert all(r.writer["records"] > 0 for r in deliver(recorded, broker))
+
+
+def test_the_receipt_of_a_stream_that_sent_nothing_does_not_guard_it(recorded: Kept) -> None:
+    broker = FakeBroker()
+    receipts = deliver(recorded, broker)
+    for receipt in receipts:
+        receipt.writer.update({"records": 0, "skipped": 0})  # type: ignore[attr-defined]
+    write_receipts(recorded.layout, receipts)
+    broker.drop_progress()
+    assert deliver(recorded, broker)
+
+
+def test_a_receipt_of_another_target_or_topic_does_not_guard_the_stream(recorded: Kept) -> None:
+    broker = FakeBroker()
+    _delivered_and_recorded(recorded, broker)
+    broker.drop_progress()
+    other = KafkaSettings.parse("127.0.0.2:9092", INTERNAL)
+    target = KafkaTarget(
+        other, broker=broker, serdes=FakeSerdes(), clock=FakeClock(WALL_2026).clock()
+    )
+    assert deliver_run(recorded.layout, recorded.bundle, target=target)
+
+
+def test_the_context_carries_the_receipts_of_its_run_and_of_its_expose_only(
+    recorded: Kept, tmp_path: Path
+) -> None:
+    from flux_engine.stages import deliver as stage
+
+    path = recorded.layout.sink_receipts_path
+    assert stage._recorded_receipts(recorded.layout) == []
+    _delivered_and_recorded(recorded, FakeBroker())
+    found = stage._recorded_receipts(recorded.layout)
+    assert {entry["exposeId"] for entry in found} == {t.removeprefix("sim.") for t in TOPICS}
+    assert {e["exposeId"] for e in stage._delivered_of(found, "site")} == {"site"}
+    document = json.loads(path.read_text(encoding="utf-8"))
+    path.write_text(json.dumps({**document, "runId": "another"}), encoding="utf-8")
+    assert stage._recorded_receipts(recorded.layout) == []
+    path.write_text("not json", encoding="utf-8")
+    assert stage._recorded_receipts(recorded.layout) == []
+    path.write_text(json.dumps({**document, "version": "flux-sink-receipts/9"}), encoding="utf-8")
+    assert stage._recorded_receipts(recorded.layout) == []
+
+
+# -- the timestamp limits, on the line ---------------------------------------------------------
+
+
+_EVERYTHING = "9223372036854775807"
+
+
+def _limited(topic_limits: Mapping[str, str]) -> FakeBroker:
+    broker = FakeBroker()
+    for topic in TOPICS:
+        broker.add_topic(
+            topic,
+            message_timestamp_before_max_ms=_EVERYTHING,
+            message_timestamp_after_max_ms=_EVERYTHING,
+            cleanup_policy="compact" if topic == "sim.device_current" else "delete",
+        )
+    broker.add_topic(
+        "sim.reading",
+        **{
+            "message_timestamp_before_max_ms": _EVERYTHING,
+            "message_timestamp_after_max_ms": _EVERYTHING,
+            **topic_limits,
+        },
+    )
+    return broker
+
+
+def test_a_record_exactly_on_the_before_limit_is_taken_and_one_past_it_is_not(
+    kept: Kept, reference: Mapping[str, List[Stored]]
+) -> None:
+    limit = 86_400_000
+    oldest = min(r.timestamp for r in reference["sim.reading"])
+    on = _limited({"message_timestamp_before_max_ms": str(limit)})
+    deliver(kept, on, clock=FakeClock(oldest + limit))
+    assert len(on.read("sim.reading")) == len(reference["sim.reading"])
+    past = _limited({"message_timestamp_before_max_ms": str(limit)})
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, past, clock=FakeClock(oldest + limit + 1))
+    assert caught.value.code.code == "FLX-3514" and "before.max.ms" in str(caught.value)
+    assert past.read("sim.reading") == []
+
+
+def test_a_record_exactly_on_the_after_limit_is_taken_and_one_past_it_is_not(
+    kept: Kept, reference: Mapping[str, List[Stored]]
+) -> None:
+    limit = 86_400_000
+    newest = max(r.timestamp for r in reference["sim.reading"])
+    on = _limited({"message_timestamp_after_max_ms": str(limit)})
+    deliver(kept, on, clock=FakeClock(newest - limit))
+    assert len(on.read("sim.reading")) == len(reference["sim.reading"])
+    past = _limited({"message_timestamp_after_max_ms": str(limit)})
+    with pytest.raises(FluxError) as caught:
+        deliver(kept, past, clock=FakeClock(newest - limit - 1))
+    assert caught.value.code.code == "FLX-3514" and "after.max.ms" in str(caught.value)
+    assert past.read("sim.reading") == []

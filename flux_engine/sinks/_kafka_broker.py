@@ -14,7 +14,8 @@ module imports without it and a test replaces the whole adapter.
 Every error a library raises is shown scrubbed (:func:`~flux_engine.sinks._secrets.scrub`: the
 target, the option values and the credential values the operator gave) as ``FLX-3505``, and the
 library's exception is never chained. librdkafka's log goes to the ``flux_engine.sinks.kafka``
-logger, and its error callback is kept for the message of a failure.
+logger, each line scrubbed the same way, and its error callback is kept for the message of a
+failure.
 
 Standard library and :mod:`flux_engine` only, until a method runs.
 """
@@ -23,7 +24,9 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import socket
 import time
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Tuple
 
@@ -77,14 +80,58 @@ FULL_QUEUE_WAIT = 0.05
 _METADATA_WAIT = 0.2
 
 
+def _resolve(name: str) -> List[str]:
+    """Every address *name* resolves to; ``OSError`` when it does not. A test replaces this."""
+    return [str(info[4][0]) for info in socket.getaddrinfo(name, None)]
+
+
+def _is_loopback_address(text: str) -> bool:
+    """Whether the address *text* is loopback; an IPv4-mapped IPv6 address counts by its IPv4 one."""
+    address = ipaddress.ip_address(text.partition("%")[0])
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return address.is_loopback
+
+
 def is_loopback(host: str) -> bool:
-    """Whether *host* (a name or an address, with or without brackets) is this machine."""
-    if host.lower() == "localhost":
-        return True
+    """Whether *host* (a name or an address, with or without brackets) is this machine.
+
+    A literal address is judged as it is. A name is resolved, and is this machine only when it
+    resolves and every address it resolves to is loopback: ``localhost`` is not trusted by its
+    spelling, and ``0.0.0.0`` and a name that does not resolve are not loopback.
+    """
+    name = host.strip("[]")
     try:
-        return ipaddress.ip_address(host.strip("[]")).is_loopback
+        return _is_loopback_address(name)
     except ValueError:
+        pass
+    try:
+        addresses = _resolve(name)
+        return bool(addresses) and all(_is_loopback_address(address) for address in addresses)
+    except (OSError, UnicodeError, ValueError):
         return False
+
+
+class _ScrubLog(logging.Filter):
+    """Masks, in every line librdkafka logs, what each broker in use was given: the target and the
+    credentials. One filter serves the logger; a broker is listed while its clients are open."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.owners: "weakref.WeakSet[ConfluentBroker]" = weakref.WeakSet()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            text = record.getMessage()
+            for owner in list(self.owners):
+                text = scrub(text, owner._known(), sink="kafka")
+        except Exception:  # noqa: BLE001
+            text = "(a log line withheld: it could not be scrubbed)"
+        record.msg, record.args = text, None
+        return True
+
+
+_SCRUBBER = _ScrubLog()
 
 
 @dataclass(frozen=True)
@@ -156,6 +203,9 @@ class Broker(Protocol):
     def versions(self) -> Mapping[str, str]:
         """The client library's versions, for the receipt; empty when there are none."""
 
+    def cluster_id(self) -> Optional[str]:
+        """The id of the cluster the brokers' metadata named last, or ``None`` when none did."""
+
     def close(self) -> None:
         """Release the clients this broker holds; a later call opens them again."""
 
@@ -207,7 +257,7 @@ class ConfluentBroker:
         self._known = known
         self._admin: Any = None
         self._errors: List[str] = []
-        self._brokers_checked = False
+        self._cluster: Optional[str] = None
 
     # -- plumbing -----------------------------------------------------------------
 
@@ -228,6 +278,9 @@ class ConfluentBroker:
     def _conf(self) -> Dict[str, Any]:
         client = self._client
         credentials = self._credentials()
+        if _SCRUBBER not in LOGGER.filters:
+            LOGGER.addFilter(_SCRUBBER)
+        _SCRUBBER.owners.add(self)
         conf: Dict[str, Any] = {
             "bootstrap.servers": client.bootstrap,
             "logger": LOGGER,
@@ -255,9 +308,13 @@ class ConfluentBroker:
 
     # -- Broker -------------------------------------------------------------------
 
-    def _require_local_brokers(self, metadata: Any) -> None:
-        """``FLX-3504`` when a credential would go to an advertised broker that is not this machine."""
-        if not self._client.loopback_only or self._brokers_checked:
+    def _check_brokers(self, metadata: Any) -> None:
+        """Note the cluster's id; ``FLX-3504`` when a credential would go to an advertised broker
+        that is not this machine."""
+        cluster = getattr(metadata, "cluster_id", None)
+        if isinstance(cluster, str) and cluster:
+            self._cluster = cluster
+        if not self._client.loopback_only:
             return
         for broker in metadata.brokers.values():
             if not is_loopback(str(broker.host)):
@@ -267,7 +324,6 @@ class ConfluentBroker:
                     "machine, and SASL_PLAINTEXT would send the credential to it in the clear; "
                     "use security-protocol=SASL_SSL",
                 )
-        self._brokers_checked = True
 
     @staticmethod
     def _unsettled(error: Any) -> bool:
@@ -291,7 +347,7 @@ class ConfluentBroker:
             deadline = time.monotonic() + timeout
             while True:
                 metadata = admin.list_topics(topic=topic, timeout=timeout)
-                self._require_local_brokers(metadata)
+                self._check_brokers(metadata)
                 found = metadata.topics.get(topic)
                 if found is None:
                     return None
@@ -387,6 +443,8 @@ class ConfluentBroker:
                     "isolation.level": "read_committed",
                 }
             )
+            if self._client.loopback_only:
+                self._check_brokers(consumer.list_topics(topic=topic, timeout=self._client.timeout))
             found = consumer.committed([TopicPartition(topic, 0)], timeout=self._client.timeout)
             if not found:
                 return None
@@ -428,6 +486,8 @@ class ConfluentBroker:
                     **(PACED_PRODUCER if paced else UNPACED_PRODUCER),
                 }
             )
+            if self._client.loopback_only:
+                self._check_brokers(producer.list_topics(timeout=timeout))
             producer.init_transactions(timeout)
             consumer = Consumer({**self._conf(), "group.id": group, "enable.auto.commit": False})
             return _ConfluentTxn(producer, consumer, self)
@@ -466,10 +526,14 @@ class ConfluentBroker:
             "librdkafka": str(confluent_kafka.libversion()[0]),
         }
 
+    def cluster_id(self) -> Optional[str]:
+        """The cluster id the last metadata read named, or ``None``."""
+        return self._cluster
+
     def close(self) -> None:
-        """Drop the admin client; the next call opens a new one and checks the brokers again."""
+        """Drop the admin client and the log scrubbing; the next call opens them again."""
         self._admin = None
-        self._brokers_checked = False
+        _SCRUBBER.owners.discard(self)
 
 
 class _ConfluentTxn:

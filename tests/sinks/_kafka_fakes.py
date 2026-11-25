@@ -202,6 +202,7 @@ class FakeBroker:
         self.producer_options: List[Dict[str, Any]] = []
         self.failures: List[Failure] = []
         self.closes = 0
+        self.cluster = "fake-cluster"
         self._open: Dict[str, FakeTxn] = {}
 
     def add_topic(self, topic: str, *, partitions: Optional[int] = None, **configs: str) -> None:
@@ -254,8 +255,15 @@ class FakeBroker:
     def versions(self) -> Mapping[str, str]:
         return {}
 
+    def cluster_id(self) -> Optional[str]:
+        return self.cluster
+
     def close(self) -> None:
         self.closes += 1
+
+    def drop_progress(self) -> None:
+        """The brokers expire every committed offset (``offsets.retention.minutes``)."""
+        self.committed.clear()
 
     # -- reading, as a read-committed consumer would ------------------------------
 

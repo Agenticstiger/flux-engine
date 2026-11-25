@@ -36,6 +36,27 @@ def _explicit_test_credentials(monkeypatch: pytest.MonkeyPatch) -> Iterator[None
     yield
 
 
+#: What a name resolves to in the tests: ``localhost`` is this machine, anything else does not
+#: resolve. A test never reads the machine's hosts file or asks a resolver.
+RESOLVED: Dict[str, List[str]] = {"localhost": ["127.0.0.1", "::1"]}
+
+
+@pytest.fixture(autouse=True)
+def _fixed_resolver(monkeypatch: pytest.MonkeyPatch) -> Iterator[Dict[str, List[str]]]:
+    """Replace the resolver the Kafka sink's loopback check uses with a table the test may edit."""
+    from flux_engine.sinks import _kafka_broker
+
+    table = dict(RESOLVED)
+
+    def resolve(name: str) -> List[str]:
+        if name not in table:
+            raise OSError(f"{name} does not resolve")
+        return list(table[name])
+
+    monkeypatch.setattr(_kafka_broker, "_resolve", resolve)
+    yield table
+
+
 CONTRACT_DIGEST: DigestRef = digest_of_document({"id": "test.sim.widget"}, subject="contractDigest")
 
 

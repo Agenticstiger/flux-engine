@@ -534,7 +534,8 @@ publish-extra:
 # library, runs the sink's tests, and fails when the library cannot be
 # imported or when any of those tests skips, so a mirror run cannot pass by
 # skipping them. The tests that start a broker in Docker are not among them.
-KAFKA_EXTRA_TESTS = $(filter-out tests/sinks/test_kafka_integration.py,$(wildcard tests/sinks/test_kafka_*.py))
+KAFKA_EXTRA_TESTS = $(filter-out tests/sinks/test_kafka_integration.py,$(wildcard tests/sinks/test_kafka_*.py)) \
+	tests/stages/test_deliver_privacy_grade.py
 kafka-extra:
 	$(BIN)python -c "import confluent_kafka.schema_registry.avro, confluent_kafka.schema_registry.json_schema" || { echo "kafka-extra needs the kafka extra: uv sync --extra dev --extra kafka" >&2; exit 1; }
 	$(BIN)mypy flux_engine/sinks/kafka.py $(wildcard flux_engine/sinks/_kafka_*.py)

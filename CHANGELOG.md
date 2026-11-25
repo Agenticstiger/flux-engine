@@ -99,16 +99,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   audience, `internal` (needs a run graded P1 or better) or `external` (needs P3 or better, worked out from the pinned
   profile, so `--profile` is given to `run` and to `apply --run-id`), and a stream below the minimum, from a run that
   pins no profile and declares no plugin, or from a run whose receipt and streams are not its plan's, is refused before
-  anything is contacted (`FLX-3512`); declarations Kafka cannot take are `FLX-3513`, a topic that will not take the stream is
-  `FLX-3514`, and a registry subject that cannot carry it is `FLX-3515`. No digest moves. See [Stream a simulation
+  anything is contacted (`FLX-3512`); declarations Kafka cannot take are `FLX-3513`, a topic that will not take the stream,
+  or a stream this run's receipts record as delivered whose progress the brokers have since dropped, is `FLX-3514`, and a
+  registry subject that cannot carry it is `FLX-3515`. No digest moves. See [Stream a simulation
   into Kafka](docs/how-to/stream-a-simulation-into-kafka.md) and [ADR
   0038](docs/adr/0038-a-kafka-sink-keys-records-by-entity-delivers-each-stream-exactly-once-and-sends-only-what-its-audience-may-see.md).
-- A sink is now told three more facts about a stream: `StreamContext.privacy_grade`, the grade the run is held to,
+- A sink is now told four more facts about a stream: `StreamContext.privacy_grade`, the grade the run is held to,
   worked out from the run's bound plan, `run-digest.json`, `receipt.json` and bundle as `apply` reads it, and from the
-  pinned profile when the command was given it (`RecordedGrade`, which says what is missing or does not check), and
-  `StreamContext.bundle_directory` and `StreamContext.simulation_id`, which say where the stream's declarations are.
-  `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill all three; `apply --run-id` takes `--profile` with
-  `--sink`, for an external audience. They default to `None`, no digest covers them, and the existing sinks ignore them.
+  pinned profile when the command was given it (`RecordedGrade`, which says what is missing or does not check);
+  `StreamContext.bundle_directory` and `StreamContext.simulation_id`, which say where the stream's declarations are;
+  and `StreamContext.delivered`, the receipts the run's `sink-receipts.json` already holds for the stream.
+  `fluxsim run --sink` and `fluxsim apply --run-id --sink` fill all four; `apply --run-id` takes `--profile` with
+  `--sink`, for an external audience. They default to `None` (`delivered` to empty), no digest covers them, and the
+  existing sinks ignore them.
 
 ### Changed
 

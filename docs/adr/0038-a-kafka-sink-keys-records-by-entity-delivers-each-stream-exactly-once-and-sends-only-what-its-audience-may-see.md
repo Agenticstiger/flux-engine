@@ -82,8 +82,8 @@ The state directory is writable by whoever runs the engine, so the files of a ru
 The engine also hands each stream's sink the bundle directory and the Simulation's id
 (`StreamContext.bundle_directory`, `StreamContext.simulation_id`), only so that the sink can find the stream's
 declarations: the contract's keys and Kafka binding, and the Simulation's `history`, `snapshots`, `events` and
-`periods` entries. The sink never reads a grade from them; the engine does (section 2). The contract digest of the header the sink is opened with must be the
-bundle's, else `FLX-3504`.
+`periods` entries. The sink never reads a grade from them; the engine does (section 2). The contract digest of the
+header the sink is opened with must be the bundle's, else `FLX-3504`.
 
 The sink connects to the bootstrap servers of its target, the brokers they name, and the registry its `registry`
 option names, and to nothing else. A registry URL, a topic or a credential written in the contract is never
@@ -231,6 +231,17 @@ and a partial one resumes after its last committed record. A read-committed cons
 `read_committed` by default in librdkafka and `read_uncommitted` in Java) sees each record exactly once, across a
 failure, a forced abort and a second delivery of the same run.
 
+The brokers drop that progress: it is a memberless group's committed offset, and the brokers expire it after
+`offsets.retention.minutes` (7 days by default). Without it a re-run would send every finished stream again and the
+fingerprint guard below would be gone too, so the engine hands each stream the receipts the run's own
+`sink-receipts.json` already holds for it (`StreamContext.delivered`; only the sink that needs it reads them). When
+the brokers hold no progress for a stream and a receipt of the same sink, target and topic counts records committed or
+skipped there, on the same cluster (the receipt names the cluster's id, `clusterId`; a receipt of another cluster says
+nothing about this one), the stream is refused with `FLX-3514` before anything is sent. The message says the brokers
+no longer hold the progress, that sending again would duplicate what was delivered, and the two ways to do that on
+purpose: another `topic-prefix`, or removing that stream's entry from `sink-receipts.json`. The bound that remains:
+without the local receipts (another machine, or a removed run directory) a re-send after the retention duplicates.
+
 The progress also records a fingerprint (16 hex digits of a digest) of the settings that decide a record's bytes
 beside its row: the key columns and the key format, the event-time column and its default, and the value form
 (plain JSON, or the registry's value format, subject and a contract subject's pinned version, never the schema id).
@@ -246,15 +257,17 @@ batches (`lz4` by default) and is recorded in the receipt. The producer drains i
 
 ### 10. Pacing outside the digest
 
-`pace=max` (the default) sends as fast as the brokers take, in the stream's order. `pace=realtime` and `pace=xN` (N
-a positive number, `x2` twice as fast as real time) hold the stream until its last row, put its records in
+`pace=max` (the default) sends as fast as the brokers take, in the stream's order. `pace=realtime` and `pace=xN` (N a
+number of at least 0.001, `x2` twice as fast as real time) hold the stream until its last row, put its records in
 event-time order while keeping each entity's order, and send each one when the wall clock, counted from the first
-record, reaches its offset from the first event time divided by N. A paced stream commits a transaction at least
-every `commit-every` seconds (1 by default; an unpaced stream commits only when `commit-every` is given) and before
-every wait longer than that, so read-committed consumers see the records as they are sent, and each transaction
-carries the progress of section 9. A delivery resumes only in the order it began: a paced delivery and an unpaced
-one of the same stream do not mix (`FLX-3504`). Keys, values, timestamps and headers are the same at every pace and
-every `--jobs`: pacing chooses when a record is sent, never what it holds.
+record, reaches its offset from the first event time divided by N. A paced stream commits a transaction at least every
+`commit-every` seconds (1 by default; an unpaced stream commits only when `commit-every` is given) and before every
+wait longer than that, so read-committed consumers see the records as they are sent, and each transaction carries the
+progress of section 9. A delivery resumes only in the order it began: a paced delivery and an unpaced one of the same
+stream do not mix (`FLX-3504`). Keys, values, timestamps and headers are the same at every pace and every `--jobs`:
+pacing chooses when a record is sent, never what it holds. A paced stream is held in memory until its last row, so one
+whose serialized keys and values pass 1 GiB is refused with `FLX-3504` before anything is sent, pointing to
+`pace=max`.
 
 ### 11. Headers and the receipt
 
@@ -266,28 +279,37 @@ the command was given the pinned profile, the grade worked out from it (`profile
 
 ### 12. Credentials and options
 
-A credential is never an option (`FLX-3508`) and never part of the target. SASL credentials come from the
-environment variables `sasl-username-env` and `sasl-password-env` name, with `security-protocol` and
-`sasl-mechanism` (`PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512`); the registry's basic credentials come from the
-variable `registry-auth-env` names, as `USER:PASSWORD`. A credential is sent only over TLS (`SASL_SSL`, an `https`
-registry) unless every server it goes to is this machine's loopback address. `ssl-ca-location` and
-`registry-ca-location` name certificate files. A credential over `SASL_PLAINTEXT`, allowed only on this machine, needs
-`sasl-mechanism=SCRAM-SHA-256` or `SCRAM-SHA-512`: `PLAIN` sends the password itself and is `FLX-3504`, as is a
-`transaction-timeout` above 2147483 seconds (librdkafka's int32 of milliseconds). When a credential goes over `SASL_PLAINTEXT` on this machine, the
-first request of every stream reads the brokers the cluster advertises, and one that is not a loopback address is
-`FLX-3504` before anything else is asked: the bootstrap servers may be local while the brokers they name are not, and
-the credential would go to them in the clear. `registry` may name several URLs, separated by commas, as the
-registry client fails over between them; each is checked by the same rules, and a credential goes over `http` only to
-URLs that are all on this machine. The registry client carries the `timeout` option, is opened when a stream needs it and
-closed when that stream's delivery ends, and every client is told not to send the brokers metrics of its own
-(`enable.metrics.push` off, KIP-714). A missing variable is `FLX-3504`, naming the variable and never a
-value, and an error a library raises is scrubbed of every credential before it is shown. librdkafka's log goes to
-the `flux_engine.sinks.kafka` logger, never to the terminal directly.
+A credential is never an option (`FLX-3508`) and never part of the target. SASL credentials come from the environment
+variables `sasl-username-env` and `sasl-password-env` name, with `security-protocol` and `sasl-mechanism` (`PLAIN`,
+`SCRAM-SHA-256` or `SCRAM-SHA-512`); the registry's basic credentials come from the variable `registry-auth-env`
+names, as `USER:PASSWORD`. A credential is sent only over TLS (`SASL_SSL`, an `https` registry), except a SASL
+credential to brokers that are all this machine's loopback addresses. The registry's credential never goes in clear:
+with `registry-auth-env`, every registry URL must be `https` (`FLX-3504`), because the registry client follows the
+environment's proxies (`HTTP_PROXY`, `ALL_PROXY`) and would send the `Authorization` header to a proxy in clear even
+for a registry on this machine. An `http` registry, on this machine or another, is allowed only without credentials.
+`ssl-ca-location` and `registry-ca-location` name certificate files. A credential over `SASL_PLAINTEXT`, allowed only
+on this machine, needs `sasl-mechanism=SCRAM-SHA-256` or `SCRAM-SHA-512`: `PLAIN` sends the password itself and is
+`FLX-3504`, as is a `transaction-timeout` above 2147483 seconds (librdkafka's int32 of milliseconds). When a
+credential goes over `SASL_PLAINTEXT` on this machine, the first request of every client reads the brokers the cluster
+advertises (the admin client's metadata, the producer's before `init_transactions` and the progress consumer's before
+its read), and one that is not a loopback address is `FLX-3504` before anything else is asked. A name is this machine
+only when it resolves and every address it resolves to is loopback (an IPv4-mapped IPv6 address counts by its IPv4
+address; `0.0.0.0` and a name that does not resolve are not loopback; `localhost` is not trusted by its spelling): the
+bootstrap servers may be local while the brokers they name are not, and the credential would go to them in the clear.
+`registry` may name several URLs, separated by commas, as the registry client fails over between them; each is checked
+by the same rules, and with `registry-auth-env` every one must be `https`. The registry client carries the `timeout`
+option, is opened when a stream needs it and closed when that stream's delivery ends, and every client is told not to
+send the brokers metrics of its own (`enable.metrics.push` off, KIP-714). A missing variable is `FLX-3504`, naming the
+variable and never a value, and an error a library raises is scrubbed of every credential before it is shown.
+librdkafka's log goes to the `flux_engine.sinks.kafka` logger, never to the terminal directly.
 
 The options are `audience`, `registry`, `registry-auth-env`, `registry-ca-location`, `topic-prefix`,
 `topic.EXPOSE`, `key.EXPOSE`, `key-format`, `timestamp.EXPOSE`, `value-format`, `pace`, `commit-every`,
 `transaction-timeout`, `compression`, `partitions`, `replication-factor`, `timeout`, `security-protocol`,
-`sasl-mechanism`, `sasl-username-env`, `sasl-password-env` and `ssl-ca-location`.
+`sasl-mechanism`, `sasl-username-env`, `sasl-password-env` and `ssl-ca-location`. Their numbers are bounded, each
+refusal `FLX-3504` naming the option and the limit: `partitions` at most 2147483647, `replication-factor` at most
+32767, `pace=xN` with N at least 0.001, `commit-every` at least 0.1 seconds, `timeout` at most 3600 seconds and
+`transaction-timeout` at most 2147483 seconds. librdkafka's log lines go through the same scrubber as an error.
 
 Metadata that is not yet settled is waited out, up to `timeout`: a retriable error on a topic or a partition (a leader
 not yet elected) and a topic the configuration read does not yet know right after it was created. A flush that still
