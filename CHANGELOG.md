@@ -133,9 +133,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   bins the column is drawn from, so `init` no longer cuts a column at a window that other columns imply. A column's
   bins are cut only at a window you pass with `--window`. A contract range that ends in the year 9999 says only that
   the column holds a date and gives the window nothing: a run's periods step past the window's end, and a window that
-  ends in that year cannot be planned. A contract range that widens the window beyond every span the profile and the
-  bundle give (a loose range such as `between '1900-01-01' and '2100-12-31'`) is named under "time window", a gap at
-  `/spec/timeBounds` that `--strict` refuses; a date column the profile publishes no order statistic for is drawn
+  ends in that year cannot be planned. A window that a contract range widens beyond every span the profile and the
+  bundle give (a loose range such as `between '1900-01-01' and '2100-12-31'`), or that comes only from a contract
+  range because neither gives a span, is named under "time window", a gap at `/spec/timeBounds` that `--strict`
+  refuses; a date column the profile publishes no order statistic for is drawn
   evenly across the whole window.
 - The parameter register counts the numbers under the namespace keys beside `emits` (`facts`, `links`, `counts`,
   `history`, `events`, `periods`, `lifetimes`, `within`, `rates`, `conditions`) and of the copula, and `init` gives
