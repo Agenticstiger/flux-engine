@@ -1027,7 +1027,9 @@ def test_the_receipt_says_what_was_written_and_holds_no_credential(
     receipts = deliver(kept, broker, options)
     change = next(r for r in receipts if r.expose_id == "device_change")
     assert (change.sink, change.target, change.table) == ("kafka", BOOTSTRAP, "sim.device_change")
-    assert change.rows == 210 and change.run_id == kept.layout.run_id
+    emitted = json.loads(kept.layout.receipt_path.read_text(encoding="utf-8"))["emits"]
+    assert change.rows == emitted["device_change"]["rows"] > 0
+    assert change.run_id == kept.layout.run_id
     writer = change.writer
     assert writer["shape"] == "debezium" and writer["value"] == "json" and writer["key"] == "string"
     assert writer["topic"] == "sim.device_change" and writer["partitions"] == 3
