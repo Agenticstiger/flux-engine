@@ -128,6 +128,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `--sink`, for an external audience. They default to `None` (`delivered` and `committed` to empty), no digest covers
   them, and the existing sinks ignore them. `privacy_grade_of` takes the `receipt.json` document its caller read
   (`receipt=`), so the streams delivered from a run directory are the ones its checks covered.
+- The page [Where FLUX fits](docs/explanation/compared.md) says what FLUX is good at, where it is not, and how it
+  compares with 24 other synthetic and test data tools, with the roadmap for many-core speed, a living clone and
+  learned generators. The README gains a short Roadmap section that links to it.
 
 ### Changed
 
