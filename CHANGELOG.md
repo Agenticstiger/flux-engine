@@ -172,9 +172,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - A date or timestamp column whose profile publishes one value is drawn as exactly that value on every row, where it
   was drawn within the day that starts there, so its rows took that day and the next. The register says every row
   takes it. A DATE column whose one value is 9999-12-30 or 9999-12-31 (the end of every open version, say), or a
-  TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet: `init` refuses it before
-  it writes anything, names the table and the column, and says to write the open end as NULL, or to make the column
-  a TIMESTAMP. Before, such a DATE left its table out of the bundle, and `init` refused the bundle with `FLX-3403`.
+  TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet. When a relationship, a
+  history or a projection needs its table, `init` refuses before it writes anything, names the table and the
+  column, and says to write the open end as NULL, or to make the column a TIMESTAMP; before, it left the table out
+  and wrote a bundle the plan refused with `FLX-3403`. When nothing needs the table, it is left out, as before, and
+  its statistics are listed unused with the reason.
 - `init` no longer writes a bundle the plan refuses with `FLX-6204` when an enforced `within` date's parent has a
   lifetime whose start declares no range: no widening of the date's range can meet the plan's check then, so the
   entry is left out and its pair is listed unused, with the reason.
