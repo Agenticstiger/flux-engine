@@ -447,6 +447,9 @@ class _FaultyBroker:
     def versions(self) -> Mapping[str, str]:
         return self.inner.versions()
 
+    def cluster_id(self) -> Optional[str]:
+        return self.inner.cluster_id()
+
     def close(self) -> None:
         self.inner.close()
 
@@ -496,7 +499,7 @@ def test_a_paced_delivery_commits_as_it_goes_and_a_resume_sends_the_rest_once(
     expected = kept.expected("site")
     counts = {"paced.site": len(expected)}
     target, broker = _target(
-        cluster, **{"topic-prefix": "paced.", "pace": "x100000000", "commit-every": "0.05"}
+        cluster, **{"topic-prefix": "paced.", "pace": "x50000000", "commit-every": "0.1"}
     )
     # The first producer of the run belongs to device_change; the site stream is the last one, so
     # fail the sixth producer: it is the one for `site`.

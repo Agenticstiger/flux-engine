@@ -113,6 +113,9 @@ class NullBroker:
     def versions(self) -> Mapping[str, str]:
         return {}
 
+    def cluster_id(self) -> Optional[str]:
+        return None
+
     def close(self) -> None:
         pass
 

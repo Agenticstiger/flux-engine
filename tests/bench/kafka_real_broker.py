@@ -198,6 +198,9 @@ class CountingBroker:
     def versions(self) -> Mapping[str, str]:
         return self._inner.versions()
 
+    def cluster_id(self) -> Optional[str]:
+        return self._inner.cluster_id()
+
     def close(self) -> None:
         self._inner.close()
 
