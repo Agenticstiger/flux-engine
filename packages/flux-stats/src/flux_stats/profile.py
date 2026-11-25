@@ -2985,8 +2985,11 @@ class _Reader:
         ``{table}``: ``m_T``. With ``by``, the child columns of a listed relationship from a parent
         ``P`` into the table: one group is one row of ``P``, ``m_P``; or the table's ``history``
         entity columns: ``m_T``, under the history's whole-entity obligation (a profiler's, stated
-        and not checked). Anything else, an unknown table or column, or a figure of 0 (a table the
-        unit does not reach), is refused, naming the query and no value.
+        and not checked), in a table the unit follows into. In the unit's own expose one unit is
+        one version, and removing it can move its entity from one cell of the rate to the other,
+        so the entity form is refused there, as a noisy history member is. Anything else, an
+        unknown table or column, or a figure of 0 (a table the unit does not reach), is refused,
+        naming the query and no value.
         """
         accounting = self._require_account(f"{where}.unit")
         refused = f"query {name!r} states a unit that does not give a charge: "
@@ -3014,6 +3017,13 @@ class _Reader:
                     break
             history = entry.history
             if history is not None and history.entity == unit.by:
+                if unit.table == accounting.unit:
+                    raise refuse(
+                        f"{where}.unit.by",
+                        refused + "it groups by the history's entity in the unit's own expose, "
+                        "where one unit is one version and can move its entity between the "
+                        "rate's cells",
+                    )
                 charges.append(reach)
             if not charges:
                 raise refuse(

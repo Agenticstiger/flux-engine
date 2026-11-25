@@ -160,6 +160,45 @@ def test_the_member_form_is_refused_when_the_table_is_reached_through_another_re
     assert "queries[1].unit.by" in message
 
 
+def _exact(member: Any) -> None:
+    """A noisy history member released without noise instead, its counts the rounded noisy ones."""
+    if "noise" not in member:
+        return
+    member.pop("noise")
+    member["disclosure"] = "none"
+    key = "binCounts" if member["definition"].startswith("marginal") else "levelCounts"
+    for group in member["groups"]:
+        counts = [max(0, round(float(value))) for value in group.pop("noisyCounts")]
+        group["k"] = sum(counts)
+        group[key] = counts
+
+
+def test_the_entity_form_is_refused_in_the_unit_s_own_expose() -> None:
+    """One unit is one version there: removing it can move its entity between the rate's cells.
+
+    The charge of a count table (1) would then understate what one unit changes (one cell down,
+    the other up), as for a noisy history member in that table.
+    """
+
+    def own_expose(document: Dict[str, Any]) -> None:
+        document["privacy"]["privacyUnit"] = {"expose": "card_version"}
+        history = document["tables"]["card_version"]["history"]
+        for key in ("versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion"):
+            _exact(history[key])
+        for column in history["columns"].values():
+            _exact(column["initial"])
+            _exact(column["transitions"])
+        document["relationships"] = []
+        for table in document["tables"].values():
+            for column in table["columns"].values():
+                column.pop("statistics", None)
+        document["queries"] = [document["queries"][CARDS]]
+        assert document["queries"][0]["unit"] == {"table": "card_version", "by": ["card_no"]}
+
+    message = _refused(_edit(own_expose))
+    assert "queries[0].unit" in message
+
+
 def test_a_noisy_query_in_a_document_of_an_earlier_format_is_refused() -> None:
     document = _edit(lambda d: d.update(_schemaURL=SCHEMA_URL_1_4_0))
     message = _refused(document)

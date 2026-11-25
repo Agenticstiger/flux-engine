@@ -36,7 +36,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   noisy no longer keeps a run from P3. Before, a `noise` block on any history member was refused in every format.
 - Profile format 1-5-0 lets a query's rate carry noise: the query states its `unit` (a table's rows, groups of them by the
   child columns of a followed relationship, or a history's entities), which gives the charge, and flux-stats reads, checks
-  and charges it. A noisy query in an earlier format is refused as before.
+  and charges it. The entity form is refused in the unit's own expose, where one unit is one version. A noisy query in an
+  earlier format is refused as before.
 - `fluxsim init` reads a private release's noisy history and noisy null counts (profile format 1-5-0). A noisy history
   member is read through its point estimate, its cells inside the noise (`noise_floor` over all its cells) carrying no
   weight; one with no cell clear of it is read as withheld. A `nullCount/2` gives a nullable column the NULL share its

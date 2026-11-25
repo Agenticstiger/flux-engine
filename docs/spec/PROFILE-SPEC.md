@@ -603,7 +603,8 @@ names an earlier format and holds one is refused (`FLX-5036`), as before.
 - `{ "table": T, "by": [columns] }`: the records are groups of the rows of `T`. `by` is either (a) the child columns of
   an entry of the profile's `relationships` from a parent `P` into `T`, and one group is the rows of one row of `P`:
   the charge is `m_P`, which is 1 when `P` is the unit's expose; or (b) the `history.entity` columns of `T`, and one
-  group is one entity: the charge is `m_T`.
+  group is one entity: the charge is `m_T`. Form (b) is refused when `T` is the unit's own expose, as a noisy history
+  member is there: one unit is one version, and removing it can move its entity from one cell of the rate to the other.
   Form (a) holds only when a group leaves with its unit whole, so that relationship must be listed in `follows` (the rows
   of `T` then follow their row of `P`), or `T` must not be reached (`m_T = 0`, so the rows of `T` are the same in every
   neighbouring data set). Otherwise one unit's rows, reached through another relationship, could move a group between the
