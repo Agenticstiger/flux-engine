@@ -105,6 +105,7 @@ from typing import (
     Iterator,
     List,
     Mapping,
+    NamedTuple,
     Optional,
     Sequence,
     Tuple,
@@ -1620,26 +1621,74 @@ def _count_queries(
     )
 
 
+class _RangeChecks(NamedTuple):
+    """The contract ranges ``verify`` checks, and what it says about the ones it does not.
+
+    *found* is each emit's checked ranges. *not_checked* is one sentence for each declared range
+    that is left out, and for a run whose every range is: advice only, it never fails the run.
+    """
+
+    found: Dict[str, Tuple["ColumnRange", ...]]
+    not_checked: Tuple[str, ...]
+
+
+#: Why a run's declared ranges are not checked at all.
+_RANGES_ARTIFACTS_MOVED = "the run's artifacts do not reproduce run-digest.json (FLX-2110)"
+_RANGES_BUNDLE_MOVED = "the bundle is not the one the plan was made from (its input digest differs)"
+
+
+def _ranges_left_out(bundle: Any, loaded: "_Loaded", *, artifacts_ok: bool) -> Optional[str]:
+    """Why the contract's ranges are not checked for the whole run, or ``None`` when they are."""
+    if not artifacts_ok:
+        return _RANGES_ARTIFACTS_MOVED
+    receipt, plan_document = loaded.receipt, loaded.recorded_plan
+    digest = _pipeline.input_digest_of(bundle, kernel=plan_kernel(plan_document)).ref.value
+    return None if digest == str(receipt.get("inputDigest")) else _RANGES_BUNDLE_MOVED
+
+
+def _checked_ranges(
+    declared: Sequence[Tuple[Any, Tuple["ColumnRange", ...]]], scale: Any
+) -> _RangeChecks:
+    """The ranges that are checked, and a sentence for each key column *scale* widened."""
+    from flux_engine.core.sizing import scale_text
+    from flux_engine.stages.scaling import widened_columns
+
+    found: Dict[str, Tuple["ColumnRange", ...]] = {}
+    skipped: List[str] = []
+    for emit, ranges in declared:
+        # A key column `--scale` widened holds keys past its contract's range by construction.
+        widened = widened_columns(emit, scale)
+        held = tuple(item for item in ranges if item.column not in widened)
+        skipped.extend(
+            f"{emit.expose_id}.{item.column}: not checked at --scale {scale_text(scale)}: "
+            "the scale widens the column's keys past its contract range"
+            for item in ranges
+            if item.column in widened
+        )
+        if held:
+            found[emit.expose_id] = held
+    return _RangeChecks(found, tuple(skipped))
+
+
 def _plan_range_checks(
     bundle_directory: Union[str, Path],
     loaded: "_Loaded",
     *,
     artifacts_ok: bool,
-) -> Dict[str, Tuple["ColumnRange", ...]]:
+) -> _RangeChecks:
     """The ranges the bundle's contract declares for each emit's columns, or nothing when it is not the run's.
 
     The bundle is read as the module checks read it: it must be the run's (the same ``inputDigest``
     under the kernel its plan names), or its contract says nothing about this run's rows. A bundle
-    that cannot be read, or whose run does not reproduce its digest, adds nothing here: the legs
-    that read it say so.
+    that cannot be read adds nothing here: the legs that read it say so. When the ranges are left
+    out for the whole run (its artifacts do not reproduce, or the bundle is not the run's) and the
+    bundle declares one, that is said once; a key column ``--scale`` widened is said by name.
     """
-    if not artifacts_ok:
-        return {}
     from decimal import Decimal
 
     from flux_engine.generator.declared_range import declared_ranges_of
     from flux_engine.seam.resolve import load_bundle, resolve_all_emits
-    from flux_engine.stages.scaling import optional_scale, widened_columns
+    from flux_engine.stages.scaling import optional_scale
 
     receipt, plan_document = loaded.receipt, loaded.recorded_plan
     scale = optional_scale(plan_document.get("scale")) or Decimal(1)
@@ -1647,31 +1696,19 @@ def _plan_range_checks(
     simulation_id = str(receipt.get("simulationId") or plan_document.get("simulationId"))
     try:
         bundle = load_bundle(Path(bundle_directory))
-        if _pipeline.input_digest_of(bundle, kernel=plan_kernel(plan_document)).ref.value != str(
-            receipt.get("inputDigest")
-        ):
-            return {}
-        resolved = resolve_all_emits(bundle, simulation_id=simulation_id)
-        found: Dict[str, Tuple["ColumnRange", ...]] = {}
-        for emit in resolved:
-            if (
-                emit.is_hidden_table
-                or not isinstance(emitted, Mapping)
-                or emit.expose_id not in emitted
-            ):
-                continue
-            # A key column `--scale` widened holds keys past its contract's range by construction.
-            widened = widened_columns(emit, scale)
-            held = tuple(
-                item
-                for item in declared_ranges_of(emit.expose, emit.compile())
-                if item.column not in widened
-            )
-            if held:
-                found[emit.expose_id] = held
+        why = _ranges_left_out(bundle, loaded, artifacts_ok=artifacts_ok)
+        declared = [
+            (emit, declared_ranges_of(emit.expose, emit.compile()))
+            for emit in resolve_all_emits(bundle, simulation_id=simulation_id)
+            if not emit.is_hidden_table
+            and isinstance(emitted, Mapping)
+            and emit.expose_id in emitted
+        ]
     except FluxError:
-        return {}
-    return found
+        return _RangeChecks({}, ())
+    if why is not None:
+        return _RangeChecks({}, (f"not checked: {why}",) if any(r for _, r in declared) else ())
+    return _checked_ranges(declared, scale)
 
 
 def _plan_module_checks(
@@ -2122,12 +2159,12 @@ def packed_emit(
     return PackedEmit(header=header, rows=tuple(tuple(row) for row in rows))
 
 
-def _range_lines(range_problems: Sequence[str]) -> List[str]:
-    """A line only for a column with rows outside the range its contract declares.
+def _range_lines(range_problems: Sequence[str], not_checked: Sequence[str] = ()) -> List[str]:
+    """A line only for a column with rows outside the range its contract declares, or a range not checked.
 
     A run with none prints what it printed before the contract's ranges were read.
     """
-    return [f"  ranges: {problem}" for problem in range_problems]
+    return [f"  ranges: {problem}" for problem in [*range_problems, *not_checked]]
 
 
 def _shortfall_lines(
@@ -2535,6 +2572,8 @@ class _Legs:
     #: The rows outside a range the contract declares (a sentence for each column); empty for a run
     #: whose contract declares none, or whose rows all lie inside.
     range_problems: List[str]
+    #: The declared ranges left unchecked, a sentence each (advice only); empty for most runs.
+    ranges_not_checked: Tuple[str, ...]
     vector_failures: int
     vector_messages: List[str]
     against: "ProfileLegs"
@@ -2595,6 +2634,9 @@ def _run_legs(
         loaded.recorded_plan,
         artifacts_ok=not artifact_mismatches,
     )
+    range_checks = _plan_range_checks(
+        bundle_directory, loaded, artifacts_ok=not artifact_mismatches
+    )
     emits = _read_emits(
         layout,
         receipt,
@@ -2602,7 +2644,7 @@ def _run_legs(
         jobs=jobs,
         module=module_plan,
         hidden_columns=_hidden_columns_of(loaded.recorded_plan) if scored is not None else None,
-        ranges=_plan_range_checks(bundle_directory, loaded, artifacts_ok=not artifact_mismatches),
+        ranges=range_checks.found,
     )
     row_problems = emits.row_problems()
     range_problems = emits.range_problems()
@@ -2675,6 +2717,7 @@ def _run_legs(
         artifacts_leg=artifacts_leg,
         row_problems=row_problems,
         range_problems=range_problems,
+        ranges_not_checked=range_checks.not_checked,
         vector_failures=vector_failures,
         vector_messages=vector_messages,
         against=against,
@@ -2903,7 +2946,7 @@ def _update_golden_baseline(loaded: _Loaded, legs: _Legs, *, reason: Optional[st
                 "golden": {"updated": False, "problems": problems},
                 "artifactComponents": legs.artifacts_leg,
                 "rowConformance": {"ok": not legs.row_problems, "problems": legs.row_problems},
-                **_range_artifact(legs.range_problems),
+                **_range_artifact(legs.range_problems, legs.ranges_not_checked),
                 "rfc04": {"failures": legs.vector_failures, "messages": legs.vector_messages},
                 "fidelity": legs.fidelity_outcomes,
                 **scorecard_extra,
@@ -2964,11 +3007,21 @@ def _shortfall_artifact(shortfalls: Mapping[str, Mapping[str, int]]) -> Dict[str
     return {"historyShortfalls": {k: dict(v) for k, v in shortfalls.items()}} if shortfalls else {}
 
 
-def _range_artifact(range_problems: Sequence[str]) -> Dict[str, Any]:
-    """The ``rangeConformance`` artifact key: present only when rows lie outside a declared range."""
-    if not range_problems:
-        return {}
-    return {"rangeConformance": {"ok": False, "problems": list(range_problems)}}
+def _range_artifact(
+    range_problems: Sequence[str], not_checked: Sequence[str] = ()
+) -> Dict[str, Any]:
+    """The ``rangeConformance`` artifact key, present only when rows lie outside a declared range.
+
+    ``rangesNotChecked`` lists the declared ranges that were not checked, only when there is one.
+    """
+    return {
+        **(
+            {"rangeConformance": {"ok": False, "problems": list(range_problems)}}
+            if range_problems
+            else {}
+        ),
+        **({"rangesNotChecked": list(not_checked)} if not_checked else {}),
+    }
 
 
 def _queries_artifact(queries: Optional["QueriesLeg"]) -> Dict[str, Any]:
@@ -3115,7 +3168,7 @@ def _verdict(
             "declaredBaselineDrift": declared_baseline_drift,
             "artifactComponents": artifacts_leg,
             "rowConformance": {"ok": not row_problems, "problems": row_problems},
-            **_range_artifact(range_problems),
+            **_range_artifact(range_problems, legs.ranges_not_checked),
             **_shortfall_artifact(shortfalls),
             "rfc04": {"failures": vector_failures, "messages": vector_messages},
             "fidelity": fidelity_outcomes,
@@ -3136,7 +3189,10 @@ def _verdict(
                     row_problems=row_problems,
                     vector_failures=vector_failures,
                     fidelity_outcomes=fidelity_outcomes,
-                    extra_lines=[*_range_lines(range_problems), *_shortfall_lines(shortfalls)],
+                    extra_lines=[
+                        *_range_lines(range_problems, legs.ranges_not_checked),
+                        *_shortfall_lines(shortfalls),
+                    ],
                 ),
                 *([f"  {render_register_line(register.summary)}"] if register is not None else []),
                 *against.lines(),

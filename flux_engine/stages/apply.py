@@ -101,6 +101,8 @@ from flux_engine.stages.plan import (
     PROJECTED_GIVENS_AFTER,
     PROJECTED_GIVENS_PLAN_KEY,
     REFERENCES_PLAN_KEY,
+    SCALE_FLOORS_PLAN_KEY,
+    SCALE_FLOORS_TRACKED,
     column_provenance_text,
     parameter_register_text,
 )
@@ -119,6 +121,7 @@ __all__ = [
     "apply",
     "load_recorded_plan",
     "plan_date_ranges",
+    "plan_scale_floors",
     "plan_end_share",
     "plan_projected_givens",
     "plan_kernel",
@@ -192,6 +195,7 @@ def load_recorded_plan(layout: RunLayout) -> Dict[str, Any]:
     plan_kernel(document)
     plan_end_share(document)
     plan_date_ranges(document)
+    plan_scale_floors(document)
     plan_projected_givens(document)
     require_plan_shortfalls(document)
     return document
@@ -258,6 +262,19 @@ def plan_date_ranges(plan_document: Mapping[str, Any]) -> bool:
     is.
     """
     return _marker_named(plan_document, DATE_RANGES_PLAN_KEY, DATE_RANGES_CUT, "cuts nothing")
+
+
+def plan_scale_floors(plan_document: Mapping[str, Any]) -> bool:
+    """Whether a recorded plan checks tracked levels and keeps its parents' keys, or the refusal (``FLX-2102``).
+
+    A plan with ``scaleFloors`` says ``"trackedLevels"`` (ADR 0017, the amendment of 2026-11-25):
+    it kept a drawn parent at the rows its children's tracked levels need. A plan without it was
+    written before that, or needed no parent kept: it replays with neither the check nor the
+    floor, so the rows it made keep their bytes. Any other value is refused as ``dateRanges`` is.
+    """
+    return _marker_named(
+        plan_document, SCALE_FLOORS_PLAN_KEY, SCALE_FLOORS_TRACKED, "checks no tracked level"
+    )
 
 
 def plan_projected_givens(plan_document: Mapping[str, Any]) -> bool:
@@ -797,9 +814,12 @@ def _apply(
                 strict_coverage=strict_coverage,
                 kernel=kernel,
                 scale=optional_scale(plan_document.get("scale")),
-                end_share=plan_end_share(plan_document),
-                cut_ranges=plan_date_ranges(plan_document),
-                projected_givens=plan_projected_givens(plan_document),
+                era=_pipeline.PlanEra(
+                    end_share=plan_end_share(plan_document),
+                    cut_ranges=plan_date_ranges(plan_document),
+                    tracked_levels=plan_scale_floors(plan_document),
+                    projected_givens=plan_projected_givens(plan_document),
+                ),
                 shard=shares,
                 references=plan_document.get(REFERENCES_PLAN_KEY),
                 allow_generators=allow_generators,

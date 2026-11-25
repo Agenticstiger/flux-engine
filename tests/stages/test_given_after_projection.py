@@ -212,7 +212,11 @@ def test_a_plan_recorded_before_the_reorder_replays_its_own_bytes(
     state = tmp_path / "state"
     # As engine 0.11.1 made it: ``tier`` drawn given the level ``model``'s own draw made.
     layout, digest = run_as_before(
-        target, state, monkeypatch, "_planned_with_projections", projected_givens=False
+        target,
+        state,
+        monkeypatch,
+        "_planned_with_projections",
+        era=pipeline.PlanEra(projected_givens=False),
     )
     assert KEY not in load_recorded_plan(layout)
     recorded = layout.emit_path(_fleet.PERIODIC).read_bytes()
