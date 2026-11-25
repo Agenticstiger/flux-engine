@@ -20,13 +20,17 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## 0.12.0 - 2026-11-25
+## 0.12.0 - 2026-11-26
 
 A Kafka sink, `fluxsim init --window` and `--history`, `validate --profile`, history and periods declarations
-on kernel 0.2.0, and fixes to `init`, history projection, date ranges and `verify`.
+on kernel 0.2.0, a declared open end and version chain read by `init`, and fixes to `init`, projections, date
+ranges and `verify`. The engine now needs `flux-spec>=0.5.5,<0.6`.
 
 ### Added
 
+- flux-stats: `noise.noise_floor(mechanism, scale, cells)`, the count a released cell must exceed to stand clear
+  of the noise among `cells` cells, a union bound at the confidence `noise.widening` uses, and `noise.ceil_ln`,
+  which it reads `ceil(ln m)` with in exact arithmetic (ADR 0019, the second amendment of 2026-11-25).
 - `init --json` carries `ledger.unused`, the list an owner can leave out of the profile: an entry the profile reader
   holds whole (a calendar entry with none of its histograms read, say) is named by its own pointer, so dropping
   exactly that list leaves a profile the reader accepts. `ledger.statistics` still names each statistic on its own,
@@ -131,13 +135,21 @@ on kernel 0.2.0, and fixes to `init`, history projection, date ranges and `verif
   `--sink`, for an external audience. They default to `None` (`delivered` and `committed` to empty), no digest covers
   them, and the existing sinks ignore them. `privacy_grade_of` takes the `receipt.json` document its caller read
   (`receipt=`), so the streams delivered from a run directory are the ones its checks covered.
+- The page [Where FLUX fits](docs/explanation/compared.md) says what FLUX is good at, where it is not, and how it
+  compares with 24 other synthetic and test data tools, with the roadmap for many-core speed, a living clone and
+  learned generators. The README gains a short Roadmap section that links to it.
 
 ### Changed
 
-- The engine reads a profile whose calendar entry holds none of its three histograms, as when a release step drops
-  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place: `init`
-  and `plan` accept it, and a citation into such an entry is still refused (`FLX-5036`). flux-stats' `parse_profile`
-  and `load_profile_text` take `allow_empty_calendar_entries`, off by default, which the engine sets.
+- The engine needs `flux-spec>=0.5.5,<0.6` (was `>=0.5.4`). 0.5.5's FLUID 0.7.7 preview declares a versioned
+  table's open end and version chain (`validityParams.openEnd` and `chain`), which `fluxsim init` reads into a
+  history; under 0.5.4 a contract that declared either was refused by validation.
+- The engine reads a profile in which an entry holds only the keys that name it, as when a release step drops
+  every statistic the `init --json` inventory marks unused, as an entry that holds nothing, kept in its place:
+  `init` and `plan` accept it, and a citation at or under such an entry is still refused (`FLX-5036`). The entries
+  are a calendar entry, a date pair, a relationship's date pair, an exposure, a history and a tracked column of
+  one. An entry that holds some of its statistics, but not all, is refused as before. flux-stats' `parse_profile`
+  and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets.
 - A profile's `privacy` block may state more loss than its noisy statistics and cliques spend, including when none
   remain; a stated loss is an upper bound, and a total below what they spend is still refused (`FLX-5036`). The grade
   comes from the statistics alone, so a block that nothing spends earns no grade, and `init` notes the stated and
@@ -180,9 +192,40 @@ on kernel 0.2.0, and fixes to `init`, history projection, date ranges and `verif
 
 ### Fixed
 
+- An instant before the year 1000 is written with a four-digit year on every platform, as RFC 3339 writes it
+  (`0001-01-01T00:00:00.000Z`). Below 1000 the engine used the platform's `strftime`, and glibc writes the year 1 as
+  `1`: on Linux a TIMESTAMP cell then held no RFC 3339 instant, and `fluxsim init` failed on a run window that starts
+  before 1000, such as one a profile's year grid gives when its first bin, from 0001-01-01, holds records. macOS
+  wrote four digits already, so its output does not change.
+- `plan` refused (`FLX-3403`), and `validate` warned of, a date column whose declared range reaches past the run's
+  window even when its draw stays inside it, as a range read from a profile does (its full year grid, with weight only
+  in the bins inside the window). Both now read the edges the draw can reach: the weighted bins' hull, or the declared
+  range when the column has no bins. A bin outside the window that carries weight is still refused (ADR 0017, the
+  amendment of 2026-11-25).
+- `verify` no longer refuses (`FLX-5037`) a histogram of a DATE column whose profile grid ends at the calendar's last
+  instant, 253402300799999 milliseconds. A profile spells the last edge of a year grid there and a declaration spells
+  it as the day 9999-12-31; they are one edge. An edge that is not a whole day still matches no declared edge.
+- `verify` no longer refuses (`FLX-5005`, "the two sides group into different sets") a property grouped by a column
+  because a noisy profile lists a level whose noisy counts project to no record and the generated rows hold none of
+  it. A level the profile holds no record of is left out on both sides, as a suppressed group is, and the other groups
+  are compared. A level the profile holds records of that the rows lack is still refused.
 - A column of an events or periods emit drawn `given` a column the entry sets (a column of the version, an image,
-  the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. The
-  plan now refuses it, `FLX-3403` naming both columns and the entry (ADR 0027, the amendment of 2026-11-24).
+  the op) read the level its own draw made and not the cell the row holds, so the two disagreed on most rows. A
+  column drawn `given` a column of the version is now drawn after the projection, given the level the version
+  holds, so `tier` given `model` follows the `model` each row carries; a plan with such a column says
+  `projectedGivens: "afterProjection"` (plan.json states only that key; the generator document the plan's digest
+  covers names the held columns as `heldGivens`), and a recorded plan without the key replays the draw it was made
+  with. Where the column of the version holds a value no level of the emit's names (a `nullFraction`, a rule, a
+  relationship or the history's `end` sets it, or the history draws other levels), the column drawn `given` it is
+  drawn from the marginal the declarations imply: its parent's level weights (the emit's, else the history's) taken
+  through its table, summed exactly and normalised, with no new declaration and nothing fitted. Where the parent
+  declares no level weights it is drawn from its own declared `support`, equal weights, which must name the levels its
+  table names (and `maxCardinality` with it). The plan prints one note for each such column saying which, and
+  `fallbackGivens` and `fallbackMarginals` in the generator document name the parents and the shares, so the digest
+  covers them. The plan refuses, `FLX-3403` naming both columns and the entry, what that cannot serve: a column drawn
+  `given` the `op`, `at`, `date`, `type` or period column, a kind's override or an image, one with `allocation: exact`,
+  and one drawn `given` a column of the version the history may fill with such a value when neither level weights for
+  the parent nor a support naming its table's levels serve (ADR 0027, the amendments of 2026-11-24 and 2026-11-25).
 - The run's window now covers the whole range of every date column, the date range the contract declares, and the bins
   the column is drawn from (those that carry weight), so `init` no longer cuts a column at a window that other columns
   imply. A column's bins are cut only at a window you pass with `--window`. A contract range that ends in the year
@@ -241,7 +284,37 @@ on kernel 0.2.0, and fixes to `init`, history projection, date ranges and `verif
   unused list names a whole entry (see below) differs by that list too, and its register is format `1-4-0`. A bundle
   already written keeps its own.
 - A refused `init` reports its refusal even when a file it wrote cannot be removed while it cleans up, rather than a
-  permission error.
+  permission error, and a line after it names each file or directory left behind (a directory once, for what lies
+  in it). With `--overlay`, the directory `init` made for the bundles is removed with them.
+- `init` leaves out a history the plan refuses, and lists its statistics unused, when the bundle holds no
+  projection too. It did so only after leaving out a projection first; with none, it reported the history's
+  refusal and exited 1.
+- `init` refuses a contract's declared date range that would make the run's window longer than 300 years, naming
+  the column, its range and the window, before writing anything. Such a range marks no data (an open end spelled
+  before the year 9999, or a placeholder such as 0001-01-01); write an open end in the year 9999, which no window
+  reads. A shorter range that widens the window is still a note and a gap at `/spec/timeBounds`.
+- `init` writes the open end and the chain a contract declares on its validity window's end (FLUID 0.7.7
+  `validityParams.openEnd` and `chain`) into the table's history (ADR 0017, amendment of 2026-11-25). A required end
+  column no longer keeps the history out when the contract declares its open end, and open versions end on exactly
+  that value, `9999-12-31` included; an end column that publishes only that value is written by the history. The
+  open end gives the run's window nothing. A declared `chain` sets the entry's chain, and `none` writes no history,
+  with the reason. Without an open end, a required end column's reason says to declare one, and `FLX-3125` names
+  declaring it first.
+- `init` reads a date or timestamp histogram released with noise only where its counts stand clear of the noise,
+  above `sqrt(2v(5 + ceil(ln m)))` for Gaussian noise of variance `v` over `m` bins (ADR 0019, the second amendment
+  of 2026-11-25). A bin below that floor carries no weight in the draw, and the run's window is the hull of the
+  bins above it. When no bin is above it, the column is drawn evenly within the window, inside its range, as a
+  noted assumption; when its range and the window do not meet, it is drawn evenly over the whole range, and the
+  column's note says so. The declared range, the histogram's whole grid, and the histogram property stay, so `verify`
+  still scores the column. Before, noise in a year grid's empty bins drew dates across the calendar and stretched
+  the window to 0001-01-01 and 9999-12-31. Only bundles written from profiles released with noise change.
+- A run window that the profile's own spans make longer than 300 years is now a `time window` note, naming the
+  columns that reach its ends, and a gap at `/spec/timeBounds` that `--strict` refuses. Before, `init` wrote such
+  a window without a word.
+- `init --window` refuses an END in the year 9999, and `init --history FILE` refuses a file whose `timeBounds` end,
+  an entry's `until` or a `start` bin falls there, naming the value and its place. The year 9999 spells an open
+  end, which gives the window nothing, as in a declared range; before, the window reached the end of the calendar,
+  and a plan with periods failed past it.
 - `init` no longer turns a table's date pair into a lifetime or a `within` entry on a column the table's history sets
   (its validity start, its validity end or its activation column). With `--history FILE` it refused with `FLX-6203`
   ("has more than one source"), and a history the profile carries could be dropped, its statistics listed unused. The

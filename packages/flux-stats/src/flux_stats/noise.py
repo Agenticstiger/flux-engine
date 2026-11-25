@@ -55,6 +55,7 @@ __all__ = [
     "Spent",
     "ZERO_CONCENTRATED_DP",
     "check_budget",
+    "ceil_ln",
     "point_estimate",
     "read_accounting",
     "read_noise",
@@ -63,6 +64,7 @@ __all__ = [
     "reach_of",
     "sampling_widening",
     "variance_of",
+    "noise_floor",
     "widening",
 ]
 
@@ -745,3 +747,60 @@ def sampling_widening(
     if exact_allocation:
         return _round_up(Fraction(cells, 2 * rows))
     return widening(rows * Fraction(largest_share), cells, Fraction(rows), rows)
+
+
+# ---------------------------------------------------------------------------
+# When a noisy count stands clear of its noise
+# ---------------------------------------------------------------------------
+
+#: e between two rationals 10^-39 apart, so a power of e can be compared with a whole number
+#: exactly: ``_E_BELOW < e < _E_ABOVE``.
+_E_BELOW = Fraction(2718281828459045235360287471352662497757, 10**39)
+_E_ABOVE = _E_BELOW + Fraction(1, 10**39)
+
+
+def ceil_ln(count: int) -> int:
+    """The least whole ``k`` with ``e^k >= count``, that is ``ceil(ln(count))``, in exact arithmetic.
+
+    ``e^k`` is compared with ``count`` through rationals on either side of ``e``, so the answer is
+    the same on every platform. ``count`` must be at least one. A power of e is never a whole
+    number past ``e^0``, so the comparison is decided once the two bounds of ``e^k`` fall on one
+    side of ``count``; :class:`ArithmeticError` if they ever straddle it, which needs a ``count``
+    within one part in about 10^37 of a power of e.
+    """
+    if count < 1:
+        raise ValueError("ceil_ln needs a count of at least one")
+    k, below, above = 0, Fraction(1), Fraction(1)
+    while True:
+        if below >= count:
+            return k
+        if above >= count:
+            raise ArithmeticError(f"e^{k} cannot be told from {count} at this precision")
+        k, below, above = k + 1, below * _E_BELOW, above * _E_ABOVE
+
+
+def noise_floor(mechanism: str, scale: Fraction, cells: int) -> Fraction:
+    """The count a noisy cell must exceed to stand clear of the noise, among ``cells`` cells.
+
+    Each of ``m`` cells carries independent noise, and a cell whose true count is zero is read as
+    noise alone. With ``t`` :data:`CONFIDENCE_EXPONENT` and ``ceil(ln m)`` from :func:`ceil_ln`, a
+    union bound over the ``m`` cells keeps every such cell at or below the floor with probability
+    at least ``1 - e^-t``:
+
+    - a Gaussian or discrete Gaussian of variance ``v`` (``scale^2``), sub-Gaussian with that
+      variance proxy as in :func:`widening`: ``P(eta > a) <= e^(-a^2 / 2v)``, so the floor is
+      ``sqrt(2 v (t + ceil(ln m)))``, its root rounded up to 12 decimal places;
+    - a Laplace of scale ``b``: ``P(eta > a) = e^(-a / b) / 2``, so the floor is
+      ``b (t + ceil(ln m))``.
+
+    A cell above the floor is one the noise alone reaches with probability at most ``e^-t / m``.
+    The floor reads the released numbers only, so using it is post-processing of the release.
+    """
+    if cells < 1:
+        raise ValueError("a noise floor needs at least one cell")
+    if scale < 0:
+        raise ValueError("a noise floor needs a scale of at least zero")
+    exponent = CONFIDENCE_EXPONENT + ceil_ln(cells)
+    if mechanism == "laplace":
+        return Fraction(scale) * exponent
+    return _root_up(2 * variance_of(mechanism, Fraction(scale)) * exponent)

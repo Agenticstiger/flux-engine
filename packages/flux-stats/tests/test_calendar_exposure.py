@@ -275,12 +275,12 @@ def _emptied(document: Dict[str, Any]) -> None:
 def test_an_entry_with_no_histogram_is_refused_by_default() -> None:
     assert "at least one of its three histograms" in _refused(_edit(_emptied))
     with pytest.raises(FluxError) as refused:
-        parse_profile(_edit(_emptied), allow_empty_calendar_entries=False)
+        parse_profile(_edit(_emptied), allow_emptied_entries=False)
     assert refused.value.code.code == "FLX-5036"
 
 
 def test_an_entry_with_no_histogram_is_kept_in_place_when_the_reader_accepts_it() -> None:
-    profile = parse_profile(_edit(_emptied), allow_empty_calendar_entries=True)
+    profile = parse_profile(_edit(_emptied), allow_emptied_entries=True)
     empty, partial = profile.tables["payment"].calendar
     assert empty.column == "paid_at"
     assert (empty.month, empty.day_of_week, empty.hour_of_week) == (None, None, None)
@@ -292,7 +292,7 @@ def test_loading_the_text_passes_the_option_on() -> None:
     text = json.dumps(_edit(_emptied))
     with pytest.raises(FluxError):
         load_profile_text(text)
-    profile, document = load_profile_text(text, allow_empty_calendar_entries=True)
+    profile, document = load_profile_text(text, allow_emptied_entries=True)
     assert document["tables"]["payment"]["calendar"][0] == {"column": "paid_at"}
     assert profile.tables["payment"].calendar[0].month is None
 
@@ -310,7 +310,7 @@ def test_the_option_loosens_no_other_rule_of_a_calendar_entry(
     change: Callable[[Dict[str, Any]], None], fragment: str
 ) -> None:
     with pytest.raises(FluxError) as refused:
-        parse_profile(_edit(change), allow_empty_calendar_entries=True)
+        parse_profile(_edit(change), allow_emptied_entries=True)
     assert fragment in str(refused.value)
 
 
@@ -320,13 +320,13 @@ def test_an_empty_entry_still_names_a_timestamp_column_once() -> None:
         document["tables"]["payment"]["calendar"][1] = {"column": "paid_at"}
 
     with pytest.raises(FluxError, match="names one column twice"):
-        parse_profile(_edit(change), allow_empty_calendar_entries=True)
+        parse_profile(_edit(change), allow_emptied_entries=True)
 
     def not_a_timestamp(document: Dict[str, Any]) -> None:
         document["tables"]["payment"]["calendar"][0] = {"column": "amount"}
 
     with pytest.raises(FluxError, match=r"calendar\[0\]\.column"):
-        parse_profile(_edit(not_a_timestamp), allow_empty_calendar_entries=True)
+        parse_profile(_edit(not_a_timestamp), allow_emptied_entries=True)
 
 
 def test_the_schema_refuses_a_malformed_member_too() -> None:

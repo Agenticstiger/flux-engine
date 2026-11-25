@@ -29,6 +29,9 @@ half of the Decision.
 
 **Amended 2026-11-24:** the range is `flux-spec>=0.5.4,<0.6`, the floor `pyproject.toml` now carries.
 
+**Amended 2026-11-25:** the range is `flux-spec>=0.5.5,<0.6`. 0.5.5 is the first release whose FLUID 0.7.7
+preview declares a versioned table's open end and version chain, which `fluxsim init` reads into a history.
+
 ## Context
 
 The FLUX offline reference validator, the RFC-04 enforcement gate, and the

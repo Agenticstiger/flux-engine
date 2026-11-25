@@ -344,7 +344,8 @@ def _published(profile: Profile, source: ExposureSource) -> Optional[ExposureEnt
             continue
         for entry in relationship.exposure:
             if entry.start == source.start and entry.end == source.end:
-                return entry
+                # An entry that holds neither count publishes nothing to compare with.
+                return None if entry.children is None and entry.active_days is None else entry
     return None
 
 
@@ -372,6 +373,8 @@ def _exposure_line(
     """
     if source.hidden is not None:
         return None, source.hidden
+    if entry.children is None or entry.active_days is None:
+        return None, "the profile holds neither count of children nor of active days"
     total, days = entry.children.value, entry.active_days.value
     if total is None or days is None:
         return None, "the profile withheld the count of children or of active days"
