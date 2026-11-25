@@ -25,11 +25,12 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 import yaml
 
+from flux_engine.author import columns
 from flux_engine.cli._init import run_init
 from tests.author import test_children, test_ledger
 from tests.author.test_binned_quantiles import _DATE_LADDER, _binned
@@ -90,21 +91,69 @@ def _dated(maximum: str) -> Tuple[str, Dict[str, Any]]:
     return contract, profile
 
 
+_SPREAD = {"0.25": "20", "0.5": "35", "0.75": "50"}
+
+
+def _clipped(constraint: str, quantiles: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
+    """The ledger shop with an INT column whose published quantiles a contract range clips."""
+    contract = test_ledger.CONTRACT.replace(
+        "        - { name: amount, type: INT, required: true }\n",
+        "        - { name: amount, type: INT, required: true }\n"
+        "        - name: score\n"
+        "          type: INT\n"
+        "          required: true\n"
+        "          validationRules:\n"
+        f'            - {{ type: range, constraint: "{constraint}" }}\n',
+    )
+    profile = test_ledger._profile()
+    profile["tables"]["orders"]["columns"]["score"] = {
+        "domain": "number",
+        "metrics": {
+            "count": _column_metric("count/1", 500),
+            "min": _column_metric("min/1", "10"),
+            "max": _column_metric("max/1", "100"),
+            "quantiles": _column_metric("quantiles/1", quantiles),
+        },
+    }
+    return contract, profile
+
+
+#: The run window a scenario is authored with, by scenario name.
+WINDOWS: Dict[str, Tuple[str, str]] = {
+    "date-max-past-the-ladder-windowed": ("2023-06-01", "2027-12-31"),
+    "date-max-in-the-ladder-windowed": ("2023-06-01", "2025-12-31"),
+}
+
 SCENARIOS = {
     "ledger-shop": _ledger_scenario,
     "children": _children_scenario,
     # The maximum closes the top of a ladder whose next bin lies beyond the run's window.
     "date-max-past-the-ladder": lambda: _dated("1788220800000"),
     "date-max-in-the-ladder": lambda: _dated("1751241600000"),
+    # A given window cuts the dated column's bins, and the cut replaces the labels that cite.
+    "date-max-past-the-ladder-windowed": lambda: _dated("1788220800000"),
+    "date-max-in-the-ladder-windowed": lambda: _dated("1751241600000"),
+    # A contract range clips the numeric column's bins, dropping the ones outside it.
+    "range-drops-bins": lambda: _clipped("between 20 and 60", _SPREAD),
+    "range-moves-an-edge": lambda: _clipped(">= 15", _SPREAD),
+    "range-leaves-one-value": lambda: _clipped("between 35 and 35", _SPREAD),
 }
 
 
-def _author(root: Path, contract: str, profile: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
+def _author(
+    root: Path,
+    contract: str,
+    profile: Dict[str, Any],
+    window: Optional[Tuple[str, str]] = None,
+) -> Tuple[Any, Dict[str, Any]]:
     root.mkdir(parents=True)
     (root / "c.fluid.yaml").write_text(contract, encoding="utf-8")
     (root / "p.json").write_text(json.dumps(profile), encoding="utf-8")
     result = run_init(
-        str(root / "bundle"), contract=str(root / "c.fluid.yaml"), profile=str(root / "p.json")
+        str(root / "bundle"),
+        contract=str(root / "c.fluid.yaml"),
+        profile=str(root / "p.json"),
+        window=window,
     )
     if result.exit_code != 0:
         return result, {}
@@ -136,7 +185,8 @@ def _without(profile: Dict[str, Any], pointer: str) -> Dict[str, Any]:
 @pytest.mark.parametrize("name", sorted(SCENARIOS))
 def test_a_statistic_the_ledger_calls_unused_changes_nothing(name: str, tmp_path: Path) -> None:
     contract, profile = SCENARIOS[name]()
-    first, whole = _author(tmp_path / "whole", contract, profile)
+    window = WINDOWS.get(name)
+    first, whole = _author(tmp_path / "whole", contract, profile, window)
     assert first.exit_code == 0, first.stderr
     unused: List[str] = [
         entry["pointer"]
@@ -150,7 +200,7 @@ def test_a_statistic_the_ledger_calls_unused_changes_nothing(name: str, tmp_path
         if pointer in skipped:
             continue
         result, written = _author(
-            tmp_path / f"without-{position}", contract, _without(profile, pointer)
+            tmp_path / f"without-{position}", contract, _without(profile, pointer), window
         )
         if result.exit_code != 0 or _comparable(written) != expected:
             differing.append(pointer)
@@ -163,3 +213,30 @@ def test_the_guard_lists_the_dated_maximum_as_used(tmp_path: Path) -> None:
     result, _ = _author(tmp_path / "x", contract, profile)
     states = {entry["pointer"]: entry for entry in result.artifacts["ledger"]["statistics"]}
     assert states[f"{_DATE_TABLE}/metrics/max"]["state"] == "used"
+
+
+def _notes(name: str, tmp_path: Path) -> Dict[str, Tuple[str, str]]:
+    contract, profile = SCENARIOS[name]()
+    result, _ = _author(tmp_path / "x", contract, profile, WINDOWS.get(name))
+    assert result.exit_code == 0, result.stderr
+    return {
+        entry["pointer"]: (entry["state"], entry.get("note", ""))
+        for entry in result.artifacts["ledger"]["statistics"]
+    }
+
+
+def test_the_ledger_lists_what_a_range_clip_still_rests_on(tmp_path: Path) -> None:
+    """The one value a range leaves is placed by the quantiles the clip then replaced."""
+    notes = _notes("range-leaves-one-value", tmp_path)
+    assert notes["/tables/orders/columns/score/metrics/quantiles"] == (
+        "used",
+        columns._RANGE_SHAPED,
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["date-max-in-the-ladder-windowed", "date-max-past-the-ladder-windowed"]
+)
+def test_the_ledger_lists_what_a_window_cut_still_rests_on(name: str, tmp_path: Path) -> None:
+    notes = _notes(name, tmp_path)
+    assert notes[f"{_DATE_TABLE}/metrics/max"] == ("used", columns._WINDOW_SHAPED)
