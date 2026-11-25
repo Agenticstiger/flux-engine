@@ -900,3 +900,45 @@ def test_a_structural_member_in_a_profile_of_format_1_4_0_is_structure_and_keeps
     graded = _with_structural("1-4-0")
     assert graded.reasons == ()
     assert graded.pattern is Pattern.P3
+
+
+# ---------------------------------------------------------------------------
+# A calendar entry that holds none of its histograms
+# ---------------------------------------------------------------------------
+
+
+def _released_with_calendar(*entries: Dict[str, Any]) -> Dict[str, Any]:
+    """The released (noisy, format 1-4-0) telco profile with the given calendar entries on the subscribers."""
+    from flux_stats.profile import SCHEMA_URL_1_4_0
+
+    document = _with_timestamps(_private())
+    document["_schemaURL"] = SCHEMA_URL_1_4_0
+    document["tables"]["subscriber"]["calendar"] = list(entries)
+    return document
+
+
+def test_a_released_profile_with_an_emptied_calendar_entry_grades_as_it_would_without_it() -> None:
+    from flux_stats.errors import FluxError
+    from flux_stats.profile import parse_profile
+
+    held = {"column": "joined_at", "month": _noisy_histogram(_MONTHS)}
+    emptied = {"column": "left_at"}
+    with_entry = _released_with_calendar(held, emptied)
+    without = _released_with_calendar(held)
+    # The strict reader refuses the entry that holds nothing, and the engine's reader accepts it.
+    parse_profile(without)
+    with pytest.raises(FluxError):
+        parse_profile(with_entry)
+    parse_profile(with_entry, allow_empty_calendar_entries=True)
+
+    graded = grade_profile(with_entry, pinned=True)
+    expected = grade_profile(without, pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
+    assert (graded.pattern, graded.reasons, graded.accounting) == (
+        expected.pattern,
+        expected.reasons,
+        expected.accounting,
+    )
+    accounting = graded.accounting
+    assert accounting is not None and accounting.parts == 3
+    assert accounting.spent == {"rho": "0.25"}

@@ -30,7 +30,7 @@ from flux_engine.stages.plan import plan
 from tests.cli.test_init_dates import HOLDS, _link_pair, _pair
 from tests.cli.test_init_dates import _levels as _order
 
-from .test_history_date_pairs import TIERS, _profile
+from .test_history_date_pairs import TIERS, _history_file, _profile
 from .test_history_init import NAMESPACE, _metrics, _ms
 from .test_history_init import _levels as _categories
 
@@ -305,3 +305,125 @@ def test_a_relationship_date_pair_through_a_foreign_key_a_projection_sets_is_unu
     assert all(
         f"the history's {entry} entry sets its foreign key 'member_id'" in r for r in reasons
     )
+
+
+# -- a column an entry of a declared history sets through an image or an override ---------------------
+
+#: Each case is (the table, the date column its entry sets, the key of the entry in the history file).
+FILE_ENTRIES = {
+    "an events entry's after image": ("tier_change", "after_on", "events"),
+    "a periods kind's overrides": ("tier_month", "bonus_on", "periods"),
+}
+
+
+def _with_extra_column(contract: str, expose: str, column: str) -> str:
+    """*contract* with a date *column* added to the schema and dimensions of *expose*."""
+    document = yaml.safe_load(contract)
+    for item in document["exposes"]:
+        if item["exposeId"] == expose:
+            item["contract"]["schema"].append({"name": column, "type": "DATE", "required": False})
+            item["semantics"]["dimensions"].append({"name": column, "type": "time"})
+    return yaml.safe_dump(document, sort_keys=False)
+
+
+def _declared_entry(kind: str, child: str, column: str) -> Dict[str, Any]:
+    """The entry of the history file that sets *column* of *child* from the history ``tier_version``."""
+    if kind == "events":
+        # The column is set by the entry's after image only: no before image names it.
+        return {
+            "emit": child,
+            "of": "tier_version",
+            "date": "recorded_on",
+            "op": "op",
+            "after": {column: "renewed_on"},
+        }
+    return {
+        "emit": child,
+        "of": "tier_version",
+        "column": "month",
+        "grain": "month",
+        "match": "overlap",
+        "kinds": [{"count": 1, "overrides": {column: "2025-01-01"}}],
+    }
+
+
+def _declared_history(tmp_path: Path, kind: str, child: str, column: str) -> Path:
+    document = yaml.safe_load(_history_file(tmp_path).read_text(encoding="utf-8"))
+    document[kind] = [_declared_entry(kind, child, column)]
+    path = tmp_path / "declared.history.yml"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("case", FILE_ENTRIES)
+def test_a_date_pair_on_a_column_an_entry_of_a_history_file_sets_is_unused(
+    tmp_path: Path, case: str
+) -> None:
+    child, column, kind = FILE_ENTRIES[case]
+    contract = _with_extra_column(
+        MEMBERS + (CHANGES if kind == "events" else MONTHS), child, column
+    )
+    profile = _with_tables(child, column)
+    profile["tables"][child]["columns"][column] = _stamp(_ms(2025, 1, 1), _ms(2025, 9, 1), 3000)
+    (tmp_path / "tiers.fluid.yml").write_text(contract, encoding="utf-8")
+    (tmp_path / "tiers.profile.json").write_text(json.dumps(profile), encoding="utf-8")
+    result = run_init(
+        str(tmp_path / "bundle"),
+        contract=str(tmp_path / "tiers.fluid.yml"),
+        profile=str(tmp_path / "tiers.profile.json"),
+        history=str(_declared_history(tmp_path, kind, child, column)),
+    )
+    assert result.exit_code == 0, result.stderr
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    block: Dict[str, Any] = yaml.safe_load(text)["extensions"][NAMESPACE]
+    key = EVENTS_KEY if kind == "events" else PERIODS_KEY
+    assert [entry["emit"] for entry in block[key]] == [child]
+    _planned(tmp_path)
+    # No entry or lifetime dates the column a second time, and the pair is listed with the entry.
+    _sets_nothing(block, child, column)
+    assert "within" not in block
+    reasons = _reasons(block, "/relationships/0/dates/0")
+    assert reasons
+    assert all(f"the history's {kind} entry sets '{column}'" in reason for reason in reasons)
+
+
+# -- the columns an entry names as its own -------------------------------------------------------------
+#
+# A projected emit's ``carried`` columns already hold the images' names, so a date pair on one is
+# unused through them as well; these pin the entry's own list, which does not rely on that.
+
+
+def test_the_columns_an_events_entry_names_as_its_own_hold_both_images() -> None:
+    from flux_engine.author.bundle import _projected_by_events
+
+    entry = {
+        "emit": "tier_change",
+        "of": "tier_version",
+        "date": "recorded_on",
+        "at": "recorded_at",
+        "op": "op",
+        "type": {"column": "reason"},
+        "before": {"before_tier": "tier"},
+        "after": {"after_tier": "tier", "after_renewed": "renewed_on"},
+    }
+    assert sorted(_projected_by_events(entry)) == [
+        "after_renewed",
+        "after_tier",
+        "before_tier",
+        "op",
+        "reason",
+        "recorded_at",
+        "recorded_on",
+    ]
+
+
+def test_the_columns_a_periods_entry_names_as_its_own_hold_the_overrides_of_each_kind() -> None:
+    from flux_engine.author.bundle import _projected_by_periods
+
+    entry = {
+        "emit": "tier_month",
+        "of": "tier_version",
+        "column": "month",
+        "kinds": [{"count": 1}, {"count": 2, "overrides": {"bonus_on": "2025-01-01"}}],
+    }
+    assert sorted(_projected_by_periods(entry)) == ["bonus_on", "month"]

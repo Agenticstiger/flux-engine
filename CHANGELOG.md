@@ -231,8 +231,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   TIMESTAMP within two milliseconds of the last instant, cannot be written on every row yet. When a relationship, a
   history or a projection needs its table, `init` refuses before it writes anything (`FLX-3125`), names the table and
   the column, and says to write the open end as NULL, or to make the column a TIMESTAMP; before, it left the table out
-  and wrote a bundle the plan refused with `FLX-3403`. When nothing needs the table, it is left out, as before, and
-  its statistics are listed unused with the reason.
+  and its own check then refused the whole init ("the bundle written from these inputs does not validate",
+  `FLX-3403`), writing no bundle. When nothing needs the table, it is left out, as before, and its statistics are
+  listed unused with the reason.
 - `init` no longer writes a bundle the plan refuses with `FLX-6204` when an enforced `within` date's parent has a
   lifetime whose start declares no range: no widening of the date's range can meet the plan's check then, so the
   entry is left out and its pair is listed unused, with the reason.
@@ -301,6 +302,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   outside the range.
   At `--scale` above 1 `verify` does not count the contract's range of a key column the scale widens, and `plan` prints
   one note naming the column, its range and the scale; a column the scale does not widen stays checked.
+- `init` no longer refuses its own bundle (`FLX-3105`) when it leaves out a table made only of foreign keys, which
+  gives its fidelity block nothing to declare: the `counts` entries into that table are taken back, and the
+  statistics of those relationships are listed unused with the reason. The table is not written, and `init` says so.
+- `init` no longer places a counted child by a parent column that is itself drawn given a column of a linked row,
+  which `plan` refuses (`FLX-3403`): that grouping is listed unused with the reason, and the next usable column, or
+  none, places the child.
+- `init` no longer writes a property over a column that declares neither the range nor the levels it compares over,
+  which `verify` refuses (`FLX-5034`): a grouped histogram or a rank correlation over a number column drawn evenly
+  over its contract's range, or a histogram grouped by a boolean column. The column is drawn as before, and its notes
+  say which property is left out.
 
 ## 0.11.1 - 2026-11-24
 
