@@ -24,6 +24,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ### Added
 
+- flux-stats: `noise.noise_floor(mechanism, scale, cells)`, the count a released cell must exceed to stand clear
+  of the noise among `cells` cells, a union bound at the confidence `noise.widening` uses, and `noise.ceil_ln`,
+  which it reads `ceil(ln m)` with in exact arithmetic (ADR 0019, the second amendment of 2026-11-25).
 - `init --json` carries `ledger.unused`, the list an owner can leave out of the profile: an entry the profile reader
   holds whole (a calendar entry with none of its histograms read, say) is named by its own pointer, so dropping
   exactly that list leaves a profile the reader accepts. `ledger.statistics` still names each statistic on its own,
@@ -246,6 +249,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the column, its range and the window, before writing anything. Such a range marks no data (an open end spelled
   before the year 9999, or a placeholder such as 0001-01-01); write an open end in the year 9999, which no window
   reads. A shorter range that widens the window is still a note and a gap at `/spec/timeBounds`.
+- `init` reads a date or timestamp histogram released with noise only where its counts stand clear of the noise,
+  above `sqrt(2v(5 + ceil(ln m)))` for Gaussian noise of variance `v` over `m` bins (ADR 0019, the second amendment
+  of 2026-11-25). A bin below that floor carries no weight in the draw, and the run's window is the hull of the
+  bins above it. When no bin is above it, the column is drawn evenly within the window, inside its range, as a
+  noted assumption. The declared range, the histogram's whole grid, and the histogram property stay, so `verify`
+  still scores the column. Before, noise in a year grid's empty bins drew dates across the calendar and stretched
+  the window to 0001-01-01 and 9999-12-31. Only bundles written from profiles released with noise change.
 - A run window that the profile's own spans make longer than 300 years is now a `time window` note, naming the
   columns that reach its ends, and a gap at `/spec/timeBounds` that `--strict` refuses. Before, `init` wrote such
   a window without a word.

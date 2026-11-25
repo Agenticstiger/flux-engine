@@ -171,6 +171,10 @@ class ColumnContext:
     #: that do, sorted. A categorical column whose levels come from the profile or the contract
     #: declares them too, so a level the profile withholds still has its share (ADR 0014 section 3).
     asked_levels: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
+    #: For each statistic of the column released with noise, by its position in the column's
+    #: ``statistics``: whether each cell of its ungrouped histogram stands clear of the noise
+    #: (:func:`flux_stats.noise.noise_floor`, ADR 0019, amendment of 2026-11-25).
+    noise_clear: Tuple[Tuple[int, Tuple[bool, ...]], ...] = ()
 
     @property
     def contract_tokens(self) -> Tuple[str, ...]:
@@ -213,6 +217,13 @@ class ColumnPlan:
     published_range: Optional[Tuple[Decimal, Decimal]] = None
     #: The column's time span in milliseconds, for a date or timestamp column with a range.
     time_span: Optional[Tuple[int, int]] = None
+    #: A date or timestamp column read from a noisy histogram: its draw weighs only the bins whose
+    #: counts stand clear of the noise, ``time_span`` is their hull (``None`` when none does), and
+    #: its declared range, the histogram's whole grid, gives the run's window nothing.
+    noise_floored: bool = False
+    #: No bin of that histogram stands clear of the noise, so the column is drawn evenly within
+    #: the run's window once it is known (:func:`draw_in_window`).
+    drawn_in_window: bool = False
     #: The declaration is a placeholder: the profile published nothing it could rest on.
     placeholder: bool = False
     #: A number key whose span is assumed, so the foreign keys that reference it may
@@ -1728,6 +1739,19 @@ def _from_histogram(
     weights, bases = cell_weights(
         ctx.minimum_cell, cells, stat_tokens, "binCounts", _HISTOGRAM, total=total
     )
+    clear = dict(ctx.noise_clear).get(index) if _temporal(kind) else None
+    if clear is not None and len(clear) == len(weights):
+        # A released date histogram: a bin whose count does not stand clear of the noise is read
+        # as noise, so it carries no weight (ADR 0019, amendment of 2026-11-25).
+        plan.noise_floored = True
+        plan.drawn_in_window = not any(clear)
+        weights = [
+            weight if keep else Fraction(0) for weight, keep in zip(weights, clear, strict=True)
+        ]
+        bases = [
+            basis if keep else assumed(_NOISE_FLOOR_REASON)
+            for basis, keep in zip(bases, clear, strict=True)
+        ]
     mean = _published_mean(ctx)
     shaped = None
     if mean is not None and kind in (LogicalKind.INT, LogicalKind.DECIMAL) and _shapes(ctx):
@@ -1741,7 +1765,14 @@ def _from_histogram(
                 else "checked against the histogram, which keeps it as near as its bins allow"
             ),
         )
-    if shaped is None:
+    if plan.drawn_in_window:
+        plan.how = (
+            "evenly within the run's time window, inside its range: no bin of its released "
+            "histogram stands clear of the noise"
+        )
+        plan.assumptions.append(_NOISE_EVERYWHERE)
+        plan.reads.append((stat_tokens, _NOISE_EVERYWHERE_READ))
+    elif shaped is None:
         plan.declaration["bins"] = [_spell(kind, edge) for edge in drawn]
         plan.declaration["binWeights"] = [_decimal_text(weight) for weight in weights]
         for position, basis in enumerate(drawn_bases):
@@ -1756,6 +1787,11 @@ def _from_histogram(
     high = _Point(Fraction(1), edges[-1], stat_tokens + ("bins", str(len(edges) - 1)), _HISTOGRAM)
     if low.value < high.value:
         _range(ctx, plan, low, high)
+    if plan.noise_floored and clear is not None:
+        # The range stays the histogram's whole grid, which its property's bins partition; the
+        # window reads the bins that stand clear of the noise.
+        kept = [position for position, keep in enumerate(clear) if keep]
+        plan.time_span = (int(edges[kept[0]]), int(edges[kept[-1] + 1])) if kept else None
     plan.assumptions.extend(_withheld_lines(ctx, cells, "bin count", total=total))
     if "range" in plan.declaration and _scores_order(kind):
         plan.properties.append(
@@ -1782,6 +1818,53 @@ def _from_histogram(
             )
         )
     _mean_property(ctx, plan)
+
+
+#: Why a bin of a released date histogram carries no weight.
+_NOISE_FLOOR_REASON = (
+    "its released count does not stand clear of the noise (ADR 0019, amendment of 2026-11-25), "
+    "so the bin is read as noise and carries no weight"
+)
+_NOISE_EVERYWHERE = (
+    "No bin of the column's released histogram stands clear of the noise, so the column is drawn "
+    "evenly within the run's time window (spec.timeBounds), inside its declared range."
+)
+_NOISE_EVERYWHERE_READ = (
+    "no bin's count stands clear of the noise, so the column is drawn evenly within the run's "
+    "time window, inside its range; the histogram property still scores it"
+)
+
+
+def draw_in_window(plan: ColumnPlan, kind: LogicalKind, window: Tuple[str, str]) -> None:
+    """Give a column whose released histogram is noise everywhere one bin over the run's window.
+
+    Only a plan with :attr:`ColumnPlan.drawn_in_window` changes. The bin is the window cut to the
+    column's declared range, the histogram's grid, since a bin stays inside the range
+    (``FLX-3402``); when the two do not meet, it is the range. A DATE column's bin runs over the
+    whole days inside it, so every day it draws lies inside it.
+    """
+    if not plan.drawn_in_window:
+        return
+    low, high = (parse_rfc3339_ms(text) for text in window)
+    if plan.published_range is not None:
+        first, last = (int(edge) for edge in plan.published_range)
+        if max(low, first) < min(high, last):
+            low, high = max(low, first), min(high, last)
+        else:
+            low, high = first, last
+    step = _DAY_MS if kind is LogicalKind.DATE else 1
+    if kind is LogicalKind.DATE:
+        low, high = -(-low // _DAY_MS) * _DAY_MS, high // _DAY_MS * _DAY_MS
+    if high <= low:
+        high = low + step
+    plan.declaration["bins"] = [_spell(kind, Decimal(low)), _spell(kind, Decimal(high))]
+    plan.declaration["binWeights"] = ["1"]
+    plan.labels = [label for label in plan.labels if label.tokens[:1] not in _BIN_LABELS]
+    plan.labels.append(Label(("bins",), assumed(_NOISE_EVERYWHERE_READ)))
+    plan.labels.append(Label(("binWeights",), assumed(_NOISE_EVERYWHERE_READ)))
+
+
+_BIN_LABELS = (("bins",), ("binWeights",))
 
 
 def _scores_order(kind: LogicalKind) -> bool:

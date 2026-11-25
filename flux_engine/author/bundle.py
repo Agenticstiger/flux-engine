@@ -74,6 +74,7 @@ from flux_engine.author.columns import (
     copy_column,
     declared_span,
     determine_column,
+    draw_in_window,
     draw_within_key,
     drawn_span,
     few_int_levels,
@@ -518,6 +519,19 @@ def _emit_rows(
     return rows, assumed(reason), reason
 
 
+def _noise_clear(
+    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str
+) -> Tuple[Tuple[int, Tuple[bool, ...]], ...]:
+    """The cells of each noisy histogram of *column* that stand clear of the noise, by statistic."""
+    prefix = ("tables", expose_id, "columns", column, "statistics")
+    found = [
+        (int(tokens[-1]), note.clear)
+        for tokens, note in (noisy or {}).items()
+        if tokens[:-1] == prefix and getattr(note, "clear", None) is not None
+    ]
+    return tuple(sorted(found))
+
+
 def _plan_expose(
     contract: Mapping[str, Any],
     expose_index: int,
@@ -573,6 +587,7 @@ def _plan_expose(
             rounding_base=rounding_base,
             range_rule=column_range(schema[position]),
             asked_levels=_levels_asked(asked, column.name),
+            noise_clear=_noise_clear(noisy, expose_id, column.name),
         )
         if _draws_int_levels(context, grouping, set_by_rules):
             context = replace(context, int_levels=True)
@@ -1285,10 +1300,12 @@ def _time_bounds(
             "Set spec.timeBounds to the span your data covers."
         )
         return window, ("time window", note)
+    noise = any(column.noise_floored for expose in exposes for column in expose.columns)
     note = (
-        "No date or timestamp column publishes its range, so the run covers "
-        f"{ASSUMED_WINDOW[0][:10]} to {ASSUMED_WINDOW[1][:10]}. Set spec.timeBounds to the "
-        "span your data covers."
+        "No date or timestamp column publishes its range"
+        + (", or a released histogram with a bin that stands clear of the noise" if noise else "")
+        + f", so the run covers {ASSUMED_WINDOW[0][:10]} to {ASSUMED_WINDOW[1][:10]}. Set "
+        "spec.timeBounds to the span your data covers."
     )
     return ASSUMED_WINDOW, ("time window", note)
 
@@ -1399,7 +1416,9 @@ def _spans_of(
         if isinstance(listed, list):
             instants.extend(moment for moment in map(instant_ms, listed) if moment is not None)
     declared = declaration.get("range")
-    if isinstance(declared, Mapping):
+    if isinstance(declared, Mapping) and not column.noise_floored:
+        # A noisy histogram's range is its whole grid (its property partitions it), so it says
+        # nothing of where the data lies: the clear bins and time_span do.
         instants.extend(
             moment
             for moment in (instant_ms(declared.get("min")), instant_ms(declared.get("max")))
@@ -3973,6 +3992,9 @@ def _bundle_window(
         given_window,
         declared_spans(declared) if declared is not None else (),
     )
+    for expose in authored:
+        for column in expose.columns:
+            draw_in_window(column, expose.kinds[column.name], window)
     if given_window is not None:
         for expose in authored:
             for column in expose.columns:
@@ -4023,10 +4045,17 @@ def _refuse_a_window_that_misses_ranges(
 def _declared_ranges_of(
     expose: AuthoredExpose, column: ColumnPlan, contract: Optional[Mapping[str, Any]]
 ) -> List[Tuple[int, int]]:
-    """The ranges (milliseconds) a date column declares: its own ``range`` and its contract's."""
+    """The ranges (milliseconds) a date column declares: its own ``range`` and its contract's.
+
+    A column read from a noisy histogram draws only inside the bins that stand clear of the noise,
+    so their span stands in for its range, the histogram's whole grid.
+    """
     found: List[Tuple[int, int]] = []
     declared = column.declaration.get("range")
-    if isinstance(declared, Mapping):
+    if column.noise_floored:
+        if column.time_span is not None:
+            found.append(column.time_span)
+    elif isinstance(declared, Mapping):
         ends = (instant_ms(declared.get("min")), instant_ms(declared.get("max")))
         if ends[0] is not None and ends[1] is not None:
             found.append((ends[0], ends[1]))
