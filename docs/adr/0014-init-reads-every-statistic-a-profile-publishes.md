@@ -268,7 +268,7 @@ timestamps in milliseconds, as days. The profile format does not change.
   total variation over k-way marginals, used by the round-trip harness under
   `e2e/` and nowhere in the engine.
 
-## Amendment of 2026-11-25: a date the profile gives no distribution is drawn where the contract's derives hold
+## Amendment of 2026-11-26: a date the profile gives no distribution is drawn where the contract's derives hold
 
 ### Context
 

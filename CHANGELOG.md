@@ -94,7 +94,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   version holds. A column or value the expose lacks, or an `activation` of another type, keeps what `init`
   wrote before and says why in its assumptions. A `currentFlag` is not written: no construct of the engine puts a
   value on an entity's last version alone, so the column keeps its own draw, and `init` says so. Before, `init` wrote
-  neither member and always wrote `closeLast` (ADR 0017, amendment of 2026-11-25).
+  neither member and always wrote `closeLast` (ADR 0017, amendment of 2026-11-26).
 - `fluxsim init` tracks a whole-number foreign key whose profile publishes it as a category. When the table's
   history lists the column, the profile publishes few whole-number levels for it, and the table it references is not
   released whole and has no published min and max for its key, `init` declares those levels on the column with their
@@ -105,7 +105,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   together; the others take their shares renormalised, the history's first values and moves leave the dropped levels
   out, and the assumptions name them and their share. Past 5 %, or when the key is a foreign key itself, the column
   stays carried and the ledger names what to change (publish fewer levels or more rows). Before, `init` declared
-  nothing for such a column and the history carried it (ADR 0017, amendment of 2026-11-25).
+  nothing for such a column and the history carried it (ADR 0017, amendment of 2026-11-26).
 
 - `init` keeps the order a contract's check declares between two dates of a row (`b >= a`, `b > a`, `a <= b` or
   `a < b`, each optionally behind `b IS NULL OR` or `a IS NULL OR`, read from the check's syntax tree). Where the
@@ -113,7 +113,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   from the first to the second, with the days between them drawn evenly from 0 (1 for a strict order) up to the days
   the run's window holds, as an assumption in the parameter register. Before, each date was drawn on its own and the
   check held on only part of the rows. A published pair is read as before. You can replace the gap with a histogram
-  of your own (ADR 0024, amendment of 2026-11-25: a check orders two dates).
+  of your own (ADR 0024, amendment of 2026-11-26: a check orders two dates).
+
+- `init` names a check that orders two dates and that it did not write as an order. A table that already holds a
+  lifetime, a column another entry sets, columns of two kinds, a declared range that cannot hold every end the gap can draw, and a window
+  too short for a gap each leave the check unwritten, and the notes now say which check and why. Before, such a check
+  was left out without a word.
 
 ### Changed
 
@@ -137,7 +142,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   lifetime, and the bundle draws the rows the same bundle with `parent.lifetime: true` draws. It was refused at plan as
   `FLX-6203`, two sources for the start. Every other `within` entry on a column the history sets is still `FLX-6203`,
   and the message for a history with no parent now names `parent.lifetime` as the way to say it (ADR 0017, amendment of
-  2026-11-25).
+  2026-11-26).
 - `init` starts a periods entry and limits an events entry where the data does. A `periods` entry carries `from`
   (and `through`) from the contract's declared `range` on the period column, or else from the first and last bin of
   its published histogram, when they lie inside the run's window; a published minimum or maximum is not read for
@@ -176,7 +181,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   to its own range, and labelled an assumption that names the derive. Two derives intersect; an empty intersection, or
   a bound with no end to draw to, keeps the even draw and the report says why. Before, the column was drawn evenly
   over the whole window and `verify` reported most rows of the derived column outside its range (ADR 0014, the
-  amendment of 2026-11-25).
+  amendment of 2026-11-26).
 
 ## 0.12.1 - 2026-11-26
 

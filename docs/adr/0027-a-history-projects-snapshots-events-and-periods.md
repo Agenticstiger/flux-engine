@@ -535,7 +535,7 @@ each version's entity to be unique, and that was refused too.
 - **What moves.** A bundle for a profile with such a statistic into a table whose profile publishes a history,
   which `init` could not write with its history before. Every other bundle keeps its bytes, and no plan or recorded plan changes.
 
-## Amendment of 2026-11-25: `init` starts a periods entry and limits an events entry where the data does
+## Amendment of 2026-11-26: `init` starts a periods entry and limits an events entry where the data does
 
 Section 9 wrote a `periods` entry with no start and an `events` entry that holds every version, so periods ran from
 `timeBounds.start`'s day and an event was written wherever the data began. `init` now reads where the date column
@@ -546,16 +546,20 @@ lies:
   minimum or maximum of the column. A column with neither has no span. Events read this span; periods read the
   declared range and the published histogram (below).
 - **Periods.** Each end of a periods entry's range is the contract's declared end, else the first and the last bin of
-  the column's published histogram (the amendment of 2026-11-26). A published minimum or maximum is not read for
-  periods, as that amendment says. The entry's `from` and `through` are held to the run as that amendment holds
-  them, and `from` is aligned the same way: the start of the period that holds the first day, counted from
-  `timeBounds.start`'s day as the entry's periods are without it, so no period moves to another day. `through` is
-  the last day. A column with no declared end and no published histogram writes neither key.
+  the column's published histogram (the amendment of 2026-11-26 that bounds a periods entry by the months its
+  column publishes). A published minimum or maximum is not read for periods, as that amendment says. The entry's
+  `from` and `through` are held to the run as that amendment holds them, and `from` is aligned the same way: the
+  start of the period that holds the first day, counted from `timeBounds.start`'s day as the entry's periods are
+  without it, so no period moves to another day. `through` is the last day. A column with no declared end and no published histogram writes neither key.
 - **Events.** An event is dated at its version's start, since `init` writes no `at` or `lag`, so a `when` of
   `<start> >= DATE '<first>' AND <start> <= DATE '<last>'` over the history's validity start holds exactly the
   events inside the span, one bound for each end the window does not already hold. A history that writes an `end`
   dates a `d` event by a version's end, which no predicate on the version holds together with its `c` and `u`
   events, so its entries are not limited and the notes say what they would need. A validity start that is not a
-  DATE writes no `when`.
+  DATE writes no `when`. Events read a published minimum and maximum where periods do not, and the two differ on
+  purpose. A periods entry writes a row for every period between its ends, so its range has to be the months its
+  histogram says hold rows, and two extremes do not say that. An events entry writes no row of its own: its `when`
+  only drops an event dated outside the span, and no event outside a column's published minimum and maximum can
+  be one of that column's rows.
 - **What moves.** A contract that declares a range on such a column, or a profile that publishes its span. Every
   other bundle keeps its bytes.

@@ -484,7 +484,7 @@ profile's durations say.
   emit that is not a snapshot.
 - **What moves.** A bundle `init` writes for such a snapshot. No plan or recorded plan changes.
 
-## Amendment of 2026-11-25: a check orders two dates
+## Amendment of 2026-11-26: a check orders two dates
 
 ### Context
 

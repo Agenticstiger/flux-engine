@@ -653,7 +653,7 @@ def published_period_range(
     a month the data holds no row for. Both are held to the window and to *until*: a ``from`` on
     the window's first day is left out, as that day is the entry's anchor without one, and so is
     a ``through`` no earlier than the window's last day. A withheld histogram and no declared end
-    writes neither (ADR 0027, the amendments of 2026-11-25 and 2026-11-26).
+    writes neither (ADR 0027, the amendments of 2026-11-26 on periods and events).
     """
     days = _published_days(table, column)
     declared = span.declared if span is not None else (None, None)

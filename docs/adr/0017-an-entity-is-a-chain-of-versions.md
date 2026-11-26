@@ -139,7 +139,7 @@ validity column or a column a rule sets; and every refusal of sections 5, 6 and 
 values, the scale and the layout's counts, which follow from declared values alone, never a drawn row. A
 `lifetimes` or `within`
 entry (ADR 0024) on the start, the end or the activation column of a history's emit is two sources for one
-value, `FLX-6203`, except the `within` entry that says `parent.lifetime: true` (amendment of 2026-11-25).
+value, `FLX-6203`, except the `within` entry that says `parent.lifetime: true` (amendment of 2026-11-26).
 
 ### 3. Entities per parent and versions per entity: two counted layouts, nested
 
@@ -817,7 +817,7 @@ versions named an entity that it did not hold.
 - **What moves.** A bundle `init` writes for a contract with such a dependency. Every other bundle keeps its bytes,
   and no plan changes: the generator and replay of recorded plans are untouched.
 
-## Amendment of 2026-11-25: `init` writes the activation and the end a contract's lifecycle declares
+## Amendment of 2026-11-26: `init` writes the activation and the end a contract's lifecycle declares
 
 FLUID 0.7.7 declares on the natural entity of a model with a validity window how its versions begin and
 end, as `lifecycle`: `activation`, a column of the expose and of the window's type that holds the start of the
@@ -846,7 +846,7 @@ says which column holds an entity's first start no more than which value marks a
 - **What does not move.** A contract with no `lifecycle` gives the bundle it gave before. Each member the
   entry does not use is named in the assumptions with its reason, as ADR 0014 requires.
 
-## Amendment of 2026-11-25: `init` tracks a whole-number foreign key published as a category
+## Amendment of 2026-11-26: `init` tracks a whole-number foreign key published as a category
 
 Section 13 tracked a column only when the emit declared levels for it, or when it was a foreign key into a table
 the profile releases whole, whose keys became its levels. A whole-number foreign key into a table that is not
@@ -868,7 +868,7 @@ released whole declared none, because its category was read only for text column
 - **What does not move.** A column that is no foreign key, a foreign key whose published levels are not whole
   numbers, and a table released whole (section 13's own route) give the bundle they gave before.
 
-## Amendment of 2026-11-25: a `within` entry that keeps the start inside the parent's life is `parent.lifetime`
+## Amendment of 2026-11-26: a `within` entry that keeps the start inside the parent's life is `parent.lifetime`
 
 The amendment of 2026-11-24 keeps a history's versions inside the life of its parent with
 `history[].parent.lifetime: true`. The same bound written the general way, a `within` entry on the

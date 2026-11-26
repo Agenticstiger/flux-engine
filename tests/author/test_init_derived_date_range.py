@@ -4,7 +4,7 @@
 
 """``fluxsim init`` draws a date the profile gives no distribution where its contract derives hold.
 
-ADR 0014, amendment of 2026-11-25: a DATE column the profile withholds (or whose released
+ADR 0014, amendment of 2026-11-26: a DATE column the profile withholds (or whose released
 histogram is noise everywhere) is drawn evenly within the run's window. When a contract ``derive``
 over it is a whole-unit date difference from a constant date, and the derived column declares a
 range, the draw is bounded to the dates whose difference lies in that range (the engine's own

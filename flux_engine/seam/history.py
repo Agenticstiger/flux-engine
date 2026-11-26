@@ -1274,7 +1274,7 @@ def read_within_as_parent_lifetime(
     target: HistoryTarget,
     emit: str,
 ) -> Tuple[Tuple[HistoryEntry, ...], Tuple[WithinEntry, ...]]:
-    """The histories and ``within`` entries, with *emit*'s ``within`` read as ``parent.lifetime`` where it says so (ADR 0017, amendment of 2026-11-25).
+    """The histories and ``within`` entries, with *emit*'s ``within`` read as ``parent.lifetime`` where it says so (ADR 0017, amendment of 2026-11-26).
 
     A ``within`` entry of the history's emit that names exactly the history's parent relationship
     (one hop) and the history's validity start as its ``date``, and carries no ``offset``,

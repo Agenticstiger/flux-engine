@@ -4,7 +4,7 @@
 
 """A ``within`` entry that keeps a history's start inside its parent's life is ``parent.lifetime: true``.
 
-ADR 0017, amendment of 2026-11-25. The ``history-fleet`` fixture gets a ``lifetimes`` entry on its
+ADR 0017, amendment of 2026-11-26. The ``history-fleet`` fixture gets a ``lifetimes`` entry on its
 depot (``opened_on`` to ``closed_on``) and a ``within`` entry on the history's emit for the
 relationship to the depot and the history's validity start. What is pinned:
 

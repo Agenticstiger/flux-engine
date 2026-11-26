@@ -4,7 +4,7 @@
 
 """``fluxsim init`` keeps the order a contract's ``check`` declares between two dates of a row.
 
-ADR 0024, amendment of 2026-11-25. A check such as ``cancelled_on IS NULL OR cancelled_on >=
+ADR 0024, amendment of 2026-11-26. A check such as ``cancelled_on IS NULL OR cancelled_on >=
 issued_on`` orders two dates of one row. A private release publishes no ``datePairs``, so each date
 was drawn on its own and the check held on a share of the rows. With no published pair, ``init``
 writes a lifetime (the form that orders two dates of one row) whose gap is drawn evenly over what

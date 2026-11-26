@@ -2437,7 +2437,7 @@ def _reading_within_as_parent_lifetime(
     *,
     where: str,
 ) -> Tuple[Tuple[HistoryEntry, ...], Tuple[WithinEntry, ...]]:
-    """The Simulation's histories and ``within`` entries, with this emit's ``within`` read as ``parent.lifetime`` (ADR 0017, amendment of 2026-11-25).
+    """The Simulation's histories and ``within`` entries, with this emit's ``within`` read as ``parent.lifetime`` (ADR 0017, amendment of 2026-11-26).
 
     Every later reader of the emit's histories and ``within`` entries takes what this returns, so
     an entry that says what ``parent.lifetime: true`` says is applied once, through that key

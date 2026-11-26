@@ -4,7 +4,7 @@
 
 """A date the profile gives no distribution is drawn where the contract's derives over it hold.
 
-ADR 0014, amendment of 2026-11-25. A DATE column whose profile entry withholds every order
+ADR 0014, amendment of 2026-11-26. A DATE column whose profile entry withholds every order
 statistic (or whose released histogram is noise everywhere) is drawn evenly within the run's
 window. When a contract ``derive`` sets a column from it as a whole-unit difference from a constant
 date (``DAYS_BETWEEN``, ``MONTHS_BETWEEN`` or ``YEARS_BETWEEN``, in either argument order), and the
