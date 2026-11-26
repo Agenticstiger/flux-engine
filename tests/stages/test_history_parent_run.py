@@ -161,6 +161,45 @@ def test_a_run_keeps_every_entity_to_its_depots_lifetime_and_verify_holds_it(
     assert "history:within_parent 60 of 60" in _lines(verified).replace("\n", " ")
 
 
+def _by_the_day(target: Path) -> None:
+    """The periodic emit at the grain of a day, in the contract and in the periods entry."""
+    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
+    periodic = next(item for item in contract["exposes"] if item["exposeId"] == PERIODIC)
+    for dimension in periodic["semantics"]["dimensions"]:
+        if dimension["name"] == "month":
+            dimension["typeParams"]["timeGranularity"] = "day"
+    repin(target, contract)
+    path = target / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    document["extensions"][NAMESPACE]["periods"][0]["grain"] = "day"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+
+
+def _last_days_held(layout: RunLayout) -> Tuple[Dict[Any, date], Dict[Any, date]]:
+    """Each vehicle whose depot closed and whose last version is open: its depot's last day, and its last periodic day."""
+    depots = _depots(layout)
+    closing: Dict[Any, date] = {}
+    for vehicle, versions in by_vehicle(read_rows(layout, EMIT)).items():
+        parent = depots[versions[0]["depot_id"]]
+        opened, closed = _day(parent["opened_on"]), _day(parent["closed_on"])
+        if closed is not None and closed >= opened and versions[-1]["valid_to"] is None:  # type: ignore[operator]
+            closing[vehicle] = closed
+    last: Dict[Any, date] = {}
+    for row in read_rows(layout, PERIODIC):
+        if row["vehicle_id"] in closing:
+            day = date.fromisoformat(row["month"])
+            last[row["vehicle_id"]] = max(day, last.get(row["vehicle_id"], day))
+    return closing, last
+
+
+def test_a_forced_entity_s_last_day_held_is_its_parent_s_last_day(tmp_path: Path) -> None:
+    """At the grain of a day, the open final version of a vehicle whose depot closed holds that day, and no later one."""
+    bundle = _bundle(tmp_path, end=FINAL)
+    _by_the_day(bundle)
+    closing, last = _last_days_held(run_bundle(bundle, tmp_path / "state"))
+    assert closing and last == closing
+
+
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
     assert_the_run_repeats(_bundle(tmp_path), tmp_path, run_bundle, EMIT)
 
