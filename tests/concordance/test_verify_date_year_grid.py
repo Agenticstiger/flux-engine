@@ -369,3 +369,12 @@ def test_a_sample_leaves_out_a_level_the_profile_holds_no_record_of_and_the_rows
     assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
     assert "FLX-5005" not in outcome.stdout + outcome.stderr
     assert "histograms 2 within, 0 outside, 0 undecided" in outcome.stdout, outcome.stdout
+
+
+def test_a_sample_holds_the_rows_of_such_a_level_to_the_floor_as_the_full_comparison_does(
+    tmp_path: Path,
+) -> None:
+    profile = _profile(YEAR_GRID, EVEN, ONE_MILL, NO_MILL_DATED)
+    outcome = _sampled(tmp_path, profile, DATES_BY_BRANCH, minimum_records=5)
+    assert outcome.exit_code == 1, outcome.stdout + outcome.stderr
+    assert "1 records, minimum is 5" in outcome.stdout + outcome.stderr

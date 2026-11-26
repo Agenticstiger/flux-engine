@@ -118,6 +118,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   history. No layout reads such a count now: it is listed as unused with the reason, in an events or periodic
   table's case that its rows per entity follow from the history. Only a history that is written holds a relationship
   back (ADR 0027, the amendment of 2026-11-26 about counts per entity).
+- A sampled `verify` whose run holds a few records of a grouping level that the profile holds no record of, fewer
+  than `records.min`, passed where the full `verify` refused the group (`FLX-5005`). The sample now holds such a
+  level's records to the floor, as the full comparison does.
 
 ## 0.12.1 - 2026-11-26
 
