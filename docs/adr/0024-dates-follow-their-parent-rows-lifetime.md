@@ -557,3 +557,19 @@ a share of the rows well below its tolerance.
    means the end no longer follows a histogram of its own that the profile publishes, and a fidelity check on that
    histogram can then fail where the check on the order now holds. Publishing the date pair for the two columns
    gives the gap a distribution and ends the trade.
+
+## Amendment of 2026-11-26: `init` widens a date that bins alone declare
+
+A date column whose profile publishes quantile bins and no minimum is declared by its bins and has no `range`; the
+plan reads the first and last edges as its range (`declared_bounds`). The widening that `init` writes for an enforced
+`within` date moved only a declared `range`, so it skipped such a column, the plan asked for the same span again and
+`init` ended in `FLX-6204`.
+
+- **The range the plan reads.** The widening takes that range for the column, moves its ends as it moves a declared
+  one, writes the result as the column's `range` and takes the outer bin edges that sat on a moved end along, as it
+  does for a column that declares both. A histogram property whose edge sat on a moved end is left out with the same
+  reason.
+- **The contract.** The check that keeps the widening inside the range the contract declares reads the same range, so
+  a bins-only date is not widened past it, and its entry is left out as for a declared range.
+- **What does not move.** A bins-only column no entry asks to widen declares no `range`, and keeps its bytes.
+

@@ -29,6 +29,7 @@ from flux_engine.stages.run import run
 
 from .test_history_date_pairs import TIERS, _block, _init, _profile
 from .test_history_init import _metrics, _ms
+from .test_init_open_end import _time_bounds
 
 pytestmark = pytest.mark.integration
 
@@ -280,3 +281,41 @@ def test_a_contract_range_that_ends_at_the_open_end_is_not_a_window(tmp_path: Pa
     assert result.exit_code == 0, result.stderr
     history = _history(tmp_path)
     assert history is not None and history["openEnd"] == "2999-12-31"
+
+
+@pytest.mark.parametrize(
+    ("column", "low", "stretched"),
+    [("valid_to", _ms(2025, 2, 1), False), ("enrolled_on", _ms(2024, 6, 1), True)],
+    ids=["a validity end", "another date"],
+)
+def test_only_a_validity_end_in_the_year_9999_gives_the_window_nothing(
+    tmp_path: Path, column: str, low: int, stretched: bool
+) -> None:
+    # The contract declares no openEnd, so nothing says what 9999-12-31 means: the profile cannot
+    # declare it. The year 9999 is an open end spelled out and marks no instant, so the window of
+    # a validity end keeps to the dates the data holds, and the note names the column and what to
+    # declare. Another date column that reaches the year 9999 still gives the window its span,
+    # and the long-window note names it.
+    profile = _profile()
+    profile["tables"]["tier_version"]["columns"][column] = {
+        "domain": "timestamp",
+        "metrics": _metrics(str(low), LAST_DAY_MS, 1850),
+    }
+    result = _init(tmp_path, profile, TIERS)
+    assert result.exit_code == 0, result.stderr
+    assert _time_bounds(tmp_path)["end"].startswith("9999") is stretched
+    (note,) = [line for line in result.stdout.splitlines() if "time window" in line]
+    assert ("longer than 300 years" in note) is stretched
+    assert ("tier_version.valid_to publishes values in the year 9999" in note) is not stretched
+    assert ("declare the openEnd on the end column" in note) is not stretched
+
+
+def test_a_declared_null_open_end_leaves_the_span_a_year_9999_end_publishes(tmp_path: Path) -> None:
+    # The contract does declare its open end, as NULL, so a value in the year 9999 is a date the
+    # column holds and not an open end left undeclared: the window is not cut and no note asks
+    # for a declaration that is already made.
+    profile = _ending_on(_profile(), _ms(2025, 2, 1), LAST_DAY_MS)
+    result = _init(tmp_path, profile, _declaring(null=True, required=False))
+    assert result.exit_code == 0, result.stderr
+    assert _time_bounds(tmp_path)["end"].startswith("9999")
+    assert "does not declare as the window's openEnd" not in result.stdout

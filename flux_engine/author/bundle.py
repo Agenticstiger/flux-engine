@@ -1431,7 +1431,9 @@ def _time_bounds(
     column declares, and of each *declared* span (a history file's start bins and ``until``), so
     no column's bins leave it. A column whose every value lies at or after
     :data:`WINDOW_END_LIMIT_MS` (an open end of 9999-12-31 on every row) gives the window nothing,
-    as a contract range that ends there gives nothing. A contract range that reaches beyond every
+    as a contract range that ends there gives nothing, and so does the part of a validity end's
+    span that reaches that year when the contract declares no ``openEnd`` for it (the ``time
+    window`` note names the column). A contract range that reaches beyond every
     span the profile and the bundle give, or the hull of contract ranges alone, is a ``time
     window`` note, which is a gap at ``/spec/timeBounds``; one that makes the window longer than
     :data:`PLAUSIBLE_WINDOW_YEARS` is refused (:func:`_refuse_a_stretching_contract_range`). A
@@ -1443,12 +1445,14 @@ def _time_bounds(
         return given, None
     named: List[Tuple[str, Tuple[int, int]]] = [("the --history file", span) for span in declared]
     contract_ranges: List[Tuple[str, Tuple[int, int]]] = []
+    unread: List[str] = []
     for expose in exposes:
         for column in expose.columns:
-            found, from_contract = _spans_of(expose, column, contract)
-            named += [(f"{expose.expose_id}.{column.name}", span) for span in found]
-            if from_contract is not None:
-                contract_ranges.append((f"{expose.expose_id}.{column.name}", from_contract))
+            name = f"{expose.expose_id}.{column.name}"
+            found, from_contract, sentinel = _spans_of(expose, column, contract)
+            named += [(name, span) for span in found]
+            contract_ranges += [] if from_contract is None else [(name, from_contract)]
+            unread += [name] if sentinel else []
     own = [span for _, span in named]
     spans = own + [span for _, span in contract_ranges]
     if spans:
@@ -1458,35 +1462,12 @@ def _time_bounds(
             end = start + 1
         _refuse_a_stretching_contract_range(own, contract_ranges, (start, end))
         window = (format_rfc3339_ms(start), format_rfc3339_ms(end))
-        widening = sorted(
-            {
-                name
-                for name, span in contract_ranges
-                if not own
-                or span[0] < min(item[0] for item in own)
-                or span[1] > max(item[1] for item in own)
-            }
-        )
-        reasons: List[str] = []
-        if widening:
-            columns = ", ".join(widening)
-            if own:
-                given_span = (
-                    f"{format_rfc3339_ms(min(item[0] for item in own))} to "
-                    f"{format_rfc3339_ms(max(item[1] for item in own))}"
-                )
-                reasons.append(
-                    f"the contract range of {columns} reaches beyond the span the profile and "
-                    f"the bundle give, {given_span}"
-                )
-            else:
-                reasons.append(
-                    f"it comes only from the contract range of {columns}: nothing the profile or "
-                    "the bundle gives holds a span"
-                )
+        reasons = [] if (reach := _contract_reach(own, contract_ranges)) is None else [reach]
         long_window = _a_long_window(named)
         if long_window is not None:
             reasons.append(long_window)
+        if unread:
+            reasons.append(_an_unread_open_end(unread))
         if not reasons:
             return window, None
         note = (
@@ -1502,6 +1483,37 @@ def _time_bounds(
         "spec.timeBounds to the span your data covers."
     )
     return ASSUMED_WINDOW, ("time window", note)
+
+
+def _contract_reach(
+    own: Sequence[Tuple[int, int]], contract_ranges: Sequence[Tuple[str, Tuple[int, int]]]
+) -> Optional[str]:
+    """Why the window comes from the contract ranges that reach beyond the spans *own*, or ``None``."""
+    widening = sorted(
+        {
+            name
+            for name, span in contract_ranges
+            if not own
+            or span[0] < min(item[0] for item in own)
+            or span[1] > max(item[1] for item in own)
+        }
+    )
+    if not widening:
+        return None
+    columns = ", ".join(widening)
+    if not own:
+        return (
+            f"it comes only from the contract range of {columns}: nothing the profile or "
+            "the bundle gives holds a span"
+        )
+    given_span = (
+        f"{format_rfc3339_ms(min(item[0] for item in own))} to "
+        f"{format_rfc3339_ms(max(item[1] for item in own))}"
+    )
+    return (
+        f"the contract range of {columns} reaches beyond the span the profile and "
+        f"the bundle give, {given_span}"
+    )
 
 
 #: The longest run window that is not remarked on. A few hundred years holds the dates a data
@@ -1539,6 +1551,18 @@ def _a_long_window(named: Sequence[Tuple[str, Tuple[int, int]]]) -> Optional[str
         f"the span the profile and the bundle give runs longer than {PLAUSIBLE_WINDOW_YEARS} "
         f"years, from {format_rfc3339_ms(low)[:10]} to {format_rfc3339_ms(high)[:10]}: {listed} "
         "reach its ends"
+    )
+
+
+def _an_unread_open_end(columns: Sequence[str]) -> str:
+    """Why the window leaves out the values in the year 9999 of the validity ends in *columns*."""
+    listed = ", ".join(sorted(columns)[:_NAMED_COLUMNS])
+    if len(columns) > _NAMED_COLUMNS:
+        listed += f" and {len(columns) - _NAMED_COLUMNS} more"
+    return (
+        f"{listed} publish{'es' if len(columns) == 1 else ''} values in the year 9999, which the "
+        "contract does not declare as the window's openEnd, so they give the window nothing; "
+        "declare the openEnd on the end column to have a history write that value"
     )
 
 
@@ -1594,13 +1618,18 @@ def _weighted_edges(edges: List[Any], weights: Any) -> List[Any]:
 
 def _spans_of(
     expose: AuthoredExpose, column: ColumnPlan, contract: Optional[Mapping[str, Any]]
-) -> Tuple[List[Tuple[int, int]], Optional[Tuple[int, int]]]:
-    """The spans (ms) a column gives the window: its range and declaration, and its contract's range."""
+) -> Tuple[List[Tuple[int, int]], Optional[Tuple[int, int]], bool]:
+    """The spans (ms) a column gives the window: its range and declaration, and its contract's range.
+
+    The third item is whether the column is a validity window's end whose span reaches the year
+    9999 with no ``openEnd`` declared for it: its values from there on give the window nothing,
+    since the year 9999 spells an open end (ADR 0017), and the window note says so.
+    """
     found: List[Tuple[int, int]] = []
     if column.time_span is not None:
         found.append(column.time_span)
     if expose.kinds.get(column.name) not in DATE_KINDS:
-        return found, None
+        return found, None, False
     declaration = column.declaration
     instants: List[int] = []
     for key in ("bins", "levels"):
@@ -1636,19 +1665,45 @@ def _spans_of(
     except (KeyError, IndexError, TypeError):
         contract_expose, contract_range = None, None
     open_end = _open_end_ms(contract_expose, column.name)
-    if open_end is not None:
-        # The end of a validity window that declares its open end: an open version holds that
-        # value, which marks no instant, so it gives the window nothing, as a value in the year
-        # 9999 does (ADR 0017 section 11).
-        below = [moment for moment in instants if moment < open_end]
-        found = [
-            (first, last if last < open_end else max(below, default=first))
-            for first, last in found
-            if first < open_end
-        ]
-        if contract_range is not None and contract_range[1] >= open_end:
-            contract_range = None
-    return found, contract_range
+    ends = declared_end(contract_expose or {}, column.name)
+    undeclared = open_end is None and bool(ends) and "openEnd" not in ends
+    # Where the contract declares no open end, the year 9999 is the open end spelled out, which
+    # the profile cannot declare (ADR 0017).
+    cut = WINDOW_END_LIMIT_MS if undeclared else open_end
+    if cut is None:
+        return found, contract_range, False
+    found, contract_range, clipped = _cut_at_open_end(
+        found, instants, contract_range, cut, undeclared
+    )
+    return found, contract_range, undeclared and clipped
+
+
+def _cut_at_open_end(
+    found: List[Tuple[int, int]],
+    instants: List[int],
+    contract_range: Optional[Tuple[int, int]],
+    cut: int,
+    undeclared: bool,
+) -> Tuple[List[Tuple[int, int]], Optional[Tuple[int, int]], bool]:
+    """The spans and contract range of a validity end with what reaches its open end *cut* left out.
+
+    An open version holds the open end, which marks no instant, so it gives the window nothing, as
+    a value in the year 9999 does (ADR 0017 section 11): a span that reaches *cut* ends at the
+    last instant the column's own edges hold below it. With *undeclared* (the cut is the start of
+    the year 9999, which no contract declares as an open end) an edge exactly at *cut* only closes
+    a bin of the values before it, and is kept. The third item is whether a span was cut.
+    """
+    held = cut + 1 if undeclared else cut
+    below = [moment for moment in instants if moment < cut]
+    clipped = any(first >= cut or cut < last for first, last in found)
+    cut_spans = [
+        (first, last if last < held else max(below, default=first))
+        for first, last in found
+        if first < cut
+    ]
+    if contract_range is not None and contract_range[1] >= cut:
+        contract_range = None
+    return cut_spans, contract_range, clipped
 
 
 def _open_end_ms(contract_expose: Optional[Mapping[str, Any]], column: str) -> Optional[int]:
@@ -5092,6 +5147,9 @@ def _widen_ranges(
 ) -> None:
     """Declare each range in *widened* on its column, with the note that it was widened.
 
+    A date column declared by bins alone is widened as one that declares a ``range`` is: the range
+    it takes is the one the plan reads for it (:func:`_declared_range_of`).
+
     An end that does not move keeps its basis. An end that moves rests on an assumption, and the
     statistic it came from is recorded as used, with the note.
     """
@@ -5107,6 +5165,7 @@ def _widen_ranges(
             moved = _move_range_ends(declared, kind, low, high)
             if not moved:
                 continue
+            plan.declaration.setdefault("range", declared)
             _drop_widened_histograms(expose, plan, before, moved)
             _widen_edges(plan, before, declared, moved)
             _note_widened_range(plan, declared, moved)
@@ -5115,9 +5174,22 @@ def _widen_ranges(
 def _declared_range_of(
     expose: AuthoredExpose, plan: Optional[ColumnPlan], name: str
 ) -> Tuple[Optional[ColumnPlan], Optional[LogicalKind], Optional[Dict[str, Any]]]:
-    """The plan, kind and declared ``range`` of column *name*, each ``None`` when the column has none."""
-    declared = None if plan is None else plan.declaration.get("range")
-    return plan, expose.kinds.get(name), declared if isinstance(declared, dict) else None
+    """The plan, kind and declared range of column *name*, each ``None`` when the column has none.
+
+    A date column declared by bins alone has the range the plan reads for it: its first and last
+    edges (:func:`flux_engine.generator.dates.declared_bounds`). That range is not in the
+    declaration, so the dict returned for it is a copy that :func:`_widen_ranges` writes only
+    when it moves an end, and a bundle that is never widened keeps its bytes.
+    """
+    declaration = {} if plan is None else plan.declaration
+    declared = declaration.get("range")
+    kind = expose.kinds.get(name)
+    if isinstance(declared, dict):
+        return plan, kind, declared
+    edges = declaration.get("bins")
+    if kind in DATE_KINDS and isinstance(edges, list) and len(edges) >= 2:
+        return plan, kind, {"min": edges[0], "max": edges[-1]}
+    return plan, kind, None
 
 
 def _move_range_ends(declared: Dict[str, Any], kind: LogicalKind, low: int, high: int) -> List[str]:

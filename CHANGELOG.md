@@ -210,6 +210,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   a bound with no end to draw to, keeps the even draw and the report says why. Before, the column was drawn evenly
   over the whole window and `verify` reported most rows of the derived column outside its range (ADR 0014, the
   amendment of 2026-11-26).
+- `init` refused a bundle with `FLX-6204` ("init widened the declared date ranges the plan's check asks for, and the
+  plan still asks for them") when an enforced `within` date was drawn by bins alone: a date column whose published
+  statistics are quantile bins with no published minimum is declared by its bins and no `range`, the plan reads its
+  first and last edges as the range, and the widening wrote only a declared `range`, so it never changed what the plan
+  read. The widening now reaches such a column: it declares the range the plan reads, moves its ends as it moves a
+  declared range, and takes the outer bin edges along (ADR 0024). A column no entry asks to widen keeps its bytes, and
+  a column the contract's range would not hold is left undated as before.
+- A validity window's end column that publishes values in the year 9999 stretched the run's window to the year 9999
+  when the contract declares no `openEnd` for it. The year 9999 spells an open end and marks no instant, so the window
+  now keeps to the dates the data holds, as it does for a declared `openEnd`, and the `time window` note names the
+  column and says to declare the `openEnd` on it. Nothing is read as an open end from the profile (ADR 0017, the
+  amendment of 2026-11-26 about an undeclared open end). Another date column that reaches the year 9999 still gives
+  the window its span.
 
 ## 0.12.1 - 2026-11-26
 
