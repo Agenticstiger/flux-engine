@@ -132,3 +132,14 @@ def test_a_missing_distribution_is_reported_as_itself_not_as_a_moved_module(
     with pytest.raises(ModuleNotFoundError, match="install flux-spec") as excinfo:
         ensure_core_codes_loaded()
     assert excinfo.value.name == "flux_spec"
+
+
+@pytest.mark.unit
+def test_the_title_of_a_recorded_plan_refusal_names_each_cause_its_text_lists() -> None:
+    """``FLX-2102`` is refused for four causes; a reader of the index sees all four in its title."""
+    ensure_core_codes_loaded()
+    title = get("FLX-2102").title
+    for cause in ("planDigest", "cannot be read", "marker", "shortfall"):
+        assert cause in title, title
+    for cause in ("edited", "not an object", "historyEndShare", "declaredRows"):
+        assert cause in get("FLX-2102").explanation

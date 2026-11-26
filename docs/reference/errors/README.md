@@ -27,7 +27,7 @@ A failure the engine can name carries an `FLX-nnnn` code. The thousands digit sa
 | Code | What it means |
 |---|---|
 | [FLX-2101](./FLX-2101.md) | the bundle's inputDigest has moved since the plan was recorded |
-| [FLX-2102](./FLX-2102.md) | the recorded plan's own planDigest has moved |
+| [FLX-2102](./FLX-2102.md) | the recorded plan's planDigest has moved, it cannot be read, or it holds a marker or a shortfall this engine does not accept |
 | [FLX-2103](./FLX-2103.md) | trace op outside the flux-trace/1 vocabulary |
 | [FLX-2104](./FLX-2104.md) | trace op field set does not match flux-trace/1 |
 | [FLX-2105](./FLX-2105.md) | golden update without a reason and a changelog row |

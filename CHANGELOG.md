@@ -226,6 +226,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   are a keyed permutation of the row index, so no level a contract declares can be shown to be one of them; the plan
   was accepted before, and every cell of the child then named a key the parent lacks (`verify` scored the link at 0 %). A foreign
   key that is not tracked takes a key the parent holds, as before.
+- The title of `FLX-2102` named only a moved `planDigest`, although the code is also given for a plan that cannot be
+  read, for a marker value this engine does not know and for a `declaredRows` and `shortfall` that do not hold
+  together. The title, and the error index that lists it, name each cause.
 
 ## 0.12.1 - 2026-11-26
 
