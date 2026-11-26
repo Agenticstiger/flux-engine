@@ -324,3 +324,27 @@ def test_the_option_loosens_no_other_rule_of_an_entry(
     with pytest.raises(FluxError) as refused:
         parse_profile(_edit(change), allow_emptied_entries=True)
     assert fragment in str(refused.value)
+
+
+def test_an_entry_a_release_cut_in_part_does_not_hold_nothing() -> None:
+    def cut(document: Dict[str, Any]) -> None:
+        _strip(_pair(document), "order")
+        _strip(_link(document), "order")
+        _strip(_history(document), "versionsPerEntity")
+
+    profile = parse_profile(_edit(cut), allow_emptied_entries=True)
+    (pair,) = profile.tables["payment"].date_pairs
+    assert pair.order is None and pair.statistics and not pair.holds_nothing
+    (link,) = profile.relationships[0].dates
+    assert link.order is None and link.statistics and not link.holds_nothing
+    history = profile.tables["plan_version"].history
+    assert history is not None and history.versions_per_entity is None
+    assert history.first_start is not None and not history.holds_nothing
+
+
+def test_a_date_pair_left_with_only_its_order_does_not_hold_nothing() -> None:
+    def cut(document: Dict[str, Any]) -> None:
+        _pair(document)["statistics"] = []
+
+    (pair,) = parse_profile(_edit(cut), allow_emptied_entries=True).tables["payment"].date_pairs
+    assert pair.statistics == () and pair.order is not None and not pair.holds_nothing

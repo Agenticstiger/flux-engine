@@ -121,6 +121,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - A sampled `verify` whose run holds a few records of a grouping level that the profile holds no record of, fewer
   than `records.min`, passed where the full `verify` refused the group (`FLX-5005`). The sample now holds such a
   level's records to the floor, as the full comparison does.
+- A profile cut in part (see the entry under Changed) was graded as if the cut members had been released without noise:
+  a noisy history or date pair with a member gone fell to `P1`. The grade now counts the members that are left. In
+  `flux_stats`, `holds_nothing` of a date pair, a relationship's date pair and a history is true only when no member is
+  left.
 
 ## 0.12.1 - 2026-11-26
 

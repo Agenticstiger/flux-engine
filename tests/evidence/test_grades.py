@@ -391,6 +391,21 @@ def test_a_history_whose_every_member_is_noisy_no_longer_keeps_a_profile_from_p3
     assert graded.pattern is Pattern.P3, graded.reasons
 
 
+@pytest.mark.parametrize("cut", ["versionsPerEntity", "firstStart", "versionLength", "chain"])
+def test_a_noisy_history_a_release_cut_in_part_keeps_p3(cut: str) -> None:
+    document = _noisy_history_example()
+    del document["tables"]["card_version"]["history"][cut]
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3, graded.reasons
+
+
+def test_a_noisy_history_with_a_tracked_column_member_cut_keeps_p3() -> None:
+    document = _noisy_history_example()
+    del document["tables"]["card_version"]["history"]["columns"]["tier"]["transitions"]
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3, graded.reasons
+
+
 def test_a_history_with_one_member_without_noise_keeps_a_profile_from_p1() -> None:
     graded = grade_profile(
         json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8")),
@@ -634,6 +649,15 @@ def test_a_date_pair_with_a_noisy_order_and_an_exact_statistic_is_p1() -> None:
     ]
     document["tables"]["subscriber"]["datePairs"] = pairs
     assert grade_profile(document, pinned=True).pattern is Pattern.P1
+
+
+def test_a_noisy_date_pair_a_release_cut_to_its_statistics_keeps_p3() -> None:
+    document = _calendar_profile(noisy=True)
+    pairs = _date_pairs(noisy=True)
+    del pairs[0]["order"]
+    document["tables"]["subscriber"]["datePairs"] = pairs
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == ()
 
 
 def test_a_fully_noisy_calendar_and_date_pair_section_keeps_p3() -> None:

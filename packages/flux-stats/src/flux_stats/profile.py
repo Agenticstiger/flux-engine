@@ -565,7 +565,7 @@ class DatePairEntry:
     @property
     def holds_nothing(self) -> bool:
         """Whether the entry holds only its two columns (:func:`parse_profile`, ``allow_emptied_entries``)."""
-        return self.order is None
+        return self.order is None and not self.statistics
 
 
 @dataclass(frozen=True)
@@ -585,7 +585,7 @@ class RelationshipDateEntry:
     @property
     def holds_nothing(self) -> bool:
         """Whether the entry holds only its two columns (:func:`parse_profile`, ``allow_emptied_entries``)."""
-        return self.order is None
+        return self.order is None and not self.statistics
 
 
 @dataclass(frozen=True)
@@ -700,8 +700,18 @@ class HistoryEntry:
 
     @property
     def holds_nothing(self) -> bool:
-        """Whether the history holds only the columns that name it."""
-        return self.versions_per_entity is None
+        """Whether the history holds only the columns that name it, and each tracked column holds nothing."""
+        return all(
+            member is None
+            for member in (
+                self.versions_per_entity,
+                self.first_start,
+                self.version_length,
+                self.chain,
+                self.last_version,
+                self.reasons,
+            )
+        ) and all(column.holds_nothing for column in self.columns.values())
 
 
 @dataclass(frozen=True)
