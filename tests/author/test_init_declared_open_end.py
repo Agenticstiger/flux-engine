@@ -139,6 +139,61 @@ def test_a_published_open_end_gives_the_window_nothing(tmp_path: Path) -> None:
     assert _open_versions(_rows(tmp_path))["9999-12-31"] == 850
 
 
+#: The last instant of the year ladder a profile bins a date's quantiles on.
+LAST_INSTANT_MS = "253402300799999"
+
+
+def _quartiles_in_the_open_end(profile: Dict[str, Any], closed: int) -> Dict[str, Any]:
+    """*profile* whose ends publish no minimum and every quartile in the bin of the open end.
+
+    The quartiles are binned on a ladder of years whose last bin runs from 2100 to the last
+    instant, so the profile says only that *closed* versions end somewhere below 2100.
+    """
+    ladder = [_ms(year, 1, 1) for year in range(2020, 2101)] + [LAST_INSTANT_MS]
+    metrics = _metrics("0", LAST_DAY_MS, 1850)
+    del metrics["min"]["value"]
+    metrics["min"]["status"] = "A"
+    group = {
+        "group": "",
+        "k": 1850,
+        "quantileBin": len(ladder) - 2,
+        "binBelow": closed,
+        "binThrough": 1850,
+        "status": "F",
+    }
+    profile["tables"]["tier_version"]["columns"]["valid_to"] = {
+        "domain": "timestamp",
+        "metrics": metrics,
+        "statistics": [
+            {
+                "definition": "quantile/2",
+                "level": level,
+                "bins": ladder,
+                "sampleSize": metrics["count"]["sampleSize"],
+                "disclosure": "acro-default",
+                "groups": [dict(group)],
+            }
+            for level in ("0.25", "0.5", "0.75")
+        ],
+    }
+    return profile
+
+
+def test_a_version_never_ends_before_it_starts_when_its_ends_publish_no_minimum(
+    tmp_path: Path,
+) -> None:
+    # Without a history to chain a version's end to the next start, a version's two dates are drawn
+    # apart: ends the profile places below the bin of the open end, and never below the starts,
+    # must not be drawn among the starts, where a version could end before it starts.
+    profile = _quartiles_in_the_open_end(_profile(), closed=300)
+    del profile["tables"]["tier_version"]["history"]
+    result = _init(tmp_path, profile, _declaring(chain="dayBefore"))
+    assert result.exit_code == 0, result.stderr
+    assert _history(tmp_path) is None
+    rows = _rows(tmp_path)
+    assert rows and all(row[END] >= row[START] for row in rows)
+
+
 def test_an_end_column_holding_only_the_open_end_is_written_by_the_history(
     tmp_path: Path,
 ) -> None:

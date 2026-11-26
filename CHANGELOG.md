@@ -45,6 +45,35 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `init` writes a table of two foreign keys whose relationships are both laid out by counts as an association, where
   it left the table out and took its `counts` entries back (see Association tables under Added).
 
+## 0.12.1 - 2026-11-26
+
+Fixes to the bundles `fluxsim init` writes from a private profile release, and a `plan` refusal of a periods
+column drawn given a cell that only some kinds override. This resolves the two known issues listed for 0.12.0:
+a column's values could fall outside the contract's declared range through a `within` entry `init` wrote, and a
+sparse categorical column could make `init` drop every projection.
+
+### Fixed
+
+- `init` keeps a bundle's projections when a column a projection takes from the history is drawn at equal weights
+  over the levels its support names (a contract's enum, or the levels the profile lists, with no counts published).
+  A projected column declares no support, and the support was all its draw read, so the plan refused the bundle
+  (`FLX-3402`) and `init` wrote it without any projection: a table projected from a history then drew keys of its
+  own. The column now keeps those levels, at equal weights.
+- `init` no longer widens a date column's declared range past the range the contract declares for it. When the
+  plan's check of an enforced `within` entry (ADR 0024 section 5) would need that widening, because the parent's
+  lifetime can end before the column's range starts, say, the entry is not written, the statistic it rests on is
+  listed as unused with the reason, and the column is drawn inside its range. The widened range let most of the
+  column's rows fall outside the contract's range. The end column of a period is held to its contract range the
+  same way.
+- `fluxsim explain FLX-6204` says that `init` refuses with it too when the date ranges it widens for an enforced
+  `within` entry do not settle.
+- `plan` refuses (`FLX-3403`) a column some kinds of a periods entry override, drawn `given` a cell the entry sets on
+  the rows of a kind that does not override it (that kind's override, a column of the version, or the period
+  column). On those rows the column was drawn given the level of its parent's own draw, which the entry then
+  replaced, so the rows disagreed with the column's table, with no error. A parent held for another column, and one
+  the entry sets only on the rows the column is overridden on, are served as before. A recorded plan replays the
+  draw it was made with.
+
 ## 0.12.0 - 2026-11-26
 
 A Kafka sink, `fluxsim init --window` and `--history`, `validate --profile`, history and periods declarations
