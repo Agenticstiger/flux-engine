@@ -22,9 +22,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ## 0.12.1 - 2026-11-26
 
-Fixes to the bundles `fluxsim init` writes from a private profile release. This resolves the two known issues
-listed for 0.12.0: a column's values could fall outside the contract's declared range through a `within` entry
-`init` wrote, and a sparse categorical column could make `init` drop every projection.
+Fixes to the bundles `fluxsim init` writes from a private profile release, and a `plan` refusal of a periods
+column drawn given a cell that only some kinds override. This resolves the two known issues listed for 0.12.0:
+a column's values could fall outside the contract's declared range through a `within` entry `init` wrote, and a
+sparse categorical column could make `init` drop every projection.
 
 ### Fixed
 
@@ -41,13 +42,12 @@ listed for 0.12.0: a column's values could fall outside the contract's declared 
   same way.
 - `fluxsim explain FLX-6204` says that `init` refuses with it too when the date ranges it widens for an enforced
   `within` entry do not settle.
-- `init` no longer stretches the run's window past the data through a validity window's end column. When the
-  profile withholds the column's minimum and publishes every quartile in the bin that holds the open end the
-  contract declares, the closed versions' ends went into the next bin of the ladder down, right below the open end,
-  which carried `spec.timeBounds` decades past every date the data holds, and with it every column drawn within the
-  window. They are now drawn over the span the window's start column is declared over, cut to the contract ranges
-  of the start and the end. A lifetime's closing that would fall past the shorter window is left open, as
-  `endPastWindow: open` says, rather than placed beyond it.
+- `plan` refuses (`FLX-3403`) a column some kinds of a periods entry override, drawn `given` a cell the entry sets on
+  the rows of a kind that does not override it (that kind's override, a column of the version, or the period
+  column). On those rows the column was drawn given the level of its parent's own draw, which the entry then
+  replaced, so the rows disagreed with the column's table, with no error. A parent held for another column, and one
+  the entry sets only on the rows the column is overridden on, are served as before. A recorded plan replays the
+  draw it was made with.
 
 ## 0.12.0 - 2026-11-26
 
