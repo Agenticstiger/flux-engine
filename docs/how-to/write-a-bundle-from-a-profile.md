@@ -383,7 +383,10 @@ declares (a `range` rule such as `between '2020-01-01' and '2026-12-31'` or `>= 
 bins are cut. To choose the window yourself, pass `--window START END`, two dates
 (`YYYY-MM-DD`, midnight UTC) or RFC 3339 timestamps with START before END. The Simulation's
 `timeBounds` are exactly those, a date column's bins that leave them are cut at them (and the
-column says so), and the output notes the window under "time window".
+column says so), and the output notes the window under "time window". The end column of a
+validity window whose contract declares no `openEnd` gives the window nothing from the year
+9999 on, since that year spells an open end; the note names the column and says to declare the
+`openEnd` on it.
 
 The register is the `parameters` list in `simulation.flux.yml`. Each entry names a
 number by a JSON Pointer and gives its source: a pointer into the profile and the

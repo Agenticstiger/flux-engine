@@ -490,14 +490,17 @@ def test_a_window_given_beside_an_end_column_in_the_year_9999_is_not_refused_for
     _plans(tmp_path)
 
 
-def test_an_end_column_that_runs_from_2025_to_the_last_day_keeps_its_span(tmp_path: Path) -> None:
+def test_an_end_column_that_runs_from_2025_to_the_last_day_keeps_its_span_below_the_year_9999(
+    tmp_path: Path,
+) -> None:
     # Versions that close in 2025 and versions that stay open on 9999-12-31: the range starts in
-    # 2025, so the column's span is not a year-9999 span and the window reaches its end.
+    # 2025, so the column's span is not a year-9999 span, and the contract declares no open end,
+    # so the window holds the span as far as the year 9999 begins and not the year's own values.
     result = _init(tmp_path, required_end=True, last_end="9999-12-31", first_end="2025-10-01")
     assert result.exit_code == 0, result.stderr
     assert _time_bounds(tmp_path) == {
         "start": "2025-01-01T00:00:00.000Z",
-        "end": "9999-12-31T00:00:00.000Z",
+        "end": "2025-10-01T00:00:00.000Z",
     }
     _plans(tmp_path)
 
@@ -526,6 +529,8 @@ def test_a_value_just_before_the_year_9999_is_a_span_the_window_holds(tmp_path: 
     ended = _emits(tmp_path)["line_version"]["fidelity"]["columns"]["valid_to"]
     assert ended["bins"] == ["9998-12-31", "9999-01-01", "9999-01-02"]
     assert ended["binWeights"] == ["1", "0"]
+    # No value is in the year 9999: the edge that starts it only closes a bin, and no note says so.
+    assert "values in the year 9999" not in result.stdout
     assert _time_bounds(tmp_path) == {
         "start": "2025-01-01T00:00:00.000Z",
         "end": "9999-01-01T00:00:00.000Z",
@@ -562,7 +567,7 @@ def _spans(
     if weights is not None:
         column.declaration["binWeights"] = weights
     expose = AuthoredExpose("visit", kinds={"opened_on": LogicalKind.DATE})
-    found, _ = _spans_of(expose, column, None)
+    found, _, _ = _spans_of(expose, column, None)
     return found
 
 
@@ -628,3 +633,30 @@ def test_a_one_value_date_ends_the_window_where_the_one_value_does(tmp_path: Pat
         "start": "2025-01-01T00:00:00.000Z",
         "end": "2025-10-02T00:00:00.000Z",
     }
+
+
+def test_a_span_wholly_in_the_year_9999_beside_another_is_cut_and_noted_for_an_undeclared_end() -> (
+    None
+):
+    column = ColumnPlan("opened_on", time_span=(_at("2025-01-01"), _at("2026-01-01")))
+    column.declaration["bins"] = ["9999-02-01", "9999-03-01"]
+    expose = AuthoredExpose("visit", kinds={"opened_on": LogicalKind.DATE}, index=0)
+    contract = {
+        "exposes": [
+            {
+                "contract": {"schema": []},
+                "semantics": {
+                    "dimensions": [
+                        {
+                            "name": "opened_on",
+                            "type": "time",
+                            "typeParams": {"validityParams": {"isEnd": True}},
+                        }
+                    ]
+                },
+            }
+        ]
+    }
+    found, _, noted = _spans_of(expose, column, contract)
+    assert found == [(_at("2025-01-01"), _at("2026-01-01"))]
+    assert noted

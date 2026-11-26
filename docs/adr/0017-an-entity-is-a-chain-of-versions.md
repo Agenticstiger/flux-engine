@@ -899,3 +899,21 @@ for the start (`FLX-6203`), though it asks for nothing else.
   parent relationship it needs.
 - **What does not move.** A `within` entry on a date the history does not set, and a bundle that declares no
   such entry, read and hash as before.
+
+## Amendment of 2026-11-26: an undeclared open end gives the window nothing
+
+The amendment of 2026-11-25 about the declared open end keeps the value out of the run's window: it marks no
+instant. A validity end that publishes values in the year 9999 with no `openEnd` declared for it left the window
+stretched to the year 9999, since only a column whose every value lay in that year gave the window nothing.
+
+- **Not read as a declaration.** `init` still never reads an open end from a profile: a value the data holds is not a
+  declaration of what it means, so no `openEnd` is written for it. A history whose end would draw such a value is
+  still not written: the plan refuses a bin or range that leaves `spec.timeBounds` (`FLX-3403`), where it refused an
+  `until` in the year 9999 before.
+- **The window.** The end column of a validity window whose contract declares no `openEnd` has its span cut at the
+  year 9999, as a declared `openEnd` cuts it: the window keeps to the dates the data holds, the way a contract range
+  that ends in the year 9999 gives it nothing. The `time window` note names the column and says to declare the
+  `openEnd` on it. Another date column that reaches the year 9999 is not an end and keeps its span, and the
+  long-window note names it. An `openEnd` declared as `null` is a declaration, so such an end keeps its span.
+- **What does not move.** A bundle with no such column, and one that declares the `openEnd`, read and hash as before.
+
