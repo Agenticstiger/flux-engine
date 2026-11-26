@@ -135,7 +135,7 @@ from flux_engine.generator.history import (
     parent_bound_notes,
 )
 from flux_engine.generator.plugin import PluginExpose, check_rows, generate_values, request_of
-from flux_engine.generator.projection_reads import refuse_unsettled_reads
+from flux_engine.generator.projection_cycles import refuse_self_reads
 from flux_engine.generator.projections import (
     NEW_PLAN_BOUNDS,
     RunBounds,
@@ -3616,6 +3616,14 @@ def _planned_with_projections(
             era,
         )
 
+    if projected and bounds.reads:
+        refuse_self_reads(
+            {nfc(item.expose.expose_id): item.plan for item in related if item.plan is not None},
+            {
+                nfc(resolved_emits[index].expose_id): nfc(found[1])
+                for index, found in projected.items()
+            },
+        )
     related, shrunk = _settled_histories(resolved_emits, related, guesses, root, replan)
     if not projected:
         return related
@@ -3684,33 +3692,28 @@ def _reading_projections(
     emit would have without its projection: its cells were drawn, not taken from the history, and
     differed from the rows the emit writes (ADR 0027, the amendment of 2026-11-26).
 
-    A history that reads a projected emit is itself renewed, and a projection takes its rows from
-    the history's plan, so each projection whose history plan moved is derived again from the
-    renewed one. That moves the plans that read the projection, so the two steps go on in
-    dependency order until nothing moves; more passes than there are emits is refused. A history
-    that reads its own projection through a link is refused first when a column it reads depends on
-    the link, which the passes could not settle (:func:`_moved_history`).
+    A history that reads a projected emit of another history is itself renewed, and a projection
+    takes its rows from the history's plan, so each projection whose history plan moved is derived
+    again from the renewed one. That moves the plans that read the projection, so the two steps
+    go on in dependency order until nothing moves. A history never reads a projection of itself,
+    by any path (:func:`~flux_engine.generator.projection_cycles.refuse_self_reads`), so the
+    plans settle; more passes than there are emits is refused, naming the emits still moving.
     """
     root, bounds = run
-    refuse_unsettled_reads(item.plan for item in planned if item.plan is not None)
     current = planned
+    moving: List[str] = []
     for _ in range(len(planned) + 1):
         current = _renewed_plans(current)
         stale = {
             index: history
             for index, found in projected.items()
             if _moved_history(
-                current[index],
-                history := _history_plan_of(resolved_emits, current, found[1]),
-                {
-                    nfc(current[other].expose.expose_id)
-                    for other, kin in projected.items()
-                    if nfc(kin[1]) == nfc(found[1])
-                },
+                current[index], history := _history_plan_of(resolved_emits, current, found[1])
             )
         }
         if not stale:
             return current
+        moving = sorted(nfc(current[index].expose.expose_id) for index in stale)
         current = tuple(
             (
                 replace(
@@ -3734,67 +3737,15 @@ def _reading_projections(
     raise FluxError(
         FLX_3403,
         "the plans of the emits that read a projected emit are still changing after "
-        f"{len(planned) + 1} passes; a history that reads an emit projected from it cannot be planned",
+        f"{len(planned) + 1} passes; still moving: {', '.join(moving)}",
     )
 
 
-def _moved_history(planned: _PlannedEmit, history: GeneratorPlan, projections: Set[str]) -> bool:
-    """Whether the history plan a projected emit was derived from is no longer *history*.
-
-    What a projection reads of its history is its columns' rows, and the plans of the emits the
-    history reads decide them. The plans the history reads of its own projections do not: they
-    hold the history as the projections were derived from it, so the history holds its own
-    previous plan, and a history that reads its projection would never be the plan it was. The
-    projections of the history, *projections* (their exposes), are compared as projected, with
-    what the history held of them left out; the histories whose rows that would leave unsettled
-    are refused before any pass (:func:`~flux_engine.generator.projection_reads.refuse_unsettled_reads`).
-    """
+def _moved_history(planned: _PlannedEmit, history: GeneratorPlan) -> bool:
+    """Whether the history plan a projected emit was derived from is no longer *history*."""
     projection = _plan_of(planned).projection
     assert projection is not None  # the caller names projected emits only
-    held = _cut(projection.history, projections).digest().value
-    return bool(held != _cut(history, projections).digest().value)
-
-
-def _cut(plan: GeneratorPlan, projections: Set[str]) -> GeneratorPlan:
-    """*plan* with the history each of the *projections* it holds, however far down, holds as a stub."""
-    cut = replace(
-        plan,
-        reads=tuple((target, _cut(read, projections)) for target, read in plan.reads),
-        sums=tuple((child, via, _cut(read, projections)) for child, via, read in plan.sums),
-    )
-    projection = plan.projection
-    if projection is None:
-        return cut
-    # The history a projection of the same history holds is the plan the history had when it was
-    # derived; a projection of another history keeps its history, cut the same way.
-    held = (
-        _stub(projection.history, projections)
-        if nfc(plan.expose.expose_id) in projections
-        else _cut(projection.history, projections)
-    )
-    return replace(cut, projection=replace(projection, history=held))
-
-
-def _stub(history: GeneratorPlan, projections: Set[str]) -> GeneratorPlan:
-    """The history a projection holds, without what it reads or sums of the *projections* of it.
-
-    Those are the plans that hold the history in turn. What it reads of other emits, and of
-    projections of other histories, stays: those are what the history's rows depend on, and they
-    move from one pass to the next while the history's rows settle.
-    """
-    return replace(
-        history,
-        reads=tuple(
-            (target, _cut(read, projections))
-            for target, read in history.reads
-            if nfc(read.expose.expose_id) not in projections
-        ),
-        sums=tuple(
-            (child, via, _cut(read, projections))
-            for child, via, read in history.sums
-            if nfc(read.expose.expose_id) not in projections
-        ),
-    )
+    return bool(projection.history.digest() != history.digest())
 
 
 class _Renewal:

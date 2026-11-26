@@ -130,18 +130,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   inside a lifetime the snapshot does not hold, and `verify` reported the entry met on fewer rows than it covers. The
   link now reads the rows the projected emit writes, in a rule, a `within` entry and a column drawn `given` the linked
   row. So does a parent's summary over a child that reads one, and a snapshot, events or periodic emit projected from
-  a history that reads one through a link, which is derived from the history as it reads it. A new plan that has such
+  a history that reads one of another history, which is derived from the history as it reads it. A new plan that has such
   a link says `projectedReads: "final"`, and a recorded plan without it replays the link as it was made (ADR 0027, the
   amendment of 2026-11-26 about linked rows).
 - A history that keeps to its parent's lifetime (`parent.lifetime`) with a rule that reads `previous` was refused at
   plan (`FLX-3403`, "whose plan this pass does not read"), though each plans without the other. It plans, and
   `verify` holds the rule on every version (ADR 0017 section 7).
-- A history that links to the table projected from it, as a self-referencing table does, derived from the current row as
-  the table would draw it without its projection, so a column read through the link differed from the row the table
-  writes. It now derives from the rows the table writes when the columns it reads through the link do not depend on
-  the link. A history that reads a column that does is refused at plan (`FLX-3403`), naming the history, the link and
-  the column: the engine does not derive a column more than one step away, through such a link, from a drawn one (ADR
-  0027, the amendment of 2026-11-26 about linked rows).
+- A history whose plan reads a projection of itself, directly or through other emits (a link into the snapshot
+  projected from it, a link to a table that links to the snapshot, a summary, a `within` entry, a column drawn
+  `given` the linked row, a weighted pick or a `parentWhen`), and two histories that read each other's projections,
+  were planned with rows that differed from the projection they read. A new plan for such a bundle is refused at
+  plan, up front (`FLX-3403`), naming the history and the emits in order: a plan for it needs a derivation that
+  follows the dependencies of each column, which a later change will design. Read a drawn column of the history
+  instead. A recorded plan replays as it was made (ADR 0027, the amendment of 2026-11-26 about linked rows).
 
 ## 0.12.1 - 2026-11-26
 

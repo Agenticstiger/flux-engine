@@ -835,39 +835,6 @@ class RulePlan:
             )
         return frozenset(found)
 
-    def column_reads(self) -> Dict[str, FrozenSet[Tuple[str, str, Tuple[str, ...]]]]:
-        """For each column a rule sets, the ``(exposeId, column, path)`` its rules read.
-
-        *path* is empty for a column of the row itself, else the relationships followed to the row
-        the column is read on (:meth:`link_paths`). A rule that sets several columns reads the
-        same for each.
-        """
-        found: Dict[str, Set[Tuple[str, str, Tuple[str, ...]]]] = {}
-        for rule in self.rules:
-            reads: Set[Tuple[str, str, Tuple[str, ...]]] = {
-                (self.expose_id, name, ()) for name in rule.reads
-            }
-            if rule.paths:
-                texts = [rule.text] if rule.form == FORM_DERIVE else [rule.k, rule.x]
-                checked = [
-                    self._checked(text, rule, value=True) for text in texts if text is not None
-                ]
-                if rule.when is not None:
-                    checked.append(self._checked(rule.when, rule, value=False))
-                reads.update(
-                    (
-                        read.expose,
-                        read.column,
-                        read.path[1:] if read.reach == "previous" else read.path,
-                    )
-                    for text in checked
-                    for read in text.reads
-                    if read.reach == "link" or (read.reach == "previous" and len(read.path) > 1)
-                )
-            for column in rule.determines:
-                found.setdefault(column, set()).update(reads)
-        return {column: frozenset(reads) for column, reads in found.items()}
-
     def asof_date(self, relationship: str) -> Optional[str]:
         """The column that dates a read through *relationship*, or ``None`` when it has no as-of entry."""
         for entry in self.asof:

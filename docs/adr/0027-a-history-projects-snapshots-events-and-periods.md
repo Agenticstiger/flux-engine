@@ -549,22 +549,25 @@ section 5.
   names the projected plan's.
 - **A summary reads it too.** A parent that summarises a child carries the child's plan, and the child carries the
   plans it reads, so a summary over a child that reads a projected emit is taken over the rows the child writes.
-- **A history that reads a projected emit.** The history carries the projected plan, and the snapshot, events or
-  periodic emit projected from it is derived from the history's plan as it then is. Each plan that reads such an emit
-  is renewed in turn, and the two steps go on in dependency order until no plan moves.
-- **A history that reads its own projection.** A history can link to the table projected from it, as a
-  self-referencing table does: a version to the current row of another entity of the same history. The projection
-  copies the history's columns, and the plan the history reads of it holds the history as it was derived from, so the
-  plans are compared as projected, not by the history each was derived from. The projection is then derived twice, once
-  to read the right cells of the link and once to copy the cells that were set from them. The history plans when the
-  columns it reads through the link do not depend on the link, and a column that depends on it may be copied. It is
-  refused (`FLX-3403`) when a column it reads through the link is set from a rule that reads the link, or from a
-  column that is: the engine does not derive a column more than one step away, through such a link, from a drawn one.
-  The message names the history, the link and the column, and says that the column read through the link depends on
-  the link.
+- **A history that reads a projected emit of another history.** The history carries the projected plan, and the
+  snapshot, events or periodic emit projected from it is derived from the history's plan as it then is. Each plan that
+  reads such an emit is renewed in turn, and the two steps go on in dependency order until the plans of every emit
+  are the plans they were derived from. They settle because no history reads a projection of itself.
+- **A history that reads a projection of itself is refused.** A history can link to the table projected from it, as
+  a self-referencing table does: a version to the current row of another entity of the same history. The projection
+  copies the history's columns, so the history would be derived from rows that are derived from it. Deriving
+  it needs a derivation that follows the dependencies of each column, which the passes above are not: they compare
+  whole plans, and a plan that reads its own projection moves with every pass or settles on rows that differ from the
+  projection it read. The shape is refused (`FLX-3403`) before any pass, for a new plan, and a later change will
+  design a derivation that follows the dependencies. The decision is made over the emits: each emit has an edge to every emit its plan reads or sums, whatever drives the read (a rule, a
+  `within` entry, a column drawn `given` a linked row, a weighted pick, a `parentWhen`), and each projected emit has
+  an edge to its history. A history from which a projection of itself can be reached is refused, which covers a read
+  through another emit, a summary, and histories that read each other's projections. The message names the history
+  and the emits in order, from the history to its projection, and says to read a drawn column of the history instead.
 - **Recorded plans.** A new plan with such a link says `projectedReads: "final"`, which the plan digest covers. A plan
   without the key replays the link as it was made, so its rows and its run id keep their bytes. Any other value is
   `FLX-2102`.
 - **What moves.** A bundle with a link into a projected emit that a rule, a `within` entry or a given column reads, a
-  summary over a child that reads one, or a history that reads one, its own projection included. Every other plan keeps
-  its bytes.
+  summary over a child that reads one, or a history that reads a projection of another history. A bundle whose history
+  reads a projection of itself is refused when planned afresh, and a recorded plan of one replays as it was made. Every
+  other plan keeps its bytes.
