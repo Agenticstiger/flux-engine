@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.author.basis import Label, assumed
 from flux_engine.author.columns import ColumnPlan
@@ -89,9 +89,9 @@ class HistoryTarget:
     #: Whether the history ends entities (``end`` is written): a ``d`` event is then dated by a version's end.
     closes: bool = False
     #: Each required column of the history that is the one-column foreign key of a to-one
-    #: relationship, with the (expose, toColumns) it reaches: the key every version of an entity
-    #: holds there is a key of that expose, and never NULL.
-    keyed: Mapping[str, Tuple[str, Tuple[str, ...]]] = field(default_factory=dict)
+    #: relationship, with every (expose, toColumns) such a relationship reaches: the key every
+    #: version of an entity holds there is a key of each of them, and never NULL.
+    keyed: Mapping[str, FrozenSet[Tuple[str, Tuple[str, ...]]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -205,10 +205,10 @@ def _counted_misses(source: ProjectionSource, target: Optional[HistoryTarget]) -
                 f"its column {column} is set by a counts entry, which a projected emit "
                 f"refuses, and {target.expose_id} has no column of that name to take it from"
             )
-        elif target.parent != item.target and target.keyed.get(column) != (
+        elif target.parent != item.target and (
             item.target,
             tuple(item.to_columns),
-        ):
+        ) not in target.keyed.get(column, frozenset()):
             held = (
                 f"writes no parent over {item.target}"
                 if target.parent is None
@@ -778,15 +778,29 @@ def history_target(
         None if entry.get("until") is None else str(entry["until"]),
         start,
         "end" in entry,
-        {
-            item.from_columns[0]: (str(item.target), tuple(item.to_columns))
-            for item in held.relationships
-            if item.cardinality == "many_to_one"
-            and len(item.from_columns) == 1
-            and by_name.get(item.from_columns[0]) is not None
-            and by_name[item.from_columns[0]].required
-        },
+        {column: frozenset(reaches) for column, reaches in _keyed_columns(held, by_name).items()},
     )
+
+
+def _keyed_columns(
+    held: ExposeKeys, by_name: Mapping[str, CompiledColumn]
+) -> Dict[str, List[Tuple[str, Tuple[str, ...]]]]:
+    """Each required one-column foreign key of a to-one relationship of *held*, with each key it reaches.
+
+    A second relationship on one column adds to the keys it reaches, and replaces none: generation
+    allows two on a column only when one implies the other.
+    """
+    found: Dict[str, List[Tuple[str, Tuple[str, ...]]]] = {}
+    for item in held.relationships:
+        column = item.from_columns[0] if len(item.from_columns) == 1 else None
+        if (
+            column is not None
+            and item.cardinality == "many_to_one"
+            and column in by_name
+            and by_name[column].required
+        ):
+            found.setdefault(column, []).append((str(item.target), tuple(item.to_columns)))
+    return found
 
 
 def _target_of(keys: ExposeKeys, name: str) -> Optional[str]:

@@ -119,6 +119,39 @@ _ELSEWHERE = """\
           cardinality: many_to_one
 """
 
+#: The same shelf key under another name and another expose, and the relationship over it.
+_ANNEX = """\
+  - exposeId: annex
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/annex.parquet }
+    contract:
+      schema:
+        - { name: shelf_id, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: annex, type: primary, expr: shelf_id }
+"""
+_SAME_KEY_ELSEWHERE = """\
+        - name: shelf
+          to: annex
+          fromColumns: [shelf_id]
+          toColumns: [shelf_id]
+          cardinality: many_to_one
+"""
+#: The shelf's second column, and the relationship that reaches it instead of the shelf's key.
+_SHELF_CODE = "        - { name: shelf_id, type: INT, required: true }\n"
+_CODE_COLUMN = "        - { name: code, type: INT, required: true }\n"
+_OTHER_COLUMNS = """\
+        - name: shelf
+          to: shelf
+          fromColumns: [shelf_id]
+          toColumns: [code]
+          cardinality: many_to_one
+"""
+
 _CHANGE = """\
   - exposeId: loan_change
     kind: table
@@ -158,11 +191,15 @@ def _library(
     relationship: Optional[str] = _RELATIONSHIP,
     required: bool = True,
     changes: bool = False,
+    annex: bool = False,
+    shelf_code: bool = False,
 ) -> str:
     """The loan history, its member, a shelf and the table of the current loans.
 
     The history holds the shelf's key, declares *relationship* over it (none when ``None``), and
-    requires it unless *required* is false. With *changes* the loans' change events follow.
+    requires it unless *required* is false. With *changes* the loans' change events follow, with
+    *annex* an expose that holds the shelf's key too, and with *shelf_code* the shelf has a second
+    column.
     """
     text = _renamed(HISTORY_CONTRACT.read_text(encoding="utf-8"))
     column = f"        - {{ name: shelf_id, type: INT, required: {str(required).lower()} }}\n"
@@ -174,8 +211,9 @@ def _library(
             "          cardinality: many_to_one\n" + relationship,
             1,
         )
-    text = text.replace("  - exposeId: loan_version\n", _SHELF + "  - exposeId: loan_version\n", 1)
-    return text + _CURRENT + (_CHANGE if changes else "")
+    shelf = _SHELF.replace(_SHELF_CODE, _SHELF_CODE + _CODE_COLUMN) if shelf_code else _SHELF
+    text = text.replace("  - exposeId: loan_version\n", shelf + "  - exposeId: loan_version\n", 1)
+    return text + _CURRENT + (_CHANGE if changes else "") + (_ANNEX if annex else "")
 
 
 def _shelf_counts() -> Dict[str, Any]:
@@ -268,14 +306,30 @@ def test_a_snapshot_with_no_count_over_the_shelf_is_the_snapshot_it_was(tmp_path
     [
         _library(relationship=None),
         _library(relationship=_ELSEWHERE),
+        _library(relationship=_SAME_KEY_ELSEWHERE, annex=True),
+        _library(relationship=_OTHER_COLUMNS, shelf_code=True),
         _library(required=False),
     ],
-    ids=["no-relationship", "relationship-elsewhere", "column-not-required"],
+    ids=[
+        "no-relationship",
+        "relationship-elsewhere",
+        "same-key-columns-on-another-expose",
+        "same-expose-other-key-columns",
+        "column-not-required",
+    ],
 )
 def test_a_history_whose_column_is_no_shelf_key_leaves_the_table_unprojected(
     tmp_path: Path, contract: str
 ) -> None:
-    result = _written(tmp_path, contract, _published())
+    profile = _published()
+    if "exposeId: annex" in contract:
+        profile["tables"]["annex"] = {
+            "rowCount": SHELVES,
+            "columns": {
+                "shelf_id": {"domain": "number", "metrics": _metrics("1", str(SHELVES), SHELVES)}
+            },
+        }
+    result = _written(tmp_path, contract, profile)
     namespace = _namespace(tmp_path)
     assert SNAPSHOTS_KEY not in namespace
     assert [item["emit"] for item in namespace["counts"]] == ["loan_current"]
