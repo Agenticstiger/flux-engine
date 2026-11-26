@@ -59,9 +59,15 @@ def _library(
     published: bool = True,
     ending: bool = True,
     window: Optional[Any] = WINDOW,
+    start: str = "valid_from",
 ) -> Any:
-    """Run ``init`` on the lending library: its contract (a range per column in *declare*) and profile."""
-    document = yaml.safe_load(_renamed(CONTRACT.read_text(encoding="utf-8")))
+    """Run ``init`` on the lending library: its contract (a range per column in *declare*) and profile.
+
+    *start* names the history's validity start column.
+    """
+    document = yaml.safe_load(
+        _renamed(CONTRACT.read_text(encoding="utf-8")).replace("valid_from", start)
+    )
     for expose in document["exposes"]:
         for column in expose["contract"]["schema"]:
             if column["name"] in (declare or {}):
@@ -71,6 +77,8 @@ def _library(
     profile = json.loads(_renamed(json.dumps(_profile_with(*(_nick(n) for n in names)))))
     tables = profile["tables"]
     _begin_in_2020(tables["member_version"])
+    profile = json.loads(json.dumps(profile).replace("valid_from", start))
+    tables = profile["tables"]
     if not published:
         for table, column in (("member_fee", "fee_month"), ("member_renewal", "recorded_on")):
             if table in tables:
@@ -199,6 +207,43 @@ def test_events_of_a_history_that_ends_nobody_start_at_the_date_columns_span(
         kernel="0.2.0",
         stage=False,
     ).success
+
+
+@pytest.mark.parametrize("start", ["date", "end", "Valid From"])
+def test_a_start_column_the_language_reserves_is_quoted_in_the_when(
+    tmp_path: Path, start: str
+) -> None:
+    _library(
+        tmp_path,
+        "member_renewal",
+        declare={"recorded_on": "between '2024-01-01' and '2025-06-30'"},
+        ending=False,
+        start=start,
+    )
+    (entry,) = _entries(tmp_path, EVENTS_KEY)
+    column = start if start.isidentifier() and start != "date" and start != "end" else f'"{start}"'
+    assert entry["when"] == f"{column} >= DATE '2024-01-01' AND {column} <= DATE '2025-06-30'"
+    assert plan(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "library.profile.json",
+        kernel="0.2.0",
+        stage=False,
+    ).success
+
+
+def test_no_upper_bound_is_written_where_the_window_ends_on_the_last_day(
+    tmp_path: Path,
+) -> None:
+    # The window ends at the start of 2025-12-31, so its last day is 2025-12-30 and a start lies on no later day.
+    _library(
+        tmp_path,
+        "member_renewal",
+        declare={"recorded_on": "between '2024-01-01' and '2025-12-30'"},
+        ending=False,
+    )
+    (entry,) = _entries(tmp_path, EVENTS_KEY)
+    assert entry["when"] == "valid_from >= DATE '2024-01-01'"
 
 
 def test_events_of_a_history_that_ends_entities_are_not_limited_and_say_why(

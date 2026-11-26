@@ -519,5 +519,9 @@ a share of the rows well below its tolerance.
    rejects and resamples is the other common form; SDV's Inequality constraint was looked at for the
    pattern only and nothing of it was taken.
 7. **A check not written is named.** When `init` cannot write a check as an order (a column a rule or a
-   history sets, a window too short to draw a gap in, an end range that cannot be shown to hold the gap), its
-   report carries a line naming the check and why.
+   history sets, two dates a snapshot's history sets together, a window too short to draw a gap in, an end range
+   that cannot be shown to hold the gap), its report carries a line naming the check and why.
+8. **What it costs.** The end is the start plus the assumed gap, so the end column no longer follows a histogram of
+   its own that the profile publishes, and a fidelity check on that histogram can then fail where the check on the
+   order now holds. The contract says the order must hold and the profile says nothing about the gap, so the order
+   wins; publishing the date pair for the two columns gives the gap a distribution and ends the trade.

@@ -10,11 +10,13 @@ import json
 from collections import Counter
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 import yaml
 
+from flux_engine.author.history import _level_weights
 from flux_engine.cli._init import run_init
 from flux_engine.stages.run import run
 from flux_engine.stages.verify import verify
@@ -320,3 +322,18 @@ def test_a_bundle_without_a_whole_number_foreign_key_is_byte_identical(tmp_path:
     other.mkdir()
     _init(other, _profile_of([f"p{key}" for key in PLAN_IDS]))
     assert bundle_digests(other) == TEXT_DIGESTS
+
+
+def test_a_dropped_level_leaves_the_records_the_withheld_cells_share() -> None:
+    # A group of 1000 records: 300 and 500 are published and one cell is withheld, which shares
+    # the 200 records they leave. Dropping the 500 level takes its records out of the group, so
+    # the withheld cell still holds 200 and does not take the 500 over.
+    node = {"levels": ["a", "b", "c", "d"]}
+    group = {"k": 1000, "levelCounts": [0, 300, 500, None], "cellStatus": ["F", "F", "F", "C"]}
+    source = SimpleNamespace(minimum_cell=5)
+    pointer = ("tables", "t", "history")
+    plain = _level_weights(node, group, pointer, source)  # type: ignore[arg-type]
+    assert plain is not None and plain["d"] == 200 and plain["c"] == 500
+    dropped = _level_weights(node, group, pointer, source, dropped=("c",))  # type: ignore[arg-type]
+    assert dropped is not None
+    assert dropped["c"] == 0 and dropped["b"] == 300 and dropped["d"] == 200

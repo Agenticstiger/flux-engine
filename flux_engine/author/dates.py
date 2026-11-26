@@ -1001,6 +1001,8 @@ class _Declarer:
         refused = self._usable(expose, start, end)
         if refused is None:
             refused = self._set_already(expose, start) or self._set_already(expose, end)
+        if refused is None and {start, end} <= held.carried:
+            refused = _BOTH_CARRIED
         if refused is None and held.kinds[start] is not held.kinds[end]:
             refused = "a lifetime's end is the same kind of column as its start"
         shortest = 1 if order.strict else 0

@@ -456,13 +456,17 @@ def _level_weights(
     cells = count_cells(group, "levelCounts")
     if not isinstance(levels, list) or len(cells) != len(levels):
         return None
+    total = _whole(group.get("k"))
     for zeroed in (own, ended, *dropped):
         if zeroed is not None and zeroed in levels:
             position = levels.index(zeroed)
+            if total is not None:
+                # What the level held leaves the records the withheld cells share.
+                total = max(0, total - (cells[position].count or 0))
             cells[position] = replace(cells[position], count=0)
     weights, _ = cell_weights(
         source.minimum_cell, cells, pointer, "levelCounts", LEVEL_HISTOGRAM.identifier,
-        total=_whole(group.get("k")),
+        total=total,
     )  # fmt: skip
     return {str(level): weight for level, weight in zip(levels, weights, strict=True)}
 

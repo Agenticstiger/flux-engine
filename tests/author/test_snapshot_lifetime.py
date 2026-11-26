@@ -52,7 +52,7 @@ SIGNED_BY_RULE = """\
 """
 
 
-def _written(tmp_path: Path, rules: str = "") -> Any:
+def _written(tmp_path: Path, rules: str = "", pairs: bool = True) -> Any:
     contract = CONTRACT.read_text(encoding="utf-8") + LATEST.replace("{rules}", rules)
     profile = _profile()
     columns: Dict[str, Any] = {
@@ -70,8 +70,11 @@ def _written(tmp_path: Path, rules: str = "") -> Any:
     profile["tables"]["plan_latest"] = {
         "rowCount": 1000,
         "columns": columns,
-        "datePairs": [_pair("signed_on", "valid_from", HOLDS, edges=(214, 300, 400, 450))],
     }
+    if pairs:
+        profile["tables"]["plan_latest"]["datePairs"] = [
+            _pair("signed_on", "valid_from", HOLDS, edges=(214, 300, 400, 450))
+        ]
     return _init(tmp_path, profile, contract)
 
 
@@ -99,3 +102,21 @@ def test_a_snapshot_pair_one_of_whose_dates_a_rule_sets_keeps_its_lifetime(
     ]
     (entry,) = [item for item in namespace["lifetimes"] if item["emit"] == "plan_latest"]
     assert (entry["start"], entry["end"]) == ("signed_on", "valid_from")
+
+
+#: A check of the snapshot that orders the two dates its history sets.
+ORDERED_BY_CHECK = """\
+      invariants:
+        - id: signed_before_valid
+          check: "valid_from >= signed_on"
+"""
+
+
+def test_a_check_that_orders_two_dates_the_history_both_sets_writes_no_lifetime(
+    tmp_path: Path,
+) -> None:
+    result = _written(tmp_path, ORDERED_BY_CHECK, pairs=False)
+    namespace = _namespace(tmp_path)
+    assert not any(entry["emit"] == "plan_latest" for entry in namespace.get("lifetimes", []))
+    notes = {item["subject"]: item["assumption"] for item in result.artifacts["notes"]}
+    assert "the history sets both dates" in notes["plan_latest.signed_before_valid"]

@@ -60,14 +60,27 @@ def contract_date_orders(expose: Mapping[str, Any]) -> List[DateOrder]:
     return orders
 
 
+def _disjuncts(tree: Node) -> List[Node]:
+    """The operands of a chain of ORs, left to right, however the parser nested them."""
+    found: List[Node] = []
+    pending = [tree]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, Or):
+            pending.extend((node.right, node.left))
+        else:
+            found.append(node)
+    return found
+
+
 def _order(rule: str, tree: Node) -> Optional[DateOrder]:
+    *guards, tree = _disjuncts(tree)
     nulls: List[str] = []
-    while isinstance(tree, Or) and isinstance(tree.left, IsNull) and not tree.left.negated:
-        name = _name(tree.left.value)
+    for guard in guards:
+        name = _name(guard.value) if isinstance(guard, IsNull) and not guard.negated else None
         if name is None:
             return None
         nulls.append(name)
-        tree = tree.right
     pair = _compare(tree)
     if pair is None:
         return None

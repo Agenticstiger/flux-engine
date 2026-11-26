@@ -41,6 +41,7 @@ from flux_engine.author.history import (
     structural_record,
 )
 from flux_engine.core.clock import parse_rfc3339_ms
+from flux_engine.expr2.ast import quote_name
 from flux_engine.expr2.functions import add_months
 from flux_engine.seam.contract import CompiledColumn, LogicalKind, compile_expose
 from flux_engine.seam.keys import ExposeKeys
@@ -364,6 +365,10 @@ def _events_entry(
     return entry
 
 
+#: The first and the last day, since 1970-01-01, a DATE can name.
+_CALENDAR = ((date.min - date(1970, 1, 1)).days, (date.max - date(1970, 1, 1)).days)
+
+
 def _day_text(day: int) -> str:
     return (date(1970, 1, 1) + timedelta(days=day)).isoformat()
 
@@ -389,12 +394,14 @@ def _events_when(
     first, last = span.days()
     begin, end = (parse_rfc3339_ms(text) for text in source.window)
     low = first if first is not None and first > begin // _DAY_MS else None
-    high = last if last is not None and last * _DAY_MS < end else None
+    high = last if last is not None and (last + 1) * _DAY_MS < end else None
     if low is None and high is None:
+        return None
+    if any(day is not None and not _CALENDAR[0] <= day <= _CALENDAR[1] for day in (low, high)):
         return None
     start = target.start
     held = target.columns.get(start) if start is not None else None
-    if start is None or held is None or not start.isidentifier():
+    if start is None or held is None:
         return None
     if held.logical_type.kind is not LogicalKind.DATE:
         return None
@@ -408,11 +415,12 @@ def _events_when(
             )
         )
         return None
+    column = quote_name(start)
     parts = []
     if low is not None:
-        parts.append(f"{start} >= DATE '{_day_text(low)}'")
+        parts.append(f"{column} >= DATE '{_day_text(low)}'")
     if high is not None:
-        parts.append(f"{start} <= DATE '{_day_text(high)}'")
+        parts.append(f"{column} <= DATE '{_day_text(high)}'")
     return " AND ".join(parts)
 
 

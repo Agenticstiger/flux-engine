@@ -543,7 +543,8 @@ lies:
 
 - **The span.** A column's span is its contract's declared `range` (an end the contract leaves out is open, and a
   strict end leaves out its own instant), and for an end the contract does not declare, the profile's published
-  minimum or maximum of the column. A column with neither has no span. Events read this span; periods read the
+  span of the column: its minimum or maximum, or, for a column that publishes a histogram, the first and the last
+  edge of the bins that stand clear of any noise. A column with neither has no span. Events read this span; periods read the
   declared range and the published histogram (below).
 - **Periods.** Each end of a periods entry's range is the contract's declared end, else the first and the last bin of
   the column's published histogram (the amendment of 2026-11-26 that bounds a periods entry by the months its

@@ -255,6 +255,13 @@ def test_the_orders_are_read_from_the_tree() -> None:
     (found,) = orders("b IS NULL OR a < b")
     assert (found.start, found.end, found.strict, found.null_end_holds) == ("a", "b", True, True)
     assert orders("a >= b OR b >= a") == []
+    # A guard for each end, nested to the left as the parser reads `x OR y OR z`, or to the right.
+    for check in ("a IS NULL OR b IS NULL OR b >= a", "b IS NULL OR (a IS NULL OR b >= a)"):
+        (found,) = orders(check)
+        assert (found.start, found.end) == ("a", "b")
+        assert found.null_start_holds and found.null_end_holds
+    assert orders("b >= a OR b IS NULL") == []
+    assert orders(" OR ".join(["c IS NULL"] * 3000) + " OR b >= a") == []
 
 
 def test_an_order_that_cannot_be_written_is_reported(tmp_path: Path) -> None:
