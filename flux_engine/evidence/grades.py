@@ -508,12 +508,17 @@ def _table_structure_reasons(
         )
 
 
-def _query_structure_reasons(queries: Any, tables: Any, found: Set[str], *, links: bool) -> None:
-    """Add to *found* the reasons the statistics of the ``queries`` state data (format 1-5-0).
+def _query_structure_reasons(
+    queries: Any, tables: Any, found: Set[str], *, links: bool, noisy_parts: bool
+) -> None:
+    """Add to *found* the reasons the statistics of the ``queries`` state data, when the profile
+    names format 1-5-0 (*noisy_parts*), which may release a query's rate with noise.
 
     A query's ``groupBy`` names a column of its unit's table. A query that states no unit, or one
     whose table the profile does not hold, has no column to look it up in.
     """
+    if not noisy_parts:
+        return
     for query in queries if isinstance(queries, list) else ():
         if not isinstance(query, Mapping):
             continue
@@ -585,6 +590,18 @@ def _queries_released_exact(queries: Any) -> bool:
         )
         for query in queries
     )
+
+
+#: Why a profile that holds a section no format releases with noise is not P3, as an earlier format
+#: words it, and as format 1-5-0 does, where a query's rate may carry noise.
+_EXACT_OTHER = (
+    "the profile holds period, query or fact statistics, or reference rows, which cannot be "
+    "released with noise in this format"
+)
+_EXACT_OTHER_1_5 = (
+    "the profile holds period statistics, fact statistics or reference rows, which cannot be "
+    "released with noise, or a query statistic released without noise"
+)
 
 
 def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> ProfileGrade:
@@ -691,13 +708,13 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             )
     exact["other"] |= any(profile.get(section) for section in _NOT_NOISY_SECTIONS)
     exact["other"] |= _queries_released_exact(profile.get("queries"))
-    if noisy_parts:
-        _query_structure_reasons(
-            profile.get("queries"),
-            tables,
-            data_stated,
-            links=accounting is None or not accounting.from_1_4,
-        )
+    _query_structure_reasons(
+        profile.get("queries"),
+        tables,
+        data_stated,
+        links=accounting is None or not accounting.from_1_4,
+        noisy_parts=noisy_parts,
+    )
     relationships = profile.get("relationships")
     for index, relationship in enumerate(relationships if isinstance(relationships, list) else ()):
         if not isinstance(relationship, Mapping):
@@ -743,13 +760,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             "the profile holds a history of versions with a member released without noise"
         )
     if exact["other"]:
-        reasons.append(
-            "the profile holds period statistics, fact statistics or reference rows, which cannot "
-            "be released with noise, or a query statistic released without noise"
-            if noisy_parts
-            else "the profile holds period, query or fact statistics, or reference rows, which "
-            "cannot be released with noise in this format"
-        )
+        reasons.append(_EXACT_OTHER_1_5 if noisy_parts else _EXACT_OTHER)
     reasons.extend(sorted(data_stated))
     for path in sections:
         reasons.append(f"the profile holds a statistic released without noise in {path}")

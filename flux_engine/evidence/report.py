@@ -621,6 +621,18 @@ _OBLIGATIONS_NOISY_QUERY = (
 )
 
 
+def _obligation_lines(accounting: Any) -> List[str]:
+    """The profiler's obligations a 1-5-0 release's noisy history and noisy queries rest on,
+    stated by the profile and not checked, one line for each part the release holds."""
+    if not accounting.from_1_5:
+        return []
+    held = (
+        (accounting.noisy_history, _OBLIGATIONS_NOISY_HISTORY),
+        (accounting.noisy_query, _OBLIGATIONS_NOISY_QUERY),
+    )
+    return [f"- {text}" for holds, text in held if holds]
+
+
 def _generator_lines(generators: Sequence[GeneratorGrade]) -> str:
     """Each generator plugin the bundle declares, with the grade it states and, for ``P4``, its account.
 
@@ -700,11 +712,7 @@ def render_privacy_section(grade: Optional[RunGrade]) -> str:
         lines = [head, *_accounting_lines(profile.accounting)]
         if pattern is Pattern.P3:
             lines.append(f"- {_NOT_COVERED_1_4 if profile.accounting.from_1_4 else _NOT_COVERED}")
-            if profile.accounting.from_1_5:
-                if profile.accounting.noisy_history:
-                    lines.append(f"- {_OBLIGATIONS_NOISY_HISTORY}")
-                if profile.accounting.noisy_query:
-                    lines.append(f"- {_OBLIGATIONS_NOISY_QUERY}")
+            lines.extend(_obligation_lines(profile.accounting))
         blocks.append("\n".join(lines))
     if grade.generators:
         blocks.append(_generator_lines(grade.generators))
