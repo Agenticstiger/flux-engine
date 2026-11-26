@@ -26,7 +26,15 @@ from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.stages import pipeline
 from flux_engine.stages.layout import RunLayout
 
-from ._fleet import CONTRACT, HISTORY, apply_module, bundle, expose, plan_module, repin, rows
+from ._fleet import (
+    HISTORY,
+    apply_module,
+    bundle,
+    plan_module,
+    plan_outcome,
+    rows,
+    with_range,
+)
 from .test_declared_range_run import verify_module
 
 pytestmark = pytest.mark.integration
@@ -51,13 +59,7 @@ HELD: List[Tuple[str, str]] = [
 
 
 def _ranged(tmp_path: Path, expose_id: str, column: str, rule: str = RANGE, **options: Any) -> Path:
-    target = bundle(tmp_path, **options)
-    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
-    schema = expose(contract, expose_id)["contract"]["schema"]
-    held = next(item for item in schema if item["name"] == column)
-    held["validationRules"] = [{"type": "range", "constraint": rule}]
-    repin(target, contract)
-    return target
+    return with_range(bundle(tmp_path, **options), expose_id, column, rule)
 
 
 def _run(target: Path, state: Path) -> Tuple[Any, Dict[str, Any], RunLayout]:
@@ -144,16 +146,14 @@ def test_an_events_date_with_a_lag_is_not_held(tmp_path: Path) -> None:
 
 
 def test_an_open_end_outside_the_range_keeps_the_end_column_s_note(tmp_path: Path) -> None:
-    target = _ranged(tmp_path, HISTORY, "valid_to", history={"openEnd": "9999-12-31"})
-    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
-    schema = expose(contract, HISTORY)["contract"]["schema"]
-    next(item for item in schema if item["name"] == "valid_to")["validationRules"] = [
-        {"type": "range", "constraint": f"between '{LOW}' and '2030-12-31'"}
-    ]
-    repin(target, contract)
-    planned = plan_module.plan(
-        target, state_dir=tmp_path / "state", kernel=KERNEL_V2.version, stage=False
+    target = _ranged(
+        tmp_path,
+        HISTORY,
+        "valid_to",
+        f"between '{LOW}' and '2030-12-31'",
+        history={"openEnd": "9999-12-31"},
     )
+    planned = plan_outcome(target, tmp_path / "state")
     assert planned.success, planned.stderr
     assert f"{HISTORY}.valid_to is not drawn inside" in planned.stderr
     assert f"{HISTORY}.valid_from is not drawn inside" not in planned.stderr
@@ -238,18 +238,10 @@ def test_a_parent_bound_history_plans_past_an_events_entry_with_a_when(tmp_path:
     """A parent that closed before the range's low end still leaves its entities room."""
     from .test_history_parent_run import _bundle as parent_bound
 
-    target = parent_bound(tmp_path)
-    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
-    schema = expose(contract, "vehicle_change")["contract"]["schema"]
-    held = next(item for item in schema if item["name"] == "changed_at")
-    held["validationRules"] = [
-        {"type": "range", "constraint": "between '2025-06-01' and '2025-12-31'"}
-    ]
-    repin(target, contract)
+    rule = "between '2025-06-01' and '2025-12-31'"
+    target = with_range(parent_bound(tmp_path), "vehicle_change", "changed_at", rule)
     _events_when(target, "valid_from >= DATE '2025-06-01'")
-    planned = plan_module.plan(
-        target, state_dir=tmp_path / "state", kernel=KERNEL_V2.version, stage=False
-    )
+    planned = plan_outcome(target, tmp_path / "state")
     assert planned.success, planned.stderr
 
 
@@ -259,16 +251,9 @@ def test_a_parent_closed_before_the_validity_range_is_refused_naming_the_range(
     """Every version starts inside the range, so a parent that closed before it leaves no room."""
     from .test_history_parent_run import _bundle as parent_bound
 
-    target = parent_bound(tmp_path)
-    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
-    schema = expose(contract, HISTORY)["contract"]["schema"]
-    held = next(item for item in schema if item["name"] == "valid_from")
-    held["validationRules"] = [
-        {"type": "range", "constraint": "between '2025-06-01' and '2025-12-31'"}
-    ]
-    repin(target, contract)
-    refused = plan_module.plan(
-        target, state_dir=tmp_path / "state", kernel=KERNEL_V2.version, stage=False
+    rule = "between '2025-06-01' and '2025-12-31'"
+    refused = plan_outcome(
+        with_range(parent_bound(tmp_path), HISTORY, "valid_from", rule), tmp_path / "state"
     )
     assert not refused.success and "FLX-3403" in refused.stderr
     assert "from the range on its validity columns (2025-06-01)" in refused.stderr

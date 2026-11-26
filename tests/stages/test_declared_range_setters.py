@@ -24,7 +24,6 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Tuple
 
 import pytest
-import yaml
 
 from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.stages import pipeline
@@ -32,7 +31,7 @@ from flux_engine.stages._range_setters import SetBy, range_setter_notes
 from flux_engine.stages.apply import load_recorded_plan
 from flux_engine.stages.layout import RunLayout
 
-from ._fleet import CONTRACT, apply_module, bundle, expose, plan_module, repin
+from ._fleet import apply_module, bundle, plan_module, with_range
 from .test_declared_range_run import verify_module
 
 pytestmark = pytest.mark.integration
@@ -66,13 +65,7 @@ def unheld(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _ranged(tmp_path: Path, expose_id: str, column: str, rule: str, name: str = "ranged") -> Path:
-    target = bundle(tmp_path, name=name)
-    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
-    schema = expose(contract, expose_id)["contract"]["schema"]
-    held = next(item for item in schema if item["name"] == column)
-    held["validationRules"] = [{"type": "range", "constraint": rule}]
-    repin(target, contract)
-    return target
+    return with_range(bundle(tmp_path, name=name), expose_id, column, rule)
 
 
 def _notes(stderr: str) -> List[str]:

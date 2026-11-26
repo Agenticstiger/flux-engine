@@ -122,15 +122,23 @@ def _check_bound(layout: RunLayout, mode: Optional[str]) -> int:
     return ended
 
 
-def _months_after_the_depot_closed(layout: RunLayout) -> Tuple[int, int]:
-    """The periodic rows of vehicles whose depot closed: how many start after its last day, of how many."""
+def _closing_days(layout: RunLayout, *, open_last: bool = False) -> Dict[Any, date]:
+    """Each vehicle whose depot closed, with the depot's last day; with *open_last*, only those whose last version is open."""
     depots = _depots(layout)
     closing: Dict[Any, date] = {}
     for vehicle, versions in by_vehicle(read_rows(layout, EMIT)).items():
         parent = depots[versions[0]["depot_id"]]
         opened, closed = _day(parent["opened_on"]), _day(parent["closed_on"])
-        if closed is not None and opened is not None and closed >= opened:
+        if closed is None or opened is None or closed < opened:
+            continue
+        if not open_last or versions[-1]["valid_to"] is None:
             closing[vehicle] = closed
+    return closing
+
+
+def _months_after_the_depot_closed(layout: RunLayout) -> Tuple[int, int]:
+    """The periodic rows of vehicles whose depot closed: how many start after its last day, of how many."""
+    closing = _closing_days(layout)
     held = [row for row in read_rows(layout, PERIODIC) if row["vehicle_id"] in closing]
     late = [row for row in held if _day(row["month"]) > closing[row["vehicle_id"]]]
     return len(late), len(held)
@@ -177,13 +185,7 @@ def _by_the_day(target: Path) -> None:
 
 def _last_days_held(layout: RunLayout) -> Tuple[Dict[Any, date], Dict[Any, date]]:
     """Each vehicle whose depot closed and whose last version is open: its depot's last day, and its last periodic day."""
-    depots = _depots(layout)
-    closing: Dict[Any, date] = {}
-    for vehicle, versions in by_vehicle(read_rows(layout, EMIT)).items():
-        parent = depots[versions[0]["depot_id"]]
-        opened, closed = _day(parent["opened_on"]), _day(parent["closed_on"])
-        if closed is not None and closed >= opened and versions[-1]["valid_to"] is None:  # type: ignore[operator]
-            closing[vehicle] = closed
+    closing = _closing_days(layout, open_last=True)
     last: Dict[Any, date] = {}
     for row in read_rows(layout, PERIODIC):
         if row["vehicle_id"] in closing:
