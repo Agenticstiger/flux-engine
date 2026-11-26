@@ -407,6 +407,54 @@ def test_a_noisy_null_count_does_not_keep_a_profile_from_p3() -> None:
     assert graded.accounting is not None and graded.accounting.parts == 12
 
 
+def _release(history: bool, queries: bool) -> Dict[str, Any]:
+    """The 1-5-0 example, graded P3, with a noisy history and noisy queries kept or dropped."""
+    document = _noisy_history_example()
+    if not history:
+        document["tables"]["card_version"].pop("history")
+        document["tables"]["card_version"]["columns"]["valid_to"] = {"domain": "timestamp"}
+        document["queries"] = document["queries"][:2]  # the entity form needs the history
+    if not queries:
+        document["queries"] = []
+    return document
+
+
+_HISTORY_OBLIGATIONS = (
+    "Noisy history, stated and not checked: every version of an entity references one row of "
+    "the parent of its table's listed relationship, so an entity lies in one unit; the "
+    "maxChildren bounding of the table keeps or drops an entity's versions together, by a rule "
+    "that reads only that parent's rows; and publicStructure also covers the bins of "
+    "versionsPerEntity, firstStart and versionLength, the levels of initial and transitions, "
+    "and the candidate columns."
+)
+_QUERY_OBLIGATIONS = (
+    "Noisy query, stated and not checked: its records are what its unit states; whether a "
+    "record matches reads only rows of that record's own unit and of tables the unit does not "
+    "reach; and a profiler that cannot run a query withholds every query of the release."
+)
+
+
+@pytest.mark.parametrize(
+    ("history", "queries"), [(True, True), (True, False), (False, True), (False, False)]
+)
+def test_a_1_5_0_report_names_the_obligations_of_each_noisy_part_it_holds(
+    history: bool, queries: bool
+) -> None:
+    graded = grade_profile(_release(history, queries), pinned=True)
+    assert graded.pattern is Pattern.P3, graded.reasons
+    text = render_privacy_section(RunGrade(graded))
+    assert ("Noisy history, stated and not checked" in text) is history
+    assert ("Noisy query, stated and not checked" in text) is queries
+    assert (_HISTORY_OBLIGATIONS in text) is history
+    assert (_QUERY_OBLIGATIONS in text) is queries
+
+
+def test_a_report_of_format_1_4_0_names_no_noisy_obligation() -> None:
+    document = json.loads((SPEC / "profile-1-4-follows-example.json").read_text(encoding="utf-8"))
+    text = render_privacy_section(RunGrade(grade_profile(document, pinned=True)))
+    assert "stated and not checked" not in text
+
+
 # ---------------------------------------------------------------------------
 # Calendar and date-pair statistics, relationship dates, and members the grade does not know
 # ---------------------------------------------------------------------------

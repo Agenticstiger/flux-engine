@@ -599,6 +599,25 @@ _NOT_COVERED_1_4 = (
 )
 
 
+#: What the profiler owes for a noisy history (format 1-5-0), stated by the profile and not
+#: checked by the engine (ADR 0019 decision 4).
+_OBLIGATIONS_NOISY_HISTORY = (
+    "Noisy history, stated and not checked: every version of an entity references one row of "
+    "the parent of its table's listed relationship, so an entity lies in one unit; the "
+    "maxChildren bounding of the table keeps or drops an entity's versions together, by a rule "
+    "that reads only that parent's rows; and publicStructure also covers the bins of "
+    "versionsPerEntity, firstStart and versionLength, the levels of initial and transitions, "
+    "and the candidate columns."
+)
+
+#: The same for a noisy query (format 1-5-0, PROFILE-SPEC.md "A noisy query").
+_OBLIGATIONS_NOISY_QUERY = (
+    "Noisy query, stated and not checked: its records are what its unit states; whether a "
+    "record matches reads only rows of that record's own unit and of tables the unit does not "
+    "reach; and a profiler that cannot run a query withholds every query of the release."
+)
+
+
 def _generator_lines(generators: Sequence[GeneratorGrade]) -> str:
     """Each generator plugin the bundle declares, with the grade it states and, for ``P4``, its account.
 
@@ -678,6 +697,11 @@ def render_privacy_section(grade: Optional[RunGrade]) -> str:
         lines = [head, *_accounting_lines(profile.accounting)]
         if pattern is Pattern.P3:
             lines.append(f"- {_NOT_COVERED_1_4 if profile.accounting.from_1_4 else _NOT_COVERED}")
+            if profile.accounting.from_1_5:
+                if profile.accounting.noisy_history:
+                    lines.append(f"- {_OBLIGATIONS_NOISY_HISTORY}")
+                if profile.accounting.noisy_query:
+                    lines.append(f"- {_OBLIGATIONS_NOISY_QUERY}")
         blocks.append("\n".join(lines))
     if grade.generators:
         blocks.append(_generator_lines(grade.generators))

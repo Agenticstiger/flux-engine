@@ -147,6 +147,12 @@ class Accounting:
     #: noisy statistics, every ``rowFloor`` and every ``maxChildren``), and a labelled column of a
     #: table its unit does not reach counts as ``P1`` for the minimum grade.
     from_1_4: bool = False
+    #: The profile names format 1-5-0, which may hold a noisy history and a noisy query.
+    from_1_5: bool = False
+    #: A table's ``history`` holds a member that carries noise (format 1-5-0).
+    noisy_history: bool = False
+    #: A query's statistic carries noise (format 1-5-0).
+    noisy_query: bool = False
     #: The relationships the unit follows, as ``(parent table, child table, maxChildren)``.
     follows: Tuple[Tuple[str, str, int], ...] = ()
     #: ``m_T`` of every table the unit reaches, the expose included, by table name. Empty when the
@@ -287,11 +293,44 @@ def _account(profile: Optional[Mapping[str, Any]]) -> Tuple[Optional[Accounting]
         spent={key: _decimal(value) for key, value in spent.items()},
         public_structure=block.get("publicStructure") is True,
         from_1_4=profile.get("_schemaURL") in (SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0),
+        from_1_5=profile.get("_schemaURL") == SCHEMA_URL_1_5_0,
+        noisy_history=_holds_noisy_history(read),
+        noisy_query=_holds_noisy_query(read),
         follows=follows,
         reached=reach,
         fixed=fixed,
     )
     return accounting, parts is not None
+
+
+def _holds_noisy_history(read: Optional[Profile]) -> bool:
+    """Whether a table of the profile has a ``history`` member that carries noise."""
+    if read is None:
+        return False
+    for table in read.tables.values():
+        history = table.history
+        if history is None:
+            continue
+        members = [
+            history.versions_per_entity,
+            history.first_start,
+            history.version_length,
+            history.chain,
+            history.last_version,
+            history.reasons,
+        ]
+        for column in history.columns.values():
+            members += [column.initial, column.transitions]
+        if any(member is not None and member.noise is not None for member in members):
+            return True
+    return False
+
+
+def _holds_noisy_query(read: Optional[Profile]) -> bool:
+    """Whether a query of the profile has a statistic that carries noise."""
+    return read is not None and any(
+        statistic.noise is not None for query in read.queries for statistic in query.statistics
+    )
 
 
 def _spent(total: Mapping[str, Any], parts: Iterable[Any]) -> Dict[str, Fraction]:
