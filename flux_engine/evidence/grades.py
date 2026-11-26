@@ -543,18 +543,20 @@ def _query_structure_reasons(
 def _history_members(history: Mapping[str, Any]) -> List[Any]:
     """The members of a table's ``history``: its statistics, and each tracked column's two.
 
-    A tracked column that is not an object counts as a member that is absent.
+    A tracked column that is not an object counts as a member that is absent. A member a
+    release cut (the reader's ``allow_emptied_entries``) is not one.
     """
     members: List[Any] = [
-        history.get(key)
+        history[key]
         for key in ("versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion")
+        if key in history
     ]
     if "reasons" in history:
         members.append(history["reasons"])
     columns = history.get("columns")
     for column in columns.values() if isinstance(columns, Mapping) else ():
         if isinstance(column, Mapping):
-            members += [column.get("initial"), column.get("transitions")]
+            members += [column[key] for key in ("initial", "transitions") if key in column]
         else:
             members.append(None)
     return members
@@ -673,7 +675,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
                     isinstance(s, Mapping) and "noise" not in s
                     for s in [*(pair.get("statistics") or ()), pair.get("order")]
                 )
-                or not isinstance(pair.get("order"), Mapping)
+                or ("order" in pair and not isinstance(pair["order"], Mapping))
             )
             for pair in table.get("datePairs") or ()
         ):

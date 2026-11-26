@@ -7,8 +7,8 @@
 A release step that drops each statistic an inventory marks unused can leave a date pair, a
 relationship's date pair, an exposure, a history or a tracked column of one with its names alone.
 The strict reader refuses each (PROFILE-SPEC.md section 5). With the option the reader keeps the
-entry in its place, holding nothing; an entry that holds some of its statistics is refused as
-before. The calendar entry has its own tests in ``test_calendar_exposure.py``.
+entry in its place, holding nothing, and reads an entry the release cut in part with the members
+left. The calendar entry has its own tests in ``test_calendar_exposure.py``.
 """
 
 from __future__ import annotations
@@ -224,22 +224,33 @@ PARTIAL = [
 
 
 @pytest.mark.parametrize(("change", "key"), PARTIAL)
-def test_an_entry_that_holds_some_of_its_statistics_is_still_refused(
+def test_an_entry_a_release_cut_is_read_with_the_members_left(
     change: Callable[[Dict[str, Any]], None], key: str
 ) -> None:
+    # A release that drops each unused statistic can leave part of an entry: the strict reader
+    # refuses it, naming the member it misses, and the engine reads the members that are left.
     with pytest.raises(FluxError) as refused:
-        parse_profile(_edit(change), allow_emptied_entries=True)
+        parse_profile(_edit(change))
     assert key in str(refused.value)
+    parse_profile(_edit(change), allow_emptied_entries=True)
 
 
-def test_a_history_that_holds_nothing_but_a_column_that_does_is_still_refused() -> None:
+def test_a_history_that_holds_only_a_tracked_column_is_read_with_it() -> None:
     def change(document: Dict[str, Any]) -> None:
         columns = copy.deepcopy(_history(document)["columns"])
         _empty_history(document)
         _history(document)["columns"] = columns
 
     with pytest.raises(FluxError, match="chain|versionsPerEntity|firstStart"):
-        parse_profile(_edit(change), allow_emptied_entries=True)
+        parse_profile(_edit(change))
+    history = (
+        parse_profile(_edit(change), allow_emptied_entries=True).tables["plan_version"].history
+    )
+    assert history is not None and history.chain is None and history.versions_per_entity is None
+    assert history.columns and all(
+        column.initial is not None and column.transitions is not None
+        for column in history.columns.values()
+    )
 
 
 def _then(
@@ -313,3 +324,37 @@ def test_the_option_loosens_no_other_rule_of_an_entry(
     with pytest.raises(FluxError) as refused:
         parse_profile(_edit(change), allow_emptied_entries=True)
     assert fragment in str(refused.value)
+
+
+def test_an_entry_a_release_cut_in_part_does_not_hold_nothing() -> None:
+    def cut(document: Dict[str, Any]) -> None:
+        _strip(_pair(document), "order")
+        _strip(_link(document), "order")
+        _strip(_history(document), "versionsPerEntity")
+
+    profile = parse_profile(_edit(cut), allow_emptied_entries=True)
+    (pair,) = profile.tables["payment"].date_pairs
+    assert pair.order is None and pair.statistics and not pair.holds_nothing
+    (link,) = profile.relationships[0].dates
+    assert link.order is None and link.statistics and not link.holds_nothing
+    history = profile.tables["plan_version"].history
+    assert history is not None and history.versions_per_entity is None
+    assert history.first_start is not None and not history.holds_nothing
+
+
+def test_a_date_pair_left_with_only_its_order_does_not_hold_nothing() -> None:
+    def cut(document: Dict[str, Any]) -> None:
+        _pair(document)["statistics"] = []
+
+    (pair,) = parse_profile(_edit(cut), allow_emptied_entries=True).tables["payment"].date_pairs
+    assert pair.statistics == () and pair.order is not None and not pair.holds_nothing
+
+
+def test_a_history_left_with_only_its_reasons_does_not_hold_nothing() -> None:
+    def cut(document: Dict[str, Any]) -> None:
+        reasons = _history(document)["reasons"]
+        _empty_history(document)
+        _history(document)["reasons"] = reasons
+
+    history = parse_profile(_edit(cut), allow_emptied_entries=True).tables["plan_version"].history
+    assert history is not None and history.reasons is not None and not history.holds_nothing

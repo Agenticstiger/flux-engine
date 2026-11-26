@@ -280,9 +280,9 @@ def test_a_citation_into_an_entry_that_still_holds_a_statistic_is_read_as_before
     check_profile_citations(_cites(pointer, definition), profile, where="sim-x")
 
 
-def test_an_entry_that_holds_some_of_its_statistics_is_still_refused_by_the_engine() -> None:
-    # The option is for an entry that holds nothing: a date pair with statistics and no order,
-    # an exposure with one of its counts, a history without its chain, are refused as before.
+def test_the_engine_reads_an_entry_a_release_cut_and_the_strict_reader_refuses_it() -> None:
+    # A date pair with statistics and no order, an exposure with one of its counts, a history
+    # without its chain: the strict reader refuses each, naming the member, and the engine reads it.
     cases: List[Tuple[Dict[str, Any], Tuple[Any, ...], str]] = [
         (_profile(), ("tables", "member", "datePairs", 1, "order"), "order"),
         (_profile(), ("relationships", 0, "dates", 1, "order"), "order"),
@@ -300,4 +300,5 @@ def test_an_entry_that_holds_some_of_its_statistics_is_still_refused_by_the_engi
             node = node[token]
         del node[path[-1]]
         with pytest.raises(FluxError, match=key):
-            load_profile_text(json.dumps(profile), allow_emptied_entries=True)
+            load_profile_text(json.dumps(profile))
+        load_profile_text(json.dumps(profile), allow_emptied_entries=True)
