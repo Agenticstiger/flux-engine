@@ -135,6 +135,7 @@ from flux_engine.generator.history import (
     parent_bound_notes,
 )
 from flux_engine.generator.plugin import PluginExpose, check_rows, generate_values, request_of
+from flux_engine.generator.projection_cycles import refuse_self_reads
 from flux_engine.generator.projections import (
     NEW_PLAN_BOUNDS,
     RunBounds,
@@ -1934,6 +1935,9 @@ class PlanEra:
     the draw it was made with, given the level the column's own draw made.
     *override_givens* is false for a plan without ``projectedGivens: "afterOverrides"`` (the
     amendment of 2026-11-26): it holds no kind's override as a level, as it was made.
+    *projected_reads* is false for a plan without ``projectedReads`` (the amendment of 2026-11-26):
+    an emit that reads a projected emit through a link reads the rows the emit would draw without
+    its projection, as it was made.
     """
 
     end_share: str = END_SHARE_OF_ENTITIES
@@ -1945,6 +1949,7 @@ class PlanEra:
     estimate_rows: bool = True
     projected_givens: bool = True
     override_givens: bool = True
+    projected_reads: bool = True
 
 
 def _run_bounds(era: PlanEra) -> RunBounds:
@@ -1955,6 +1960,7 @@ def _run_bounds(era: PlanEra) -> RunBounds:
         era.estimate_rows,
         era.projected_givens,
         era.override_givens,
+        era.projected_reads,
     )
 
 
@@ -3610,6 +3616,14 @@ def _planned_with_projections(
             era,
         )
 
+    if projected and bounds.reads:
+        refuse_self_reads(
+            {nfc(item.expose.expose_id): item.plan for item in related if item.plan is not None},
+            {
+                nfc(resolved_emits[index].expose_id): nfc(found[1])
+                for index, found in projected.items()
+            },
+        )
     related, shrunk = _settled_histories(resolved_emits, related, guesses, root, replan)
     if not projected:
         return related
@@ -3639,7 +3653,7 @@ def _with_projected_plans(
     *run* is the run root and what the run holds a projection to (:func:`_planned_with_projections`').
     """
     root, bounds = run
-    return tuple(
+    planned = tuple(
         (
             replace(
                 planned_emit,
@@ -3658,6 +3672,164 @@ def _with_projected_plans(
             else planned_emit
         )
         for index, planned_emit in enumerate(related)
+    )
+    if not bounds.reads:
+        return planned
+    return _reading_projections(resolved_emits, planned, projected, run)
+
+
+def _reading_projections(
+    resolved_emits: Sequence[ResolvedEmit],
+    planned: Tuple[_PlannedEmit, ...],
+    projected: Mapping[int, Tuple[str, str, str]],
+    run: Tuple[SeedTreeRoot, RunBounds],
+) -> Tuple[_PlannedEmit, ...]:
+    """*planned*, with every plan that reads a projected emit carrying the projected plan.
+
+    The plans were related, and their ``reads`` and ``sums`` attached, before a projected emit's
+    rows were derived, so a plan that reads one through a link (a ``within`` entry, a rule, a
+    column drawn ``given`` the linked row), or summarises a child that does, carried the plan the
+    emit would have without its projection: its cells were drawn, not taken from the history, and
+    differed from the rows the emit writes (ADR 0027, the amendment of 2026-11-26).
+
+    A history that reads a projected emit of another history is itself renewed, and a projection
+    takes its rows from the history's plan, so each projection whose history plan moved is derived
+    again from the renewed one. That moves the plans that read the projection, so the two steps
+    go on in dependency order until nothing moves. A history never reads a projection of itself,
+    by any path (:func:`~flux_engine.generator.projection_cycles.refuse_self_reads`), so the
+    plans settle; more passes than there are emits is refused, naming the emits still moving.
+    """
+    root, bounds = run
+    current = planned
+    moving: List[str] = []
+    for _ in range(len(planned) + 1):
+        current = _renewed_plans(current)
+        stale = {
+            index: history
+            for index, found in projected.items()
+            if _moved_history(
+                current[index], history := _history_plan_of(resolved_emits, current, found[1])
+            )
+        }
+        if not stale:
+            return current
+        moving = sorted(nfc(current[index].expose.expose_id) for index in stale)
+        current = tuple(
+            (
+                replace(
+                    item,
+                    plan=(
+                        projected_plan := project_plan(
+                            replace(_plan_of(item), projection=None),
+                            projected[index],
+                            stale[index],
+                            root,
+                            bounds=bounds,
+                        )
+                    ),
+                    coverage=coverage_of_plan(projected_plan),
+                )
+                if index in stale
+                else item
+            )
+            for index, item in enumerate(current)
+        )
+    raise FluxError(
+        FLX_3403,
+        "the plans of the emits that read a projected emit are still changing after "
+        f"{len(planned) + 1} passes; still moving: {', '.join(moving)}",
+    )
+
+
+def _moved_history(planned: _PlannedEmit, history: GeneratorPlan) -> bool:
+    """Whether the history plan a projected emit was derived from is no longer *history*."""
+    projection = _plan_of(planned).projection
+    assert projection is not None  # the caller names projected emits only
+    return bool(projection.history.digest() != history.digest())
+
+
+class _Renewal:
+    """The plans of *planned* as each carries the plans it reads and sums (:func:`_renewed_plans`)."""
+
+    def __init__(self, planned: Sequence[_PlannedEmit]) -> None:
+        self.plans = {
+            nfc(item.expose.expose_id): item.plan for item in planned if item.plan is not None
+        }
+        self.holding_link: Dict[str, bool] = {}  # a plan as a link reads it holds a projection
+        self.holding_sums: Dict[str, bool] = {}  # a plan as a summary reads it does
+        # Each plan is renewed once; the reads and the sums are acyclic, so none waits on itself.
+        self.linked = functools.cache(self._linked)
+        self.summed = functools.cache(self._summed)
+
+    def reads_hold(self, plan: GeneratorPlan) -> bool:
+        return any(target in self.plans and self.link_holds(target) for target, _ in plan.reads)
+
+    def sums_hold(self, plan: GeneratorPlan) -> bool:
+        return any(child in self.plans and self.whole_holds(child) for child, _, _ in plan.sums)
+
+    def link_holds(self, expose_id: str) -> bool:
+        if expose_id not in self.holding_link:
+            self.holding_link[expose_id] = False  # a cycle among the reads is refused before this
+            plan = self.plans[expose_id]
+            self.holding_link[expose_id] = plan.projection is not None or self.reads_hold(plan)
+        return self.holding_link[expose_id]
+
+    def whole_holds(self, expose_id: str) -> bool:
+        if expose_id not in self.holding_sums:
+            self.holding_sums[expose_id] = False  # a cycle among the sums is refused before this
+            plan = self.plans[expose_id]
+            self.holding_sums[expose_id] = (
+                plan.projection is not None or self.reads_hold(plan) or self.sums_hold(plan)
+            )
+        return self.holding_sums[expose_id]
+
+    def with_reads(self, expose_id: str) -> GeneratorPlan:
+        """The plan of *expose_id* with the plans it reads renewed, and the sums it had."""
+        plan = self.plans[expose_id]
+        reads = tuple(
+            (
+                target,
+                self.linked(target) if target in self.plans and self.link_holds(target) else read,
+            )
+            for target, read in plan.reads
+        )
+        return replace(plan, reads=reads)
+
+    def _linked(self, expose_id: str) -> GeneratorPlan:
+        """The plan as a link reads it: renewed, with no sums."""
+        return replace(self.with_reads(expose_id), sums=())
+
+    def _summed(self, expose_id: str) -> GeneratorPlan:
+        """The plan as a summary reads it and as it is written: renewed, with its sums renewed."""
+        plan = self.with_reads(expose_id)
+        sums = tuple(
+            (
+                child,
+                via,
+                self.summed(child) if child in self.plans and self.whole_holds(child) else read,
+            )
+            for child, via, read in plan.sums
+        )
+        return replace(plan, sums=sums)
+
+
+def _renewed_plans(planned: Sequence[_PlannedEmit]) -> Tuple[_PlannedEmit, ...]:
+    """*planned*, with each plan carrying the plans it reads and sums as *planned* holds them.
+
+    A plan that reads or sums a plan that holds a projection, however far down, is taken from
+    *planned* again. What a link reads carries no sums, as a link reads a plan before its sums are
+    attached (ADR 0016 section 5), and what a summary reads carries its own. Every other plan is as
+    it was.
+    """
+    renewal = _Renewal(planned)
+    return tuple(
+        (
+            replace(item, plan=renewal.summed(nfc(item.expose.expose_id)))
+            if item.plan is not None
+            and (renewal.reads_hold(item.plan) or renewal.sums_hold(item.plan))
+            else item
+        )
+        for item in planned
     )
 
 

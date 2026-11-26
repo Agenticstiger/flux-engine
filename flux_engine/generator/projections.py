@@ -181,7 +181,9 @@ class RunBounds:
     the amendment of 2026-11-25), which a recorded plan without ``projectedGivens`` does not.
     ``overrides`` draws one given a kind's override too, and a column only some kinds override
     given the level the other kinds' rows hold (the amendment of 2026-11-26), which a recorded
-    plan without ``projectedGivens: "afterOverrides"`` does not.
+    plan without ``projectedGivens: "afterOverrides"`` does not. ``reads`` makes a plan that reads
+    a projected emit through a link read the projected rows, which a recorded plan without
+    ``projectedReads`` does not (ADR 0027, the amendment of 2026-11-26).
     """
 
     budget: Optional[int] = None
@@ -189,6 +191,7 @@ class RunBounds:
     estimate: bool = False
     after: bool = True
     overrides: bool = True
+    reads: bool = True
 
 
 #: What a new plan holds its projections to: the default budget, estimated, and the columns' ranges.
