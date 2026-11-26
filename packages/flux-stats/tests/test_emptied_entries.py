@@ -352,15 +352,9 @@ def test_a_date_pair_left_with_only_its_order_does_not_hold_nothing() -> None:
 
 def test_a_history_left_with_only_its_reasons_does_not_hold_nothing() -> None:
     def cut(document: Dict[str, Any]) -> None:
-        _strip(
-            _history(document),
-            "versionsPerEntity",
-            "firstStart",
-            "versionLength",
-            "chain",
-            "lastVersion",
-        )
-        _history(document)["columns"] = {"tier": {}}
+        reasons = _history(document)["reasons"]
+        _empty_history(document)
+        _history(document)["reasons"] = reasons
 
     history = parse_profile(_edit(cut), allow_emptied_entries=True).tables["plan_version"].history
     assert history is not None and history.reasons is not None and not history.holds_nothing

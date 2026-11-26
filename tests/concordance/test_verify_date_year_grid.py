@@ -90,9 +90,8 @@ def _noisy_level_histogram(levels: List[str], counts: List[str]) -> Dict[str, An
     }
 
 
-def _grouped_by_branch(per_branch: Dict[str, List[str]]) -> Dict[str, Any]:
-    """``format`` grouped by ``branch``, each branch's two noisy counts as given."""
-    statistic = _noisy_level_histogram(["audio", "book"], ["0", "0"])
+def _by_branch(statistic: Dict[str, Any], per_branch: Dict[str, List[str]]) -> Dict[str, Any]:
+    """*statistic* grouped by ``branch``, each branch's noisy counts as given."""
     statistic["groupBy"] = "branch"
     statistic["groups"] = [
         {"group": branch, "status": "F", "noisyCounts": counts}
@@ -101,20 +100,17 @@ def _grouped_by_branch(per_branch: Dict[str, List[str]]) -> Dict[str, Any]:
     return statistic
 
 
+def _grouped_by_branch(per_branch: Dict[str, List[str]]) -> Dict[str, Any]:
+    """``format`` grouped by ``branch``, each branch's two noisy counts as given."""
+    return _by_branch(_noisy_level_histogram(["audio", "book"], ["0", "0"]), per_branch)
+
+
 def _dated_by_branch(per_branch: Dict[str, List[str]], edges: List[int]) -> Dict[str, Any]:
     """``due_date`` over the year grid, grouped by ``branch``, each branch's noisy counts as given."""
-    return {
-        "definition": "marginalHistogram/1",
-        "bins": [str(edge) for edge in edges],
-        "groupBy": "branch",
-        "sampleSize": {"min": 900, "max": 1100},
-        "disclosure": "noisy",
-        "noise": {"mechanism": "gaussian", "scale": "2.5", "privacyLoss": {"rho": "0.1"}},
-        "groups": [
-            {"group": branch, "status": "F", "noisyCounts": counts}
-            for branch, counts in per_branch.items()
-        ],
-    }
+    noisy = _noisy_level_histogram([], [])
+    noisy.update(definition="marginalHistogram/1", bins=[str(edge) for edge in edges])
+    del noisy["levels"]
+    return _by_branch(noisy, per_branch)
 
 
 def _profile(

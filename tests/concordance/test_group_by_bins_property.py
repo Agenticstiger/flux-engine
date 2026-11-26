@@ -271,35 +271,11 @@ def test_a_null_grouping_value_leaves_the_row_out() -> None:
     assert found.outcome == WITHIN and [g.synthetic_count for g in found.groups] == [30, 30, 30]
 
 
-def test_a_date_grouping_column_reads_a_profile_that_holds_milliseconds() -> None:
+def _date_grouping_ending_at(last_edge: int, declared_last: str = "9999-12-31") -> Any:
+    """The mean of ``a`` grouped by the bins of ``d`` declared to end at *declared_last*, over a profile whose last edge is *last_edge* ms."""
     compiled = _compiled(
         _mean_by_bins(
-            groupByBins={"column": "d", "bins": ["2026-01-01", "2026-02-01", "2026-03-01"]}
-        )
-    )
-    january, february = 1767225600000, 1769904000000  # 2026-01-01 and 2026-02-01 in ms
-    document = _mean_profile([10, 50, 0])
-    stat = document["tables"][EXPOSE]["columns"]["a"]["statistics"][0]
-    stat["groupByBins"] = {"column": "d", "bins": [str(january), str(february), str(1772323200000)]}
-    stat["groups"] = [
-        {"group": str(january), "k": 30, "Sx": str(30 * 10 * GRID), "status": "F"},
-        {"group": str(february), "k": 30, "Sx": str(30 * 50 * GRID), "status": "F"},
-    ]
-    document["tables"][EXPOSE]["columns"]["d"] = {"domain": "timestamp"}
-    rows = [{"a": 10, "b": 1, "d": "2026-01-05", "tag": "x"} for _ in range(30)] + [
-        {"a": 50, "b": 1, "d": "2026-02-05", "tag": "x"} for _ in range(30)
-    ]
-    evaluation = _evaluate(compiled, document, rows)
-    assert not evaluation.refusals, evaluation.refusals
-    assert evaluation.outcomes[0].outcome == WITHIN
-    assert [g.group for g in evaluation.outcomes[0].groups] == ["20454", "20485"]
-
-
-def _date_grouping_ending_at(last_edge: int) -> Any:
-    """The mean of ``a`` grouped by the bins of ``d`` declared to end 9999-12-31, over a profile whose last edge is *last_edge* ms."""
-    compiled = _compiled(
-        _mean_by_bins(
-            groupByBins={"column": "d", "bins": ["2026-01-01", "2026-02-01", "9999-12-31"]}
+            groupByBins={"column": "d", "bins": ["2026-01-01", "2026-02-01", declared_last]}
         )
     )
     january, february = 1767225600000, 1769904000000  # 2026-01-01 and 2026-02-01 in ms
@@ -315,6 +291,13 @@ def _date_grouping_ending_at(last_edge: int) -> Any:
         {"a": 50, "b": 1, "d": "2026-02-05", "tag": "x"} for _ in range(30)
     ]
     return _evaluate(compiled, document, rows)
+
+
+def test_a_date_grouping_column_reads_a_profile_that_holds_milliseconds() -> None:
+    evaluation = _date_grouping_ending_at(1772323200000, declared_last="2026-03-01")
+    assert not evaluation.refusals, evaluation.refusals
+    assert evaluation.outcomes[0].outcome == WITHIN
+    assert [g.group for g in evaluation.outcomes[0].groups] == ["20454", "20485"]
 
 
 def test_a_date_grouping_ending_at_the_last_instant_is_the_declared_last_day() -> None:
