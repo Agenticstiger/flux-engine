@@ -109,12 +109,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   history. No layout reads such a count now: it is listed as unused with the reason, in an events or periodic
   table's case that its rows per entity follow from the history. Only a history that is written holds a relationship
   back (ADR 0027, the amendment of 2026-11-26 about counts per entity).
-- A table that links to a projected emit (a snapshot, events or periodic emit) read the rows the emit would draw
+- A table that links to a projected emit (a snapshot or an events emit) read the rows the emit would draw
   without its projection, not the rows it writes, so a `within` entry through a link into a snapshot kept a date
   inside a lifetime the snapshot does not hold, and `verify` reported the entry met on fewer rows than it covers. The
   link now reads the rows the projected emit writes, in a rule, a `within` entry and a column drawn `given` the linked
-  row; a new plan that has such a link says `projectedReads: "final"`, and a recorded plan without it replays the
-  link as it was made (ADR 0027, the amendment of 2026-11-26 about linked rows).
+  row. So does a parent's summary over a child that reads one, and a snapshot, events or periodic emit projected from
+  a history that reads one through a link, which is derived from the history as it reads it. A new plan that has such
+  a link says `projectedReads: "final"`, and a recorded plan without it replays the link as it was made (ADR 0027, the
+  amendment of 2026-11-26 about linked rows).
 - A history that keeps to its parent's lifetime (`parent.lifetime`) with a rule that reads `previous` was refused at
   plan (`FLX-3403`, "whose plan this pass does not read"), though each plans without the other. It plans, and
   `verify` holds the rule on every version (ADR 0017 section 7).

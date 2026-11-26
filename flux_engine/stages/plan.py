@@ -458,8 +458,10 @@ PROJECTED_READS_FINAL = "final"
 
 
 def _reads_projection(plan: Any) -> bool:
-    """Whether *plan* carries the plan of a projected emit among the plans its rules read."""
-    return any(read.projection is not None for _, read in plan.reads)
+    """Whether *plan* carries the plan of a projected emit among the plans it reads or sums."""
+    return any(read.projection is not None for _, read in plan.reads) or any(
+        child.projection is not None for _, _, child in plan.sums
+    )
 
 
 def _projected_read_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:

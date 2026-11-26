@@ -539,7 +539,7 @@ each version's entity to be unique, and that was refused too.
 
 A plan that reads another emit through a link (a rule that follows it, a `within` entry over it, a column drawn
 `given` the linked row) carries that emit's plan, and the plan was attached before a projected emit's rows were
-derived. A link into a snapshot, an events emit or a periodic emit therefore read the emit's cells as it would draw them
+derived. A link into a snapshot or an events emit therefore read the emit's cells as it would draw them
 without its projection, which are not the rows it writes: a `within` entry kept a date inside a lifetime read from a
 cell the snapshot does not hold, and `verify` reported the entry met on fewer rows than it covers, against ADR 0024
 section 5.
@@ -547,8 +547,13 @@ section 5.
 - **The link reads the projection.** Each plan that reads a projected emit, or reads a plan that does, carries the
   projected plan, so the linked row is the row the emit writes, rules included. The generator digest of such a plan
   names the projected plan's.
+- **A summary reads it too.** A parent that summarises a child carries the child's plan, and the child carries the
+  plans it reads, so a summary over a child that reads a projected emit is taken over the rows the child writes.
+- **A history that reads a projected emit.** The history carries the projected plan, and the snapshot, events or
+  periodic emit projected from it is derived from the history's plan as it then is. Each plan that reads such an emit
+  is renewed in turn, and the two steps go on in dependency order until no plan moves.
 - **Recorded plans.** A new plan with such a link says `projectedReads: "final"`, which the plan digest covers. A plan
   without the key replays the link as it was made, so its rows and its run id keep their bytes. Any other value is
   `FLX-2102`.
-- **What moves.** A bundle with a link into a projected emit that a rule, a `within` entry or a given column reads.
-  Every other plan keeps its bytes.
+- **What moves.** A bundle with a link into a projected emit that a rule, a `within` entry or a given column reads, a
+  summary over a child that reads one, or a history that reads one. Every other plan keeps its bytes.
