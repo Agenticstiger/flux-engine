@@ -369,7 +369,10 @@ class ParentCut:
     """What a parent's lifetime does to the entities of a history (ADR 0017, amendment of 2026-11-24).
 
     ``limits[e]`` is where entity ``e``'s chain must end, in the chain's unit. ``forced`` flags the
-    entities whose parent ended inside the horizon (they end). ``capped`` is the number of entities
+    entities whose parent ended inside the horizon (they end), and ``last_days`` holds a forced
+    entity's parent's last day (``limits`` elsewhere): what a projection holds its open version to,
+    which, unlike ``limits``, leaves out the validity columns' range, since the range closes no
+    version (ADR 0017, the amendment of 2026-11-26). ``capped`` is the number of entities
     whose version count was cut to the room their parent leaves them, ``moved`` the versions they
     lost that went to entities with room to spare, and ``shortfall`` the versions no entity had
     room for, which the layout does not hold (its rows are the declared ones less the shortfall).
@@ -377,6 +380,7 @@ class ParentCut:
 
     limits: "np.ndarray"
     forced: "np.ndarray"
+    last_days: "np.ndarray"
     capped: int = 0
     moved: int = 0
     shortfall: int = 0
@@ -1471,22 +1475,29 @@ def _bounded_chain(
             f"({_unit_text(until, kind)}); widen the range, or move the window or until into it"
         )
     if bool(short.any()):
-        raise _no_room(entry, kind, lifetimes, parents[short], int(parents.shape[0]), until)
+        found = (lifetimes, parents[short], int(parents.shape[0]))
+        raise _no_room(entry, kind, found, until, None if ranged is None else ranged[0])
     starts = _bounded_first_starts(root, sim_id, expose_id, entry, kind, low, high)
     closing = lifetimes.has_end[parents]
     forced = closing & (lifetimes.ends[parents] <= until)
-    return starts, ParentCut(limits, forced)
+    last_days = np.where(forced, lifetimes.ends[parents], limits).astype(np.int64)
+    return starts, ParentCut(limits, forced, last_days)
 
 
 def _no_room(
     entry: HistoryEntry,
     kind: LogicalKind,
-    bound: ParentBound,
-    parents: "np.ndarray",
-    entities: int,
+    found: Tuple[ParentBound, "np.ndarray", int],
     until: int,
+    low: Optional[int] = None,
 ) -> FluxError:
-    """``FLX-3403`` for the entities whose parent leaves no room for one version: how many, and their parents' lifetimes."""
+    """``FLX-3403`` for the entities whose parent leaves no room for one version: how many, and their parents' lifetimes.
+
+    *found* is the parents' lifetimes, the short entities' parent rows and the count of entities;
+    *low* is the first unit the validity columns' range lets a version start on, when it cuts the
+    window, and the message names it, since a parent that closes before it has no room either.
+    """
+    bound, parents, entities = found
     opened = bound.starts[parents][bound.has_start[parents]]
     closed = bound.ends[parents][bound.has_end[parents]]
 
@@ -1499,10 +1510,12 @@ def _no_room(
 
     return _refuse(
         f"history ({entry.emit}).parent.lifetime: {int(parents.shape[0])} of {entities} entities "
-        "have a parent whose lifetime leaves no room for one version before "
-        f"until ({_unit_text(until, kind)}){_closing_words(entry)}; the parents of those entities "
-        f"open {spread(opened)} and close {spread(closed)}; give the parents longer lifetimes, "
-        "move until later, or drop parent.lifetime"
+        "have a parent whose lifetime leaves no room for one version "
+        f"{'' if low is None else f'from the range on its validity columns ({_unit_text(low, kind)}) '}"
+        f"before until ({_unit_text(until, kind)}){_closing_words(entry)}; the parents of those "
+        f"entities open {spread(opened)} and close {spread(closed)}; give the parents longer "
+        f"lifetimes, {'' if low is None else 'widen the range, '}move until later, or drop "
+        "parent.lifetime"
     )
 
 
