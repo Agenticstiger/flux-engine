@@ -286,8 +286,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   from the side whose parent rows are published, and the assumed parent takes the rows its own mean children per
   parent make of them (both sides of an association count the same pairs). Where both parents are assumed, where a
   side publishes no mean, where another table also refers to the parent, or where the rows derived cannot hold the
-  pairs, no association is written, the table keeps the rows it had and a note says why. Parents with published row
-  counts keep their bytes (ADR 0039, the amendment of 2026-11-26).
+  pairs, no association is written, as before associations existed, and a note says why. The assumed parent's mean is
+  read over the cells of a noisy histogram that stand clear of the noise, and a histogram with none gives no mean.
+  Parents with published row counts keep their bytes (ADR 0039, the amendment of 2026-11-26).
 
 ## 0.12.1 - 2026-11-26
 

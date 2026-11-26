@@ -3998,6 +3998,7 @@ def _settle_assumed_parents(
             (sides[0].rows, sides[1].rows),
             (guessed[0], guessed[1]),
             reading.fractional_bits,
+            reading.noisy,
         )
         if isinstance(found, str):
             authored.association_declined = found

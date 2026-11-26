@@ -90,12 +90,10 @@ def association_pair(
     return first, second
 
 
-def _profile_entry(
-    profile: Mapping[str, Any], relationship: Relationship
-) -> Optional[Mapping[str, Any]]:
-    """The profile's ``relationships`` entry of *relationship*, by its two tables and its columns."""
+def _entry_index(profile: Mapping[str, Any], relationship: Relationship) -> Optional[int]:
+    """The place in the profile's ``relationships`` of *relationship*, by its two tables and its columns."""
     found = profile.get("relationships")
-    for entry in found if isinstance(found, list) else ():
+    for index, entry in enumerate(found if isinstance(found, list) else ()):
         if not isinstance(entry, Mapping):
             continue
         parent, child = entry.get("parent"), entry.get("child")
@@ -106,8 +104,17 @@ def _profile_entry(
             and child.get("table") == relationship.source
             and list(child.get("columns") or ()) == list(relationship.from_columns)
         ):
-            return entry
+            return index
     return None
+
+
+def _profile_entry(
+    profile: Mapping[str, Any], relationship: Relationship
+) -> Optional[Mapping[str, Any]]:
+    """The profile's ``relationships`` entry of *relationship*, by its two tables and its columns."""
+    index = _entry_index(profile, relationship)
+    found = profile.get("relationships")
+    return found[index] if index is not None and isinstance(found, list) else None
 
 
 def _group(statistic: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
@@ -139,25 +146,21 @@ def _published_total(
 
 
 def _histogram_total(
-    statistic: Mapping[str, Any],
+    statistic: Mapping[str, Any], clear: Optional[Tuple[bool, ...]] = None
 ) -> Optional[Tuple[Fraction, Fraction, int, int]]:
     """The total of children a histogram of children per parent gives, its variance, its parents and its top.
 
     Each class's parents sit at its middle; a class's variance is that of an even spread over its
     whole counts. Bin ``k`` holds ``[edge_k, edge_(k+1) - 1]``, the last bin its upper edge too.
     The parents are the histogram's counts added up, and the top is the most children a parent of
-    a class that holds one has.
+    a class that holds one has. With *clear*, a noisy histogram's per-cell flags for standing clear
+    of the noise, a cell that does not carries no weight: the total, the variance, the parents and
+    the top are over the cells that do.
     """
-    group = _group(statistic)
-    bins, counts = statistic.get("bins"), None if group is None else group.get("binCounts")
-    if not isinstance(bins, list) or not isinstance(counts, list) or len(counts) != len(bins) - 1:
+    read = _whole_counts(statistic, clear)
+    if read is None:
         return None
-    try:
-        edges = [int(str(edge)) for edge in bins]
-    except ValueError:
-        return None
-    if any(not isinstance(count, int) or isinstance(count, bool) for count in counts):
-        return None
+    edges, counts = read
     total, variance, top = Fraction(0), Fraction(0), 0
     for index, parents in enumerate(counts):
         low = edges[index]
@@ -171,6 +174,27 @@ def _histogram_total(
     return total, variance, sum(counts), top
 
 
+def _whole_counts(
+    statistic: Mapping[str, Any], clear: Optional[Tuple[bool, ...]]
+) -> Optional[Tuple[List[int], List[int]]]:
+    """A histogram's whole edges and whole counts, a cell not in *clear* counting 0, or ``None``."""
+    group = _group(statistic)
+    bins, counts = statistic.get("bins"), None if group is None else group.get("binCounts")
+    if not isinstance(bins, list) or not isinstance(counts, list) or len(counts) != len(bins) - 1:
+        return None
+    try:
+        edges = [int(str(edge)) for edge in bins]
+    except ValueError:
+        return None
+    if any(not isinstance(count, int) or isinstance(count, bool) for count in counts):
+        return None
+    if clear is None:
+        return edges, counts
+    if len(clear) != len(counts):
+        return None
+    return edges, [count if standing else 0 for count, standing in zip(counts, clear, strict=True)]
+
+
 @dataclass(frozen=True)
 class _Degrees:
     """One side's published children per parent: their total, its variance and the parents it is over."""
@@ -181,6 +205,10 @@ class _Degrees:
     parents: Optional[int]
     #: The most children a parent can have by the statistic, when it is a histogram.
     top: Optional[int] = None
+    #: The parents the whole histogram counts, whatever cells stood clear of the noise.
+    counted: Optional[int] = None
+    #: A noisy histogram none of whose cells stands clear of the noise.
+    no_clear_cell: bool = False
 
 
 def _mean_of(found: Optional[_Degrees]) -> Optional[Fraction]:
@@ -188,24 +216,42 @@ def _mean_of(found: Optional[_Degrees]) -> Optional[Fraction]:
     return Fraction(found.total, found.parents) if found is not None and found.parents else None
 
 
-def _side_degrees(entry: Optional[Mapping[str, Any]], bits: int) -> Optional[_Degrees]:
-    """One side's children per parent: a published total first, else a histogram's."""
+def _side_degrees(
+    entry: Optional[Mapping[str, Any]],
+    bits: int,
+    clear_of: Optional[Mapping[int, Tuple[bool, ...]]] = None,
+) -> Optional[_Degrees]:
+    """One side's children per parent: a published total first, else a histogram's.
+
+    *clear_of* gives, by the position of a histogram among the entry's statistics, which of its
+    cells stand clear of the noise; the histogram is then read over those cells alone.
+    """
     statistics = entry.get("statistics") if entry is not None else None
     held = (
-        [item for item in statistics if isinstance(item, Mapping)]
+        [(position, item) for position, item in enumerate(statistics) if isinstance(item, Mapping)]
         if isinstance(statistics, list)
         else []
     )
-    for statistic in held:
+    for _, statistic in held:
         if statistic.get("definition") == MEAN.identifier:
             published = _published_total(statistic, bits)
             if published is not None:
-                return _Degrees(published[0], _EXACT, published[1])
-    for statistic in held:
+                return _Degrees(published[0], _EXACT, published[1], None, published[1])
+    for position, statistic in held:
         if statistic.get("definition") == MARGINAL_HISTOGRAM.identifier:
-            found = _histogram_total(statistic)
+            clear = None if clear_of is None else clear_of.get(position)
+            found = _histogram_total(statistic, clear)
             if found is not None:
-                return _Degrees(found[0], found[1], found[2], found[3])
+                everything = found if clear is None else _histogram_total(statistic)
+                counted = None if everything is None else everything[2]
+                return _Degrees(
+                    found[0],
+                    found[1],
+                    found[2],
+                    found[3],
+                    counted,
+                    clear is not None and found[2] == 0,
+                )
     return None
 
 
@@ -264,6 +310,7 @@ def derive_parent_rows(
     parents: Tuple[int, int],
     assumed: Tuple[bool, bool],
     bits: int,
+    noisy: Optional[Mapping[Tuple[str, ...], Any]] = None,
 ) -> Union[Derived, str]:
     """The rows of an association and of its assumed parent, or why no association is written.
 
@@ -276,9 +323,24 @@ def derive_parent_rows(
     table of distinct pairs holds.
     """
     try:
-        return _derive(profile, pair, parents, assumed, bits)
+        return _derive(profile, pair, parents, assumed, bits, noisy)
     except (OverflowError, ValueError):
         return "a number the profile publishes is beyond what a bundle can declare"
+
+
+def _clear_cells(
+    profile: Mapping[str, Any],
+    relationship: Relationship,
+    noisy: Optional[Mapping[Tuple[str, ...], Any]],
+) -> Dict[int, Tuple[bool, ...]]:
+    """The cells of each noisy histogram of *relationship* that stand clear of the noise, by statistic."""
+    index = _entry_index(profile, relationship)
+    found: Dict[int, Tuple[bool, ...]] = {}
+    for tokens, note in (noisy or {}).items():
+        if index is not None and tokens[:2] == ("relationships", str(index)):
+            if len(tokens) == 4 and getattr(note, "clear", None) is not None:
+                found[int(tokens[3])] = note.clear
+    return found
 
 
 def _derive(
@@ -287,6 +349,7 @@ def _derive(
     parents: Tuple[int, int],
     assumed: Tuple[bool, bool],
     bits: int,
+    noisy: Optional[Mapping[Tuple[str, ...], Any]],
 ) -> Union[Derived, str]:
     """The rows of an association and of its assumed parent, or why no association is written.
 
@@ -306,11 +369,20 @@ def _derive(
     side = 1 - other
     held, lacking = pair[other], pair[side]
     from_held = _side_degrees(_profile_entry(profile, held), bits)
-    from_lacking = _side_degrees(_profile_entry(profile, lacking), bits)
+    # The mean of the side whose parent is assumed is read over the cells that stand clear of the
+    # noise: a cell inside it says nothing of how many children a parent has.
+    from_lacking = _side_degrees(
+        _profile_entry(profile, lacking), bits, _clear_cells(profile, lacking, noisy)
+    )
     mean_held = _mean_of(from_held)
     mean_lacking = _mean_of(from_lacking)
     if from_held is None:
         return f"the {held.name!r} relationship publishes no children per parent"
+    if from_lacking is not None and from_lacking.no_clear_cell:
+        return (
+            f"no cell of the {lacking.name!r} histogram of children per {lacking.target!r} "
+            "stands clear of the noise, so it gives no mean"
+        )
     if mean_lacking is None or mean_lacking <= 0:
         return (
             f"the {lacking.name!r} relationship publishes no mean children per "
@@ -319,8 +391,8 @@ def _derive(
     pairs = from_held.total if mean_held is None else mean_held * parents[other]
     edges = max(_half_up(pairs), 1)
     rows = _half_up(pairs / mean_lacking)
-    if from_lacking is not None and from_lacking.parents:
-        counted = from_lacking.parents
+    if from_lacking is not None and from_lacking.counted:
+        counted = from_lacking.counted
         if rows > 10 * counted or counted > 10 * rows:
             return (
                 f"the {rows} {lacking.target!r} the pairs give are far from the {counted} that "

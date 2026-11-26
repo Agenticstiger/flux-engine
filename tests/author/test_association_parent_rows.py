@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import copy
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 import yaml
 
 from flux_engine.author import bundle
 from flux_engine.author.association import derive_parent_rows
+from flux_engine.author.noisy import point_estimates
 from flux_engine.seam.keys import ContractKeys, ExposeKeys, Relationship
 from tests.bundles import init_from_texts
 
@@ -208,3 +209,36 @@ def _mean_with(total: int, parents: int) -> Dict[str, Any]:
     found = _profile()["relationships"][1]["statistics"][-1]
     found["groups"][0].update({"k": parents, "Sx": str(total)})
     return found
+
+
+def _noisy_clubs(counts: List[str]) -> Dict[str, Any]:
+    """The profile whose clubs' children per club are a noisy histogram with an open top class."""
+    profile = _profile(means=False)
+    statistic = _histogram(["30", "50", "70", "100", "1000000"], [0, 0, 0, 0], CLUBS)
+    statistic["disclosure"] = "noisy"
+    statistic["noise"] = {
+        "mechanism": "discreteGaussian",
+        "scale": "2",
+        "privacyLoss": {"rho": "1"},
+    }
+    statistic["groups"] = [{"group": "", "status": "F", "noisyCounts": counts}]
+    profile["relationships"][1]["statistics"] = [statistic]
+    return profile
+
+
+def test_the_mean_of_a_noisy_side_is_read_over_the_cells_that_stand_clear_of_the_noise() -> None:
+    # The last cell, a class from a hundred to a million children, is inside the noise (6 against
+    # a floor of 7.5): read at its middle it would put half a million children on a club.
+    profile = _noisy_clubs(["10", "12", "8", "6"])
+    view, notes = point_estimates(profile)
+    found = derive_parent_rows(view, _pair(), (MEMBERS, 5), (False, True), 16, notes)
+    assert not isinstance(found, str) and found.parent_rows == 30
+    unread = derive_parent_rows(view, _pair(), (MEMBERS, 5), (False, True), 16)
+    assert isinstance(unread, str)
+
+
+def test_a_noisy_side_with_no_cell_clear_of_the_noise_gives_no_mean() -> None:
+    profile = _noisy_clubs(["3", "4", "2", "1"])
+    view, notes = point_estimates(profile)
+    found = derive_parent_rows(view, _pair(), (MEMBERS, 5), (False, True), 16, notes)
+    assert isinstance(found, str) and "stands clear of the noise" in found

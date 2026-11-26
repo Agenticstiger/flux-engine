@@ -147,8 +147,13 @@ column count published) gives no total, and the mean put the pairs far from the 
   the pairs are the other side's parents times its mean children per parent (a published total when the statistic gives
   one), and the assumed parent takes `round(pairs / mean children per parent)` rows, as an assumption in the register
   that says what was derived.
+- **The mean of the assumed side.** A noisy histogram of children per parent is read for this mean over the cells that
+  stand clear of the noise (`noise_floor` over all its cells, ADR 0019), as `init` reads a noisy date or number histogram:
+  a cell inside it carries no weight, and a histogram with no cell clear of it gives no mean. The `counts` entries read
+  the histogram as before.
 - **No association.** Both parents assumed, a side with no mean, a parent another table refers to or that refers to a
-  parent of its own, or rows that cannot hold the pairs (more children per parent than the other side has parents, or
-  fewer than one parent) keep the behaviour before associations: no `associations` entry, the rows the table had, and a
-  note that says why.
+  parent of its own, rows far (ten times) from the parents a side's own statistic counts, a class of either side holding
+  more children than the other side has parents, or rows that cannot hold the pairs (fewer than one parent) keep the
+  behaviour before associations: no `associations` entry, and a note that says why. A table of two keys and no other
+  column is then not written (`FLX-5034`), as before.
 - **What does not move.** Parents with published or estimated row counts keep the mean of the two totals.
