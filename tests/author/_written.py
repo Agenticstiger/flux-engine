@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any, Dict
 
 from flux_engine.seam.resolve import load_bundle, resolve_all_emits
+from flux_engine.stages.apply import apply
 from flux_engine.stages.plan import plan
 from flux_engine.stages.validate import validate
+from flux_engine.stages.verify import verify
 from tests.bundles import by_file
 
 
@@ -40,6 +42,19 @@ def plan_written(tmp_path: Path, profile: str = "plans.profile.json") -> None:
         stage=False,
     )
     assert outcome.success, outcome.stderr
+
+
+def applied_and_verified(tmp_path: Path, profile: str = "plans.profile.json") -> None:
+    """The bundle validates, plans under kernel 0.2.0, applies and verifies."""
+    bundle, state = tmp_path / "bundle", tmp_path / "state"
+    assert validate(bundle).exit_code == 0
+    planned = plan(bundle, state_dir=state, profile=tmp_path / profile, kernel="0.2.0", stage=False)
+    assert planned.success, planned.stderr
+    run_id = str(planned.artifacts["run_id"])
+    applied = apply(bundle, state_dir=state, run_id=run_id)
+    assert applied.success, applied.stderr
+    checked = verify(bundle, state_dir=state, run_id=run_id)
+    assert checked.success, checked.stdout + checked.stderr
 
 
 def assert_state(result: Any, pointer: str, state: str, *notes: str) -> None:

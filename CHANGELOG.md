@@ -20,6 +20,16 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+### Fixed
+
+- `init` keeps a history, and the snapshot, events and periodic tables projected from it, when the profile counts a
+  table's rows per parent over a relationship into the table with the history. It wrote that count as a `counts`
+  entry, which the plan refuses over a table with a history, so the bundle lost its projections and then its
+  history. No layout reads such a count now: it is listed as unused with the reason, in an events or periodic
+  table's case that its rows per entity follow from the history (ADR 0027, the amendment of 2026-11-26).
+
 ## 0.12.1 - 2026-11-26
 
 Fixes to the bundles `fluxsim init` writes from a private profile release, and a `plan` refusal of a periods

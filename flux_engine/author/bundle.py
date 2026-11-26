@@ -133,6 +133,7 @@ from flux_engine.author.projection import (
     history_target,
     project,
     release_counts,
+    say_per_entity,
     span_primary_key,
 )
 from flux_engine.author.ranges import column_range
@@ -2219,6 +2220,54 @@ def _structural_classes(entry: Mapping[str, Any]) -> List[str]:
     return [str(name) for name in structural] if isinstance(structural, list) else []
 
 
+#: Why no layout reads the children per parent of a relationship into a table with a history.
+_INTO_A_HISTORY = (
+    "the relationship reaches {target}, which has a history, by {key}, and a child picks a "
+    "version as any child does, so no layout places its children per {unit}"
+)
+
+
+def _into_a_history(
+    keys: Optional[ContractKeys], histories: FrozenSet[str], emit: str, name: str
+) -> Optional[str]:
+    """Why relationship *name* of *emit* is laid out by no entry, or ``None`` when it may be.
+
+    A ``counts`` entry over a relationship into a table with a history is refused (``FLX-3403``,
+    ADR 0017 section 8), and a foreign key's spread over the parent's keys moves no pick of a
+    version. *histories* holds the tables that have one: those a history file declares, or else
+    those whose profile table publishes a history. Over the natural entity, which every version
+    of an entity holds, the profile counts children per entity; over another key, per version.
+    """
+    if keys is None or emit not in keys.exposes:
+        return None
+    for relationship in keys.expose(emit).relationships:
+        if relationship.name == name and relationship.target in histories:
+            entity = tuple(relationship.to_columns) == _natural_of(keys, relationship.target)
+            return _INTO_A_HISTORY.format(
+                target=relationship.target,
+                key="its natural entity" if entity else "a key of its versions",
+                unit="entity" if entity else "version",
+            )
+    return None
+
+
+def _history_tables(
+    declared: Optional[DeclaredHistory], keys: Optional[ContractKeys], tables: Mapping[str, Any]
+) -> FrozenSet[str]:
+    """The versioned tables a history file declares a history for, or else whose profile publishes one."""
+    if declared is not None:
+        return frozenset(str(entry["emit"]) for entry in declared.history)
+    return frozenset(
+        name
+        for name, table in tables.items()
+        if isinstance(table, Mapping)
+        and isinstance(table.get("history"), Mapping)
+        and keys is not None
+        and name in keys.exposes
+        and keys.expose(name).versioned
+    )
+
+
 def _resolved(
     entry: Mapping[str, Any],
     keys: Optional[ContractKeys],
@@ -2535,14 +2584,14 @@ def _projections(
         )
         return Projected(notes=[(f"{emit}: projection", why) for emit in sorted(found.emits)])
     freed = release_counts(found, histories.entries, keys.expose, published)
+    say_per_entity(found, targets, keys.expose, published)
     for emit, reason in found.emits.items():
         index[emit].projected = reason
         if emit in found.carried:
             _release_carried(index[emit], *found.carried[emit])
     for emit, column in freed:
         follow_history(index[emit], column, found.carried[emit][0])
-    for entry in (*found.events, *found.periods):
-        emit = str(entry["emit"])
+    for emit in (str(entry["emit"]) for entry in (*found.events, *found.periods)):
         span_primary_key(index[emit].columns, keys.expose(emit))
     return found
 
@@ -2698,22 +2747,26 @@ _DECLARED_UNUSED = "--history declares the bundle's histories, so none is writte
 _ENDED_STATUS = "the ended status sits on the last version only, so a first version never draws it"
 
 
-def _held_back(declared: DeclaredHistory) -> Callable[[str, str], Optional[str]]:
+def _held_back(
+    declared: Optional[DeclaredHistory], keys: Optional[ContractKeys], tables: Mapping[str, Any]
+) -> Callable[[str, str], Optional[str]]:
     """The reason no counts entry lays out a relationship, by its child emit and its name, or ``None``.
 
     A projected emit's rows follow from its history, and a declared history's parent lays the
     entities out over its relationship, so a counted layout over either would be refused
-    (``FLX-3403``).
+    (``FLX-3403``); so would one over a relationship into a table with a history
+    (:func:`_into_a_history`).
     """
-    projected = projected_emits(declared)
-    parents = parent_relationships(declared)
+    projected = projected_emits(declared) if declared is not None else frozenset()
+    parents = parent_relationships(declared) if declared is not None else frozenset()
+    histories = _history_tables(declared, keys, tables)
 
     def reason(emit: str, relationship: str) -> Optional[str]:
         if emit in projected:
             return _HELD_PROJECTED
         if (emit, relationship) in parents:
             return _HELD_PARENT
-        return None
+        return _into_a_history(keys, histories, emit, relationship)
 
     return reason
 
@@ -4018,7 +4071,7 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
     _skip_unreadable_references(exposes, keys)
     drawn = [expose for expose in exposes if expose.skipped is None and not expose.reference]
     declared = inputs.history
-    held_back = _held_back(declared) if declared is not None else None
+    held_back = _held_back(declared, keys, reading.tables)
     spread = _draw_and_link(reading, keys, exposes, drawn, held_back)
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
     _refuse_a_needed_one_value(exposes, keys)

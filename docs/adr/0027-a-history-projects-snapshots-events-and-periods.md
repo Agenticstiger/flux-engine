@@ -473,3 +473,24 @@ the data covers.
   neither.
 - **What moves.** A bundle `init` writes whose periods entry's column publishes such a histogram that starts after
   the window or ends before it. Every other bundle keeps its bytes, and no plan or recorded plan changes.
+
+## Amendment of 2026-11-26: `init` keeps the history when the profile counts rows per entity
+
+A profiler counts a child's rows per parent over every relationship, so over a relationship whose `toColumns` are
+a versioned expose's natural entity it counts the child's rows per entity. `init` wrote a `counts` entry over it,
+which the plan refuses for a history (ADR 0017 section 8: no counted layout of the versions), so `init` wrote the
+bundle again without its projections and then without its history; with no history the counted layout needed
+each version's entity to be unique, and that was refused too.
+
+- **No layout reads it.** A parent row of a table with a history is a version, which no `counts` entry, and no
+  spread of the foreign key over the parent's keys, turns into an entity: a child picks a version as any child
+  does. So a relationship into a table with a history is laid out by no entry, and each statistic of its profile
+  entry is unused, with that reason: children per entity over the natural entity, per version over another key.
+  A table has a history here when the history file declares one, or else when its profile table publishes one; a
+  table with neither is counted as before. The history and its projections are written as they are without it.
+- **A projection says why in its own words.** When the child is an events or a periodic emit, the statistic is
+  unused with the projection's reason: an event is one row per change, so its rows per entity follow from the
+  history's versions; a periodic row is one row per version and period, and the profile counts the rows but not
+  the periods each holds, so no rows per period are read from it. A note says it once per emit.
+- **What moves.** A bundle for a profile with such a statistic into a table whose profile publishes a history,
+  which `init` could not write with its history before. Every other bundle keeps its bytes, and no plan or recorded plan changes.
