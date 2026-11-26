@@ -133,6 +133,10 @@ def test_a_plan_recorded_before_the_refusal_replays_its_own_bytes(
         patched.setattr(projections, "_refuse_partly_overridden_givens", _no_refusal)
         layout = _fleet.run_bundle(target, state, jobs=1)
     recorded = layout.emit_path(_fleet.PERIODIC).read_bytes()
+    # The rows engine 0.12.0 drew: a toll row's ``band`` takes ``x`` too, which the table gives
+    # only a fuel row, since it was drawn given the fuel or toll of its parent's own draw.
+    tolls = [row for row in _fleet.rows(layout, _fleet.PERIODIC) if row["charge"] == "toll"]
+    assert {row["band"] for row in tolls} == {"x", "y"}
     digest = recorded_digest(state, layout.run_id)
     for jobs in (1, 4):
         replayed = replay(
