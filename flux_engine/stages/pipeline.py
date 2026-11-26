@@ -50,7 +50,12 @@ from typing import (
     Union,
 )
 
-from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity, names_a_snapshot
+from flux_engine.concordance.compiler import (
+    CompiledFidelity,
+    compile_fidelity,
+    may_declare_no_column,
+    names_a_snapshot,
+)
 from flux_engine.concordance.predicate import (
     DeclaredExpose,
     FidelityBlock,
@@ -90,6 +95,7 @@ from flux_engine.generator import GeneratorPlan, build_plan, generate_rows
 # Imported for its registration: the exposure hook gives the counted layout a parent's expected
 # count (ADR 0025 section 4), and must be registered before any plan is related.
 from flux_engine.generator import exposure as _exposure  # noqa: F401
+from flux_engine.generator.associations import association_notes
 from flux_engine.generator.conditions import with_conditions
 from flux_engine.generator.copula import declares_copula
 from flux_engine.generator.counts import TooFewChildRows, TooManyChildRows
@@ -784,7 +790,7 @@ def _history_chains(
 
 
 def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
-    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds and range cuts."""
+    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds, associations and range cuts."""
     outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*result.emits, *result.hidden_emits]
     plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
     emits = [outcome.resolved for outcome in outcomes]
@@ -792,6 +798,7 @@ def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
         period_end_null_notes(emits)
         + end_share_notes(plans, result.root)
         + parent_bound_history_notes(plans, result.root)
+        + association_notes(plans, result.root)
         + tuple(note for plan in plans for note in fallback_notes(plan))
         + tuple(
             note for plan in plans for note in range_cut_notes(plan.expose.expose_id, plan.columns)
@@ -1860,7 +1867,7 @@ def _parsed_fidelity(resolved: ResolvedEmit) -> FidelityBlock:
     return parse_fidelity_block(
         canonicalise(resolved.written_fidelity),
         expose=_declared_contract(resolved)[1],
-        allow_no_columns=names_a_snapshot(resolved.extension),
+        allow_no_columns=may_declare_no_column(resolved.extension),
     )
 
 

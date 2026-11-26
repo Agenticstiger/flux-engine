@@ -38,7 +38,7 @@ Everything here generates under kernel 0.2.0, the default of a new plan. Under k
 
 ## 3. Copy a parent's column
 
-A copy is declared one of three ways. The first two generate only where the Simulation declares `copies: true` in its namespace (`extensions` under `com.agentics.flux/1`, [ADR 0018](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/adr/0018-module-facts-live-in-the-flux-bundle.md)); the third needs no such key:
+A copy is declared one of three ways. The first two generate only where the Simulation declares `copies: true` in its namespace (`extensions` under `com.agentics.flux/1`, [ADR 0018](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0018-module-facts-live-in-the-flux-bundle.md)); the third needs no such key:
 
 - the contract's relationship lists the column in `sharedColumns`;
 - the contract's column carries `sharedAttribute`, owned by the one member every other member reaches on one path;
@@ -54,10 +54,10 @@ Both live in the namespace key `links`, one entry per relationship, `{emit, rela
 - `sentinels` maps a column the relationship copies to the text written in place of NULL where no link reaches a row. A row whose own value is NULL keeps it. The text must read as the column's type, or the plan is refused with `FLX-3105`.
 - A condition on an `inner` relationship, on one whose columns are a key, or on one another relationship implies, is refused with `FLX-3403`.
 
-No tested page shows a `links` entry, so read [ADR 0022](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/adr/0022-rows-read-their-linked-rows.md) sections 5 and 6 before you write one, and do not invent a key.
+No tested page shows a `links` entry, so read [ADR 0022](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0022-rows-read-their-linked-rows.md) sections 5 and 6 before you write one, and do not invent a key.
 
 ## 5. Lay out a bridge
-`bridges` lists `{emit, relationships: [a, b]}`: two many-to-one relationships of one emit whose pairs never repeat, as an enrolment of students in courses. More rows than pairs, a `nullFraction` on a side, a distinct or key relationship, or a condition or weight on a side is refused with `FLX-3403`. See [ADR 0022](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/adr/0022-rows-read-their-linked-rows.md) section 8.
+`bridges` lists `{emit, relationships: [a, b]}`: two many-to-one relationships of one emit whose pairs never repeat, as an enrolment of students in courses. More rows than pairs, a `nullFraction` on a side, a distinct or key relationship, or a condition or weight on a side is refused with `FLX-3403`. See [ADR 0022](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0022-rows-read-their-linked-rows.md) section 8.
 
 ## 6. Publish a catalogue whole
 A catalogue is a small table, such as products, plans or branches, that other tables point at. Declare it as a reference expose: its block holds `reference: true` and nothing else, and its rows are the rows the pinned profile publishes under `references` (profile format `1-3-0`).
@@ -74,7 +74,7 @@ extensions:
         rows: 400
 ```
 
-The excerpt is from [publish a catalogue whole](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/publish-a-catalogue.md). The digest shown is a placeholder: the Simulation pins the real profile's digest, which `fluxsim init` writes. A table the user wants as a catalogue must be non-personal: a column with a FLUID sensitivity that sets a minimum grade is refused with `FLX-4005`, and you never change the label. Refusals and what the grade does not cover: [the catalogue](references/catalogue.md).
+The excerpt is from [publish a catalogue whole](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/publish-a-catalogue.md). The digest shown is a placeholder: the Simulation pins the real profile's digest, which `fluxsim init` writes. A table the user wants as a catalogue must be non-personal: a column with a FLUID sensitivity that sets a minimum grade is refused with `FLX-4005`, and you never change the label. Refusals and what the grade does not cover: [the catalogue](references/catalogue.md).
 
 ## 7. Draw a column given a linked row's column
 
@@ -99,7 +99,7 @@ properties:
     tolerance: { type: distance, measure: totalVariation, max: "0.05" }
 ```
 
-From [draw a column given another](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/draw-a-column-given-another.md). The relationship must reach a row on every row (no `nullFraction`, no condition), and a parent column that a rule sets is refused with `FLX-3402`. Every level of the linked column needs a weight list. The weight tables come from grouped counts of the user's data: ask whether the data owner's disclosure rule was applied; do not invent counts.
+From [draw a column given another](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/draw-a-column-given-another.md). The relationship must reach a row on every row (no `nullFraction`, no condition), and a parent column that a rule sets is refused with `FLX-3402`. Every level of the linked column needs a weight list. The weight tables come from grouped counts of the user's data: ask whether the data owner's disclosure rule was applied; do not invent counts.
 
 ## 8. Pick parents by a weight column
 A `links` entry's `weight` names a number column of the relationship's target; a parent is picked in proportion to it, NULL weighing zero. A negative weight, all-zero weights, or a weight on a distinct relationship, a declared pick or a bridge side is refused with `FLX-3403`. See [the catalogue](references/catalogue.md).
@@ -127,7 +127,7 @@ fluxsim validate bundle
 4. A failure is read with `fluxsim explain`, never answered by loosening the declaration, the tolerance or the check.
 
 ## 12. Give every parent its children
-A foreign key picks its parent one child at a time, so some parents get none. A `counts` entry in the namespace lays the children out parent by parent instead. It needs kernel 0.2.0 and tables generated from statistics; kernel 0.1.0 refuses the key with `FLX-3105`. The shape is from [give every parent its children](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/give-every-parent-its-children.md):
+A foreign key picks its parent one child at a time, so some parents get none. A `counts` entry in the namespace lays the children out parent by parent instead. It needs kernel 0.2.0 and tables generated from statistics; kernel 0.1.0 refuses the key with `FLX-3105`. The shape is from [give every parent its children](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/give-every-parent-its-children.md):
 
 ```yaml
 extensions:

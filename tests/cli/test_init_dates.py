@@ -39,6 +39,7 @@ from flux_engine.author.dates import (
     window_start_ms,
 )
 from flux_engine.cli._init import run_init
+from flux_engine.core.clock import parse_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.dates import read_lifetimes_block, read_within_block
 from flux_engine.seam.resolve import FLX_3105
@@ -47,6 +48,7 @@ from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.plan import plan as plan_stage
 from flux_engine.stages.verify import verify as verify_stage
 from flux_stats.request import MOST_CALENDAR_COLUMNS, MOST_DATE_PAIRS, load_request_text
+from tests.stages._fleet import rows as run_rows
 
 pytestmark = pytest.mark.integration
 
@@ -1483,6 +1485,125 @@ def test_a_widened_range_is_recorded_in_the_used_note_of_its_statistic(tmp_path:
         if entry.tokens[:4] == ("tables", "invoice", "columns", "issued_at")
     ]
     assert any("declared range widened to the parent's lifetime" in note for note in notes)
+
+
+def _ranged_contract(low: int, high: int) -> str:
+    """The contract with a range of ``issued_at``, *low* to *high*, declared as a validation rule."""
+    return CONTRACT.replace(
+        "    - name: issued_at\n      type: TIMESTAMP\n      required: true\n",
+        "    - name: issued_at\n      type: TIMESTAMP\n      required: true\n"
+        "      validationRules:\n      - type: range\n"
+        f"        constraint: between '{_iso(low)}' and '{_iso(high)}'\n",
+    )
+
+
+def test_a_child_date_is_not_widened_past_the_range_its_contract_declares(tmp_path: Path) -> None:
+    # The late-child profile, with the contract declaring the child date's range as well: the
+    # widening that would let every row lie inside its parent's lifetime moves the declared start,
+    # so no entry dates the column, and every row keeps to the range the contract declares.
+    low = START + 100 * DAY
+    contract = _ranged_contract(low, END)
+    assert contract != CONTRACT
+    written = _written(tmp_path, _late_child_profile(), contract)
+    assert not [item for item in written.within if item.get("date") == "issued_at"]
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert column["range"]["min"].startswith(_iso(low)[:19])
+    reasons = written.unused("/relationships/0/dates/0")
+    assert reasons and all("the contract declares" in reason for reason in reasons)
+    state = tmp_path / "state"
+    planned = plan_stage(
+        str(written.directory), state_dir=str(state), profile=str(written.profile_path)
+    )
+    assert planned.exit_code == 0, planned.stderr
+    run_id = str(planned.artifacts["run_id"])
+    applied = apply_stage(written.directory, state_dir=state, run_id=run_id)
+    assert applied.success, applied.stderr
+    layout = RunLayout.for_state_dir(state, run_id)
+    issued = [parse_rfc3339_ms(row["issued_at"]) for row in run_rows(layout, "invoice")]
+    assert issued and all(low <= value <= END for value in issued)
+
+
+def test_a_widening_inside_the_range_the_contract_declares_still_dates_the_column(
+    tmp_path: Path,
+) -> None:
+    # A contract range that already holds the parent's lifetime leaves the widening as it was.
+    written = _written(tmp_path, _late_child_profile(), _ranged_contract(START, END))
+    (entry,) = [item for item in written.within if item.get("date") == "issued_at"]
+    assert "target" not in entry
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert column["range"]["min"].startswith(_iso(START)[:19])
+    # A published maximum past the contract's is not the widening's doing, so it stops nothing.
+    late = _late_child_profile()
+    late["tables"]["invoice"]["columns"]["issued_at"] = _stamp(START + 100 * DAY, END + 10 * DAY)
+    beyond = _written(tmp_path / "beyond", late, _ranged_contract(START, END))
+    assert [item for item in beyond.within if item.get("date") == "issued_at"]
+
+
+def test_a_widening_onto_the_end_the_contract_declares_still_dates_the_column(
+    tmp_path: Path,
+) -> None:
+    # The plan raises the child date's maximum to the parents' latest start, which is the end the
+    # contract declares: the range still holds every row inside the contract's, so the entry is
+    # written. The published minimum lies below the contract's, which the widening leaves as it
+    # is, so it does not stop the entry either.
+    link = _link_pair("signed_up", "issued_at", _levels(after=300, before=0, same=100))
+    profile = _profile(links=[link])
+    profile["tables"]["invoice"]["columns"]["issued_at"] = _stamp(START - 10 * DAY, END - 100 * DAY)
+    written = _written(tmp_path, profile, _ranged_contract(START, END))
+    (entry,) = [item for item in written.within if item.get("date") == "issued_at"]
+    assert "target" not in entry
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert column["range"]["max"].startswith(_iso(END)[:19])
+
+
+def test_a_child_date_is_not_widened_past_the_end_its_contract_declares(tmp_path: Path) -> None:
+    # Parents start until a hundred days after the child date's last day, so the plan raises the
+    # child date's maximum to the latest start; with the contract declaring that maximum, no
+    # entry dates the column and its range keeps its end.
+    link = _link_pair("signed_up", "issued_at", _levels(after=300, before=0, same=100))
+    profile = _profile(links=[link])
+    profile["tables"]["customer"]["columns"]["signed_up"] = _stamp(START, END + 100 * DAY)
+    plain = _written(tmp_path / "plain", profile)
+    assert [item for item in plain.within if item.get("date") == "issued_at"]
+    widened = plain.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert widened["range"]["max"].startswith(_iso(END + 100 * DAY)[:19])
+    ranged = _written(tmp_path / "ranged", profile, _ranged_contract(START, END))
+    assert not [item for item in ranged.within if item.get("date") == "issued_at"]
+    column = ranged.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert column["range"]["max"].startswith(_iso(END)[:19])
+
+
+def test_a_period_is_not_written_when_its_end_would_leave_the_range_the_contract_declares(
+    tmp_path: Path,
+) -> None:
+    # The child's own lifetime is a period within its parent's, and a parent can end on the day
+    # it starts, so the plan lowers the end column's minimum to that day. With the contract
+    # declaring the end's range, that minimum is past it: no period is written, and the end keeps
+    # its range.
+    late = START + 100 * DAY
+    link = _link_pair("signed_up", "issued_at", _levels(after=300, before=0, same=100))
+    profile = _profile(
+        customer=[_pair("signed_up", "closed_at", HOLDS)],
+        invoice=[_pair("issued_at", "paid_at", HOLDS)],
+        links=[link],
+    )
+    profile["tables"]["invoice"]["columns"]["paid_at"] = _stamp(late, END)
+    plain = _written(tmp_path / "plain", profile)
+    assert [item for item in plain.within if item.get("lifetime") is True]
+    widened = plain.block["emits"]["invoice"]["fidelity"]["columns"]["paid_at"]
+    assert widened["range"]["min"].startswith(_iso(START)[:19])
+    contract = CONTRACT.replace(
+        "    - name: paid_at\n      type: TIMESTAMP\n",
+        "    - name: paid_at\n      type: TIMESTAMP\n      validationRules:\n      - type: range\n"
+        f"        constraint: between '{_iso(late)}' and '{_iso(END)}'\n",
+    )
+    assert contract != CONTRACT
+    ranged = _written(tmp_path / "ranged", profile, contract)
+    assert not [item for item in ranged.within if item.get("lifetime") is True]
+    column = ranged.block["emits"]["invoice"]["fidelity"]["columns"]["paid_at"]
+    assert column["range"]["min"].startswith(_iso(late)[:19])
+    reasons = ranged.unused("/relationships/0/dates/0")
+    assert reasons and all("the contract declares" in reason for reason in reasons)
 
 
 # -- windows at the ends of the calendar (a December 9999 sentinel) --------------------------------

@@ -43,6 +43,7 @@ from flux_engine.core import rng as v1
 from flux_engine.core.seedtree import PathKind, PathShape, match_shape, path_label
 from flux_engine.generator.paths import (
     ALLOCATE_PATH_SHAPE,
+    ASSOCIATE_PATH_SHAPE,
     COUNT_PATH_SHAPE,
     GENERATOR_PATH_SHAPE,
     matches_generator_shape,
@@ -177,7 +178,7 @@ def _matches_names(path: Sequence[Any], shape: PathShape) -> bool:
 def _shape(path: Sequence[Any]) -> PathShape:
     if matches_generator_shape(path):
         return GENERATOR_PATH_SHAPE
-    for extra in (COUNT_PATH_SHAPE, ALLOCATE_PATH_SHAPE):
+    for extra in (COUNT_PATH_SHAPE, ALLOCATE_PATH_SHAPE, ASSOCIATE_PATH_SHAPE):
         if _matches_names(path, extra):
             return extra
     shape = match_shape(path)

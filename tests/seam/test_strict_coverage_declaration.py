@@ -75,13 +75,13 @@ def test_anything_but_a_boolean_is_refused_and_the_refusal_names_the_key(
     assert ("sim-x" in raised.value.detail) is bool(where)
 
 
-def test_the_namespace_carries_twenty_six_keys_and_nothing_else(write_bundle: Any) -> None:
+def test_the_namespace_carries_twenty_seven_keys_and_nothing_else(write_bundle: Any) -> None:
     with pytest.raises(FluxError) as raised:
         _resolved(write_bundle, {"strictCoverage": True, "strictCoverages": True})
     assert raised.value.code.code == "FLX-3105"
     assert (
         "declares ['strictCoverages']; this namespace carries "
-        "['asOf', 'bridges', 'conditions', 'consumers', 'copies', 'counts', 'emits', 'events', 'facts', 'forecasts', 'generators', 'history', 'lifetimes', 'links', 'overlay', 'parameters', 'periods', 'privacy', 'profile', 'rates', 'responses', 'scorecard', 'snapshots', 'strictCoverage', 'unused', 'within']"
+        "['asOf', 'associations', 'bridges', 'conditions', 'consumers', 'copies', 'counts', 'emits', 'events', 'facts', 'forecasts', 'generators', 'history', 'lifetimes', 'links', 'overlay', 'parameters', 'periods', 'privacy', 'profile', 'rates', 'responses', 'scorecard', 'snapshots', 'strictCoverage', 'unused', 'within']"
         in raised.value.detail
     )
 

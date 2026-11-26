@@ -1,6 +1,6 @@
 # Size, split and speed
 
-Offline first: `fluxsim plan --help` and `fluxsim apply --help` are the authority for these options. The pages: [Size a run, split it and time it](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/size-and-split-a-run.md).
+Offline first: `fluxsim plan --help` and `fluxsim apply --help` are the authority for these options. The pages: [Size a run, split it and time it](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/size-and-split-a-run.md).
 
 ## `--scale F`
 

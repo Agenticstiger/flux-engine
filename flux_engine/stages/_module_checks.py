@@ -73,6 +73,7 @@ from flux_engine.generator.rules import (
 )
 from flux_engine.safeio import is_regular_file, json_lines, read_text_nofollow
 from flux_engine.seam.asof import asof_entries_of
+from flux_engine.seam.associations import association_entries_of
 from flux_engine.seam.bridges import bridge_entries_of
 from flux_engine.seam.copies import copies_of
 from flux_engine.seam.counts import CountsEntry
@@ -366,7 +367,7 @@ def _has_module_rules(
     counts: Sequence[Any] = (),
     dates: Sequence[Any] = (),
 ) -> bool:
-    """Whether an expose declares anything the module checks read: rules, copies, links, bridges, counts or dates."""
+    """Whether an expose declares anything the module checks read: rules, copies, links, bridges, associations, counts or dates."""
     expose_id = emit.expose_id
     return bool(
         dates
@@ -380,6 +381,7 @@ def _has_module_rules(
         or projection_entry_of(emit.extension, expose_id) is not None
         or link_entries_of(emit.extension, expose_id)
         or bridge_entries_of(emit.extension, expose_id)
+        or association_entries_of(emit.extension, expose_id)
     )
 
 
