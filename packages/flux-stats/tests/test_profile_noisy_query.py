@@ -350,3 +350,63 @@ def test_a_noisy_query_in_a_1_4_0_document_is_refused_as_a_form_of_1_5_0() -> No
     message = _refused(_edit(older))
     assert "queries[0].statistics" in message
     assert "a noise block on a query's statistic is a form of format 1-5-0" in message
+
+
+def _link(parent: str, parent_column: str, child: str, child_column: str) -> Dict[str, Any]:
+    return {
+        "parent": {"table": parent, "columns": [parent_column]},
+        "child": {"table": child, "columns": [child_column]},
+    }
+
+
+def _with_accounts(document: Dict[str, Any]) -> None:
+    """An ``account`` table between ``member`` and ``card_version``, which the unit follows into
+    at a cap of 4."""
+    identifier = document["tables"]["member"]["columns"]["id"]
+    document["tables"]["account"] = {
+        "columns": {"id": copy.deepcopy(identifier), "member_id": copy.deepcopy(identifier)}
+    }
+    document["privacy"]["privacyUnit"]["follows"] = [
+        {**_link("member", "id", "account", "member_id"), "maxChildren": 4}
+    ]
+    document["privacy"]["privacyLoss"]["rho"] = "100"
+
+
+def _through_accounts(document: Dict[str, Any]) -> None:
+    """The unit follows member -> account at a cap of 4 and account -> card_version at a cap of
+    1, and the members query groups ``card_version`` by its account: form (a) at m_P = 4."""
+    _with_accounts(document)
+    identifier = document["tables"]["member"]["columns"]["id"]
+    document["tables"]["card_version"]["columns"]["account_id"] = copy.deepcopy(identifier)
+    document["privacy"]["privacyUnit"]["follows"].append(
+        {**_link("account", "id", "card_version", "account_id"), "maxChildren": 1}
+    )
+    document["relationships"] = [
+        {**_link("member", "id", "account", "member_id"), "statistics": []},
+        {**_link("account", "id", "card_version", "account_id"), "statistics": []},
+    ]
+    for table in document["tables"].values():
+        for column in table["columns"].values():
+            column["statistics"] = [
+                statistic for statistic in column.get("statistics", []) if "noise" not in statistic
+            ]
+    document["tables"]["card_version"].pop("history")
+    query = document["queries"][MEMBERS]
+    query["unit"] = {"table": "card_version", "by": ["account_id"]}
+    document["queries"] = [query]
+
+
+def test_the_member_form_is_charged_every_row_of_the_parent_one_unit_holds() -> None:
+    """Form (a) at m_P = 4 and scale 2: rho = m_P^2 / (2 x 4) = 2, where one row of the parent
+    would need 1/8."""
+
+    def share(rho: str) -> Dict[str, Any]:
+        def change(document: Dict[str, Any]) -> None:
+            _through_accounts(document)
+            _statistic(document, 0)["noise"]["privacyLoss"]["rho"] = rho
+
+        return _edit(change)
+
+    message = _refused(share("0.125"))
+    assert "queries[0]" in message and "16 / (2 scale^2)" in message
+    assert parse_profile(share("2")).accounting.reach("account") == 4  # type: ignore[union-attr]
