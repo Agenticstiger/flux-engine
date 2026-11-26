@@ -41,6 +41,7 @@ from flux_engine.author.history import (
     structural_record,
 )
 from flux_engine.core.clock import parse_rfc3339_ms
+from flux_engine.expr2.ast import Column, unparse
 from flux_engine.expr2.functions import add_months
 from flux_engine.seam.contract import CompiledColumn, LogicalKind, compile_expose
 from flux_engine.seam.keys import ExposeKeys
@@ -48,6 +49,7 @@ from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
 from flux_stats.definitions import MARGINAL_HISTOGRAM
 
 __all__ = [
+    "DateSpan",
     "HistoryTarget",
     "Projected",
     "ProjectionSource",
@@ -82,6 +84,30 @@ class HistoryTarget:
     parent: Optional[str] = None
     #: The history's ``until``, the horizon its versions start before, ``None`` when it writes none.
     until: Optional[str] = None
+    #: The history's validity start column, ``None`` when the contract names none.
+    start: Optional[str] = None
+    #: Whether the history ends entities (``end`` is written): a ``d`` event is then dated by a version's end.
+    closes: bool = False
+
+
+@dataclass(frozen=True)
+class DateSpan:
+    """Where a DATE column's values lie: what its contract declares and what the profile publishes.
+
+    ``declared`` is the first and last day of the contract's ``range`` (each ``None`` when the
+    contract names no such end), ``published`` the profile's span in milliseconds, or ``None``.
+    """
+
+    declared: Tuple[Optional[int], Optional[int]] = (None, None)
+    published: Optional[Tuple[int, int]] = None
+
+    def days(self) -> Tuple[Optional[int], Optional[int]]:
+        """The first and last day: each end from the contract's range, else from the published span."""
+        first, last = self.declared
+        if self.published is not None:
+            first = self.published[0] // _DAY_MS if first is None else first
+            last = self.published[1] // _DAY_MS if last is None else last
+        return first, last
 
 
 @dataclass(frozen=True)
@@ -101,6 +127,8 @@ class ProjectionSource:
     table: Optional[Mapping[str, Any]] = None
     #: The run's ``timeBounds`` as RFC 3339 text, ``None`` when no periods entry may read the table.
     window: Optional[Tuple[str, str]] = None
+    #: The span of each DATE column that has one, by column name.
+    spans: Mapping[str, DateSpan] = field(default_factory=dict)
 
 
 @dataclass
@@ -331,7 +359,69 @@ def _events_entry(
                     f"{sentence}, so it is drawn as any column",
                 )
             )
+    limit = _events_when(source, columns, target, entry["date"], projected)
+    if limit is not None:
+        entry["when"] = limit
     return entry
+
+
+#: The first and the last day, since 1970-01-01, a DATE can name.
+_CALENDAR = ((date.min - date(1970, 1, 1)).days, (date.max - date(1970, 1, 1)).days)
+
+
+def _day_text(day: int) -> str:
+    return (date(1970, 1, 1) + timedelta(days=day)).isoformat()
+
+
+def _events_when(
+    source: ProjectionSource,
+    columns: Mapping[str, CompiledColumn],
+    target: HistoryTarget,
+    name: str,
+    projected: Projected,
+) -> Optional[str]:
+    """A ``when`` that keeps the events of the versions that start inside the date column's span.
+
+    An event is dated at its version's start (``init`` writes no ``at`` or ``lag``), so a bound on
+    the version's validity start holds exactly the events the column's declared range or published
+    span holds. A history that ends entities dates a ``d`` event by a version's end, which one
+    predicate on the version cannot hold with its ``c`` and ``u`` events: no ``when`` is written
+    then, and the note says what the events would need.
+    """
+    span = source.spans.get(name)
+    if span is None or source.window is None:
+        return None
+    first, last = span.days()
+    begin, end = (parse_rfc3339_ms(text) for text in source.window)
+    low = first if first is not None and first > begin // _DAY_MS else None
+    high = last if last is not None and (last + 1) * _DAY_MS < end else None
+    if low is None and high is None:
+        return None
+    if any(day is not None and not _CALENDAR[0] <= day <= _CALENDAR[1] for day in (low, high)):
+        return None
+    start = target.start
+    held = target.columns.get(start) if start is not None else None
+    if start is None or held is None:
+        return None
+    if held.logical_type.kind is not LogicalKind.DATE:
+        return None
+    if target.closes:
+        projected.notes.append(
+            (
+                f"{source.expose_id}: events",
+                f"{name} lies in a span the events are not limited to: {target.expose_id} ends "
+                "entities, and a d event is dated by a version's end, so no condition on the "
+                "version's start holds the c, u and d events together",
+            )
+        )
+        return None
+    column = unparse(Column(name=start), flux_side=True)
+    parts = []
+    if low is not None:
+        parts.append(f"{column} >= DATE '{_day_text(low)}'")
+    if high is not None:
+        parts.append(f"{column} <= DATE '{_day_text(high)}'")
+    return " AND ".join(parts)
 
 
 def _as_events(
@@ -476,7 +566,14 @@ def _as_periods(
     }
     if source.window is not None:
         entry.update(
-            published_period_range(source.table, column, grain, source.window, target.until)
+            published_period_range(
+                source.table,
+                column,
+                grain,
+                source.window,
+                target.until,
+                source.spans.get(column),
+            )
         )
     entry["kinds"] = [{"count": 1}]
     projected.periods.append(entry)
@@ -553,24 +650,33 @@ def published_period_range(
     grain: str,
     window: Tuple[str, str],
     until: Optional[str],
+    span: Optional[DateSpan] = None,
 ) -> Dict[str, str]:
-    """``from`` and ``through`` for a periods entry on *column* by *grain*, from its published histogram.
+    """``from`` and ``through`` for a periods entry on *column* by *grain*, from where its values lie.
 
-    ``from`` is the start of the period that holds the first edge, counted from the window's
-    first day as the entry's periods are without it, and ``through`` the last bin's start, so no
-    period lies in a month the data holds no row for. Both are held to the window and to
-    *until*: a ``from`` on the window's first day is left out, as that day is the entry's anchor
-    without one, and so is a ``through`` no earlier than the window's last day. A withheld
-    histogram, or none, writes neither (ADR 0027, the amendment of 2026-11-26).
+    Each end is read from the contract's declared range (*span*), else from the first and the last
+    bin of the column's published histogram; a published minimum or maximum is not read.
+    ``from`` is the start of the period that holds the first day, counted from the window's first
+    day as the entry's periods are without it, and ``through`` the last day, so no period lies in
+    a month the data holds no row for. Both are held to the window and to *until*: a ``from`` on
+    the window's first day is left out, as that day is the entry's anchor without one, and so is
+    a ``through`` no earlier than the window's last day. A withheld histogram and no declared end
+    writes neither (ADR 0027, the amendments of 2026-11-26 on periods and events).
     """
     days = _published_days(table, column)
-    if days is None:
-        return {}
+    declared = span.declared if span is not None else (None, None)
+    ends: List[Optional[int]] = []
+    for position, edge in enumerate((0, -2)):
+        day = declared[position]
+        if day is None and days is not None:
+            day = days[edge]
+        ends.append(day)
     first = parse_rfc3339_ms(window[0]) // _DAY_MS
     last = _last_day_before(window[1])
     held = last if until is None else min(last, _last_day_before(until))
-    low, high = max(days[0], first), min(days[-2], held)
-    if high < low:
+    low = first if ends[0] is None else max(ends[0], first)
+    high = held if ends[1] is None else min(ends[1], held)
+    if (ends[0] is None and ends[1] is None) or high < low:
         return {}
     found: Dict[str, str] = {}
     anchor = _EPOCH + timedelta(days=first)
@@ -615,7 +721,9 @@ def project(
     """The projections of each expose in *sources* from the *histories* ``init`` wrote.
 
     *kinds* holds each expose's planned column types, by exposeId. An expose that no rule reads
-    is left as it is, and one that meets part of a rule is listed in ``notes`` as unused.
+    is left as it is, and one that meets part of a rule is listed in ``notes`` as unused. With a
+    source's ``window``, a periods entry and an events entry start where the data does (its
+    ``spans`` and, for a periods entry, its profile ``table``).
     """
     projected = Projected()
     held = {target.expose_id: target for target in histories}
@@ -644,7 +752,10 @@ _NOT_ENTITIES = (
 
 
 def history_target(
-    entry: Mapping[str, Any], held: ExposeKeys, columns: Sequence[CompiledColumn]
+    entry: Mapping[str, Any],
+    held: ExposeKeys,
+    columns: Sequence[CompiledColumn],
+    start: Optional[str] = None,
 ) -> HistoryTarget:
     """The target of the ``history`` *entry* of the emit with the keys *held* and *columns*."""
     declared = entry.get("parent")
@@ -655,6 +766,8 @@ def history_target(
         {column.name: column for column in columns},
         None if name is None else _target_of(held, str(name)),
         None if entry.get("until") is None else str(entry["until"]),
+        start,
+        "end" in entry,
     )
 
 

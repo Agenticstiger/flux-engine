@@ -86,6 +86,49 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `support`, evenly, and is refused (`FLX-3403`) with neither, as a version's value no level names is. A plan with
   such a column says `projectedGivens: "afterOverrides"`; a plan that says `"afterProjection"`, or has no key, replays
   as it was made. A column drawn `given` the period column is still refused.
+- `fluxsim init` reads the `lifecycle` a FLUID 0.7.7 contract declares on a versioned table's natural entity. An
+  `activation` column that the expose has, at the validity window's type, becomes the history's `activation`, so
+  every version of an entity holds its first start. An `endMarker` becomes the history's `end` as `finalVersion`
+  with that column and value, at the closed share of last versions that `closeLast` used, and the profile's
+  published moves between the column's levels are written without the marker's level, which only the ending
+  version holds. A column or value the expose lacks, or an `activation` of another type, keeps what `init`
+  wrote before and says why in its assumptions. A `currentFlag` is not written: no construct of the engine puts a
+  value on an entity's last version alone, so the column keeps its own draw, and `init` says so. Before, `init` wrote
+  neither member and always wrote `closeLast` (ADR 0017, amendment of 2026-11-26).
+- `fluxsim init` tracks a whole-number foreign key whose profile publishes it as a category. When the table's
+  history lists the column, the profile publishes few whole-number levels for it, and the table it references is not
+  released whole and has no published min and max for its key, `init` declares those levels on the column with their
+  published weights, so the history writes its `initial` and `transitions`. The referenced key is laid out as the
+  published levels, one value per row, so every generated value of the column is a key of that table. When the
+  levels span more values than the table writes rows, `init` drops end levels one at a time (the one with the smaller
+  published share, the higher value on a tie) until they fit, while the dropped levels hold at most 5 % of the rows
+  together; the others take their shares renormalised, the history's first values and moves leave the dropped levels
+  out, and the assumptions name them and their share. Past 5 %, or when the key is a foreign key itself, the column
+  stays carried and the ledger names what to change (publish fewer levels or more rows). Before, `init` declared
+  nothing for such a column and the history carried it (ADR 0017, amendment of 2026-11-26).
+
+- `init` keeps the order a contract's check declares between two dates of a row (`b >= a`, `b > a`, `a <= b` or
+  `a < b`, each optionally behind `b IS NULL OR` or `a IS NULL OR`, read from the check's syntax tree). Where the
+  profile publishes no date pair for the two columns, as a private release never does, it first estimates, from the
+  two histograms the bundle draws the dates from, the share of rows that would break the order if the dates were
+  drawn apart, counting the last bin of each histogram closed at its top as the generator draws it. When that share
+  and three standard errors of it at the table's planned row count, `sqrt(p (1 - p) / n)`, are within the check's
+  tolerance (none, for a check with no percent band; a table with no planned row count compares the share itself),
+  both histograms stay, no lifetime is written, and a note says the published dates already keep the check. A check
+  kept this way rests on the histograms of both its dates, so no lifetime of the table's other checks ends on either:
+  that check is not written as an order, and its note names the check it would have broken. A date a published date
+  pair lays out is no histogram's to keep a check. Otherwise, or where either date has no histogram to draw from, it
+  writes a `lifetimes` entry from the first to the second, with the days between them drawn evenly from 0 (1 for a
+  strict order) up to the days the run's window holds, as an assumption in the parameter register, and where the end
+  had a histogram a note says it is traded for the order. The checks of a table are taken in the order of their ids,
+  so the order they are listed in decides nothing. Before, each date was drawn on its own and the check held on only
+  part of the rows. A published pair is read as before. You can replace the gap with a histogram of your own (ADR
+  0024, amendment of 2026-11-26: a check orders two dates).
+
+- `init` names a check that orders two dates and that it did not write as an order. A table that already holds a
+  lifetime, a column another entry sets, columns of two kinds, a declared range that cannot hold every end the gap can draw, and a window
+  too short for a gap each leave the check unwritten, and the notes now say which check and why. Before, such a check
+  was left out without a word.
 
 ### Changed
 
@@ -103,6 +146,21 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   unpublished statistic is (`FLX-3113`). 0.12.0 refused an entry that a release had cut in part. flux-stats'
   `parse_profile` and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets;
   without it each entry is read as the format writes it, and a cut entry is refused naming the member it misses.
+- A `within` entry that keeps a history's start inside its parent's life is read as `parent.lifetime: true`: when its
+  emit is the history's, its relationship is the history's parent relationship (one hop), its `date` is the history's
+  validity start and it carries no `offset`, `target` or `exposure`, the bound is applied once, through the parent's
+  lifetime, and the bundle draws the rows the same bundle with `parent.lifetime: true` draws. It was refused at plan as
+  `FLX-6203`, two sources for the start. Every other `within` entry on a column the history sets is still `FLX-6203`,
+  and the message for a history with no parent now names `parent.lifetime` as the way to say it (ADR 0017, amendment of
+  2026-11-26).
+- `init` starts a periods entry and limits an events entry where the data does. A `periods` entry carries `from`
+  (and `through`) from the contract's declared `range` on the period column, or else from the first and last bin of
+  its published histogram, when they lie inside the run's window; a published minimum or maximum is not read for
+  periods. Before, periods ran from the window's start whatever the data held, unless the histogram bounded them. An `events` entry for a history that ends no entity carries a `when` on
+  the version's validity start that holds the date column's declared range or its published minimum and maximum; before, an event was
+  written for every version. A history that ends entities is not limited, and the notes say why. A contract that
+  declares no range, with a profile that publishes no span of the column (for periods, no histogram), writes what it
+  wrote before.
 
 ### Fixed
 
@@ -143,6 +201,15 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   plan, up front (`FLX-3403`), naming the history and the emits in order: a plan for it needs a derivation that
   follows the dependencies of each column, which a later change will design. Read a drawn column of the history
   instead. A recorded plan replays as it was made (ADR 0027, the amendment of 2026-11-26 about linked rows).
+- `init` draws a DATE column that the profile gives no distribution (a private release that publishes nothing for the
+  table, or a released histogram that is noise everywhere) where the contract's derives over it stay inside their
+  declared range. A `derive` that is `DAYS_BETWEEN`, `MONTHS_BETWEEN` or `YEARS_BETWEEN` of a date literal and the
+  column, in either argument order, whose derived column declares a `range` rule, bounds the draw to the dates the
+  engine's own evaluator keeps in that range; the column is declared as one bin over them, cut to the run's window and
+  to its own range, and labelled an assumption that names the derive. Two derives intersect; an empty intersection, or
+  a bound with no end to draw to, keeps the even draw and the report says why. Before, the column was drawn evenly
+  over the whole window and `verify` reported most rows of the derived column outside its range (ADR 0014, the
+  amendment of 2026-11-26).
 
 ## 0.12.1 - 2026-11-26
 

@@ -483,3 +483,77 @@ profile's durations say.
 - **What is kept.** A pair one of whose columns a derive, a dependency, a copy or a key sets, and every pair of an
   emit that is not a snapshot.
 - **What moves.** A bundle `init` writes for such a snapshot. No plan or recorded plan changes.
+
+## Amendment of 2026-11-26: a check orders two dates
+
+### Context
+
+A contract can order two dates of one row as an invariant, such as `cancelled_on IS NULL OR
+cancelled_on >= issued_on` at most 5 % failing. `init` wrote an order only from a profile's
+`datePairs`. A private release publishes none, so each date was drawn on its own, and the check held on
+a share of the rows well below its tolerance.
+
+### Decision
+
+1. **What is read.** A `check` of the contract, with no `when`, whose syntax tree (the engine's own
+   `flux-expr/2` parser, never a pattern over the text) is `b >= a`, `b > a`, `a <= b` or `a < b` over two
+   columns of the row, optionally behind `b IS NULL OR` or `a IS NULL OR`. Anything else orders nothing here.
+2. **Which form.** A lifetime. It is the one form that orders two dates of one row: a `within` entry orders a
+   child's date inside a linked parent's lifetime, and a `derive` would fix the gap, so the end could not
+   draw the days between the dates as an open question. The lifetime starts at `a` and ends at `b`.
+3. **The gap is an assumption.** With no published pair, the days between the dates are drawn evenly from
+   0 days (1 for a strict order) up to the days between the window's start and end, the most a row that
+   starts at the window's start can hold. Evenly says the least: nothing published favours a short or a long
+   gap, and a gap longer than the window only ends after it. The number is assumed in the register, naming
+   the check, so a person can replace it. No `target` is written: every row holds the order.
+4. **The end.** A nullable end the check lets be NULL keeps the lifetime's default, so an end after the
+   window is NULL (a card not cancelled by the window's end). A nullable end the check does not let be NULL,
+   and a required end, keep their date past the window (`endPastWindow: kept`); then the bundle is written
+   only when the end's declared range holds every end the gap can draw (`FLX-6204` would refuse it
+   otherwise), and no lifetime is written when it cannot be shown to.
+5. **What wins.** A published `datePairs` entry for the two columns, used or not, is read exactly as before
+   and this reads nothing. A table declares one lifetime: a pair's, when it has one.
+6. **Prior art.** The same construction a generator uses to keep a return date after a purchase date: the
+   later date is the earlier one plus a random offset (dbldatagen's date ranges), rather than sampling both
+   and rejecting rows, which loses the tolerance the check allows. A column inequality constraint that
+   rejects and resamples is the other common form; SDV's Inequality constraint was looked at for the
+   pattern only and nothing of it was taken.
+7. **A check not written is named.** When `init` cannot write a check as an order (a column a rule or a
+   history sets, two dates a snapshot's history sets together, a window too short to draw a gap in, an end range
+   that cannot be shown to hold the gap), its report carries a line naming the check and why.
+8. **When the lifetime is written.** The lifetime replaces the end's own histogram, so it is written only
+   where the histograms do not already keep the order within the check's tolerance.
+   - *No usable distribution.* When the end, or the start, is drawn evenly within the window (the profile
+     published no order statistic, or no bin stands clear of the noise) or from no histogram of its own, there is
+     nothing to estimate from and the lifetime is written.
+   - *The estimate.* Otherwise `init` estimates from the two histograms the bundle draws the dates from the share
+     of rows that would break the order if the two were drawn independently: the end before the start (on or
+     before it, for a strict check), each bin's mass spread evenly over the days it covers (the milliseconds, for
+     a timestamp), in exact fractions, so the same inputs give the same number. The generator draws the last
+     declared bin closed at its top, so that bin also holds its upper edge (one more day, or millisecond). A NULL
+     date counts as breaking the check where the check does not hold on a NULL one.
+   - *The tolerance.* The check's tolerance is the share its band allows, read from `mustBeLessThan`,
+     `mustBeLessOrEqualTo` or `mustBeBetween` from zero, in `percent`. A check with no such band, or a band in
+     `rows`, has none, which counts as 0.
+   - *The margin.* A run draws its rows by chance, and a share just under the tolerance falls outside it about
+     half the time. The estimate `p` is kept only where `p` plus three standard errors, `sqrt(p (1 - p) / n)` at
+     the `n` rows the table plans, is at most the tolerance (below it, for `mustBeLessThan`); it is compared in
+     exact fractions, as `9 p (1 - p)` against `n` times the square of the room left. A table whose rows follow a
+     history plans none, and compares `p` itself.
+   - *Within it.* When the estimate keeps that margin, both histograms stay and no lifetime is written. The
+     notes name the check and say the published dates already keep it within its tolerance, with the estimate.
+   - *Above it.* Otherwise the lifetime is written as above and the end's histogram is traded for the order. The
+     notes name the check and say so, with the share that independent dates would break.
+   - *A kept check is not undone.* A check kept this way rests on the histograms of both its dates. Every check
+     of a table is decided before any lifetime is written, taken in the order of the checks' ids, so the order
+     the contract lists them in decides nothing. A lifetime is then not written that would end on a date a kept
+     check rests on (a table declares one lifetime in any case): the other check is not written as an order, and
+     its note names the kept check, which holds through its published histogram. A date that a lifetime from the
+     profile's published date pair ends is laid out by that pair, so no check rests on its histogram: a check of
+     that date is not written, and its note says the pair lays it out.
+
+   The two choices cost something. A kept pair of histograms holds the order as far as a sample of rows follows
+   them, and a small table can fall outside the tolerance by chance; the lifetime holds every row. A lifetime
+   means the end no longer follows a histogram of its own that the profile publishes, and a fidelity check on that
+   histogram can then fail where the check on the order now holds. Publishing the date pair for the two columns
+   gives the gap a distribution and ends the trade.

@@ -90,6 +90,7 @@ from flux_engine.author.columns import (
     widen_key_span,
 )
 from flux_engine.author.copula import CopulaPlan, declare_copula
+from flux_engine.author.date_spread import DateSpread, spread_of
 from flux_engine.author.dates import (
     DATE_KINDS,
     DatedExpose,
@@ -116,6 +117,7 @@ from flux_engine.author.derived import (
     contract_guarded,
     numeric,
 )
+from flux_engine.author.derived_dates import bound_derived_dates
 from flux_engine.author.exact import EXACT_HOW, allot_small_tables
 from flux_engine.author.given import choose_givens
 from flux_engine.author.history import (
@@ -131,7 +133,9 @@ from flux_engine.author.history import (
 from flux_engine.author.history import _pointers as declared_pointers
 from flux_engine.author.ledger import Ledger
 from flux_engine.author.noisy import cite_noisy, point_estimates
+from flux_engine.author.orders import contract_date_orders
 from flux_engine.author.projection import (
+    DateSpan,
     Projected,
     ProjectionSource,
     follow_history,
@@ -143,9 +147,14 @@ from flux_engine.author.projection import (
 )
 from flux_engine.author.ranges import column_range
 from flux_engine.author.replace import ask_for_private_release, replacements_for
-from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_window, instant_ms
+from flux_engine.author.window import (
+    WINDOW_END_LIMIT_MS,
+    declared_days,
+    declared_window,
+    instant_ms,
+)
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
-from flux_engine.core.clock import format_rfc3339_ms
+from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
 from flux_engine.expr2.errors import FLX_6204
@@ -1000,6 +1009,172 @@ class _Link:
         """Whether both ends are number columns, the only ones a span is read from."""
         numbers = (LogicalKind.INT, LogicalKind.DECIMAL)
         return self.kind in numbers and self.parent_kind in numbers
+
+
+def _track_foreign_keys(
+    exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys], profile: Mapping[str, Any]
+) -> None:
+    """Draw a whole-number foreign key a history tracks over the levels its profile publishes.
+
+    A foreign key into a table that is not released whole, whose profile publishes it as a category
+    (few whole-number levels) and lists it among the columns of the table's history, was a
+    placeholder: the history had no levels to move it between, so it carried the column. It is
+    drawn over those levels instead (:func:`flux_engine.author.columns.plan_column` with
+    ``int_levels``), when the keys can hold them: the key it references is an assumed span, no
+    foreign key itself, and the levels of every column that references it lie inside as many
+    consecutive values as it has rows, which :func:`_span_keys` then lays the key over. Any other
+    foreign key keeps the plan it had.
+    """
+    if keys is None:
+        return
+    by_id = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
+    for expose in exposes:
+        table = profile.get("tables", {}).get(expose.expose_id)
+        history = table.get("history") if isinstance(table, Mapping) else None
+        tracked = history.get("columns") if isinstance(history, Mapping) else None
+        if expose.skipped is not None or expose.reference or not isinstance(tracked, Mapping):
+            continue
+        for relationship in keys.expose(expose.expose_id).relationships:
+            target = by_id.get(relationship.target)
+            if (
+                target is None
+                or target.reference
+                or relationship.cardinality != "many_to_one"
+                or len(relationship.from_columns) != 1
+                or len(relationship.to_columns) != 1
+                or relationship.from_columns[0] not in tracked
+            ):
+                continue
+            _track_foreign_key(
+                exposes,
+                keys,
+                expose,
+                relationship.from_columns[0],
+                target,
+                relationship.to_columns[0],
+            )
+
+
+def _track_foreign_key(
+    exposes: Sequence[AuthoredExpose],
+    keys: ContractKeys,
+    expose: AuthoredExpose,
+    column: str,
+    target: AuthoredExpose,
+    to_column: str,
+) -> None:
+    """Swap one foreign key's placeholder for its published levels, if the key they reference holds them."""
+    context = expose.contexts.get(column)
+    positions = {plan.name: place for place, plan in enumerate(expose.columns)}
+    parents = {plan.name: plan for plan in target.columns}
+    parent = parents.get(to_column)
+    if (
+        context is None
+        or parent is None
+        or column not in positions
+        or not expose.columns[positions[column]].placeholder
+        or not parent.key_span
+        or expose.kinds[column] is not LogicalKind.INT
+        or target.kinds[to_column] is not LogicalKind.INT
+        or column in expose.drawn_by_cliques
+        or column in expose.derives
+        or column in expose.copies
+        or column in expose.dependents
+        or context.foreign is None
+        or few_int_levels(context.entry, context.range_rule) is None
+    ):
+        return
+    before = expose.columns[positions[column]]
+    trial = plan_column(replace(context, int_levels=True))
+    if trial.placeholder or not trial.declaration.get("levels"):
+        return
+    expose.columns[positions[column]] = trial
+    links = _links(exposes, keys)
+    values = [
+        value for link in links if link.parent is parent for value in declared_span(link.child)
+    ]
+    if not values:
+        expose.columns[positions[column]] = before
+        return
+    low, high = min(values), max(values)
+    why = None
+    if (
+        high - low + 1 > target.rows
+        and len(values) == len(declared_span(trial))
+        and not any(link.child is parent for link in links)
+    ):
+        why = _trim_levels(trial, target.rows, target.expose_id)
+        if why is None:
+            values = declared_span(trial)
+            low, high = min(values), max(values)
+    if why is None and any(link.child is parent for link in links):
+        why = f"{printable(to_column)} of {printable(target.expose_id)} is a foreign key itself"
+    elif why is None and high - low + 1 > target.rows:
+        why = (
+            f"the levels of the columns that reference {printable(to_column)} of "
+            f"{printable(target.expose_id)} span {high - low + 1:f} values and the table writes "
+            f"{target.rows} rows: publish fewer levels or more rows"
+        )
+    elif (
+        why is None and max(abs(low), abs(max(high, low + target.rows - 1))) > JCS_MAX_SAFE_INTEGER
+    ):
+        why = f"the levels are beyond the integers a row of {printable(target.expose_id)} carries"
+    if why is not None:
+        expose.columns[positions[column]] = before
+        before.levels_refused = f"{why}, so the column is carried"
+        return
+    expose.contexts[column] = replace(context, int_levels=True)
+
+
+#: The most of a column's published rows its end levels may take from it, so that it fits the
+#: rows of the table it references.
+_MOST_TRIMMED = Fraction(1, 20)
+
+
+def _trim_levels(plan: ColumnPlan, rows: int, table: str) -> Optional[str]:
+    """Drop the end levels of a foreign key's span until it fits *rows*; why not, else ``None``.
+
+    Each step drops the end level with the smaller published share, the higher value on a tie, and
+    the levels it drops may hold at most :data:`_MOST_TRIMMED` of the rows together. The
+    others take their shares, renormalised, and the plan says so as an assumption.
+    """
+    shares = {int(level): Fraction(text) for level, text in plan.declaration["levels"].items()}
+    kept = sorted(shares)
+    dropped: List[int] = []
+    while kept[-1] - kept[0] + 1 > rows and len(kept) > 1:
+        end = kept[0] if shares[kept[0]] < shares[kept[-1]] else kept[-1]
+        kept.remove(end)
+        dropped.append(end)
+    lost = sum((shares[level] for level in dropped), Fraction(0))
+    if kept[-1] - kept[0] + 1 > rows or lost > _MOST_TRIMMED:
+        return (
+            f"the levels span more values than {printable(table)} writes rows ({rows}), and "
+            f"dropping end levels to fit would drop {float(lost) * 100:.1f} % of the rows, more "
+            f"than {float(_MOST_TRIMMED) * 100:.0f} %: publish fewer levels or more rows"
+        )
+    names = ", ".join(str(level) for level in sorted(dropped))
+    reason = (
+        f"{printable(table)} writes {rows} rows, so the foreign key keeps {kept[0]}..{kept[-1]} "
+        f"and drops {names} ({float(lost) * 100:.1f} % of the rows): the others take their shares, "
+        "renormalised."
+    )
+    texts = share_texts([shares[level] / (1 - lost) for level in kept])
+    levels = [str(level) for level in kept]
+    plan.declaration["levels"] = dict(zip(levels, texts, strict=True))
+    plan.declaration["support"] = {"values": levels}
+    plan.declaration["maxCardinality"] = len(levels)
+    plan.level_names = tuple(levels)
+    plan.dropped_levels = tuple(str(level) for level in sorted(dropped))
+    # The profile's histogram counts the dropped levels too, so the property cannot be scored.
+    plan.properties = [
+        item for item in plan.properties if item.document.get("property") != "levelHistogram"
+    ]
+    plan.labels = [
+        label for label in plan.labels if label.tokens[:1] not in (("levels",), ("maxCardinality",))
+    ] + [Label((name,), assumed(reason)) for name in ("levels", "maxCardinality")]
+    plan.assumptions.append(reason)
+    plan.choices.append(reason)
+    return None
 
 
 def _span_keys(exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys]) -> None:
@@ -2635,6 +2810,24 @@ def _check_histories(
         raise
 
 
+def _date_spans(expose: AuthoredExpose, contract: Mapping[str, Any]) -> Dict[str, DateSpan]:
+    """Each DATE column of *expose* with a span: the days its contract's range holds, the profile's span."""
+    found: Dict[str, DateSpan] = {}
+    try:
+        schema = contract["exposes"][expose.index]["contract"]["schema"]
+    except (KeyError, IndexError, TypeError):
+        return found
+    for column in expose.columns:
+        context = expose.contexts.get(column.name)
+        if expose.kinds.get(column.name) is not LogicalKind.DATE or context is None:
+            continue
+        declared = declared_days(schema[context.schema_index])
+        published = None if column.noise_floored else column.time_span
+        if declared != (None, None) or published is not None:
+            found[column.name] = DateSpan(declared, published)
+    return found
+
+
 def _projections(
     planned: _Planned,
     histories: _Histories,
@@ -2659,6 +2852,9 @@ def _projections(
             entry,
             keys.expose(str(entry["emit"])),
             compile_expose(contract["exposes"][index[str(entry["emit"])].index]).columns,
+            window_ends(contract["exposes"][index[str(entry["emit"])].index].get("semantics")).get(
+                "start"
+            ),
         )
         for entry in histories.entries
     ]
@@ -2672,13 +2868,18 @@ def _projections(
             ),
             table=tables.get(expose.expose_id),
             window=window,
+            spans=_date_spans(expose, contract),
         )
         for expose in exposes
         if not expose.reference
         and expose.skipped is None
         and not keys.expose(expose.expose_id).versioned
     ]
-    found = project(sources, targets, {expose.expose_id: expose.kinds for expose in exposes})
+    found = project(
+        sources,
+        targets,
+        {expose.expose_id: expose.kinds for expose in exposes},
+    )
     if declined is not None:
         why = (
             f"the bundle written with these projections is refused, so none is written: {declined}"
@@ -2800,6 +3001,7 @@ def _histories(
             _refuse_an_unset_open_end(expose, written)
         if written.entry is not None:
             result.entries.append(written.entry)
+            _ended_status(expose, written.entry)
             restate_assumptions(expose)
             reads.release(expose.expose_id, written)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)
@@ -3665,6 +3867,7 @@ def _draw_and_link(
     """Span the keys of the drawn exposes, lay their relationships out and link their givens."""
     try:
         _with_edge_rows(reading, keys, drawn)
+        _track_foreign_keys(drawn, keys, reading.profile)
         _span_keys(drawn, keys)
         for expose in drawn:
             for plan in expose.columns:
@@ -4135,6 +4338,8 @@ def _author_bundle(
         + tuple(histories.notes)
         + tuple(projections.notes)
         + tuple(exact_notes)
+        + tuple(dated.declined_orders)
+        + tuple(dated.order_notes)
     )
     namespace = drafted.namespace
     counts = _counts(
@@ -4341,6 +4546,12 @@ def _bundle_window(
             draw_in_window(column, expose.kinds[column.name], window)
         # A column drawn over its whole range, its range and the window apart, says so.
         restate_assumptions(expose)
+    bound_derived_dates(
+        planned.authored,
+        planned.contract,
+        window,
+        lambda expose, column: _declared_ranges_of(expose, column, planned.contract),
+    )
     if given_window is not None:
         for expose in authored:
             for column in expose.columns:
@@ -4573,6 +4784,62 @@ def _carried_by_snapshot(
     return frozenset(projections.carried[expose.expose_id][1]) - ruled
 
 
+def _date_bounds(expose: AuthoredExpose) -> Dict[str, Tuple[int, int]]:
+    """The span each date column's declared draw reaches, in milliseconds: its bins' ends, or its range."""
+    found: Dict[str, Tuple[int, int]] = {}
+    for plan in expose.columns:
+        if expose.kinds.get(plan.name) not in DATE_KINDS:
+            continue
+        bins = plan.declaration.get("bins")
+        held = plan.declaration.get("range")
+        ends = (
+            (bins[0], bins[-1])
+            if isinstance(bins, list) and bins
+            else (
+                (held["min"], held["max"])
+                if isinstance(held, Mapping) and "min" in held and "max" in held
+                else None
+            )
+        )
+        if ends is not None:
+            found[plan.name] = (_milliseconds(str(ends[0])), _milliseconds(str(ends[1])))
+    return found
+
+
+def _date_spreads(expose: AuthoredExpose) -> Dict[str, DateSpread]:
+    """The histogram each date column is drawn from, where the bundle declares one the profile published.
+
+    A column drawn evenly within the run's window, from a histogram no bin of which stands clear of
+    noise, or from a placeholder, has none.
+    """
+    found: Dict[str, DateSpread] = {}
+    for plan in expose.columns:
+        kind = expose.kinds.get(plan.name)
+        if (
+            kind not in DATE_KINDS
+            or plan.drawn_in_window
+            or plan.even_in_window
+            or plan.placeholder
+        ):
+            continue
+        bins = plan.declaration.get("bins")
+        weights = plan.declaration.get("binWeights")
+        if not isinstance(bins, list) or not isinstance(weights, list):
+            continue
+        try:
+            spread = spread_of(
+                kind,
+                [_milliseconds(str(edge)) for edge in bins],
+                [Fraction(str(weight)) for weight in weights],
+                Fraction(str(plan.declaration.get("nullFraction", "0"))),
+            )
+        except (ValueError, ArithmeticError):
+            continue
+        if spread is not None:
+            found[plan.name] = spread
+    return found
+
+
 def _dated_columns(
     planned: _Planned,
     window: Tuple[str, str],
@@ -4608,6 +4875,15 @@ def _dated_columns(
                     if label != _HISTORY_LABEL
                 },
                 carried=_carried_by_snapshot(expose, projections, snapshots),
+                orders=tuple(contract_date_orders(planned.contract["exposes"][expose.index])),
+                required=frozenset(
+                    name
+                    for name, context in expose.contexts.items()
+                    if name in expose.kinds and context.column.required
+                ),
+                bounds=_date_bounds(expose),
+                spreads=_date_spreads(expose),
+                rows=expose.rows,
             )
             for expose in planned.authored
             if not expose.reference
@@ -4979,7 +5255,6 @@ def _relabel_edge(plan: ColumnPlan, labels: List[Label], position: str) -> None:
 
 def _milliseconds(text: str) -> int:
     """A range end spelled as a date or an RFC 3339 timestamp, in milliseconds since the epoch."""
-    from flux_engine.core.clock import parse_rfc3339_ms
 
     if len(text) == 10:
         return (date.fromisoformat(text) - date(1970, 1, 1)).days * _DAY_MILLISECONDS

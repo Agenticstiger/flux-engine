@@ -267,3 +267,43 @@ timestamps in milliseconds, as days. The profile format does not change.
 - NIST SDNist's k-marginal score, <https://github.com/usnistgov/SDNist>: the mean
   total variation over k-way marginals, used by the round-trip harness under
   `e2e/` and nowhere in the engine.
+
+## Amendment of 2026-11-26: a date the profile gives no distribution is drawn where the contract's derives hold
+
+### Context
+
+A column the profile gives no distribution is drawn evenly within the run's window (the
+placeholder rule above): a private release that publishes nothing for a table leaves a DATE
+column as a bare `timestamp` domain. A contract may derive another column from that date, as the
+whole months or days from a fixed date, and declare a range for the derived column. An even draw
+over a window of several years writes the derived column outside its range on most rows, and
+`verify` reports them. A date column's own declared range already cuts its draw, so only the
+range of the derived column was missing.
+
+### Decision
+
+1. **The family.** A `derive` (with no `when`) whose text the engine's parser reads as
+   `DAYS_BETWEEN`, `MONTHS_BETWEEN` or `YEARS_BETWEEN` of a date literal and one column of the row,
+   in either argument order, bounds that column when the derived column declares a `range` rule.
+   Any other shape (a sum, a rounding, a column of another row), a derived column with no declared
+   range, and a column the profile publishes a distribution for change nothing.
+2. **The bound is the preimage.** The difference is a monotone step function of the date, so each
+   end of the dates whose difference lies in the range is found by bisection over the day ordinals
+   with the engine's evaluator, and then checked with it: the difference lies in the range at each
+   end, and the day beside each end does not. The engine's whole-unit semantics decide, for a
+   month difference as for a day one: the count truncates toward zero, so a date up to a month
+   before the fixed date has a difference of 0 in either argument order.
+3. **What `init` writes.** The column is declared with one bin over the bound, weight 1, cut to
+   the run's window and to the column's own declared range, as an assumption whose sentence names
+   the derive and the range; the report says so. Two derives over one column intersect. When the
+   bound misses the run's window, the column is drawn within the bound, since the contract's range
+   decides, and the sentence says so. When the intersection is empty, when a bound has no end to
+   draw to inside the window, or when one date is all that holds, the column keeps its even draw
+   and the sentence gives the reason. A column whose released histogram is noise everywhere (ADR
+   0019, amendment of 2026-11-25) is bounded the same way.
+
+### Consequences
+
+- Only an authoring change: no kernel behaviour or golden digest moves, and a contract that
+  declares none of this gets the bundle it got before.
+- A bin's upper edge is a date the draw can reach, so the bin runs to the last date that holds.

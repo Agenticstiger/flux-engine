@@ -34,6 +34,7 @@ __all__ = [
     "WINDOW_END_LIMIT_MS",
     "WindowError",
     "declared_instants",
+    "declared_days",
     "declared_window",
     "instant_ms",
     "parse_window",
@@ -68,6 +69,28 @@ def declared_window(column: Any, kind: Optional[LogicalKind]) -> Optional[Tuple[
     if kind is LogicalKind.DATE:
         return (bounds.low, bounds.low + _DAY_MS) if bounds.low % _DAY_MS == 0 else None
     return bounds.low, bounds.low + 1
+
+
+def declared_days(column: Any) -> Tuple[Optional[int], Optional[int]]:
+    """The first and the last day (days since the epoch) a date column's declared ``range`` holds.
+
+    Each end is ``None`` when the contract declares none (a high end in the year 9999 is none). A
+    low end between two days is the next day; a strict end leaves out its own instant. A range
+    with no day in it gives ``(None, None)``, since it describes nothing a projection can follow.
+    """
+    bounds = declared_range_bounds(column)
+    if bounds is None:
+        return None, None
+    first = last = None
+    if bounds.low is not None:
+        low = bounds.low + 1 if bounds.low_strict else bounds.low
+        first = -((-low) // _DAY_MS)
+    if bounds.high is not None:
+        high = bounds.high - 1 if bounds.high_strict else bounds.high
+        last = high // _DAY_MS
+    if first is not None and last is not None and last < first:
+        return None, None
+    return first, last
 
 
 class WindowError(ValueError):

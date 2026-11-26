@@ -177,6 +177,7 @@ from flux_engine.seam.history import (
     check_history_sources,
     history_target,
     read_history_block,
+    read_within_as_parent_lifetime,
 )
 from flux_engine.seam.history import bound_into_h as history_bound_into_h
 from flux_engine.seam.keys import (
@@ -2292,6 +2293,9 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
         )
 
     extension = extension_block(simulation, expose_id, where=where)
+    histories, withins = _reading_within_as_parent_lifetime(
+        simulation, simulation_id, contract_document, expose, expose_id, where=where
+    )
     extension = _with_facts(
         extension,
         declared_facts(simulation, where=simulation_id),
@@ -2301,11 +2305,11 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
         date_rules=(
             *date_rule_ids(
                 declared_lifetimes(simulation, where=simulation_id),
-                declared_within(simulation, where=simulation_id),
+                withins,
                 contract_step(contract_document),
                 expose_id,
             ),
-            *exposure_rule_ids(declared_within(simulation, where=simulation_id), expose_id),
+            *exposure_rule_ids(withins, expose_id),
         ),
     )
     extension = _with_relationship_blocks(
@@ -2313,7 +2317,7 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
     )
     extension = _with_history(
         extension,
-        declared_history(simulation, where=simulation_id),
+        histories,
         expose=expose,
         expose_id=expose_id,
         contract_document=contract_document,
@@ -2322,7 +2326,7 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
         links=declared_links(simulation, where=simulation_id),
         copies=declared_copies(simulation, where=simulation_id),
         lifetimes=declared_lifetimes(simulation, where=simulation_id),
-        within=declared_within(simulation, where=simulation_id),
+        within=withins,
         where=where,
     )
     extension = _with_asof(
@@ -2331,7 +2335,7 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
         expose=expose,
         expose_id=expose_id,
         contract_document=contract_document,
-        histories=declared_history(simulation, where=simulation_id),
+        histories=histories,
     )
     extension = _with_projection(
         extension,
@@ -2376,7 +2380,7 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
     )
     extension = _with_within(
         extension,
-        declared_within(simulation, where=simulation_id),
+        withins,
         declared_lifetimes(simulation, where=simulation_id),
         contract=contract_document,
         expose=expose,
@@ -2387,7 +2391,7 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
         extension,
         declared_rates(simulation, where=simulation_id),
         declared_lifetimes(simulation, where=simulation_id),
-        declared_within(simulation, where=simulation_id),
+        withins,
         expose=expose,
         expose_id=expose_id,
         where=where,
@@ -2422,6 +2426,41 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
             entry.emit for entry in declared_history(simulation, where=simulation_id)
         ),
     )
+
+
+def _reading_within_as_parent_lifetime(
+    simulation: Mapping[str, Any],
+    simulation_id: str,
+    contract_document: Mapping[str, Any],
+    expose: Mapping[str, Any],
+    expose_id: str,
+    *,
+    where: str,
+) -> Tuple[Tuple[HistoryEntry, ...], Tuple[WithinEntry, ...]]:
+    """The Simulation's histories and ``within`` entries, with this emit's ``within`` read as ``parent.lifetime`` (ADR 0017, amendment of 2026-11-26).
+
+    Every later reader of the emit's histories and ``within`` entries takes what this returns, so
+    an entry that says what ``parent.lifetime: true`` says is applied once, through that key
+    (:func:`flux_engine.seam.history.read_within_as_parent_lifetime`). A bundle with no history on
+    the emit, or no ``within`` entry on it, returns what it declares.
+    """
+    histories = declared_history(simulation, where=simulation_id)
+    withins = declared_within(simulation, where=simulation_id)
+    wanted = nfc(expose_id)
+    if not any(nfc(entry.emit) == wanted for entry in histories) or not any(
+        nfc(entry.emit) == wanted for entry in withins
+    ):
+        return histories, withins
+    keys = compile_keys(contract_document)
+    target = history_target(
+        expose,
+        keys.expose(expose_id) if keys is not None else None,
+        fidelity=None,
+        time_bounds=None,
+        counts=[],
+        links=[],
+    )
+    return read_within_as_parent_lifetime(histories, withins, target, expose_id)
 
 
 def _check_hidden_columns(

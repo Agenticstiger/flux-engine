@@ -139,7 +139,7 @@ validity column or a column a rule sets; and every refusal of sections 5, 6 and 
 values, the scale and the layout's counts, which follow from declared values alone, never a drawn row. A
 `lifetimes` or `within`
 entry (ADR 0024) on the start, the end or the activation column of a history's emit is two sources for one
-value, `FLX-6203`.
+value, `FLX-6203`, except the `within` entry that says `parent.lifetime: true` (amendment of 2026-11-26).
 
 ### 3. Entities per parent and versions per entity: two counted layouts, nested
 
@@ -827,3 +827,75 @@ pass reads.
 
 - **What moves.** A bundle with both a `parent.lifetime` and a rule that reads `previous` now plans. Every other plan
   keeps its bytes, and no recorded plan changes: no plan was made for that shape.
+
+## Amendment of 2026-11-26: `init` writes the activation and the end a contract's lifecycle declares
+
+FLUID 0.7.7 declares on the natural entity of a model with a validity window how its versions begin and
+end, as `lifecycle`: `activation`, a column of the expose and of the window's type that holds the start of the
+entity's first version on every version; `endMarker`, a column and a value, the value an ending version holds
+and no earlier version does (dbt's `hard_deletes: new_record`); and `currentFlag`, a column and a value that one
+version of each entity holds, its last. Section 13 wrote neither `activation` nor a `finalVersion`, since a profile
+says which column holds an entity's first start no more than which value marks an end. The contract does.
+
+- **`activation`.** `init` writes the declared column as the entry's `activation` when the expose has it at the
+  window's type and it is no key, no validity column and no column a rule, a dependency or a copy sets. Every version
+  of an entity then holds its first start (section 5). Otherwise none is written, and the assumptions say which
+  of these it fails.
+- **`endMarker`.** When the column declares the value as a level, besides one with a weight, and is no key, no
+  validity column, no column a rule sets, declares no `nullFraction`, is drawn given no column and no column is
+  drawn given it, `init` writes `end: {mode: finalVersion, share, column, value}`. `share` is the closed share of
+  last versions that `closeLast` took, a share of every entity (the amendment of 2026-11-24). Where the profile
+  tracks the column, its first values and moves are written without the value, which only the ending version holds
+  (section 5); a tracked column with no published first value is carried instead, and a carried column's weight for
+  the value becomes 0. The change into the value is no change reason, so the profile's `reasons` share of that
+  column, which counted it, is written as published. When no last version is closed, or the contract's column or
+  value does not fit, the end is what section 13 wrote, `closeLast` or none, with the reason.
+- **`currentFlag`.** The engine has no construct that sets a value on an entity's last version alone: a window over
+  siblings (EXPR-SPEC-2 section 5) partitions by a to-one relationship, and an entity's natural key is never a
+  relationship's column on a history's emit (section 3), so no window spans exactly an entity's versions; `previous`
+  reads backwards only; and `history:one_current` checks an open end, not a column. `init` writes nothing for it, the column keeps its own draw, and the assumptions say so.
+- **What does not move.** A contract with no `lifecycle` gives the bundle it gave before. Each member the
+  entry does not use is named in the assumptions with its reason, as ADR 0014 requires.
+
+## Amendment of 2026-11-26: `init` tracks a whole-number foreign key published as a category
+
+Section 13 tracked a column only when the emit declared levels for it, or when it was a foreign key into a table
+the profile releases whole, whose keys became its levels. A whole-number foreign key into a table that is not
+released whole declared none, because its category was read only for text columns, so the history carried it.
+
+- **Levels.** A foreign key (one column, to-one) that the history lists, that no rule, dependency or copy sets and
+  no clique draws, whose profile publishes at most 64 whole-number levels (`levelHistogram/1` or `support/1`), and
+  that references a table not released whole, declares those levels with their published weights, as any column
+  drawn over few integer levels does. The history then tracks it by section 5 like any categorical column.
+- **The keys.** The referenced key must hold every level. It is laid out as the span of the levels of all the
+  columns that reference it (the rule that widens an assumed key to its foreign keys), which is one value per row
+  when the levels lie inside as many consecutive values as the table has rows. When they span more, the end levels
+  are dropped one at a time, the one with the smaller published share first and the higher value on a tie, until
+  they fit, provided the dropped levels hold at most 5 % of the rows together; the others take their shares
+  renormalised, the history's first values and moves are written without the dropped levels, the column's
+  `levelHistogram` property is not written (the profile's histogram counts the dropped levels), and the assumptions
+  name the dropped levels and their share. Above 5 %, when the key's own min and max are published, or when the key is a foreign key itself, no level
+  is declared, the column is carried as before, and the ledger says what to change.
+- **What does not move.** A column that is no foreign key, a foreign key whose published levels are not whole
+  numbers, and a table released whole (section 13's own route) give the bundle they gave before.
+
+## Amendment of 2026-11-26: a `within` entry that keeps the start inside the parent's life is `parent.lifetime`
+
+The amendment of 2026-11-24 keeps a history's versions inside the life of its parent with
+`history[].parent.lifetime: true`. The same bound written the general way, a `within` entry on the
+history's emit for the parent relationship and the history's validity start, was refused as two sources
+for the start (`FLX-6203`), though it asks for nothing else.
+
+- **Read as the key.** A `within` entry whose emit is the history's, whose relationship is exactly the
+  history's `parent.relationship` (one hop), whose `date` is the history's validity start and that carries
+  no `offset`, `target`, `exposure` or `lifetime`, is read as `parent.lifetime: true`. It is applied once,
+  through the parent's lifetime, and is no `within` entry afterwards, so nothing else sets the start from
+  it. The reading happens where the bundle is resolved, before any reader of the entries, so the bundle
+  draws the rows the same bundle written with the key draws. A target emit with no `lifetimes` entry is
+  `FLX-3403`, as for the key.
+- **What stays refused.** Every other `within` entry on a column the history sets (another relationship,
+  a path of several hops, the validity end, the activation column, an entry that draws its own offset or
+  target) is `FLX-6203`. The message for a history with no parent also names `parent.lifetime`, with the
+  parent relationship it needs.
+- **What does not move.** A `within` entry on a date the history does not set, and a bundle that declares no
+  such entry, read and hash as before.

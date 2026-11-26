@@ -20,7 +20,13 @@ Simulation's ``history`` entry:
   at equal weights, so it can be tracked; with a key not published, it is carried;
 * ``reasons`` is the histogram of the changes by the column they move, without ``several``;
 * ``end`` is ``closeLast`` with the closed share of ``lastVersion``, when that share is above zero.
-  A profile does not say which value marks an end, so ``finalVersion`` is never written;
+  A profile does not say which value marks an end, so ``finalVersion`` is written only from the
+  contract: the natural entity's ``lifecycle.endMarker`` (:func:`declared_lifecycle`) names the
+  column and the value, and the share of entities that end is the closed share, as under
+  ``closeLast``;
+* ``activation`` is the natural entity's ``lifecycle.activation`` when the expose has that column
+  at the window's type. A ``lifecycle.currentFlag`` is written nowhere: no construct of the
+  engine puts a value on an entity's last version alone, so the column keeps its own draw;
 * ``parent`` is written when the history's emit has a to-one relationship to another expose that the
   history can lay its entities under (:func:`_parent`). A profile counts children per parent in rows,
   which are versions here, so the published shape is kept and its total is the entities' (the
@@ -337,8 +343,10 @@ def _percent(share: Fraction) -> str:
     return f"{float(share * 100):g} %"
 
 
-def _end(node: Any, pointer: Tuple[str, ...], source: HistorySource) -> Optional[Dict[str, Any]]:
-    """The ``end`` of the entry: ``closeLast`` with the closed share, or ``None`` when none ends."""
+def _closed_share(
+    node: Any, pointer: Tuple[str, ...], source: HistorySource
+) -> Optional[Tuple[Fraction, Fraction]]:
+    """The closed weight and the total weight of ``lastVersion``, or ``None`` when none is closed."""
     group = _group(node)
     levels = node.get("levels") if isinstance(node, Mapping) else None
     if group is None or not isinstance(levels, list) or "closed" not in levels:
@@ -354,7 +362,32 @@ def _end(node: Any, pointer: Tuple[str, ...], source: HistorySource) -> Optional
     closed = weights[levels.index("closed")]
     if total <= 0 or closed <= 0:
         return None
+    return closed, total
+
+
+def _end(node: Any, pointer: Tuple[str, ...], source: HistorySource) -> Optional[Dict[str, Any]]:
+    """The ``end`` of the entry: ``closeLast`` with the closed share, or ``None`` when none ends."""
+    found = _closed_share(node, pointer, source)
+    if found is None:
+        return None
+    closed, total = found
     return {"mode": "closeLast", "share": share_texts([closed, total - closed])[0]}
+
+
+def _final_end(marker: Tuple[str, str], closed: Tuple[Fraction, Fraction]) -> Dict[str, Any]:
+    """The ``finalVersion`` end of the contract's end marker, with the profile's closed share.
+
+    The share is a share of every entity (ADR 0017, the amendment of 2026-11-24), as under
+    ``closeLast``, so the closed share of last versions is written as it is.
+    """
+    column, value = marker
+    weight, total = closed
+    return {
+        "mode": "finalVersion",
+        "share": share_texts([weight, total - weight])[0],
+        "column": column,
+        "value": value,
+    }
 
 
 def _versions(
@@ -411,18 +444,29 @@ def _level_weights(
     source: HistorySource,
     *,
     own: Optional[str] = None,
+    ended: Optional[str] = None,
+    dropped: Sequence[str] = (),
 ) -> Optional[Dict[str, Fraction]]:
-    """The weight of each level of a level histogram's group; the level *own* is known to be zero."""
+    """The weight of each level of a level histogram's group; the levels *own* and *ended* are zero.
+
+    *own* is a level known to be zero (a group's own level in a transition row), *ended* the value
+    the history's ending version holds, which no other version takes.
+    """
     levels = node.get("levels")
     cells = count_cells(group, "levelCounts")
     if not isinstance(levels, list) or len(cells) != len(levels):
         return None
-    if own in levels:
-        position = levels.index(own)
-        cells[position] = replace(cells[position], count=0)
+    total = _whole(group.get("k"))
+    for zeroed in (own, ended, *dropped):
+        if zeroed is not None and zeroed in levels:
+            position = levels.index(zeroed)
+            if total is not None:
+                # What the level held leaves the records the withheld cells share.
+                total = max(0, total - (cells[position].count or 0))
+            cells[position] = replace(cells[position], count=0)
     weights, _ = cell_weights(
         source.minimum_cell, cells, pointer, "levelCounts", LEVEL_HISTOGRAM.identifier,
-        total=_whole(group.get("k")),
+        total=total,
     )  # fmt: skip
     return {str(level): weight for level, weight in zip(levels, weights, strict=True)}
 
@@ -443,15 +487,26 @@ def _moves(node: Any) -> bool:
 
 
 def _rows(
-    node: Mapping[str, Any], pointer: Tuple[str, ...], source: HistorySource
+    node: Mapping[str, Any],
+    pointer: Tuple[str, ...],
+    source: HistorySource,
+    ended: Optional[str] = None,
+    dropped: Sequence[str] = (),
 ) -> Dict[str, Dict[str, str]]:
-    """Each level's weights of the levels it moves to, for each group that moves."""
+    """Each level's weights of the levels it moves to, for each group that moves.
+
+    The level *ended*, when given, is no source and no target: only the ending version holds it.
+    """
     rows: Dict[str, Dict[str, str]] = {}
     for group in node.get("groups") or ():
         if not isinstance(group, Mapping) or group.get("status") != _FREE:
             continue
         level = str(group.get("group"))
-        weights = _level_weights(node, group, pointer, source, own=level)
+        if level == ended or level in dropped:
+            continue
+        weights = _level_weights(
+            node, group, pointer, source, own=level, ended=ended, dropped=dropped
+        )
         if weights is None:
             continue
         moved = {
@@ -478,10 +533,18 @@ def _reachable(start: Sequence[str], rows: Mapping[str, Mapping[str, str]]) -> L
 
 
 def _initial(
-    node: Any, pointer: Tuple[str, ...], source: HistorySource
+    node: Any,
+    pointer: Tuple[str, ...],
+    source: HistorySource,
+    ended: Optional[str] = None,
+    dropped: Sequence[str] = (),
 ) -> Optional[Dict[str, Any]]:
     group = _group(node)
-    weights = _level_weights(node, group, pointer, source) if group is not None else None
+    weights = (
+        _level_weights(node, group, pointer, source, ended=ended, dropped=dropped)
+        if group is not None
+        else None
+    )
     if not weights:
         return None
     kept = {level: weight for level, weight in weights.items() if weight > 0}
@@ -507,6 +570,8 @@ def _refusal_of(
     given: FrozenSet[str],
 ) -> Optional[str]:
     """Why a candidate column cannot be tracked in this emit, or ``None``."""
+    if plan is not None and plan.levels_refused is not None and _levels_of(plan) is None:
+        return plan.levels_refused
     if plan is None or _levels_of(plan) is None:
         return "the emit declares no levels for the column, so it is carried"
     return _held_back(name, plan, source, fixed, given)
@@ -541,13 +606,25 @@ def _track_one(
     base: Tuple[str, ...],
     source: HistorySource,
     declared: Tuple[str, ...],
+    ended: Optional[str] = None,
+    dropped: Sequence[str] = (),
 ) -> Dict[str, Any]:
-    """The ``tracked`` item of one column, or :class:`_Skip` with why it is carried."""
+    """The ``tracked`` item of one column, or :class:`_Skip` with why it is carried.
+
+    *ended* is the value the entry's ending version holds in this column, which no tracked change
+    or first value takes; without a published first value the column's own weights would take it,
+    so the column is carried.
+    """
     moves = entry.get("transitions")
     if not isinstance(moves, Mapping) or not _moves(moves):
         raise _Skip("no published change moves the column, so it is carried")
-    rows = _rows(moves, base + ("transitions",), source)
-    initial = _initial(entry.get("initial"), base + ("initial",), source)
+    rows = _rows(moves, base + ("transitions",), source, ended, dropped)
+    initial = _initial(entry.get("initial"), base + ("initial",), source, ended, dropped)
+    if ended is not None and initial is None:
+        raise _Skip(
+            f"no first value is published, and the column's own weights would give {ended!r}, "
+            "which only the ending version holds, so it is carried"
+        )
     named = set(rows) | {target for row in rows.values() for target in row}
     named |= set(initial["levels"]) if initial else set()
     if not named <= set(declared):
@@ -614,6 +691,7 @@ def _track_candidate(
     where: Tuple[str, ...],
     source: HistorySource,
     held: Tuple[FrozenSet[str], FrozenSet[str]],
+    end_marker: Optional[Tuple[str, str]] = None,
 ) -> Union[Dict[str, Any], str]:
     """The ``tracked`` item of candidate column *name*, or the sentence that says why it is carried.
 
@@ -632,7 +710,10 @@ def _track_candidate(
         return reason
     assert plan is not None
     try:
-        item = _track_one(name, entry, where, source, keys or _levels_of(plan) or ())
+        ended = end_marker[1] if end_marker is not None and end_marker[0] == name else None
+        item = _track_one(
+            name, entry, where, source, keys or _levels_of(plan) or (), ended, plan.dropped_levels
+        )
     except _Skip as skipped:
         return str(skipped)
     if keys:
@@ -641,7 +722,11 @@ def _track_candidate(
 
 
 def _track(
-    history: Mapping[str, Any], base: Tuple[str, ...], source: HistorySource, fixed: FrozenSet[str]
+    history: Mapping[str, Any],
+    base: Tuple[str, ...],
+    source: HistorySource,
+    fixed: FrozenSet[str],
+    end_marker: Optional[Tuple[str, str]] = None,
 ) -> _Tracking:
     """Each candidate column that moves, with its ``initial`` and ``transitions``; the others are carried."""
     result = _Tracking()
@@ -655,7 +740,7 @@ def _track(
     )
     for name in sorted(str(key) for key in candidates):
         where = base + ("columns", name)
-        item = _track_candidate(name, candidates[name], where, source, (fixed, given))
+        item = _track_candidate(name, candidates[name], where, source, (fixed, given), end_marker)
         if isinstance(item, str):
             result.unused += [(where + (key,), item) for key in ("initial", "transitions")]
             continue
@@ -1228,6 +1313,167 @@ def _chain_reason(history: Mapping[str, Any], kind: LogicalKind, level: str) -> 
     return f"{declared}; the versions meet by {found} on {_percent(share)} of consecutive versions"
 
 
+_LIFECYCLE_KEYS = ("activation", "endMarker", "currentFlag")
+
+
+def declared_lifecycle(contract_expose: Mapping[str, Any], natural: str) -> Mapping[str, Any]:
+    """The ``lifecycle`` the contract declares on the natural entity keyed by column *natural*, or ``{}``.
+
+    FLUID 0.7.7 declares how the versions of an entity begin and end on the model's natural entity:
+    ``activation`` (a column holding the entity's first start on every version), ``endMarker`` (a
+    column and the value its ending version holds) and ``currentFlag`` (a column and the value its
+    last version holds).
+    """
+    semantics = contract_expose.get("semantics")
+    entities = semantics.get("entities") if isinstance(semantics, Mapping) else None
+    for entity in entities if isinstance(entities, list) else ():
+        if not isinstance(entity, Mapping) or entity.get("type") != "natural":
+            continue
+        expr = entity.get("expr", entity.get("name"))
+        if isinstance(expr, str) and nfc(expr) == natural:
+            lifecycle = entity.get("lifecycle")
+            return lifecycle if isinstance(lifecycle, Mapping) else {}
+    return {}
+
+
+@dataclass
+class _Lifecycle:
+    """What the contract's lifecycle gives the entry, and why each member it declares is not used."""
+
+    activation: Optional[str] = None
+    #: The column and the value (as text) an ending version holds.
+    marker: Optional[Tuple[str, str]] = None
+    notes: List[Tuple[str, str]] = field(default_factory=list)
+
+    def decline(self, member: str, why: str) -> None:
+        self.notes.append(
+            (
+                f"history lifecycle {member}",
+                f"The contract declares lifecycle.{member}, which init does not write: {why}.",
+            )
+        )
+
+
+def _spelled(value: Any) -> str:
+    """A ``columnValue`` as the text of a level."""
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def _column_and_value(raw: Any) -> Optional[Tuple[str, Any]]:
+    column = raw.get("column") if isinstance(raw, Mapping) else None
+    value = raw.get("value") if isinstance(raw, Mapping) else None
+    if (
+        not isinstance(column, str)
+        or not column
+        or isinstance(value, (Mapping, list))
+        or value is None
+    ):
+        return None
+    return nfc(column), value
+
+
+def _activation(
+    source: HistorySource,
+    declared: Mapping[str, Any],
+    kind: LogicalKind,
+    held: FrozenSet[str],
+    lifecycle: _Lifecycle,
+) -> None:
+    """Take ``lifecycle.activation`` when the expose has that column at the window's type."""
+    raw = declared.get("activation")
+    if raw is None:
+        return
+    column = nfc(raw) if isinstance(raw, str) and raw else None
+    found = source.kinds.get(column) if column is not None else None
+    if column is None or found is None:
+        named = f"{column!r}" if column is not None else repr(raw)
+        lifecycle.decline(
+            "activation",
+            f"{named} is not a column of the expose, so the column keeps its own draw "
+            f"(columns: {sorted(source.kinds)})",
+        )
+    elif found is not kind:
+        lifecycle.decline(
+            "activation",
+            f"{column!r} is a {found.value} column and the validity window is {kind.value}: "
+            "it holds the first start, so it must be of the window's type",
+        )
+    elif column in held:
+        lifecycle.decline(
+            "activation",
+            f"{column!r} is a key, a validity column, or set by a rule, a dependency or a copy, "
+            "so the history cannot set it as well",
+        )
+    else:
+        lifecycle.activation = column
+
+
+def _levels_weighted(plan: ColumnPlan) -> Optional[Dict[str, Fraction]]:
+    declared = plan.declaration.get("levels")
+    if not isinstance(declared, Mapping) or not declared:
+        return None
+    try:
+        return {str(name): Fraction(Decimal(str(weight))) for name, weight in declared.items()}
+    except ArithmeticError:
+        return None
+
+
+def _end_marker(
+    source: HistorySource,
+    declared: Mapping[str, Any],
+    held: FrozenSet[str],
+    lifecycle: _Lifecycle,
+) -> None:
+    """Take ``lifecycle.endMarker`` when its column declares the value as a level an ending version can hold."""
+    if "endMarker" not in declared:
+        return
+    read = _column_and_value(declared["endMarker"])
+    if read is None:
+        lifecycle.decline("endMarker", "it is not a column and a literal of the column's type")
+        return
+    column, value = read
+    text = _spelled(value)
+    plan = source.plans.get(column)
+    why: Optional[str] = None
+    if plan is None:
+        why = f"{column!r} is not a column of the expose"
+    elif (levels := _levels_weighted(plan)) is None:
+        why = f"{column!r} declares no levels, so it is not categorical"
+    elif text not in levels:
+        why = f"{text!r} is not a level of {column!r} (levels: {sorted(levels)})"
+    elif sum((w for name, w in levels.items() if name != text), Fraction(0)) <= 0:
+        why = f"{text!r} is the only level of {column!r} with a weight"
+    elif column in held:
+        why = f"{column!r} is a key, a validity column, or set by a rule, a dependency or a copy"
+    elif "nullFraction" in plan.declaration or "given" in plan.declaration:
+        why = f"{column!r} declares a nullFraction or is drawn given another column"
+    elif any(column in _given_names(other) for other in source.plans.values()):
+        why = f"another column is drawn given {column!r}"
+    if why is not None:
+        lifecycle.decline("endMarker", f"{why}, so the end stays closeLast")
+        return
+    lifecycle.marker = (column, text)
+
+
+def _read_lifecycle(
+    source: HistorySource, natural: str, kind: LogicalKind, held: FrozenSet[str]
+) -> _Lifecycle:
+    """The members of the contract's lifecycle that the entry writes, and the reason for each it does not."""
+    declared = declared_lifecycle(source.contract_expose, natural)
+    lifecycle = _Lifecycle()
+    _activation(source, declared, kind, held, lifecycle)
+    _end_marker(source, declared, held, lifecycle)
+    if "currentFlag" in declared:
+        lifecycle.decline(
+            "currentFlag",
+            "no construct of the engine puts a value on the last version of an entity alone, so "
+            "the column keeps its own draw and may hold the value on other versions",
+        )
+    for key in sorted(str(name) for name in declared if name not in _LIFECYCLE_KEYS):
+        lifecycle.decline(key, "the engine does not read it")
+    return lifecycle
+
+
 def _until(source: HistorySource, kind: LogicalKind) -> str:
     _, high = _window_units(source, kind)
     return _spell(kind, high)
@@ -1300,9 +1546,14 @@ def _build(source: HistorySource, written: HistoryWritten) -> None:
         entry["openEnd"] = open_end
     if "chain" in history:
         written.used.append((base + ("chain",), chain_reason))
-    written.exempt = _fixed(source, (start, end, *natural)) | source.set_by_rules
+    held = _fixed(source, (start, end, *natural)) | source.set_by_rules
+    lifecycle = _read_lifecycle(source, natural[0], kind, held)
+    if lifecycle.activation is not None:
+        entry["activation"] = lifecycle.activation
+    written.exempt = held | ({lifecycle.activation} if lifecycle.activation else set())
     _write_parent(source, entry, entities, written)
-    _tracked_and_end(history, base, source, entry, written)
+    _tracked_and_end(history, base, source, entry, written, lifecycle)
+    written.notes += lifecycle.notes
     written.entry = entry
     written.start_column = start
 
@@ -1325,8 +1576,16 @@ def _tracked_and_end(
     source: HistorySource,
     entry: Dict[str, Any],
     written: HistoryWritten,
+    lifecycle: _Lifecycle,
 ) -> None:
-    tracking = _track(history, base, source, written.exempt - source.set_by_rules)
+    closed = _closed_share(history.get("lastVersion"), base + ("lastVersion",), source)
+    marker = lifecycle.marker if closed is not None else None
+    if marker is None and lifecycle.marker is not None:
+        lifecycle.decline(
+            "endMarker",
+            "no entity ends in the profile (no last version is closed), so the entry writes no end",
+        )
+    tracking = _track(history, base, source, written.exempt - source.set_by_rules, marker)
     written.used += tracking.used
     written.unused += tracking.unused
     names = [str(item["column"]) for item in tracking.columns]
@@ -1335,7 +1594,15 @@ def _tracked_and_end(
     _reasons_entry(history, base, source, entry, written, names)
     end = _end(history.get("lastVersion"), base + ("lastVersion",), source)
     pointer = base + ("lastVersion",)
-    if end is not None:
+    if end is not None and marker is not None and closed is not None:
+        entry["end"] = _final_end(marker, closed)
+        written.used.append(
+            (
+                pointer,
+                "the closed share of last versions, as the entry's end share under finalVersion",
+            )
+        )
+    elif end is not None:
         entry["end"] = end
         written.used.append(
             (pointer, "the closed share of last versions, as the entry's end share under closeLast")
