@@ -219,6 +219,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `validate` accepted a date range that holds no value (its low end beyond its high end) when any emit of the bundle
   took its rows from the run, because its relation check builds no plan then; `plan` refused it with `FLX-3403`.
   `validate` reads the range of every drawn emit and refuses it with the same code.
+- `calibrate --fit` seeded each candidate from the unpatched bundle's `H` at the run's `--scale` without the rows a
+  tracked foreign key's floor raised a parent to, so the unpatched bundle read as a candidate drew other rows than a
+  plain run at that scale. The common draws take the floors the run has.
 
 ## 0.12.1 - 2026-11-26
 

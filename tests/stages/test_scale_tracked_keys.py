@@ -41,6 +41,7 @@ from flux_engine.generator import relations
 from flux_engine.stages.apply import load_recorded_plan, plan_scale_floors
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.replay import replay
+from flux_engine.stages.run import run_on_common_draws
 from flux_engine.stages.verify import verify
 
 from ._fleet import (
@@ -294,6 +295,25 @@ def test_a_plan_recorded_without_the_marker_replays_as_it_was_made(
     applied = apply_module.apply(target, run_id=layout.run_id, state_dir=state)
     assert applied.success, applied.stderr
     assert layout.emit_path(HISTORY).read_bytes() == recorded
+
+
+def test_a_run_on_its_own_common_draws_is_the_run_at_the_same_scale(tmp_path: Path) -> None:
+    """``calibrate --fit`` seeds its candidates from the unpatched bundle's ``H`` at the run's scale.
+
+    The floors a scale raised a parent to are part of that scale, so the unpatched bundle read as a
+    candidate draws the rows of the plain run: the same bytes, floored parent included.
+    """
+    target = _catalogue_bundle(tmp_path)
+    plain = run_bundle(target, tmp_path / "plain", scale="0.25")
+    common = run_on_common_draws(
+        target, common_draws_of=target, state_dir=tmp_path / "common", scale="0.25"
+    )
+    assert common.success, common.stderr
+    (run_id,) = (path.name for path in (tmp_path / "common" / "runs").iterdir())
+    again = RunLayout.for_state_dir(tmp_path / "common", run_id)
+    assert again.run_id == plain.run_id
+    for expose_id in (CATALOGUE, HISTORY):
+        assert again.emit_path(expose_id).read_bytes() == plain.emit_path(expose_id).read_bytes()
 
 
 def test_the_marker_moves_the_plan_digest_of_a_plan_that_floored_only(tmp_path: Path) -> None:
