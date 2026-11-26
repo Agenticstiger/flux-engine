@@ -426,47 +426,81 @@ def _two_parents(document: Dict[str, Any], account_first: bool) -> None:
     )
 
 
+@pytest.mark.parametrize("laplace", [False, True])
 @pytest.mark.parametrize("account_first", [False, True])
-def test_two_parents_on_the_same_child_columns_charge_the_larger_in_either_order(
-    account_first: bool,
+def test_two_parents_the_unit_reaches_on_the_same_child_columns_are_refused_in_either_order(
+    account_first: bool, laplace: bool
 ) -> None:
-    """In a table the unit does not reach, a row of a parent moves a group: L1 = 2 m_P and
-    L2^2 = 2 m_P^2. From account, at scale 2, Gaussian noise needs rho 32 / 8 = 4 and Laplace
-    noise (8 / 2)^2 / 2 = 8; from member they would need 1/4 and 1/2."""
+    """In a table the unit does not reach, a row of each parent can move a group: one unit's
+    member row and its four account rows can move five groups, so the two relationships'
+    charges would add. The query is refused, naming both parents, even at a share that would
+    pay for their sum."""
 
-    def share(rho: str, laplace: bool = False) -> Dict[str, Any]:
+    def change(document: Dict[str, Any]) -> None:
+        _two_parents(document, account_first)
+        _statistic(document, 0)["noise"]["privacyLoss"]["rho"] = "50"
+        if laplace:
+            _laplace(document, 0, "2", "50")
+
+    message = _refused(_edit(change))
+    assert "queries[0].unit.by" in message
+    assert "more than one parent the unit reaches (account(id), member(id))" in message
+
+
+@pytest.mark.parametrize("store_first", [False, True])
+def test_a_parent_the_unit_does_not_reach_gives_no_charge_beside_one_that_does(
+    store_first: bool,
+) -> None:
+    """A relationship from ``store``, a table the unit does not reach, on the same child columns
+    moves no group, so the query keeps the member form's charge: at m_P = 1 and scale 2, rho 1/4."""
+
+    def share(rho: str) -> Dict[str, Any]:
         def change(document: Dict[str, Any]) -> None:
-            _two_parents(document, account_first)
+            _unfollow(document)
+            identifier = document["tables"]["member"]["columns"]["id"]
+            document["tables"]["store"] = {"columns": {"id": copy.deepcopy(identifier)}}
+            from_store = {**_link("store", "id", "card_version", "member_id"), "statistics": []}
+            listed = document["relationships"]
+            document["relationships"] = (
+                [from_store, *listed] if store_first else [*listed, from_store]
+            )
             _statistic(document, 0)["noise"]["privacyLoss"]["rho"] = rho
-            if laplace:
-                _laplace(document, 0, "2", rho)
 
         return _edit(change)
 
-    message = _refused(share("0.25"))
-    assert "queries[0]" in message and "32 / (2 scale^2)" in message
-    parse_profile(share("4"))
-    assert "queries[0]" in _refused(share("0.5", laplace=True))
-    assert "queries[0]" in _refused(share("7.99", laplace=True))
-    parse_profile(share("8", laplace=True))
+    assert "queries[0]" in _refused(share("0.125"))
+    parse_profile(share("0.25"))
 
 
+@pytest.mark.parametrize("account_reached", [False, True])
 @pytest.mark.parametrize("account_first", [False, True])
 def test_a_relationship_the_unit_does_not_follow_leaves_the_followed_charge_in_either_order(
-    account_first: bool,
+    account_first: bool, account_reached: bool
 ) -> None:
     """``card_version`` is reached through ``member``, and its ``member_id`` is also the child
-    column of a relationship from ``account``, a table the unit does not reach: a group still
-    leaves whole with its member, m_P = 1, whichever relationship is listed first."""
+    column of a relationship from ``account`` that the unit does not follow (``account`` itself
+    unreached, or reached through ``member``): a group still leaves whole with its member,
+    m_P = 1, whichever relationship is listed first."""
 
     def change(document: Dict[str, Any]) -> None:
         identifier = document["tables"]["member"]["columns"]["id"]
-        document["tables"]["account"] = {"columns": {"id": copy.deepcopy(identifier)}}
+        document["tables"]["account"] = {
+            "columns": {"id": copy.deepcopy(identifier), "member_id": copy.deepcopy(identifier)}
+        }
         from_account = {**_link("account", "id", "card_version", "member_id"), "statistics": []}
         listed = document["relationships"]
         document["relationships"] = (
             [from_account, *listed] if account_first else [*listed, from_account]
         )
+        if account_reached:
+            document["privacy"]["privacyUnit"]["follows"].append(
+                {**_link("member", "id", "account", "member_id"), "maxChildren": 4}
+            )
+            document["relationships"].append(
+                {**_link("member", "id", "account", "member_id"), "statistics": []}
+            )
 
     profile = parse_profile(_edit(change))
     assert profile.queries[MEMBERS].statistics[0].noise.scale == 2  # type: ignore[union-attr]
+    if account_reached:
+        assert profile.accounting.reach("account") == 4  # type: ignore[union-attr]

@@ -40,9 +40,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - Profile format 1-5-0 lets a query's rate carry noise: the query states its `unit` (a table's rows, groups of them by the
   child columns of a relationship, or a history's entities), which gives the charge, and flux-stats reads, checks
   and charges it: groups by a followed relationship are charged `m_P`, groups by a relationship into a table the unit does
-  not reach `2 m_P` in L1 and `2 m_P^2` in the squared L2, since a group can change cell without leaving. With
-  relationships from more than one parent on the same child columns, the largest of their charges is taken, whatever
-  their order. The entity form
+  not reach `2 m_P` in L1 and `2 m_P^2` in the squared L2, since a group can change cell without leaving. A query
+  grouped by child columns that relationships from more than one parent the unit reaches give a charge is refused,
+  since one unit's rows of each can move a group and the charges would add. The entity form
   is refused in the unit's own expose, where one unit is one version, and a query over groups of rows is refused a
   `groupBy`. What the profiler owes (a record matches by reading only rows of its own unit and of tables the unit does not
   reach) is stated and not checked. The P3 checks that a noisy statistic still states data (a `groupBy` on a column
