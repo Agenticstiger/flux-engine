@@ -552,8 +552,18 @@ section 5.
 - **A history that reads a projected emit.** The history carries the projected plan, and the snapshot, events or
   periodic emit projected from it is derived from the history's plan as it then is. Each plan that reads such an emit
   is renewed in turn, and the two steps go on in dependency order until no plan moves.
+- **A history that reads its own projection.** A history can link to the table projected from it, as a
+  self-referencing table does: a version to the current row of another entity of the same history. The projection
+  copies the history's columns, and the plan the history reads of it holds the history as it was derived from, so the
+  plans are compared as projected, not by the history each was derived from. The projection is then derived twice, once
+  to read the right cells of the link and once to copy the cells that were set from them. The history plans when the
+  columns it reads through the link do not depend on the link, and a column that depends on it may be copied. It is
+  refused (`FLX-3403`) when a column it reads through the link is set from a rule that reads the link, or from a
+  column that is, as the rows cannot settle: the message names the history, the link and the column, and says that the
+  column read through the link depends on the link.
 - **Recorded plans.** A new plan with such a link says `projectedReads: "final"`, which the plan digest covers. A plan
   without the key replays the link as it was made, so its rows and its run id keep their bytes. Any other value is
   `FLX-2102`.
 - **What moves.** A bundle with a link into a projected emit that a rule, a `within` entry or a given column reads, a
-  summary over a child that reads one, or a history that reads one. Every other plan keeps its bytes.
+  summary over a child that reads one, or a history that reads one, its own projection included. Every other plan keeps
+  its bytes.

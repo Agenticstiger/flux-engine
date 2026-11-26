@@ -136,6 +136,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - A history that keeps to its parent's lifetime (`parent.lifetime`) with a rule that reads `previous` was refused at
   plan (`FLX-3403`, "whose plan this pass does not read"), though each plans without the other. It plans, and
   `verify` holds the rule on every version (ADR 0017 section 7).
+- A history that links to the table projected from it, as a self-referencing table does, derived from the current row as
+  the table would draw it without its projection, so a column read through the link differed from the row the table
+  writes. It now derives from the rows the table writes when the columns it reads through the link do not depend on
+  the link. A history that reads a column that does is refused at plan (`FLX-3403`), naming the history, the link and
+  the column, as its rows cannot settle (ADR 0027, the amendment of 2026-11-26 about linked rows).
 
 ## 0.12.1 - 2026-11-26
 
