@@ -233,7 +233,7 @@ class ColumnPlan:
     #: No bin of that histogram stands clear of the noise, so the column is drawn evenly within
     #: the run's window once it is known (:func:`draw_in_window`).
     drawn_in_window: bool = False
-    #: A number column read from a noisy histogram: a bin of it inside the noise carries no weight,
+    #: A number column read from a noisy histogram with a bin inside the noise: that bin carries no weight,
     #: and the outer ones do not set where the column's values lie for a rule that reads them
     #: (:func:`weighted_span`). Its declared range stays the histogram's whole grid.
     weights_floored: bool = False
@@ -1813,7 +1813,9 @@ def _floor_by_noise(
         plan.noise_floored = True
         plan.drawn_in_window = not any(clear)
     else:
-        plan.weights_floored = True
+        # Only a column that has a bin read as none is floored: a release whose bins all clear the
+        # floor is read as it was, so its published ends and a rule over it keep their bytes.
+        plan.weights_floored = not all(clear)
     return (
         [weight if keep else Fraction(0) for weight, keep in zip(weights, clear, strict=True)],
         [
