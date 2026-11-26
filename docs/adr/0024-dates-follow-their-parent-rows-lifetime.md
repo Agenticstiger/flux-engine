@@ -573,3 +573,32 @@ plan reads the first and last edges as its range (`declared_bounds`). The wideni
   a bins-only date is not widened past it, and its entry is left out as for a declared range.
 - **What does not move.** A bins-only column no entry asks to widen declares no `range`, and keeps its bytes.
 
+## Amendment of 2026-11-27: the validity window takes a table's lifetime from a pair that lays out one of its dates
+
+A table declares one lifetime. A versioned table whose history `init` does not write (a required end with no declared
+open end, or no history entry in the release) has the window its contract declares, from a start to an end, and every
+version ends on or after its start. The lifetime a published date pair gave a table could lay the window's end out from
+a column outside the window, and the start, drawn on its own, was then ordered with it only by chance.
+
+- **When the window takes the lifetime.** The best pair of the profile is the pair of a window date and a column
+  outside the window, and it either lays out a window date (the end of the lifetime is a date of the window) or leaves
+  the window to its two histograms, which drawn apart would break its order (the check's tolerance where the contract
+  declares one, none otherwise).
+- **What the lifetime is.** The window's own pair where the profile publishes one that holds on enough rows (section 5
+  applies to it as it does to any pair). Otherwise a lifetime from the window's start to its end with the gaps derived
+  from the two published histograms (the amendment of 2026-11-26 to ADR 0017, `author/gap_fit.py`), or drawn evenly
+  from one day to the days of the run's window where either is not published. Each is an assumption in the register, and
+  the end keeps its date past the window where it is required (`endPastWindow: kept`) and is NULL there where it is
+  nullable. For a required end, or a nullable end that keeps its date, no lifetime is written, and the best pair stands,
+  where the end's declared range cannot be shown to hold every end the gaps can draw; a nullable end that is NULL past
+  the run needs no such proof, since no end the gaps draw falls outside the range.
+- **What is unused.** Every pair of the profile that was a candidate for the lifetime, with a reason that names the
+  window. A column the other pair tied to a window date (published on the same day, say) is drawn on its own: a table
+  declares one lifetime, and the order the contract states for its window is the one kept.
+- **A pair the release withholds.** A pair of the window's two dates whose order the release withholds gives no
+  lifetime; with no other pair to take it, the window takes it the same way.
+- **What does not move.** A table whose history is written, a release whose `history` entry names the window (its
+  lifetime was already written from the entry), a window whose two histograms keep its order within the check's
+  tolerance, a table with no declared window, and a window the profile publishes the pair of as the best pair, keep their
+  bytes.
+

@@ -28,6 +28,8 @@ from flux_engine.author.orders import contract_date_orders
 from flux_engine.cli._init import run_init
 from flux_engine.stages.run import run
 
+from ._written import emitted_rows
+
 pytestmark = pytest.mark.integration
 
 NAMESPACE = "com.agentics.flux/1"
@@ -200,15 +202,7 @@ def _block(tmp_path: Path) -> Dict[str, Any]:
 
 
 def _rows(tmp_path: Path, table: str) -> List[List[Any]]:
-    outcome = run(
-        tmp_path / "bundle",
-        state_dir=tmp_path / "state",
-        profile=tmp_path / "c.profile.json",
-        verify=True,
-    )
-    assert outcome.success, outcome.stderr + outcome.stdout
-    (stream,) = (tmp_path / "state").glob(f"runs/*/emits/{table}.ndjson")
-    return [json.loads(line) for line in stream.read_text(encoding="utf-8").splitlines() if line]
+    return emitted_rows(tmp_path, table, "c.profile.json", verify=True)
 
 
 def _notes(result: Any) -> Dict[str, str]:
