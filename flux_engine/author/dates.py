@@ -463,6 +463,58 @@ def _add_shaped(found: List[Tuple[str, str]], emit: str, column: Any) -> None:
         found.append((emit, str(column)))
 
 
+#: Why an exposure that fits is not declared: another expose's is, through a relationship of the same name.
+_EXPOSURE_BEATEN = (
+    "{winner!r} declares the exposure through the relationship of this name to the same parent "
+    "instead: the parent's counts cannot tell two apart, so one declares it, the one whose "
+    "published children are the most, and the lowest expose id when they are equal"
+)
+
+
+@dataclass
+class _Weighed:
+    """What one profile relationship's published exposures came to, before any is declared.
+
+    ``items`` holds the statistic tokens of each exposure with the reason it is not declared, ``""``
+    where it fits. ``fitting`` is the position of the one that fits and ``children`` its published
+    children, which ranks it against another expose's exposure through a relationship of the same
+    name to the same ``parent``.
+    """
+
+    index: int
+    first: Optional[Dict[str, Any]]
+    parent: str
+    items: List[Tuple[List[Tuple[str, ...]], str]] = field(default_factory=list)
+    fitting: Optional[int] = None
+    children: Decimal = Decimal(0)
+
+
+def _exposure_rank(weighed: _Weighed) -> Tuple[Decimal, str]:
+    """The order exposures through one relationship name to one parent are declared in: most children, then lowest emit."""
+    assert weighed.first is not None
+    return (-weighed.children, str(weighed.first["emit"]))
+
+
+def _beaten_exposures(weighed: Sequence[_Weighed]) -> Dict[int, str]:
+    """The relationships whose fitting exposure another's beats, by profile index, with the winner's emit.
+
+    Exposures through relationships of one name to one parent are rivals; the one :func:`_exposure_rank`
+    ranks first is declared and the others are beaten.
+    """
+    rivals: Dict[Tuple[str, str], List[_Weighed]] = {}
+    for each in weighed:
+        if each.fitting is not None and each.first is not None:
+            rivals.setdefault((str(each.first["relationship"]), each.parent), []).append(each)
+    beaten: Dict[int, str] = {}
+    for group in rivals.values():
+        winner = min(group, key=_exposure_rank)
+        assert winner.first is not None
+        beaten.update(
+            {each.index: str(winner.first["emit"]) for each in group if each is not winner}
+        )
+    return beaten
+
+
 class _Declarer:
     """The state of one run of :func:`declare_dates`."""
 
@@ -1442,7 +1494,10 @@ class _Declarer:
 
         An exposure fits when its start and end are the start and end of the parent lifetime the
         bundle writes and both its counts are published, with an active day. A relationship of an
-        emit carries one exposure entry, so a second entry over it never does.
+        emit carries one exposure entry, so a second entry over it never does. The parent's counts
+        cannot tell apart two exposes that declare an exposure through relationships of one name
+        to one parent (``FLX-3403``), so of those only the one :func:`_exposure_rank` ranks first
+        declares it, whichever the profile lists first.
         """
         written: Dict[int, List[Dict[str, Any]]] = {}
         for entry in entries:
@@ -1451,30 +1506,46 @@ class _Declarer:
                 written.setdefault(held[1], []).append(entry)
         relationships = self.profile.get("relationships")
         taken: set[Tuple[str, str]] = set()
-        for index in range(len(relationships) if isinstance(relationships, list) else 0):
-            self._declare_exposure_of(index, written.get(index, []), taken)
+        weighed = [
+            self._weigh_exposure_of(index, written.get(index, []), taken)
+            for index in range(len(relationships) if isinstance(relationships, list) else 0)
+        ]
+        beaten = _beaten_exposures(weighed)
+        for each in weighed:
+            self._declare_weighed(each, beaten.get(each.index))
 
-    def _declare_exposure_of(
+    def _weigh_exposure_of(
         self, index: int, over: Sequence[Dict[str, Any]], taken: set[Tuple[str, str]]
-    ) -> None:
-        """Declare the exposure of one relationship on its first written entry, or say why not."""
+    ) -> "_Weighed":
+        """What each published exposure of one relationship is: declared on its first written entry, or why not."""
         items = self._published_exposures(index)
-        if not items:
-            return
-        base = ("relationships", str(index), "exposure")
-        life = self.lifetimes.get(self.origin[id(over[0])][2]) if over else None
         first = over[0] if over else None
+        parent = self.origin[id(first)][2] if first is not None else ""
+        life = self.lifetimes.get(parent) if first is not None else None
+        weighed = _Weighed(index, first, parent)
         declared = False
         for position, item in enumerate(items):
-            spots = [base + (str(position), key) for key in ("children", "activeDays")]
+            base = ("relationships", str(index), "exposure", str(position))
+            spots: List[Tuple[str, ...]] = [base + (key,) for key in ("children", "activeDays")]
             why = self._exposure_why(item, life, first, declared, taken)
+            if not why and first is not None:
+                taken.add((str(first["emit"]), str(first["relationship"])))
+                declared = True
+                weighed.fitting = position
+                weighed.children = self._published_count(item.get("children")) or Decimal(0)
+            weighed.items.append((spots, why))
+        return weighed
+
+    def _declare_weighed(self, weighed: "_Weighed", beaten_by: Optional[str]) -> None:
+        """Record one relationship's exposures: the declared one used, the rest unused with their reasons."""
+        for position, (spots, why) in enumerate(weighed.items):
+            if beaten_by is not None and position == weighed.fitting:
+                why = _EXPOSURE_BEATEN.format(winner=beaten_by)
             if why:
                 self.unused.extend((tokens, why) for tokens in spots)
                 continue
-            assert first is not None
-            first["exposure"] = True
-            taken.add((str(first["emit"]), str(first["relationship"])))
-            declared = True
+            assert weighed.first is not None
+            weighed.first["exposure"] = True
             how = (
                 "the children per active day of the parent's lifetime, which a run is "
                 "checked against, and the exposure the entry draws its children by"

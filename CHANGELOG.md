@@ -258,6 +258,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   still scores the column. A column the contract makes a key keeps its bins as they stand, since its rows hold
   distinct values. Only bundles written from profiles released with noise change, and only for a number column with a
   bin at or below the floor: an exact histogram, and a release whose bins all clear it, keep their bytes.
+- `init` wrote an exposure on two exposes that reach one parent through relationships of the same name, and `plan`
+  refused the bundle (`FLX-3403`, "at most one declares it"): the parent's counts cannot tell the two apart. It now
+  declares the one whose exposure is published over the most children, the lowest expose id when they are equal,
+  whatever order the profile lists them in. The other's exposure statistics are unused, with a reason that names the
+  expose that declares it, and its `within` entry is written without `exposure` (ADR 0025, the amendment of
+  2026-11-26). An exposure over a relationship whose foreign key `init` leaves drawn is no longer declared either,
+  since the plan refused that bundle too. A bundle with no two such exposures keeps its bytes.
+- `init` wrote a `counts` entry over a relationship whose pick a `sharedColumns` copy sets, and `plan` refused its own
+  bundle (`FLX-3403`, "it is on the counted layout; a copy sets the pick alone"). The contract's copy now stays
+  and the relationship is laid out by no counts entry: its foreign key declares no draw of its own, and every
+  statistic of its profile entry is unused, with a reason that names the relationship the copy goes through. No
+  exposure is declared over that relationship either. A copy of a column that is no other relationship's foreign
+  key, and every bundle without `copies: true`, keep their bytes (ADR 0022, the amendment of 2026-11-26).
 - `fluxsim init` keeps the ends of an order lifetime inside the range their contract declares. A check such as
   `returned_on IS NULL OR returned_on >= borrowed_on` becomes a lifetime whose gap is drawn evenly over the run's
   window, and the generator cuts the gap to the end column's declared range. A column the profile gives no
