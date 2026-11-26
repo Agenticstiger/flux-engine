@@ -13,7 +13,7 @@ closest to the ends' histogram.
 
 * **The model.** Each bin of starts and each bin of gaps spreads its mass evenly over the days it
   covers, and the share of the ends that land in each end bin follows exactly, in
-  :class:`~fractions.Fraction` arithmetic (the same even spread as :mod:`flux_engine.author.date_spread`).
+  :class:`~fractions.Fraction` arithmetic (a continuous spread, where :mod:`flux_engine.author.date_spread` spreads over whole days).
 * **The update.** The gaps' weights start even, which is the assumption ``init`` made before this
   module, and take a fixed number of multiplicative updates, :data:`GAP_FIT_ITERATIONS`. That is
   the Richardson-Lucy update for a mixture of known components, the maximum-likelihood step for the
@@ -162,7 +162,7 @@ def _grid(
     edges = sorted(found)
     if len(edges) - 1 > GAP_FIT_MAX_BINS:
         keep = {
-            edges[round(position * (len(edges) - 1) / GAP_FIT_MAX_BINS)]
+            edges[(2 * position * (len(edges) - 1) + GAP_FIT_MAX_BINS) // (2 * GAP_FIT_MAX_BINS)]
             for position in range(GAP_FIT_MAX_BINS + 1)
         }
         edges = sorted(keep)

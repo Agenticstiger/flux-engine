@@ -417,3 +417,48 @@ def test_timestamp_columns_derive_their_gaps_in_whole_days(tmp_path: Path) -> No
     assert entry["length"]["bins"][0] == "1" and len(entry["length"]["bins"]) > 2
     assert all(text.isdigit() for text in entry["length"]["bins"])
     assert entry["end"] == {"mode": "closeLast", "share": "0.5"}
+
+
+# ---------------------------------------------------------------------------
+# What the history's end holds, and what it declines
+# ---------------------------------------------------------------------------
+
+
+def test_a_nullable_end_with_no_open_end_keeps_the_ends_past_the_window(tmp_path: Path) -> None:
+    from tests.cli.test_init_verifies import _verified
+
+    profile = _profile()
+    same = _levels(["after", "before", "same"], [0, 0, 1000], 1000)
+    profile["tables"]["tier_version"]["datePairs"] = [
+        {"start": "valid_from", "end": "enrolled_on", "order": same, "statistics": []}
+    ]
+    # The contract's end is nullable and declares no open end, so the history is not written.
+    _init(tmp_path, profile, TIERS)
+    assert _namespace(tmp_path).get("history", []) == []
+    assert _lifetime(tmp_path)["endPastWindow"] == "kept"
+    verified = _verified(tmp_path / "bundle", tmp_path / "tiers.profile.json", tmp_path / "state")
+    assert verified.exit_code == 0, verified.stdout + verified.stderr
+
+
+def test_a_published_null_share_of_the_end_lowers_the_closed_share(tmp_path: Path) -> None:
+    profile = _profile()
+    profile["tables"]["tier_version"]["columns"]["valid_to"]["metrics"]["nullCount"] = {
+        "definition": "nullCount/1",
+        "status": "F",
+        "sampleSize": SAMPLE,
+        "disclosure": "acro-default",
+        "value": 100,
+    }
+    _init(tmp_path, profile, ACTIVATED)
+    # Half of the dated ends are closed, and some ends are NULL: fewer than half of all rows.
+    assert _entry(tmp_path)["end"] == {"mode": "closeLast", "share": "0.4743589745"}
+
+
+def test_a_declared_end_range_the_gaps_cannot_fill_declines_the_lifetime(tmp_path: Path) -> None:
+    profile = _profile()
+    column = profile["tables"]["tier_version"]["columns"]["valid_to"]
+    del column["statistics"]
+    column["metrics"]["max"]["value"] = _ms(2025, 10, 1)
+    result = _init(tmp_path, profile, NO_OPEN_END)
+    assert _lifetimes(tmp_path) == []
+    assert "the declared range of 'valid_to' cannot be shown to hold every end" in result.stdout

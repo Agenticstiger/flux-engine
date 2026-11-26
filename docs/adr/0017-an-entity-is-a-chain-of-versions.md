@@ -961,7 +961,7 @@ end before it started.
   closed part of the end's histogram, found by the Richardson-Lucy update from an even start (`author/gap_fit.py`):
   each bin of starts and of gaps spread evenly, a fixed count of updates, whole-number arithmetic so no machine
   reads a different byte. Where the starts or the end are drawn from no histogram, the length is even over the run's
-  window. The `end` share is the share of entities that have not an open version in the end's histogram, read at the
+  window. The `end` share is the share of entities with no open version in the end's histogram, read at the
   horizon; with the end drawn from no histogram, no history is written for the length and the table's start and end are one
   lifetime (below). With no closed part in that histogram, the share of the lifecycle's end marker stands in, and
   with neither no entity ends.

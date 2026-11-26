@@ -720,7 +720,7 @@ class _Declarer:
                 "binWeights": share_texts(weights),
             },
         }
-        if end in held.required and self._max_after_window(expose, end):
+        if self._max_after_window(expose, end):
             entry["endPastWindow"] = "kept"
         if not self._fits(held, start, end, edges[0], edges[-1]):
             self.declined_orders.append(
