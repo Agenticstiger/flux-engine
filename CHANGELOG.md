@@ -417,6 +417,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   entry by it: `from` opens the period that holds the first edge and `through` is the last bin's start, both held
   to the window and the history's `until`. A withheld histogram, or none, writes the entry as before (ADR 0027,
   the amendment of 2026-11-26).
+- `init` wrote a lifetime over a snapshot's two dates although the history sets both, so `verify` failed the
+  lifetime on the entities whose history ended otherwise. A date pair of a snapshot whose columns both come from
+  the history is now unused, for the reason "the history sets both dates"; a pair one of whose dates a rule sets
+  keeps its lifetime (ADR 0024, the amendment of 2026-11-26).
 
 ## 0.11.1 - 2026-11-24
 

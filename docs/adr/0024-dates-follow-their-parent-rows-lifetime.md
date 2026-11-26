@@ -451,3 +451,18 @@ that can keep to a range now do, on kernel `0.2.0`:
   projection (`periodRange`) says where. A recorded plan without the key replays as it was made, with no
   setter held; any other value is `FLX-2102`.
 
+
+## Amendment of 2026-11-26: a snapshot whose history sets both dates takes no lifetime
+
+`init` reads a table's date pair as a lifetime unless a history, or an events or periods entry of one, sets either
+column. A `snapshots` entry was not counted: its emit takes every column it declares from the history's last
+version, so a lifetime over two of them was a second source for both dates. The plan kept it as a check the rows
+could not be drawn to, and `verify` failed it on the share of entities whose history did not end the way the
+profile's durations say.
+
+- **What is dropped.** A date pair of an emit `init` makes the history's snapshot, when both its columns are
+  columns the snapshot takes from the history and no rule of the contract sets either. The pair's statistics are
+  unused, for the reason "the history sets both dates".
+- **What is kept.** A pair one of whose columns a derive, a dependency, a copy or a key sets, and every pair of an
+  emit that is not a snapshot.
+- **What moves.** A bundle `init` writes for such a snapshot. No plan or recorded plan changes.

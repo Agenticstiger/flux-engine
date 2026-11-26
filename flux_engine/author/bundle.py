@@ -4264,6 +4264,21 @@ def _setters(
     return [(name, held[nfc(name)]) for name in expose.kinds if nfc(name) in held]
 
 
+def _carried_by_snapshot(
+    expose: AuthoredExpose, projections: Projected, snapshots: Set[str]
+) -> FrozenSet[str]:
+    """The columns a ``snapshots`` entry takes from the history for *expose*, less those a rule sets."""
+    if expose.expose_id not in snapshots or expose.expose_id not in projections.carried:
+        return frozenset()
+    ruled = (
+        set(expose.derives)
+        | set(expose.dependents)
+        | set(expose.copies)
+        | {plan.name for plan in expose.columns if plan.fixed}
+    )
+    return frozenset(projections.carried[expose.expose_id][1]) - ruled
+
+
 def _dated_columns(
     planned: _Planned,
     window: Tuple[str, str],
@@ -4274,9 +4289,11 @@ def _dated_columns(
     """Declare the dates of the written exposes: ``within`` entries, exposures and ``rates``.
 
     A column a written history, or a projection entry of it, sets is dated by no lifetime and no
-    ``within`` entry.
+    ``within`` entry, and a snapshot whose history sets both dates of a pair takes no lifetime
+    over them.
     """
     history_columns = _history_columns(planned, histories, projections)
+    snapshots = {str(entry["emit"]) for entry in projections.snapshots}
     return declare_dates(
         planned.reading.profile,
         {
@@ -4296,6 +4313,7 @@ def _dated_columns(
                     for name, label in _setters(expose, history_columns)
                     if label != _HISTORY_LABEL
                 },
+                carried=_carried_by_snapshot(expose, projections, snapshots),
             )
             for expose in planned.authored
             if not expose.reference
