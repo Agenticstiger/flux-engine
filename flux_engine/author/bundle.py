@@ -2107,17 +2107,28 @@ _PAIRED_GIVEN = (
 
 
 def _association_tables(
-    planned: Mapping[str, AuthoredExpose], keys: Optional[ContractKeys]
+    planned: Mapping[str, AuthoredExpose], keys: Optional[ContractKeys], slots: Sequence[_Slot]
 ) -> FrozenSet[str]:
-    """The planned tables of two foreign keys and no other column (ADR 0039)."""
+    """The drawn tables of two foreign keys and no other column whose two sides are laid out by counts.
+
+    Only such a table is written as an association (ADR 0039): a table with one side counted keeps
+    what that side's entry holds, and a reference expose is written whole.
+    """
     if keys is None:
         return frozenset()
-    return frozenset(
-        expose_id
-        for expose_id, expose in planned.items()
-        if association_pair(keys.expose(expose_id), [plan.name for plan in expose.columns])
-        is not None
-    )
+    counted = {
+        (slot.child_table, slot.declared.name)
+        for slot in slots
+        if slot.placed is not None and slot.placed.entry is not None
+    }
+    held = set()
+    for expose_id, expose in planned.items():
+        if expose.reference:
+            continue
+        pair = association_pair(keys.expose(expose_id), [plan.name for plan in expose.columns])
+        if pair is not None and all((expose_id, item.name) in counted for item in pair):
+            held.add(expose_id)
+    return frozenset(held)
 
 
 def _settle_given(
@@ -2303,7 +2314,6 @@ def _spread_relationships(
     found_tables = profile.get("tables")
     tables: Mapping[str, Any] = found_tables if isinstance(found_tables, Mapping) else {}
     planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
-    paired = _association_tables(planned, keys)
     slots: List[_Slot] = []
     for index, entry in enumerate(found if isinstance(found, list) else ()):
         if not isinstance(entry, Mapping):
@@ -2339,6 +2349,7 @@ def _spread_relationships(
         slots.append(_Slot(tokens, entry, declared, child_table, placed, []))
     if declare_links is not None:
         declare_links()
+    paired = _association_tables(planned, keys, slots)
     for slot in slots:
         unused += slot.passed
         if slot.placed is None:

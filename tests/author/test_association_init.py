@@ -23,11 +23,13 @@ import copy
 import json
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import pytest
 import yaml
 
+from flux_engine.author import bundle
 from flux_engine.author.association import association_pair
 from flux_engine.seam.keys import ExposeKeys, Relationship
 from flux_engine.stages.run import run
@@ -346,3 +348,41 @@ def test_a_side_s_children_follow_no_column_of_its_parent(tmp_path: Path) -> Non
     assert grouped["state"] == "unused"
     assert "stub by stub" in grouped["note"]
     assert len(_run(tmp_path)) == ROWS
+
+
+def test_a_table_with_one_side_counted_keeps_the_given_of_its_children(tmp_path: Path) -> None:
+    # Without a profile relationship for the clubs the table is no association, so its one counted
+    # side keeps the grouping by segment: nothing pairs its rows with the other side's stubs.
+    profile = _segmented()
+    del profile["relationships"][1]
+    result = init_from_texts(tmp_path, SEGMENTED, profile, NAMES)
+    assert result.exit_code == 0, result.stderr
+    namespace = yaml.safe_load(
+        (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    )["extensions"][NAMESPACE]
+    assert "associations" not in namespace
+    member = next(
+        entry for entry in namespace["counts"] if entry["relationship"] == "membership_to_member"
+    )
+    assert member["given"] == "segment" and "childrenGiven" in member
+    states = {entry["pointer"]: entry for entry in result.artifacts["ledger"]["statistics"]}
+    assert states["/relationships/0/statistics/2"]["state"] == "used"
+
+
+def test_a_reference_table_is_never_an_association_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A reference expose is written whole, with no counts entry and no association, whatever its
+    # shape: the table of two keys that is drawn is the only one named.
+    pair = (SimpleNamespace(name="a"), SimpleNamespace(name="b"))
+    monkeypatch.setattr(bundle, "association_pair", lambda keys, columns: pair)
+    keys = SimpleNamespace(expose=lambda expose_id: expose_id)
+    planned = {
+        "whole": SimpleNamespace(reference=True, columns=[]),
+        "drawn": SimpleNamespace(reference=False, columns=[]),
+    }
+    slots = [
+        SimpleNamespace(child_table=table, declared=side, placed=SimpleNamespace(entry={}))
+        for table in planned
+        for side in pair
+    ]
+    held = bundle._association_tables(planned, keys, slots)  # type: ignore[arg-type]
+    assert held == frozenset({"drawn"})
