@@ -1201,6 +1201,21 @@ def _every_bin_published(groups: Sequence[Any], grouping: BinGrouping, where: st
         )
 
 
+def _require_form(
+    version: str, forms: Mapping[str, str], named: bool, form: str, where: str
+) -> None:
+    """Refuse (``FLX-5036``) a form of format *version* (one of *forms*) in a document that names
+    an earlier format (*named* is false)."""
+    if form not in forms:
+        raise KeyError(f"{form!r} is no form of format {version}")
+    if not named:
+        raise refuse(
+            where,
+            f"{forms[form]} is a form of format {version}, and this document names an earlier "
+            "format",
+        )
+
+
 class _Reader:
     """One profile's reading state: the rules a statistic may name."""
 
@@ -1241,25 +1256,11 @@ class _Reader:
 
     def require_1_4_0(self, form: str, where: str) -> None:
         """Refuse (``FLX-5036``) a form of format 1-4-0 in a document that names an earlier one."""
-        if form not in _FORMS_OF_1_4_0:
-            raise KeyError(f"{form!r} is no form of format 1-4-0")
-        if not self.from_1_4:
-            raise refuse(
-                where,
-                f"{_FORMS_OF_1_4_0[form]} is a form of format 1-4-0, and this document names an "
-                "earlier format",
-            )
+        _require_form("1-4-0", _FORMS_OF_1_4_0, self.from_1_4, form, where)
 
     def require_1_5_0(self, form: str, where: str) -> None:
         """Refuse (``FLX-5036``) a form of format 1-5-0 in a document that names an earlier one."""
-        if form not in _FORMS_OF_1_5_0:
-            raise KeyError(f"{form!r} is no form of format 1-5-0")
-        if not self.from_1_5:
-            raise refuse(
-                where,
-                f"{_FORMS_OF_1_5_0[form]} is a form of format 1-5-0, and this document names an "
-                "earlier format",
-            )
+        _require_form("1-5-0", _FORMS_OF_1_5_0, self.from_1_5, form, where)
 
     # -- statistics ----------------------------------------------------------
 

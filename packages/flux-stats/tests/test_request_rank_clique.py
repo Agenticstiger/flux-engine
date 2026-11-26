@@ -249,5 +249,5 @@ def test_the_list_of_keys_that_need_1_2_0_is_the_one_the_reader_and_the_writer_u
         ("relationship", "groupBy"),
         ("relationship", "linked"),
     ]
-    assert module._keys_of_1_2_0("table") == ("rankCorrelations", "cliqueColumns")
-    assert module._keys_of_1_2_0("relationship") == ("groupBy", "linked")
+    assert module._keys_of(module._FORMAT_1_2_0, "table") == ("rankCorrelations", "cliqueColumns")
+    assert module._keys_of(module._FORMAT_1_2_0, "relationship") == ("groupBy", "linked")

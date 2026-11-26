@@ -165,46 +165,69 @@ def _estimate(
         return
     key = _COUNT_KEYS[statistic["definition"]]
     noise = statistic.pop("noise")
-    records = None
-    clear = None
+    mechanism, scale = str(noise["mechanism"]), Fraction(noise["scale"])
     cells = sum(len(group.get("noisyCounts", ())) for group in statistic["groups"])
-    floor = noise_floor(str(noise["mechanism"]), Fraction(noise["scale"]), max(cells, 1))
-    standing = False
-    for group in statistic["groups"]:
-        noisy = [Fraction(text) for text in group.pop("noisyCounts")]
-        estimate = point_estimate(noisy)
-        counts = list(estimate.counts)
-        if floored:
-            counts = [
-                count if value > floor else 0 for count, value in zip(counts, noisy, strict=True)
-            ]
-            standing = standing or any(value > floor for value in noisy)
-        group["k"] = sum(counts) if floored else estimate.records
-        group[key] = counts
-        records = group["k"] if not grouped(statistic) else None
-        if not grouped(statistic) and (
-            statistic["definition"] == MARGINAL_HISTOGRAM.identifier
-            or statistic["definition"] == NULL_COUNT_2
-        ):
-            single = noise_floor(str(noise["mechanism"]), Fraction(noise["scale"]), len(noisy))
-            clear = tuple(value > single for value in noisy)
+    floor = noise_floor(mechanism, scale, max(cells, 1))
+    records, clear, standing = _estimate_groups(
+        statistic, key, mechanism, scale, floor if floored else None
+    )
     if floored and not standing:
-        for group in statistic["groups"]:
-            group.pop("k", None)
-            group.pop(key, None)
-            group["status"] = "C"
+        _withhold(statistic, key)
         records = None
-    variance = variance_of(str(noise["mechanism"]), Fraction(noise["scale"]))
     notes[tokens] = NoisyNote(
         tokens=tokens,
-        mechanism=str(noise["mechanism"]),
+        mechanism=mechanism,
         scale=str(noise["scale"]),
-        variance=render_exact(variance),
+        variance=render_exact(variance_of(mechanism, scale)),
         definition=str(statistic["definition"]),
         records=records,
         clear=clear,
         floor=floor if statistic["definition"] == NULL_COUNT_2 else None,
     )
+
+
+def _estimate_groups(
+    statistic: Dict[str, Any],
+    key: str,
+    mechanism: str,
+    scale: Fraction,
+    floor: Optional[Fraction],
+) -> Tuple[Optional[int], Optional[Tuple[bool, ...]], bool]:
+    """Write each group's point estimate in place; with a *floor*, a cell inside it counts 0.
+
+    Returns the records of an ungrouped statistic, the cells of an ungrouped histogram or null
+    count that stand clear of the noise over its own cells, and whether any cell stands clear of
+    *floor*.
+    """
+    records: Optional[int] = None
+    clear: Optional[Tuple[bool, ...]] = None
+    standing = False
+    whole = not grouped(statistic)
+    per_cell = whole and statistic["definition"] in (MARGINAL_HISTOGRAM.identifier, NULL_COUNT_2)
+    for group in statistic["groups"]:
+        noisy = [Fraction(text) for text in group.pop("noisyCounts")]
+        estimate = point_estimate(noisy)
+        counts = list(estimate.counts)
+        if floor is not None:
+            counts = [
+                count if value > floor else 0 for count, value in zip(counts, noisy, strict=True)
+            ]
+            standing = standing or any(value > floor for value in noisy)
+        group["k"] = sum(counts) if floor is not None else estimate.records
+        group[key] = counts
+        records = group["k"] if whole else None
+        if per_cell:
+            single = noise_floor(mechanism, scale, len(noisy))
+            clear = tuple(value > single for value in noisy)
+    return records, clear, standing
+
+
+def _withhold(statistic: Dict[str, Any], key: str) -> None:
+    """Read every group of *statistic* as withheld: no cell of it stands clear of the noise."""
+    for group in statistic["groups"]:
+        group.pop("k", None)
+        group.pop(key, None)
+        group["status"] = "C"
 
 
 def _has_noise(profile: Mapping[str, Any]) -> bool:

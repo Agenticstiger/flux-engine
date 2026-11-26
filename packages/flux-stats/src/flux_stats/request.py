@@ -27,7 +27,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
 from flux_stats.column_metrics import CATEGORY, DOMAINS, NUMBER, TIMESTAMP
 from flux_stats.errors import FluxError, register
@@ -456,11 +456,11 @@ def _table(
             if additions
             else ("rowCount", "workload")
         )
-        + _keys_of_1_2_0("table")
-        + _keys_of_1_3_0("table"),
+        + _keys_of(_FORMAT_1_2_0, "table")
+        + _keys_of(_FORMAT_1_3_0, "table"),
     )
-    _needs_1_2_0(from_1_2_0, raw, where, "table")
-    _needs_1_3_0(from_1_3_0, raw, where, "table")
+    _needs(_FORMAT_1_2_0, from_1_2_0, raw, where, "table")
+    _needs(_FORMAT_1_3_0, from_1_3_0, raw, where, "table")
     row_count = raw.get("rowCount", False)
     if not isinstance(row_count, bool):
         raise _refuse(f"{where}.rowCount", "is true or false")
@@ -576,9 +576,9 @@ def _relationship(
         value,
         where,
         required=("parent", "child", "statistics"),
-        optional=(("dates", "exposure") if dated else ()) + _keys_of_1_2_0("relationship"),
+        optional=(("dates", "exposure") if dated else ()) + _keys_of(_FORMAT_1_2_0, "relationship"),
     )
-    _needs_1_2_0(from_1_2_0, raw, where, "relationship")
+    _needs(_FORMAT_1_2_0, from_1_2_0, raw, where, "relationship")
     parent = _end(raw["parent"], f"{where}.parent", tables)
     child = _end(raw["child"], f"{where}.child", tables)
     if len(parent.columns) != len(child.columns):
@@ -1032,7 +1032,7 @@ class _Addition:
 
 
 #: Every key that only format ``1-2-0`` holds. A document that names an earlier format and holds
-#: one is refused (:func:`_needs_1_2_0`), the keys a section may carry (:func:`_keys_of_1_2_0`) and
+#: one is refused (:func:`_needs`), the keys a section may carry (:func:`_keys_of`) and
 #: the format a request is written in (:func:`_schema_url_of`) come from this list, and a later
 #: addition of the format is one more entry here and one place that reads it.
 _ADDITIONS_OF_1_2_0: Tuple[_Addition, ...] = (
@@ -1063,25 +1063,40 @@ _READ_FORMATS: Tuple[str, ...] = (
 )
 
 
-def _keys_of_1_3_0(section: str) -> Tuple[str, ...]:
-    """The keys a *section* may carry in format 1-3-0 and not before (a table's ``history``)."""
+class _Format(NamedTuple):
+    """A request format that added keys: its version, its ``_schemaURL`` and its additions."""
+
+    version: str
+    schema_url: str
+    additions: Tuple[_Addition, ...]
+
+
+_FORMAT_1_2_0 = _Format("1-2-0", REQUEST_SCHEMA_URL_1_2_0, _ADDITIONS_OF_1_2_0)
+_FORMAT_1_3_0 = _Format("1-3-0", REQUEST_SCHEMA_URL_1_3_0, _ADDITIONS_OF_1_3_0)
+
+
+def _keys_of(added: _Format, section: str) -> Tuple[str, ...]:
+    """The keys a *section* may carry in the format *added* and not before.
+
+    A column's ``nullCount/2``, listed under ``columns`` for format 1-3-0, is a statistic rather
+    than a key, and :func:`_statistics` reads it.
+    """
     return tuple(
-        item.key
-        for item in _ADDITIONS_OF_1_3_0
-        if item.section == section and item.key != "columns"
+        item.key for item in added.additions if item.section == section and item.key != "columns"
     )
 
 
-def _needs_1_3_0(from_1_3_0: bool, raw: Mapping[str, Any], where: str, section: str) -> None:
-    """Refuse (``FLX-5038``) an addition of format 1-3-0 in a document that names an earlier format."""
-    if from_1_3_0:
+def _needs(added: _Format, named: bool, raw: Mapping[str, Any], where: str, section: str) -> None:
+    """Refuse (``FLX-5038``) an addition of the format *added* in a document that names an
+    earlier format (*named* is false)."""
+    if named:
         return
-    for key in _keys_of_1_3_0(section):
+    for key in _keys_of(added, section):
         if key in raw:
             raise _refuse(
                 f"{where}.{key}",
-                "is an addition of format 1-3-0, and this document names an earlier format: name "
-                f"{REQUEST_SCHEMA_URL_1_3_0} in _schemaURL",
+                f"is an addition of format {added.version}, and this document names an earlier "
+                f"format: name {added.schema_url} in _schemaURL",
             )
 
 
@@ -1101,27 +1116,9 @@ def _history(value: Any, where: str, columns: Sequence[RequestColumn]) -> Reques
     return RequestHistory(columns=names)
 
 
-def _keys_of_1_2_0(section: str) -> Tuple[str, ...]:
-    """The keys a *section* may carry in format 1-2-0 and not before."""
-    return tuple(item.key for item in _ADDITIONS_OF_1_2_0 if item.section == section)
-
-
 def _entries_of(request: ProfileRequest, section: str) -> Sequence[Any]:
     """The parsed entries of a *section* of the request, in document order."""
     return request.tables if section == "table" else request.relationships
-
-
-def _needs_1_2_0(from_1_2_0: bool, raw: Mapping[str, Any], where: str, section: str) -> None:
-    """Refuse (``FLX-5038``) an addition of format 1-2-0 in a document that names an earlier format."""
-    if from_1_2_0:
-        return
-    for key in _keys_of_1_2_0(section):
-        if key in raw:
-            raise _refuse(
-                f"{where}.{key}",
-                "is an addition of format 1-2-0, and this document names an earlier format: name "
-                f"{REQUEST_SCHEMA_URL_1_2_0} in _schemaURL",
-            )
 
 
 def _rank_correlations(

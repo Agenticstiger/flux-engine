@@ -520,28 +520,19 @@ def _emit_rows(
     return rows, assumed(reason), reason
 
 
-def _noise_floors(
-    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str
-) -> Tuple[Tuple[int, Fraction], ...]:
-    """The noise floor of each noisy null count of *column* (profile format 1-5-0), by statistic."""
+def _noise_of(
+    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str, attribute: str
+) -> Tuple[Tuple[int, Any], ...]:
+    """One *attribute* of the noise note of each noisy statistic of *column*, by statistic.
+
+    ``clear`` is the cells of a noisy histogram that stand clear of the noise, and ``floor`` the
+    noise floor of a noisy null count (profile format 1-5-0).
+    """
     prefix = ("tables", expose_id, "columns", column, "statistics")
     found = [
-        (int(tokens[-1]), note.floor)
+        (int(tokens[-1]), getattr(note, attribute))
         for tokens, note in (noisy or {}).items()
-        if tokens[:-1] == prefix and getattr(note, "floor", None) is not None
-    ]
-    return tuple(sorted(found))
-
-
-def _noise_clear(
-    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str
-) -> Tuple[Tuple[int, Tuple[bool, ...]], ...]:
-    """The cells of each noisy histogram of *column* that stand clear of the noise, by statistic."""
-    prefix = ("tables", expose_id, "columns", column, "statistics")
-    found = [
-        (int(tokens[-1]), note.clear)
-        for tokens, note in (noisy or {}).items()
-        if tokens[:-1] == prefix and getattr(note, "clear", None) is not None
+        if tokens[:-1] == prefix and getattr(note, attribute, None) is not None
     ]
     return tuple(sorted(found))
 
@@ -601,8 +592,8 @@ def _plan_expose(
             rounding_base=rounding_base,
             range_rule=column_range(schema[position]),
             asked_levels=_levels_asked(asked, column.name),
-            noise_clear=_noise_clear(noisy, expose_id, column.name),
-            noise_floors=_noise_floors(noisy, expose_id, column.name),
+            noise_clear=_noise_of(noisy, expose_id, column.name, "clear"),
+            noise_floors=_noise_of(noisy, expose_id, column.name, "floor"),
             open_end=_open_end_ms(expose, column.name) if "history" in table else None,
         )
         if _draws_int_levels(context, grouping, set_by_rules):
