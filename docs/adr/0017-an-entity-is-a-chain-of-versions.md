@@ -698,12 +698,14 @@ scale 0.25 with the plan still exiting 0.
   the check nor the floor, as a plan written before them was made, so its rows keep their bytes. Any other value is
   `FLX-2102`. A fresh plan always runs the check and the floor.
 - **What is not refused.** A foreign key that is not tracked: a `declared` pick takes the nearest key the parent
-  holds (`KeyGrid.row_near`), so its link holds at any scale. A parent whose key is an identifier or a several-column
-  key, and a relationship of several columns, are not asked.
+  holds (`KeyGrid.row_near`), so its link holds at any scale. A parent whose key is a several-column key, and a
+  relationship of several columns, are not asked. A tracked foreign key into a parent whose key is an identifier
+  is asked as the amendment of 2026-11-26 on identifier keys says.
 - **What moves.** Nothing for a bundle whose levels are all keys of the parent, at any scale, and nothing for a
   bundle with no tracked foreign key. A bundle whose levels are keys of the parent at scale 1 and not at a scale
   below 1 plans with the parent kept, where it ran before with a link below 100 %. A bundle with a level that is no
-  key of the parent at any row count is refused at plan at every scale.
+  key of the parent at any row count is refused at plan at every scale. A parent whose key is an identifier moves as
+  that later amendment says.
 
 ## Amendment of 2026-11-25: dates outside the window read the draw
 
@@ -917,3 +919,29 @@ stretched to the year 9999, since only a column whose every value lay in that ye
   long-window note names it. An `openEnd` declared as `null` is a declaration, so such an end keeps its span.
 - **What does not move.** A bundle with no such column, and one that declares the `openEnd`, read and hash as before.
 
+## Amendment of 2026-11-26: a tracked foreign key into a parent keyed by an identifier
+
+Section 6 asks a tracked foreign key's levels of the parent's keys, and the amendment of 2026-11-25 left a
+parent whose key is an identifier out. An identifier key is a keyed permutation of the row index over every
+identifier of its `identifierLength` hex characters. A parent with fewer rows than there are identifiers holds
+a few of them, scattered by the key, so no level a contract declares is one of its keys: a tracked foreign key
+writes its level as the cell, and every cell of the child then named a key the parent lacked (the link scored
+far below 100 % at `verify`).
+
+- **The rule.** A tracked foreign key into an identifier parent is refused (`FLX-3403`) unless the parent holds
+  every identifier of its length: its rows in this plan equal `16 ** identifierLength`, and it is not a UUID.
+  Then it holds every lower case hex string of that length, and each level is a key when it is exactly that many
+  characters of `0-9a-f`. A level of another form (not hex, upper case, shorter or longer) is refused, and the
+  message names it.
+- **Rows in the plan.** The count is the parent's rows at the plan's `--scale`, so a parent that fills the space
+  at scale 1 and is cut below 1 holds a part of it and is refused, as a sparse parent is. The floor of the
+  amendment of 2026-11-25 raises only a parent whose key is one whole-number column, and does not raise this one.
+- **What is not asked.** A partial space is not tested level by level: whether a given identifier is among the
+  first `rows` permuted values needs the inverse of the permutation, which the key does not carry, and a loop
+  over the space is unbounded. A parent that holds fewer identifiers than its length allows is refused for every
+  level, which is the answer a plan can give without drawing the parent.
+- **What moves.** A bundle with a tracked foreign key into a dense identifier parent, which a plan refused
+  before, plans and verifies at 100 %. A bundle whose identifier parent is sparse, or cut by `--scale`, is
+  refused as it was. No row changes for a plan accepted before: a plan
+  with such a link was either refused or accepted with a broken link, and a broken one is refused now. A foreign
+  key that is not tracked takes a key the parent holds, as before.

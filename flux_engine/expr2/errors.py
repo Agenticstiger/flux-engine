@@ -249,7 +249,8 @@ FLX_6208 = register(
     "rules that determine columns in a cycle",
     "The determined columns form a graph through what each rule reads (its `expr`, `when`, "
     "`k` and `x`, or a dependency's `from` columns). A column that is read by a rule that determines it, directly or through "
-    "other rules, has no order in which to generate. The message names the rules.",
+    "other rules, has no order in which to generate; a dependency that names one column on both sides "
+    "is the shortest case. The message names the rules.",
 )
 FLX_6209 = register(
     "FLX-6209",
