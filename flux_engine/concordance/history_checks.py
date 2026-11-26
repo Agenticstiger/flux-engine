@@ -17,6 +17,12 @@ run, and none reads a draw: the rows are read as written and nothing is regenera
   its last version carries ``end.value`` when the entry names an ``end.column``.
 * ``history:ended_is_last``: with an ``end.column`` and ``end.value``, the value appears only on an
   entity's last version.
+* ``history:open_end``: with an ``openEnd``, no version's end is NULL and the sentinel appears on no
+  version but an entity's last, so an end column that mixes NULL and the sentinel fails, as a closed
+  version that holds the sentinel does (ADR 0017, the amendment of 2026-11-25). Without one, an end
+  in the year 9999 or later, which a contract's range reads as an open end
+  (:data:`~flux_engine.seam.range_rules.WINDOW_END_LIMIT_MS`), is a sentinel the entry does not
+  declare: the line is present only when some end is one, and an entity with one fails it.
 
 :class:`AsOfRows` is the same history read the other way: the rows a rule reads through an as-of
 link (ADR 0017 section 8), each reading the version of the linked entity valid on its own date.
@@ -41,6 +47,7 @@ __all__ = [
     "HISTORY_RULE_IDS",
     "NO_GAPS_NO_OVERLAP",
     "ONE_CURRENT",
+    "OPEN_END",
     "WITHIN_PARENT",
     "chain_ended",
     "entity_chains",
@@ -54,7 +61,10 @@ NO_GAPS_NO_OVERLAP = "history:no_gaps_no_overlap"
 ONE_CURRENT = "history:one_current"
 ENDED_IS_LAST = "history:ended_is_last"
 WITHIN_PARENT = "history:within_parent"
-HISTORY_RULE_IDS = (NO_GAPS_NO_OVERLAP, ONE_CURRENT, ENDED_IS_LAST, WITHIN_PARENT)
+OPEN_END = "history:open_end"
+HISTORY_RULE_IDS = (NO_GAPS_NO_OVERLAP, ONE_CURRENT, ENDED_IS_LAST, WITHIN_PARENT, OPEN_END)
+#: The first year a contract's range reads as an open end (``seam.range_rules.WINDOW_END_LIMIT_MS``).
+OPEN_YEAR = 9999
 
 _Row = Mapping[str, Any]
 
@@ -156,6 +166,41 @@ def _current_holds(
     return entry.end.column is None or _carries(ordered[-1], entry)
 
 
+def _far(end: Any) -> bool:
+    """Whether *end* is in the year 9999 or later: an open end, as a contract's range reads one."""
+    return end is not None and getattr(end, "year", 0) >= OPEN_YEAR
+
+
+def _open_end_holds(ordered: Sequence[_Row], end: str, sentinel: Any) -> bool:
+    """Whether one entity writes its open end as the entry declares it.
+
+    With a sentinel no end is NULL and only the last version carries it; without one no end is in
+    the year 9999 or later. dbt's ``dbt_valid_to_current`` is the same choice: one spelling of the
+    open end per table, NULL or the declared day.
+    """
+    ends = [row.get(end) for row in ordered]
+    if sentinel is None:
+        return not any(_far(stop) for stop in ends)
+    if any(stop is None for stop in ends):
+        return False
+    return all(stop != sentinel for stop in ends[:-1])
+
+
+def _open_end_line(
+    entry: HistoryEntry, ordered: Mapping[Any, Sequence[_Row]], versions: Versions, sentinel: Any
+) -> Optional[Tuple[str, Holds]]:
+    """``history:open_end`` on the entities, or ``None`` where the line has nothing to check."""
+    end = versions.end
+    if end is None:
+        return None
+    if entry.open_end is None and not any(
+        _far(row.get(end)) for chain in ordered.values() for row in chain
+    ):
+        return None
+    held = sum(1 for chain in ordered.values() if _open_end_holds(chain, end, sentinel))
+    return OPEN_END, Holds(held, len(ordered))
+
+
 def _ended_holds(ordered: Sequence[_Row], entry: HistoryEntry) -> bool:
     """Whether the end value appears on no version but the last."""
     return not any(_carries(row, entry) for row in ordered[:-1])
@@ -214,7 +259,9 @@ def history_shares(
 
     *rows* are the emit's stored rows (dates and instants as values, as the evaluator reads them) and
     *versions* the emit's natural entity and validity window as the contract declares them. The
-    third line is present only when the entry names both ``end.column`` and ``end.value``.
+    third line is present only when the entry names both ``end.column`` and ``end.value``, and
+    ``history:open_end`` only when the entry declares an ``openEnd`` or some end is in the year 9999
+    or later.
     """
     grouped = _entities(rows, versions)
     sentinel = open_sentinel(entry, rows, versions)
@@ -230,6 +277,9 @@ def history_shares(
     if entry.end is not None and entry.end.column is not None and entry.end.value is not None:
         held = sum(1 for chain in ordered.values() if _ended_holds(chain, entry))
         lines.append((ENDED_IS_LAST, Holds(held, total)))
+    opened = _open_end_line(entry, ordered, versions, sentinel)
+    if opened is not None:
+        lines.append(opened)
     return tuple(lines)
 
 

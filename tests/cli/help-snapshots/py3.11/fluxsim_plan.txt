@@ -1,7 +1,8 @@
 usage: fluxsim plan [-h] [--simulation-id SIMULATION_ID] [--zone ZONE]
-                    [--kernel VERSION] [--no-stage] [--allow-generator NAME]
-                    [--scale F] [--timings] [--jobs N] [--strict-coverage]
-                    [--profile PATH] [--state-dir STATE_DIR] [-j]
+                    [--kernel VERSION] [--no-stage] [--max-rows N]
+                    [--allow-generator NAME] [--scale F] [--timings]
+                    [--jobs N] [--strict-coverage] [--profile PATH]
+                    [--state-dir STATE_DIR] [-j]
                     bundle
 
 Execute the whole pipeline once, in memory, and write down what it saw:
@@ -52,6 +53,11 @@ options:
                         before it staged them (refused for a bundle that
                         declares generator plugins, whose bytes are stored and
                         never generated again)
+  --max-rows N          the rows each periodic emit may be estimated to derive
+                        when the plan is made, checked before its periods are
+                        laid out (default 50000000, at most 10000000000). A
+                        plan above it is refused (FLX-3403); plan.json records
+                        another budget as maxRows
   --allow-generator NAME
                         allow the generator plugin of that entry-point name to
                         be imported and run, when the plan generates the rows;

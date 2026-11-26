@@ -9,6 +9,11 @@ history's columns, and a rule or a relationship sets its columns. Such a column 
 own statistics, so the cut leaves it alone: the plan keeps the bytes of the bundle without the range,
 a range that misses its statistics is no ``FLX-3403``, ``plan`` says once what sets the column, and
 ``verify`` counts the rows outside the range.
+
+A history's validity columns, the columns that copy a version's start or end, and a periods entry's
+period column keep to their range since the amendment of 2026-11-25
+(``tests/stages/test_declared_range_held.py``); here they are run as a recorded plan without
+``rangeSetters`` replays them, with the setters not held.
 """
 
 from __future__ import annotations
@@ -16,14 +21,14 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pytest
 import yaml
 
 from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.stages import pipeline
-from flux_engine.stages._range_setters import range_setter_notes
+from flux_engine.stages._range_setters import SetBy, range_setter_notes
 from flux_engine.stages.apply import load_recorded_plan
 from flux_engine.stages.layout import RunLayout
 
@@ -31,6 +36,12 @@ from ._fleet import CONTRACT, apply_module, bundle, expose, plan_module, repin
 from .test_declared_range_run import verify_module
 
 pytestmark = pytest.mark.integration
+
+
+def _unheld(options: Dict[str, Any]) -> pipeline.PlanEra:
+    """The era *options* name, its setters not held to ranges: a plan made before they were."""
+    return replace(options.get("era", pipeline.PlanEra()), hold_ranges=False)
+
 
 RANGE = "between '2024-01-01' and '2024-12-31'"
 MISSING = "between '2012-01-01' and '2012-12-31'"
@@ -43,6 +54,15 @@ SET_ELSEWHERE: List[Tuple[str, str, str]] = [
     ("vehicle_month", "month", "its periods entry"),
     ("vehicle_current", "commissioned_on", "the history it is projected from"),
 ]
+
+
+@pytest.fixture(autouse=True)
+def unheld(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every run here as a plan made before the setters kept to their ranges replays."""
+    execute = pipeline.execute
+    monkeypatch.setattr(
+        pipeline, "execute", lambda *a, **k: execute(*a, **{**k, "era": _unheld(k)})
+    )
 
 
 def _ranged(tmp_path: Path, expose_id: str, column: str, rule: str, name: str = "ranged") -> Path:
@@ -131,8 +151,10 @@ def test_a_column_a_rule_or_a_relationship_sets_is_noted(tmp_path: Path) -> None
     rule_plan = replace(
         outcome.plan, rules=SimpleNamespace(covers_every_row=frozenset({"opened_on"}))
     )
-    notes = range_setter_notes(outcome.resolved, rule_plan, emits, frozenset())
+    notes = range_setter_notes(outcome.resolved, rule_plan, emits, SetBy())
     assert len(notes) == 1 and "a rule of the emit sets the column" in notes[0]
-    notes = range_setter_notes(outcome.resolved, outcome.plan, emits, frozenset({"opened_on"}))
+    notes = range_setter_notes(
+        outcome.resolved, outcome.plan, emits, SetBy(frozenset({"opened_on"}))
+    )
     assert len(notes) == 1 and "its key or relationship sets the column" in notes[0]
-    assert range_setter_notes(outcome.resolved, outcome.plan, emits, frozenset()) == ()
+    assert range_setter_notes(outcome.resolved, outcome.plan, emits, SetBy()) == ()

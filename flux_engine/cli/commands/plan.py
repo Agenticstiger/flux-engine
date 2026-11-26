@@ -16,6 +16,7 @@ from flux_engine.cli._args import (
     _add_allow_generator,
     _add_jobs,
     _add_json_flag,
+    _add_max_rows,
     _add_profile,
     _add_scale,
     _add_state_dir,
@@ -89,6 +90,7 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
             "declares generator plugins, whose bytes are stored and never generated again)"
         ),
     )
+    _add_max_rows(plan_p)
     _add_allow_generator(plan_p, when="when the plan generates the rows")
     _add_scale(plan_p)
     _add_timings(plan_p)
@@ -118,5 +120,6 @@ def _cmd_plan(args: argparse.Namespace) -> int:
             scale=args.scale,
             timings=args.timings,
             allow_generators=tuple(args.allow_generator or ()),
+            max_rows=args.max_rows,
         )
     return _finish(args, result)

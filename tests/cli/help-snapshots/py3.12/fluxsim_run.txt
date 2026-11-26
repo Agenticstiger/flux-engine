@@ -4,8 +4,8 @@ usage: fluxsim run [-h] [--simulation-id SIMULATION_ID] [--zone ZONE]
                    [--committed-slice EXPOSE_ID=file://PATH] [--update-golden]
                    [--reason REASON] [--allow-declared-baseline-drift]
                    [--signing-key SIGNING_KEY] [--trust-key PATH]
-                   [--allow-generator NAME] [--scale F] [--timings] [--jobs N]
-                   [--strict-coverage] [--profile PATH]
+                   [--allow-generator NAME] [--scale F] [--max-rows N]
+                   [--timings] [--jobs N] [--strict-coverage] [--profile PATH]
                    [--state-dir STATE_DIR] [-j]
                    bundle
 
@@ -104,6 +104,11 @@ options:
                         0, at most 1000000); the plan records it and apply
                         reads it back, and 1 changes nothing; a table built
                         from the run's events is left as it is
+  --max-rows N          the rows each periodic emit may be estimated to derive
+                        when the plan is made, checked before its periods are
+                        laid out (default 50000000, at most 10000000000). A
+                        plan above it is refused (FLX-3403); plan.json records
+                        another budget as maxRows
   --timings             print where the time went (load, compile, each emit,
                         framing, attestation); the numbers are wall-clock
                         seconds, reported and recorded nowhere in a run's
