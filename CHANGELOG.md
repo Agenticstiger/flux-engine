@@ -407,6 +407,22 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   recorded shortfall. A range on a periods entry's period column keeps the periods whose first day lies in it.
   Only a range that does not meet the window is refused (`FLX-3403`). Such a plan records `rangeSetters: "held"`;
   a recorded plan without it replays as it was made (ADR 0024, the amendment of 2026-11-25).
+- In a history kept to its parent's lifetime (`parent.lifetime: true`), the periodic rows of an entity that ends
+  with its parent stay inside the parent's lifetime. Under `finalVersion` that entity's ending version is open, and a
+  periods projection held it up to the window's end, long after the parent had ended; its periods now stop at the
+  parent's last day (ADR 0017, the amendment of 2026-11-26), even where a range on the validity columns ends before
+  it, since the range closes no version. Only a bundle that declares the key changes bytes, and no released version
+  has it; every other bundle and every recorded plan keeps its bytes.
+- As intended, an entity of such a history ends when its parent's lifetime ends inside the horizon, even when the
+  declared end `share` is 0: under `finalVersion` its final version carries the end value, and an entity with one
+  version carries it from its first day, so the share a run reaches can be above the declared one.
+- An events entry with a `when` no longer holds its history to the range on the columns it copies. The entry
+  records only the versions its condition holds for, yet the range on its `date` or `at` was read as a bound on
+  every version, so every entity's first start was moved to the range's low end, and in a history kept to its
+  parent's lifetime the entities of a parent that closed before that day had no room and `plan` refused the bundle
+  (`FLX-3403`). The range on such a column is noted again, and `verify` counts the events outside it. When a range
+  on the validity columns does leave a parent's entities no room, the refusal now names the range and says to
+  widen it (ADR 0024, the amendment of 2026-11-26).
 
 ## 0.11.1 - 2026-11-24
 

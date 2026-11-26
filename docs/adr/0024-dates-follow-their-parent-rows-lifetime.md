@@ -451,3 +451,19 @@ that can keep to a range now do, on kernel `0.2.0`:
   projection (`periodRange`) says where. A recorded plan without the key replays as it was made, with no
   setter held; any other value is `FLX-2102`.
 
+## Amendment of 2026-11-26: an events entry with a `when` holds no history to a range
+
+The amendment above holds a history to the range on an events entry's `at`, and on its `date` without a `lag`,
+as if the entry recorded every version. An entry with a `when` records only the versions its condition holds for,
+so the range on its columns says nothing of the others: read as a bound on every version, it moved every entity's
+first start to the range's low end, and under a parent's lifetime (ADR 0017, the amendment of 2026-11-24) the
+entities of a parent that closed before that day had no room, which `plan` refused (`FLX-3403`).
+
+- **What holds.** An events entry with a `when` adds no column to the history's range, and its columns are noted,
+  as before the amendment above; `verify` counts the events outside the range. A `when` that keeps the events
+  inside the range, such as one on the version's start, leaves no such row.
+- **What is refused.** A range on the history's own validity columns, or on an entry without a `when`, is still
+  a bound every entity shares. Where it leaves an entity whose parent closed before the range's low end no room for
+  one version, `FLX-3403` names the range's first day beside the parents' lifetimes and says to widen the range.
+- **What moves.** A bundle whose only range on a history was such an entry's no longer records `rangeSetters`, and
+  its versions keep the first starts they had before the amendment above. No released version held such a range.
