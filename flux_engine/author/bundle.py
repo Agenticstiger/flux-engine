@@ -91,7 +91,8 @@ from flux_engine.author.columns import (
     widen_key_span,
 )
 from flux_engine.author.copula import CopulaPlan, declare_copula
-from flux_engine.author.date_spread import DateSpread, spread_of
+from flux_engine.author.date_spread import DateSpread, declared_spread
+from flux_engine.author.date_spread import bin_edge_ms as _milliseconds
 from flux_engine.author.dates import (
     DATE_KINDS,
     DatedExpose,
@@ -155,7 +156,7 @@ from flux_engine.author.window import (
     instant_ms,
 )
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
-from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
+from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
 from flux_engine.expr2.errors import FLX_6204
@@ -2760,6 +2761,10 @@ class _Histories(NamedTuple):
     used: List[_Note]
     unused: List[_Note]
     notes: List[Tuple[str, str]]
+    #: The members of each entry (by emit) that no statistic of the profile gives, with what each rests on.
+    derived: Dict[str, Dict[Tuple[str, ...], str]]
+    #: Each end column whose length the entry derives: (emit, end, how far the ends it gives lie from the published ones).
+    fitted: List[Tuple[str, str, Fraction]]
 
     def declare_in(self, namespace: Dict[str, Any]) -> None:
         """Declare the entries under the namespace's ``history`` key, in emit order."""
@@ -3035,7 +3040,7 @@ def _histories(
     the reason plan refuses the bundle that holds them, no entry is written and each statistic is
     unused for that reason.
     """
-    result = _Histories([], [], [], [])
+    result = _Histories([], [], [], [], {}, [])
     reads = HistoryReads(exposes, published)
     for expose in exposes:
         table = tables.get(expose.expose_id)
@@ -3068,6 +3073,9 @@ def _histories(
             restate_assumptions(expose)
             reads.release(expose.expose_id, written)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)
+            result.derived[expose.expose_id] = dict(written.derived)
+            if written.fitted_end is not None:
+                result.fitted.append((expose.expose_id, *written.fitted_end))
         result.used.extend(written.used)
         result.unused.extend(written.unused)
         result.notes.extend(
@@ -3263,6 +3271,8 @@ def _declared_histories(
             (f"{entry['emit']}: history", f"declared by --history {declared.name}")
             for entry in entries
         ],
+        {},
+        [],
     )
     for expose in exposes:
         table = tables.get(expose.expose_id)
@@ -4142,8 +4152,13 @@ def _basis_of(profile: Mapping[str, Any], tokens: Optional[Tuple[str, ...]], how
 _DECLARED_BY_HISTORY = "declared by --history"
 
 
-def _history_cited(entry: Mapping[str, Any]) -> List[_Cited]:
-    """What each number of a ``history`` entry rests on: the history statistic it was read from."""
+def _history_cited(
+    entry: Mapping[str, Any], derived: Optional[Mapping[Tuple[str, ...], str]] = None
+) -> List[_Cited]:
+    """What each number of a ``history`` entry rests on: the history statistic it was read from.
+
+    A member in *derived* is one the release withholds: it rests on no statistic and is assumed.
+    """
     base = ("tables", str(entry["emit"]), "history")
     found: List[_Cited] = []
     for member, statistic, how in (
@@ -4158,7 +4173,9 @@ def _history_cited(entry: Mapping[str, Any]) -> List[_Cited]:
         (("reasons",), "reasons", "the share of changes each tracked column makes"),
         (("end", "share"), "lastVersion", "the closed share of last versions, as the end share"),
     ):
-        if member[0] in entry:
+        if member in (derived or {}):
+            found.append((member, None, (derived or {})[member]))
+        elif member[0] in entry:
             found.append((member, base + (statistic,), how))
     for index, tracked in enumerate(entry.get("tracked", ())):
         where = base + ("columns", str(tracked["column"]))
@@ -4177,6 +4194,7 @@ def _namespace_labels(
     dated: Any,
     profile: Mapping[str, Any],
     declared: bool = False,
+    derived: Optional[Mapping[str, Mapping[Tuple[str, ...], str]]] = None,
 ) -> List[Tuple[Tuple[str, ...], Basis]]:
     """The source of the numbers written under the namespace's keys beside ``emits``.
 
@@ -4203,7 +4221,9 @@ def _namespace_labels(
         found.extend(_declared_labels(namespace, profile))
     else:
         for entry in namespace.get(HISTORY_KEY) or ():
-            place(HISTORY_KEY, entry, _history_cited(entry))
+            place(
+                HISTORY_KEY, entry, _history_cited(entry, (derived or {}).get(str(entry["emit"])))
+            )
     for key, entry, member, tokens, how in _dated_cited(dated):
         place(key, entry, ((member, tokens, how),))
     if not declared:
@@ -4367,6 +4387,7 @@ def _author_bundle(
     )
     dated = _dated_columns(planned, window, fallbacks, histories, projections)
     _release_dated_columns(planned.authored, dated)
+    _trade_fitted_ends(planned.authored, histories, dated)
     _declare_copulas(planned.authored, planned.reading, dated, histories)
     drafted = _draft_documents(
         planned, inputs, _Layers(window, histories, projections, dated), team
@@ -4878,26 +4899,9 @@ def _date_spreads(expose: AuthoredExpose) -> Dict[str, DateSpread]:
     found: Dict[str, DateSpread] = {}
     for plan in expose.columns:
         kind = expose.kinds.get(plan.name)
-        if (
-            kind not in DATE_KINDS
-            or plan.drawn_in_window
-            or plan.even_in_window
-            or plan.placeholder
-        ):
+        if kind not in DATE_KINDS:
             continue
-        bins = plan.declaration.get("bins")
-        weights = plan.declaration.get("binWeights")
-        if not isinstance(bins, list) or not isinstance(weights, list):
-            continue
-        try:
-            spread = spread_of(
-                kind,
-                [_milliseconds(str(edge)) for edge in bins],
-                [Fraction(str(weight)) for weight in weights],
-                Fraction(str(plan.declaration.get("nullFraction", "0"))),
-            )
-        except (ValueError, ArithmeticError):
-            continue
+        spread = declared_spread(plan, kind)
         if spread is not None:
             found[plan.name] = spread
     return found
@@ -5002,7 +5006,9 @@ def _draft_documents(
         simulation_id,
         planned.authored,
         reading.noisy,
-        _namespace_labels(namespace, spread, dated, reading.profile, declared is not None),
+        _namespace_labels(
+            namespace, spread, dated, reading.profile, declared is not None, histories.derived
+        ),
     )
     # The register counts numbers as the engine reads the files back (a YAML
     # float is an exact decimal there), so it is built from that reading.
@@ -5331,14 +5337,6 @@ def _relabel_edge(plan: ColumnPlan, labels: List[Label], position: str) -> None:
             plan.reads.append((label.basis.statistic[0], _WIDENED_RANGE))
     labels[:] = [item for item in labels if item.tokens != token]
     labels.append(Label(token, assumed(_WIDENED_RANGE)))
-
-
-def _milliseconds(text: str) -> int:
-    """A range end spelled as a date or an RFC 3339 timestamp, in milliseconds since the epoch."""
-
-    if len(text) == 10:
-        return (date.fromisoformat(text) - date(1970, 1, 1)).days * _DAY_MILLISECONDS
-    return parse_rfc3339_ms(text)
 
 
 def _refuse_unless_widened(
@@ -5728,6 +5726,54 @@ def _simulation_of(files: Sequence[StarterFile]) -> Mapping[str, Any]:
             loaded = yaml.safe_load(entry.data)
             return loaded if isinstance(loaded, Mapping) else {}
     return {}
+
+
+def _trade_fitted_ends(
+    exposes: Sequence[AuthoredExpose], histories: _Histories, dated: Any
+) -> None:
+    """Leave out the histogram property of an end column whose gaps init derived, where the fit misses its band.
+
+    A gap derived from the published histograms of a start and an end (``gap_fit``) turns the
+    first into the second as nearly as independent draws can. Where the ends it gives lie further
+    from the published histogram than the property's own tolerance, verify would fail the table
+    for what init cannot do better; the property is left out and the column's notes say so.
+    """
+    fits = {(emit, end): distance for emit, end, distance in histories.fitted}
+    fits.update(dated.fit_distances)
+    for expose in exposes:
+        for (emit, end), distance in fits.items():
+            plan = next((item for item in expose.columns if item.name == end), None)
+            if emit == expose.expose_id and plan is not None:
+                _trade_one_histogram(expose, plan, distance)
+
+
+def _trade_one_histogram(expose: AuthoredExpose, plan: ColumnPlan, distance: Fraction) -> None:
+    """Leave out *plan*'s histogram properties whose tolerance the derived gaps miss, and say so."""
+    dropped = [
+        item
+        for item in plan.properties
+        if item.document.get("property") == "marginalHistogram"
+        and distance > Fraction(str(item.document.get("tolerance", {}).get("max", "1")))
+    ]
+    if not dropped:
+        return
+    sentence = (
+        f"No histogram property is written for {printable(plan.name)}: its values follow the "
+        "gaps init derived from the published histograms of the start and the end, and "
+        f"those lie {float(distance):.2f} of total variation from the published histogram "
+        "of the end, beyond the property's tolerance."
+    )
+    plan.properties = [item for item in plan.properties if item not in dropped]
+    expose.properties = [item for item in expose.properties if item not in dropped]
+    plan.assumptions.append(sentence)
+    plan.choices.append(sentence)
+    expose.assumptions.append((plan.name, sentence))
+    if not expose.properties:
+        for other in expose.columns:
+            fallback = assumed_check(other, expose.kinds[other.name], scorable_only=True)
+            if fallback is not None:
+                expose.properties = [fallback]
+                break
 
 
 def _release_dated_columns(exposes: Sequence[AuthoredExpose], dated: Any) -> None:

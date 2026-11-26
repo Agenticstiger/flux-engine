@@ -50,6 +50,8 @@ from flux_engine.author.basis import Label, assumed
 from flux_engine.author.catalogue import published_levels
 from flux_engine.author.children import count_children, declare_counted
 from flux_engine.author.columns import ColumnPlan, cell_weights, count_cells, share_texts
+from flux_engine.author.date_spread import DateSpread, declared_spread
+from flux_engine.author.gap_fit import GAP_FIT_ITERATIONS, GapFit, Interval, fit_gap
 from flux_engine.core.canonical import nfc
 from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
@@ -153,6 +155,12 @@ class HistoryWritten:
     parent_of: Optional[Tuple[str, Optional[Tuple[str, ...]]]] = None
     #: The decisions about the parent's relationship that no statistic holds, listed as used.
     records: List[_Note] = field(default_factory=list)
+    #: The members of the entry that no statistic of the profile gives, by their position below the
+    #: entry, with the sentence that says what they rest on: each is assumed.
+    derived: Dict[Tuple[str, ...], str] = field(default_factory=dict)
+    #: The end column, and how far the ends the entry's length gives lie from its published
+    #: histogram (total variation), when the length is derived from the published histograms.
+    fitted_end: Optional[Tuple[str, Fraction]] = None
 
 
 class _Skip(Exception):
@@ -309,6 +317,130 @@ def _length_histogram(
         "binWeights": share_texts(held),
         "closed": "lower",
     }, raised
+
+
+# ---------------------------------------------------------------------------
+# A history whose lengths the release withholds
+# ---------------------------------------------------------------------------
+
+
+def _withheld(node: Any) -> bool:
+    """Whether a histogram of the table's history is withheld: no group of it is published, or no bins."""
+    return (
+        not isinstance(node, Mapping)
+        or _group(node) is None
+        or not isinstance(node.get("bins"), list)
+    )
+
+
+def _entities_of_key(source: HistorySource, natural: str) -> Optional[int]:
+    """The entities, from the natural entity's published distinct count, or ``None``."""
+    columns = source.table.get("columns")
+    column = columns.get(natural) if isinstance(columns, Mapping) else None
+    metrics = column.get("metrics") if isinstance(column, Mapping) else None
+    metric = metrics.get("distinctCount") if isinstance(metrics, Mapping) else None
+    if not isinstance(metric, Mapping) or metric.get("status") != _FREE:
+        return None
+    value = metric.get("value")
+    count = (
+        _whole(value) if not isinstance(value, str) else (int(value) if value.isdigit() else None)
+    )
+    return count if count is not None and 1 <= count <= source.rows else None
+
+
+def _column_start(
+    source: HistorySource, start: str, kind: LogicalKind, until: int
+) -> Optional[Tuple[Dict[str, Any], Tuple[str, ...]]]:
+    """The ``start`` of the entry from the start column's own histogram, and where it is read, or ``None``."""
+    columns = source.table.get("columns")
+    column = columns.get(start) if isinstance(columns, Mapping) else None
+    statistics = column.get("statistics") if isinstance(column, Mapping) else None
+    for index, node in enumerate(statistics if isinstance(statistics, list) else ()):
+        if not isinstance(node, Mapping) or node.get("definition") != _MARGINAL:
+            continue
+        pointer = ("tables", source.expose_id, "columns", start, "statistics", str(index))
+        try:
+            return _start_histogram(node, pointer, kind, until, source), pointer
+        except _Skip:
+            continue
+    return None
+
+
+@dataclass(frozen=True)
+class _Derived:
+    """The length and the closed share read from the published histograms of the start and the end."""
+
+    #: The ``length`` of the entry, with its derivation: ``None`` when the gaps are even.
+    fit: Optional[GapFit]
+    length: Dict[str, Any]
+    #: The share of the end column's rows that are closed (end before ``until``), or ``None``.
+    closed: Optional[Fraction]
+    how: str
+
+
+def _spread_days(spread: DateSpread) -> List[Interval]:
+    scale = _DAY_MS if spread.kind is LogicalKind.TIMESTAMP else 1
+    return [
+        (Fraction(low, scale), Fraction(high, scale), share) for low, high, share in spread.bins
+    ]
+
+
+def _closed_ends(spread: DateSpread, until: Fraction) -> Tuple[List[Interval], Fraction]:
+    """The part of the ends' histogram before *until*, shares adding up to 1, and its share of all rows."""
+    found: List[Interval] = []
+    closed = Fraction(0)
+    for low, high, share in _spread_days(spread):
+        if low >= until:
+            continue
+        part = share if high <= until else share * (until - low) / (high - low)
+        found.append((low, min(high, until), part))
+        closed += part
+    if closed <= 0:
+        return [], Fraction(0)
+    return [(low, high, part / closed) for low, high, part in found], closed * (1 - spread.nulls)
+
+
+def _derive_length(
+    source: HistorySource, kind: LogicalKind, start: str, end: str, until: int
+) -> Optional[_Derived]:
+    """The length the entry draws and the closed share, from the published histograms of *start* and *end*.
+
+    ``None`` when the end is drawn from no histogram, so nothing says how many versions close. The
+    gaps are the histogram that turns the starts into the closed ends
+    (:func:`~flux_engine.author.gap_fit.fit_gap`), or an even spread over the run's window where
+    the starts are not drawn from a histogram.
+    """
+    plans = source.plans
+    ends = declared_spread(plans[end], kind) if end in plans else None
+    if ends is None:
+        return None
+    scale = 1 if kind is LogicalKind.DATE else _DAY_MS
+    low_unit, _ = _window_units(source, kind)
+    window_days = max(1, (until - low_unit) // scale)
+    closed_bins, closed = _closed_ends(ends, Fraction(until, scale))
+    starts = declared_spread(plans[start], kind) if start in plans else None
+    fit: Optional[GapFit] = None
+    if starts is not None and closed_bins:
+        fit = fit_gap(_spread_days(starts), closed_bins, 1, window_days)
+    if fit is None or fit.even:
+        length = {"bins": ["1", str(window_days)], "binWeights": ["1"], "closed": "lower"}
+        how = (
+            f"the days of a version, which the release withholds: drawn evenly from 1 to "
+            f"{window_days} days, the most the run's window allows"
+        )
+        return _Derived(None, length, closed if closed_bins else None, how)
+    length = {
+        "bins": [str(edge) for edge in fit.edges],
+        "binWeights": share_texts(list(fit.weights)),
+        "closed": "lower",
+    }
+    how = (
+        f"the days of a version, which the release withholds: derived from the published "
+        f"histograms of {start!r} and {end!r}, as the histogram of gaps that turns the first into "
+        f"the closed part of the second (each bin spread evenly, {GAP_FIT_ITERATIONS} "
+        "multiplicative updates from an even start)"
+    )
+    return _Derived(fit, length, closed, how)
 
 
 # ---------------------------------------------------------------------------
@@ -1497,6 +1629,169 @@ def _write_parent(
     ]
 
 
+def _same_day_other(item: Any, start: str) -> Optional[str]:
+    """The other column of a date pair of *start* that holds as the same day on nearly every row, or ``None``."""
+    if not isinstance(item, Mapping) or start not in (item.get("start"), item.get("end")):
+        return None
+    other = item.get("end") if item.get("start") == start else item.get("start")
+    order = item.get("order")
+    group = _group(order)
+    levels = order.get("levels") if isinstance(order, Mapping) else None
+    total = _whole(group.get("k")) if group is not None else None
+    if not isinstance(other, str) or group is None or not total or not isinstance(levels, list):
+        return None
+    if "same" not in levels:
+        return None
+    cells = count_cells(group, "levelCounts")
+    position = levels.index("same")
+    held = position < len(cells) and (cells[position].count or 0) * 10 >= total * 9
+    return other if held else None
+
+
+def _refuse_a_lost_tie(
+    source: HistorySource, start: str, held: FrozenSet[str], lifecycle: _Lifecycle
+) -> None:
+    """Raise :class:`_Skip` when the release publishes a column on the day each version starts and the entry would not keep it.
+
+    A date pair that holds as the same day on nearly every row, between the start and a column the
+    history does not set, is a tie the history would cut: the column is drawn apart from the start.
+    ``lifecycle.activation`` is how a contract keeps such a column with the first start.
+    """
+    pairs = source.table.get("datePairs")
+    for item in pairs if isinstance(pairs, list) else ():
+        other = _same_day_other(item, start)
+        if other is not None and other not in held and other != lifecycle.activation:
+            raise _Skip(
+                f"the release publishes {other!r} on the same day as {start!r}, and a history "
+                "written from withheld lengths would draw them apart: declare "
+                f"lifecycle.activation as {other!r} to keep them together"
+            )
+
+
+def _chain_of(
+    history: Mapping[str, Any], kind: LogicalKind, declared: Mapping[str, Any], withheld: bool
+) -> Tuple[str, str, bool]:
+    """The chain level, the sentence that says why, and whether the release withholds how versions meet.
+
+    The contract's chain wins, then the published share. Where the lengths are withheld and so is
+    the share, the entry's default stands and the third value is set.
+    """
+    level = _declared_chain(declared, kind)
+    if level is not None:
+        return level, _chain_reason(history, kind, level), False
+    try:
+        level, share = _chain_level(history.get("chain"), kind)
+    except _Skip:
+        if not (withheld and _withheld_levels(history.get("chain"))):
+            raise
+        return _CHAINS[0], "", True
+    reason = (
+        f"{level} holds on {_percent(share)} of consecutive versions, "
+        "which sets the entry's chain"
+    )
+    return level, reason, False
+
+
+def _entities_of(
+    history: Mapping[str, Any],
+    base: Tuple[str, ...],
+    source: HistorySource,
+    natural: str,
+    withheld: bool,
+    written: HistoryWritten,
+) -> Tuple[int, Optional[Dict[str, Any]]]:
+    """The entities and the ``versions`` shape; with the lengths withheld, the key's distinct count stands in."""
+    try:
+        entities, versions, used, unused, notes = _versions(history, base, source)
+    except _Skip:
+        entities_of_key = _entities_of_key(source, natural) if withheld else None
+        if entities_of_key is None:
+            raise
+        written.derived[("entities",)] = _KEY_ENTITIES
+        if entities_of_key < source.rows:
+            written.notes.append(("history versions", _EVEN_VERSIONS))
+        return entities_of_key, None
+    written.used += used
+    written.unused += unused
+    written.notes += notes
+    return entities, versions
+
+
+def _first_starts(
+    history: Mapping[str, Any],
+    base: Tuple[str, ...],
+    source: HistorySource,
+    start: str,
+    kind: LogicalKind,
+    until: int,
+    written: HistoryWritten,
+    withheld: bool,
+) -> Optional[Dict[str, Any]]:
+    """The entry's ``start``: the first starts' histogram, else (lengths withheld) the start column's own."""
+    try:
+        found = _start_histogram(
+            history.get("firstStart"), base + ("firstStart",), kind, until, source
+        )
+    except _Skip as skipped:
+        written.unused.append((base + ("firstStart",), str(skipped)))
+        column = _column_start(source, start, kind, until) if withheld else None
+        if column is None:
+            return None
+        written.used.append((column[1], _START_FROM_COLUMN))
+        written.derived[("start",)] = _START_FROM_COLUMN
+        written.notes.append(("history start", _START_FROM_COLUMN))
+        return column[0]
+    written.used.append(
+        (base + ("firstStart",), "the histogram of first starts, as the entry's start")
+    )
+    return found
+
+
+def _length_of(
+    history: Mapping[str, Any],
+    base: Tuple[str, ...],
+    source: HistorySource,
+    window: Tuple[LogicalKind, str, str, int],
+    held_and_lifecycle: Tuple[FrozenSet[str], "_Lifecycle"],
+    written: HistoryWritten,
+) -> Tuple[Dict[str, Any], Optional["_Derived"]]:
+    """The entry's ``length``, read from the published histogram or derived where the release withholds it."""
+    kind, start, end, until = window
+    if not _withheld(history.get("versionLength")):
+        length, raised = _length_histogram(
+            history.get("versionLength"), base + ("versionLength",), source
+        )
+        written.used.append(
+            (base + ("versionLength",), "the histogram of version lengths, as the entry's length")
+        )
+        if raised:
+            written.notes.append(
+                (
+                    "history length",
+                    "A bin of the published version lengths starts below one day; its lower edge is raised to one day, since a version lasts a day or more.",
+                )
+            )
+        return length, None
+    _refuse_a_lost_tie(source, start, *held_and_lifecycle)
+    derived = _derive_length(source, kind, start, end, until)
+    if derived is None:
+        raise _Skip(
+            "the histogram of version lengths is withheld, and the histogram of "
+            f"{end!r} is not one the bundle draws from, so no length can be derived"
+        )
+    written.unused.append(
+        (
+            base + ("versionLength",),
+            "the release withholds it, so the length is derived: " + derived.how,
+        )
+    )
+    written.derived[("length",)] = derived.how
+    written.notes.append(("history length", derived.how[0].upper() + derived.how[1:] + "."))
+    if derived.fit is not None:
+        written.fitted_end = (end, derived.fit.distance)
+    return derived.length, derived
+
+
 def _build(source: HistorySource, written: HistoryWritten) -> None:
     """Fill *written* from the table's history, or raise :class:`_Skip` with why none is written."""
     history = source.table["history"]
@@ -1504,58 +1799,66 @@ def _build(source: HistorySource, written: HistoryWritten) -> None:
     kind, natural, start, end = _validity(source)
     declared = declared_end(source.contract_expose, end)
     open_end = _open_end(source, end, declared)
-    level = _declared_chain(declared, kind)
-    if level is not None:
-        chain_reason = _chain_reason(history, kind, level)
-    else:
-        level, share = _chain_level(history.get("chain"), kind)
-        chain_reason = f"{level} holds on {_percent(share)} of consecutive versions, which sets the entry's chain"
-    entities, versions, used, unused, notes = _versions(history, base, source)
-    written.used += used
-    written.unused += unused
-    written.notes += notes
+    withheld = _withheld(history.get("versionLength"))
+    level, chain_reason, chain_withheld = _chain_of(history, kind, declared, withheld)
+    entities, versions = _entities_of(history, base, source, natural[0], withheld, written)
     entry: Dict[str, Any] = {"emit": source.expose_id, "entities": entities}
     if versions is not None:
         entry["versions"] = versions
     until = _window_units(source, kind)[1]
-    try:
-        entry["start"] = _start_histogram(
-            history.get("firstStart"), base + ("firstStart",), kind, until, source
-        )
-        written.used.append(
-            (base + ("firstStart",), "the histogram of first starts, as the entry's start")
-        )
-    except _Skip as skipped:
-        written.unused.append((base + ("firstStart",), str(skipped)))
-    entry["length"], raised = _length_histogram(
-        history.get("versionLength"), base + ("versionLength",), source
+    held = _fixed(source, (start, end, *natural)) | source.set_by_rules
+    lifecycle = _read_lifecycle(source, natural[0], kind, held)
+    first = _first_starts(history, base, source, start, kind, until, written, withheld)
+    if first is not None:
+        entry["start"] = first
+    entry["length"], derived = _length_of(
+        history, base, source, (kind, start, end, until), (held, lifecycle), written
     )
-    written.used.append(
-        (base + ("versionLength",), "the histogram of version lengths, as the entry's length")
-    )
-    if raised:
-        written.notes.append(
-            (
-                "history length",
-                "A bin of the published version lengths starts below one day; its lower edge is raised to one day, since a version lasts a day or more.",
-            )
-        )
     entry["until"] = _until(source, kind)
     entry["chain"] = level
     if open_end is not None:
         entry["openEnd"] = open_end
-    if "chain" in history:
+    if chain_withheld:
+        written.unused.append((base + ("chain",), _CHAIN_WITHHELD))
+        if entities < source.rows:
+            written.notes.append(("history chain", _CHAIN_ASSUMED))
+            written.derived[("chain",)] = _CHAIN_ASSUMED
+    elif "chain" in history:
         written.used.append((base + ("chain",), chain_reason))
-    held = _fixed(source, (start, end, *natural)) | source.set_by_rules
-    lifecycle = _read_lifecycle(source, natural[0], kind, held)
     if lifecycle.activation is not None:
         entry["activation"] = lifecycle.activation
     written.exempt = held | ({lifecycle.activation} if lifecycle.activation else set())
     _write_parent(source, entry, entities, written)
-    _tracked_and_end(history, base, source, entry, written, lifecycle)
+    _tracked_and_end(history, base, source, entry, written, lifecycle, derived)
     written.notes += lifecycle.notes
     written.entry = entry
     written.start_column = start
+
+
+_KEY_ENTITIES = (
+    "the entities: the release withholds the versions per entity, so they are the natural "
+    "entity's published distinct count"
+)
+_EVEN_VERSIONS = (
+    "The release withholds the number of versions per entity, so the versions are spread over the "
+    "entities as evenly as whole counts allow."
+)
+_START_FROM_COLUMN = (
+    "the histogram of first starts, which the release withholds: the start column's own "
+    "histogram of starts is used, which is the first starts' where each entity has one version"
+)
+_CHAIN_WITHHELD = (
+    "the release withholds how the versions meet, so the chain is the entry's default, nextStart"
+)
+_CHAIN_ASSUMED = (
+    "The release withholds how consecutive versions meet, and the contract declares no chain: "
+    "each version ends where the next one starts (nextStart)."
+)
+
+
+def _withheld_levels(node: Any) -> bool:
+    """Whether a level histogram of the table's history is withheld: no group of it is published."""
+    return not isinstance(node, Mapping) or _group(node) is None
 
 
 def _fixed(source: HistorySource, window: Tuple[str, ...]) -> FrozenSet[str]:
@@ -1570,6 +1873,34 @@ def _fixed(source: HistorySource, window: Tuple[str, ...]) -> FrozenSet[str]:
     return frozenset(fixed)
 
 
+def _derived_closed(
+    source: HistorySource,
+    entry: Mapping[str, Any],
+    derived: Optional[_Derived],
+    lifecycle: _Lifecycle,
+) -> Optional[Tuple[Fraction, Fraction]]:
+    """The closed share of last versions when the release withholds it, from what else it publishes.
+
+    The open versions of the end column's histogram are the entities that have not ended, so the
+    ended share of the entities follows from them; where the end is drawn from no histogram, the
+    share of the lifecycle's ending level stands in.
+    """
+    entities, rows = int(entry["entities"]), source.rows
+    if derived is not None and derived.closed is not None:
+        # open rows = rows * (1 - closed share of rows); each entity not ended keeps one open version.
+        open_rows = rows * (1 - derived.closed)
+        ended = 1 - open_rows / entities
+        if ended <= 0:
+            return None
+        return min(ended, Fraction(1)), Fraction(1)
+    if lifecycle.marker is not None:
+        plan = source.plans.get(lifecycle.marker[0])
+        levels = _levels_weighted(plan) if plan is not None else None
+        if levels and lifecycle.marker[1] in levels and sum(levels.values(), Fraction(0)) > 0:
+            return levels[lifecycle.marker[1]], sum(levels.values(), Fraction(0))
+    return None
+
+
 def _tracked_and_end(
     history: Mapping[str, Any],
     base: Tuple[str, ...],
@@ -1577,8 +1908,14 @@ def _tracked_and_end(
     entry: Dict[str, Any],
     written: HistoryWritten,
     lifecycle: _Lifecycle,
+    derived: Optional[_Derived] = None,
 ) -> None:
     closed = _closed_share(history.get("lastVersion"), base + ("lastVersion",), source)
+    withheld_share = (
+        closed is None and derived is not None and _withheld_levels(history.get("lastVersion"))
+    )
+    if withheld_share:
+        closed = _derived_closed(source, entry, derived, lifecycle)
     marker = lifecycle.marker if closed is not None else None
     if marker is None and lifecycle.marker is not None:
         lifecycle.decline(
@@ -1592,8 +1929,11 @@ def _tracked_and_end(
     if tracking.columns:
         entry["tracked"] = tracking.columns
     _reasons_entry(history, base, source, entry, written, names)
-    end = _end(history.get("lastVersion"), base + ("lastVersion",), source)
     pointer = base + ("lastVersion",)
+    if withheld_share:
+        _withheld_end(source, entry, written, pointer, closed, marker, derived)
+        return
+    end = _end(history.get("lastVersion"), pointer, source)
     if end is not None and marker is not None and closed is not None:
         entry["end"] = _final_end(marker, closed)
         written.used.append(
@@ -1611,6 +1951,40 @@ def _tracked_and_end(
         written.used.append(
             (pointer, "no entity ends: no last version is closed, so the entry writes no end")
         )
+
+
+def _withheld_end(
+    source: HistorySource,
+    entry: Dict[str, Any],
+    written: HistoryWritten,
+    pointer: Tuple[str, ...],
+    closed: Optional[Tuple[Fraction, Fraction]],
+    marker: Optional[Tuple[str, str]],
+    derived: Optional[_Derived],
+) -> None:
+    """The entry's ``end`` when the release withholds the last versions' closed share, from what else it publishes."""
+    if closed is None:
+        written.unused.append(
+            (
+                pointer,
+                "the release withholds it, and nothing else it publishes says how many entities end",
+            )
+        )
+        return
+    from_histogram = derived is not None and derived.closed is not None
+    how = "the closed share of last versions, which the release withholds: " + (
+        "the entities that have not ended are the open versions of the histogram of "
+        f"{source.table['history'].get('end')!r}, so the rest ended"
+        if from_histogram
+        else "the contract's ending level of the lifecycle's endMarker"
+    )
+    written.derived[("end", "share")] = how
+    written.unused.append((pointer, how))
+    entry["end"] = (
+        _final_end(marker, closed)
+        if marker is not None
+        else {"mode": "closeLast", "share": share_texts([closed[0], closed[1] - closed[0]])[0]}
+    )
 
 
 def _reasons_entry(

@@ -252,6 +252,22 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   still scores the column. A column the contract makes a key keeps its bins as they stand, since its rows hold
   distinct values. Only bundles written from profiles released with noise change, and only for a number column with a
   bin at or below the floor: an exact histogram, and a release whose bins all clear it, keep their bytes.
+- `init` left a version's end drawn apart from its start when a release publishes the two as one `history` entry and
+  withholds that entry's lengths (and with them, often, the versions per entity, the first starts, the chain and the
+  last versions): the history was skipped, the one date pair left became the only lifetime, and the end took its own
+  histogram, so a share of the versions ended before they started. The two cases are now read apart. Where the history
+  can be written, it is written from what the release does publish: the entities from the natural entity's distinct
+  count (the versions spread evenly over them), the first starts from the start column's own histogram, the closed
+  share from the open mass of the end column's histogram (or the lifecycle's end marker where that histogram is not
+  drawn from), and the length from the two published histograms, as the histogram of gaps that turns the starts into
+  the closed ends (Richardson-Lucy updates from an even start, a fixed count, whole-number arithmetic), each an
+  assumption in the register. Where it cannot (a required end with no declared open end, a column the release
+  publishes on the start's day that no `lifecycle.activation` keeps with it, or an end drawn from no histogram), the
+  start and the end of the history entry are laid out as one lifetime with the same derived gaps, or gaps drawn evenly
+  over the run's window, and the end's histogram is traded for it with a note; a table with a published date pair on
+  that start and end keeps that pair. A histogram property of the end that the derived gaps cannot reproduce within its
+  tolerance is left out, with a note. A release whose history `init` already wrote, and one that publishes the pair as
+  a date pair, keep their bytes.
 
 ## 0.12.1 - 2026-11-26
 

@@ -16,13 +16,15 @@ two are drawn independently. The share is exact under those two assumptions, in
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from fractions import Fraction
-from typing import Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple
 
 from flux_engine.author.orders import DateOrder
+from flux_engine.core.clock import parse_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
 
-__all__ = ["DateSpread", "independent_break_share", "spread_of"]
+__all__ = ["DateSpread", "bin_edge_ms", "declared_spread", "independent_break_share", "spread_of"]
 
 _DAY_MS = 86_400_000
 
@@ -72,6 +74,36 @@ def spread_of(
             return None
         bins.append((low, high + 1 if position == last else high, weight / total))
     return DateSpread(kind, tuple(bins), nulls)
+
+
+def bin_edge_ms(text: str) -> int:
+    """A bin edge spelled as a date or an RFC 3339 timestamp, in milliseconds since the epoch."""
+    if len(text) == 10:
+        return (date.fromisoformat(text) - date(1970, 1, 1)).days * _DAY_MS
+    return parse_rfc3339_ms(text)
+
+
+def declared_spread(plan: Any, kind: LogicalKind) -> Optional[DateSpread]:
+    """The histogram a date column's plan declares, where it is drawn from one the profile published.
+
+    A column drawn evenly within the run's window, from a histogram no bin of which stands clear of
+    noise, or from a placeholder, has none.
+    """
+    if plan.drawn_in_window or plan.even_in_window or plan.placeholder:
+        return None
+    bins = plan.declaration.get("bins")
+    weights = plan.declaration.get("binWeights")
+    if not isinstance(bins, list) or not isinstance(weights, list):
+        return None
+    try:
+        return spread_of(
+            kind,
+            [bin_edge_ms(str(edge)) for edge in bins],
+            [Fraction(str(weight)) for weight in weights],
+            Fraction(str(plan.declaration.get("nullFraction", "0"))),
+        )
+    except (ValueError, ArithmeticError):
+        return None
 
 
 def _count_before(first: Tuple[int, int], second: Tuple[int, int], tie: bool) -> int:
