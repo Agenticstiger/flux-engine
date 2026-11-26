@@ -2040,8 +2040,13 @@ def _lay_out_children(
     *,
     minimum_cell: int,
     fractional_bits: int,
-) -> _Placed:
-    """Place one relationship by counts when the layout can, and as its foreign key's spread if not."""
+    into_a_history: Optional[str] = None,
+) -> Optional[_Placed]:
+    """Place one relationship by counts when the layout can, and as its foreign key's spread if not.
+
+    Returns ``None`` when the layout would place it but *into_a_history* says why it may not: the
+    relationship is then laid out by no entry.
+    """
     child_table = child_expose.expose_id
     notes: List[Tuple[str, str]] = []
     held = _counting_hold(keys, child_expose, child_plan, declared)
@@ -2064,6 +2069,8 @@ def _lay_out_children(
             (f"{child_table}.{declared.name}", f"not laid out by counts: {counted.why_not}")
         )
         held, counted = counted.why_not, None
+    if counted is not None and into_a_history is not None:
+        return None
     if counted is not None:
         declare_counted(child_plan, counted.assumption)
         counts = {"emit": child_table, "relationship": declared.name, **counted.members}
@@ -2238,7 +2245,7 @@ def _into_a_history(
     those whose profile table publishes a history. Over the natural entity, which every version
     of an entity holds, the profile counts children per entity; over another key, per version.
     """
-    if keys is None or emit not in keys.exposes:
+    if keys is None:
         return None
     for relationship in keys.expose(emit).relationships:
         if relationship.name == name and relationship.target in histories:
@@ -2263,7 +2270,6 @@ def _history_tables(
         if isinstance(table, Mapping)
         and isinstance(table.get("history"), Mapping)
         and keys is not None
-        and name in keys.exposes
         and keys.expose(name).versioned
     )
 
@@ -2289,6 +2295,7 @@ def _spread_relationships(
     minimum_cell: int,
     fractional_bits: int,
     held_back: Optional[Callable[[str, str], Optional[str]]] = None,
+    into_a_history: Optional[Callable[[str, str], Optional[str]]] = None,
     declare_links: Optional[Callable[[], None]] = None,
 ) -> _Spreads:
     """Lay each relationship's children per parent out (ADR 0014 section 5, ADR 0016 section 7).
@@ -2300,7 +2307,9 @@ def _spread_relationships(
     its foreign key's spread (:func:`flux_engine.author.children.spread_children`). Returns what
     was used and, with the reasons, what was not, and the ``counts`` entries, in relationship
     order. A relationship that *held_back* gives a reason for, by its child table and name, is laid
-    out by no entry: every statistic of its profile entry is unused for that reason.
+    out by no entry: every statistic of its profile entry is unused for that reason. So is one
+    that *into_a_history* gives a reason for, but only when the counted layout would have placed
+    it; any other lays its children out as its foreign key's spread, as it does for any table.
 
     The given column of each ``counts`` entry is chosen last, after *declare_links* has run: it
     declares the columns drawn given a column of a linked row, and a grouping by one of them is
@@ -2330,6 +2339,7 @@ def _spread_relationships(
             slots.append(_Slot(tokens, entry, None, "", None, [(p, why or "") for p in every]))
             continue
         child_expose, parent_expose = planned[child_table], planned[parent_table]
+        reason = into_a_history(child_table, declared.name) if into_a_history is not None else None
         child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
         parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
         child_table_entry = tables.get(child_table)
@@ -2348,7 +2358,11 @@ def _spread_relationships(
             child_entries,
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
+            into_a_history=reason,
         )
+        if placed is None:
+            slots.append(_Slot(tokens, entry, None, "", None, [(p, reason or "") for p in every]))
+            continue
         slots.append(_Slot(tokens, entry, declared, child_table, placed, []))
     if declare_links is not None:
         declare_links()
@@ -2747,26 +2761,22 @@ _DECLARED_UNUSED = "--history declares the bundle's histories, so none is writte
 _ENDED_STATUS = "the ended status sits on the last version only, so a first version never draws it"
 
 
-def _held_back(
-    declared: Optional[DeclaredHistory], keys: Optional[ContractKeys], tables: Mapping[str, Any]
-) -> Callable[[str, str], Optional[str]]:
+def _held_back(declared: DeclaredHistory) -> Callable[[str, str], Optional[str]]:
     """The reason no counts entry lays out a relationship, by its child emit and its name, or ``None``.
 
     A projected emit's rows follow from its history, and a declared history's parent lays the
     entities out over its relationship, so a counted layout over either would be refused
-    (``FLX-3403``); so would one over a relationship into a table with a history
-    (:func:`_into_a_history`).
+    (``FLX-3403``).
     """
-    projected = projected_emits(declared) if declared is not None else frozenset()
-    parents = parent_relationships(declared) if declared is not None else frozenset()
-    histories = _history_tables(declared, keys, tables)
+    projected = projected_emits(declared)
+    parents = parent_relationships(declared)
 
     def reason(emit: str, relationship: str) -> Optional[str]:
         if emit in projected:
             return _HELD_PROJECTED
         if (emit, relationship) in parents:
             return _HELD_PARENT
-        return _into_a_history(keys, histories, emit, relationship)
+        return None
 
     return reason
 
@@ -3516,6 +3526,7 @@ def _draw_and_link(
     exposes: Sequence[AuthoredExpose],
     drawn: Sequence[AuthoredExpose],
     held_back: Optional[Callable[[str, str], Optional[str]]] = None,
+    into_a_history: Optional[Callable[[str, str], Optional[str]]] = None,
 ) -> _Spreads:
     """Span the keys of the drawn exposes, lay their relationships out and link their givens."""
     try:
@@ -3545,6 +3556,7 @@ def _draw_and_link(
             minimum_cell=reading.minimum_cell,
             fractional_bits=reading.fractional_bits,
             held_back=held_back,
+            into_a_history=into_a_history,
             declare_links=declare_links,
         )
     except (ArithmeticError, ValueError) as error:
@@ -3940,15 +3952,10 @@ def _author_bundle(
     written again without them.
     """
     declared = inputs.history
-    planned = _plan_bundle(inputs)
-    team, owner_note = _owner(planned.contract)
-    window, window_note, given_window = _bundle_window(planned, inputs)
-    _widen_ranges(planned.authored, fallbacks.widened)
-    if given_window is not None:
-        _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
-    histories, projections = _histories_and_projections(
-        planned, window, declared, (declined_history, declined_projection)
+    planned, window, (window_note, given_window), (histories, projections) = _laid_out(
+        inputs, fallbacks, (declined_history, declined_projection)
     )
+    team, owner_note = _owner(planned.contract)
     exact_notes = allot_small_tables(
         [expose for expose in planned.drawn if expose.skipped is None],
         _follows_the_entity(planned.authored, histories),
@@ -4030,6 +4037,8 @@ class _Planned:
     drawn: List[AuthoredExpose]
     spread: _Spreads
     authored: List[AuthoredExpose]
+    #: The tables with a history whose relationships no counts entry lays out.
+    held: FrozenSet[str] = frozenset()
 
 
 class _Layers(NamedTuple):
@@ -4054,8 +4063,47 @@ class _Drafted(NamedTuple):
     asked: Any
 
 
-def _plan_bundle(inputs: AuthorInputs) -> _Planned:
-    """Read the contract and the profile of *inputs*, plan each expose and draw what links them."""
+def _laid_out(
+    inputs: AuthorInputs,
+    fallbacks: _Fallbacks,
+    declined: Tuple[Optional[str], Optional[str]],
+) -> Tuple[
+    _Planned,
+    Tuple[str, str],
+    Tuple[Optional[Tuple[str, str]], Optional[Tuple[str, str]]],
+    Tuple[_Histories, Projected],
+]:
+    """The plan, the window, the window's notes and the histories and projections of one authoring run.
+
+    A relationship into a table with a history is laid out by no entry, but only a history that is
+    written holds one back. The history of a table is not written when the plan refuses it
+    (*declined* names the reason), or when its profile gives no history init writes. Then the
+    relationships held back for it are counted as they are for any other table, so the run plans
+    again with that table's history unwritten. Each pass leaves out one table at least, so the
+    passes end.
+    """
+    declared = inputs.history
+    unwritten: FrozenSet[str] = frozenset()
+    while True:
+        planned = _plan_bundle(inputs, unwritten)
+        window, window_note, given_window = _bundle_window(planned, inputs)
+        _widen_ranges(planned.authored, fallbacks.widened)
+        if given_window is not None:
+            _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
+        written = _histories_and_projections(planned, window, declared, declined)
+        gone = planned.held - {str(entry["emit"]) for entry in written[0].entries}
+        if not gone:
+            return planned, window, (window_note, given_window), written
+        unwritten = unwritten | gone
+
+
+def _plan_bundle(inputs: AuthorInputs, unwritten: FrozenSet[str] = frozenset()) -> _Planned:
+    """Read the contract and the profile of *inputs*, plan each expose and draw what links them.
+
+    No counts entry lays out a relationship into a table with a history, so those relationships are
+    held back, except those into the tables of *unwritten*, for which no history is written: they
+    are counted as they would be without one.
+    """
     contract_path = Path(inputs.contract_path)
     contract, contract_bytes = _read_contract(contract_path)
     pinned = load_profile(Path(inputs.profile_path))
@@ -4071,8 +4119,15 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
     _skip_unreadable_references(exposes, keys)
     drawn = [expose for expose in exposes if expose.skipped is None and not expose.reference]
     declared = inputs.history
-    held_back = _held_back(declared, keys, reading.tables)
-    spread = _draw_and_link(reading, keys, exposes, drawn, held_back)
+    held = _history_tables(declared, keys, reading.tables) - unwritten
+    spread = _draw_and_link(
+        reading,
+        keys,
+        exposes,
+        drawn,
+        _held_back(declared) if declared is not None else None,
+        lambda emit, name: _into_a_history(keys, held, emit, name),
+    )
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
     _refuse_a_needed_one_value(exposes, keys)
     spread = _without_unwritten(
@@ -4091,6 +4146,7 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
         drawn,
         spread,
         authored,
+        held,
     )
 
 

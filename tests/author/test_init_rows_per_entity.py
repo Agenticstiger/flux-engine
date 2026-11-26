@@ -219,6 +219,8 @@ def test_only_a_relationship_into_a_table_with_a_history_is_held_back() -> None:
     assert _into_a_history(keys, held, "membership", "club") is None
     assert _into_a_history(keys, frozenset(), "locker_rental", "member") is None
     assert _into_a_history(keys, held, "locker_rental", "no_such") is None
+    assert _into_a_history(keys, held, "no_such_expose", "member") is None
+    assert _into_a_history(None, held, "locker_rental", "member") is None
 
 
 def test_a_key_of_the_versions_is_held_back_and_counted_per_version() -> None:
@@ -240,3 +242,120 @@ def test_the_tables_with_a_history_are_those_whose_profile_publishes_one() -> No
     keys = _keys()
     assert _history_tables(None, keys, _profile()["tables"]) == {"membership"}
     assert _history_tables(None, keys, _profile(history=False)["tables"]) == frozenset()
+
+
+# ---------------------------------------------------------------------------
+# A history that is not written holds no relationship back
+# ---------------------------------------------------------------------------
+
+#: The gym with each reader's member relationship reading the version's own key, which is unique,
+#: so the table is a table a counted layout may read when no history is written for it.
+VERSIONED = GYM.replace(
+    "          fromColumns: [member_id]\n          toColumns: [member_id]\n",
+    "          fromColumns: [member_id]\n          toColumns: [version_id]\n",
+)
+
+#: The same, with the natural entity also the club the member belongs to: the plan refuses a
+#: history over it, so a bundle that holds one is written again without.
+REFUSED_HISTORY = VERSIONED.replace(
+    "{ name: member, type: natural, expr: member_id }",
+    "{ name: member, type: natural, expr: club_id }",
+)
+
+
+def _per_version(*, history: bool = True) -> Dict[str, Any]:
+    """The gym's profile with only the rentals counted, per version of the membership."""
+    found = _profile(history=history)
+    (rental,) = [
+        item for item in found["relationships"] if item["child"]["table"] == "locker_rental"
+    ]
+    rental["parent"]["columns"] = ["version_id"]
+    rental["statistics"] = [_bins(["0", "1", "3", "5", "9"], [185, 555, 740, 370], 1850)]
+    found["relationships"] = [rental]
+    return found
+
+
+def _counts(tmp_path: Path, profile: Dict[str, Any], contract: str) -> Any:
+    _init(tmp_path, profile, contract)
+    return _namespace(tmp_path).get("counts")
+
+
+def test_a_history_that_is_written_holds_the_rentals_count_back(tmp_path: Path) -> None:
+    result = _init(tmp_path, _per_version(), VERSIONED)
+    namespace = _namespace(tmp_path)
+    assert [entry["emit"] for entry in namespace["history"]] == ["membership"]
+    assert "counts" not in namespace
+    assert "children per version" in _states(result)["/relationships/0/statistics/0"]["note"]
+
+
+def test_a_history_init_does_not_write_gives_the_count_back(tmp_path: Path) -> None:
+    skipped, never = tmp_path / "skipped", tmp_path / "never"
+    skipped.mkdir()
+    never.mkdir()
+    counts = _counts(never, _per_version(history=False), VERSIONED)
+    assert counts and counts[0]["relationship"] == "member"
+    profile = _per_version()
+    # More entities than versions: the profile's history is one init does not write.
+    profile["tables"]["membership"]["history"]["versionsPerEntity"] = _bins(
+        ["1", "2", "3", "4"], [800, 700, 500], 2000
+    )
+    assert _counts(skipped, profile, VERSIONED) == counts
+    assert "history" not in _namespace(skipped)
+
+
+def test_a_history_the_plan_refuses_gives_the_count_back(tmp_path: Path) -> None:
+    refused, never = tmp_path / "refused", tmp_path / "never"
+    refused.mkdir()
+    never.mkdir()
+    profile = _per_version()
+    profile["tables"]["membership"]["history"]["entity"] = ["club_id"]
+    counts = _counts(refused, profile, REFUSED_HISTORY)
+    assert "history" not in _namespace(refused)
+    assert counts and counts[0]["relationship"] == "member"
+    assert _counts(never, _per_version(history=False), REFUSED_HISTORY) == counts
+
+
+def test_a_history_file_decides_which_tables_have_a_history() -> None:
+    from types import SimpleNamespace
+
+    from flux_engine.author.bundle import _history_tables
+
+    keys = _keys()
+    declared: Any = SimpleNamespace(history=[{"emit": "club"}])
+    # The file's tables, whether or not the profile publishes a history for any of them.
+    assert _history_tables(declared, keys, _profile()["tables"]) == {"club"}
+    assert _history_tables(declared, keys, _profile(history=False)["tables"]) == {"club"}
+    none: Any = SimpleNamespace(history=[])
+    assert _history_tables(none, keys, _profile()["tables"]) == frozenset()
+
+
+def test_a_published_history_counts_only_for_a_versioned_table_of_the_contract() -> None:
+    from flux_engine.author.bundle import _history_tables
+
+    tables = _profile()["tables"]
+    published = tables["membership"]["history"]
+    # The club is no versioned table, and a table the contract does not declare is no table at all.
+    tables["club"]["history"] = published
+    tables["ghost"] = {"history": published}
+    assert _history_tables(None, _keys(), tables) == {"membership"}
+    # An entry that is no table is read as no history.
+    assert _history_tables(None, _keys(), {"membership": None, "club": "nothing"}) == frozenset()
+
+
+def test_a_count_the_layout_cannot_place_is_laid_out_as_the_spread_it_always_was(
+    tmp_path: Path,
+) -> None:
+    # Edges that are no whole numbers are no rows per member: before the history was kept, such a
+    # relationship was laid out as its foreign key's spread, and it still is.
+    profile = _profile(counted=False)
+    profile["relationships"] = [
+        {
+            "parent": {"table": "membership", "columns": ["member_id"]},
+            "child": {"table": "locker_rental", "columns": ["member_id"]},
+            "statistics": [_bins(["0.5", "2.5", "4.5"], [500, 500], 1000)],
+        }
+    ]
+    result = _init(tmp_path, profile, GYM)
+    assert [entry["emit"] for entry in _namespace(tmp_path)["history"]] == ["membership"]
+    state = _states(result)["/relationships/0/statistics/0"]
+    assert (state["state"], state["note"]) == ("used", "laid out over the parent's keys")
