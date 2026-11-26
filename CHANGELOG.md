@@ -20,7 +20,12 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.12.1 - 2026-11-26
+
+Fixes to the bundles `fluxsim init` writes from a private profile release, and a `plan` refusal of a periods
+column drawn given a cell that only some kinds override. This resolves the two known issues listed for 0.12.0:
+a column's values could fall outside the contract's declared range through a `within` entry `init` wrote, and a
+sparse categorical column could make `init` drop every projection.
 
 ### Fixed
 
