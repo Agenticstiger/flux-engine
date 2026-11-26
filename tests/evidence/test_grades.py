@@ -1109,3 +1109,21 @@ def test_a_released_profile_with_an_emptied_calendar_entry_grades_as_it_would_wi
     accounting = graded.accounting
     assert accounting is not None and accounting.parts == 3
     assert accounting.spent == {"rho": "0.25"}
+
+
+#: A profile of format 1-3-0 whose queries are exact and grouped, the shape a run pins today.
+EARLIER_QUERIES = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "outcomes" / "subscriptions.profile.json"
+)
+
+
+def test_a_profile_of_an_earlier_format_keeps_the_reasons_its_queries_give() -> None:
+    """Format 1-5-0's checks of a history's and a query's statistics, and its wording of the reason
+    a query gives, leave an earlier document's grade as it was."""
+    grade = grade_profile(json.loads(EARLIER_QUERIES.read_text("utf-8")), pinned=True)
+    assert grade.pattern is Pattern.P1
+    assert (
+        "the profile holds period, query or fact statistics, or reference rows, which cannot be "
+        "released with noise in this format"
+    ) in grade.reasons
+    assert not any("whose keys are data values" in reason for reason in grade.reasons)

@@ -478,10 +478,16 @@ def _statistic_reasons(
 
 
 def _table_structure_reasons(
-    table: Mapping[str, Any], found: Set[str], *, links: bool, tables: Any = None
+    table: Mapping[str, Any],
+    found: Set[str],
+    *,
+    links: bool,
+    tables: Any = None,
+    noisy_parts: bool = False,
 ) -> None:
     """Add to *found* the reasons the statistics of a table's columns, date pairs and column pairs
-    state data."""
+    state data, and with *noisy_parts* (a profile of format 1-5-0, which may release a history
+    with noise) those of its history's members."""
     columns = table.get("columns")
     table_columns = columns if isinstance(columns, Mapping) else {}
     for key in ("datePairs", "columnPairs"):
@@ -496,7 +502,7 @@ def _table_structure_reasons(
                 column.get("statistics"), table_columns, found, links=links, tables=tables
             )
     history = table.get("history")
-    if isinstance(history, Mapping):
+    if noisy_parts and isinstance(history, Mapping):
         _structure_reasons(
             _history_members(history), table_columns, found, links=links, tables=tables
         )
@@ -627,6 +633,9 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
     ]
     data_stated: Set[str] = set()
     tables = profile.get("tables")
+    # Format 1-5-0 may release a history and a query's rate with noise, so their statistics are
+    # checked for what they state as the columns' are; an earlier document keeps its reasons.
+    noisy_parts = profile.get("_schemaURL") == SCHEMA_URL_1_5_0
     for table_id, table in tables.items() if isinstance(tables, Mapping) else ():
         if not isinstance(table, Mapping):
             continue
@@ -666,6 +675,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             data_stated,
             links=accounting is None or not accounting.from_1_4,
             tables=tables,
+            noisy_parts=noisy_parts,
         )
         for name, column in (table.get("columns") or {}).items():
             if not isinstance(column, Mapping):
@@ -681,12 +691,13 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             )
     exact["other"] |= any(profile.get(section) for section in _NOT_NOISY_SECTIONS)
     exact["other"] |= _queries_released_exact(profile.get("queries"))
-    _query_structure_reasons(
-        profile.get("queries"),
-        tables,
-        data_stated,
-        links=accounting is None or not accounting.from_1_4,
-    )
+    if noisy_parts:
+        _query_structure_reasons(
+            profile.get("queries"),
+            tables,
+            data_stated,
+            links=accounting is None or not accounting.from_1_4,
+        )
     relationships = profile.get("relationships")
     for index, relationship in enumerate(relationships if isinstance(relationships, list) else ()):
         if not isinstance(relationship, Mapping):
@@ -735,6 +746,9 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
         reasons.append(
             "the profile holds period statistics, fact statistics or reference rows, which cannot "
             "be released with noise, or a query statistic released without noise"
+            if noisy_parts
+            else "the profile holds period, query or fact statistics, or reference rows, which "
+            "cannot be released with noise in this format"
         )
     reasons.extend(sorted(data_stated))
     for path in sections:
