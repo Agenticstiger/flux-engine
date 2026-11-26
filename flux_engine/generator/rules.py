@@ -4536,6 +4536,9 @@ class _Pass:
             from flux_engine.generator.relations import RelationReader
 
             self._reader = RelationReader(_run_root(self))
+            # The history a rule's ``previous`` walks may keep to its parent's lifetime, whose
+            # layout reads the parents through this plan's own foreign key (ADR 0017).
+            self._reader.know(self.plan)
         return self._reader
 
     def own_null(self, column_plan: "ColumnPlan", row: int) -> bool:

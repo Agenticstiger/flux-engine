@@ -115,6 +115,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   link now reads the rows the projected emit writes, in a rule, a `within` entry and a column drawn `given` the linked
   row; a new plan that has such a link says `projectedReads: "final"`, and a recorded plan without it replays the
   link as it was made (ADR 0027, the amendment of 2026-11-26 about linked rows).
+- A history that keeps to its parent's lifetime (`parent.lifetime`) with a rule that reads `previous` was refused at
+  plan (`FLX-3403`, "whose plan this pass does not read"), though each plans without the other. It plans, and
+  `verify` holds the rule on every version (ADR 0017 section 7).
 
 ## 0.12.1 - 2026-11-26
 
