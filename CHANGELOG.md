@@ -415,6 +415,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - As intended, an entity of such a history ends when its parent's lifetime ends inside the horizon, even when the
   declared end `share` is 0: under `finalVersion` its final version carries the end value, and an entity with one
   version carries it from its first day, so the share a run reaches can be above the declared one.
+- An events entry with a `when` no longer holds its history to the range on the columns it copies. The entry
+  records only the versions its condition holds for, yet the range on its `date` or `at` was read as a bound on
+  every version, so every entity's first start was moved to the range's low end, and in a history kept to its
+  parent's lifetime the entities of a parent that closed before that day had no room and `plan` refused the bundle
+  (`FLX-3403`). The range on such a column is noted again, and `verify` counts the events outside it. When a range
+  on the validity columns does leave a parent's entities no room, the refusal now names the range and says to
+  widen it (ADR 0024, the amendment of 2026-11-26).
 
 ## 0.11.1 - 2026-11-24
 

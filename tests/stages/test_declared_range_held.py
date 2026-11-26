@@ -204,3 +204,72 @@ def test_a_range_too_narrow_for_the_declared_versions_holds_fewer_rows(tmp_path:
     assert document["rangeSetters"] == "held"
     verified = verify_module.verify(target, run_id=layout.run_id, state_dir=state)
     assert verified.success, verified.stdout + verified.stderr
+
+
+def _events_when(target: Path, when: str) -> None:
+    """Give the events entry a ``when``: it records only the versions the condition holds for."""
+    simulation = target / "simulation.flux.yml"
+    document = yaml.safe_load(simulation.read_text("utf-8"))
+    document["extensions"]["com.agentics.flux/1"]["events"][0]["when"] = when
+    simulation.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+
+
+def test_an_events_entry_with_a_when_leaves_the_history_unheld(tmp_path: Path) -> None:
+    """The range on a column an events entry with a ``when`` copies is only noted.
+
+    The entry records only the versions its condition holds for, so the range says nothing of the
+    others: the history keeps its first starts, and verify counts any event outside the range.
+    """
+    target = _ranged(tmp_path, "vehicle_change", "changed_at")
+    _events_when(target, f"valid_from >= DATE '{LOW}'")
+    state = tmp_path / "state"
+    planned = plan_module.plan(target, state_dir=state, kernel=KERNEL_V2.version, stage=False)
+    assert planned.success, planned.stderr
+    assert "vehicle_change.changed_at is not drawn inside" in planned.stderr
+    layout = RunLayout.for_state_dir(state, planned.artifacts["run_id"])
+    assert "rangeSetters" not in json.loads(layout.plan_path.read_text("utf-8"))
+    applied = apply_module.apply(target, run_id=layout.run_id, state_dir=state)
+    assert applied.success, applied.stderr
+    assert any(row["valid_from"] < LOW for row in rows(layout, HISTORY))
+    assert all(row["changed_at"] >= LOW for row in rows(layout, "vehicle_change"))
+
+
+def test_a_parent_bound_history_plans_past_an_events_entry_with_a_when(tmp_path: Path) -> None:
+    """A parent that closed before the range's low end still leaves its entities room."""
+    from .test_history_parent_run import _bundle as parent_bound
+
+    target = parent_bound(tmp_path)
+    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
+    schema = expose(contract, "vehicle_change")["contract"]["schema"]
+    held = next(item for item in schema if item["name"] == "changed_at")
+    held["validationRules"] = [
+        {"type": "range", "constraint": "between '2025-06-01' and '2025-12-31'"}
+    ]
+    repin(target, contract)
+    _events_when(target, "valid_from >= DATE '2025-06-01'")
+    planned = plan_module.plan(
+        target, state_dir=tmp_path / "state", kernel=KERNEL_V2.version, stage=False
+    )
+    assert planned.success, planned.stderr
+
+
+def test_a_parent_closed_before_the_validity_range_is_refused_naming_the_range(
+    tmp_path: Path,
+) -> None:
+    """Every version starts inside the range, so a parent that closed before it leaves no room."""
+    from .test_history_parent_run import _bundle as parent_bound
+
+    target = parent_bound(tmp_path)
+    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
+    schema = expose(contract, HISTORY)["contract"]["schema"]
+    held = next(item for item in schema if item["name"] == "valid_from")
+    held["validationRules"] = [
+        {"type": "range", "constraint": "between '2025-06-01' and '2025-12-31'"}
+    ]
+    repin(target, contract)
+    refused = plan_module.plan(
+        target, state_dir=tmp_path / "state", kernel=KERNEL_V2.version, stage=False
+    )
+    assert not refused.success and "FLX-3403" in refused.stderr
+    assert "from the range on its validity columns (2025-06-01)" in refused.stderr
+    assert "widen the range" in refused.stderr

@@ -1471,7 +1471,8 @@ def _bounded_chain(
             f"({_unit_text(until, kind)}); widen the range, or move the window or until into it"
         )
     if bool(short.any()):
-        raise _no_room(entry, kind, lifetimes, parents[short], int(parents.shape[0]), until)
+        found = (lifetimes, parents[short], int(parents.shape[0]))
+        raise _no_room(entry, kind, found, until, None if ranged is None else ranged[0])
     starts = _bounded_first_starts(root, sim_id, expose_id, entry, kind, low, high)
     closing = lifetimes.has_end[parents]
     forced = closing & (lifetimes.ends[parents] <= until)
@@ -1481,12 +1482,17 @@ def _bounded_chain(
 def _no_room(
     entry: HistoryEntry,
     kind: LogicalKind,
-    bound: ParentBound,
-    parents: "np.ndarray",
-    entities: int,
+    found: Tuple[ParentBound, "np.ndarray", int],
     until: int,
+    low: Optional[int] = None,
 ) -> FluxError:
-    """``FLX-3403`` for the entities whose parent leaves no room for one version: how many, and their parents' lifetimes."""
+    """``FLX-3403`` for the entities whose parent leaves no room for one version: how many, and their parents' lifetimes.
+
+    *found* is the parents' lifetimes, the short entities' parent rows and the count of entities;
+    *low* is the first unit the validity columns' range lets a version start on, when it cuts the
+    window, and the message names it, since a parent that closes before it has no room either.
+    """
+    bound, parents, entities = found
     opened = bound.starts[parents][bound.has_start[parents]]
     closed = bound.ends[parents][bound.has_end[parents]]
 
@@ -1499,10 +1505,12 @@ def _no_room(
 
     return _refuse(
         f"history ({entry.emit}).parent.lifetime: {int(parents.shape[0])} of {entities} entities "
-        "have a parent whose lifetime leaves no room for one version before "
-        f"until ({_unit_text(until, kind)}){_closing_words(entry)}; the parents of those entities "
-        f"open {spread(opened)} and close {spread(closed)}; give the parents longer lifetimes, "
-        "move until later, or drop parent.lifetime"
+        "have a parent whose lifetime leaves no room for one version "
+        f"{'' if low is None else f'from the range on its validity columns ({_unit_text(low, kind)}) '}"
+        f"before until ({_unit_text(until, kind)}){_closing_words(entry)}; the parents of those "
+        f"entities open {spread(opened)} and close {spread(closed)}; give the parents longer "
+        f"lifetimes, {'' if low is None else 'widen the range, '}move until later, or drop "
+        "parent.lifetime"
     )
 
 
