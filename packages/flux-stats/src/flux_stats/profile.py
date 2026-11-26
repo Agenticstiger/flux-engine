@@ -2931,8 +2931,10 @@ class _Reader:
 
         A noisy statistic needs the unit, which says how many records one unit of privacy changes:
         rows of a table (``m_T``), groups of its rows by the columns of a followed relationship
-        (``m_P`` of the parent), or its history's entities (``m_T``). Both cells of the rate are a
-        count table, so each is charged that figure (PROFILE-SPEC.md section 3a).
+        (``m_P`` of the parent; twice that, ``L1 = 2 m_P`` and ``L2^2 = 2 m_P^2``, when the table
+        is one the unit does not reach, where a group can change cell without leaving), or its
+        history's entities (``m_T``). Both cells of the rate are a count table, charged that
+        sensitivity (PROFILE-SPEC.md section 3a).
         """
         raw = _mapping(value, where, required=("name", "statistics"), optional=("unit",))
         name = _name(raw["name"], f"{where}.name")
@@ -2981,16 +2983,22 @@ class _Reader:
         tables: Mapping[str, TableEntry],
         relationships: Sequence[RelationshipEntry],
     ) -> _Charge:
-        """The sensitivity of a noisy query over *unit*: a count table, L1 = L2 = the unit's reach.
+        """The sensitivity of a noisy query over *unit*, a count table of its records.
 
-        ``{table}``: ``m_T``. With ``by``, the child columns of a listed relationship from a parent
-        ``P`` into the table: one group is one row of ``P``, ``m_P``; or the table's ``history``
-        entity columns: ``m_T``, under the history's whole-entity obligation (a profiler's, stated
-        and not checked), in a table the unit follows into. In the unit's own expose one unit is
-        one version, and removing it can move its entity from one cell of the rate to the other,
-        so the entity form is refused there, as a noisy history member is. Anything else, an
-        unknown table or column, or a figure of 0 (a table the unit does not reach), is refused,
-        naming the query and no value.
+        ``{table}``: each row is a record, ``m_T`` of them change, ``(m_T, m_T^2)``. With ``by``,
+        the child columns of a listed relationship from a parent ``P`` into the table: one group is
+        one row of ``P``. When the unit follows that relationship, a group leaves with its row of
+        ``P`` whole and the charge is ``(m_P, m_P^2)``. When the table is a table the unit does not
+        reach, its rows are the same in every neighbouring data set, so a group stays when its row
+        of ``P`` leaves, and a query that reads that row can move the group from one cell of the
+        rate to the other: ``(2 m_P, 2 m_P^2)``, as a row moving between cells of a relationship
+        statistic (section 3a). Or the table's ``history`` entity columns: ``m_T``, under the
+        history's whole-entity obligation (a profiler's, stated and not checked), in a table the
+        unit follows into. In the unit's own expose one unit is one version, and removing it can
+        move its entity from one cell of the rate to the other, so the entity form is refused
+        there, as a noisy history member is. Anything else, an unknown table or column, or a figure
+        of 0 (a table the unit does not reach, with no parent the unit reaches), is refused, naming
+        the query and no value.
         """
         accounting = self._require_account(f"{where}.unit")
         refused = f"query {name!r} states a unit that does not give a charge: "
@@ -3000,10 +3008,10 @@ class _Reader:
         if not set(unit.by) <= set(entry.columns):
             raise refuse(f"{where}.unit.by", refused + "a column is not one of its table")
         reach = accounting.reach(unit.table)
+        charges: List[_Charge] = []
         if not unit.by:
-            charges = [reach]
+            charges.append(_Charge(Fraction(reach), Fraction(reach * reach)))
         else:
-            charges = []
             for link in relationships:
                 if link.child_table == unit.table and link.child_columns == unit.by:
                     key = (link.parent_table, link.parent_columns, unit.table, link.child_columns)
@@ -3011,10 +3019,14 @@ class _Reader:
                         (f.parent_table, f.parent_columns, f.child_table, f.child_columns) == key
                         for f in accounting.follows
                     )
+                    parent = accounting.reach(link.parent_table)
                     # A group leaves with its unit whole only when the table's rows follow their
-                    # parent row, or are the same in every neighbouring data set.
-                    if followed or reach == 0:
-                        charges.append(accounting.reach(link.parent_table))
+                    # parent row. When they are the same in every neighbouring data set, the
+                    # group stays when its row of the parent leaves and may change cell.
+                    if followed:
+                        charges.append(_Charge(Fraction(parent), Fraction(parent * parent)))
+                    elif reach == 0:
+                        charges.append(_Charge(Fraction(2 * parent), Fraction(2 * parent * parent)))
                     break
             history = entry.history
             if history is not None and history.entity == unit.by:
@@ -3025,7 +3037,7 @@ class _Reader:
                         "where one unit is one version and can move its entity between the "
                         "rate's cells",
                     )
-                charges.append(reach)
+                charges.append(_Charge(Fraction(reach), Fraction(reach * reach)))
             if not charges:
                 raise refuse(
                     f"{where}.unit.by",
@@ -3034,14 +3046,14 @@ class _Reader:
                     "into the table (or into a table the unit does not reach) nor its history's "
                     "entity",
                 )
-        charge = next((figure for figure in charges if figure >= 1), 0)
-        if charge < 1:
-            raise refuse(
-                f"{where}.unit",
-                refused + "the unit of privacy does not reach it, so the profile does not state "
-                "how many records one unit contributes",
-            )
-        return _Charge(Fraction(charge), Fraction(charge * charge))
+        for charge in charges:
+            if charge.l1 >= 1:
+                return charge
+        raise refuse(
+            f"{where}.unit",
+            refused + "the unit of privacy does not reach it, so the profile does not state "
+            "how many records one unit contributes",
+        )
 
     def invariant(self, value: Any, where: str) -> InvariantEntry:
         """A declared fact's share: exactly one ungrouped ``levelHistogram/1`` over false and true."""

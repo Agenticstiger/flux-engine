@@ -129,17 +129,32 @@ def test_a_unit_the_privacy_unit_does_not_reach_has_no_charge() -> None:
     assert "queries[0].unit" in _refused(_edit(unreach))
 
 
-def test_the_member_form_needs_a_followed_relationship_or_a_table_that_is_not_reached() -> None:
-    def unfollow(document: Dict[str, Any]) -> None:
-        # the relationship stays listed, but the unit follows nothing: card_version is unreached,
-        # which is the other case form (a) allows, and its own rows then have no charge
-        document["privacy"]["privacyUnit"] = {"expose": "member"}
-        for table, column in (("member", "segment"), ("card_version", "valid_to")):
-            document["tables"][table]["columns"][column]["statistics"] = []
-        document["tables"]["card_version"].pop("history")
-        document["queries"] = [document["queries"][MEMBERS]]
+def _unfollow(document: Dict[str, Any]) -> None:
+    # the relationship stays listed, but the unit follows nothing: card_version is unreached,
+    # which is the other case form (a) allows, and its own rows then have no charge
+    document["privacy"]["privacyUnit"] = {"expose": "member"}
+    for table, column in (("member", "segment"), ("card_version", "valid_to")):
+        document["tables"][table]["columns"][column]["statistics"] = []
+    document["tables"]["card_version"].pop("history")
+    document["queries"] = [document["queries"][MEMBERS]]
 
-    parse_profile(_edit(unfollow))  # m_T = 0 and m_P = 1: charged 1, scale 2 at rho 1/8 is fine
+
+def test_the_member_form_in_a_table_that_is_not_reached_moves_a_group_between_cells() -> None:
+    """The table's rows are the same in every neighbouring data set, so a group stays when its
+    row of the parent leaves, and a query that reads that row can move the group from one cell
+    of the rate to the other: per row of the parent L1 = 2 and L2^2 = 2. At m_P = 1 and scale 2
+    that needs rho 1/4; 1/8 is the charge of a group that leaves whole."""
+
+    def share(rho: str) -> Dict[str, Any]:
+        def change(document: Dict[str, Any]) -> None:
+            _unfollow(document)
+            _statistic(document, 0)["noise"]["privacyLoss"]["rho"] = rho
+
+        return _edit(change)
+
+    message = _refused(share("0.125"))
+    assert "queries[0]" in message
+    parse_profile(share("0.25"))
 
 
 def test_the_member_form_is_refused_when_the_table_is_reached_through_another_relationship() -> (
