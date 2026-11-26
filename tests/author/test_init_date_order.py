@@ -188,6 +188,18 @@ def test_a_card_cancelled_before_issued_is_not_drawn(tmp_path: Path) -> None:
     assert "card_cancelled_after_issued" in entries[0]["reason"]
 
 
+def test_no_row_ends_before_it_starts_when_the_check_is_plain(tmp_path: Path) -> None:
+    # An end every row holds, and a check with no NULL branch: each row's end is on or after its start.
+    plain = CARD.replace(
+        "{ name: cancelled_on, type: DATE }", "{ name: cancelled_on, type: DATE, required: true }"
+    ).replace("cancelled_on IS NULL OR cancelled_on >= issued_on", "cancelled_on >= issued_on")
+    assert plain != CARD
+    _init(tmp_path, plain, _profile("card", "issued_on", "cancelled_on"))
+    rows = _rows(tmp_path, "card")
+    assert len(rows) > 100 and all(row[2] is not None for row in rows)
+    assert not [row for row in rows if row[2] < row[1]]
+
+
 def test_a_timestamp_pair_is_ordered_too(tmp_path: Path) -> None:
     _init(tmp_path, LOAN, _profile("loan", "borrowed_at", "returned_at"))
     (life,) = _block(tmp_path)["lifetimes"]
