@@ -139,6 +139,151 @@ def test_a_published_open_end_gives_the_window_nothing(tmp_path: Path) -> None:
     assert _open_versions(_rows(tmp_path))["9999-12-31"] == 850
 
 
+#: The last instant of the year ladder a profile bins a date's quantiles on.
+LAST_INSTANT_MS = "253402300799999"
+
+
+def _quartiles_past_the_data(
+    profile: Dict[str, Any],
+    closed: int,
+    ladder: Optional[List[str]] = None,
+    minimum: Optional[str] = None,
+    maximum: Optional[str] = None,
+) -> Dict[str, Any]:
+    """*profile* whose ends publish every quartile in the bin of the open end, and no *minimum*.
+
+    The quartiles are binned on a ladder of years whose last bin runs from 2100 to the last
+    instant, unless *ladder* gives other edges, so the profile says only that *closed* versions
+    end somewhere below that bin. With *maximum*, the last bin and the published maximum end
+    there, before the open end.
+    """
+    if ladder is None:
+        ladder = [_ms(year, 1, 1) for year in range(2020, 2101)]
+    ladder = ladder + [LAST_INSTANT_MS if maximum is None else maximum]
+    high = LAST_DAY_MS if maximum is None else maximum
+    metrics = _metrics("0" if minimum is None else minimum, high, 1850)
+    if minimum is None:
+        del metrics["min"]["value"]
+        metrics["min"]["status"] = "A"
+    group = {
+        "group": "",
+        "k": 1850,
+        "quantileBin": len(ladder) - 2,
+        "binBelow": closed,
+        "binThrough": 1850,
+        "status": "F",
+    }
+    profile["tables"]["tier_version"]["columns"]["valid_to"] = {
+        "domain": "timestamp",
+        "metrics": metrics,
+        "statistics": [
+            {
+                "definition": "quantile/2",
+                "level": level,
+                "bins": ladder,
+                "sampleSize": metrics["count"]["sampleSize"],
+                "disclosure": "acro-default",
+                "groups": [dict(group)],
+            }
+            for level in ("0.25", "0.5", "0.75")
+        ],
+    }
+    return profile
+
+
+def test_closed_ends_below_every_published_quartile_lie_where_the_versions_start(
+    tmp_path: Path,
+) -> None:
+    # A closed version ends the day before the next one starts, so the ends the profile places
+    # only below 2100 are drawn over the starts' span: the bin next to the open end would
+    # stretch the run's window to 2100.
+    profile = _quartiles_past_the_data(_profile(), closed=300)
+    result = _init(tmp_path, profile, _declaring(chain="dayBefore"))
+    assert result.exit_code == 0, result.stderr
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    assert yaml.safe_load(text)["spec"]["timeBounds"]["end"] < "2026"
+    column = _block(tmp_path)["emits"]["tier_version"]["fidelity"]["columns"]["valid_to"]
+    assert column["bins"] == ["2025-01-01", "2025-09-01", "9999-12-31"]
+    # The register says where the moved bin's rows now lie.
+    reasons = [
+        str(item.get("reason"))
+        for item in _block(tmp_path)["parameters"]
+        if item["pointer"].endswith("/columns/valid_to/binWeights/0")
+    ]
+    assert reasons and all("over the span the window's start column" in text for text in reasons)
+    rows = _rows(tmp_path)
+    assert all(row[END] == "9999-12-31" or row[END] < "2026" for row in rows)
+
+
+def test_closed_ends_of_starts_within_one_day_hold_that_day(tmp_path: Path) -> None:
+    # The versions start within one morning, and the end column holds whole days: the closed ends
+    # lie on that day.
+    contract = _declaring(chain="dayBefore").replace(
+        "{ name: valid_from, type: DATE, required: true }",
+        "{ name: valid_from, type: TIMESTAMP, required: true }",
+    )
+    assert "valid_from, type: TIMESTAMP" in contract
+    morning = _ms(2025, 3, 1)
+    profile = _quartiles_past_the_data(_profile(), closed=300)
+    profile["tables"]["tier_version"]["columns"]["valid_from"] = {
+        "domain": "timestamp",
+        "metrics": _metrics(morning, str(int(morning) + 5 * 3_600_000), 1850),
+    }
+    result = _init(tmp_path, profile, contract)
+    assert result.exit_code == 0, result.stderr
+    column = _block(tmp_path)["emits"]["tier_version"]["fidelity"]["columns"]["valid_to"]
+    assert column["bins"] == ["2025-03-01", "2025-03-02", "9999-12-31"]
+
+
+def test_closed_ends_stay_below_the_bin_of_the_open_end_that_starts_inside_the_data(
+    tmp_path: Path,
+) -> None:
+    # The bin of the open end starts in June, before the last start: the profile counts the
+    # closed ends below it, so they are drawn from the first start to June.
+    ladder = [_ms(year, 1, 1) for year in range(2020, 2025)] + [_ms(2025, 6, 1)]
+    profile = _quartiles_past_the_data(_profile(), closed=300, ladder=ladder)
+    result = _init(tmp_path, profile, _declaring(chain="dayBefore"))
+    assert result.exit_code == 0, result.stderr
+    column = _block(tmp_path)["emits"]["tier_version"]["fidelity"]["columns"]["valid_to"]
+    assert column["bins"] == ["2025-01-01", "2025-06-01", "9999-12-31"]
+
+
+def test_a_published_minimum_keeps_the_closed_ends_where_the_profile_puts_them(
+    tmp_path: Path,
+) -> None:
+    profile = _quartiles_past_the_data(_profile(), closed=300, minimum=_ms(2025, 3, 1))
+    result = _init(tmp_path, profile, _declaring(chain="dayBefore"))
+    assert result.exit_code == 0, result.stderr
+    column = _block(tmp_path)["emits"]["tier_version"]["fidelity"]["columns"]["valid_to"]
+    assert column["bins"][0] == "2025-03-01"
+
+
+def test_a_last_bin_that_ends_before_the_open_end_keeps_the_bin_below_it(tmp_path: Path) -> None:
+    # No end the profile publishes is the open end: the last bin is data, and so is the one below.
+    ladder = [_ms(year, 1, 1) for year in range(2020, 2025)] + [_ms(2025, 6, 1)]
+    ladder.remove(_ms(2024, 1, 1))
+    profile = _quartiles_past_the_data(_profile(), 300, ladder=ladder, maximum=_ms(2025, 10, 1))
+    result = _init(tmp_path, profile, _declaring(chain="dayBefore"))
+    assert result.exit_code == 0, result.stderr
+    column = _block(tmp_path)["emits"]["tier_version"]["fidelity"]["columns"]["valid_to"]
+    assert column["bins"] == ["2023-01-01", "2025-06-01", "2025-10-01"]
+
+
+def test_closed_ends_keep_to_the_range_the_contract_declares_for_the_starts(
+    tmp_path: Path,
+) -> None:
+    contract = _declaring(chain="dayBefore").replace(
+        "{ name: valid_from, type: DATE, required: true }",
+        "{ name: valid_from, type: DATE, required: true, validationRules: "
+        "[{ type: range, constraint: \"between '2025-02-01' and '2025-08-01'\" }] }",
+    )
+    profile = _quartiles_past_the_data(_profile(), closed=300)
+    result = _init(tmp_path, profile, contract)
+    assert result.exit_code == 0, result.stderr
+    column = _block(tmp_path)["emits"]["tier_version"]["fidelity"]["columns"]["valid_to"]
+    assert column["bins"] == ["2025-02-01", "2025-08-01", "9999-12-31"]
+
+
 def test_an_end_column_holding_only_the_open_end_is_written_by_the_history(
     tmp_path: Path,
 ) -> None:
