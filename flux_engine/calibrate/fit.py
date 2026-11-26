@@ -348,6 +348,23 @@ def _register_of(loaded: Any, cast: Any) -> ParameterRegister:
     )
 
 
+def _nothing_to_fit(inside: Sequence[str]) -> FluxError:
+    """``FLX-3707`` for a pinned profile that states no calibration query's rate, naming the
+    queries whose rates it states only inside the noise (profile format 1-5-0), if any."""
+    if inside:
+        return FluxError(
+            FLX_3707,
+            "the pinned profile states the rate of no calibration query outside its noise: "
+            f"the rates of {', '.join(repr(name) for name in inside)} stand inside it, so "
+            "there is nothing to fit to; nothing was run",
+        )
+    return FluxError(
+        FLX_3707,
+        "the pinned profile states the rate of no calibration query, so there is nothing "
+        "to fit to; nothing was run",
+    )
+
+
 def _prepare(request: FitRequest, ceilings: Ceilings) -> _Prepared:
     from flux_engine.consumers.check import SQLGLOT_VERSION, check_registry
     from flux_engine.runtime import resolve_cast
@@ -369,18 +386,7 @@ def _prepare(request: FitRequest, ceilings: Ceilings) -> _Prepared:
     stated = stated_queries((q for q in registry.queries if not q.held_out), targets)
     inside = sorted(inside_noise(targets) & frozenset(calibration_ids))
     if not stated:
-        if inside:
-            raise FluxError(
-                FLX_3707,
-                "the pinned profile states the rate of no calibration query outside its noise: "
-                f"the rates of {', '.join(repr(name) for name in inside)} stand inside it, so "
-                "there is nothing to fit to; nothing was run",
-            )
-        raise FluxError(
-            FLX_3707,
-            "the pinned profile states the rate of no calibration query, so there is nothing "
-            "to fit to; nothing was run",
-        )
+        raise _nothing_to_fit(inside)
     if registry.compiled_sqlglot is not None and registry.compiled_sqlglot != SQLGLOT_VERSION:
         raise FluxError(
             FLX_3709,

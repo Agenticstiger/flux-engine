@@ -121,9 +121,7 @@ def point_estimates(
             for index, statistic in enumerate(statistics if isinstance(statistics, list) else ()):
                 tokens = ("tables", str(expose), "columns", str(name), "statistics", str(index))
                 _estimate(statistic, tokens, notes)
-        history = table.get("history") if isinstance(table, dict) else None
-        if isinstance(history, dict):
-            _estimate_history(history, ("tables", str(expose), "history"), notes)
+        _estimate_history(table, str(expose), notes)
     # A relationship's noisy histogram of children per parent, grouped or not (profile format
     # 1-4-0), is read as a column's is.
     relationships = view.get("relationships")
@@ -134,10 +132,13 @@ def point_estimates(
     return view, notes
 
 
-def _estimate_history(
-    history: Dict[str, Any], base: Tuple[str, ...], notes: Dict[Tuple[str, ...], NoisyNote]
-) -> None:
-    """Read each noisy member of a history, and of its tracked columns, with the noise floor."""
+def _estimate_history(table: Any, expose: str, notes: Dict[Tuple[str, ...], NoisyNote]) -> None:
+    """Read each noisy member of a table's history, and of its tracked columns, with the noise
+    floor."""
+    history = table.get("history") if isinstance(table, dict) else None
+    if not isinstance(history, dict):
+        return
+    base = ("tables", expose, "history")
     for key in _HISTORY_MEMBERS:
         _estimate(history.get(key), base + (key,), notes, floored=True)
     columns = history.get("columns")
@@ -232,10 +233,8 @@ def _withhold(statistic: Dict[str, Any], key: str) -> None:
 
 def _has_noise(profile: Mapping[str, Any]) -> bool:
     tables = profile.get("tables")
-    for table in tables.values() if isinstance(tables, Mapping) else ():
-        history = table.get("history") if isinstance(table, Mapping) else None
-        if isinstance(history, Mapping) and _history_has_noise(history):
-            return True
+    if _histories_have_noise(tables):
+        return True
     for entry in profile.get("relationships") or ():
         statistics = entry.get("statistics") if isinstance(entry, Mapping) else None
         if any(isinstance(item, Mapping) and "noise" in item for item in statistics or ()):
@@ -248,6 +247,15 @@ def _has_noise(profile: Mapping[str, Any]) -> bool:
             statistics = column.get("statistics") if isinstance(column, Mapping) else None
             if any(isinstance(item, Mapping) and "noise" in item for item in statistics or ()):
                 return True
+    return False
+
+
+def _histories_have_noise(tables: Any) -> bool:
+    """Whether a member of a table's history, or of one of its tracked columns, carries noise."""
+    for table in tables.values() if isinstance(tables, Mapping) else ():
+        history = table.get("history") if isinstance(table, Mapping) else None
+        if isinstance(history, Mapping) and _history_has_noise(history):
+            return True
     return False
 
 
