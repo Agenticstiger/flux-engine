@@ -515,8 +515,9 @@ the grade does not know counts as released without noise.
 A noisy statistic that still states data is graded P1 too, in every format: a `groupBy` on a column that
 is not categorical (a number or timestamp column, or a column the profile does not hold), whose group keys
 are data values, and a `sampleSize` band whose `min` equals its `max`, which is an exact size. The check
-reads the statistics of columns, of `datePairs` and `columnPairs`, and of `relationships` (whose `groupBy`
-names a column of the parent table). In a profile of an earlier format a `groupByLink` is graded P1 as well,
+reads the statistics of columns, of `datePairs` and `columnPairs`, of `relationships` (whose `groupBy`
+names a column of the parent table), of every member of a `history` (format `1-5-0`) and of the `queries` (format
+`1-5-0`, whose `groupBy` names a column of the query's unit table). In a profile of an earlier format a `groupByLink` is graded P1 as well,
 because its keys are values of another table and that declaration covers levels, bin edges and bands only;
 in format `1-4-0` the declaration covers the values of a `category` column of the parent table, so a
 `groupByLink` whose `column` is any other column (a number or timestamp column, or one the profile does not

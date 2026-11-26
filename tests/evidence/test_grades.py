@@ -407,6 +407,49 @@ def test_a_noisy_null_count_does_not_keep_a_profile_from_p3() -> None:
     assert graded.accounting is not None and graded.accounting.parts == 12
 
 
+def _band(document: Dict[str, Any], statistic: Dict[str, Any]) -> None:
+    statistic["sampleSize"] = {"min": 5000, "max": 5000}
+
+
+def _history_chain(document: Dict[str, Any]) -> None:
+    _band(document, document["tables"]["card_version"]["history"]["chain"])
+
+
+def _history_initial(document: Dict[str, Any]) -> None:
+    columns = document["tables"]["card_version"]["history"]["columns"]
+    _band(document, next(iter(columns.values()))["initial"])
+
+
+def _query_band(document: Dict[str, Any]) -> None:
+    _band(document, document["queries"][1]["statistics"][0])
+
+
+def _query_group(document: Dict[str, Any]) -> None:
+    document["queries"][0]["statistics"][0][
+        "groupBy"
+    ] = "valid_from"  # a timestamp column: its keys are data
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (_history_chain, "sampleSize band whose min equals its max"),
+        (_history_initial, "sampleSize band whose min equals its max"),
+        (_query_band, "sampleSize band whose min equals its max"),
+        (_query_group, "grouped by a column whose keys are data values"),
+    ],
+)
+def test_a_noisy_history_member_or_query_that_still_states_data_is_not_p3(
+    change: Any, reason: str
+) -> None:
+    document = _noisy_history_example()
+    assert grade_profile(document, pinned=True).pattern is Pattern.P3
+    change(document)
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any(reason in item for item in graded.reasons), graded.reasons
+
+
 def _release(history: bool, queries: bool) -> Dict[str, Any]:
     """The 1-5-0 example, graded P3, with a noisy history and noisy queries kept or dropped."""
     document = _noisy_history_example()
@@ -428,9 +471,12 @@ _HISTORY_OBLIGATIONS = (
     "and the candidate columns."
 )
 _QUERY_OBLIGATIONS = (
-    "Noisy query, stated and not checked: its records are what its unit states; whether a "
-    "record matches reads only rows of that record's own unit and of tables the unit does not "
-    "reach; and a profiler that cannot run a query withholds every query of the release."
+    "Noisy query, stated and not checked: its records are what its unit states; the query and "
+    "its unit pass the checks of ADR 0028; whether a record matches reads only rows of that "
+    "record's own unit and of tables the unit does not reach; under a history's entities, an "
+    "entity's rows lie in one unit and the bounding of its table keeps or drops an entity's "
+    "versions together; and a profiler that cannot run a query withholds every query of the "
+    "release."
 )
 
 

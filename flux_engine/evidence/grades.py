@@ -495,6 +495,58 @@ def _table_structure_reasons(
             _structure_reasons(
                 column.get("statistics"), table_columns, found, links=links, tables=tables
             )
+    history = table.get("history")
+    if isinstance(history, Mapping):
+        _structure_reasons(
+            _history_members(history), table_columns, found, links=links, tables=tables
+        )
+
+
+def _query_structure_reasons(queries: Any, tables: Any, found: Set[str], *, links: bool) -> None:
+    """Add to *found* the reasons the statistics of the ``queries`` state data (format 1-5-0).
+
+    A query's ``groupBy`` names a column of its unit's table. A query that states no unit, or one
+    whose table the profile does not hold, has no column to look it up in.
+    """
+    for query in queries if isinstance(queries, list) else ():
+        if not isinstance(query, Mapping):
+            continue
+        unit = query.get("unit")
+        table = (
+            tables.get(unit.get("table"))
+            if isinstance(tables, Mapping)
+            and isinstance(unit, Mapping)
+            and isinstance(unit.get("table"), str)
+            else None
+        )
+        columns = table.get("columns") if isinstance(table, Mapping) else None
+        _structure_reasons(
+            query.get("statistics"),
+            columns if isinstance(columns, Mapping) else {},
+            found,
+            links=links,
+            tables=tables,
+        )
+
+
+def _history_members(history: Mapping[str, Any]) -> List[Any]:
+    """The members of a table's ``history``: its statistics, and each tracked column's two.
+
+    A tracked column that is not an object counts as a member that is absent.
+    """
+    members: List[Any] = [
+        history.get(key)
+        for key in ("versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion")
+    ]
+    if "reasons" in history:
+        members.append(history["reasons"])
+    columns = history.get("columns")
+    for column in columns.values() if isinstance(columns, Mapping) else ():
+        if isinstance(column, Mapping):
+            members += [column.get("initial"), column.get("transitions")]
+        else:
+            members.append(None)
+    return members
 
 
 def _history_released_exact(history: Any) -> bool:
@@ -508,18 +560,7 @@ def _history_released_exact(history: Any) -> bool:
         return False
     if not isinstance(history, Mapping):
         return True
-    members: List[Any] = [
-        history.get(key)
-        for key in ("versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion")
-    ]
-    if "reasons" in history:
-        members.append(history["reasons"])
-    columns = history.get("columns")
-    for column in columns.values() if isinstance(columns, Mapping) else ():
-        if isinstance(column, Mapping):
-            members += [column.get("initial"), column.get("transitions")]
-        else:
-            members.append(None)
+    members = _history_members(history)
     return any(not (isinstance(member, Mapping) and "noise" in member) for member in members)
 
 
@@ -640,6 +681,12 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             )
     exact["other"] |= any(profile.get(section) for section in _NOT_NOISY_SECTIONS)
     exact["other"] |= _queries_released_exact(profile.get("queries"))
+    _query_structure_reasons(
+        profile.get("queries"),
+        tables,
+        data_stated,
+        links=accounting is None or not accounting.from_1_4,
+    )
     relationships = profile.get("relationships")
     for index, relationship in enumerate(relationships if isinstance(relationships, list) else ()):
         if not isinstance(relationship, Mapping):
@@ -686,8 +733,8 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
         )
     if exact["other"]:
         reasons.append(
-            "the profile holds period, query or fact statistics, or reference "
-            "rows, which cannot be released with noise in this format"
+            "the profile holds period statistics, fact statistics or reference rows, which cannot "
+            "be released with noise, or a query statistic released without noise"
         )
     reasons.extend(sorted(data_stated))
     for path in sections:

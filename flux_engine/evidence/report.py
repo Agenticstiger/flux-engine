@@ -612,9 +612,12 @@ _OBLIGATIONS_NOISY_HISTORY = (
 
 #: The same for a noisy query (format 1-5-0, PROFILE-SPEC.md "A noisy query").
 _OBLIGATIONS_NOISY_QUERY = (
-    "Noisy query, stated and not checked: its records are what its unit states; whether a "
-    "record matches reads only rows of that record's own unit and of tables the unit does not "
-    "reach; and a profiler that cannot run a query withholds every query of the release."
+    "Noisy query, stated and not checked: its records are what its unit states; the query and "
+    "its unit pass the checks of ADR 0028; whether a record matches reads only rows of that "
+    "record's own unit and of tables the unit does not reach; under a history's entities, an "
+    "entity's rows lie in one unit and the bounding of its table keeps or drops an entity's "
+    "versions together; and a profiler that cannot run a query withholds every query of the "
+    "release."
 )
 
 

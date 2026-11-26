@@ -40,7 +40,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   not reach `2 m_P` in L1 and `2 m_P^2` in the squared L2, since a group can change cell without leaving. The entity form
   is refused in the unit's own expose, where one unit is one version, and a query over groups of rows is refused a
   `groupBy`. What the profiler owes (a record matches by reading only rows of its own unit and of tables the unit does not
-  reach) is stated and not checked, and the evidence of a P3 grade for a 1-5-0 profile names it, with the
+  reach) is stated and not checked. The P3 checks that a noisy statistic still states data (a `groupBy` on a column
+  that is not a category, a `sampleSize` band of one size) run on every history member and every query statistic. The
+  evidence of a P3 grade for a 1-5-0 profile names it, with the
   obligations of a noisy history, for each part the profile holds. A noisy query in an earlier format is refused as before.
 - `fluxsim init` reads a private release's noisy history and noisy null counts (profile format 1-5-0). A noisy history
   member is read through its point estimate, its cells inside the noise (`noise_floor` over all its cells) carrying no
