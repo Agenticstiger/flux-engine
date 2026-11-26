@@ -9,7 +9,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Tuple
 
 import pytest
 
@@ -391,17 +391,23 @@ def test_a_history_whose_every_member_is_noisy_no_longer_keeps_a_profile_from_p3
     assert graded.pattern is Pattern.P3, graded.reasons
 
 
-@pytest.mark.parametrize("cut", ["versionsPerEntity", "firstStart", "versionLength", "chain"])
-def test_a_noisy_history_a_release_cut_in_part_keeps_p3(cut: str) -> None:
+@pytest.mark.parametrize(
+    "cut",
+    [
+        ("versionsPerEntity",),
+        ("firstStart",),
+        ("versionLength",),
+        ("chain",),
+        ("columns", "tier", "transitions"),
+    ],
+    ids="-".join,
+)
+def test_a_noisy_history_a_release_cut_in_part_keeps_p3(cut: Tuple[str, ...]) -> None:
     document = _noisy_history_example()
-    del document["tables"]["card_version"]["history"][cut]
-    graded = grade_profile(document, pinned=True)
-    assert graded.pattern is Pattern.P3, graded.reasons
-
-
-def test_a_noisy_history_with_a_tracked_column_member_cut_keeps_p3() -> None:
-    document = _noisy_history_example()
-    del document["tables"]["card_version"]["history"]["columns"]["tier"]["transitions"]
+    node = document["tables"]["card_version"]["history"]
+    for key in cut[:-1]:
+        node = node[key]
+    del node[cut[-1]]
     graded = grade_profile(document, pinned=True)
     assert graded.pattern is Pattern.P3, graded.reasons
 

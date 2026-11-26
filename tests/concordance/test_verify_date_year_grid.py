@@ -298,22 +298,18 @@ NO_MILL_GROUPED = dict(EVEN, mill=["0", "0"])
 NO_MILL_DATED = dict({branch: ["10", "40", "50"] for branch in BRANCHES}, mill=["0", "0", "0"])
 
 
-def test_a_grouped_property_leaves_out_a_level_the_profile_holds_no_record_of_and_the_rows_lack(
-    tmp_path: Path,
+ROWS_OF_MILL = [
+    pytest.param(NO_MILL, id="the-rows-lack-it"),
+    pytest.param(ONE_MILL, id="the-rows-hold-one"),
+]
+
+
+@pytest.mark.parametrize("branches", ROWS_OF_MILL)
+def test_a_grouped_property_leaves_out_a_level_the_profile_holds_no_record_of(
+    tmp_path: Path, branches: Tuple[str, ...]
 ) -> None:
     # ``init`` declares no grouped property over such a level, so the property is declared by hand.
-    profile = _profile(YEAR_GRID, NO_MILL_GROUPED, NO_MILL)
-    outcome = _verify(tmp_path, profile, LEVELS_BY_BRANCH)
-    assert "FLX-5005" not in outcome.stdout, outcome.stdout
-    assert "4 of 4 declared properties within the margin" in outcome.stdout, outcome.stdout
-    assert outcome.success, outcome.stdout + outcome.stderr
-
-
-def test_a_grouped_property_leaves_out_a_level_the_profile_holds_no_record_of_and_the_rows_hold_one(
-    tmp_path: Path,
-) -> None:
-    profile = _profile(YEAR_GRID, NO_MILL_GROUPED, ONE_MILL)
-    outcome = _verify(tmp_path, profile, LEVELS_BY_BRANCH)
+    outcome = _verify(tmp_path, _profile(YEAR_GRID, NO_MILL_GROUPED, branches), LEVELS_BY_BRANCH)
     assert "FLX-5005" not in outcome.stdout, outcome.stdout
     assert "4 of 4 declared properties within the margin" in outcome.stdout, outcome.stdout
     assert outcome.success, outcome.stdout + outcome.stderr
@@ -351,21 +347,13 @@ def test_an_exact_group_of_no_record_is_still_a_group_the_rows_lack(tmp_path: Pa
     assert not outcome.success
 
 
-def test_a_sample_leaves_out_a_level_the_profile_holds_no_record_of_and_the_rows_lack(
-    tmp_path: Path,
+@pytest.mark.parametrize("branches", ROWS_OF_MILL)
+def test_a_sample_leaves_out_a_level_the_profile_holds_no_record_of(
+    tmp_path: Path, branches: Tuple[str, ...]
 ) -> None:
-    profile = _profile(YEAR_GRID, EVEN, NO_MILL, NO_MILL_DATED)
-    outcome = _sampled(tmp_path, profile, DATES_BY_BRANCH)
-    assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
-    assert "FLX-5005" not in outcome.stdout + outcome.stderr
-    assert "histograms 2 within, 0 outside, 0 undecided" in outcome.stdout, outcome.stdout
-
-
-def test_a_sample_leaves_out_a_level_the_profile_holds_no_record_of_and_the_rows_hold_one(
-    tmp_path: Path,
-) -> None:
-    profile = _profile(YEAR_GRID, EVEN, ONE_MILL, NO_MILL_DATED)
-    outcome = _sampled(tmp_path, profile, DATES_BY_BRANCH)
+    outcome = _sampled(
+        tmp_path, _profile(YEAR_GRID, EVEN, branches, NO_MILL_DATED), DATES_BY_BRANCH
+    )
     assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
     assert "FLX-5005" not in outcome.stdout + outcome.stderr
     assert "histograms 2 within, 0 outside, 0 undecided" in outcome.stdout, outcome.stdout

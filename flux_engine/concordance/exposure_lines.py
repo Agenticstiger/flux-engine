@@ -358,6 +358,12 @@ def _is_for(relationship: RelationshipEntry, source: ExposureSource) -> bool:
     )
 
 
+def _missing_count_reason(entry: ExposureEntry) -> str:
+    """Why an exposure a release cut to one count is not compared, naming the count it misses."""
+    missing = "children" if entry.children is None else "active days"
+    return f"the profile holds no count of {missing}, so the exposure is not compared"
+
+
 def _exposure_line(
     source: ExposureSource,
     entry: ExposureEntry,
@@ -374,8 +380,7 @@ def _exposure_line(
     if source.hidden is not None:
         return None, source.hidden
     if entry.children is None or entry.active_days is None:
-        missing = "children" if entry.children is None else "active days"
-        return None, f"the profile holds no count of {missing}, so the exposure is not compared"
+        return None, _missing_count_reason(entry)
     total, days = entry.children.value, entry.active_days.value
     if total is None or days is None:
         return None, "the profile withheld the count of children or of active days"

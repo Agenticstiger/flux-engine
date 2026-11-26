@@ -348,3 +348,19 @@ def test_a_date_pair_left_with_only_its_order_does_not_hold_nothing() -> None:
 
     (pair,) = parse_profile(_edit(cut), allow_emptied_entries=True).tables["payment"].date_pairs
     assert pair.statistics == () and pair.order is not None and not pair.holds_nothing
+
+
+def test_a_history_left_with_only_its_reasons_does_not_hold_nothing() -> None:
+    def cut(document: Dict[str, Any]) -> None:
+        _strip(
+            _history(document),
+            "versionsPerEntity",
+            "firstStart",
+            "versionLength",
+            "chain",
+            "lastVersion",
+        )
+        _history(document)["columns"] = {"tier": {}}
+
+    history = parse_profile(_edit(cut), allow_emptied_entries=True).tables["plan_version"].history
+    assert history is not None and history.reasons is not None and not history.holds_nothing

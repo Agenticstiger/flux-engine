@@ -295,17 +295,17 @@ def test_a_date_grouping_column_reads_a_profile_that_holds_milliseconds() -> Non
     assert [g.group for g in evaluation.outcomes[0].groups] == ["20454", "20485"]
 
 
-def test_a_date_grouping_ending_at_the_last_instant_is_the_declared_last_day() -> None:
+def _date_grouping_ending_at(last_edge: int) -> Any:
+    """The mean of ``a`` grouped by the bins of ``d`` declared to end 9999-12-31, over a profile whose last edge is *last_edge* ms."""
     compiled = _compiled(
         _mean_by_bins(
             groupByBins={"column": "d", "bins": ["2026-01-01", "2026-02-01", "9999-12-31"]}
         )
     )
     january, february = 1767225600000, 1769904000000  # 2026-01-01 and 2026-02-01 in ms
-    last_instant = 253_402_300_799_999  # the profiler's last edge, 9999-12-31T23:59:59.999Z
     document = _mean_profile([10, 50, 0])
     stat = document["tables"][EXPOSE]["columns"]["a"]["statistics"][0]
-    stat["groupByBins"] = {"column": "d", "bins": [str(january), str(february), str(last_instant)]}
+    stat["groupByBins"] = {"column": "d", "bins": [str(january), str(february), str(last_edge)]}
     stat["groups"] = [
         {"group": str(january), "k": 30, "Sx": str(30 * 10 * GRID), "status": "F"},
         {"group": str(february), "k": 30, "Sx": str(30 * 50 * GRID), "status": "F"},
@@ -314,31 +314,17 @@ def test_a_date_grouping_ending_at_the_last_instant_is_the_declared_last_day() -
     rows = [{"a": 10, "b": 1, "d": "2026-01-05", "tag": "x"} for _ in range(30)] + [
         {"a": 50, "b": 1, "d": "2026-02-05", "tag": "x"} for _ in range(30)
     ]
-    evaluation = _evaluate(compiled, document, rows)
+    return _evaluate(compiled, document, rows)
+
+
+def test_a_date_grouping_ending_at_the_last_instant_is_the_declared_last_day() -> None:
+    evaluation = _date_grouping_ending_at(253_402_300_799_999)  # 9999-12-31T23:59:59.999Z
     assert not evaluation.refusals, evaluation.refusals
     assert evaluation.outcomes[0].outcome == WITHIN
 
 
 def test_a_date_grouping_ending_a_millisecond_short_of_it_matches_nothing() -> None:
-    compiled = _compiled(
-        _mean_by_bins(
-            groupByBins={"column": "d", "bins": ["2026-01-01", "2026-02-01", "9999-12-31"]}
-        )
-    )
-    january, february = 1767225600000, 1769904000000
-    document = _mean_profile([10, 50, 0])
-    stat = document["tables"][EXPOSE]["columns"]["a"]["statistics"][0]
-    stat["groupByBins"] = {
-        "column": "d",
-        "bins": [str(january), str(february), str(253_402_300_799_998)],
-    }
-    stat["groups"] = [
-        {"group": str(january), "k": 30, "Sx": str(30 * 10 * GRID), "status": "F"},
-        {"group": str(february), "k": 30, "Sx": str(30 * 50 * GRID), "status": "F"},
-    ]
-    document["tables"][EXPOSE]["columns"]["d"] = {"domain": "timestamp"}
-    rows = [{"a": 10, "b": 1, "d": "2026-01-05", "tag": "x"} for _ in range(30)]
-    evaluation = _evaluate(compiled, document, rows)
+    evaluation = _date_grouping_ending_at(253_402_300_799_998)
     assert [refusal.code for refusal in evaluation.refusals] == ["FLX-5037"]
     assert "groupBy" in evaluation.refusals[0].reason
 
