@@ -791,6 +791,10 @@ long after the parent's last day `pe`: the periodic rows left the lifetime the v
   end. A period it holds under `match` is read against that validity. The written version is unchanged: its end
   cell stays NULL or `openEnd`. Closed versions, and the entities of parents that did not end by `until`, read as
   before.
+- **A range on the validity columns** (ADR 0024, the amendment of 2026-11-25) moves no cut. It is folded into where a
+  chain must end, so versions start and close inside it, but it closes no version: the open version of a forced
+  entity is still valid up to the end of `pe`, even where the range ends before `pe`. The layout keeps `pe` for each
+  forced entity apart from the chain's end for this reason.
 - **Events and snapshots** read no validity beyond a version's start, so they are unchanged.
 - **What moves.** The periodic rows of a bundle that declares `parent.lifetime: true` with a `finalVersion` end and
   an entity forced to end, and that emit's count, so its plan digest and run id. No released version carries the key.

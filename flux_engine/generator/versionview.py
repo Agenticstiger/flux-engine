@@ -85,14 +85,15 @@ def _within_parent(
 ) -> "np.ndarray":
     """*valid_to* with each forced entity's open version cut at the end of its parent's last day.
 
-    A forced entity's limit is its parent's last day, the last unit of the parent's lifetime, so
-    the version is valid up to the next unit; a history with no parent bound has no cut.
+    The parent's last day is the last unit of its lifetime, so the version is valid up to the next
+    unit. A range on the validity columns closes no version and moves no cut; a history with no
+    parent bound has no cut.
     """
     cut = chain.cut
     if cut is None:
         return valid_to.astype(np.int64)
     bounded = opened & cut.forced[entities]
-    parent_end = (cut.limits[entities].astype(np.int64) + 1) * scale
+    parent_end = (cut.last_days[entities].astype(np.int64) + 1) * scale
     return np.where(bounded, np.minimum(valid_to, parent_end), valid_to).astype(np.int64)
 
 

@@ -369,7 +369,10 @@ class ParentCut:
     """What a parent's lifetime does to the entities of a history (ADR 0017, amendment of 2026-11-24).
 
     ``limits[e]`` is where entity ``e``'s chain must end, in the chain's unit. ``forced`` flags the
-    entities whose parent ended inside the horizon (they end). ``capped`` is the number of entities
+    entities whose parent ended inside the horizon (they end), and ``last_days`` holds a forced
+    entity's parent's last day (``limits`` elsewhere): what a projection holds its open version to,
+    which, unlike ``limits``, leaves out the validity columns' range, since the range closes no
+    version (ADR 0017, the amendment of 2026-11-26). ``capped`` is the number of entities
     whose version count was cut to the room their parent leaves them, ``moved`` the versions they
     lost that went to entities with room to spare, and ``shortfall`` the versions no entity had
     room for, which the layout does not hold (its rows are the declared ones less the shortfall).
@@ -377,6 +380,7 @@ class ParentCut:
 
     limits: "np.ndarray"
     forced: "np.ndarray"
+    last_days: "np.ndarray"
     capped: int = 0
     moved: int = 0
     shortfall: int = 0
@@ -1476,7 +1480,8 @@ def _bounded_chain(
     starts = _bounded_first_starts(root, sim_id, expose_id, entry, kind, low, high)
     closing = lifetimes.has_end[parents]
     forced = closing & (lifetimes.ends[parents] <= until)
-    return starts, ParentCut(limits, forced)
+    last_days = np.where(forced, lifetimes.ends[parents], limits).astype(np.int64)
+    return starts, ParentCut(limits, forced, last_days)
 
 
 def _no_room(

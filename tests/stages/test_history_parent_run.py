@@ -200,6 +200,22 @@ def test_a_forced_entity_s_last_day_held_is_its_parent_s_last_day(tmp_path: Path
     assert closing and last == closing
 
 
+def test_a_range_on_the_validity_columns_does_not_move_that_last_day(tmp_path: Path) -> None:
+    """The range bounds where versions start and close, and closes no version: the depot's last day still ends the open one."""
+    bundle = _bundle(tmp_path, end=FINAL)
+    _by_the_day(bundle)
+    contract = yaml.safe_load((bundle / CONTRACT).read_text("utf-8"))
+    history = next(item for item in contract["exposes"] if item["exposeId"] == EMIT)
+    column = next(item for item in history["contract"]["schema"] if item["name"] == "valid_from")
+    column["validationRules"] = [
+        {"type": "range", "constraint": "between '2023-01-01' and '2024-06-30'"}
+    ]
+    repin(bundle, contract)
+    closing, last = _last_days_held(run_bundle(bundle, tmp_path / "state"))
+    assert any(day > date(2024, 7, 1) for day in closing.values())
+    assert last == closing
+
+
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
     assert_the_run_repeats(_bundle(tmp_path), tmp_path, run_bundle, EMIT)
 
