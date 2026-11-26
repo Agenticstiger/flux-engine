@@ -224,5 +224,6 @@ entity, start or end column is the profiler's to refuse, against the contract. A
 for these two only when the profile it was given has a `privacy` block, a private release, and then only of the tables
 that request already holds. It asks `history: {}` for a table whose contract declares a validity window, and
 `nullCount/2` for each column of such a table the contract does not make required. The new `nullCount/2` follows the
-column's other statistics, so no pointer a `replacedBy` names moves. Every other request, and every first request
-written from a contract alone, keeps the format and the bytes it had.
+column's other statistics, so no pointer a `replacedBy` names moves. Every other request that asks for neither addition keeps the
+format and the bytes it had. A first request written from a contract alone asks for neither, so it keeps its format;
+its `cliqueColumns` list changed as section 7 says, only the columns the contract requires.
