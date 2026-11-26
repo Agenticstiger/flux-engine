@@ -27,6 +27,7 @@ from flux_engine.concordance.predicate import PropertyKind
 from flux_engine.concordance.verifier import (
     ClearStatistic,
     NoProofSystem,
+    _edge_in_days,
     emit_stream_digest,
 )
 from flux_engine.core.digest import DigestDomain
@@ -518,3 +519,25 @@ def test_an_on_support_dataset_is_within_a_max_of_zero() -> None:
     document = _support_document(0)
     rows = [dict(row) for row in document["committedSlice"]]
     assert _support_outcome(document, rows).outcome == "within"
+
+
+# -- a bin edge of a DATE column ---------------------------------------------------------------
+
+#: The last instant a DATE column holds, 9999-12-31T23:59:59.999Z, in milliseconds, and the day
+#: 9999-12-31 a declaration spells that edge as (days since 1970-01-01).
+LAST_INSTANT_MS = 253_402_300_799_999
+LAST_DAY = 2_932_896
+
+
+def test_the_last_instant_of_a_date_column_is_read_as_the_day_9999_12_31() -> None:
+    assert _edge_in_days(Fraction(LAST_INSTANT_MS)) == LAST_DAY
+
+
+def test_an_edge_past_the_last_instant_is_read_as_the_milliseconds_it_is() -> None:
+    past = LAST_INSTANT_MS + 1
+    assert _edge_in_days(Fraction(past)) == Fraction(past, 86_400_000)
+    assert _edge_in_days(Fraction(past)) != LAST_DAY
+    # The edge before it is a fraction of a day, and matches no declared edge either.
+    before = LAST_INSTANT_MS - 1
+    assert _edge_in_days(Fraction(before)) == Fraction(before, 86_400_000)
+    assert _edge_in_days(Fraction(before)) != LAST_DAY
