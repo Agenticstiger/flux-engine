@@ -535,6 +535,43 @@ each version's entity to be unique, and that was refused too.
 - **What moves.** A bundle for a profile with such a statistic into a table whose profile publishes a history,
   which `init` could not write with its history before. Every other bundle keeps its bytes, and no plan or recorded plan changes.
 
+## Amendment of 2026-11-26: a link into a projected emit reads the rows the emit writes
+
+A plan that reads another emit through a link (a rule that follows it, a `within` entry over it, a column drawn
+`given` the linked row) carries that emit's plan, and the plan was attached before a projected emit's rows were
+derived. A link into a snapshot or an events emit therefore read the emit's cells as it would draw them
+without its projection, which are not the rows it writes: a `within` entry kept a date inside a lifetime read from a
+cell the snapshot does not hold, and `verify` reported the entry met on fewer rows than it covers, against ADR 0024
+section 5.
+
+- **The link reads the projection.** Each plan that reads a projected emit, or reads a plan that does, carries the
+  projected plan, so the linked row is the row the emit writes, rules included. The generator digest of such a plan
+  names the projected plan's.
+- **A summary reads it too.** A parent that summarises a child carries the child's plan, and the child carries the
+  plans it reads, so a summary over a child that reads a projected emit is taken over the rows the child writes.
+- **A history that reads a projected emit of another history.** The history carries the projected plan, and the
+  snapshot, events or periodic emit projected from it is derived from the history's plan as it then is. Each plan that
+  reads such an emit is renewed in turn, and the two steps go on in dependency order until the plans of every emit
+  are the plans they were derived from. They settle because no history reads a projection of itself.
+- **A history that reads a projection of itself is refused.** A history can link to the table projected from it, as
+  a self-referencing table does: a version to the current row of another entity of the same history. The projection
+  copies the history's columns, so the history would be derived from rows that are derived from it. Deriving
+  it needs a derivation that follows the dependencies of each column, which the passes above are not: they compare
+  whole plans, and a plan that reads its own projection moves with every pass or settles on rows that differ from the
+  projection it read. The shape is refused (`FLX-3403`) before any pass, for a new plan, and a later change will
+  design a derivation that follows the dependencies. The decision is made over the emits: each emit has an edge to every emit its plan reads or sums, whatever drives the read (a rule, a
+  `within` entry, a column drawn `given` a linked row, a weighted pick, a `parentWhen`), and each projected emit has
+  an edge to its history. A history from which a projection of itself can be reached is refused, which covers a read
+  through another emit, a summary, and histories that read each other's projections. The message names the history
+  and the emits in order, from the history to its projection, and says to read a drawn column of the history instead.
+- **Recorded plans.** A new plan with such a link says `projectedReads: "final"`, which the plan digest covers. A plan
+  without the key replays the link as it was made, so its rows and its run id keep their bytes. Any other value is
+  `FLX-2102`.
+- **What moves.** A bundle with a link into a projected emit that a rule, a `within` entry or a given column reads, a
+  summary over a child that reads one, or a history that reads a projection of another history. A bundle whose history
+  reads a projection of itself is refused when planned afresh, and a recorded plan of one replays as it was made. Every
+  other plan keeps its bytes.
+
 ## Amendment of 2026-11-26: `init` starts a periods entry and limits an events entry where the data does
 
 Section 9 wrote a `periods` entry with no start and an `events` entry that holds every version, so periods ran from

@@ -448,6 +448,29 @@ def _projected_given_entries(result: "_pipeline.PipelineResult") -> Dict[str, An
     return {PROJECTED_GIVENS_PLAN_KEY: PROJECTED_GIVENS_AFTER} if held else {}
 
 
+#: ``plan.json``'s key for an emit that reads a projected emit through a link (ADR 0027, the
+#: amendment of 2026-11-26): ``"final"``, the link reads the rows the projected emit writes. Present
+#: only when some plan reads one, so every other plan keeps its bytes and its planDigest. A recorded
+#: plan without it replays as it was made, its link reading the rows the emit would draw without
+#: its projection (:func:`flux_engine.stages.apply.plan_projected_reads`).
+PROJECTED_READS_PLAN_KEY = "projectedReads"
+PROJECTED_READS_FINAL = "final"
+
+
+def _reads_projection(plan: Any) -> bool:
+    """Whether *plan* carries the plan of a projected emit among the plans it reads or sums."""
+    return any(read.projection is not None for _, read in plan.reads) or any(
+        child.projection is not None for _, _, child in plan.sums
+    )
+
+
+def _projected_read_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``projectedReads``, only for a plan in which an emit reads a projected emit through a link."""
+    if any(_reads_projection(plan) for plan in _emit_plans(result)):
+        return {PROJECTED_READS_PLAN_KEY: PROJECTED_READS_FINAL}
+    return {}
+
+
 def _end_share_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     """``historyEndShare``, only for a plan that allots a history's ``end`` a share of every entity.
 
@@ -541,6 +564,7 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
         **_max_rows_entries(result),
         **_range_setter_entries(result),
         **_projected_given_entries(result),
+        **_projected_read_entries(result),
         **(
             {
                 REFERENCES_PLAN_KEY: {

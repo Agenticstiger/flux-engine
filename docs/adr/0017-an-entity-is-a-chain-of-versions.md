@@ -817,6 +817,17 @@ versions named an entity that it did not hold.
 - **What moves.** A bundle `init` writes for a contract with such a dependency. Every other bundle keeps its bytes,
   and no plan changes: the generator and replay of recorded plans are untouched.
 
+## Amendment of 2026-11-26: a rule that reads `previous` runs on a history that keeps to its parent's lifetime
+
+Section 7 lets a rule read the version before a row. The pass that evaluates such a rule laid out the entity's
+versions without knowing its own plan, and a history that keeps to its parent's lifetime lays its versions out from
+the parents' lifetimes, which are read through the plan's own `parent` relationship, so the plan was refused
+(`FLX-3403`, "whose plan this pass does not read"). The pass now knows its plan, and the layout is the one every other
+pass reads.
+
+- **What moves.** A bundle with both a `parent.lifetime` and a rule that reads `previous` now plans. Every other plan
+  keeps its bytes, and no recorded plan changes: no plan was made for that shape.
+
 ## Amendment of 2026-11-26: `init` writes the activation and the end a contract's lifecycle declares
 
 FLUID 0.7.7 declares on the natural entity of a model with a validity window how its versions begin and
