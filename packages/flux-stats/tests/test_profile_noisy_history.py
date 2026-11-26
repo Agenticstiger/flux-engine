@@ -257,6 +257,40 @@ def test_a_null_count_in_a_document_of_an_earlier_format_is_refused() -> None:
     assert "nullCount/2" in message and "1-5-0" in message
 
 
+def _reached_twice(document: Dict[str, Any]) -> None:
+    """One unit holds at most 2 rows of ``card_version``, and the budget has room."""
+    document["privacy"]["privacyUnit"]["follows"][0]["maxChildren"] = 2
+    document["privacy"]["privacyLoss"]["rho"] = "10"
+
+
+@pytest.mark.parametrize("mechanism", ["gaussian", "laplace"])
+def test_a_null_count_is_charged_the_rows_one_unit_holds(mechanism: str) -> None:
+    """m_T = 2 at scale 2 spends rho 4 / 8 = 1/2 (Gaussian, m_T^2 over 2 s^2) or (2 / 2)^2 / 2 = 1/2
+    (Laplace, L1 over b); a charge of 1 in L1 or of m_T in the squared L2 would need less."""
+
+    def share(rho: str) -> Dict[str, Any]:
+        def change(document: Dict[str, Any]) -> None:
+            _reached_twice(document)
+            noise = _null_count(document, "card_version", "valid_to")["noise"]
+            noise.update(mechanism=mechanism, scale="2", privacyLoss={"rho": rho})
+
+        return _edit(change)
+
+    assert "valid_to.statistics[0].noise" in _refused(share("0.49"))
+    parse_profile(share("0.5"))
+
+
+def test_a_history_member_of_a_table_the_unit_does_not_reach_is_refused_for_it() -> None:
+    def unfollow(document: Dict[str, Any]) -> None:
+        del document["privacy"]["privacyUnit"]["follows"]
+        document["tables"]["card_version"]["columns"]["valid_to"]["statistics"] = []
+        document["queries"] = document["queries"][:2]
+
+    message = _refused(_edit(unfollow))
+    assert HISTORY_AT in message
+    assert "carries noise only in a table the unit of privacy follows into" in message
+
+
 # --- documents of earlier formats read as before ---------------------------------
 
 

@@ -283,3 +283,70 @@ def test_a_unit_in_a_document_of_an_earlier_format_is_refused() -> None:
 def test_documents_of_earlier_formats_read_as_before(name: str) -> None:
     profile = parse_profile(json.loads((SPEC / name).read_text("utf-8")))
     assert all(query.unit is None for query in profile.queries)
+
+
+def _laplace(document: Dict[str, Any], index: int, scale: str, rho: str) -> None:
+    statistic = _statistic(document, index)
+    statistic["noise"] = {
+        "mechanism": "laplace",
+        "scale": scale,
+        "privacyLoss": {"rho": rho},
+    }
+
+
+def test_the_unreached_form_is_charged_two_in_l1_under_laplace() -> None:
+    """A Laplace of scale 2 spends rho (L1 / 2)^2 / 2: 1/2 at L1 = 2, where L1 = 1 would need 1/8."""
+
+    def share(rho: str) -> Dict[str, Any]:
+        def change(document: Dict[str, Any]) -> None:
+            _unfollow(document)
+            _laplace(document, 0, "2", rho)
+
+        return _edit(change)
+
+    assert "queries[0]" in _refused(share("0.49"))
+    parse_profile(share("0.5"))
+
+
+def _reached_twice(document: Dict[str, Any]) -> None:
+    """One unit holds at most 2 rows of ``card_version``, and the budget has room."""
+    document["privacy"]["privacyUnit"]["follows"][0]["maxChildren"] = 2
+    document["privacy"]["privacyLoss"]["rho"] = "10"
+
+
+def test_a_query_over_rows_is_charged_the_square_of_the_rows_one_unit_holds() -> None:
+    """m_T = 2, scale 8: rho = m_T^2 / (2 x 64) = 1/32; m_T alone would need 1/64."""
+
+    def share(rho: str) -> Dict[str, Any]:
+        def change(document: Dict[str, Any]) -> None:
+            _reached_twice(document)
+            _statistic(document, ROWS)["noise"]["privacyLoss"]["rho"] = rho
+
+        return _edit(change)
+
+    assert "queries[0]" in _refused(share("0.03"))
+    parse_profile(share("0.03125"))
+
+
+def test_a_unit_that_groups_by_a_column_the_table_does_not_hold_is_refused_for_it() -> None:
+    def other(document: Dict[str, Any]) -> None:
+        document["queries"][ROWS]["unit"] = {"table": "card_version", "by": ["nowhere"]}
+
+    message = _refused(_edit(other))
+    assert "queries[0].unit.by" in message and "a column is not one of its table" in message
+
+
+def test_a_noisy_query_in_a_1_4_0_document_is_refused_as_a_form_of_1_5_0() -> None:
+    """With no unit to read first, the noise block is what the document may not hold."""
+
+    def older(document: Dict[str, Any]) -> None:
+        document["_schemaURL"] = SCHEMA_URL_1_4_0
+        document["tables"]["card_version"].pop("history")
+        for table, column in (("member", "segment"), ("card_version", "valid_to")):
+            document["tables"][table]["columns"][column]["statistics"] = []
+        document["queries"] = document["queries"][:1]
+        del document["queries"][0]["unit"]
+
+    message = _refused(_edit(older))
+    assert "queries[0].statistics" in message
+    assert "a noise block on a query's statistic is a form of format 1-5-0" in message
