@@ -230,6 +230,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   expose that declares it, and its `within` entry is written without `exposure` (ADR 0025, the amendment of
   2026-11-26). An exposure over a relationship whose foreign key `init` leaves drawn is no longer declared either,
   since the plan refused that bundle too. A bundle with no two such exposures keeps its bytes.
+- `init` wrote a `counts` entry over a relationship whose pick a `sharedColumns` copy sets, and `plan` refused its own
+  bundle (`FLX-3403`, "it is on the counted layout; a copy sets the pick alone"). The contract's copy now stays
+  and the relationship is laid out by no counts entry: its foreign key declares no draw of its own, and every
+  statistic of its profile entry is unused, with a reason that names the relationship the copy goes through. No
+  exposure is declared over that relationship either. A copy of a column that is no other relationship's foreign
+  key, and every bundle without `copies: true`, keep their bytes (ADR 0022, the amendment of 2026-11-26).
 
 ## 0.12.1 - 2026-11-26
 

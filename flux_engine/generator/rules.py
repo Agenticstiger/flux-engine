@@ -200,6 +200,7 @@ from flux_engine.seam.keys import (
     ContractKeys,
     ExposeKeys,
     compile_keys,
+    copied_pick,
     declared_exposes,
     window_ends,
 )
@@ -2788,14 +2789,10 @@ def _pick_copy(
     keys = compile_keys(contract_document)
     if keys is None:
         return None
-    mine = keys.expose(expose_id).relationships
-    held = [r for r in mine if r.from_columns == (column,) and r.name != through]
-    if not held or any(r.name == through for r in mine if column in r.from_columns):
+    found = copied_pick(keys, expose_id, through, column)
+    if found is None:
         return None
-    relationship = held[0]
-    reached = next((r for r in mine if r.name == through), None)
-    if reached is None:
-        return None
+    relationship, reached = found
     source = next(
         (
             r

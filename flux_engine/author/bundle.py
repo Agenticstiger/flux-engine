@@ -120,6 +120,7 @@ from flux_engine.author.derived import (
     contract_dependents,
     contract_derives,
     contract_guarded,
+    contract_pick_copies,
     numeric,
 )
 from flux_engine.author.derived_dates import bound_derived_dates
@@ -3130,6 +3131,57 @@ def _held_back(declared: DeclaredHistory) -> Callable[[str, str], Optional[str]]
     return reason
 
 
+#: Why no counts entry lays out a relationship whose pick a copy sets.
+_HELD_COPIED = (
+    "a sharedColumns copy through the relationship {through} sets the pick of this relationship, "
+    "and a copy sets the pick alone, so no layout places its children per parent"
+)
+#: Why no exposure counts the children of a relationship whose pick a copy sets (ADR 0025 section 4).
+_HELD_EXPOSURE = (
+    "a sharedColumns copy through the relationship {through} sets the pick of this relationship, "
+    "and a copy sets the pick alone, so no exposure counts its children per parent"
+)
+_COPIED_REASON = (
+    "A foreign key a copy sets: the contract copies it through the relationship {through} "
+    "(sharedColumns), so the key declares no draw of its own and no layout counts its children "
+    "per parent (ADR 0022 section 4)."
+)
+
+
+def _copied_picks(contract: Mapping[str, Any]) -> Dict[Tuple[str, str], Tuple[str, str]]:
+    """The (emit, relationship) of each foreign key a ``sharedColumns`` copy sets, with its (through, column).
+
+    A copy sets the pick of the relationship alone (ADR 0022 section 4): the plan refuses a counts
+    entry over it, and a draw its column declares (``FLX-3403``). Empty where the Simulation copies
+    nothing (:func:`_asks_for_copies`).
+    """
+    return contract_pick_copies(contract) if _asks_for_copies(contract) else {}
+
+
+def _copy_held(
+    picked: Mapping[Tuple[str, str], Tuple[str, str]],
+) -> Optional[Callable[[str, str], Optional[str]]]:
+    """The reason no counts entry lays out a relationship, by its child emit and its name, when a copy sets its pick."""
+    if not picked:
+        return None
+
+    def reason(emit: str, relationship: str) -> Optional[str]:
+        found = picked.get((emit, relationship))
+        return None if found is None else _HELD_COPIED.format(through=found[0])
+
+    return reason
+
+
+def _either(
+    first: Optional[Callable[[str, str], Optional[str]]],
+    second: Optional[Callable[[str, str], Optional[str]]],
+) -> Optional[Callable[[str, str], Optional[str]]]:
+    """The reason of *first* for a relationship, else that of *second*; ``None`` when neither holds."""
+    if first is None or second is None:
+        return first or second
+    return lambda emit, name: first(emit, name) or second(emit, name)
+
+
 #: Why no exposure counts the children of a relationship whose foreign key declares a draw.
 _DRAWN_EXPOSURE = (
     "the foreign key of this relationship is drawn on its own, and an exposure counts a "
@@ -3156,6 +3208,45 @@ def _drawn_exposures(
             if plan is not None and draws_itself(plan):
                 held[(expose.expose_id, relationship.name)] = _DRAWN_EXPOSURE
     return held
+
+
+def _copied_exposures(
+    picked: Mapping[Tuple[str, str], Tuple[str, str]],
+) -> Dict[Tuple[str, str], str]:
+    """The (emit, relationship) whose pick a copy sets, each with why no exposure counts it."""
+    return {key: _HELD_EXPOSURE.format(through=through) for key, (through, _) in picked.items()}
+
+
+def _copied_keys(
+    exposes: Sequence[AuthoredExpose],
+    picked: Mapping[Tuple[str, str], Tuple[str, str]],
+    keys: Optional[ContractKeys],
+) -> None:
+    """Take each foreign key a copy sets off every draw of its own.
+
+    The copy sets the pick from the rows it goes through, so the plan refuses a key that also
+    declares a draw (``FLX-3403``), as it does one the counted layout sets. What its own
+    statistics said is passed over, with the reason.
+    """
+    if not picked or keys is None:
+        return
+    for expose in exposes:
+        columns = {plan.name: plan for plan in expose.columns}
+        for relationship in keys.expose(expose.expose_id).relationships:
+            found = picked.get((expose.expose_id, relationship.name))
+            plan = columns.get(relationship.from_columns[0]) if relationship.from_columns else None
+            if found is None or plan is None or len(relationship.from_columns) != 1:
+                continue
+            declare_counted(
+                plan,
+                None,
+                reason=_COPIED_REASON.format(through=found[0]),
+                how=f"a foreign key, set by the copy through the relationship {found[0]}",
+                sets=(
+                    "a copy sets the foreign key from the rows it goes through, so this "
+                    "statistic of its own values adds no bound to it"
+                ),
+            )
 
 
 def _declared_exempt(
@@ -4552,14 +4643,16 @@ def _plan_bundle(inputs: AuthorInputs, unwritten: FrozenSet[str] = frozenset()) 
     drawn = [expose for expose in exposes if expose.skipped is None and not expose.reference]
     declared = inputs.history
     held = _history_tables(declared, keys, reading.tables) - unwritten
+    picked = _copied_picks(contract)
     spread = _draw_and_link(
         reading,
         keys,
         exposes,
         drawn,
-        _held_back(declared) if declared is not None else None,
+        _either(_held_back(declared) if declared is not None else None, _copy_held(picked)),
         lambda emit, name: _into_a_history(keys, held, emit, name),
     )
+    _copied_keys(drawn, picked, keys)
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
     _refuse_a_needed_one_value(exposes, keys)
     spread = _without_unwritten(
@@ -4983,6 +5076,7 @@ def _dated_columns(
         declined_exposures={
             **fallbacks.declined,
             **_drawn_exposures(planned.authored, planned.keys),
+            **_copied_exposures(_copied_picks(planned.contract)),
         },
         declined_within=fallbacks.undated,
         declined_rates=fallbacks.unrated,
@@ -5960,11 +6054,15 @@ def _plan_emit(
 ) -> Any:
     """The generator plan of one emit: a reference plan, or the plan of a drawn expose.
 
-    The fidelity block of a drawn expose is compiled first, as ``verify`` does.
+    The fidelity block of a drawn expose is compiled first, as ``verify`` does. The plan is built
+    as ``plan`` builds it: a snapshot's columns and the columns a history or a projection sets are
+    not cut at the contract's date range, since the history's rows write them.
     """
+    from flux_engine.concordance.compiler import names_a_snapshot
     from flux_engine.generator import build_plan
     from flux_engine.generator.reference import ReferenceRows, build_reference_plan
     from flux_engine.generator.relations import related_columns
+    from flux_engine.stages._range_setters import uncut_columns
     from flux_engine.stages.pipeline import compile_declared_fidelity
 
     if resolved.is_reference:
@@ -5988,6 +6086,8 @@ def _plan_emit(
         related=related_columns(resolved.keys),
         rules=rules,
         generator_version=version,
+        projected=names_a_snapshot(resolved.extension),
+        uncut=uncut_columns(resolved, emits),
     )
 
 

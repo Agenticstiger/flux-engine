@@ -68,6 +68,7 @@ __all__ = [
     "check_no_key_blocks",
     "check_unique_declarations",
     "compile_keys",
+    "copied_pick",
     "declared_exposes",
     "keys_for_emit",
     "mark_key_columns",
@@ -362,6 +363,26 @@ def check_unique_declarations(
                 f"{keys.expose_id!r} declares a validity window that repeats {name!r} across "
                 "versions; drop the declaration",
             )
+
+
+def copied_pick(
+    keys: "ContractKeys", expose_id: str, through: str, column: str
+) -> Optional[Tuple[Relationship, Relationship]]:
+    """The relationship whose pick a copy of *column* through *through* sets, and *through* itself.
+
+    A ``sharedColumns`` entry of relationship *through* of *expose_id* that lists *column*, the
+    one-column foreign key of another relationship of the expose (ADR 0022 section 4, the
+    amendment of 2026-11-24), sets that relationship's pick. ``None`` when *column* is the foreign
+    key of no other relationship, or of *through* itself, or *through* is not one of the expose's.
+    The columns the two tables hold, and whether the target holds the column as a key, are for
+    the caller.
+    """
+    mine = keys.expose(expose_id).relationships
+    held = [r for r in mine if r.from_columns == (column,) and r.name != through]
+    if not held or any(r.name == through for r in mine if column in r.from_columns):
+        return None
+    reached = next((r for r in mine if r.name == through), None)
+    return None if reached is None else (held[0], reached)
 
 
 def declared_exposes(contract: Mapping[str, Any]) -> Dict[str, Mapping[str, Any]]:
