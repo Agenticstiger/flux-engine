@@ -2484,19 +2484,21 @@ def _check_histories(
 
 
 def _projections(
-    exposes: Sequence[AuthoredExpose],
-    keys: Optional[ContractKeys],
-    contract: Mapping[str, Any],
+    planned: _Planned,
     histories: _Histories,
     published: Published,
     declined: Optional[str],
+    window: Tuple[str, str],
 ) -> Projected:
     """The ``snapshots``, ``events`` and ``periods`` entries of the written exposes (ADR 0027 section 9).
 
     Each expose without a validity window is read against each expose that has a history
-    (:func:`flux_engine.author.projection.project`). With *declined*, the reason plan refuses the
-    bundle that holds them, none is written and the note says so.
+    (:func:`flux_engine.author.projection.project`); a periods entry also reads its emit's
+    profile table and the run's *window*. With *declined*, the reason plan refuses the bundle
+    that holds them, none is written and the note says so.
     """
+    exposes, keys, contract = planned.authored, planned.keys, planned.contract
+    tables = planned.reading.tables
     if keys is None or not histories.entries:
         return Projected()
     index = {expose.expose_id: expose for expose in exposes}
@@ -2516,6 +2518,8 @@ def _projections(
             counts=tuple(
                 entry for entry in published.spread.entries if entry["emit"] == expose.expose_id
             ),
+            table=tables.get(expose.expose_id),
+            window=window,
         )
         for expose in exposes
         if not expose.reference
@@ -4180,7 +4184,7 @@ def _histories_and_projections(
         published=published,
         declined=declined[0],
     )
-    projections = _projections(authored, keys, contract, histories, published, declined[1])
+    projections = _projections(planned, histories, published, declined[1], window)
     return histories, projections
 
 

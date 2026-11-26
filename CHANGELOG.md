@@ -412,6 +412,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   was no snapshot of the history: it was drawn apart, with keys of its own, and many of its rows had no version.
   `init` now writes the parent for such a dependency; a dependency from other columns, or to another column too,
   still leaves it out (ADR 0017, the amendment of 2026-11-26).
+- A periods entry `init` wrote had no `from` or `through`, so its periods ran over every month of every version,
+  years before the months the data holds. When the period column publishes its histogram, `init` now bounds the
+  entry by it: `from` opens the period that holds the first edge and `through` is the last bin's start, both held
+  to the window and the history's `until`. A withheld histogram, or none, writes the entry as before (ADR 0027,
+  the amendment of 2026-11-26).
 
 ## 0.11.1 - 2026-11-24
 

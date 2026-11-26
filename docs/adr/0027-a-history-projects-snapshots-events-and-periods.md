@@ -454,3 +454,22 @@ that projects a column of the version (`model` on a month, or on a change) and d
   id keep their bytes. Any other value is `FLX-2102`.
 - **What moves.** Only a bundle the first amendment refused: its plan is now accepted. Every other plan writes no
   key and keeps its bytes.
+
+## Amendment of 2026-11-26: `init` bounds a periods entry by the months its column publishes
+
+Section 9 wrote a periods entry with neither `from` nor `through`, so its periods ran from the window's start over
+every month a version held, although the profile's histogram of the period column says which months hold rows. A
+history with versions from many years back then wrote periodic rows in each of those years, far outside the months
+the data covers.
+
+- **What is read.** The period column's histogram (`marginalHistogram/1`), only when its one group is published and
+  every edge is a whole day. `from` is the start of the period that holds its first edge, counted from the
+  window's first day as the entry's periods are without it, so no period moves to another day; `through` is its
+  last bin's start, so the last period is the one the last bin opens. A withheld histogram, or none, writes
+  neither key, and no withheld `min` or `max` is read.
+- **Held to the run.** Both are held to the window and to the history's `until`: a `from` on or before the window's
+  first day is left out, as that day is the entry's anchor without one, and so is a `through` at or after the
+  window's last day; a `through` past `until` is the last day before it. A histogram wholly outside them writes
+  neither.
+- **What moves.** A bundle `init` writes whose periods entry's column publishes such a histogram that starts after
+  the window or ends before it. Every other bundle keeps its bytes, and no plan or recorded plan changes.
