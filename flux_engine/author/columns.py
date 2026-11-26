@@ -2248,6 +2248,8 @@ _LADDER_REASON = (
     "The profile withheld {end}: the rows {side} its outermost binned quantile are assumed to "
     "lie in the next bin of the edge ladder the profile counts over, drawn evenly."
 )
+#: The sentence of a withheld minimum closed in the next bin down of the ladder.
+LADDER_LOW_REASON = _LADDER_REASON.format(end="min", side="below")
 _TAIL_REASON = (
     "The profile withheld {end} and publishes the mean: the rows {side} its outermost binned "
     "quantile are drawn by the distribution of largest entropy with the mean the rest leaves, "
