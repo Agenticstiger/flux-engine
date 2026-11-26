@@ -162,7 +162,7 @@ def events_plan(
     if typed:
         options = {"type_column": "change_type", "type_values": TYPES, **options}
     return project_plan(
-        plan, EVENTS_KEY, EMIT, events_entry(**options), plans[EMIT], root_for(seed)
+        plan, (EVENTS_KEY, EMIT, events_entry(**options)), plans[EMIT], root_for(seed)
     )
 
 

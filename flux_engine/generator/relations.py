@@ -141,6 +141,7 @@ from flux_engine.generator.history import (
     tracked_levels_kept,
     tracked_spec,
     unit_of,
+    validity_bound,
     version_valid_on,
 )
 from flux_engine.generator.parent_bounds import deferred_bound
@@ -1449,9 +1450,10 @@ class RelationReader:
                 owner.expose_id,
                 pick.entry,
                 kind=pick.kind,
-                rows=pick.rows,
+                rows=pick.laid_rows,
                 entities=pick.entities,
                 time_bounds=(pick.window_start,),
+                ranged=pick.ranged,
             )
             self._histories[address] = found
         return found
@@ -1493,6 +1495,7 @@ class RelationReader:
                 identity=(None if parent is None else parent.digest().value, hook),
             ),
             bound=_deferred_bound(self, owner, driver),
+            ranged=driver.history.ranged,
         )
         self._histories[address] = found
         return found
@@ -2971,6 +2974,11 @@ def _history_shape_of(
         window_start=plan.time_bounds[0],
         parent_lifetime=binding.parent_lifetime,
         declared_rows=binding.declared_rows,
+        ranged=validity_bound(
+            binding,
+            plan.column_plan(binding.start).column.logical_type.kind,
+            plan.time_bounds[0],
+        ),
     )
     # The refusals that follow from declared values alone, before any layout is worked out.
     declared = binding.entry.parent

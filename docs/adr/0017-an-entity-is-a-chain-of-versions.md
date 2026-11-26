@@ -754,6 +754,30 @@ the contract requires was never written: an open version had nothing to hold.
 - **What does not move.** A contract that declares neither key reads as before, so its bundle is
   unchanged.
 
+## Amendment of 2026-11-25: the open end is one value, and no closed version holds it
+
+Section 5 lets an entry write `openEnd` in the end column of an open version, and `verify` read NULL and that value
+alike as open. Nothing kept the two apart: an end column could mix NULL and the value, and a value a closed version
+can end on read that version as open. dbt snapshots make the same choice per table (`dbt_valid_to` is NULL, or the
+`dbt_valid_to_current` day, such as `9999-12-31`, for current rows; a table changed to it keeps its old NULLs until
+they are updated by hand), and SQLMesh's SCD type 2 kinds write NULL only. The value is a day no row ends on.
+
+- **Plan.** An `openEnd` before `until` is `FLX-3403`: a closed version may end there. Under `nextStart` so is an
+  `openEnd` inside `timeBounds`, its ends included, since a closed version ends on the next version's start and a
+  projection reads an open version up to the window's end, where this value would close it. Under `dayBefore` a
+  closed version ends the day before a start, so an `openEnd` at `until` is allowed. A value in the year 9999 or
+  later, which a contract's range reads as an open end (`WINDOW_END_LIMIT_MS`, ADR 0024), is after every window.
+- **Verify.** A fifth line, `history:open_end`, enforced like the others. With an `openEnd`, an entity holds it when
+  none of its versions' ends is NULL and none but its last carries the value: an end column that mixes NULL and the
+  value fails, as a closed version that carries it does. Without an `openEnd` the line is present only when some end
+  is in the year 9999 or later, an open end the entry does not declare, and an entity with one fails it. The check
+  is the one dbt-utils' `mutually_exclusive_ranges` leaves to the author: it fails a NULL upper bound outright, and
+  this line says which spelling of the open end the table uses.
+- **An `until` in the year 9999.** `until` is the horizon versions start before, not an open end: one in the year
+  9999 is `FLX-3403` at plan, pointing at `openEnd` for the open end. A periodic step past such a horizon would
+  leave the calendar.
+- **What moves.** No row: the generator already writes the value on every open version and NULL nowhere. A run whose
+  entry declares `openEnd` gains the line in its report; an entry that a closed version could end on is refused.
 
 ## Amendment of 2026-11-26: a forced entity's projections stop at its parent's last day
 

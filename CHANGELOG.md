@@ -379,6 +379,34 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   which `verify` refuses (`FLX-5034`): a grouped histogram or a rank correlation over a number column drawn evenly
   over its contract's range, or a histogram grouped by a boolean column. The column is drawn as before, and its notes
   say which property is left out.
+
+- A history's `openEnd` could be a value a closed version ends on, and `verify` read NULL and the value alike as
+  open, so an end column that mixed the two, or a closed version that held the value, passed. `plan` now refuses
+  (`FLX-3403`) an `openEnd` before `until` and, under `nextStart`, one inside `timeBounds`; a value in the year 9999
+  or later is after every window. `verify` adds `history:open_end`: with an `openEnd`, no end is NULL and only an
+  entity's last version carries the value; without one, the line is present only when some end is in the year 9999
+  or later, and such an end fails it (ADR 0017, the amendment of 2026-11-25). No generated row moves. A plan
+  recorded before this change whose `openEnd` is before `until` is refused when `apply --run-id` or `replay` runs
+  it, since its rows could hold a closed version that reads as open; plan it again with an `openEnd` after `until`.
+- A history's `until` in the year 9999 is now refused at `plan` (`FLX-3403`): a day in that year is the open-end
+  spelling, which a contract's range reads as an open end, and a periodic step past it leaves the calendar. The
+  message says to set `until` to the last instant a version may start and to write the open end with `openEnd`.
+- A periodic emit over a long window made `plan` generate every row before any bound applied: five thousand years
+  of months for a thousand entities took gigabytes. `plan` now estimates each periods entry's rows from its versions
+  before it lists a period (at most two periods more than a version's span holds, times the most rows a pair takes)
+  and refuses (`FLX-3403`) an estimate above the budget, 50,000,000 rows a periodic emit by default, naming the emit,
+  the grain, the window, the estimate and the budget. A count class's high level is taken for every pair however
+  rare it is, and the refusal then names that level. `--max-rows N` on `plan`, `run` or an `apply` that takes a
+  fresh plan sets another budget, up to 10,000,000,000, which `plan.json` records as `maxRows`. The estimate runs
+  only while a plan is made: `apply --run-id` and `replay` run a recorded plan, which states its rows, with no
+  estimate. A plan with the default budget keeps its bytes (ADR 0027, the amendment of 2026-11-25).
+- A contract's date range on a history's validity column, or on a column that copies a version's start or end (an
+  events entry's `at`, and its `date` without a `lag`), was only noted: the history wrote versions outside it and
+  `verify` failed the run. The range is now a bound every entity of the history shares, as a parent's lifetime is:
+  every start and closed end lies inside it, an open last version stays open, and rows no entity has room for are a
+  recorded shortfall. A range on a periods entry's period column keeps the periods whose first day lies in it.
+  Only a range that does not meet the window is refused (`FLX-3403`). Such a plan records `rangeSetters: "held"`;
+  a recorded plan without it replays as it was made (ADR 0024, the amendment of 2026-11-25).
 - In a history kept to its parent's lifetime (`parent.lifetime: true`), the periodic rows of an entity that ends
   with its parent stay inside the parent's lifetime. Under `finalVersion` that entity's ending version is open, and a
   periods projection held it up to the window's end, long after the parent had ended; its periods now stop at the
