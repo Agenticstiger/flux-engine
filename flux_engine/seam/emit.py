@@ -44,6 +44,7 @@ from flux_engine.core.digest import DigestRef, digest_of_document, digest_of_str
 from flux_engine.core.errors import FluxError, register
 from flux_engine.core.seedtree import digest_bytes, seam_bytes
 from flux_engine.seam.asof import ASOF_KEY
+from flux_engine.seam.associations import ASSOCIATIONS_KEY
 from flux_engine.seam.bridges import BRIDGES_KEY
 from flux_engine.seam.conditions import CONDITIONS_KEY
 from flux_engine.seam.conform import RenderedRow, Row, render_columns, render_row
@@ -307,9 +308,10 @@ def strip_excluded(value: Mapping[str, Any], *, keep_facts: bool = False) -> Dic
             # The tolerances of a Simulation's facts are part of ``H`` and of nothing a committed
             # state depends on (ADR 0018), so ``G`` is blind to the whole member.
             continue
-        elif key == BRIDGES_KEY:
-            # A bridge lays two relationships out together after the statistics are drawn, and no
-            # committed state depends on it (ADR 0022 section 8), so ``G`` is blind to it too.
+        elif key in (BRIDGES_KEY, ASSOCIATIONS_KEY):
+            # A bridge (ADR 0022 section 8) or an association (ADR 0039) lays two relationships out
+            # together after the statistics are drawn, and no committed state depends on it, so
+            # ``G`` is blind to it too.
             continue
         elif key == COPIES_KEY:
             # A copy writes a column after the statistics are drawn, from a row the statistics
@@ -404,16 +406,17 @@ def reusable_extension(
 ) -> Optional[Dict[str, Any]]:
     """The extension entry ``G`` is taken over: ``None`` when it held only bound declarations.
 
-    An emit whose only extension entries are the facts, links, bridges, counts, copies, history,
-    projection, asOf, overlay, conditions, hidden, hiddenColumns, lifetimes, within and rates members
-    (:func:`strip_excluded` drops them) has no extension as far as ``G`` is concerned, so its ``G`` is
-    the one it had before the Simulation declared them.
+    An emit whose only extension entries are the facts, links, bridges, associations, counts,
+    copies, history, projection, asOf, overlay, conditions, hidden, hiddenColumns, lifetimes, within
+    and rates members (:func:`strip_excluded` drops them) has no extension as far as ``G`` is
+    concerned, so its ``G`` is the one it had before the Simulation declared them.
     """
     if extension is None:
         return None
     bound = {
         LINKS_KEY,
         BRIDGES_KEY,
+        ASSOCIATIONS_KEY,
         COUNTS_KEY,
         COPIES_KEY,
         CONDITIONS_KEY,

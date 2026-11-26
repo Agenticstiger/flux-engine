@@ -1,0 +1,580 @@
+{
+  "description": "KERNEL-SPEC-2 section 8.7: an association's pairing. Each side's rows per parent (the counted layout of its count path over the rows), the rows the caps and the Gale-Ryser step moved, the keys of the stubs and switches paths, what the repair did, and the second side's parent row of every row in row order (the first side's parents are runs in row order). Keys are hex, other integers decimal. Computed by tests/kernel2/test_association_vectors.py, never typed.",
+  "regenerate": "python -m tests.kernel2.test_association_vectors",
+  "seam": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+  "seed": "20261125",
+  "root": "4e7faebf36cdef3035d96676fc5df774f8c37ec4334d2aed949bb26fac641fe8",
+  "cases": [
+    {
+      "name": "(a) distinct, sparse, a shape on the first side",
+      "path": [
+        "sim",
+        "s",
+        "gen",
+        "membership",
+        "associate",
+        "member",
+        "club"
+      ],
+      "parentRows": [
+        12,
+        9
+      ],
+      "shapes": [
+        {
+          "bins": [
+            "0",
+            "1",
+            "3",
+            "6"
+          ],
+          "binWeights": [
+            "0.1",
+            "0.5",
+            "0.4"
+          ]
+        },
+        null
+      ],
+      "rows": 30,
+      "distinct": true,
+      "stubsKey": "454d98b1310a3f03569f929d51da06f4930865cecc77b728a4b8f91df96a900c",
+      "switchesKey": "88bb4c690bfc59329aa55b710f505395d0f1ac35fed24a71958f87232afa1d05",
+      "degrees": [
+        [
+          5,
+          2,
+          3,
+          2,
+          1,
+          4,
+          1,
+          6,
+          3,
+          1,
+          2,
+          0
+        ],
+        [
+          4,
+          4,
+          4,
+          3,
+          3,
+          3,
+          3,
+          3,
+          3
+        ]
+      ],
+      "moved": [
+        0,
+        0,
+        0
+      ],
+      "switches": 3,
+      "placed": 0,
+      "rebuilt": false,
+      "second": [
+        2,
+        6,
+        1,
+        5,
+        7,
+        6,
+        3,
+        0,
+        7,
+        3,
+        2,
+        1,
+        0,
+        2,
+        6,
+        4,
+        1,
+        1,
+        8,
+        3,
+        0,
+        2,
+        4,
+        7,
+        4,
+        8,
+        5,
+        8,
+        5,
+        0
+      ]
+    },
+    {
+      "name": "(b) repeats allowed: no repair",
+      "path": [
+        "sim",
+        "s",
+        "gen",
+        "membership",
+        "associate",
+        "member",
+        "club"
+      ],
+      "parentRows": [
+        8,
+        5
+      ],
+      "shapes": [
+        {
+          "bins": [
+            "0",
+            "1",
+            "3",
+            "6"
+          ],
+          "binWeights": [
+            "0.1",
+            "0.5",
+            "0.4"
+          ]
+        },
+        null
+      ],
+      "rows": 40,
+      "distinct": false,
+      "stubsKey": "454d98b1310a3f03569f929d51da06f4930865cecc77b728a4b8f91df96a900c",
+      "switchesKey": "88bb4c690bfc59329aa55b710f505395d0f1ac35fed24a71958f87232afa1d05",
+      "degrees": [
+        [
+          2,
+          5,
+          9,
+          2,
+          11,
+          7,
+          4,
+          0
+        ],
+        [
+          8,
+          8,
+          8,
+          8,
+          8
+        ]
+      ],
+      "moved": [
+        0,
+        0,
+        0
+      ],
+      "switches": 0,
+      "placed": 0,
+      "rebuilt": false,
+      "second": [
+        0,
+        1,
+        2,
+        4,
+        4,
+        1,
+        3,
+        3,
+        2,
+        0,
+        2,
+        1,
+        2,
+        0,
+        3,
+        4,
+        1,
+        3,
+        4,
+        0,
+        1,
+        2,
+        1,
+        3,
+        0,
+        0,
+        1,
+        0,
+        0,
+        1,
+        3,
+        3,
+        4,
+        4,
+        4,
+        4,
+        2,
+        2,
+        2,
+        3
+      ]
+    },
+    {
+      "name": "(c) a degree above the other side's parents is capped",
+      "path": [
+        "sim",
+        "s",
+        "gen",
+        "membership",
+        "associate",
+        "member",
+        "club"
+      ],
+      "parentRows": [
+        10,
+        6
+      ],
+      "shapes": [
+        {
+          "levels": [
+            "1",
+            "20"
+          ],
+          "levelWeights": [
+            "0.5",
+            "0.5"
+          ]
+        },
+        null
+      ],
+      "rows": 50,
+      "distinct": true,
+      "stubsKey": "454d98b1310a3f03569f929d51da06f4930865cecc77b728a4b8f91df96a900c",
+      "switchesKey": "88bb4c690bfc59329aa55b710f505395d0f1ac35fed24a71958f87232afa1d05",
+      "degrees": [
+        [
+          6,
+          6,
+          4,
+          6,
+          6,
+          4,
+          4,
+          4,
+          4,
+          6
+        ],
+        [
+          9,
+          9,
+          8,
+          8,
+          8,
+          8
+        ]
+      ],
+      "moved": [
+        20,
+        0,
+        0
+      ],
+      "switches": 0,
+      "placed": 0,
+      "rebuilt": true,
+      "second": [
+        0,
+        4,
+        2,
+        1,
+        5,
+        3,
+        1,
+        5,
+        3,
+        0,
+        4,
+        2,
+        3,
+        0,
+        4,
+        1,
+        1,
+        5,
+        3,
+        0,
+        4,
+        2,
+        2,
+        1,
+        5,
+        3,
+        0,
+        4,
+        0,
+        2,
+        1,
+        5,
+        2,
+        1,
+        5,
+        3,
+        4,
+        2,
+        1,
+        0,
+        5,
+        3,
+        0,
+        4,
+        4,
+        2,
+        1,
+        5,
+        3,
+        0
+      ]
+    },
+    {
+      "name": "(d) the second side moved until it meets Gale-Ryser",
+      "path": [
+        "sim",
+        "s",
+        "gen",
+        "membership",
+        "associate",
+        "member",
+        "club"
+      ],
+      "parentRows": [
+        4,
+        4
+      ],
+      "shapes": [
+        {
+          "levels": [
+            "0",
+            "4"
+          ],
+          "levelWeights": [
+            "0.5",
+            "0.5"
+          ]
+        },
+        {
+          "levels": [
+            "1",
+            "3"
+          ],
+          "levelWeights": [
+            "0.5",
+            "0.5"
+          ]
+        }
+      ],
+      "rows": 8,
+      "distinct": true,
+      "stubsKey": "454d98b1310a3f03569f929d51da06f4930865cecc77b728a4b8f91df96a900c",
+      "switchesKey": "88bb4c690bfc59329aa55b710f505395d0f1ac35fed24a71958f87232afa1d05",
+      "degrees": [
+        [
+          0,
+          0,
+          4,
+          4
+        ],
+        [
+          2,
+          2,
+          2,
+          2
+        ]
+      ],
+      "moved": [
+        0,
+        0,
+        2
+      ],
+      "switches": 0,
+      "placed": 2,
+      "rebuilt": false,
+      "second": [
+        1,
+        2,
+        3,
+        0,
+        3,
+        1,
+        0,
+        2
+      ]
+    },
+    {
+      "name": "(e) dense: 100 of 120 pairs",
+      "path": [
+        "sim",
+        "s",
+        "gen",
+        "membership",
+        "associate",
+        "member",
+        "club"
+      ],
+      "parentRows": [
+        12,
+        10
+      ],
+      "shapes": [
+        {
+          "bins": [
+            "0",
+            "1",
+            "3",
+            "6"
+          ],
+          "binWeights": [
+            "0.1",
+            "0.5",
+            "0.4"
+          ]
+        },
+        null
+      ],
+      "rows": 100,
+      "distinct": true,
+      "stubsKey": "454d98b1310a3f03569f929d51da06f4930865cecc77b728a4b8f91df96a900c",
+      "switchesKey": "88bb4c690bfc59329aa55b710f505395d0f1ac35fed24a71958f87232afa1d05",
+      "degrees": [
+        [
+          10,
+          10,
+          10,
+          10,
+          7,
+          10,
+          7,
+          10,
+          10,
+          6,
+          10,
+          0
+        ],
+        [
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10
+        ]
+      ],
+      "moved": [
+        20,
+        0,
+        0
+      ],
+      "switches": 0,
+      "placed": 0,
+      "rebuilt": true,
+      "second": [
+        1,
+        6,
+        7,
+        0,
+        2,
+        8,
+        3,
+        4,
+        9,
+        5,
+        3,
+        4,
+        9,
+        5,
+        1,
+        6,
+        7,
+        0,
+        2,
+        8,
+        5,
+        1,
+        6,
+        7,
+        0,
+        2,
+        8,
+        3,
+        4,
+        9,
+        5,
+        1,
+        6,
+        7,
+        0,
+        2,
+        8,
+        3,
+        4,
+        9,
+        1,
+        6,
+        7,
+        0,
+        2,
+        8,
+        3,
+        7,
+        0,
+        2,
+        8,
+        3,
+        4,
+        9,
+        5,
+        1,
+        6,
+        6,
+        7,
+        0,
+        2,
+        4,
+        9,
+        5,
+        8,
+        3,
+        4,
+        9,
+        5,
+        1,
+        6,
+        7,
+        0,
+        2,
+        9,
+        5,
+        1,
+        6,
+        7,
+        0,
+        2,
+        8,
+        3,
+        4,
+        4,
+        9,
+        5,
+        1,
+        8,
+        3,
+        2,
+        8,
+        3,
+        4,
+        9,
+        5,
+        1,
+        6,
+        7,
+        0
+      ]
+    }
+  ]
+}

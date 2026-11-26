@@ -94,6 +94,12 @@ from flux_engine.core.digest import DigestRef, digest_of_bytes, digest_of_docume
 from flux_engine.core.errors import ErrorCode, FluxError, register
 from flux_engine.seam.asof import ASOF_KEY, AsOfEntry, check_asof, read_asof_block
 from flux_engine.seam.asof import bound_into_h as asof_bound_into_h
+from flux_engine.seam.associations import (
+    ASSOCIATIONS_KEY,
+    AssociationEntry,
+    read_associations_block,
+)
+from flux_engine.seam.associations import bound_into_h as associations_bound_into_h
 from flux_engine.seam.bridges import BRIDGES_KEY, BridgeEntry, read_bridges_block
 from flux_engine.seam.bridges import bound_into_h as bridges_bound_into_h
 from flux_engine.seam.conditions import (
@@ -446,6 +452,7 @@ _NAMESPACE_KEYS: FrozenSet[str] = frozenset(
         FACTS_KEY,
         LINKS_KEY,
         BRIDGES_KEY,
+        ASSOCIATIONS_KEY,
         COUNTS_KEY,
         HISTORY_KEY,
         ASOF_KEY,
@@ -2009,6 +2016,22 @@ def declared_overlay(simulation: Mapping[str, Any], *, where: str = "") -> Optio
     return read_overlay_block(value, where=at, code=FLX_3105)
 
 
+def declared_associations(
+    simulation: Mapping[str, Any], *, where: str = ""
+) -> Tuple[AssociationEntry, ...]:
+    """The association tables *simulation* declares, or ``()`` when it declares none (ADR 0039).
+
+    Reads ``extensions["com.agentics.flux/1"].associations``
+    (:func:`flux_engine.seam.associations.read_associations_block`) and refuses a malformed block
+    with ``FLX-3105``. A YAML null declares none, as a null namespace does.
+    """
+    declared = _declared_block(simulation, ASSOCIATIONS_KEY, where)
+    if declared is None:
+        return ()
+    block, emitted, located = declared
+    return read_associations_block(block, emits=emitted, where=located, code=FLX_3105)
+
+
 def declared_bridges(simulation: Mapping[str, Any], *, where: str = "") -> Tuple[BridgeEntry, ...]:
     """The bridges *simulation* declares, or ``()`` when it declares none (ADR 0022 section 8).
 
@@ -2107,6 +2130,7 @@ def _require_namespace(simulation: Mapping[str, Any], simulation_id: str) -> Non
     declared_facts(simulation, where=simulation_id)
     declared_links(simulation, where=simulation_id)
     declared_bridges(simulation, where=simulation_id)
+    declared_associations(simulation, where=simulation_id)
     declared_counts(simulation, where=simulation_id)
     declared_history(simulation, where=simulation_id)
     declared_asof(simulation, where=simulation_id)
@@ -2284,26 +2308,8 @@ def resolve_emit(loaded: LoadedBundle, *, simulation_id: str, emit_index: int = 
             *exposure_rule_ids(declared_within(simulation, where=simulation_id), expose_id),
         ),
     )
-    extension = _with_links(
-        extension,
-        declared_links(simulation, where=simulation_id),
-        expose=expose,
-        expose_id=expose_id,
-        where=where,
-    )
-    extension = _with_bridges(
-        extension,
-        declared_bridges(simulation, where=simulation_id),
-        expose=expose,
-        expose_id=expose_id,
-        where=where,
-    )
-    extension = _with_counts(
-        extension,
-        declared_counts(simulation, where=simulation_id),
-        expose=expose,
-        expose_id=expose_id,
-        where=where,
+    extension = _with_relationship_blocks(
+        extension, simulation, simulation_id, (expose, expose_id), where
     )
     extension = _with_history(
         extension,
@@ -2783,23 +2789,59 @@ def _with_facts(
     return {**(extension or {}), FACTS_KEY: member}
 
 
-def _with_links(
+#: How each block that names relationships of an emit is bound into ``H``: its namespace key, its
+#: member, the words a missing relationship is named with, and the names an entry gives.
+_BOUND: Mapping[type, Tuple[str, Callable[..., Optional[List[Dict[str, Any]]]], str]] = {
+    LinkEntry: (LINKS_KEY, links_bound_into_h, "links configure"),
+    BridgeEntry: (BRIDGES_KEY, bridges_bound_into_h, "bridges name"),
+    AssociationEntry: (ASSOCIATIONS_KEY, associations_bound_into_h, "associations name"),
+    CountsEntry: (COUNTS_KEY, counts_bound_into_h, "counts lay out"),
+}
+
+
+def _named(entry: Any) -> Tuple[str, ...]:
+    """The relationships an entry names: a link's or a counts entry's one, a pair's two."""
+    pair = getattr(entry, "relationships", None)
+    return tuple(pair) if pair is not None else (entry.relationship,)
+
+
+def _with_relationship_blocks(
     extension: Optional[Mapping[str, Any]],
-    entries: Sequence[LinkEntry],
-    *,
-    expose: Mapping[str, Any],
-    expose_id: str,
+    simulation: Mapping[str, Any],
+    simulation_id: str,
+    target: Tuple[Mapping[str, Any], str],
     where: str,
 ) -> Optional[Mapping[str, Any]]:
-    """*extension* with the emit's link entries bound into it, for ``H`` (ADR 0022 section 5).
+    """*extension* with the emit's links, bridges, association and counts bound into it."""
+    for declared in (
+        declared_links(simulation, where=simulation_id),
+        declared_bridges(simulation, where=simulation_id),
+        declared_associations(simulation, where=simulation_id),
+        declared_counts(simulation, where=simulation_id),
+    ):
+        extension = _with_entries(extension, declared, target, where)
+    return extension
 
-    Each entry must name a relationship the emit's expose declares, or the declaration would
-    configure nothing and say it did. The member is added only when the emit has entries, so
-    every other emit, and every bundle that declares none, hashes as before.
+
+def _with_entries(
+    extension: Optional[Mapping[str, Any]],
+    entries: Sequence[Any],
+    target: Tuple[Mapping[str, Any], str],
+    where: str,
+) -> Optional[Mapping[str, Any]]:
+    """*extension* with the emit's entries of one block bound into it, for ``H``.
+
+    The links (ADR 0022 section 5), the bridges (ADR 0022 section 8), the association (ADR 0039)
+    and the counts (ADR 0016 section 1): each entry must name relationships the emit's expose
+    declares, or the declaration would configure nothing and say it did (``FLX-3105``); *target*
+    is the expose and its exposeId. The member is added only when the emit has entries, so every
+    other emit, and every bundle that declares none, hashes as before.
     """
+    expose, expose_id = target
     mine = [entry for entry in entries if entry.emit == nfc(expose_id)]
     if not mine:
         return extension
+    key, bound, verb = _BOUND[type(mine[0])]
     semantics = expose.get("semantics")
     raw = semantics.get("relationships") if isinstance(semantics, Mapping) else None
     held = {
@@ -2807,92 +2849,18 @@ def _with_links(
         for item in (raw if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)) else ())
         if isinstance(item, Mapping) and isinstance(item.get("name"), str)
     }
-    missing = sorted(entry.relationship for entry in mine if entry.relationship not in held)
+    missing = [name for entry in mine for name in _named(entry) if name not in held]
     if missing:
+        first = missing[0] if isinstance(mine[0], (BridgeEntry, AssociationEntry)) else min(missing)
         raise FluxError(
             FLX_3105,
-            f"{where}: links configure the relationship {missing[0]!r}, which {nfc(expose_id)!r} "
-            f"does not declare (its relationships: {sorted(held)})",
+            f"{where}: {verb} the relationship {first!r}, which {nfc(expose_id)!r} does not "
+            f"declare (its relationships: {sorted(held)})",
         )
-    member = links_bound_into_h(mine, expose_id)
+    member = bound(mine, expose_id)
     if member is None:
         return extension
-    return {**(extension or {}), LINKS_KEY: member}
-
-
-def _with_bridges(
-    extension: Optional[Mapping[str, Any]],
-    entries: Sequence[BridgeEntry],
-    *,
-    expose: Mapping[str, Any],
-    expose_id: str,
-    where: str,
-) -> Optional[Mapping[str, Any]]:
-    """*extension* with the emit's bridges bound into it, for ``H`` (ADR 0022 section 8).
-
-    Each bridge must name two relationships the emit's expose declares. The member is added only
-    when the emit has a bridge, so every other emit, and every bundle that declares none, hashes
-    as before.
-    """
-    mine = [entry for entry in entries if entry.emit == nfc(expose_id)]
-    if not mine:
-        return extension
-    semantics = expose.get("semantics")
-    raw = semantics.get("relationships") if isinstance(semantics, Mapping) else None
-    held = {
-        nfc(str(item["name"]))
-        for item in (raw if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)) else ())
-        if isinstance(item, Mapping) and isinstance(item.get("name"), str)
-    }
-    for entry in mine:
-        missing = [name for name in entry.relationships if name not in held]
-        if missing:
-            raise FluxError(
-                FLX_3105,
-                f"{where}: bridges name the relationship {missing[0]!r}, which "
-                f"{nfc(expose_id)!r} does not declare (its relationships: {sorted(held)})",
-            )
-    member = bridges_bound_into_h(mine, expose_id)
-    if member is None:
-        return extension
-    return {**(extension or {}), BRIDGES_KEY: member}
-
-
-def _with_counts(
-    extension: Optional[Mapping[str, Any]],
-    entries: Sequence[CountsEntry],
-    *,
-    expose: Mapping[str, Any],
-    expose_id: str,
-    where: str,
-) -> Optional[Mapping[str, Any]]:
-    """*extension* with the emit's counts entries bound into it, for ``H`` (ADR 0016 section 1).
-
-    Each entry must name a relationship the emit's expose declares. The member is added only when
-    the emit has entries, so every other emit, and every bundle that declares none, hashes as
-    before.
-    """
-    mine = [entry for entry in entries if entry.emit == nfc(expose_id)]
-    if not mine:
-        return extension
-    semantics = expose.get("semantics")
-    raw = semantics.get("relationships") if isinstance(semantics, Mapping) else None
-    held = {
-        nfc(str(item["name"]))
-        for item in (raw if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)) else ())
-        if isinstance(item, Mapping) and isinstance(item.get("name"), str)
-    }
-    missing = sorted(entry.relationship for entry in mine if entry.relationship not in held)
-    if missing:
-        raise FluxError(
-            FLX_3105,
-            f"{where}: counts lay out the relationship {missing[0]!r}, which {nfc(expose_id)!r} "
-            f"does not declare (its relationships: {sorted(held)})",
-        )
-    member = counts_bound_into_h(mine, expose_id)
-    if member is None:
-        return extension
-    return {**(extension or {}), COUNTS_KEY: member}
+    return {**(extension or {}), key: member}
 
 
 def _with_history(

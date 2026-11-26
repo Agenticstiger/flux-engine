@@ -1,6 +1,6 @@
 # The catalogue, grouped draws, weights and stable traits
 
-Read this when the user wants a small table that other tables point at kept as the owner's own rows, a column drawn given a column of a linked row, parents picked by a weight, or a trait the same on every row of an entity. The record is [ADR 0023](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/adr/0023-a-catalogue-and-the-rows-that-follow-it.md); the pages are [publish a catalogue whole](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/publish-a-catalogue.md) and [draw a column given another](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/draw-a-column-given-another.md). All of it generates under kernel 0.2.0 only.
+Read this when the user wants a small table that other tables point at kept as the owner's own rows, a column drawn given a column of a linked row, parents picked by a weight, or a trait the same on every row of an entity. The record is [ADR 0023](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0023-a-catalogue-and-the-rows-that-follow-it.md); the pages are [publish a catalogue whole](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/publish-a-catalogue.md) and [draw a column given another](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/draw-a-column-given-another.md). All of it generates under kernel 0.2.0 only.
 
 ## Why a catalogue
 
@@ -26,11 +26,11 @@ Profile format `1-3-0` has a `references` section: one entry per `exposeId`, wit
 }
 ```
 
-The data owner writes this section where the data lives; you never read the records to make it. The format is in the [profile specification](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/spec/PROFILE-SPEC.md). The same format adds a statistic grouped by a number column, a statistic grouped by a column of a linked row (`groupByLink`), and a statistic counted once per entity (`per`).
+The data owner writes this section where the data lives; you never read the records to make it. The format is in the [profile specification](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/spec/PROFILE-SPEC.md). The same format adds a statistic grouped by a number column, a statistic grouped by a column of a linked row (`groupByLink`), and a statistic counted once per entity (`per`).
 
 ## Declare the expose
 
-The emit's block carries `reference: true` and no other key. Every contract column must be a published column and every published column a contract column. The Simulation pins the profile by its digest. The block below is from [publish a catalogue whole](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/publish-a-catalogue.md), and the digest is a placeholder:
+The emit's block carries `reference: true` and no other key. Every contract column must be a published column and every published column a contract column. The Simulation pins the profile by its digest. The block below is from [publish a catalogue whole](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/publish-a-catalogue.md), and the digest is a placeholder:
 
 ```yaml
 extensions:
@@ -63,7 +63,7 @@ A reference expose is released whole, with no noise on it. A profile that holds 
 
 ## A column drawn given a linked row's column
 
-`given: <relationship>.<column>` draws a column given the level that the row's link reaches. The yaml block of that declaration, with its grouped `levelHistogram` check, is in step 7 of the skill; it is from [draw a column given another](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/draw-a-column-given-another.md). The conditions:
+`given: <relationship>.<column>` draws a column given the level that the row's link reaches. The yaml block of that declaration, with its grouped `levelHistogram` check, is in step 7 of the skill; it is from [draw a column given another](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/draw-a-column-given-another.md). The conditions:
 
 - the relationship reaches a row on every row: no `nullFraction` on its foreign key and no condition on its link;
 - the linked column is a categorical drawn from its own levels with no `nullFraction`, or a column of a reference expose, whose levels are its distinct values;
@@ -74,7 +74,7 @@ A reference expose is released whole, with no noise on it. A profile that holds 
 
 ## Parents picked by a weight column
 
-A `links` entry's `weight` names a number column of the relationship's target. The parent row is the first row whose cumulative share of the weights exceeds one draw, over the parent's final weights in row order, NULL weighing zero. A negative weight, all-zero weights, or a weight on a distinct relationship, on a declared pick or on a bridge side is `FLX-3403`. Without a weight a foreign key picks its parent row uniformly. No tested page shows a `links` entry: write it from [ADR 0023](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/adr/0023-a-catalogue-and-the-rows-that-follow-it.md) section 4 and ADR 0022 section 5, key for key.
+A `links` entry's `weight` names a number column of the relationship's target. The parent row is the first row whose cumulative share of the weights exceeds one draw, over the parent's final weights in row order, NULL weighing zero. A negative weight, all-zero weights, or a weight on a distinct relationship, on a declared pick or on a bridge side is `FLX-3403`. Without a weight a foreign key picks its parent row uniformly. No tested page shows a `links` entry: write it from [ADR 0023](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0023-a-catalogue-and-the-rows-that-follow-it.md) section 4 and ADR 0022 section 5, key for key.
 
 ## A trait stable per entity
 
@@ -90,7 +90,7 @@ From a contract and a profile, `fluxsim init` writes:
 - a whole-number column with at most 64 values that the profile groups another column by, as a categorical over those values; a statistic grouped by a number column that publishes bins stays unused;
 - `copies: true` for a contract that declares `sharedColumns` or `sharedAttribute`, with no draw and no `nullFraction` on a copied column.
 
-It writes no `links`, `bridges`, weight, sentinel or `counts`. See [the init reference](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/reference/cli/init.md) for its options and [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/write-a-bundle-from-a-profile.md) for how it reads each statistic.
+It writes no `links`, `bridges`, weight, sentinel or `counts`. See [the init reference](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/reference/cli/init.md) for its options and [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/write-a-bundle-from-a-profile.md) for how it reads each statistic.
 
 ## Check it
 

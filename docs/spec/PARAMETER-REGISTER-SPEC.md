@@ -302,8 +302,8 @@ A `levels` list that names the levels of a column, as `history[<n>].tracked[].in
 `overrides` of a periods kind or `end.value`, which are values of a column.
 
 Not counted are the namespace's declarations of what a patch or a consumer asks for, and the ones
-that hold no number: `bridges`, `asOf`, `snapshots`, `copies`, `generators`, `overlay`,
-`consumers`, `responses`, `forecasts` and `privacy`. A number there is read by the run but has no
+that hold no number: `bridges`, `associations`, `asOf`, `snapshots`, `copies`, `generators`,
+`overlay`, `consumers`, `responses`, `forecasts` and `privacy`. A number there is read by the run but has no
 entry and no share in the record, so a calibration cannot name it (`FLX-3706`).
 
 **Counting a position changes the record of a run that declares it.** The numbers of a key a

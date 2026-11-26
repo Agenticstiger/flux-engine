@@ -73,6 +73,7 @@ from flux_engine.evidence.register import (
     render_register,
     render_register_line,
 )
+from flux_engine.generator.associations import association_report
 from flux_engine.generator.periods import DEFAULT_PERIODIC_ROWS
 from flux_engine.generator.relations import ForeignKey, history_pick_of
 from flux_engine.generator.statistics import FLX_3402
@@ -187,6 +188,20 @@ def _counts_given_entry(
     return (
         {"countsGiven": sorted(found, key=lambda item: str(item["relationship"]))} if found else {}
     )
+
+
+def _association_entry(
+    outcome: Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"], root: SeedTreeRoot
+) -> Dict[str, Any]:
+    """``association`` for an emit that declares one (ADR 0039), else nothing.
+
+    Its two relationships, ``distinct``, and what the pairing did: the rows the caps and the
+    Gale-Ryser step moved, the switches and placements of the repair, and each side's realised
+    total variation distance from its ``counts`` shape (``null`` for a side with none). Any other
+    emit has no key, so its plan keeps its bytes.
+    """
+    report = None if outcome.plan is None else association_report(outcome.plan, root)
+    return {} if report is None else {"association": report}
 
 
 def _derived_rows_entry(
@@ -591,6 +606,8 @@ def _plan_emits(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
             # An emit with a counted relationship given a parent column states the weights each
             # class took, those it took from the shape included (ADR 0037 decision 4).
             **_counts_given_entry(outcome),
+            # An emit that declares an association records what its pairing did (ADR 0039).
+            **_association_entry(outcome, result.root),
             # SEAM-FIDELITY-SPEC §3: "every ε" is written to plan.json.
             # The key is the one the block is declared under, and an
             # emit that declares none gets no key, so its plan keeps
