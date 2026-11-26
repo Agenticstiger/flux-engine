@@ -71,6 +71,7 @@ from flux_engine.seam.counts import ChildShape
 from flux_stats.fidelity import require_number_length
 
 if TYPE_CHECKING:
+    from flux_engine.generator.associations import PairedSide
     from flux_engine.generator.rows import GeneratorPlan
     from flux_engine.generator.rules import ParentCondition
 
@@ -81,6 +82,7 @@ __all__ = [
     "ExpectedCountHook",
     "TooFewChildRows",
     "TooManyChildRows",
+    "allot",
     "check_minimum",
     "classes_of",
     "class_counts",
@@ -194,6 +196,8 @@ class CountedPick:
     #: The hook that returned :attr:`expected_count`; the layout asks it for each parent's
     #: expected count. It is no part of the pick's identity or document.
     hook: Optional["ExpectedCountHook"] = field(default=None, compare=False, hash=False, repr=False)
+    #: One side of an association (ADR 0039), whose document gains an ``association`` member.
+    paired: Optional["PairedSide"] = None
 
     def as_document(self) -> Dict[str, Any]:
         """The ``counts`` member of the foreign key's plan document: what the entry declares."""
@@ -207,6 +211,8 @@ class CountedPick:
         document.update(self.as_document_given())
         if self.expected_count is not None:
             document["expectedCount"] = dict(self.expected_count)
+        if self.paired is not None:
+            document["association"] = self.paired.as_document()
         return document
 
     def as_document_given(self) -> Dict[str, Any]:
@@ -600,6 +606,15 @@ def _allot(spare: int, weights: "np.ndarray") -> "np.ndarray":
         order = np.argsort(-(product - floors * total), kind="stable")[:left]
         floors[order] += 1
     return floors.astype(np.int64)
+
+
+def allot(spare: int, weights: "np.ndarray") -> "np.ndarray":
+    """*spare* over the ranks in proportion to *weights* (at least one above 0), the largest remainders taking the rest.
+
+    The allotment step of :func:`counted_layout` (:func:`_allot`), for a layout that shares a
+    remainder out again, such as an association's cap (:mod:`flux_engine.generator.associations`).
+    """
+    return _allot(spare, weights)
 
 
 def pass_excess(

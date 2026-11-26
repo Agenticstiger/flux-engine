@@ -87,6 +87,7 @@ _WORD_MASK = (1 << 64) - 1
 
 __all__ = [
     "ALLOCATE_PATH_SHAPE",
+    "ASSOCIATE_PATH_SHAPE",
     "CHANGE_PATH_SHAPE",
     "COPULA_PATH_SHAPE",
     "COUNT_PATH_SHAPE",
@@ -105,6 +106,7 @@ __all__ = [
     "GeneratorStreams",
     "StreamSource",
     "allocate_path",
+    "associate_path",
     "change_path",
     "copula_path",
     "count_path",
@@ -239,6 +241,40 @@ def count_path(sim_id: str, expose_id: str, relationship: str) -> SeedPath:
         _require_name(expose_id, "exposeId"),
         "count",
         _require_name(relationship, "relationship"),
+    )
+
+
+#: The paths of one association's pairing (ADR 0039): ``stubs`` keys the permutation of the second
+#: side's stubs and ``switches`` the partners its repair tries. Same standing as
+#: :data:`COUNT_PATH_SHAPE`: no ordinal part, outside the seed-path ledger.
+ASSOCIATE_PATH_SHAPE = PathShape(
+    name="sim.associate",
+    consumer="pairing of the two sides of one association table",
+    pattern=(
+        "sim",
+        PathKind.NAME,
+        "gen",
+        PathKind.NAME,
+        "associate",
+        PathKind.NAME,
+        PathKind.NAME,
+        PathKind.NAME,
+    ),
+)
+
+
+def associate_path(sim_id: str, expose_id: str, pair: Sequence[str], purpose: str) -> SeedPath:
+    """``("sim", sim_id, "gen", exposeId, "associate", a, b, purpose)``."""
+    first, second = pair
+    return (
+        "sim",
+        _require_name(sim_id, "sim_id"),
+        "gen",
+        _require_name(expose_id, "exposeId"),
+        "associate",
+        _require_name(first, "relationship"),
+        _require_name(second, "relationship"),
+        _require_name(purpose, "purpose"),
     )
 
 

@@ -48,6 +48,11 @@ from typing import (
 
 import yaml
 
+from flux_engine.author.association import (
+    association_entry,
+    association_pair,
+    edge_rows,
+)
 from flux_engine.author.basis import Basis, Label, assumed, default, from_profile
 from flux_engine.author.catalogue import (
     catalogue_foreign_keys,
@@ -146,6 +151,7 @@ from flux_engine.expr2.errors import FLX_6204
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.governance.privacy import effective_floors, sensitivities_of
 from flux_engine.seam.asof import ASOF_KEY
+from flux_engine.seam.associations import ASSOCIATIONS_KEY
 from flux_engine.seam.contract import LogicalKind, compile_expose
 from flux_engine.seam.copies import COPIES_KEY, declares_copies
 from flux_engine.seam.copula import COPULA_KEY
@@ -284,6 +290,9 @@ class AuthoredExpose:
     drawn_by_cliques: Set[str] = field(default_factory=set)
     #: What the table's published rank correlations came to: its copula, and what was said of it.
     copula: Optional[CopulaPlan] = None
+    #: The ``associations`` entry of a table of two foreign keys and no other column, once both its
+    #: relationships are laid out by counts (ADR 0039).
+    association: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -1113,7 +1122,7 @@ def _finish_expose(authored: AuthoredExpose) -> None:
             if fallback is not None:
                 authored.properties = [fallback]
                 break
-    if not authored.properties and not _declares_a_column(authored):
+    if not authored.properties and not _declares_a_column(authored) and not authored.association:
         authored.skipped = (
             "no column has a range or levels the fidelity block could declare, so it would "
             "declare no column (FLX-5034); declare one by hand"
@@ -2092,11 +2101,47 @@ def _lay_out_children(
     return _Placed(list(spread.used), list(spread.unused), None, notes, False, laid)
 
 
-def _settle_given(placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int) -> _Placed:
+#: Why the grouping of an association side's children is not read (ADR 0039 section 5).
+_PAIRED_GIVEN = (
+    "an association table pairs its two sides stub by stub, so its children per parent follow no "
+    "column of the parent"
+)
+
+
+def _association_tables(
+    planned: Mapping[str, AuthoredExpose], keys: Optional[ContractKeys], slots: Sequence[_Slot]
+) -> FrozenSet[str]:
+    """The drawn tables of two foreign keys and no other column whose two sides are laid out by counts.
+
+    Only such a table is written as an association (ADR 0039): a table with one side counted keeps
+    what that side's entry holds, and a reference expose is written whole.
+    """
+    if keys is None:
+        return frozenset()
+    counted = {
+        (slot.child_table, slot.declared.name)
+        for slot in slots
+        if slot.placed is not None and slot.placed.entry is not None
+    }
+    held = set()
+    for expose_id, expose in planned.items():
+        if expose.reference:
+            continue
+        pair = association_pair(keys.expose(expose_id), [plan.name for plan in expose.columns])
+        if pair is not None and all((expose_id, item.name) in counted for item in pair):
+            held.add(expose_id)
+    return frozenset(held)
+
+
+def _settle_given(
+    placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int, paired: bool = False
+) -> _Placed:
     """*placed* with the given column of its ``counts`` entry chosen, when the profile groups one.
 
     This reads which columns of the parent are drawn given a column of a linked row, so it runs
-    once those are declared. A grouping by one of them is passed over, with the reason.
+    once those are declared. A grouping by one of them is passed over, with the reason. The side of
+    an association table (*paired*) takes no given column: its rows pair with the other side's stub
+    by stub, so the statistic a given would rest on is listed unused.
     """
     pending = placed.pending
     if pending is None or placed.entry is None:
@@ -2110,6 +2155,9 @@ def _settle_given(placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int
     )
     if given is None:
         return placed
+    if paired:
+        passed = [(pointer, _PAIRED_GIVEN) for pointer, _ in given.used]
+        return placed._replace(unused=[*placed.unused, *passed, *given.unused])
     placed.entry.update(given.members)
     notes = list(placed.notes)
     _take_given(given, pending.child_plan, pending.parent_expose, (notes, pending.name))
@@ -2303,11 +2351,17 @@ def _spread_relationships(
         slots.append(_Slot(tokens, entry, declared, child_table, placed, []))
     if declare_links is not None:
         declare_links()
+    paired = _association_tables(planned, keys, slots)
     for slot in slots:
         unused += slot.passed
         if slot.placed is None:
             continue
-        settled = _settle_given(slot.placed, slot.tokens, minimum_cell=minimum_cell)
+        settled = _settle_given(
+            slot.placed,
+            slot.tokens,
+            minimum_cell=minimum_cell,
+            paired=slot.child_table in paired,
+        )
         used += settled.used
         unused += settled.unused
         written_notes = list(settled.notes)
@@ -3450,6 +3504,53 @@ def _plan_guarded(
         return AuthoredExpose(expose_id=expose_id, skipped=_beyond_note(error))
 
 
+def _with_edge_rows(
+    reading: _Reading, keys: Optional[ContractKeys], drawn: Sequence[AuthoredExpose]
+) -> None:
+    """Give each association table whose profile publishes no rowCount its edge rows (ADR 0039).
+
+    The rows are bounded by the pairs of the two parents as they are written, so this runs once
+    every expose has its rows and before any relationship is laid out.
+    """
+    rows_of = {expose.expose_id: expose.rows for expose in drawn}
+    for authored in drawn:
+        table = reading.tables.get(authored.expose_id) or {}
+        if keys is None or table.get("rowCount") is not None:
+            continue
+        pair = association_pair(
+            keys.expose(authored.expose_id), [plan.name for plan in authored.columns]
+        )
+        if pair is None or not all(item.target in rows_of for item in pair):
+            continue
+        parents = (rows_of[pair[0].target], rows_of[pair[1].target])
+        found = edge_rows(reading.profile, pair, parents, reading.fractional_bits)
+        if found is not None:
+            rows, note = found
+            authored.assumptions = [item for item in authored.assumptions if item[0] != "rows"]
+            authored.rows, authored.rows_basis, authored.rows_note = rows, assumed(note), note
+            authored.assumptions.append(("rows", note))
+
+
+def _mark_associations(
+    exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys], spread: "_Spreads"
+) -> None:
+    """Give each association table its ``associations`` entry, once both sides are laid out by counts."""
+    rows_of = {expose.expose_id: expose.rows for expose in exposes}
+    for expose in exposes:
+        if keys is None or expose.skipped is not None or expose.reference:
+            continue
+        pair = association_pair(
+            keys.expose(expose.expose_id), [plan.name for plan in expose.columns]
+        )
+        if pair is None or not all(item.target in rows_of for item in pair):
+            continue
+        rows = (expose.rows, rows_of[pair[0].target], rows_of[pair[1].target])
+        found = association_entry(expose.expose_id, pair, spread.entries, rows)
+        if found is not None:
+            expose.association, note = found
+            spread.notes.append((expose.expose_id, note))
+
+
 def _cliques_of(table: Any) -> Tuple[CliqueEntry, ...]:
     """The cliques of a profile's *table* of either definition, in the order the document lists them."""
     if table is None:
@@ -3466,6 +3567,7 @@ def _draw_and_link(
 ) -> _Spreads:
     """Span the keys of the drawn exposes, lay their relationships out and link their givens."""
     try:
+        _with_edge_rows(reading, keys, drawn)
         _span_keys(drawn, keys)
         for expose in drawn:
             for plan in expose.columns:
@@ -3494,6 +3596,7 @@ def _draw_and_link(
             held_back=held_back,
             declare_links=declare_links,
         )
+        _mark_associations(written, keys, spread)
     except (ArithmeticError, ValueError) as error:
         raise AuthorError(_beyond_note(error)) from error
     return spread
@@ -3566,6 +3669,9 @@ def _namespace_block(
         namespace[COUNTS_KEY] = sorted(
             spread.entries, key=lambda item: (item["emit"], item["relationship"])
         )
+    associations = [expose.association for expose in authored if expose.association]
+    if associations:
+        namespace[ASSOCIATIONS_KEY] = sorted(associations, key=lambda item: str(item["emit"]))
     if dated.lifetimes:
         namespace[LIFETIMES_KEY] = dated.lifetimes
     if dated.within:

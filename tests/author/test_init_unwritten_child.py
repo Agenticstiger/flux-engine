@@ -2,19 +2,20 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""``fluxsim init`` writes no ``counts`` entry for a table it does not write.
+"""``fluxsim init`` writes a link table of two foreign keys as an association (ADR 0039).
 
-A table made only of foreign keys has nothing for its fidelity block to declare once a ``counts``
-entry has set its keys, so it is not written (``FLX-5034``). The entry was laid out before that
-was known, and the bundle named an emit the Simulation does not write (``FLX-3105``), so ``init``
-refused its own output. Pinned here, through ``fluxsim init`` and ``plan``, on a private release
-of a world where a link table has two parents and the profile publishes neither its rows nor
-anything of its keys:
+A table made only of foreign keys has nothing for its fidelity block to declare once ``counts``
+entries have set its keys. ``init`` once wrote the entries and left the table out, and the bundle
+named an emit the Simulation does not write (``FLX-3105``); the table is now written as an
+association of its two relationships. Pinned here, through ``fluxsim init`` and ``plan``, on a
+private release of a world where a link table has two parents and the profile publishes neither
+its rows nor anything of its keys:
 
 * the bundle validates and plans, whether the rows are withheld or published;
-* the link table is told as not written, with the reason, and no ``counts`` entry names it;
-* each statistic of the two relationships into it is listed unused, with the reason;
-* a relationship between tables that are written keeps its entry.
+* the link table is written, with a ``counts`` entry for each relationship and an
+  ``associations`` entry;
+* each statistic of the two relationships into it is used;
+* a relationship between other tables that are written keeps its entry.
 """
 
 from __future__ import annotations
@@ -228,16 +229,18 @@ def _namespace(tmp_path: Path) -> Dict[str, Any]:
 
 
 @pytest.mark.parametrize("loans", [None, 500], ids=["rows withheld", "rows published"])
-def test_a_link_table_with_nothing_to_declare_is_left_out_with_its_entries(
+def test_a_link_table_of_two_keys_is_written_as_an_association(
     tmp_path: Path, loans: Optional[int]
 ) -> None:
     result = _written(tmp_path, _profile(loans=loans))
     assert result.exit_code == 0, result.stderr
     block = _namespace(tmp_path)
-    assert "loan" not in block["emits"]
-    assert [entry["emit"] for entry in block.get("counts", [])] == ["review"]
-    assert "loan: not written" in result.stdout
-    assert "FLX-5034" in result.stdout
+    assert block["emits"]["loan"]["fidelity"]["columns"] == {}
+    assert [entry["emit"] for entry in block.get("counts", [])] == ["loan", "loan", "review"]
+    assert block["associations"] == [
+        {"emit": "loan", "relationships": ["loan_to_member", "loan_to_branch"], "distinct": True}
+    ]
+    assert "loan: not written" not in result.stdout
     planned = plan(
         tmp_path / "bundle",
         state_dir=tmp_path / "state",
@@ -248,14 +251,9 @@ def test_a_link_table_with_nothing_to_declare_is_left_out_with_its_entries(
     assert planned.success, planned.stderr
 
 
-def test_each_statistic_into_the_link_table_is_listed_unused_with_the_reason(
-    tmp_path: Path,
-) -> None:
+def test_each_statistic_into_the_link_table_is_used(tmp_path: Path) -> None:
     result = _written(tmp_path, _profile())
     assert result.exit_code == 0, result.stderr
     states = {entry["pointer"]: entry for entry in result.artifacts["ledger"]["statistics"]}
-    for relationship in (0, 1):
-        state = states[f"/relationships/{relationship}/statistics/0"]
-        assert state["state"] == "unused"
-        assert "no generator emit of one of its two tables" in state["note"]
-    assert states["/relationships/2/statistics/0"]["state"] == "used"
+    for relationship in (0, 1, 2):
+        assert states[f"/relationships/{relationship}/statistics/0"]["state"] == "used"
