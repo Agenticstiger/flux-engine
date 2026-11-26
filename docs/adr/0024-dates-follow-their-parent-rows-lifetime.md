@@ -529,16 +529,28 @@ a share of the rows well below its tolerance.
    - *The estimate.* Otherwise `init` estimates from the two histograms the bundle draws the dates from the share
      of rows that would break the order if the two were drawn independently: the end before the start (on or
      before it, for a strict check), each bin's mass spread evenly over the days it covers (the milliseconds, for
-     a timestamp), in exact fractions, so the same inputs give the same number. A NULL date counts as breaking
-     the check where the check does not hold on a NULL one.
+     a timestamp), in exact fractions, so the same inputs give the same number. The generator draws the last
+     declared bin closed at its top, so that bin also holds its upper edge (one more day, or millisecond). A NULL
+     date counts as breaking the check where the check does not hold on a NULL one.
    - *The tolerance.* The check's tolerance is the share its band allows, read from `mustBeLessThan`,
      `mustBeLessOrEqualTo` or `mustBeBetween` from zero, in `percent`. A check with no such band, or a band in
      `rows`, has none, which counts as 0.
-   - *Within it.* When the estimate is at most the tolerance (below it, for `mustBeLessThan`), both histograms
-     stay and no lifetime is written. The notes name the check and say the published dates already keep it
-     within its tolerance, with the estimate.
+   - *The margin.* A run draws its rows by chance, and a share just under the tolerance falls outside it about
+     half the time. The estimate `p` is kept only where `p` plus three standard errors, `sqrt(p (1 - p) / n)` at
+     the `n` rows the table plans, is at most the tolerance (below it, for `mustBeLessThan`); it is compared in
+     exact fractions, as `9 p (1 - p)` against `n` times the square of the room left. A table whose rows follow a
+     history plans none, and compares `p` itself.
+   - *Within it.* When the estimate keeps that margin, both histograms stay and no lifetime is written. The
+     notes name the check and say the published dates already keep it within its tolerance, with the estimate.
    - *Above it.* Otherwise the lifetime is written as above and the end's histogram is traded for the order. The
      notes name the check and say so, with the share that independent dates would break.
+   - *A kept check is not undone.* A check kept this way rests on the histograms of both its dates. Every check
+     of a table is decided before any lifetime is written, taken in the order of the checks' ids, so the order
+     the contract lists them in decides nothing. A lifetime is then not written that would end on a date a kept
+     check rests on (a table declares one lifetime in any case): the other check is not written as an order, and
+     its note names the kept check, which holds through its published histogram. A date that a lifetime from the
+     profile's published date pair ends is laid out by that pair, so no check rests on its histogram: a check of
+     that date is not written, and its note says the pair lays it out.
 
    The two choices cost something. A kept pair of histograms holds the order as far as a sample of rows follows
    them, and a small table can fall outside the tolerance by chance; the lifetime holds every row. A lifetime

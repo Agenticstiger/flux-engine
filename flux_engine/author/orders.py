@@ -25,7 +25,10 @@ from flux_engine.expr2.errors import Expr2Error
 from flux_engine.expr2.parser import Side, parse
 from flux_engine.generator.rules import Band
 
-__all__ = ["DateOrder", "contract_date_orders"]
+__all__ = ["DateOrder", "STANDARD_ERRORS", "contract_date_orders"]
+
+#: How many standard errors of a share, at the table's row count, a kept order leaves below its band.
+STANDARD_ERRORS = 3
 
 
 @dataclass(frozen=True)
@@ -44,9 +47,23 @@ class DateOrder:
     tolerance: Fraction = Fraction(0)
     tolerance_open: bool = False
 
-    def tolerates(self, share: Fraction) -> bool:
-        """Whether a run in which *share* of the rows break the check stays within its band."""
-        return share < self.tolerance if self.tolerance_open else share <= self.tolerance
+    def tolerates(self, share: Fraction, rows: int = 0) -> bool:
+        """Whether a run of *rows* rows, in which *share* of them break the check, stays within its band.
+
+        A run draws its rows by chance, so the share it breaks the check on falls about
+        ``sqrt(share * (1 - share) / rows)`` either side of *share*. The share is tolerated only
+        where it and :data:`STANDARD_ERRORS` such errors are within the band (below it, for an
+        open band), so that a run of this size stays within it all but about once in a thousand.
+        With no row count (*rows* of 0) the share itself is compared. Exact, in fractions.
+        """
+        room = self.tolerance - share
+        if room < 0 or (self.tolerance_open and room == 0):
+            return False
+        if rows <= 0:
+            return True
+        noise = STANDARD_ERRORS * STANDARD_ERRORS * share * (1 - share)
+        reach = rows * room * room
+        return noise < reach if self.tolerance_open else noise <= reach
 
 
 def contract_date_orders(expose: Mapping[str, Any]) -> List[DateOrder]:

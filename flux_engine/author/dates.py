@@ -112,6 +112,9 @@ class DatedExpose:
     #: The histogram each date column is drawn from, where it is drawn from one the profile
     #: published and the bundle declares (none for a column drawn evenly within the window).
     spreads: Mapping[str, DateSpread] = field(default_factory=dict)
+    #: The rows the bundle plans for the table (0 where they follow a history), which the share
+    #: a kept order breaks the check on is held below its band by a margin of.
+    rows: int = 0
 
 
 @dataclass
@@ -966,57 +969,118 @@ class _Declarer:
         The profile's date pair, when it publishes one for the two columns, is the statistic and
         wins: this reads nothing of the profile. Where the end is drawn from a histogram the bundle
         declares, and so is the start, the dates are first drawn apart: when that keeps the order
-        within the check's tolerance (:func:`independent_break_share`) both histograms stay and no
+        within the check's tolerance (:func:`independent_break_share`, with the margin
+        :meth:`DateOrder.tolerates` leaves a table of this many rows) both histograms stay and no
         lifetime is written, and otherwise the lifetime replaces the end's histogram. The days
         between the dates are an assumption. An order that cannot be written is listed in
         ``declined_orders`` with the reason.
+
+        Every order of a table is decided before any lifetime is written, in the order of its
+        rule's id, so the listing of the checks decides nothing. A kept order rests on the
+        histograms of its two dates, so a lifetime is not written that would end on either: the
+        other check is not written as an order, and the notes say so. A date a published date
+        pair ends is laid out by that pair, and no order rests on its histogram.
         """
         for expose, held in self.exposes.items():
-            written = False
-            for order in held.orders:
-                if self._published_pair(expose, order):
-                    continue
-                subject = f"{expose}.{order.rule}"
-                refused = self._order_refusal(expose, held, order)
-                share = None if refused is not None else self._independent_share(held, order)
-                if share is not None and order.tolerates(share):
-                    self.order_notes.append(
-                        (
-                            subject,
-                            f"the check orders {order.start!r} and {order.end!r}, and no lifetime "
-                            "is written for it: the published dates already keep it within its "
-                            f"tolerance of {_percent(order.tolerance)}, since dates drawn apart "
-                            f"would break it on about {_percent(share)} of the rows",
-                        )
+            orders = sorted(
+                (order for order in held.orders if not self._published_pair(expose, order)),
+                key=lambda order: (order.rule, order.start, order.end),
+            )
+            life = self.lifetimes.get(expose)
+            laid = None if life is None else life.get("end")
+            kept = [order for order in orders if self._kept(expose, held, order, laid)]
+            self._write_lifetimes_of(
+                expose, held, [order for order in orders if order not in kept], kept, laid
+            )
+
+    def _kept(self, expose: str, held: DatedExpose, order: DateOrder, laid: Optional[str]) -> bool:
+        """Whether the published histograms keep *order* within its tolerance, and so need no lifetime.
+
+        *laid* is the date a lifetime from a published date pair ends, if the table has one: it is
+        drawn by that lifetime, not by its histogram, so an order of it is declined, and says so.
+        """
+        subject = f"{expose}.{order.rule}"
+        if laid in (order.start, order.end):
+            self.declined_orders.append(
+                (
+                    subject,
+                    f"the check orders {order.start!r} and {order.end!r}, and no lifetime is "
+                    f"written for it: {laid!r} is laid out by the table's published date pair, "
+                    "not by its histogram, so the histograms do not keep the check",
+                )
+            )
+            return False
+        if self._order_refusal(expose, held, order) is not None:
+            return False
+        share = self._independent_share(held, order)
+        if share is None or not order.tolerates(share, held.rows):
+            return False
+        self.order_notes.append(
+            (
+                subject,
+                f"the check orders {order.start!r} and {order.end!r}, and no lifetime "
+                "is written for it: the published dates already keep it within its "
+                f"tolerance of {_percent(order.tolerance)}, since dates drawn apart "
+                f"would break it on about {_percent(share)} of the rows",
+            )
+        )
+        return True
+
+    def _write_lifetimes_of(
+        self,
+        expose: str,
+        held: DatedExpose,
+        orders: Sequence[DateOrder],
+        kept: Sequence[DateOrder],
+        laid: Optional[str],
+    ) -> None:
+        """The lifetime of a table for the first of *orders* it can hold, short of a kept order's date."""
+        written = False
+        for order in orders:
+            subject = f"{expose}.{order.rule}"
+            if laid in (order.start, order.end):
+                continue  # declined already, with the date a published pair lays out
+            if written or expose in self.lifetimes:
+                self.declined_orders.append(
+                    (subject, "the table declares one lifetime, and another one already does")
+                )
+                continue
+            refused = self._order_refusal(expose, held, order)
+            holder = next((one for one in kept if order.end in (one.start, one.end)), None)
+            if refused is None and holder is not None:
+                self.declined_orders.append(
+                    (
+                        subject,
+                        f"the check orders {order.start!r} and {order.end!r}, and no lifetime "
+                        f"is written for it: {order.end!r} also keeps the check {holder.rule!r} "
+                        "within its tolerance through its published histogram, which a lifetime "
+                        "ending on it would replace",
                     )
-                    continue
-                if written or expose in self.lifetimes:
-                    self.declined_orders.append(
-                        (subject, "the table declares one lifetime, and another one already does")
+                )
+                continue
+            entry = self._order_lifetime(expose, held, order)
+            if isinstance(entry, str):
+                self.declined_orders.append(
+                    (
+                        subject,
+                        f"the check orders {order.start!r} and {order.end!r}, and no lifetime "
+                        f"is written for it: {entry}",
                     )
-                    continue
-                entry = self._order_lifetime(expose, held, order)
-                if isinstance(entry, str):
-                    self.declined_orders.append(
-                        (
-                            subject,
-                            f"the check orders {order.start!r} and {order.end!r}, and no lifetime "
-                            f"is written for it: {entry}",
-                        )
+                )
+                continue
+            self.lifetimes[expose] = entry
+            written = True
+            share = self._independent_share(held, order)
+            if share is not None:
+                self.order_notes.append(
+                    (
+                        subject,
+                        f"the histogram of {order.end!r} is traded for a lifetime from "
+                        f"{order.start!r}: the check orders them, and dates drawn apart "
+                        f"would break it on about {_percent(share)} of the rows, more "
+                        f"than its tolerance of {_percent(order.tolerance)}",
                     )
-                else:
-                    self.lifetimes[expose] = entry
-                    written = True
-                    if share is not None:
-                        self.order_notes.append(
-                            (
-                                subject,
-                                f"the histogram of {order.end!r} is traded for a lifetime from "
-                                f"{order.start!r}: the check orders them, and dates drawn apart "
-                                f"would break it on about {_percent(share)} of the rows, more "
-                                f"than its tolerance of {_percent(order.tolerance)}",
-                            )
-                        )
+                )
 
     @staticmethod
     def _independent_share(held: DatedExpose, order: DateOrder) -> Optional[Fraction]:

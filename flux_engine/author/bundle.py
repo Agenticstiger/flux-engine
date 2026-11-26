@@ -4883,6 +4883,7 @@ def _dated_columns(
                 ),
                 bounds=_date_bounds(expose),
                 spreads=_date_spreads(expose),
+                rows=expose.rows,
             )
             for expose in planned.authored
             if not expose.reference

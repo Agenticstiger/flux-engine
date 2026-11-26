@@ -330,8 +330,10 @@ def test_an_order_that_cannot_be_written_is_reported(tmp_path: Path) -> None:
 # -- dates the published histograms already keep in order --------------------------------------
 
 
-def _plain_card(tmp_path: Path, check: str = "cancelled_on >= issued_on", band: str = "") -> Any:
-    """Cards both dates of which are required, from plain histograms of 20,000 rows."""
+def _plain_card(
+    tmp_path: Path, check: str = "cancelled_on >= issued_on", band: str = "", rows: int = 20000
+) -> Any:
+    """Cards both dates of which are required, from plain histograms of *rows* rows."""
     contract = (
         CARD.replace(
             "{ name: cancelled_on, type: DATE }",
@@ -344,7 +346,7 @@ def _plain_card(tmp_path: Path, check: str = "cancelled_on >= issued_on", band: 
         )
     )
     return _init(
-        tmp_path, contract, _profile("card", "issued_on", "cancelled_on", plain=True, rows=20000)
+        tmp_path, contract, _profile("card", "issued_on", "cancelled_on", plain=True, rows=rows)
     )
 
 
@@ -452,3 +454,188 @@ def test_a_start_the_profile_gives_no_distribution_is_ordered_by_a_lifetime(tmp_
     _init(tmp_path, CARD, _profile("card", "issued_on", "cancelled_on", bare="issued_on"))
     (life,) = _block(tmp_path)["lifetimes"]
     assert (life["start"], life["end"]) == ("issued_on", "cancelled_on")
+
+
+# -- one date, two checks: a kept check's histograms are not replaced by another check's lifetime ------
+
+#: Cards that are issued, renewed and cancelled, both checks of which say cancelled comes last.
+_TWO_CHECKS = (
+    CARD.replace(
+        "{ name: cancelled_on, type: DATE }",
+        "{ name: cancelled_on, type: DATE, required: true }\n"
+        "        - { name: renewed_on, type: DATE, required: true }",
+    )
+    .replace("cancelled_on IS NULL OR cancelled_on >= issued_on", "cancelled_on >= issued_on")
+    .replace(
+        "    semantics:",
+        '        - id: cancelled_after_renewed\n          check: "cancelled_on >= renewed_on"\n'
+        "    semantics:",
+    )
+)
+
+_AFTER_ISSUED = (
+    "        - id: card_cancelled_after_issued\n"
+    '          check: "cancelled_on >= issued_on"\n'
+    "          mustBeLessOrEqualTo: 5\n"
+    "          unit: percent\n"
+)
+_AFTER_RENEWED = (
+    '        - id: cancelled_after_renewed\n          check: "cancelled_on >= renewed_on"\n'
+)
+
+
+def _renewing_profile(first: str, **keep: Any) -> Dict[str, Any]:
+    profile = _profile("card", first, "cancelled_on", plain=True, rows=20000, **keep)
+    other = "renewed_on" if first == "issued_on" else "issued_on"
+    profile["tables"]["card"]["columns"][other] = {
+        "domain": "timestamp",
+        "statistics": [_plain(STARTED)],
+    }
+    return profile
+
+
+def _swapped(contract: str, first: str = _AFTER_ISSUED, second: str = _AFTER_RENEWED) -> str:
+    """The same contract with its two checks listed the other way round."""
+    swapped = contract.replace(first, "@@A@@").replace(second, "@@B@@")
+    assert "@@A@@" in swapped and "@@B@@" in swapped
+    return swapped.replace("@@A@@", second).replace("@@B@@", first)
+
+
+def _bundle_without_the_contract_digest(folder: Path) -> Dict[str, bytes]:
+    """The World, the Persona and the Simulation, but for the digest of the contract's own text."""
+    found = {}
+    for path in sorted((folder / "bundle").glob("*.flux.yml")):
+        lines = path.read_bytes().splitlines()
+        found[path.name] = b"\n".join(line for line in lines if b"contractDigest" not in line)
+    assert len(found) == 3
+    return found
+
+
+def test_a_later_check_writes_no_lifetime_that_replaces_a_kept_checks_histogram(
+    tmp_path: Path,
+) -> None:
+    # Dates drawn apart break the first check on 2.8% of the rows, within its band of 5%: both
+    # histograms stay. The second check has no band and the same start histogram, so its lifetime
+    # would end on 'cancelled_on' and replace the histogram the first check was kept on.
+    result = _init(tmp_path, _TWO_CHECKS, _renewing_profile("issued_on"))
+    assert "lifetimes" not in _block(tmp_path)
+    notes = _notes(result)
+    assert "within its tolerance of 5%" in notes["card.card_cancelled_after_issued"]
+    refused = notes["card.cancelled_after_renewed"]
+    assert "no lifetime is written for it" in refused
+    assert "'card_cancelled_after_issued'" in refused and "published histogram" in refused
+    assert "traded" not in refused
+    rows = _rows(tmp_path, "card")  # the run verifies: the kept check holds within its band
+    assert 0 < len([row for row in rows if row[2] < row[1]]) <= 0.05 * len(rows)
+
+
+def test_the_listing_of_the_checks_decides_nothing(tmp_path: Path) -> None:
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    one = _init(first, _TWO_CHECKS, _renewing_profile("issued_on"))
+    two = _init(second, _swapped(_TWO_CHECKS), _renewing_profile("issued_on"))
+    assert _bundle_without_the_contract_digest(first) == _bundle_without_the_contract_digest(second)
+    assert _notes(one) == _notes(two)
+    assert "lifetimes" not in _block(second)
+
+
+def test_of_two_checks_that_each_need_a_lifetime_the_first_by_id_writes_it(tmp_path: Path) -> None:
+    # Neither check has a band, and both starts are drawn over the same years as 'cancelled_on'.
+    bare = (
+        '        - id: card_cancelled_after_issued\n          check: "cancelled_on >= issued_on"\n'
+    )
+    contract = _TWO_CHECKS.replace(_AFTER_ISSUED, bare)
+    assert contract != _TWO_CHECKS
+    results = []
+    for index, text in enumerate((contract, _swapped(contract, bare))):
+        folder = tmp_path / str(index)
+        folder.mkdir()
+        results.append(_init(folder, text, _renewing_profile("issued_on")))
+        (life,) = _block(folder)["lifetimes"]
+        # 'cancelled_after_renewed' sorts before 'card_cancelled_after_issued'.
+        assert (life["start"], life["end"]) == ("renewed_on", "cancelled_on")
+    assert _bundle_without_the_contract_digest(
+        tmp_path / "0"
+    ) == _bundle_without_the_contract_digest(tmp_path / "1")
+    assert _notes(results[0]) == _notes(results[1])
+    assert "one lifetime" in _notes(results[0])["card.card_cancelled_after_issued"]
+
+
+def test_a_check_whose_end_a_published_pair_lays_out_is_not_called_kept(tmp_path: Path) -> None:
+    # The profile publishes the days from 'renewed_on' to 'cancelled_on': the table's lifetime
+    # draws 'cancelled_on', so its own histogram keeps no check.
+    contract = _TWO_CHECKS.replace(_AFTER_RENEWED, "")
+    profile = _profile("card", "renewed_on", "cancelled_on", pairs=True, plain=True, rows=20000)
+    profile["tables"]["card"]["columns"]["issued_on"] = {
+        "domain": "timestamp",
+        "statistics": [_plain(STARTED)],
+    }
+    result = _init(tmp_path, contract, profile)
+    (life,) = _block(tmp_path)["lifetimes"]
+    assert (life["start"], life["end"]) == ("renewed_on", "cancelled_on")
+    note = _notes(result)["card.card_cancelled_after_issued"]
+    assert "'cancelled_on' is laid out by the table's published date pair" in note
+    assert "already keep it" not in note
+
+
+# -- the draw of the last bin, and the margin of a sample --------------------------------------------
+
+
+def _ms_of(day: str) -> str:
+    year, month, date = (int(part) for part in day.split("-"))
+    return str(int(datetime(year, month, date, tzinfo=timezone.utc).timestamp() * 1000))
+
+
+def _binned(edges: List[str], counts: List[int]) -> Dict[str, Any]:
+    return {
+        "definition": "marginalHistogram/1",
+        "sampleSize": SAMPLE,
+        "disclosure": "none",
+        "bins": [_ms_of(day) for day in edges],
+        "groups": [{"group": "", "k": sum(counts), "status": "F", "binCounts": counts}],
+    }
+
+
+def test_the_last_bin_is_drawn_closed_so_a_day_of_adjacency_needs_a_lifetime(
+    tmp_path: Path,
+) -> None:
+    # Cards are issued from 1 June to 1 September and cancelled from 31 August to 1 December. Read
+    # as half-open, the latest start is 31 August and the earliest end 31 August: the order always
+    # holds. The generator draws a last bin closed at its top, so a card can be issued on 1 September
+    # and cancelled on 31 August, and a check with no band is not kept by the histograms.
+    contract = (
+        CARD.replace(
+            "{ name: cancelled_on, type: DATE }",
+            "{ name: cancelled_on, type: DATE, required: true }",
+        )
+        .replace("cancelled_on IS NULL OR cancelled_on >= issued_on", "cancelled_on >= issued_on")
+        .replace("          mustBeLessOrEqualTo: 5\n          unit: percent\n", "")
+    )
+    profile = _profile("card", "issued_on", "cancelled_on", plain=True, rows=20000)
+    columns = profile["tables"]["card"]["columns"]
+    columns["issued_on"]["statistics"] = [_binned(["2022-06-01", "2022-09-01"], [1000])]
+    columns["cancelled_on"]["statistics"] = [_binned(["2022-08-31", "2022-12-01"], [1000])]
+    result = _init(tmp_path, contract, profile)
+    (life,) = _block(tmp_path)["lifetimes"]
+    assert (life["start"], life["end"]) == ("issued_on", "cancelled_on")
+    assert "is traded for a lifetime" in _notes(result)["card.card_cancelled_after_issued"]
+
+
+@pytest.mark.parametrize(
+    ("rows", "written"),
+    [(20000, False), (5000, False), (1000, True), (100, True)],
+)
+def test_a_share_just_under_the_tolerance_is_kept_only_where_the_rows_are_many_enough(
+    tmp_path: Path, rows: int, written: bool
+) -> None:
+    # Drawn apart the dates break the check on 2.8% of the rows, and its band is 4%. A sample of
+    # 1,000 rows falls about 0.5 points either side of its share, so 2.8% and three such steps
+    # are past 4%; 20,000 rows fall a fifth as far.
+    result = _plain_card(
+        tmp_path, band="mustBeLessOrEqualTo: 4\n          unit: percent", rows=rows
+    )
+    assert ("lifetimes" in _block(tmp_path)) is written
+    (note,) = (text for subject, text in _notes(result).items() if subject.startswith("card."))
+    assert ("is traded for a lifetime" in note) is written
+    assert "on about 2.8% of the rows" in note

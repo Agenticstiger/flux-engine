@@ -35,6 +35,8 @@ class DateSpread:
     kind: LogicalKind
     #: Each bin that holds mass as ``(low, high, share)``: it holds the grid points
     #: ``low <= v < high``, and ``share`` is the share of the column's non-null rows it holds. The shares add up to 1.
+    #: The generator draws the last declared bin closed at the top, so that bin's ``high`` is one grid step
+    #: past its declared edge.
     bins: Tuple[Tuple[int, int, Fraction], ...]
     #: The share of the column's rows that are NULL.
     nulls: Fraction = Fraction(0)
@@ -49,7 +51,10 @@ def spread_of(
     """The spread a declared histogram draws, or ``None`` when it holds no mass or a bin no unit.
 
     *edges_ms* are the bins' edges in milliseconds since the epoch. A DATE column's grid is the
-    day each edge falls on, a TIMESTAMP's the millisecond.
+    day each edge falls on, a TIMESTAMP's the millisecond (a step of 1 in both). A bin is half-open,
+    its top grid point one step below its upper edge, except the last declared bin, which the
+    generator draws closed at the top (``_bin_top`` in ``generator/rows.py``): it holds its upper
+    edge too, whatever its weight.
     """
     if len(edges_ms) != len(weights) + 1 or any(weight < 0 for weight in weights):
         return None
@@ -59,12 +64,13 @@ def spread_of(
     scale = _DAY_MS if kind is LogicalKind.DATE else 1
     grid = [edge // scale for edge in edges_ms]
     bins = []
-    for low, high, weight in zip(grid[:-1], grid[1:], weights, strict=True):
+    last = len(weights) - 1
+    for position, (low, high, weight) in enumerate(zip(grid[:-1], grid[1:], weights, strict=True)):
         if weight == 0:
             continue
         if high <= low:
             return None
-        bins.append((low, high, weight / total))
+        bins.append((low, high + 1 if position == last else high, weight / total))
     return DateSpread(kind, tuple(bins), nulls)
 
 
