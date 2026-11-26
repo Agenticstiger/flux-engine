@@ -109,11 +109,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 - `init` keeps the order a contract's check declares between two dates of a row (`b >= a`, `b > a`, `a <= b` or
   `a < b`, each optionally behind `b IS NULL OR` or `a IS NULL OR`, read from the check's syntax tree). Where the
-  profile publishes no date pair for the two columns, as a private release never does, it writes a `lifetimes` entry
-  from the first to the second, with the days between them drawn evenly from 0 (1 for a strict order) up to the days
-  the run's window holds, as an assumption in the parameter register. Before, each date was drawn on its own and the
-  check held on only part of the rows. A published pair is read as before. You can replace the gap with a histogram
-  of your own (ADR 0024, amendment of 2026-11-26: a check orders two dates).
+  profile publishes no date pair for the two columns, as a private release never does, it first estimates, from the
+  two histograms the bundle draws the dates from, the share of rows that would break the order if the dates were
+  drawn apart. When that share is within the check's tolerance (none, for a check with no percent band), both
+  histograms stay, no lifetime is written, and a note says the published dates already keep the check. Otherwise, or
+  where either date has no histogram to draw from, it writes a `lifetimes` entry from the first to the second, with
+  the days between them drawn evenly from 0 (1 for a strict order) up to the days the run's window holds, as an
+  assumption in the parameter register, and where the end had a histogram a note says it is traded for the order.
+  Before, each date was drawn on its own and the check held on only part of the rows. A published pair is read as
+  before. You can replace the gap with a histogram of your own (ADR 0024, amendment of 2026-11-26: a check orders
+  two dates).
 
 - `init` names a check that orders two dates and that it did not write as an order. A table that already holds a
   lifetime, a column another entry sets, columns of two kinds, a declared range that cannot hold every end the gap can draw, and a window

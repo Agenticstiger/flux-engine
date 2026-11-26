@@ -521,7 +521,27 @@ a share of the rows well below its tolerance.
 7. **A check not written is named.** When `init` cannot write a check as an order (a column a rule or a
    history sets, two dates a snapshot's history sets together, a window too short to draw a gap in, an end range
    that cannot be shown to hold the gap), its report carries a line naming the check and why.
-8. **What it costs.** The end is the start plus the assumed gap, so the end column no longer follows a histogram of
-   its own that the profile publishes, and a fidelity check on that histogram can then fail where the check on the
-   order now holds. The contract says the order must hold and the profile says nothing about the gap, so the order
-   wins; publishing the date pair for the two columns gives the gap a distribution and ends the trade.
+8. **When the lifetime is written.** The lifetime replaces the end's own histogram, so it is written only
+   where the histograms do not already keep the order within the check's tolerance.
+   - *No usable distribution.* When the end, or the start, is drawn evenly within the window (the profile
+     published no order statistic, or no bin stands clear of the noise) or from no histogram of its own, there is
+     nothing to estimate from and the lifetime is written.
+   - *The estimate.* Otherwise `init` estimates from the two histograms the bundle draws the dates from the share
+     of rows that would break the order if the two were drawn independently: the end before the start (on or
+     before it, for a strict check), each bin's mass spread evenly over the days it covers (the milliseconds, for
+     a timestamp), in exact fractions, so the same inputs give the same number. A NULL date counts as breaking
+     the check where the check does not hold on a NULL one.
+   - *The tolerance.* The check's tolerance is the share its band allows, read from `mustBeLessThan`,
+     `mustBeLessOrEqualTo` or `mustBeBetween` from zero, in `percent`. A check with no such band, or a band in
+     `rows`, has none, which counts as 0.
+   - *Within it.* When the estimate is at most the tolerance (below it, for `mustBeLessThan`), both histograms
+     stay and no lifetime is written. The notes name the check and say the published dates already keep it
+     within its tolerance, with the estimate.
+   - *Above it.* Otherwise the lifetime is written as above and the end's histogram is traded for the order. The
+     notes name the check and say so, with the share that independent dates would break.
+
+   The two choices cost something. A kept pair of histograms holds the order as far as a sample of rows follows
+   them, and a small table can fall outside the tolerance by chance; the lifetime holds every row. A lifetime
+   means the end no longer follows a histogram of its own that the profile publishes, and a fidelity check on that
+   histogram can then fail where the check on the order now holds. Publishing the date pair for the two columns
+   gives the gap a distribution and ends the trade.

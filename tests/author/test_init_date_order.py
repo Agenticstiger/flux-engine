@@ -7,8 +7,11 @@
 ADR 0024, amendment of 2026-11-26. A check such as ``cancelled_on IS NULL OR cancelled_on >=
 issued_on`` orders two dates of one row. A private release publishes no ``datePairs``, so each date
 was drawn on its own and the check held on a share of the rows. With no published pair, ``init``
-writes a lifetime (the form that orders two dates of one row) whose gap is drawn evenly over what
-the run's window allows, as an assumption; a published pair is read as before.
+estimates from the two histograms the dates are drawn from how many rows would break the order if
+they were drawn apart. Within the check's tolerance, both histograms stay. Above it, or where a date
+has no histogram, ``init`` writes a lifetime (the form that orders two dates of one row) whose gap
+is drawn evenly over what the run's window allows, as an assumption; a published pair is read as
+before.
 """
 
 from __future__ import annotations
@@ -89,16 +92,54 @@ def _noisy(counts: List[str]) -> Dict[str, Any]:
     }
 
 
-def _profile(table: str, first: str, second: str, pairs: bool = False) -> Dict[str, Any]:
-    started = ["0", "0", "300", "500", "200", "0", "0", "0", "0"]
-    ended = ["0", "0", "0", "0", "200", "400", "100", "0", "0"]
+def _plain(counts: List[str]) -> Dict[str, Any]:
+    return {
+        "definition": "marginalHistogram/1",
+        "sampleSize": SAMPLE,
+        "disclosure": "none",
+        "bins": [_ms(year) for year in YEARS],
+        "groups": [
+            {
+                "group": "",
+                "k": sum(int(n) for n in counts),
+                "status": "F",
+                "binCounts": [int(n) for n in counts],
+            }
+        ],
+    }
+
+
+#: Cards issued in 2020 to 2022; with these ends, drawn apart a card ends before it starts on 2.9%.
+STARTED = ["0", "0", "300", "500", "200", "0", "0", "0", "0"]
+ENDED = ["0", "0", "0", "0", "200", "400", "100", "0", "0"]
+#: Ends spread as the starts are: drawn apart, about half the cards end before they start.
+OVERLAPPING = STARTED
+
+
+def _profile(
+    table: str,
+    first: str,
+    second: str,
+    pairs: bool = False,
+    *,
+    ended: List[str] = ENDED,
+    plain: bool = False,
+    rows: int = 0,
+    bare: str = "",
+) -> Dict[str, Any]:
+    """A profile of one table; *bare* names the date column that publishes no statistic."""
+    make = _plain if plain else _noisy
     entry: Dict[str, Any] = {
         "columns": {
             f"{table}_id": {"domain": "number"},
-            first: {"domain": "timestamp", "statistics": [_noisy(started)]},
-            second: {"domain": "timestamp", "statistics": [_noisy(ended)]},
+            first: {"domain": "timestamp", "statistics": [make(STARTED)]},
+            second: {"domain": "timestamp", "statistics": [make(ended)]},
         }
     }
+    if rows:
+        entry["rowCount"] = rows
+    if bare:
+        entry["columns"][bare] = {"domain": "timestamp"}
     if pairs:
         entry["datePairs"] = [
             {
@@ -170,13 +211,18 @@ def _rows(tmp_path: Path, table: str) -> List[List[Any]]:
     return [json.loads(line) for line in stream.read_text(encoding="utf-8").splitlines() if line]
 
 
+def _notes(result: Any) -> Dict[str, str]:
+    return {item["subject"]: item["assumption"] for item in result.artifacts["notes"]}
+
+
 def _holds(rows: List[List[Any]], strict: bool = False) -> float:
     ok = sum(r[2] is None or (r[2] > r[1] if strict else r[2] >= r[1]) for r in rows)
     return ok / len(rows)
 
 
 def test_a_card_cancelled_before_issued_is_not_drawn(tmp_path: Path) -> None:
-    _init(tmp_path, CARD, _profile("card", "issued_on", "cancelled_on"))
+    # Ends spread as the starts are: drawn apart, half the cards end before they start, far above 5%.
+    result = _init(tmp_path, CARD, _profile("card", "issued_on", "cancelled_on", ended=OVERLAPPING))
     (life,) = _block(tmp_path)["lifetimes"]
     assert (life["emit"], life["start"], life["end"]) == ("card", "issued_on", "cancelled_on")
     assert life["duration"]["bins"][0] == "0" and "target" not in life
@@ -186,6 +232,9 @@ def test_a_card_cancelled_before_issued_is_not_drawn(tmp_path: Path) -> None:
     entries = [item for item in _block(tmp_path)["parameters"] if "lifetimes" in item["pointer"]]
     assert [item["source"] for item in entries] == ["assumption"]
     assert "card_cancelled_after_issued" in entries[0]["reason"]
+    note = _notes(result)["card.card_cancelled_after_issued"]
+    assert "histogram of 'cancelled_on' is traded for a lifetime" in note
+    assert "tolerance of 5%" in note and "on about 49.9% of the rows" in note
 
 
 def test_no_row_ends_before_it_starts_when_the_check_is_plain(tmp_path: Path) -> None:
@@ -194,14 +243,14 @@ def test_no_row_ends_before_it_starts_when_the_check_is_plain(tmp_path: Path) ->
         "{ name: cancelled_on, type: DATE }", "{ name: cancelled_on, type: DATE, required: true }"
     ).replace("cancelled_on IS NULL OR cancelled_on >= issued_on", "cancelled_on >= issued_on")
     assert plain != CARD
-    _init(tmp_path, plain, _profile("card", "issued_on", "cancelled_on"))
+    _init(tmp_path, plain, _profile("card", "issued_on", "cancelled_on", ended=OVERLAPPING))
     rows = _rows(tmp_path, "card")
     assert len(rows) > 100 and all(row[2] is not None for row in rows)
     assert not [row for row in rows if row[2] < row[1]]
 
 
 def test_a_timestamp_pair_is_ordered_too(tmp_path: Path) -> None:
-    _init(tmp_path, LOAN, _profile("loan", "borrowed_at", "returned_at"))
+    _init(tmp_path, LOAN, _profile("loan", "borrowed_at", "returned_at", ended=OVERLAPPING))
     (life,) = _block(tmp_path)["lifetimes"]
     assert (life["start"], life["end"]) == ("borrowed_at", "returned_at")
     assert _holds(_rows(tmp_path, "loan")) == 1.0
@@ -209,7 +258,7 @@ def test_a_timestamp_pair_is_ordered_too(tmp_path: Path) -> None:
 
 def test_a_strict_order_starts_the_gap_at_one_day(tmp_path: Path) -> None:
     contract = CARD.replace("cancelled_on >= issued_on", "cancelled_on > issued_on")
-    _init(tmp_path, contract, _profile("card", "issued_on", "cancelled_on"))
+    _init(tmp_path, contract, _profile("card", "issued_on", "cancelled_on", ended=OVERLAPPING))
     (life,) = _block(tmp_path)["lifetimes"]
     assert life["duration"]["bins"][0] == "1"
     assert _holds(_rows(tmp_path, "card"), strict=True) == 1.0
@@ -274,6 +323,132 @@ def test_an_order_that_cannot_be_written_is_reported(tmp_path: Path) -> None:
         tmp_path, yaml.safe_dump(document), _profile("card", "issued_on", "cancelled_on")
     )
     assert "lifetimes" not in _block(tmp_path)
-    notes = {item["subject"]: item["assumption"] for item in result.artifacts["notes"]}
-    reason = notes["card.card_cancelled_after_issued"]
+    reason = _notes(result)["card.card_cancelled_after_issued"]
     assert "already sets 'cancelled_on'" in reason and "no lifetime is written" in reason
+
+
+# -- dates the published histograms already keep in order --------------------------------------
+
+
+def _plain_card(tmp_path: Path, check: str = "cancelled_on >= issued_on", band: str = "") -> Any:
+    """Cards both dates of which are required, from plain histograms of 20,000 rows."""
+    contract = (
+        CARD.replace(
+            "{ name: cancelled_on, type: DATE }",
+            "{ name: cancelled_on, type: DATE, required: true }",
+        )
+        .replace("cancelled_on IS NULL OR cancelled_on >= issued_on", check)
+        .replace(
+            "mustBeLessOrEqualTo: 5\n          unit: percent",
+            band or "mustBeLessOrEqualTo: 5\n          unit: percent",
+        )
+    )
+    return _init(
+        tmp_path, contract, _profile("card", "issued_on", "cancelled_on", plain=True, rows=20000)
+    )
+
+
+def test_dates_drawn_apart_that_keep_the_check_within_its_tolerance_keep_their_histograms(
+    tmp_path: Path,
+) -> None:
+    result = _plain_card(tmp_path)
+    block = _block(tmp_path)
+    assert "lifetimes" not in block
+    (note,) = (text for subject, text in _notes(result).items() if subject.startswith("card."))
+    assert "'issued_on' and 'cancelled_on'" in note
+    assert "tolerance of 5%" in note and "on about 2.8% of the rows" in note
+    # The end is drawn from its own histogram: its cells come from 2022 to 2024 only.
+    outcome = run(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "c.profile.json",
+        verify=True,
+    )
+    assert outcome.success, outcome.stderr + outcome.stdout
+    (stream,) = (tmp_path / "state").glob("runs/*/emits/card.ndjson")
+    rows = [json.loads(line) for line in stream.read_text(encoding="utf-8").splitlines() if line]
+    assert len(rows) == 20000
+    assert 0 < len([row for row in rows if row[2] < row[1]]) <= 0.05 * len(rows)
+    assert (
+        min(row[2] for row in rows) >= "2022-01-01" and max(row[2] for row in rows) < "2025-01-01"
+    )
+
+
+@pytest.mark.parametrize(
+    ("band", "written"),
+    [
+        ("mustBeLessOrEqualTo: 5\n          unit: percent", False),
+        ("mustBeLessThan: 5\n          unit: percent", False),
+        ("mustBeBetween: [0, 5]\n          unit: percent", False),
+        ("mustBeLessOrEqualTo: 2\n          unit: percent", True),
+        ("mustBeLessThan: 2\n          unit: percent", True),
+        ("mustBeLessOrEqualTo: 0\n          unit: percent", True),
+        ("mustBeLessOrEqualTo: 50\n          unit: rows", True),
+        ("mustBe: 3\n          unit: percent", True),
+    ],
+)
+def test_the_lifetime_is_written_only_where_the_checks_tolerance_is_below_the_share(
+    tmp_path: Path, band: str, written: bool
+) -> None:
+    # The same dates, drawn apart, break the order on about 2.8% of the rows.
+    result = _plain_card(tmp_path, band=band)
+    assert ("lifetimes" in _block(tmp_path)) is written
+    (note,) = (text for subject, text in _notes(result).items() if subject.startswith("card."))
+    assert ("is traded for a lifetime" in note) is written
+    assert "on about 2.8% of the rows" in note
+
+
+def test_a_check_that_declares_no_tolerance_counts_as_none(tmp_path: Path) -> None:
+    contract = CARD.replace("          mustBeLessOrEqualTo: 5\n          unit: percent\n", "")
+    assert contract != CARD
+    result = _init(tmp_path, contract, _profile("card", "issued_on", "cancelled_on"))
+    assert "lifetimes" in _block(tmp_path)
+    assert "tolerance of 0%" in _notes(result)["card.card_cancelled_after_issued"]
+
+
+def test_dates_that_cannot_break_the_order_need_no_lifetime(tmp_path: Path) -> None:
+    # Every end is later than every start: a check with no tolerance at all is kept as it is.
+    contract = CARD.replace("          mustBeLessOrEqualTo: 5\n          unit: percent\n", "")
+    later = ["0", "0", "0", "0", "0", "0", "300", "500", "200"]
+    result = _init(tmp_path, contract, _profile("card", "issued_on", "cancelled_on", ended=later))
+    assert "lifetimes" not in _block(tmp_path)
+    assert "on about 0% of the rows" in _notes(result)["card.card_cancelled_after_issued"]
+
+
+def test_a_strict_check_counts_the_rows_that_end_the_day_they_start(tmp_path: Path) -> None:
+    # The lending library's cards are dated by the day: independent ends tie a start on some days.
+    loose = _plain_card(tmp_path)
+    strict_dir = tmp_path / "strict"
+    strict_dir.mkdir()
+    strict = _plain_card(strict_dir, check="cancelled_on > issued_on")
+    share = lambda result: next(  # noqa: E731
+        text for subject, text in _notes(result).items() if subject.startswith("card.")
+    )
+    assert "about 2.8%" in share(loose) and "about 2.9%" in share(strict)
+
+
+# -- dates with no histogram to be drawn apart from --------------------------------------------
+
+
+def test_an_end_the_profile_gives_no_distribution_is_ordered_by_a_lifetime(tmp_path: Path) -> None:
+    result = _init(
+        tmp_path, CARD, _profile("card", "issued_on", "cancelled_on", bare="cancelled_on")
+    )
+    (life,) = _block(tmp_path)["lifetimes"]
+    assert (life["start"], life["end"]) == ("issued_on", "cancelled_on")
+    assert "traded" not in _notes(result).get("card.card_cancelled_after_issued", "")
+
+
+def test_an_end_no_bin_of_which_stands_clear_of_the_noise_is_ordered_by_a_lifetime(
+    tmp_path: Path,
+) -> None:
+    faint = ["1", "0", "2", "1", "0", "1", "2", "0", "1"]
+    _init(tmp_path, CARD, _profile("card", "issued_on", "cancelled_on", ended=faint))
+    (life,) = _block(tmp_path)["lifetimes"]
+    assert (life["start"], life["end"]) == ("issued_on", "cancelled_on")
+
+
+def test_a_start_the_profile_gives_no_distribution_is_ordered_by_a_lifetime(tmp_path: Path) -> None:
+    _init(tmp_path, CARD, _profile("card", "issued_on", "cancelled_on", bare="issued_on"))
+    (life,) = _block(tmp_path)["lifetimes"]
+    assert (life["start"], life["end"]) == ("issued_on", "cancelled_on")

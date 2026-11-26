@@ -90,6 +90,7 @@ from flux_engine.author.columns import (
     widen_key_span,
 )
 from flux_engine.author.copula import CopulaPlan, declare_copula
+from flux_engine.author.date_spread import DateSpread, spread_of
 from flux_engine.author.dates import (
     DATE_KINDS,
     DatedExpose,
@@ -4338,6 +4339,7 @@ def _author_bundle(
         + tuple(projections.notes)
         + tuple(exact_notes)
         + tuple(dated.declined_orders)
+        + tuple(dated.order_notes)
     )
     namespace = drafted.namespace
     counts = _counts(
@@ -4804,6 +4806,40 @@ def _date_bounds(expose: AuthoredExpose) -> Dict[str, Tuple[int, int]]:
     return found
 
 
+def _date_spreads(expose: AuthoredExpose) -> Dict[str, DateSpread]:
+    """The histogram each date column is drawn from, where the bundle declares one the profile published.
+
+    A column drawn evenly within the run's window, from a histogram no bin of which stands clear of
+    noise, or from a placeholder, has none.
+    """
+    found: Dict[str, DateSpread] = {}
+    for plan in expose.columns:
+        kind = expose.kinds.get(plan.name)
+        if (
+            kind not in DATE_KINDS
+            or plan.drawn_in_window
+            or plan.even_in_window
+            or plan.placeholder
+        ):
+            continue
+        bins = plan.declaration.get("bins")
+        weights = plan.declaration.get("binWeights")
+        if not isinstance(bins, list) or not isinstance(weights, list):
+            continue
+        try:
+            spread = spread_of(
+                kind,
+                [_milliseconds(str(edge)) for edge in bins],
+                [Fraction(str(weight)) for weight in weights],
+                Fraction(str(plan.declaration.get("nullFraction", "0"))),
+            )
+        except (ValueError, ArithmeticError):
+            continue
+        if spread is not None:
+            found[plan.name] = spread
+    return found
+
+
 def _dated_columns(
     planned: _Planned,
     window: Tuple[str, str],
@@ -4846,6 +4882,7 @@ def _dated_columns(
                     if name in expose.kinds and context.column.required
                 ),
                 bounds=_date_bounds(expose),
+                spreads=_date_spreads(expose),
             )
             for expose in planned.authored
             if not expose.reference

@@ -17,11 +17,13 @@ Anything else (a ``when``, a third column, a path through a link, a function) is
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Any, List, Mapping, Optional, Tuple
 
 from flux_engine.expr2.ast import Column, Compare, IsNull, Node, Or
 from flux_engine.expr2.errors import Expr2Error
 from flux_engine.expr2.parser import Side, parse
+from flux_engine.generator.rules import Band
 
 __all__ = ["DateOrder", "contract_date_orders"]
 
@@ -37,6 +39,14 @@ class DateOrder:
     #: Whether the check holds on a row whose end, or whose start, is NULL.
     null_end_holds: bool
     null_start_holds: bool
+    #: The share of the covered rows that may break the check (0 when it declares no band, or a
+    #: band that is not an upper bound in percent), and whether the share itself is too many.
+    tolerance: Fraction = Fraction(0)
+    tolerance_open: bool = False
+
+    def tolerates(self, share: Fraction) -> bool:
+        """Whether a run in which *share* of the rows break the check stays within its band."""
+        return share < self.tolerance if self.tolerance_open else share <= self.tolerance
 
 
 def contract_date_orders(expose: Mapping[str, Any]) -> List[DateOrder]:
@@ -54,7 +64,7 @@ def contract_date_orders(expose: Mapping[str, Any]) -> List[DateOrder]:
             tree = parse(text, side=Side.CORE).tree
         except Expr2Error:
             continue
-        order = _order(rule, tree)
+        order = _order(rule, tree, _tolerance(entry))
         if order is not None:
             orders.append(order)
     return orders
@@ -73,7 +83,27 @@ def _disjuncts(tree: Node) -> List[Node]:
     return found
 
 
-def _order(rule: str, tree: Node) -> Optional[DateOrder]:
+def _tolerance(invariant: Mapping[str, Any]) -> Tuple[Fraction, bool]:
+    """The share of rows a check's band lets break it, and whether that share is itself too many.
+
+    Only a ``percent`` band with an upper bound counts: ``mustBeLessThan`` and
+    ``mustBeLessOrEqualTo``, and ``mustBeBetween`` from zero. Any other band, a band in rows, or no
+    band reads as no tolerance.
+    """
+    try:
+        band = Band.read(invariant, "invariant")
+    except ValueError:
+        return Fraction(0), False
+    if band is None or band.unit != "percent":
+        return Fraction(0), False
+    if band.operator in ("mustBeLessThan", "mustBeLessOrEqualTo"):
+        return Fraction(band.values[0]) / 100, band.operator == "mustBeLessThan"
+    if band.operator == "mustBeBetween" and band.values[0] == 0:
+        return Fraction(band.values[1]) / 100, False
+    return Fraction(0), False
+
+
+def _order(rule: str, tree: Node, tolerance: Tuple[Fraction, bool]) -> Optional[DateOrder]:
     *guards, tree = _disjuncts(tree)
     nulls: List[str] = []
     for guard in guards:
@@ -94,6 +124,8 @@ def _order(rule: str, tree: Node) -> Optional[DateOrder]:
         strict=strict,
         null_end_holds=end in nulls,
         null_start_holds=start in nulls,
+        tolerance=tolerance[0],
+        tolerance_open=tolerance[1],
     )
 
 

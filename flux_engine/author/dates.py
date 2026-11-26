@@ -36,6 +36,7 @@ from math import gcd, lcm
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple, Union
 
 from flux_engine.author.columns import _share_text, cell_weights, count_cells
+from flux_engine.author.date_spread import DateSpread, independent_break_share
 from flux_engine.author.forms import SUPERSEDED, grouped, number_grouped
 from flux_engine.author.orders import DateOrder
 from flux_engine.seam.contract import LogicalKind
@@ -108,6 +109,9 @@ class DatedExpose:
     required: FrozenSet[str] = frozenset()
     #: The span each date column's declared draw reaches, in milliseconds, where it declares one.
     bounds: Mapping[str, Tuple[int, int]] = field(default_factory=dict)
+    #: The histogram each date column is drawn from, where it is drawn from one the profile
+    #: published and the bundle declares (none for a column drawn evenly within the window).
+    spreads: Mapping[str, DateSpread] = field(default_factory=dict)
 
 
 @dataclass
@@ -122,6 +126,9 @@ class DateDeclarations:
     rates: List[Dict[str, Any]] = field(default_factory=list)
     #: The checks of the contract that order two dates and were not written, as (subject, why).
     declined_orders: List[Tuple[str, str]] = field(default_factory=list)
+    #: The checks that order two dates and are held by the published dates, or by a lifetime that
+    #: trades the end's histogram for it, as (subject, what).
+    order_notes: List[Tuple[str, str]] = field(default_factory=list)
     #: What each written number rests on: the entry, the member of it (tokens below the entry), the
     #: statistic of the profile it was read from (tokens into the profile) and the sentence that
     #: says how. The entry is one of ``lifetimes``, ``within`` or ``rates``, by identity.
@@ -469,6 +476,7 @@ class _Declarer:
         self.window_start = window_start
         self.minimum_cell = minimum_cell
         self.declined_orders: List[Tuple[str, str]] = []
+        self.order_notes: List[Tuple[str, str]] = []
         self.used: List[_Note] = []
         self.unused: List[_Note] = []
         self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Optional[Tuple[str, ...]], str]] = (
@@ -953,11 +961,15 @@ class _Declarer:
     # -- orders the contract declares ---------------------------------------
 
     def lifetimes_of_orders(self) -> None:
-        """A lifetime for each table whose contract orders two of its dates and whose profile gives no pair of them.
+        """A lifetime for each table whose contract orders two of its dates and whose dates need one.
 
         The profile's date pair, when it publishes one for the two columns, is the statistic and
-        wins: this reads nothing of the profile. The days between the dates are an assumption. An
-        order that cannot be written is listed in ``declined_orders`` with the reason.
+        wins: this reads nothing of the profile. Where the end is drawn from a histogram the bundle
+        declares, and so is the start, the dates are first drawn apart: when that keeps the order
+        within the check's tolerance (:func:`independent_break_share`) both histograms stay and no
+        lifetime is written, and otherwise the lifetime replaces the end's histogram. The days
+        between the dates are an assumption. An order that cannot be written is listed in
+        ``declined_orders`` with the reason.
         """
         for expose, held in self.exposes.items():
             written = False
@@ -965,6 +977,19 @@ class _Declarer:
                 if self._published_pair(expose, order):
                     continue
                 subject = f"{expose}.{order.rule}"
+                refused = self._order_refusal(expose, held, order)
+                share = None if refused is not None else self._independent_share(held, order)
+                if share is not None and order.tolerates(share):
+                    self.order_notes.append(
+                        (
+                            subject,
+                            f"the check orders {order.start!r} and {order.end!r}, and no lifetime "
+                            "is written for it: the published dates already keep it within its "
+                            f"tolerance of {_percent(order.tolerance)}, since dates drawn apart "
+                            f"would break it on about {_percent(share)} of the rows",
+                        )
+                    )
+                    continue
                 if written or expose in self.lifetimes:
                     self.declined_orders.append(
                         (subject, "the table declares one lifetime, and another one already does")
@@ -982,6 +1007,28 @@ class _Declarer:
                 else:
                     self.lifetimes[expose] = entry
                     written = True
+                    if share is not None:
+                        self.order_notes.append(
+                            (
+                                subject,
+                                f"the histogram of {order.end!r} is traded for a lifetime from "
+                                f"{order.start!r}: the check orders them, and dates drawn apart "
+                                f"would break it on about {_percent(share)} of the rows, more "
+                                f"than its tolerance of {_percent(order.tolerance)}",
+                            )
+                        )
+
+    @staticmethod
+    def _independent_share(held: DatedExpose, order: DateOrder) -> Optional[Fraction]:
+        """The share of rows that would break *order* with both dates drawn apart, if it is known.
+
+        It is known where both dates are drawn from a histogram the bundle declares. A date drawn
+        evenly within the window, or from one no bin of which stands clear of noise, has none.
+        """
+        start, end = held.spreads.get(order.start), held.spreads.get(order.end)
+        if start is None or end is None:
+            return None
+        return independent_break_share(start, end, order)
 
     def _published_pair(self, expose: str, order: DateOrder) -> bool:
         tables = self.profile.get("tables")
@@ -993,10 +1040,8 @@ class _Declarer:
             for item in (items if isinstance(items, list) else ())
         )
 
-    def _order_lifetime(
-        self, expose: str, held: DatedExpose, order: DateOrder
-    ) -> Union[Dict[str, Any], str]:
-        """The lifetime that keeps *order*, or why the bundle cannot hold it."""
+    def _order_refusal(self, expose: str, held: DatedExpose, order: DateOrder) -> Optional[str]:
+        """Why no lifetime can order the two dates of *order*, whatever the run's window."""
         start, end = order.start, order.end
         refused = self._usable(expose, start, end)
         if refused is None:
@@ -1005,6 +1050,14 @@ class _Declarer:
             refused = _BOTH_CARRIED
         if refused is None and held.kinds[start] is not held.kinds[end]:
             refused = "a lifetime's end is the same kind of column as its start"
+        return refused
+
+    def _order_lifetime(
+        self, expose: str, held: DatedExpose, order: DateOrder
+    ) -> Union[Dict[str, Any], str]:
+        """The lifetime that keeps *order*, or why the bundle cannot hold it."""
+        start, end = order.start, order.end
+        refused = self._order_refusal(expose, held, order)
         shortest = 1 if order.strict else 0
         if refused is None and self.window_start is None:
             refused = "the run's window is not known"
@@ -1681,4 +1734,5 @@ def declare_dates(
         rates=rates,
         cited=declarer.cited,
         declined_orders=declarer.declined_orders,
+        order_notes=declarer.order_notes,
     )
