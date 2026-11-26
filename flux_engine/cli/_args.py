@@ -397,6 +397,42 @@ def _add_sink(parser: argparse.ArgumentParser, *, when: str) -> None:
     )
 
 
+#: ``--max-rows``' default and its ceiling: :data:`flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`
+#: and :data:`flux_engine.core.sizing.MOST_ROWS`, written out so that building the parser imports
+#: no generator code. ``tests/stages/test_periodic_rows_budget.py`` holds them to each other.
+DEFAULT_MAX_ROWS = 50_000_000
+MOST_MAX_ROWS = 10**10
+
+
+def _max_rows_type(text: str) -> int:
+    """``argparse`` ``type=`` callable for ``--max-rows``: a whole number from 1 to :data:`MOST_MAX_ROWS`."""
+    value = _whole_number_type(1)(text)
+    if value > MOST_MAX_ROWS:
+        raise argparse.ArgumentTypeError(f"expected at most {MOST_MAX_ROWS}, got {text!r}")
+    return value
+
+
+def _add_max_rows(parser: argparse.ArgumentParser, *, fresh_plan_only: bool = False) -> None:
+    """``--max-rows``: the periodic rows' budget (ADR 0027 section 5, the amendment of 2026-11-25)."""
+    note = (
+        "; read only when a fresh plan is taken, since the plan of --run-id states its rows"
+        if fresh_plan_only
+        else ""
+    )
+    parser.add_argument(
+        "--max-rows",
+        type=_max_rows_type,
+        default=None,
+        metavar="N",
+        help=(
+            "the rows each periodic emit may be estimated to derive when the plan is made, "
+            f"checked before its periods are laid out (default {DEFAULT_MAX_ROWS}, at most "
+            f"{MOST_MAX_ROWS}). A plan above it is refused (FLX-3403); plan.json records another "
+            "budget as maxRows" + note
+        ),
+    )
+
+
 def _add_scale(parser: argparse.ArgumentParser, *, fresh_plan_only: bool = False) -> None:
     note = (
         "; read only when a fresh plan is taken, since the plan of --run-id records its own"

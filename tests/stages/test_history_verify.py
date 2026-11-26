@@ -19,6 +19,7 @@ from flux_engine.concordance.history_checks import (
     ENDED_IS_LAST,
     NO_GAPS_NO_OVERLAP,
     ONE_CURRENT,
+    OPEN_END,
     history_shares,
 )
 from flux_engine.concordance.shares import Holds
@@ -90,6 +91,33 @@ def test_the_open_end_sentinel_is_an_open_version() -> None:
     found = lines(rows, entry(open_end="9999-12-31"))
     assert found[NO_GAPS_NO_OVERLAP] == Holds(1, 1)
     assert found[ONE_CURRENT] == Holds(1, 1)
+
+
+def test_every_open_end_is_the_sentinel_the_entry_declares() -> None:
+    rows = [row("a", day(0), day(3)), row("a", day(3), OPEN), row("b", day(1), OPEN)]
+    assert lines(rows, entry(open_end="9999-12-31"))[OPEN_END] == Holds(2, 2)
+
+
+def test_an_end_column_mixing_null_and_the_sentinel_fails_the_open_end() -> None:
+    # The other two lines read NULL and the sentinel alike as open, so only this one fails.
+    rows = [row("a", day(0), day(3)), row("a", day(3), OPEN), row("b", day(1), None)]
+    found = lines(rows, entry(open_end="9999-12-31"))
+    assert found[OPEN_END] == Holds(1, 2)
+    assert found[ONE_CURRENT] == Holds(2, 2)
+
+
+def test_a_closed_version_that_holds_the_sentinel_fails_the_open_end() -> None:
+    rows = [row("a", day(0), OPEN), row("a", day(3), OPEN)]
+    assert fails(lines(rows, entry(open_end="9999-12-31")), OPEN_END)
+
+
+def test_with_no_sentinel_the_open_end_line_reads_only_a_far_end() -> None:
+    plain = [row("a", day(0), day(3)), row("a", day(3), None)]
+    assert OPEN_END not in lines(plain, entry())
+    # An end in the year 9999 is an open end a contract's range reads as one, and the entry
+    # declares none: NULL is the only open end it writes.
+    far = [*plain, row("b", day(1), date(9999, 6, 1))]
+    assert lines(far, entry())[OPEN_END] == Holds(1, 2)
 
 
 def test_timestamp_chains_pass_and_fail_the_same_way() -> None:

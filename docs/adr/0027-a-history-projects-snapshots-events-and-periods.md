@@ -378,6 +378,32 @@ had a different number of rows per parent than the history had entities. `init` 
   so the result does not depend on the order of the exposes. The ledger says which statistic moved where and why.
 - **What moves.** A bundle for a contract with such an expose. Every other bundle keeps its bytes.
 
+## Amendment of 2026-11-25: a budget on the rows of a periodic emit
+
+`MOST_PERIODS` bounds the periods of an entry, but not its rows, and `plan` generates every row it plans: a monthly
+entry over five thousand years for a thousand entities derives sixty million rows, which took gigabytes before any
+check saw the count.
+
+- **The estimate.** Before it lists a period, `plan` bounds the entry's pairs from the versions alone: a version valid
+  over `[a, b)` inside the periods' span meets at most `(b - a) // shortest + 2` periods, `shortest` the fewest days
+  a period of the grain spans (1, 7, 28, 89 or 365), and never more than there are periods. The estimate is that sum
+  times the most rows a pair takes, over the kinds a count or the high end of the largest class. Spark's `sequence`
+  sizes its array the same way, in exact arithmetic before it allocates. The estimate is never below the rows the
+  layout makes.
+- **A rare high count.** Since the estimate never counts fewer rows than the layout makes, a count class's high
+  level is taken for every pair, however rare the class: a kind whose count is 1 almost always and 100,000 once in
+  a hundred thousand pairs is estimated at 100,000 rows a pair. The refusal then names the kind and that level.
+- **The budget.** An estimate above the budget is `FLX-3403`, naming the emit, the grain, the window, the periods,
+  the pairs, the estimate, the rows a pair takes and the budget, and the two ways out: a smaller estimate (a lower
+  high level where a count class sets it, else a narrower window or a coarser grain), or a larger budget. The budget
+  is 50,000,000 rows a periodic emit; `--max-rows N` on `plan`, `run` or an `apply` that takes a fresh plan sets
+  another, up to `MOST_ROWS`.
+- **When it runs.** Only while a plan is made. A recorded plan states the rows it derives, so `apply --run-id` and
+  `replay` run it with no estimate, and `MOST_ROWS` alone bounds its rows; `apply --run-id` refuses `--max-rows`.
+- **What moves.** Nothing a plan makes. A budget other than the default is recorded in `plan.json` as `maxRows`; a
+  plan with the default carries no key and keeps its bytes and its planDigest. A plan recorded before the budget
+  replays as it did.
+
 ## Amendment of 2026-11-25: a `given` over a column of the version is drawn after the projection
 
 The first amendment of 2026-11-24 refused a column of an events or periodic emit drawn `given` a column the entry

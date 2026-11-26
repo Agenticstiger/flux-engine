@@ -17,6 +17,7 @@ from flux_engine.cli._args import (
     _add_allow_generator,
     _add_jobs,
     _add_json_flag,
+    _add_max_rows,
     _add_profile,
     _add_scale,
     _add_sink,
@@ -92,6 +93,7 @@ def configure(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
         apply_p, when="when apply generates the rows rather than committing a stage"
     )
     _add_scale(apply_p, fresh_plan_only=True)
+    _add_max_rows(apply_p, fresh_plan_only=True)
     _add_timings(apply_p)
     _add_jobs(apply_p)
     _add_strict_coverage(apply_p)
@@ -121,5 +123,6 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             sink=args.sink,
             sink_options=_kv_pairs(args.sink_opt),
             allow_generators=tuple(args.allow_generator or ()),
+            max_rows=args.max_rows,
         )
     return _finish(args, result)
