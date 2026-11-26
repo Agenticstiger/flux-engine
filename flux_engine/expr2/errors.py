@@ -224,7 +224,9 @@ FLX_6204 = register(
     "Otherwise widen the band, or drop the strict run. Several `within` entries for one date "
     "along a chain are refused too when a middle expose of the chain does not declare a "
     "`within` entry that ties its lifetime's start to the next relationship of the chain: "
-    "without that tie the lifetimes of the levels need not meet.",
+    "without that tie the lifetimes of the levels need not meet. `fluxsim init` refuses with it "
+    "too when the declared date ranges it widens for an enforced `within` entry do not settle: "
+    "the plan still asks for wider ranges once they are written.",
 )
 FLX_6205 = register(
     "FLX-6205",

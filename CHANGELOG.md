@@ -20,6 +20,35 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## 0.12.1 - 2026-11-26
+
+Fixes to the bundles `fluxsim init` writes from a private profile release. This resolves the two known issues
+listed for 0.12.0: a column's values could fall outside the contract's declared range through a `within` entry
+`init` wrote, and a sparse categorical column could make `init` drop every projection.
+
+### Fixed
+
+- `init` keeps a bundle's projections when a column a projection takes from the history is drawn at equal weights
+  over the levels its support names (a contract's enum, or the levels the profile lists, with no counts published).
+  A projected column declares no support, and the support was all its draw read, so the plan refused the bundle
+  (`FLX-3402`) and `init` wrote it without any projection: a table projected from a history then drew keys of its
+  own. The column now keeps those levels, at equal weights.
+- `init` no longer widens a date column's declared range past the range the contract declares for it. When the
+  plan's check of an enforced `within` entry (ADR 0024 section 5) would need that widening, because the parent's
+  lifetime can end before the column's range starts, say, the entry is not written, the statistic it rests on is
+  listed as unused with the reason, and the column is drawn inside its range. The widened range let most of the
+  column's rows fall outside the contract's range. The end column of a period is held to its contract range the
+  same way.
+- `fluxsim explain FLX-6204` says that `init` refuses with it too when the date ranges it widens for an enforced
+  `within` entry do not settle.
+- `init` no longer stretches the run's window past the data through a validity window's end column. When the
+  profile withholds the column's minimum and publishes every quartile in the bin that holds the open end the
+  contract declares, the closed versions' ends went into the next bin of the ladder down, right below the open end,
+  which carried `spec.timeBounds` decades past every date the data holds, and with it every column drawn within the
+  window. They are now drawn over the span the window's start column is declared over, cut to the contract ranges
+  of the start and the end. A lifetime's closing that would fall past the shorter window is left open, as
+  `endPastWindow: open` says, rather than placed beyond it.
+
 ## 0.12.0 - 2026-11-26
 
 A Kafka sink, `fluxsim init --window` and `--history`, `validate --profile`, history and periods declarations
