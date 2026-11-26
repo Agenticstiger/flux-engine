@@ -15,7 +15,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 
 import pytest
 
@@ -445,6 +445,95 @@ def test_two_parents_the_unit_reaches_on_the_same_child_columns_are_refused_in_e
     message = _refused(_edit(change))
     assert "queries[0].unit.by" in message
     assert "more than one parent the unit reaches (account(id), member(id))" in message
+
+
+def _key_link(
+    parent: str, parent_columns: List[str], child: str, child_columns: List[str]
+) -> Dict[str, Any]:
+    return {
+        "parent": {"table": parent, "columns": parent_columns},
+        "child": {"table": child, "columns": child_columns},
+        "statistics": [],
+    }
+
+
+def _two_keys(document: Dict[str, Any]) -> None:
+    """``card_version``, which the unit does not reach, holds a second key column ``k2`` and
+    ``member`` a column ``k``; ``account`` is reached at a cap of 4, and the members query groups
+    ``card_version`` by (member_id, k2)."""
+    _unfollow(document)
+    _with_accounts(document)
+    identifier = document["tables"]["member"]["columns"]["id"]
+    document["tables"]["member"]["columns"]["k"] = copy.deepcopy(identifier)
+    document["tables"]["card_version"]["columns"]["k2"] = copy.deepcopy(identifier)
+    document["queries"][0]["unit"] = {"table": "card_version", "by": ["member_id", "k2"]}
+
+
+@pytest.mark.parametrize("laplace", [False, True])
+def test_two_parents_on_the_same_child_columns_in_another_order_are_refused(laplace: bool) -> None:
+    """``member`` (id, k) gives ``card_version`` (member_id, k2), and ``account`` (member_id, id)
+    gives it (k2, member_id): the same columns in another order, which group its rows the same
+    way. A row of either parent can move a group, so the query is refused as for the same
+    columns in the same order."""
+
+    def change(document: Dict[str, Any]) -> None:
+        _two_keys(document)
+        document["relationships"] = [
+            _key_link("member", ["id", "k"], "card_version", ["member_id", "k2"]),
+            _key_link("account", ["member_id", "id"], "card_version", ["k2", "member_id"]),
+            {**_link("member", "id", "account", "member_id"), "statistics": []},
+        ]
+        _statistic(document, 0)["noise"]["privacyLoss"]["rho"] = "50"
+        if laplace:
+            _laplace(document, 0, "2", "50")
+
+    message = _refused(_edit(change))
+    assert "queries[0].unit.by" in message
+    assert "parent the unit reaches (account(member_id, id), member(id, k))" in message
+
+
+def test_a_unit_naming_a_relationship_s_child_columns_in_another_order_is_not_its_form() -> None:
+    """With ``member`` (id, k) giving ``card_version`` (member_id, k2) alone, a unit grouping by
+    (k2, member_id) is not the relationship's form, which names its child columns in their
+    order: it is refused, and the same columns in that order are charged 2 at m_P = 1."""
+
+    def by(columns: List[str]) -> Dict[str, Any]:
+        def change(document: Dict[str, Any]) -> None:
+            _two_keys(document)
+            document["relationships"] = [
+                _key_link("member", ["id", "k"], "card_version", ["member_id", "k2"]),
+                {**_link("member", "id", "account", "member_id"), "statistics": []},
+            ]
+            document["queries"][0]["unit"]["by"] = columns
+            _statistic(document, 0)["noise"]["privacyLoss"]["rho"] = "0.25"
+
+        return _edit(change)
+
+    assert "queries[0].unit.by" in _refused(by(["k2", "member_id"]))
+    parse_profile(by(["member_id", "k2"]))
+
+
+def test_a_relationship_on_other_child_columns_does_not_count_among_the_charging_parents() -> None:
+    """``account``, reached at a cap of 4, gives ``card_version`` an ``account_id``, and the unit
+    groups ``card_version`` by ``member_id``: only the relationship from ``member`` names the
+    groups, so the query keeps its charge, 2 at m_P = 1 and scale 2, rho 1/4."""
+
+    def share(rho: str) -> Dict[str, Any]:
+        def change(document: Dict[str, Any]) -> None:
+            _unfollow(document)
+            _with_accounts(document)
+            identifier = document["tables"]["member"]["columns"]["id"]
+            document["tables"]["card_version"]["columns"]["account_id"] = copy.deepcopy(identifier)
+            document["relationships"] += [
+                {**_link("account", "id", "card_version", "account_id"), "statistics": []},
+                {**_link("member", "id", "account", "member_id"), "statistics": []},
+            ]
+            _statistic(document, 0)["noise"]["privacyLoss"]["rho"] = rho
+
+        return _edit(change)
+
+    assert "queries[0]" in _refused(share("0.125"))
+    parse_profile(share("0.25"))
 
 
 @pytest.mark.parametrize("store_first", [False, True])

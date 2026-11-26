@@ -41,7 +41,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   child columns of a relationship, or a history's entities), which gives the charge, and flux-stats reads, checks
   and charges it: groups by a followed relationship are charged `m_P`, groups by a relationship into a table the unit does
   not reach `2 m_P` in L1 and `2 m_P^2` in the squared L2, since a group can change cell without leaving. A query
-  grouped by child columns that relationships from more than one parent the unit reaches give a charge is refused,
+  grouped by child columns that relationships from more than one parent the unit reaches give a charge, on the same
+  columns in any order, is refused,
   since one unit's rows of each can move a group and the charges would add. The entity form
   is refused in the unit's own expose, where one unit is one version, and a query over groups of rows is refused a
   `groupBy`. What the profiler owes (a record matches by reading only rows of its own unit and of tables the unit does not

@@ -614,10 +614,10 @@ names an earlier format and holds one is refused (`FLX-5036`), as before.
   charge is `L1 = 2 m_P` and `L2^2 = 2 m_P^2`, as for a relationship statistic whose rows can move between cells
   (above). Otherwise one unit's rows, reached through another relationship, could move a group between the cells, and the
   query is refused. The reader takes (a) when it matches and holds and `P` is reached, and (b)
-  otherwise. When (a) holds for entries of `relationships` from more than one parent the unit reaches, the query is
-  refused: one unit's rows of every such parent leave together, and each can move a group from one cell of the rate to
-  the other, so their charges would add. A query whose `unit` has `by` states no `groupBy` and no `groupByBins` on its
-  statistics: a record is a group
+  otherwise. When (a) holds for entries of `relationships` from more than one parent the unit reaches, on the same child
+  columns in any order, the query is refused: one unit's rows of every such parent leave together, and each can move a
+  group from one cell of the rate to the other, so their charges would add. A query whose `unit` has `by` states no
+  `groupBy` and no `groupByBins` on its statistics: a record is a group
   of rows and can hold several levels of a grouping column, so it can land in more than one cell. A `{ "table": T }` unit
   may group, since one row lands in one group. What the profiler owes, stated and not checked (the evidence says so): the
   query and its unit pass the checks of ADR 0028; whether a record matches reads only rows of that record's own unit and
@@ -635,8 +635,8 @@ charged `(2 m_P, 2 m_P^2)`, since a group can change cell without leaving. Each 
 **Refused with `FLX-5036`**, naming the query and never a value: a noisy query with no `unit`; a `unit` of another form,
 including a `by` that matches neither (a) nor (b), a table the profile does not hold and columns its table does not hold;
 a charge of 0, which is a table the unit of privacy does not reach; a `by` for which (a) holds through relationships from
-more than one parent the unit reaches; a `groupBy` or `groupByBins` on a statistic of a query
-whose `unit` has `by`; and a noisy statistic in a document that names an
+more than one parent the unit reaches, on the same child columns in any order; a `groupBy` or `groupByBins` on a
+statistic of a query whose `unit` has `by`; and a noisy statistic in a document that names an
 earlier format. An exact query reads as before, and its `unit`, if it has one, is checked for its shape only.
 
 **P3.** A profile whose every query statistic carries noise under the account no longer keeps a run from P3 for its

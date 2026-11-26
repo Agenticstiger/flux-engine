@@ -3001,14 +3001,14 @@ class _Reader:
         reach, its rows are the same in every neighbouring data set, so a group stays when its row
         of ``P`` leaves, and a query that reads that row can move the group from one cell of the
         rate to the other: ``(2 m_P, 2 m_P^2)``, as a row moving between cells of a relationship
-        statistic (section 3a). When those columns are the child columns of relationships from
-        more than one parent the unit reaches, one unit's rows of each can move a group, and their
-        charges would add: such a unit is refused. Or the table's ``history`` entity columns:
-        ``m_T``, under the history's whole-entity obligation (a profiler's, stated and not
-        checked), in a table the unit follows into. In the unit's own expose one unit is one
-        version, and removing it can move its entity from one cell of the rate to the other, so the
-        entity form is refused there, as a noisy history member is. Anything else, an unknown table
-        or column, or a figure of 0 (a table the unit does not reach, with no parent the unit
+        statistic (section 3a). When those columns, in any order, are the child columns of
+        relationships from more than one parent the unit reaches, one unit's rows of each can move
+        a group, and their charges would add: such a unit is refused. Or the table's ``history``
+        entity columns: ``m_T``, under the history's whole-entity obligation (a profiler's, stated
+        and not checked), in a table the unit follows into. In the unit's own expose one unit is
+        one version, and removing it can move its entity from one cell of the rate to the other, so
+        the entity form is refused there, as a noisy history member is. Anything else, an unknown
+        table or column, or a figure of 0 (a table the unit does not reach, with no parent the unit
         reaches), is refused, naming the query and no value.
         """
         accounting = self._require_account(f"{where}.unit")
@@ -3025,13 +3025,20 @@ class _Reader:
         else:
             charging: List[str] = []
             for link in relationships:
-                if link.child_table == unit.table and link.child_columns == unit.by:
+                if link.child_table == unit.table and set(link.child_columns) == set(unit.by):
                     key = (link.parent_table, link.parent_columns, unit.table, link.child_columns)
                     followed = any(
                         (f.parent_table, f.parent_columns, f.child_table, f.child_columns) == key
                         for f in accounting.follows
                     )
                     parent = accounting.reach(link.parent_table)
+                    if (followed or reach == 0) and parent >= 1:
+                        charging.append(f"{link.parent_table}({', '.join(link.parent_columns)})")
+                    if link.child_columns != unit.by:
+                        # The same columns in another order group the rows the same way, so
+                        # they count among the parents above; only the order ``by`` names is
+                        # form (a) and gives a charge.
+                        continue
                     # A group leaves with its unit whole only when the table's rows follow their
                     # parent row. When they are the same in every neighbouring data set, the
                     # group stays when its row of the parent leaves and may change cell.
@@ -3039,8 +3046,6 @@ class _Reader:
                         charges.append(_Charge(Fraction(parent), Fraction(parent * parent)))
                     elif reach == 0:
                         charges.append(_Charge(Fraction(2 * parent), Fraction(2 * parent * parent)))
-                    if (followed or reach == 0) and parent >= 1:
-                        charging.append(f"{link.parent_table}({', '.join(link.parent_columns)})")
             if len(charging) > 1:
                 # One unit's rows of every such parent leave together, and each can move a
                 # group between the cells, so their charges would add.

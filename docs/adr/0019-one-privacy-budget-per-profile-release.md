@@ -236,7 +236,8 @@ for a table that a unit follows into (ADR 0037).
    `T` is not reached, since a group stays when its row of `P` leaves and can change cell) or `T`'s
    history entity (charge `m_T`, under the history's whole-entity obligation, and refused in the unit's own expose as
    a noisy history member is: one unit is one version there, and can move its entity between the cells). When
-   relationships from more than one parent the unit reaches give those child columns a charge, the query is refused:
+   relationships from more than one parent the unit reaches give those child columns a charge, in any order, the query
+   is refused:
    one unit's rows of each can move a group, so the charges would add. A query whose
    unit has `by` states no `groupBy` or `groupByBins`: a group of rows can hold several levels of a column and land in
    more than one cell. The profiler owes, stated and not checked: whether a record matches reads only rows of that
