@@ -380,7 +380,10 @@ When some columns do publish a range, the run's `timeBounds` span all of them: t
 to the latest end of every date column's published range, of the date range its contract column
 declares (a `range` rule such as `between '2020-01-01' and '2026-12-31'` or `>= '2020-01-01' and
 <= '2026-12-31'`), and of the bins, levels and range the column itself is drawn from. No column's
-bins are cut. To choose the window yourself, pass `--window START END`, two dates
+bins are cut. A validity window's end column that withholds its minimum and publishes every
+quartile in the bin of its declared open end draws its closed versions' ends over the span its
+start column is declared over, not in the bin next to the open end, so they keep the window to
+the data. To choose the window yourself, pass `--window START END`, two dates
 (`YYYY-MM-DD`, midnight UTC) or RFC 3339 timestamps with START before END. The Simulation's
 `timeBounds` are exactly those, a date column's bins that leave them are cut at them (and the
 column says so), and the output notes the window under "time window".
