@@ -55,6 +55,7 @@ from flux_engine.author.association import (
 )
 from flux_engine.author.basis import Basis, Label, assumed, default, from_profile
 from flux_engine.author.catalogue import (
+from flux_engine.author.basis import from_contract as contract_basis
     catalogue_foreign_keys,
     link_givens,
     reference_table,
@@ -151,6 +152,7 @@ from flux_engine.author.replace import ask_for_private_release, replacements_for
 from flux_engine.author.window import (
     WINDOW_END_LIMIT_MS,
     declared_days,
+    contract_span,
     declared_window,
     instant_ms,
 )
@@ -4927,7 +4929,7 @@ def _dated_columns(
     """
     history_columns = _history_columns(planned, histories, projections)
     snapshots = {str(entry["emit"]) for entry in projections.snapshots}
-    return declare_dates(
+    declared = declare_dates(
         planned.reading.profile,
         {
             expose.expose_id: DatedExpose(
@@ -5076,6 +5078,7 @@ def _asked(
 
     table = scored.tables.get(expose_id)
     drawn = {name for clique in _cliques_of(table) for name in clique.columns}
+                declared=_declared_spans(expose, planned.contract),
     return asked_levels_of(needs, expose_id, skip=drawn)
 
 
@@ -5090,6 +5093,70 @@ def _counts(
     register = build_parameter_register(
         simulation_id=simulation_id,
         documents=documents,
+    _declare_end_ranges(planned.authored, declared.end_ranges)
+    return declared
+
+
+def _declared_spans(
+    expose: AuthoredExpose, contract: Optional[Mapping[str, Any]]
+) -> Dict[str, Tuple[int, int]]:
+    """The span the contract's range rules give each date column the bundle declares no span for.
+
+    A column whose declaration holds bins, levels or a range already has a span (or is one value),
+    and the contract's range does not replace it.
+    """
+    found: Dict[str, Tuple[int, int]] = {}
+    for plan in expose.columns:
+        kind = expose.kinds.get(plan.name)
+        context = expose.contexts.get(plan.name)
+        if kind not in DATE_KINDS or context is None or contract is None:
+            continue
+        if any(key in plan.declaration for key in ("bins", "levels", "range")):
+            continue
+        try:
+            column = contract["exposes"][expose.index]["contract"]["schema"][context.schema_index]
+        except (KeyError, IndexError, TypeError):
+            continue
+        span = contract_span(column, kind)
+        if span is not None:
+            found[plan.name] = span
+    return found
+
+
+_END_RANGE = (
+    "The column has no distribution of its own and a lifetime ends on it, so its range is the one "
+    "its contract declares: every end the lifetime draws is held inside it."
+)
+
+
+def _declare_end_ranges(
+    exposes: Sequence[AuthoredExpose], ranges: Mapping[Tuple[str, str], Tuple[int, int]]
+) -> None:
+    """Declare the contract's range on each end column a lifetime was written against it.
+
+    The generator cuts a lifetime's gap to the end column's declared range, so a column with no
+    span of its own needs one for the ends to stay inside what the contract lets it hold.
+    """
+    for expose in exposes:
+        plans = {plan.name: plan for plan in expose.columns}
+        for (expose_id, name), (low, high) in ranges.items():
+            plan = plans.get(name)
+            context = expose.contexts.get(name)
+            kind = expose.kinds.get(name)
+            if expose.expose_id != expose_id or plan is None or context is None or kind is None:
+                continue
+            plan.declaration["range"] = {
+                "min": _range_text(kind, low),
+                "max": _range_text(kind, high),
+            }
+            basis = contract_basis(
+                context.product_ref, context.contract_tokens + ("validationRules",)
+            )
+            plan.labels.append(Label(("range", "min"), basis))
+            plan.labels.append(Label(("range", "max"), basis))
+            plan.assumptions.append(_END_RANGE)
+            plan.choices.append(_END_RANGE)
+            expose.assumptions.append((name, _END_RANGE))
         namespace=EXTENSION_NAMESPACE,
         entries=read_parameters_block(
             entries, pinned=True, where="parameters", code=FLX_3105, overlay=overlay

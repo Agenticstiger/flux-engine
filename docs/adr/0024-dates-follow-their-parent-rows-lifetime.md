@@ -573,3 +573,22 @@ plan reads the first and last edges as its range (`declared_bounds`). The wideni
   a bins-only date is not widened past it, and its entry is left out as for a declared range.
 - **What does not move.** A bins-only column no entry asks to widen declares no `range`, and keeps its bytes.
 
+
+
+## Amendment of 2026-11-26: `init` declares the contract's range on an order lifetime's end
+
+The generator cuts a lifetime's gap to the end column's declared range `Re` (section 4), but a column the profile gives
+no distribution declares none, so no `Re` existed and nothing was cut: with a window much wider than the data, a gap
+drawn evenly over the window put most ends outside the range the contract holds the column to.
+
+- **The range.** When `init` writes a lifetime for a check that orders two dates, and the bundle declares no bins, levels
+  or range for the end column, it declares the range the contract's rules give the column, when both ends are given
+  (a strict end is moved one day, or one millisecond, inward). The cut then applies and every end lies inside it.
+- **The gap.** The longest gap is at most the range's last instant less the earliest start the bundle can draw (the
+  start's declared span, else its contract range within the window, else the window's start). A range that leaves no gap
+  after the earliest start writes no lifetime, and the notes say so.
+- **What it admits.** The two conditions of `FLX-6204` are checked against the range written, so a required end, or a
+  check with no NULL branch, over such a column is ordered where `init` declined it before.
+- **What does not move.** An end that already declares a span keeps its range and its gap, as does an end with no
+  closed contract range, and the nullable end that a check lets be NULL keeps the default `endPastWindow`.
+  Deriving the gap from the two published histograms by deconvolution is a later improvement.
