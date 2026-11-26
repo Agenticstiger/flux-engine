@@ -222,13 +222,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `calibrate --fit` seeded each candidate from the unpatched bundle's `H` at the run's `--scale` without the rows a
   tracked foreign key's floor raised a parent to, so the unpatched bundle read as a candidate drew other rows than a
   plain run at that scale. The common draws take the floors the run has.
-- A tracked foreign key into a parent whose key is an identifier is refused at `plan` (`FLX-3403`). The parent's keys
-  are a keyed permutation of the row index, so no level a contract declares can be shown to be one of them; the plan
-  was accepted before, and every cell of the child then named a key the parent lacks (`verify` scored the link at 0 %). A foreign
-  key that is not tracked takes a key the parent holds, as before.
-- The title of `FLX-2102` named only a moved `planDigest`, although the code is also given for a plan that cannot be
-  read, for a marker value this engine does not know and for a `declaredRows` and `shortfall` that do not hold
-  together. The title, and the error index that lists it, name each cause.
+- A tracked foreign key into a parent whose key is an identifier is refused at `plan` (`FLX-3403`) unless the parent
+  holds every identifier of its length. The parent's keys are a keyed permutation of the row index, so a parent with
+  fewer rows than there are identifiers holds a few of them and no level a contract declares can be shown to be one;
+  the plan was accepted before, and cells of the child then named keys the parent lacks (`verify` scored the link far
+  below 100 %). A parent whose rows fill the space (16 to the power of `identifierLength` rows at the plan's scale, not
+  a UUID) holds every lower case hex identifier of that length, so each level of exactly that form is a key and the link
+  is whole; a level of another form is refused, naming it, and so is a parent a `--scale` below 1 cut. A foreign key
+  that is not tracked takes a key the parent holds, as before.
 
 ## 0.12.1 - 2026-11-26
 

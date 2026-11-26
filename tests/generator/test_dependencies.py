@@ -536,6 +536,17 @@ def test_a_column_on_both_sides_is_a_cycle_and_not_a_crash(
     assert all(name in message for name in set(from_) & set(to))
 
 
+def test_a_column_named_twice_is_refused_before_the_cycle_is_named() -> None:
+    """A name repeated in ``from`` is refused as a repeat, so the cycle message lists each name once."""
+    with pytest.raises(ValueError, match="names a column twice"):
+        refuses("FLX-6208", star_with(dependency(["ss_amount", "ss_amount"], ["ss_amount"])))
+    message = refuses(
+        "FLX-6208",
+        star_with(dependency(["ss_amount", "ss_ticket_number"], ["ss_ticket_number", "ss_amount"])),
+    )
+    assert message.count("'ss_amount'") == 1 and message.count("'ss_ticket_number'") == 1
+
+
 @pytest.mark.parametrize(
     "band",
     [

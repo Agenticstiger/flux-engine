@@ -223,8 +223,9 @@ FLX_3403 = register(
     "inside timeBounds for an entity's versions, when a tracked column is not categorical, names "
     "an undeclared level or has no transition row for a level a chain can reach, when a tracked "
     "foreign key has a level that is no key its parent holds in the plan (an identifier key holds "
-    "none a contract can name), or when its parent is not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
-    "declares no lifetimes entry, or declares a history of its own that sets a lifetime column (a "
+    "a level only when its rows fill every identifier of its length in the plan and the level is "
+    "one, in lower case hex), or when its parent is not a to-one relationship. A history's "
+    "parent.lifetime is refused when the parent emit declares no lifetimes entry, or declares a history of its own that sets a lifetime column (a "
     "validity, tracked, end or rule-set column), which differs between versions; when the parent's "
     "lifetime leaves no room for one version of an entity (the message names "
     "`history(<emit>).parent.lifetime`, the entities and their lifetimes); or when the rows of the "
@@ -5621,16 +5622,58 @@ def _check_declared_keys(
                 )
 
 
-def _identifier_parent(shape: _Shape, column: str, relationship: Relationship) -> FluxError:
-    """``FLX-3403`` for a tracked foreign key whose parent's key is an identifier."""
-    return _refuse(
-        f"expose {shape.plan.expose.expose_id!r} column {column!r} is tracked by its history over "
-        f"levels and points at {relationship.target!r}, whose key {relationship.to_columns[0]!r} "
-        "is an identifier drawn by a keyed permutation of the row index, so no level a contract "
-        "declares can be shown to be a key it holds; a tracked foreign key writes its level as "
-        "the key: lay the parent's key out over a range, or stop tracking the column so its "
-        "foreign key takes a key the parent holds"
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
+
+def _identifier_parent(
+    shape: _Shape, column: str, relationship: Relationship, parent: IdentifierKey, level: str
+) -> FluxError:
+    """``FLX-3403`` for a tracked foreign key whose parent's key is an identifier and holds no *level*.
+
+    An identifier key is a keyed permutation of the row index over every identifier of its
+    length. Its rows hold all of them only when they fill that space, so the message tells
+    a parent that holds too few from a level that is no identifier of the parent's form.
+    """
+    where = (
+        f"expose {shape.plan.expose.expose_id!r} column {column!r} is tracked by its history "
+        f"over levels and points at {relationship.target!r}, whose key "
+        f"{relationship.to_columns[0]!r} is an identifier"
     )
+    if parent.as_uuid or parent.rows != parent.space:
+        held = (
+            "far fewer than every UUID"
+            if parent.as_uuid
+            else f"{parent.rows} of the {parent.space} identifiers of its length"
+        )
+        return _refuse(
+            f"{where} drawn by a keyed permutation of the row index; in this plan it holds "
+            f"{held}, so a declared level cannot be shown to be a key it holds; a tracked "
+            "foreign key writes its level as the key: lay the parent's key out over a range, "
+            "give it as many rows as it has identifiers (at --scale 1), or stop tracking the "
+            "column so its foreign key takes a key the parent holds"
+        )
+    return _refuse(
+        f"{where} of {parent.length} hex characters whose {parent.rows} rows hold every one, "
+        f"but level {level!r} is no key of that form; a tracked foreign key writes its level as "
+        "the key, so every level is exactly that many lower case hex digits: change the level, "
+        "or stop tracking the column so its foreign key takes a key the parent holds"
+    )
+
+
+def _identifier_levels(
+    shape: _Shape, column: str, relationship: Relationship, parent: IdentifierKey
+) -> None:
+    """Refuse (``FLX-3403``) a tracked level that is no key of an identifier parent.
+
+    A parent that holds every identifier of its length (its rows in this plan fill the
+    space, which a ``--scale`` below 1 does not) holds each level of that form. A parent
+    that holds fewer cannot be asked cheaply which ones, so every level is refused.
+    """
+    levels = _rows._level_names(shape.plan.column_plan(column).statistics)
+    dense = not parent.as_uuid and parent.rows == parent.space
+    for level in levels:
+        if not (dense and len(level) == parent.length and _HEX_DIGITS.issuperset(level)):
+            raise _identifier_parent(shape, column, relationship, parent, level)
 
 
 def _check_tracked_keys(
@@ -5643,6 +5686,7 @@ def _check_tracked_keys(
     the ones in this plan: a ``--scale`` below 1 cuts the parent's rows and its key range and
     leaves the levels, so the refusal shows the cut in the span it names. A pick that takes the
     nearest key (``declared``) never writes a level, so it holds at any scale and is not asked.
+    An identifier parent holds a level only when its rows fill the space (``_identifier_levels``).
     """
     relationship = shape.owners.get(column)
     if (
@@ -5653,7 +5697,8 @@ def _check_tracked_keys(
         return
     parent = view(relationship.target, relationship.to_columns).driver(relationship.to_columns[0])
     if isinstance(parent, IdentifierKey):
-        raise _identifier_parent(shape, column, relationship)
+        _identifier_levels(shape, column, relationship, parent)
+        return
     if not isinstance(parent, (KeyGrid, ReferenceColumn)):
         return
     statistics = shape.plan.column_plan(column).statistics
