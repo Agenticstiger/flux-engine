@@ -1909,8 +1909,8 @@ class PlanEra:
     """What a recorded plan was made under, so that ``apply`` and ``replay`` run it as it was.
 
     A new plan takes the defaults; a recorded plan takes what its keys say
-    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges``, ``plan_scale_floors`` and
-    ``plan_projected_givens``).
+    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges``, ``plan_scale_floors``,
+    ``plan_projected_givens`` and ``plan_override_givens``).
 
     *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
     2026-11-24): every entity, or the entities that can end for a plan without ``historyEndShare``.
@@ -1932,6 +1932,8 @@ class PlanEra:
     *projected_givens* is false for a plan without ``projectedGivens`` (ADR 0027, the amendment of
     2026-11-25): a column of an events or periods emit drawn given a column of the version replays
     the draw it was made with, given the level the column's own draw made.
+    *override_givens* is false for a plan without ``projectedGivens: "afterOverrides"`` (the
+    amendment of 2026-11-26): it holds no kind's override as a level, as it was made.
     """
 
     end_share: str = END_SHARE_OF_ENTITIES
@@ -1942,6 +1944,18 @@ class PlanEra:
     hold_ranges: bool = True
     estimate_rows: bool = True
     projected_givens: bool = True
+    override_givens: bool = True
+
+
+def _run_bounds(era: PlanEra) -> RunBounds:
+    """What a run under *era* holds its projections to (:class:`RunBounds`)."""
+    return RunBounds(
+        era.periodic_rows,
+        era.hold_ranges,
+        era.estimate_rows,
+        era.projected_givens,
+        era.override_givens,
+    )
 
 
 def _execute_with_parent_kept(
@@ -2482,9 +2496,7 @@ def execute(
                 replicate=replicate,
                 end_share=era.end_share,
                 cut_ranges=era.cut_ranges,
-                bounds=RunBounds(
-                    era.periodic_rows, era.hold_ranges, era.estimate_rows, era.projected_givens
-                ),
+                bounds=_run_bounds(era),
                 scale_widened=widened,
                 scale_floors=era.scale_floors,
             )
@@ -3567,7 +3579,7 @@ def _planned_with_projections(
     """
     namespace = _flux_namespace(simulation)
     projected = _projected_emits(resolved_emits)
-    bounds = RunBounds(era.periodic_rows, era.hold_ranges, era.estimate_rows, era.projected_givens)
+    bounds = _run_bounds(era)
 
     def plan_at(index: int, rows: Optional[int]) -> _PlannedEmit:
         return _plan_emit(

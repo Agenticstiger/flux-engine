@@ -432,11 +432,19 @@ def _periodic_budget(max_rows: Optional[int]) -> Optional[int]:
 #: (:func:`flux_engine.stages.apply.plan_projected_givens`).
 PROJECTED_GIVENS_PLAN_KEY = "projectedGivens"
 PROJECTED_GIVENS_AFTER = "afterProjection"
+#: ``projectedGivens`` for a plan whose draw after the projection holds a level engine 0.12.0 did
+#: not hold (ADR 0027, the amendment of 2026-11-26): a kind's override a column is drawn given, or
+#: a column some kinds override drawn given the level the other kinds' rows hold. A plan with the
+#: value ``afterProjection``, or without the key, holds none, and replays as it was made.
+PROJECTED_GIVENS_OVERRIDES = "afterOverrides"
 
 
 def _projected_given_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
-    """``projectedGivens``, only for a plan with a column drawn given a column of the version."""
-    held = any(plan.projection is not None and plan.projection.held for plan in _emit_plans(result))
+    """``projectedGivens``, only for a plan with a column drawn given a column the projection sets."""
+    projections = [plan.projection for plan in _emit_plans(result) if plan.projection is not None]
+    if any(projection.overridden for projection in projections):
+        return {PROJECTED_GIVENS_PLAN_KEY: PROJECTED_GIVENS_OVERRIDES}
+    held = any(projection.held for projection in projections)
     return {PROJECTED_GIVENS_PLAN_KEY: PROJECTED_GIVENS_AFTER} if held else {}
 
 

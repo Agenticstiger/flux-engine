@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -50,6 +50,7 @@ from flux_engine.generator.counts import CountClass, classes_of, digest_key, slo
 from flux_engine.generator.history import HistoryPlan
 from flux_engine.generator.paths import KIND_PATH_SHAPE, kind_path
 from flux_engine.generator.rows import (
+    OWN_DRAW,
     GeneratorPlan,
     cells_before_rules,
     generate_row_slice,
@@ -655,8 +656,8 @@ def _row_plan(
     return periods[cut], versions[cut], kinds[cut]
 
 
-def _override(text: str, column: CompiledColumn) -> Any:
-    """*text* read as a value of *column*'s type."""
+def override_value(text: str, column: CompiledColumn) -> Any:
+    """A kind's override *text* read as a value of *column*'s type."""
     kind = column.logical_type.kind
     if kind is LogicalKind.DATE:
         return date.fromisoformat(text)
@@ -677,17 +678,26 @@ def periods_rows(
     periods, versions, kinds = _row_plan(layout, start, stop)
     names = [column.column.name for column in plan.columns]
     low, history_rows, named = _history_cells(projection, names, entry, versions, root)
+    overrides = [
+        {
+            names.index(name): override_value(text, plan.column_plan(name).column)
+            for name, text in declared.overrides
+        }
+        for declared in layout.kinds
+    ]
     # The emit's own cells, before its rules: they run over the row once the period, the
     # version's columns and the kind's overrides are set (projections.projection_rows). A column
-    # drawn given a column of the version reads the version's level (ADR 0027, the amendment of
-    # 2026-11-25).
+    # drawn given a column the entry sets reads the level the row holds there: the version's
+    # (ADR 0027, the amendment of 2026-11-25), or its kind's override (the amendment of
+    # 2026-11-26).
     own_plan = own_plan_of(plan)
+    pairs = list(zip(kinds, versions, strict=True))
+    sources = dict(named)
     held = held_levels(
         own_plan,
         {
-            names[index]: [history_rows[version - low][source] for version in versions]
-            for index, source in named
-            if names[index] in projection.held
+            name: _held_cells(names.index(name), sources, overrides, pairs, (low, history_rows))
+            for name in projection.held
         },
         projection.fallback,
     )
@@ -695,14 +705,6 @@ def periods_rows(
     position = names.index(entry.column)
     kind = plan.column_plan(entry.column).column.logical_type.kind
     assert kind is LogicalKind.DATE
-    overrides = []
-    for declared in layout.kinds:
-        overrides.append(
-            {
-                names.index(name): _override(text, plan.column_plan(name).column)
-                for name, text in declared.overrides
-            }
-        )
     found = []
     for row, period, which, version in zip(own, periods, kinds, versions, strict=True):
         cells = list(row)
@@ -713,6 +715,33 @@ def periods_rows(
             cells[index] = value
         found.append(tuple(cells))
     return tuple(found)
+
+
+def _held_cells(
+    index: int,
+    sources: Mapping[int, int],
+    overrides: Sequence[Mapping[int, Any]],
+    pairs: Sequence[Tuple[int, int]],
+    history: Tuple[int, Sequence[Tuple[Any, ...]]],
+) -> List[Any]:
+    """The value each row holds in the emit's column *index* before the emit draws its own cells.
+
+    *pairs* holds each row's kind and version row. A row holds its kind's override where the kind
+    sets one, else its version's value for a column of the version (*sources*: the history's
+    column each such column of the emit reads), else :data:`OWN_DRAW`, and draws the column
+    itself. *history* is the first version row the slice reads, and those rows.
+    """
+    low, rows = history
+    source = sources.get(index)
+    found: List[Any] = []
+    for which, version in pairs:
+        if index in overrides[which]:
+            found.append(overrides[which][index])
+        elif source is not None:
+            found.append(rows[version - low][source])
+        else:
+            found.append(OWN_DRAW)
+    return found
 
 
 def _history_cells(

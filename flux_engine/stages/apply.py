@@ -101,6 +101,7 @@ from flux_engine.stages.plan import (
     END_SHARE_PLAN_KEY,
     MAX_ROWS_PLAN_KEY,
     PROJECTED_GIVENS_AFTER,
+    PROJECTED_GIVENS_OVERRIDES,
     PROJECTED_GIVENS_PLAN_KEY,
     RANGE_SETTERS_HELD,
     RANGE_SETTERS_PLAN_KEY,
@@ -130,6 +131,7 @@ __all__ = [
     "plan_range_setters",
     "plan_end_share",
     "plan_projected_givens",
+    "plan_override_givens",
     "plan_kernel",
     "require_plan_shortfalls",
     "require_run_digest_binds_plan",
@@ -321,31 +323,71 @@ def plan_projected_givens(plan_document: Mapping[str, Any]) -> bool:
     """Whether a recorded plan draws a column given a column of the version after the projection.
 
     A plan with ``projectedGivens`` says ``"afterProjection"`` (ADR 0027, the amendment of
-    2026-11-25). A plan without it holds no such column, or was written by engine 0.11.1, which drew
-    the column given the level the column's own draw made; it replays that draw, so its rows keep
-    their bytes. Any other value is refused as ``historyEndShare`` is.
+    2026-11-25) or ``"afterOverrides"`` (:func:`plan_override_givens`). A plan without it holds no
+    such column, or was written by engine 0.11.1, which drew the column given the level the
+    column's own draw made; it replays that draw, so its rows keep their bytes. Any other value is
+    refused as ``historyEndShare`` is.
     """
-    return _marker_named(
+    return _projected_givens_of(plan_document) is not None
+
+
+def plan_override_givens(plan_document: Mapping[str, Any]) -> bool:
+    """Whether a recorded plan holds a kind's override as the level of a column drawn given it.
+
+    A plan with ``projectedGivens: "afterOverrides"`` does (ADR 0027, the amendment of 2026-11-26).
+    A plan with ``"afterProjection"`` or without the key was made by an engine that held no
+    override, and replays that draw, so its rows keep their bytes.
+    """
+    return _projected_givens_of(plan_document) == PROJECTED_GIVENS_OVERRIDES
+
+
+def _projected_givens_of(plan_document: Mapping[str, Any]) -> Optional[str]:
+    return _marker_value(
         plan_document,
         PROJECTED_GIVENS_PLAN_KEY,
-        PROJECTED_GIVENS_AFTER,
+        (PROJECTED_GIVENS_AFTER, PROJECTED_GIVENS_OVERRIDES),
         "draws given the level the column's own draw made",
+    )
+
+
+def _recorded_era(plan_document: Mapping[str, Any]) -> "_pipeline.PlanEra":
+    """What a recorded plan was made under, from its keys (:class:`~flux_engine.stages.pipeline.PlanEra`).
+
+    A recorded plan states the rows it derives, so it is run with no estimate of them.
+    """
+    return _pipeline.PlanEra(
+        end_share=plan_end_share(plan_document),
+        cut_ranges=plan_date_ranges(plan_document),
+        tracked_levels=plan_scale_floors(plan_document),
+        periodic_rows=plan_max_rows(plan_document),
+        hold_ranges=plan_range_setters(plan_document),
+        estimate_rows=False,
+        projected_givens=plan_projected_givens(plan_document),
+        override_givens=plan_override_givens(plan_document),
     )
 
 
 def _marker_named(plan_document: Mapping[str, Any], key: str, known: str, without: str) -> bool:
     """Whether *plan_document* carries *key*, refusing (``FLX-2102``) a value other than *known*."""
+    return _marker_value(plan_document, key, (known,), without) is not None
+
+
+def _marker_value(
+    plan_document: Mapping[str, Any], key: str, known: Tuple[str, ...], without: str
+) -> Optional[str]:
+    """The value *plan_document* names for *key*, ``None`` without it; one not *known* is ``FLX-2102``."""
     if key not in plan_document:
-        return False
+        return None
     named = plan_document[key]
-    if named != known:
+    if named not in known:
+        values = " and ".join(repr(value) for value in known)
         raise FluxError(
             FLX_2102,
             f"the recorded plan names {key} {_short_repr(named)}, a value this engine does not "
-            f"know (a plan written by a newer or incompatible version; it knows {known!r}, and a "
+            f"know (a plan written by a newer or incompatible version; it knows {values}, and a "
             f"plan without the key {without}); plan again with this engine",
         )
-    return True
+    return str(named)
 
 
 def _is_count(value: object) -> TypeGuard[int]:
@@ -872,15 +914,7 @@ def _apply(
                 strict_coverage=strict_coverage,
                 kernel=kernel,
                 scale=optional_scale(plan_document.get("scale")),
-                era=_pipeline.PlanEra(
-                    end_share=plan_end_share(plan_document),
-                    cut_ranges=plan_date_ranges(plan_document),
-                    tracked_levels=plan_scale_floors(plan_document),
-                    periodic_rows=plan_max_rows(plan_document),
-                    hold_ranges=plan_range_setters(plan_document),
-                    estimate_rows=False,
-                    projected_givens=plan_projected_givens(plan_document),
-                ),
+                era=_recorded_era(plan_document),
                 shard=shares,
                 references=plan_document.get(REFERENCES_PLAN_KEY),
                 allow_generators=allow_generators,

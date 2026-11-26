@@ -34,7 +34,7 @@ the arrays of one chunk are all a pass holds.
 from __future__ import annotations
 
 from decimal import Decimal, localcontext
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
@@ -134,7 +134,7 @@ def _carried_given(plan: "_rows.GeneratorPlan") -> bool:
 
 def _held_chunk(
     held: Optional["_rows.HeldLevels"], offset: int, rows: "np.ndarray"
-) -> Dict[str, List[str]]:
+) -> Dict[str, List[Optional[str]]]:
     """The held levels of the chunk *rows*, which starts *offset* rows into the slice."""
     if not held:
         return {}
@@ -146,14 +146,15 @@ def _chunk(
     plan: "_rows.GeneratorPlan",
     streams: CellStreams,
     rows: "np.ndarray",
-    held: Optional[Dict[str, List[str]]] = None,
+    held: Optional[Dict[str, List[Optional[str]]]] = None,
 ) -> List[List[Any]]:
     """Every column of *plan* over *rows*: drawn as arrays, or read from the relations.
 
     A column *held* names is given by the levels *held* gives it: they stand in the chunk's
     levels, which every column drawn given it reads, in place of the levels its own draw makes.
+    A row that holds no level (``None``) keeps the level its own draw makes.
     """
-    levels: Dict[str, List[str]] = dict(held or {})
+    levels = _with_own_levels(plan, streams, rows, held or {})
     if plan.relations is None:
         return [_column(column_plan, plan, streams, rows, levels) for column_plan in plan.columns]
     from flux_engine.generator.relations import carried_columns, history_pick_of, owner_of
@@ -173,6 +174,35 @@ def _chunk(
                 columns.append(reader.column_values(owner, column_plan, driver, rows))
         return columns
     return _carried_chunk(plan, streams, rows, reader, owner, drivers, pick, carried, levels)
+
+
+def _with_own_levels(
+    plan: "_rows.GeneratorPlan",
+    streams: CellStreams,
+    rows: "np.ndarray",
+    held: Mapping[str, List[Optional[str]]],
+) -> Dict[str, List[str]]:
+    """The chunk's levels of the *held* columns: the held level, or the own draw's where a row holds none.
+
+    A column held on some rows only is drawn for the chunk, its parents first, and each row that
+    holds no level takes the level that draw makes, as the per-row path keeps its own level there.
+    """
+    levels: Dict[str, List[str]] = {}
+    partly: Dict[str, List[Optional[str]]] = {}
+    for name, found in held.items():
+        if None in found:
+            partly[name] = found
+        else:
+            levels[name] = cast(List[str], found)
+    for index in _rows._draw_order(plan) if partly else ():
+        name = plan.columns[index].column.name
+        if name in partly:
+            drawn = _levels_of(plan, name, streams, rows, levels)
+            levels[name] = [
+                own if level is None else level
+                for level, own in zip(partly[name], drawn, strict=True)
+            ]
+    return levels
 
 
 def _carried_chunk(
