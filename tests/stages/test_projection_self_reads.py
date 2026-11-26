@@ -50,8 +50,10 @@ from .test_projection_reads_renewed import (
 pytestmark = pytest.mark.integration
 
 KEY = "projectedReads"
-#: What a refusal takes at most; the passes that ran before it took minutes for some shapes.
-QUICK = 1.0
+#: A bound that only a run of passes would break: they took minutes for some shapes. That no
+#: pass runs is shown by the passes raising when called; the clock only catches a hang, so it
+#: allows for a slow machine.
+QUICK = 10.0
 MODELS = {"sedan": "0.5", "van": "0.3", "truck": "0.2"}
 STATUSES = {"levels": {"active": "0.8", "retired": "0.2"}}
 KINDS = {"k1": "0.5", "k2": "0.3", "k3": "0.2"}
