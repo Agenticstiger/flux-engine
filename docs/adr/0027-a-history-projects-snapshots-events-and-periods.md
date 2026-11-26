@@ -534,3 +534,21 @@ each version's entity to be unique, and that was refused too.
   the periods each holds, so no rows per period are read from it. A note says it once per emit.
 - **What moves.** A bundle for a profile with such a statistic into a table whose profile publishes a history,
   which `init` could not write with its history before. Every other bundle keeps its bytes, and no plan or recorded plan changes.
+
+## Amendment of 2026-11-26: a link into a projected emit reads the rows the emit writes
+
+A plan that reads another emit through a link (a rule that follows it, a `within` entry over it, a column drawn
+`given` the linked row) carries that emit's plan, and the plan was attached before a projected emit's rows were
+derived. A link into a snapshot, an events emit or a periodic emit therefore read the emit's cells as it would draw them
+without its projection, which are not the rows it writes: a `within` entry kept a date inside a lifetime read from a
+cell the snapshot does not hold, and `verify` reported the entry met on fewer rows than it covers, against ADR 0024
+section 5.
+
+- **The link reads the projection.** Each plan that reads a projected emit, or reads a plan that does, carries the
+  projected plan, so the linked row is the row the emit writes, rules included. The generator digest of such a plan
+  names the projected plan's.
+- **Recorded plans.** A new plan with such a link says `projectedReads: "final"`, which the plan digest covers. A plan
+  without the key replays the link as it was made, so its rows and its run id keep their bytes. Any other value is
+  `FLX-2102`.
+- **What moves.** A bundle with a link into a projected emit that a rule, a `within` entry or a given column reads.
+  Every other plan keeps its bytes.
