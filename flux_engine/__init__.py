@@ -28,7 +28,7 @@ def __getattr__(name: str) -> Any:
         try:
             __version__ = metadata.version("flux-sim-engine")
         except metadata.PackageNotFoundError:  # pragma: no cover - editable/dev tree
-            __version__ = "0.11.1"
+            __version__ = "0.12.1"
         globals()["__version__"] = __version__
         return __version__
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

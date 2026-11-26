@@ -1,6 +1,6 @@
 # Privacy grades
 
-Read each statement here from the installed engine's own text where it prints one: `fluxsim explain FLX-4005` prints the floors a label sets. The design is in [ADR 0020](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/adr/0020-privacy-grades.md).
+Read each statement here from the installed engine's own text where it prints one: `fluxsim explain FLX-4005` prints the floors a label sets. The design is in [ADR 0020](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0020-privacy-grades.md).
 
 ## The patterns
 
@@ -28,7 +28,7 @@ A profile of format 1-4-0 may state a unit of privacy that is one row of a table
 
 ## Generator plugins
 
-A bundle may declare a generator plugin (`fluxsim plugins` lists the installed ones). A plugin is trusted code that runs with the user's rights and is not sandboxed by FLUX (allow only plugins you trust), and a command imports it only when the command line allows it by name. Never pass `--allow-generator` on your own judgement: only the person running `fluxsim` decides that, so stop and ask them, naming the plugin. The grade of a run that uses a plugin is stated in [ADR 0032](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/adr/0032-a-generator-plugin-is-declared-graded-and-stored.md) section 4.
+A bundle may declare a generator plugin (`fluxsim plugins` lists the installed ones). A plugin is trusted code that runs with the user's rights and is not sandboxed by FLUX (allow only plugins you trust), and a command imports it only when the command line allows it by name. Never pass `--allow-generator` on your own judgement: only the person running `fluxsim` decides that, so stop and ask them, naming the plugin. The grade of a run that uses a plugin is stated in [ADR 0032](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0032-a-generator-plugin-is-declared-graded-and-stored.md) section 4.
 
 ## Where the gate refuses
 
@@ -46,4 +46,4 @@ The evidence report has a "Privacy Grade" section. It gives the run's grade and 
 
 It is a statement about what the run's numbers rest on. It is not a finding that the data is anonymous, which is a controller's assessment. A bound of differential privacy limits what any analysis of the output can learn about whether one unit was in the data, for that unit and loss only. Say no more than that to the user.
 
-More: [the evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/explanation/the-evidence-pack.md).
+More: [the evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/explanation/the-evidence-pack.md).

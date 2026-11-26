@@ -204,7 +204,10 @@ def fresh_layouts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(history, "_OUTERS", {})
 
 
-def history_plan(held: HistoryEntry, *, rows: int, entities: int, seed: int = 5) -> HistoryPlan:
+def history_plan(
+    held: HistoryEntry, *, rows: int, entities: int, seed: int = 5, **options: Any
+) -> HistoryPlan:
+    """*held*'s layout over a DATE chain; *options* go to :func:`plan_history` as they are."""
     return plan_history(
         root_for(seed),
         SIM_ID,
@@ -214,6 +217,7 @@ def history_plan(held: HistoryEntry, *, rows: int, entities: int, seed: int = 5)
         rows=rows,
         entities=entities,
         time_bounds=BOUNDS,
+        **options,
     )
 
 

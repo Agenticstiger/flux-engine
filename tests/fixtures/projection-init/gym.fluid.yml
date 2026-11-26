@@ -1,0 +1,135 @@
+# gym.fluid.yml: a membership history (a validity window over each member's versions) and three tables
+# that read it through the member: monthly visit rows (a periods projection), membership changes (an
+# events projection) and locker rentals (a plain child). The profile is built in
+# tests/author/test_init_rows_per_entity.py.
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: gym.members
+name: Members
+metadata:
+  owner:
+    team: front-desk
+exposes:
+  - exposeId: club
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/club.parquet }
+    contract:
+      schema:
+        - { name: club_id, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: club, type: primary, expr: club_id }
+  - exposeId: membership
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/membership.parquet }
+    contract:
+      schema:
+        - { name: version_id, type: INT, required: true }
+        - { name: member_id, type: INT, required: true }
+        - { name: club_id, type: INT, required: true }
+        - { name: valid_from, type: DATE, required: true }
+        - { name: valid_to, type: DATE, required: false }
+        - { name: tier, type: STRING, required: true }
+        - { name: channel, type: STRING, required: true }
+        - { name: signed_on, type: DATE, required: true }
+    semantics:
+      entities:
+        - { name: membership, type: primary, expr: version_id }
+        - { name: member, type: natural, expr: member_id }
+      dimensions:
+        - { name: valid_from, type: time, typeParams: { validityParams: { isStart: true } } }
+        - { name: valid_to, type: time, typeParams: { validityParams: { isEnd: true } } }
+        - { name: tier, type: categorical }
+        - { name: channel, type: categorical }
+        - { name: signed_on, type: time }
+      relationships:
+        - name: club
+          to: club
+          fromColumns: [club_id]
+          toColumns: [club_id]
+          cardinality: many_to_one
+  - exposeId: locker_rental
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/locker_rental.parquet }
+    contract:
+      schema:
+        - { name: rental_id, type: INT, required: true }
+        - { name: member_id, type: INT, required: true }
+        - { name: fee, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: rental, type: primary, expr: rental_id }
+      dimensions:
+        - { name: fee, type: categorical }
+      relationships:
+        - name: member
+          to: membership
+          fromColumns: [member_id]
+          toColumns: [member_id]
+          cardinality: many_to_one
+  - exposeId: membership_change
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/membership_change.parquet }
+    contract:
+      schema:
+        - { name: event_id, type: INT, required: true }
+        - { name: member_id, type: INT, required: true }
+        - { name: op, type: "enum('c','u','d')", required: true }
+        - { name: recorded_on, type: DATE, required: true }
+        - { name: before_tier, type: STRING, required: false }
+        - { name: after_tier, type: STRING, required: false }
+        - { name: before_channel, type: STRING, required: true }
+        - { name: after_channel, type: STRING, required: false }
+    semantics:
+      defaultAggTimeDimension: recorded_on
+      entities:
+        - { name: event, type: primary, expr: event_id }
+      dimensions:
+        - { name: op, type: categorical }
+        - { name: recorded_on, type: time }
+        - { name: before_tier, type: categorical }
+        - { name: after_tier, type: categorical }
+        - { name: before_channel, type: categorical }
+        - { name: after_channel, type: categorical }
+      relationships:
+        - name: member
+          to: membership
+          fromColumns: [member_id]
+          toColumns: [member_id]
+          cardinality: many_to_one
+  - exposeId: visit_month
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/visit_month.parquet }
+    contract:
+      schema:
+        - { name: period_id, type: INT, required: true }
+        - { name: member_id, type: INT, required: true }
+        - { name: month, type: DATE, required: true }
+        - { name: tier, type: STRING, required: true }
+    semantics:
+      entities:
+        - { name: period, type: primary, expr: period_id }
+      dimensions:
+        - { name: month, type: time, typeParams: { timeGranularity: month } }
+        - { name: tier, type: categorical }
+      relationships:
+        - name: member
+          to: membership
+          fromColumns: [member_id]
+          toColumns: [member_id]
+          cardinality: many_to_one

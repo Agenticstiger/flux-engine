@@ -19,12 +19,16 @@ exposes, the ones without a validity window:
 An expose that meets part of a rule is not projected: it is recorded as unused, with the part it
 misses (ADR 0014). A projected emit declares no ``rows``, since its rows follow from the history.
 A profile publishes nothing about a projection, so no lag, no rows per entity and one row per pair
-are written.
+are written. A periods entry reads one thing of its emit's profile table: when the period column
+publishes its histogram, the months it covers bound the periods (``from`` and ``through``). A
+profile's count of an events or periodic emit's rows per entity follows from the history, so it is
+unused, and :func:`say_per_entity` gives the reason.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -36,9 +40,12 @@ from flux_engine.author.history import (
     restate_assumptions,
     structural_record,
 )
+from flux_engine.core.clock import parse_rfc3339_ms
+from flux_engine.expr2.functions import add_months
 from flux_engine.seam.contract import CompiledColumn, LogicalKind, compile_expose
 from flux_engine.seam.keys import ExposeKeys
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
+from flux_stats.definitions import MARGINAL_HISTOGRAM
 
 __all__ = [
     "HistoryTarget",
@@ -47,7 +54,9 @@ __all__ = [
     "follow_history",
     "history_target",
     "project",
+    "published_period_range",
     "release_counts",
+    "say_per_entity",
     "span_primary_key",
 ]
 
@@ -71,6 +80,8 @@ class HistoryTarget:
     columns: Mapping[str, CompiledColumn]
     #: The exposeId the history's ``parent`` is laid out under, ``None`` when it writes no ``parent``.
     parent: Optional[str] = None
+    #: The history's ``until``, the horizon its versions start before, ``None`` when it writes none.
+    until: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +97,10 @@ class ProjectionSource:
     contract_expose: Mapping[str, Any]
     keys: ExposeKeys
     counts: Tuple[Mapping[str, Any], ...] = ()
+    #: The expose's profile table, ``None`` when the profile has none.
+    table: Optional[Mapping[str, Any]] = None
+    #: The run's ``timeBounds`` as RFC 3339 text, ``None`` when no periods entry may read the table.
+    window: Optional[Tuple[str, str]] = None
 
 
 @dataclass
@@ -218,11 +233,8 @@ _NO_RELATIONSHIP = (
 )
 
 
-def _relationship(
-    source: ProjectionSource, histories: Mapping[str, HistoryTarget]
-) -> Optional[HistoryTarget]:
-    """The history of the first to-one relationship that is no key of the expose and reads its natural entity."""
-    held = source.keys
+def _followed(held: ExposeKeys, histories: Mapping[str, HistoryTarget]) -> Optional[Any]:
+    """The first to-one relationship of *held* that is no key of the expose and reads a history's natural entity."""
     key_sets = {frozenset(key) for key in (*held.keys, *held.instant_keys)}
     for relationship in held.relationships:
         target = histories.get(relationship.target)
@@ -232,8 +244,16 @@ def _relationship(
             and frozenset(relationship.from_columns) not in key_sets
             and tuple(relationship.to_columns) == target.natural
         ):
-            return target
+            return relationship
     return None
+
+
+def _relationship(
+    source: ProjectionSource, histories: Mapping[str, HistoryTarget]
+) -> Optional[HistoryTarget]:
+    """The history of the first to-one relationship that is no key of the expose and reads its natural entity."""
+    relationship = _followed(source.keys, histories)
+    return None if relationship is None else histories[relationship.target]
 
 
 def _default_time(expose: Mapping[str, Any]) -> Optional[str]:
@@ -447,17 +467,119 @@ def _as_periods(
         target.expose_id,
         tuple(name for name in columns if name in target.columns and name != column),
     )
-    projected.periods.append(
-        {
-            "emit": source.expose_id,
-            "of": target.expose_id,
-            "column": column,
-            "grain": grain,
-            "match": "overlap",
-            "kinds": [{"count": 1}],
-        }
-    )
+    entry: Dict[str, Any] = {
+        "emit": source.expose_id,
+        "of": target.expose_id,
+        "column": column,
+        "grain": grain,
+        "match": "overlap",
+    }
+    if source.window is not None:
+        entry.update(
+            published_period_range(source.table, column, grain, source.window, target.until)
+        )
+    entry["kinds"] = [{"count": 1}]
+    projected.periods.append(entry)
     return "periods", []
+
+
+_DAY_MS = 86_400_000
+_EPOCH = date(1970, 1, 1)
+_GRAIN_MONTHS = {"month": 1, "quarter": 3, "year": 12}
+
+
+def _period_on(anchor: date, grain: str, day: date) -> date:
+    """The start of the period, counted from *anchor* by *grain*, that holds *day* (on or after *anchor*).
+
+    Periods count from their anchor (ADR 0027 section 5), so a ``from`` on this day keeps every
+    period on the days the entry would have without it.
+    """
+    if grain in ("day", "week"):
+        width = 1 if grain == "day" else 7
+        return anchor + timedelta(days=(day - anchor).days // width * width)
+    step = _GRAIN_MONTHS[grain]
+    position = ((day.year - anchor.year) * 12 + day.month - anchor.month) // step
+    while position > 0 and add_months(anchor, step * position) > day:
+        position -= 1
+    return add_months(anchor, step * position)
+
+
+def _last_day_before(text: str) -> int:
+    """The last day, as days since 1970-01-01, that starts before the instant or day *text*."""
+    milliseconds = parse_rfc3339_ms(f"{text}T00:00:00Z" if len(text) == 10 else text)
+    return -(-milliseconds // _DAY_MS) - 1
+
+
+def _histogram(table: Optional[Mapping[str, Any]], column: str) -> Optional[Mapping[str, Any]]:
+    """The first ungrouped ``marginalHistogram/1`` of *column* in the profile *table*, or ``None``."""
+    columns = table.get("columns") if isinstance(table, Mapping) else None
+    node = columns.get(column) if isinstance(columns, Mapping) else None
+    statistics = node.get("statistics") if isinstance(node, Mapping) else None
+    for statistic in statistics if isinstance(statistics, list) else ():
+        if (
+            isinstance(statistic, Mapping)
+            and "groupBy" not in statistic
+            and statistic.get("definition") == MARGINAL_HISTOGRAM.identifier
+        ):
+            return statistic
+    return None
+
+
+def _published_days(table: Optional[Mapping[str, Any]], column: str) -> Optional[List[int]]:
+    """The edges, in days, of the published histogram of *column*, or ``None`` without one.
+
+    Only an ungrouped histogram whose one group is published counts, and only when every edge
+    is a whole day: a withheld group, or no histogram at all, gives ``None``.
+    """
+    statistic = _histogram(table, column)
+    groups = statistic.get("groups") if statistic is not None else None
+    if not isinstance(groups, list) or len(groups) != 1:
+        return None
+    if not isinstance(groups[0], Mapping) or groups[0].get("status") != "F":
+        return None
+    edges = statistic.get("bins") if statistic is not None else None
+    try:
+        values = [Decimal(str(edge)) for edge in edges] if isinstance(edges, list) else []
+    except ArithmeticError:
+        return None
+    if len(values) < 2 or any(value % _DAY_MS != 0 for value in values):
+        return None
+    return [int(value) // _DAY_MS for value in values]
+
+
+def published_period_range(
+    table: Optional[Mapping[str, Any]],
+    column: str,
+    grain: str,
+    window: Tuple[str, str],
+    until: Optional[str],
+) -> Dict[str, str]:
+    """``from`` and ``through`` for a periods entry on *column* by *grain*, from its published histogram.
+
+    ``from`` is the start of the period that holds the first edge, counted from the window's
+    first day as the entry's periods are without it, and ``through`` the last bin's start, so no
+    period lies in a month the data holds no row for. Both are held to the window and to
+    *until*: a ``from`` on the window's first day is left out, as that day is the entry's anchor
+    without one, and so is a ``through`` no earlier than the window's last day. A withheld
+    histogram, or none, writes neither (ADR 0027, the amendment of 2026-11-26).
+    """
+    days = _published_days(table, column)
+    if days is None:
+        return {}
+    first = parse_rfc3339_ms(window[0]) // _DAY_MS
+    last = _last_day_before(window[1])
+    held = last if until is None else min(last, _last_day_before(until))
+    low, high = max(days[0], first), min(days[-2], held)
+    if high < low:
+        return {}
+    found: Dict[str, str] = {}
+    anchor = _EPOCH + timedelta(days=first)
+    start = _period_on(anchor, grain, _EPOCH + timedelta(days=low))
+    if start > anchor:
+        found["from"] = start.isoformat()
+    if high < last:
+        found["through"] = (_EPOCH + timedelta(days=high)).isoformat()
+    return found
 
 
 def _write_one(
@@ -532,6 +654,7 @@ def history_target(
         tuple(item.column for item in held.entities if item.kind == "natural"),
         {column.name: column for column in columns},
         None if name is None else _target_of(held, str(name)),
+        None if entry.get("until") is None else str(entry["until"]),
     )
 
 
@@ -655,6 +778,71 @@ def _move_statistic(
         used += [(pointer, sentence) for pointer, _ in gone]
     else:
         unused += [(pointer, sentence) for pointer, _ in gone]
+
+
+#: Why the children per entity of the relationship a projection reads its history through are unused.
+_PER_ENTITY = {
+    EVENTS_KEY: (
+        "the emit is projected from {history} as its change events, one row per change, so its "
+        "rows per {entity} are the changes of that entity's versions and follow from the history"
+    ),
+    PERIODS_KEY: (
+        "the emit is projected from {history} as its periodic rows, one row per version and "
+        "period it holds, so its rows per {entity} follow from the versions and their periods; "
+        "the profile counts the rows, not the periods each row holds, so no rows per period are "
+        "read from it"
+    ),
+}
+
+
+def _followed_statistic(
+    entry: Mapping[str, Any],
+    held: Mapping[str, HistoryTarget],
+    keys_of: Callable[[str], ExposeKeys],
+    sources: Sequence[Any],
+) -> Optional[Tuple[HistoryTarget, str, Tuple[str, ...]]]:
+    """The history of a projection *entry*, the relationship it follows and its profile pointer, or ``None``."""
+    emit, target = str(entry["emit"]), held.get(str(entry["of"]))
+    followed = None if target is None else _followed(keys_of(emit), {target.expose_id: target})
+    if target is None or followed is None:
+        return None
+    _, tokens = profile_relationship(sources, emit, followed)
+    if tokens is None:
+        return None
+    return target, str(followed.name), tokens
+
+
+def say_per_entity(
+    found: Projected,
+    histories: Sequence[HistoryTarget],
+    keys_of: Callable[[str], ExposeKeys],
+    published: Published,
+) -> None:
+    """Say why the rows per entity of each events and periodic emit are not read from the profile.
+
+    The relationship such an emit reads its history through reaches the history's natural entity,
+    so the profile's children per parent over it count the emit's rows per entity, which no layout
+    places (they are left unused when the relationships are laid out). The projection lays them
+    out from the history, so the reason each statistic of that profile entry is unused, in
+    *published*, becomes the projection's, and a note says it once per emit.
+    """
+    _, _, unused, _, _ = published.lists()
+    sources = published.relationships if isinstance(published.relationships, list) else []
+    held = {target.expose_id: target for target in histories}
+    for key, entries in ((EVENTS_KEY, found.events), (PERIODS_KEY, found.periods)):
+        for entry in sorted(entries, key=lambda item: str(item["emit"])):
+            followed = _followed_statistic(entry, held, keys_of, sources)
+            if followed is None:
+                continue
+            target, name, tokens = followed
+            sentence = _PER_ENTITY[key].format(
+                history=target.expose_id, entity=", ".join(target.natural)
+            )
+            unused[:] = [
+                (pointer, sentence) if tuple(pointer[: len(tokens)]) == tokens else (pointer, why)
+                for pointer, why in unused
+            ]
+            found.notes.append((f"{entry['emit']}: {name}", sentence))
 
 
 _FOLLOWS = (

@@ -26,7 +26,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
 
-from flux_engine.author.window import WindowError, instant_ms, parse_window
+from flux_engine.author.window import WINDOW_END_LIMIT_MS, WindowError, instant_ms, parse_window
 from flux_engine.core.errors import FluxError
 from flux_engine.seam.coverage import printable
 
@@ -175,15 +175,43 @@ def read_history_file(path: Path) -> DeclaredHistory:
     if "history" not in document:
         raise DeclaredHistoryError(f"{name}: a history file holds history, a non-empty list")
     lists = {key: _entries(document, key, name, required=False) for key in _LISTS}
+    history = _entries(document, "history", name, required=True)
+    _refuse_the_year_9999(history, name)
     return DeclaredHistory(
         name=name,
-        history=_entries(document, "history", name, required=True),
+        history=history,
         snapshots=lists["snapshots"],
         events=lists["events"],
         periods=lists["periods"],
         as_of=lists["asOf"] if "asOf" in document else None,
         time_bounds=_time_bounds(document, name),
     )
+
+
+def _refuse_the_year_9999(history: Tuple[Mapping[str, Any], ...], name: str) -> None:
+    """Refuse an entry's ``until`` or ``start.bins`` edge at or after :data:`WINDOW_END_LIMIT_MS`.
+
+    The year 9999 spells an open end, which gives a run's window nothing, as in a declared range;
+    the window would end there to hold the history, and a run's periods step past the end of its
+    window, into a year no date holds. Each value is refused naming its place, as
+    ``history[0].until``. A value that reads as no instant is left to the plan's check.
+    """
+    for position, entry in enumerate(history):
+        start = entry.get("start")
+        bins = start.get("bins") if isinstance(start, Mapping) else None
+        places = [
+            (f"start.bins[{index}]", edge)
+            for index, edge in enumerate(bins if isinstance(bins, list) else ())
+        ]
+        places.append(("until", entry.get("until")))
+        for place, value in places:
+            found = instant_ms(value)
+            if found is not None and found >= WINDOW_END_LIMIT_MS:
+                raise DeclaredHistoryError(
+                    f"{name}: history[{position}].{place} {printable(str(value))!r} is in the year "
+                    "9999, which spells an open end rather than an instant the history runs to; "
+                    "give the instant its versions are written up to"
+                )
 
 
 def projected_emits(declared: DeclaredHistory) -> FrozenSet[str]:

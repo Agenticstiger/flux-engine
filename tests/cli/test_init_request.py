@@ -238,14 +238,16 @@ def test_the_request_file_starts_with_a_header_naming_what_it_is_and_its_spec(
 
 
 @pytest.mark.parametrize(
-    ("stuck", "overlays"), [("rmdir", False), ("unlink", False), ("unlink", True)]
+    ("stuck", "overlays"),
+    [("rmdir", False), ("unlink", False), ("rmdir", True), ("unlink", True)],
 )
-def test_what_cleanup_cannot_remove_does_not_change_the_refusal(
+def test_what_cleanup_cannot_remove_is_named_after_the_refusal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stuck: str, overlays: bool
 ) -> None:
     """The request cannot be written, so init removes what it wrote, best effort.
 
-    A directory or a file it cannot remove is left as it is: the refusal is the one reported.
+    A directory or a file it cannot remove is left as it is: the refusal is the one reported, and
+    a line after it names what stays, the outermost directory once for what lies in it.
     """
     profile = FIXTURES / "author" / "orders.profile.json"
     extra: Dict[str, Any] = {}
@@ -265,6 +267,8 @@ def test_what_cleanup_cannot_remove_does_not_change_the_refusal(
     plain.mkdir()
     expected = run_init(str(plain / "b"), contract=str(ORDERS), profile=str(profile), **extra)
     assert expected.exit_code == 1 and "No space left on device" in expected.stderr
+    assert "could not remove" not in expected.stderr
+    assert not (plain / "b").exists()
 
     def refuse(self: Path, *args: Any, **kwargs: Any) -> None:
         raise PermissionError(errno.EACCES, "Permission denied")
@@ -273,5 +277,22 @@ def test_what_cleanup_cannot_remove_does_not_change_the_refusal(
     stubborn = tmp_path / "stubborn"
     stubborn.mkdir()
     result = run_init(str(stubborn / "b"), contract=str(ORDERS), profile=str(profile), **extra)
+    monkeypatch.undo()
     assert result.exit_code == expected.exit_code
-    assert result.stderr == expected.stderr.replace(str(plain), str(stubborn))
+    refusal, _, named = result.stderr.partition("\ninit: could not remove ")
+    assert refusal == expected.stderr.replace(str(plain), str(stubborn))
+    stays = [stubborn / "b", *(stubborn / "b").rglob("*")] if (stubborn / "b").exists() else []
+    if not stays:
+        # The overlays' directories are removed whole, past a file method that refuses.
+        assert (stuck, overlays) == ("unlink", True) and not named
+        return
+    listed, _, way_out = named.rpartition("; remove ")
+    names = [Path(text) for text in listed.split(", ")]
+    assert way_out == ("it by hand" if len(names) == 1 else "them by hand")
+    # Each name is still there, none lies inside another, and all that stays is named or inside.
+    assert all(os.path.lexists(path) for path in names)
+    assert not any(other in path.parents for path in names for other in names)
+    assert all(any(path == name or name in path.parents for name in names) for path in stays)
+    if stuck == "rmdir":
+        # The files went; the directories that held them could not.
+        assert names == [stubborn / "b"] and not any(path.is_file() for path in stays)

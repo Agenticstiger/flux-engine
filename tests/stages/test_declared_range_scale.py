@@ -18,14 +18,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 import pytest
-import yaml
 
 from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.runtime import resolve_cast
 from flux_engine.seam.resolve import load_bundle, resolve_all_emits
 from flux_engine.stages.scaling import widened_columns
 
-from ._fleet import CONTRACT, DEPOT, VISIT, apply_module, bundle, expose, plan_module, repin
+from ._fleet import DEPOT, VISIT, apply_module, bundle, plan_module, with_range
 from .test_declared_range_run import verify_module
 
 pytestmark = pytest.mark.integration
@@ -34,14 +33,7 @@ KEY_RANGE = ">= 1 and <= 50"
 
 
 def _ranged(tmp_path: Path, expose_id: str, column: str, rule: str) -> Path:
-    target = bundle(tmp_path)
-    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
-    schema = expose(contract, expose_id)["contract"]["schema"]
-    next(item for item in schema if item["name"] == column)["validationRules"] = [
-        {"type": "range", "constraint": rule}
-    ]
-    repin(target, contract)
-    return target
+    return with_range(bundle(tmp_path), expose_id, column, rule)
 
 
 def _run(target: Path, state: Path, scale: str) -> Any:

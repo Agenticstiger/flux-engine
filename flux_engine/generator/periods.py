@@ -34,21 +34,29 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
 from flux_engine.core import kernel2
-from flux_engine.core.clock import parse_rfc3339_ms
+from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
 from flux_engine.core.errors import FluxError
 from flux_engine.core.seedtree import SeedTreeRoot
+from flux_engine.core.sizing import MOST_ROWS
 from flux_engine.expr2.check import Checked
 from flux_engine.expr2.functions import add_months
 from flux_engine.generator import rows as _rows
 from flux_engine.generator.counts import CountClass, classes_of, digest_key, slot_values
 from flux_engine.generator.history import HistoryPlan
 from flux_engine.generator.paths import KIND_PATH_SHAPE, kind_path
-from flux_engine.generator.rows import GeneratorPlan, cells_before_rules, generate_row_slice
+from flux_engine.generator.rows import (
+    OWN_DRAW,
+    GeneratorPlan,
+    cells_before_rules,
+    generate_row_slice,
+    held_levels,
+    own_plan_of,
+)
 from flux_engine.generator.versionview import DAY_MS, VersionView, unit_value, view_of
 from flux_engine.seam.contract import CompiledColumn, LogicalKind
 from flux_engine.seam.projections import PeriodKind, PeriodsEntry
@@ -57,9 +65,12 @@ if TYPE_CHECKING:
     from flux_engine.generator.projections import ProjectionPlan
 
 __all__ = [
+    "DEFAULT_PERIODIC_ROWS",
     "PeriodLayout",
     "clear_layouts",
     "count",
+    "estimated_pairs",
+    "period_range",
     "layout_of",
     "period_grid",
     "periods_rows",
@@ -74,6 +85,12 @@ _LAYOUTS_KEPT = 4
 _LAYOUTS: Dict[Tuple[Any, ...], "PeriodLayout"] = {}
 #: The most periods an entry may have; more is refused before any period is worked out.
 MOST_PERIODS = 1_000_000
+#: The rows a periodic emit may be estimated to derive before its periods are laid out, unless the
+#: plan sets another budget (``fluxsim plan --max-rows``, which ``plan.json`` records as ``maxRows``).
+DEFAULT_PERIODIC_ROWS = 50_000_000
+#: The fewest days a period of each grain spans: a month from the 31st of January ends on the 28th
+#: of February, and a quarter from the 1st of February spans 89 days.
+_SHORTEST_DAYS = {"day": 1, "week": 7, "month": 28, "quarter": 89, "year": 365}
 
 
 def _refuse(message: str) -> FluxError:
@@ -157,6 +174,75 @@ def period_count(
     return high
 
 
+def _day_text(milliseconds: int, *, up: bool) -> Optional[str]:
+    """The day of *milliseconds*, the first at or after it when *up*, else the last at or before it."""
+    days = -(-milliseconds // DAY_MS) if up else milliseconds // DAY_MS
+    try:
+        return date.fromordinal(days + _EPOCH_ORDINAL).isoformat()
+    except (ValueError, OverflowError):
+        return None
+
+
+def _day_before(text: str) -> Optional[str]:
+    found = _day_of(text)
+    return None if found == date.min else (found - timedelta(days=1)).isoformat()
+
+
+def _earlier(first: Optional[str], second: Optional[str]) -> Optional[str]:
+    """The earlier of two days, ``None`` being no bound."""
+    return second if first is None else first if second is None else min(first, second)
+
+
+def period_range(
+    entry: PeriodsEntry, window: Tuple[int, int], declared: Tuple[Optional[int], Optional[int]]
+) -> Optional[Tuple[Optional[str], Optional[str]]]:
+    """The days of the period column's range that cut the periods (ADR 0024, the amendment of 2026-11-25).
+
+    *declared* is the column's range in milliseconds. A period is kept when its first day lies in
+    it: ``(low, high)`` are the range's first and last days, each ``None`` where it drops no period,
+    and the whole is ``None`` when it drops none. A range no period of the entry starts in is
+    ``FLX-3403``.
+    """
+    grain = str(entry.grain)
+    low = None if declared[0] is None else _day_text(declared[0], up=True)
+    high = None if declared[1] is None else _day_text(declared[1], up=False)
+    total = period_count(grain, window, entry.from_day, entry.through_day)
+    through = _earlier(entry.through_day, high)
+    kept = period_count(grain, window, entry.from_day, through)
+    before = _before(entry, window, low, through)
+    if total and kept <= before:
+        raise _refuse(
+            f"periods ({entry.emit}): the contract's range on the period column "
+            f"{entry.column!r} ({low or ''} to {high or ''}) holds the first day of none of the "
+            f"{total} periods of the window; widen the range, or move the window or the entry's "
+            "from and through to meet it"
+        )
+    cut = (low if before else None, high if kept < total else None)
+    return None if cut == (None, None) else cut
+
+
+def _before(
+    entry: PeriodsEntry, window: Tuple[int, int], low: Optional[str], through: Optional[str]
+) -> int:
+    """The periods that start before the day *low*, of those that start on or before *through*."""
+    if low is None:
+        return 0
+    last = _day_before(low)
+    if last is None:
+        return 0
+    return period_count(str(entry.grain), window, entry.from_day, _earlier(through, last))
+
+
+def _clipped(entry: PeriodsEntry, projection: "ProjectionPlan") -> Tuple[PeriodsEntry, int]:
+    """*entry* with its ``through`` at the period column's range, and the periods before its low end."""
+    if projection.clip is None:
+        return entry, 0
+    assert projection.window is not None
+    low, high = projection.clip
+    clipped = replace(entry, through_day=_earlier(entry.through_day, high))
+    return clipped, _before(clipped, projection.window, low, clipped.through_day)
+
+
 def _refuse_many_periods(entry: PeriodsEntry, grain: str, window: Tuple[int, int]) -> None:
     """Refuse (``FLX-3403``) an entry whose range holds more than :data:`MOST_PERIODS` periods."""
     number = period_count(grain, window, entry.from_day, entry.through_day)
@@ -165,6 +251,95 @@ def _refuse_many_periods(entry: PeriodsEntry, grain: str, window: Tuple[int, int
             f"periods ({entry.emit}): grain {grain} over the range makes {number} periods; "
             f"at most {MOST_PERIODS}"
         )
+
+
+def _most_per_pair(entry: PeriodsEntry) -> Tuple[int, Optional[Tuple[int, int]]]:
+    """The most rows one held (version, period) pair takes, and the count class that sets most of it.
+
+    Over the kinds, a count or the high level of its largest class. The second member is the kind
+    whose classes reach the highest level and that level, or ``None`` for whole counts alone.
+    """
+    most, highest = 0, None
+    for index, kind in enumerate(entry.kinds or (PeriodKind(),)):
+        if isinstance(kind.count, int):
+            most += kind.count
+            continue
+        where = f"periods ({entry.emit}).kinds[{index}].count"
+        high = max(found.high for found in classes_of(kind.count.as_member(), where))
+        most += high
+        if highest is None or high > highest[1]:
+            highest = (index, high)
+    return most, highest
+
+
+def estimated_pairs(
+    entry: PeriodsEntry, window: Tuple[int, int], valid: Tuple["np.ndarray", "np.ndarray"]
+) -> int:
+    """An upper bound on the held pairs, worked out from the versions alone, before any period is listed.
+
+    Spark's ``sequence`` sizes its array as ``1 + (stop - start) / step`` in exact arithmetic before
+    it allocates; here a version valid over ``[a, b)`` inside the periods' span meets at most
+    ``(b - a) // shortest + 2`` periods, ``shortest`` the fewest days a period of the grain spans,
+    and never more than there are periods.
+    """
+    grain = str(entry.grain)
+    periods = period_count(grain, window, entry.from_day, entry.through_day)
+    if periods == 0:
+        return 0
+    anchor, _stop = _span(window, entry.from_day, entry.through_day)
+    low = np.maximum(valid[0], (anchor.toordinal() - _EPOCH_ORDINAL) * DAY_MS)
+    high = np.minimum(valid[1], window[1])
+    met = (high - low) // (_SHORTEST_DAYS[grain] * DAY_MS) + 2
+    return int(np.minimum(np.where(high >= low, met, 0), periods).sum())
+
+
+def _refuse_above_budget(
+    entry: PeriodsEntry,
+    projection: "ProjectionPlan",
+    valid: Tuple["np.ndarray", "np.ndarray"],
+    entities: int,
+) -> None:
+    """Refuse (``FLX-3403``) an entry estimated to derive more rows than the plan's budget.
+
+    The estimate is the pairs :func:`estimated_pairs` bounds times the most rows a pair takes, so
+    the refusal comes before the periods, the layout or a row is made. It never counts fewer rows
+    than the layout makes, so a count class's high level is taken for every pair, however rare the
+    class: the refusal then names that level. It runs while a plan is made; a recorded plan states
+    its rows, and ``apply`` and ``replay`` run it with no estimate (``budget`` is ``None``).
+    """
+    assert projection.window is not None and projection.budget is not None
+    budget = projection.budget
+    pairs = estimated_pairs(entry, projection.window, valid)
+    per_pair, highest = _most_per_pair(entry)
+    estimate = pairs * per_pair
+    if estimate <= budget:
+        return
+    grain = str(entry.grain)
+    start, end = (format_rfc3339_ms(instant) for instant in projection.window)
+    periods = period_count(grain, projection.window, entry.from_day, entry.through_day)
+    ranged = "".join(
+        f", {word} {day}"
+        for word, day in (("from", entry.from_day), ("through", entry.through_day))
+        if day is not None
+    )
+    raise _refuse(
+        f"periods ({entry.emit}): grain {grain} over the window {start} to {end}{ranged} makes "
+        f"{periods} periods, and the {entities} entities' versions are estimated to hold {pairs} "
+        f"(version, period) pairs, {estimate} rows at up to {per_pair} rows a pair, above the "
+        f"budget of {budget} rows a periodic emit; {_ways_out(highest)}, or raise the budget with "
+        f"--max-rows N (at most {MOST_ROWS})"
+    )
+
+
+def _ways_out(highest: Optional[Tuple[int, int]]) -> str:
+    """What brings the estimate down: a count class's high level when one sets it, else the periods."""
+    if highest is not None and highest[1] > 1:
+        index, level = highest
+        return (
+            f"kinds[{index}]'s count reaches {level} rows a pair and the estimate takes that level "
+            "for every pair, however rare its class: lower that level"
+        )
+    return "narrow the window (timeBounds, or the entry's from and through) or take a coarser grain"
 
 
 def period_grid(
@@ -373,14 +548,17 @@ def _per_period(layout_parts: Dict[str, Any], kinds: Tuple[_Kind, ...]) -> "np.n
 
 
 def _build(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
-    entry = _entry_of(projection)
+    entry, skipped = _clipped(_entry_of(projection), projection)
     assert projection.root is not None and projection.window is not None
     view = view_of(projection.history, chain, projection.root)
     _refuse_many_periods(entry, str(entry.grain), projection.window)
+    valid_from, valid_to = view.valid_ms(projection.window[1])
+    if projection.budget is not None:
+        _refuse_above_budget(entry, projection, (valid_from, valid_to), chain.entities)
     days, begins, ends = period_grid(
         str(entry.grain), projection.window, entry.from_day, entry.through_day
     )
-    valid_from, valid_to = view.valid_ms(projection.window[1])
+    days, begins, ends = days[skipped:], begins[skipped:], ends[skipped:]
     first, last = _runs(entry.match, begins, ends, valid_from, valid_to)
     where = f"periods ({entry.emit})"
     declared = entry.kinds or (PeriodKind(),)
@@ -428,6 +606,7 @@ def layout_of(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
         projection.history.digest().value,
         repr(entry),
         projection.window,
+        projection.budget,
     )
     found = _LAYOUTS.get(held)
     if found is None:
@@ -477,8 +656,8 @@ def _row_plan(
     return periods[cut], versions[cut], kinds[cut]
 
 
-def _override(text: str, column: CompiledColumn) -> Any:
-    """*text* read as a value of *column*'s type."""
+def override_value(text: str, column: CompiledColumn) -> Any:
+    """A kind's override *text* read as a value of *column*'s type."""
     kind = column.logical_type.kind
     if kind is LogicalKind.DATE:
         return date.fromisoformat(text)
@@ -496,25 +675,38 @@ def periods_rows(
     entry = projection.entry
     if start == stop:
         return ()
-    held, versions, kinds = _row_plan(layout, start, stop)
-    # The emit's own cells, before its rules: they run over the row once the period, the
-    # version's columns and the kind's overrides are set (projections.projection_rows).
-    own = cells_before_rules(replace(plan, projection=None), start, stop, root=root)
+    periods, versions, kinds = _row_plan(layout, start, stop)
     names = [column.column.name for column in plan.columns]
+    low, history_rows, named = _history_cells(projection, names, entry, versions, root)
+    overrides = [
+        {
+            names.index(name): override_value(text, plan.column_plan(name).column)
+            for name, text in declared.overrides
+        }
+        for declared in layout.kinds
+    ]
+    # The emit's own cells, before its rules: they run over the row once the period, the
+    # version's columns and the kind's overrides are set (projections.projection_rows). A column
+    # drawn given a column the entry sets reads the level the row holds there: the version's
+    # (ADR 0027, the amendment of 2026-11-25), or its kind's override (the amendment of
+    # 2026-11-26).
+    own_plan = own_plan_of(plan)
+    pairs = list(zip(kinds, versions, strict=True))
+    sources = dict(named)
+    held = held_levels(
+        own_plan,
+        {
+            name: _held_cells(names.index(name), sources, overrides, pairs, (low, history_rows))
+            for name in projection.held
+        },
+        projection.fallback,
+    )
+    own = cells_before_rules(own_plan, start, stop, root=root, held=held)
     position = names.index(entry.column)
     kind = plan.column_plan(entry.column).column.logical_type.kind
     assert kind is LogicalKind.DATE
-    overrides = []
-    for declared in layout.kinds:
-        overrides.append(
-            {
-                names.index(name): _override(text, plan.column_plan(name).column)
-                for name, text in declared.overrides
-            }
-        )
-    low, history_rows, named = _history_cells(projection, names, entry, versions, root)
     found = []
-    for row, period, which, version in zip(own, held, kinds, versions, strict=True):
+    for row, period, which, version in zip(own, periods, kinds, versions, strict=True):
         cells = list(row)
         for index, source in named:
             cells[index] = history_rows[version - low][source]
@@ -523,6 +715,33 @@ def periods_rows(
             cells[index] = value
         found.append(tuple(cells))
     return tuple(found)
+
+
+def _held_cells(
+    index: int,
+    sources: Mapping[int, int],
+    overrides: Sequence[Mapping[int, Any]],
+    pairs: Sequence[Tuple[int, int]],
+    history: Tuple[int, Sequence[Tuple[Any, ...]]],
+) -> List[Any]:
+    """The value each row holds in the emit's column *index* before the emit draws its own cells.
+
+    *pairs* holds each row's kind and version row. A row holds its kind's override where the kind
+    sets one, else its version's value for a column of the version (*sources*: the history's
+    column each such column of the emit reads), else :data:`OWN_DRAW`, and draws the column
+    itself. *history* is the first version row the slice reads, and those rows.
+    """
+    low, rows = history
+    source = sources.get(index)
+    found: List[Any] = []
+    for which, version in pairs:
+        if index in overrides[which]:
+            found.append(overrides[which][index])
+        elif source is not None:
+            found.append(rows[version - low][source])
+        else:
+            found.append(OWN_DRAW)
+    return found
 
 
 def _history_cells(

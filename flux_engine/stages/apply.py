@@ -43,6 +43,7 @@ from flux_engine.core.digest import (
 )
 from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import Kernel
+from flux_engine.core.sizing import MOST_ROWS
 from flux_engine.core.trace import TraceOp, build_run_digest_document, component_of
 from flux_engine.evidence.provenance import PROVENANCE_DIGEST_KEY, provenance_digest
 from flux_engine.evidence.register import REGISTER_DIGEST_KEY, register_digest
@@ -98,6 +99,12 @@ from flux_engine.stages.plan import (
     DATE_RANGES_CUT,
     DATE_RANGES_PLAN_KEY,
     END_SHARE_PLAN_KEY,
+    MAX_ROWS_PLAN_KEY,
+    PROJECTED_GIVENS_AFTER,
+    PROJECTED_GIVENS_OVERRIDES,
+    PROJECTED_GIVENS_PLAN_KEY,
+    RANGE_SETTERS_HELD,
+    RANGE_SETTERS_PLAN_KEY,
     REFERENCES_PLAN_KEY,
     SCALE_FLOORS_PLAN_KEY,
     SCALE_FLOORS_TRACKED,
@@ -120,7 +127,11 @@ __all__ = [
     "load_recorded_plan",
     "plan_date_ranges",
     "plan_scale_floors",
+    "plan_max_rows",
+    "plan_range_setters",
     "plan_end_share",
+    "plan_projected_givens",
+    "plan_override_givens",
     "plan_kernel",
     "require_plan_shortfalls",
     "require_run_digest_binds_plan",
@@ -193,6 +204,9 @@ def load_recorded_plan(layout: RunLayout) -> Dict[str, Any]:
     plan_end_share(document)
     plan_date_ranges(document)
     plan_scale_floors(document)
+    plan_max_rows(document)
+    plan_range_setters(document)
+    plan_projected_givens(document)
     require_plan_shortfalls(document)
     return document
 
@@ -273,19 +287,107 @@ def plan_scale_floors(plan_document: Mapping[str, Any]) -> bool:
     )
 
 
+def plan_range_setters(plan_document: Mapping[str, Any]) -> bool:
+    """Whether a recorded plan keeps its setters to the columns' ranges, or the refusal (``FLX-2102``).
+
+    A plan with ``rangeSetters`` says ``"held"`` (ADR 0024, the amendment of 2026-11-25): a history,
+    its projections and a periods entry keep to the contract's ranges on the columns they set. A
+    plan without it replays as it was made. Any other value is refused as ``historyEndShare`` is.
+    """
+    return _marker_named(
+        plan_document, RANGE_SETTERS_PLAN_KEY, RANGE_SETTERS_HELD, "holds no setter to a range"
+    )
+
+
+def plan_max_rows(plan_document: Mapping[str, Any]) -> Optional[int]:
+    """The periodic rows' budget a recorded plan names, or the refusal (``FLX-2102``).
+
+    A plan with ``maxRows`` was made with ``--max-rows`` (ADR 0027 section 5, the amendment of
+    2026-11-25); a plan without it took the default. A run of a recorded plan makes no estimate,
+    since the plan states its rows, so the value is read to check the plan. One that is not a
+    count from 1 to ``MOST_ROWS`` is refused as an unknown ``historyEndShare`` is.
+    """
+    if MAX_ROWS_PLAN_KEY not in plan_document:
+        return None
+    named = plan_document[MAX_ROWS_PLAN_KEY]
+    if not _is_count(named) or not 1 <= named <= MOST_ROWS:
+        raise FluxError(
+            FLX_2102,
+            f"the recorded plan names {MAX_ROWS_PLAN_KEY} {_short_repr(named)}, which is not a "
+            f"budget of rows from 1 to {MOST_ROWS}; plan again with this engine",
+        )
+    return named
+
+
+def plan_projected_givens(plan_document: Mapping[str, Any]) -> bool:
+    """Whether a recorded plan draws a column given a column of the version after the projection.
+
+    A plan with ``projectedGivens`` says ``"afterProjection"`` (ADR 0027, the amendment of
+    2026-11-25) or ``"afterOverrides"`` (:func:`plan_override_givens`). A plan without it holds no
+    such column, or was written by engine 0.11.1, which drew the column given the level the
+    column's own draw made; it replays that draw, so its rows keep their bytes. Any other value is
+    refused as ``historyEndShare`` is.
+    """
+    return _projected_givens_of(plan_document) is not None
+
+
+def plan_override_givens(plan_document: Mapping[str, Any]) -> bool:
+    """Whether a recorded plan holds a kind's override as the level of a column drawn given it.
+
+    A plan with ``projectedGivens: "afterOverrides"`` does (ADR 0027, the amendment of 2026-11-26).
+    A plan with ``"afterProjection"`` or without the key was made by an engine that held no
+    override, and replays that draw, so its rows keep their bytes.
+    """
+    return _projected_givens_of(plan_document) == PROJECTED_GIVENS_OVERRIDES
+
+
+def _projected_givens_of(plan_document: Mapping[str, Any]) -> Optional[str]:
+    return _marker_value(
+        plan_document,
+        PROJECTED_GIVENS_PLAN_KEY,
+        (PROJECTED_GIVENS_AFTER, PROJECTED_GIVENS_OVERRIDES),
+        "draws given the level the column's own draw made",
+    )
+
+
+def _recorded_era(plan_document: Mapping[str, Any]) -> "_pipeline.PlanEra":
+    """What a recorded plan was made under, from its keys (:class:`~flux_engine.stages.pipeline.PlanEra`).
+
+    A recorded plan states the rows it derives, so it is run with no estimate of them.
+    """
+    return _pipeline.PlanEra(
+        end_share=plan_end_share(plan_document),
+        cut_ranges=plan_date_ranges(plan_document),
+        tracked_levels=plan_scale_floors(plan_document),
+        periodic_rows=plan_max_rows(plan_document),
+        hold_ranges=plan_range_setters(plan_document),
+        estimate_rows=False,
+        projected_givens=plan_projected_givens(plan_document),
+        override_givens=plan_override_givens(plan_document),
+    )
+
+
 def _marker_named(plan_document: Mapping[str, Any], key: str, known: str, without: str) -> bool:
     """Whether *plan_document* carries *key*, refusing (``FLX-2102``) a value other than *known*."""
+    return _marker_value(plan_document, key, (known,), without) is not None
+
+
+def _marker_value(
+    plan_document: Mapping[str, Any], key: str, known: Tuple[str, ...], without: str
+) -> Optional[str]:
+    """The value *plan_document* names for *key*, ``None`` without it; one not *known* is ``FLX-2102``."""
     if key not in plan_document:
-        return False
+        return None
     named = plan_document[key]
-    if named != known:
+    if named not in known:
+        values = " and ".join(repr(value) for value in known)
         raise FluxError(
             FLX_2102,
             f"the recorded plan names {key} {_short_repr(named)}, a value this engine does not "
-            f"know (a plan written by a newer or incompatible version; it knows {known!r}, and a "
+            f"know (a plan written by a newer or incompatible version; it knows {values}, and a "
             f"plan without the key {without}); plan again with this engine",
         )
-    return True
+    return str(named)
 
 
 def _is_count(value: object) -> TypeGuard[int]:
@@ -439,6 +541,11 @@ def _register_the_plan_does_not_name(
     )
 
 
+#: Why ``apply --run-id`` refuses ``--max-rows``: the plan states the rows it derives.
+_MAX_ROWS_NEEDS_A_FRESH_PLAN = (
+    "--max-rows is read only when apply takes a fresh plan: the plan of --run-id states the rows "
+    "it derives, and is applied with no estimate"
+)
 #: Why ``apply --run-id`` refuses ``--scale``: the plan records the size it was made at.
 _SCALE_NEEDS_A_FRESH_PLAN = (
     "--scale is read only when apply takes a fresh plan: the plan of --run-id records the "
@@ -473,6 +580,7 @@ def apply(
     sink: Optional[str] = None,
     sink_options: Optional[Mapping[str, str]] = None,
     allow_generators: Sequence[str] = (),
+    max_rows: Optional[int] = None,
 ) -> StageResult:
     """Apply the plan at ``<state_dir>/runs/<run_id>/plan.json``.
 
@@ -481,7 +589,8 @@ def apply(
     execute the plan again.
 
     *scale* sizes the fresh plan (:mod:`flux_engine.stages.scaling`); with *run_id* it is
-    refused, because the plan records its own. *shard* is ``(I, N)`` or ``"I/N"``: only
+    refused, because the plan records its own, and so is *max_rows*, the fresh plan's periodic
+    rows' budget (:func:`flux_engine.stages.plan.plan`), since a recorded plan states its rows. *shard* is ``(I, N)`` or ``"I/N"``: only
     that share of every generated emit's rows is made and written, as
     ``emits/<exposeId>.shard-I-of-N.ndjson`` beside ``shard-I-of-N.json``, which joined in
     order are the bytes of the run's own emit streams. A shard writes no run digest and no
@@ -567,6 +676,7 @@ def apply(
                 scale=scale,
                 shard=shard,
                 allow_generators=allow_generators,
+                max_rows=max_rows,
             ),
         ),
     )
@@ -644,11 +754,14 @@ def _apply(
     scale: Any,
     shard: Any,
     allow_generators: Sequence[str],
+    max_rows: Optional[int] = None,
 ) -> StageResult:
     if run_id is not None and profile is not None:
         return StageResult(stage="apply", exit_code=2, stderr=_PROFILE_NEEDS_A_FRESH_PLAN)
     if run_id is not None and scale is not None:
         return StageResult(stage="apply", exit_code=2, stderr=_SCALE_NEEDS_A_FRESH_PLAN)
+    if run_id is not None and max_rows is not None:
+        return StageResult(stage="apply", exit_code=2, stderr=_MAX_ROWS_NEEDS_A_FRESH_PLAN)
     try:
         shares = None if shard is None else parse_shard(shard)
         optional_scale(scale)  # refused here when it names no usable size
@@ -679,6 +792,7 @@ def _apply(
             shard=shares,
             allow_generators=allow_generators,
             reuse_committed=shares is None,
+            max_rows=max_rows,
         )
         if not planned.success:
             return StageResult(
@@ -800,11 +914,7 @@ def _apply(
                 strict_coverage=strict_coverage,
                 kernel=kernel,
                 scale=optional_scale(plan_document.get("scale")),
-                era=_pipeline.PlanEra(
-                    end_share=plan_end_share(plan_document),
-                    cut_ranges=plan_date_ranges(plan_document),
-                    tracked_levels=plan_scale_floors(plan_document),
-                ),
+                era=_recorded_era(plan_document),
                 shard=shares,
                 references=plan_document.get(REFERENCES_PLAN_KEY),
                 allow_generators=allow_generators,

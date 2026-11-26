@@ -27,7 +27,7 @@ install, and how a run moves through them.
 | Learn by doing | [Tutorial](./tutorial/README.md) | A lesson that works the first time. |
 | Get a job done | [How-to guides](./how-to/README.md) | Steps for one goal, for a reader who knows the basics. |
 | Look something up | [Reference](./reference/README.md) | The command line, every error code, the Python API, the schemas. |
-| Understand why | [Explanation](./explanation/README.md) | Background: the architecture, the loop, determinism, the seam, the evidence pack, running offline. |
+| Understand why | [Explanation](./explanation/README.md) | Background: the architecture, the loop, determinism, the seam, the evidence pack, running offline, and where FLUX fits among other tools. |
 | Read the rules | [Specifications](./spec/README.md) | What the engine must do, rule by rule: the kernel, the seam, the expression languages, the profile and the scores. |
 | See why it was decided | [Decision records](./adr/README.md) | One record per design decision, with what else was considered. |
 
@@ -76,3 +76,6 @@ checks fail.
 It is not a claim that the simulated customers behave like real ones. Every evidence
 pack ends with a section that says so, and in this release the engine always reports
 `validity: not asserted`.
+
+[Where FLUX fits](./explanation/compared.md) says what FLUX is good at, where it is not, and how it
+compares with other synthetic data tools.

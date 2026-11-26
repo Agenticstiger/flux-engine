@@ -377,6 +377,173 @@ def test_a_noisy_profile_that_holds_an_exact_history_is_p1_and_names_the_history
     assert accounting.spent == {"rho": "0.2"}
 
 
+def _noisy_history_example() -> Dict[str, Any]:
+    document = json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8"))
+    version = document["tables"]["card_version"]["history"]["versionLength"]
+    version["noise"] = {"mechanism": "gaussian", "scale": "8", "privacyLoss": {"rho": "0.125"}}
+    version["groups"] = [{"group": "", "status": "F", "noisyCounts": ["251.5", "348.2", "250.6"]}]
+    document["privacy"]["privacyLoss"]["rho"] = "1.5"
+    return document
+
+
+def test_a_history_whose_every_member_is_noisy_no_longer_keeps_a_profile_from_p3() -> None:
+    graded = grade_profile(_noisy_history_example(), pinned=True)
+    assert graded.pattern is Pattern.P3, graded.reasons
+
+
+def test_a_history_with_one_member_without_noise_keeps_a_profile_from_p1() -> None:
+    graded = grade_profile(
+        json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8")),
+        pinned=True,
+    )
+    assert graded.pattern is Pattern.P1
+    assert any("history" in reason and "without noise" in reason for reason in graded.reasons)
+
+
+def test_a_noisy_null_count_does_not_keep_a_profile_from_p3() -> None:
+    document = _noisy_history_example()
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3
+    assert graded.accounting is not None and graded.accounting.parts == 12
+
+
+def _released_exact(member: Dict[str, Any]) -> None:
+    """*member* of a history released without noise, its counts the rounded noisy ones."""
+    member.pop("noise")
+    member["disclosure"] = "none"
+    for group in member["groups"]:
+        counts = [max(0, round(float(value))) for value in group.pop("noisyCounts")]
+        group["k"] = sum(counts)
+        group["levelCounts"] = counts
+
+
+def _exact_member(document: Dict[str, Any], member: str) -> Dict[str, Any]:
+    """The 1-5-0 example with a noisy history, its tracked column's *member* released exactly."""
+    history = document["tables"]["card_version"]["history"]
+    if member == "reasons":
+        found = copy.deepcopy(history["columns"]["tier"]["initial"])
+        found["levels"] = ["several", "tier"]
+        history["reasons"] = found
+    else:
+        found = history["columns"]["tier"][member]
+    _released_exact(found)
+    return document
+
+
+@pytest.mark.parametrize("member", ["reasons", "transitions"])
+def test_a_history_member_released_exactly_keeps_a_profile_from_p3(member: str) -> None:
+    document = _noisy_history_example()
+    document["privacy"]["privacyLoss"]["rho"] = "3"
+    if member == "reasons":
+        # a noisy reasons member next to it is P3; only the exact one is not
+        history = document["tables"]["card_version"]["history"]
+        noisy = copy.deepcopy(history["columns"]["tier"]["initial"])
+        noisy["levels"] = ["several", "tier"]
+        history["reasons"] = noisy
+        assert grade_profile(document, pinned=True).pattern is Pattern.P3
+        del history["reasons"]
+    graded = grade_profile(_exact_member(document, member), pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert graded.accounting is not None and graded.accounting.parts > 0, graded.reasons
+    assert any(
+        "history of versions with a member released without noise" in r for r in graded.reasons
+    )
+
+
+def _band(document: Dict[str, Any], statistic: Dict[str, Any]) -> None:
+    statistic["sampleSize"] = {"min": 5000, "max": 5000}
+
+
+def _history_chain(document: Dict[str, Any]) -> None:
+    _band(document, document["tables"]["card_version"]["history"]["chain"])
+
+
+def _history_initial(document: Dict[str, Any]) -> None:
+    columns = document["tables"]["card_version"]["history"]["columns"]
+    _band(document, next(iter(columns.values()))["initial"])
+
+
+def _query_band(document: Dict[str, Any]) -> None:
+    _band(document, document["queries"][1]["statistics"][0])
+
+
+def _query_group(document: Dict[str, Any]) -> None:
+    document["queries"][0]["statistics"][0][
+        "groupBy"
+    ] = "valid_from"  # a timestamp column: its keys are data
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (_history_chain, "sampleSize band whose min equals its max"),
+        (_history_initial, "sampleSize band whose min equals its max"),
+        (_query_band, "sampleSize band whose min equals its max"),
+        (_query_group, "grouped by a column whose keys are data values"),
+    ],
+)
+def test_a_noisy_history_member_or_query_that_still_states_data_is_not_p3(
+    change: Any, reason: str
+) -> None:
+    document = _noisy_history_example()
+    assert grade_profile(document, pinned=True).pattern is Pattern.P3
+    change(document)
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert any(reason in item for item in graded.reasons), graded.reasons
+
+
+def _release(history: bool, queries: bool) -> Dict[str, Any]:
+    """The 1-5-0 example, graded P3, with a noisy history and noisy queries kept or dropped."""
+    document = _noisy_history_example()
+    if not history:
+        document["tables"]["card_version"].pop("history")
+        document["tables"]["card_version"]["columns"]["valid_to"] = {"domain": "timestamp"}
+        document["queries"] = document["queries"][:2]  # the entity form needs the history
+    if not queries:
+        document["queries"] = []
+    return document
+
+
+_HISTORY_OBLIGATIONS = (
+    "Noisy history, stated and not checked: every version of an entity references one row of "
+    "the parent of its table's listed relationship, so an entity lies in one unit; the "
+    "maxChildren bounding of the table keeps or drops an entity's versions together, by a rule "
+    "that reads only that parent's rows; and publicStructure also covers the bins of "
+    "versionsPerEntity, firstStart and versionLength, the levels of initial and transitions, "
+    "and the candidate columns."
+)
+_QUERY_OBLIGATIONS = (
+    "Noisy query, stated and not checked: its records are what its unit states; the query and "
+    "its unit pass the checks of ADR 0028; whether a record matches reads only rows of that "
+    "record's own unit and of tables the unit does not reach; under a history's entities, an "
+    "entity's rows lie in one unit and the bounding of its table keeps or drops an entity's "
+    "versions together; and a profiler that cannot run a query withholds every query of the "
+    "release."
+)
+
+
+@pytest.mark.parametrize(
+    ("history", "queries"), [(True, True), (True, False), (False, True), (False, False)]
+)
+def test_a_1_5_0_report_names_the_obligations_of_each_noisy_part_it_holds(
+    history: bool, queries: bool
+) -> None:
+    graded = grade_profile(_release(history, queries), pinned=True)
+    assert graded.pattern is Pattern.P3, graded.reasons
+    text = render_privacy_section(RunGrade(graded))
+    assert ("Noisy history, stated and not checked" in text) is history
+    assert ("Noisy query, stated and not checked" in text) is queries
+    assert (_HISTORY_OBLIGATIONS in text) is history
+    assert (_QUERY_OBLIGATIONS in text) is queries
+
+
+def test_a_report_of_format_1_4_0_names_no_noisy_obligation() -> None:
+    document = json.loads((SPEC / "profile-1-4-follows-example.json").read_text(encoding="utf-8"))
+    text = render_privacy_section(RunGrade(grade_profile(document, pinned=True)))
+    assert "stated and not checked" not in text
+
+
 # ---------------------------------------------------------------------------
 # Calendar and date-pair statistics, relationship dates, and members the grade does not know
 # ---------------------------------------------------------------------------
@@ -942,3 +1109,21 @@ def test_a_released_profile_with_an_emptied_calendar_entry_grades_as_it_would_wi
     accounting = graded.accounting
     assert accounting is not None and accounting.parts == 3
     assert accounting.spent == {"rho": "0.25"}
+
+
+#: A profile of format 1-3-0 whose queries are exact and grouped, the shape a run pins today.
+EARLIER_QUERIES = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "outcomes" / "subscriptions.profile.json"
+)
+
+
+def test_a_profile_of_an_earlier_format_keeps_the_reasons_its_queries_give() -> None:
+    """Format 1-5-0's checks of a history's and a query's statistics, and its wording of the reason
+    a query gives, leave an earlier document's grade as it was."""
+    grade = grade_profile(json.loads(EARLIER_QUERIES.read_text("utf-8")), pinned=True)
+    assert grade.pattern is Pattern.P1
+    assert (
+        "the profile holds period, query or fact statistics, or reference rows, which cannot be "
+        "released with noise in this format"
+    ) in grade.reasons
+    assert not any("whose keys are data values" in reason for reason in grade.reasons)

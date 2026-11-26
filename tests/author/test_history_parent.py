@@ -23,7 +23,7 @@ import pytest
 
 from flux_engine.seam.history import history_entries_of
 
-from ._written import assert_state, bundle_digests, resolved_emits
+from ._written import assert_state, bundle_digests, plan_written, resolved_emits
 from .test_history_init import (
     CONTRACT,
     _bins,
@@ -254,3 +254,42 @@ def test_every_statistic_of_the_relationship_is_used_or_unused_with_a_reason(
         for pointer, state in states.items()
         if pointer.startswith("/relationships/")
     )
+
+
+def _with_dependency(sources: str, targets: str) -> str:
+    """The plans contract with one ``dependency`` of the plan versions, *sources* to *targets*."""
+    return CONTRACT.read_text(encoding="utf-8").replace(
+        "        - { name: signed_on, type: DATE, required: true }\n    semantics:",
+        "        - { name: signed_on, type: DATE, required: true }\n"
+        "      invariants:\n"
+        "        - id: account_by_plan\n"
+        f"          dependency: {{ from: [{sources}], to: [{targets}] }}\n"
+        "    semantics:",
+    )
+
+
+def test_a_dependency_from_the_entity_to_the_parent_key_keeps_the_parent(tmp_path: Path) -> None:
+    # The layout gives every version of a plan one account, so the dependency holds by it and
+    # the plan draws nothing for it: the relationship is still the history's parent.
+    result = _init(tmp_path, _with_accounts(), _with_dependency("plan_id", "account_id"))
+    (entry,) = _entries(tmp_path)
+    assert entry["parent"]["relationship"] == "account" and "children" in entry["parent"]
+    assert "history parent account: not the parent" not in result.stdout
+    plan_written(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "sources, targets",
+    [
+        # From a column that is not the natural entity: the layout does not decide it.
+        ("signed_on", "account_id"),
+        # To a column besides the parent's key: the layout sets only the key.
+        ("plan_id", "account_id, channel"),
+    ],
+)
+def test_a_dependency_the_layout_does_not_hold_still_refuses_the_parent(
+    tmp_path: Path, sources: str, targets: str
+) -> None:
+    result = _init(tmp_path, _with_accounts(), _with_dependency(sources, targets))
+    assert "parent" not in _entries(tmp_path)[0]
+    assert "a rule, a dependency or a copy sets its column" in result.stdout

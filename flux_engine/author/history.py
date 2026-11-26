@@ -44,6 +44,7 @@ from flux_engine.author.basis import Label, assumed
 from flux_engine.author.catalogue import published_levels
 from flux_engine.author.children import count_children, declare_counted
 from flux_engine.author.columns import ColumnPlan, cell_weights, count_cells, share_texts
+from flux_engine.core.canonical import nfc
 from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.keys import ExposeKeys, window_ends
@@ -105,7 +106,8 @@ class HistorySource:
 
     ``rows`` is the expose's versions. ``plans`` holds each column's plan, by name, and ``kinds``
     its type. ``set_by_rules`` is the columns a rule, a dependency or a copy sets, which a history
-    never tracks. ``window`` is ``timeBounds`` as RFC 3339 text.
+    never tracks, and ``dependents`` those of them a contract ``dependency`` alone sets.
+    ``window`` is ``timeBounds`` as RFC 3339 text.
     """
 
     expose_id: str
@@ -119,6 +121,7 @@ class HistorySource:
     minimum_cell: int
     fractional_bits: int
     set_by_rules: FrozenSet[str] = frozenset()
+    dependents: FrozenSet[str] = frozenset()
     parents: Tuple[ParentCandidate, ...] = ()
     #: Each foreign key of the emit into a reference expose, by column: the expose and the keys the
     #: profile publishes for it, or ``None`` when they are not all published.
@@ -722,7 +725,7 @@ def _parent_hold(source: HistorySource, candidate: ParentCandidate, fixed: Froze
         return "its column is not one the bundle plans"
     if candidate.column in fixed:
         return "its column is a key, or a validity column, which the history sets"
-    if candidate.column in source.set_by_rules:
+    if candidate.column in source.set_by_rules and not _held_by_layout(source, candidate):
         return "a rule, a dependency or a copy sets its column"
     nulls = plan.declaration.get("nullFraction")
     if nulls is not None and Decimal(str(nulls)) != 0:
@@ -732,6 +735,40 @@ def _parent_hold(source: HistorySource, candidate: ParentCandidate, fixed: Froze
     if candidate.parent_rows < 1:
         return "its parent holds no row"
     return ""
+
+
+def _held_by_layout(source: HistorySource, candidate: ParentCandidate) -> bool:
+    """Whether the only rule that sets *candidate*'s column is a dependency the layout holds.
+
+    The layout gives every version of an entity one parent row, so a contract ``dependency`` from
+    columns that include the natural entity to the parent's foreign key alone holds by it, and the
+    plan draws nothing for it (ADR 0017, amendment of 2026-11-25). Any other dependency, or a
+    derive or copy of the column, keeps the column from the layout.
+    """
+    keys = source.keys
+    if keys is None or candidate.column not in source.dependents:
+        return False
+    natural = {entity.column for entity in keys.entities if entity.kind == "natural"}
+    if len(natural) != 1:
+        return False
+    contract = source.contract_expose.get("contract")
+    invariants = contract.get("invariants") if isinstance(contract, Mapping) else None
+    naming = [
+        rule
+        for rule in (
+            entry.get("dependency") if isinstance(entry, Mapping) else None
+            for entry in (invariants if isinstance(invariants, list) else ())
+        )
+        if isinstance(rule, Mapping)
+        and isinstance(rule.get("to"), list)
+        and candidate.column in rule["to"]
+    ]
+    return bool(naming) and all(
+        set(rule["to"]) == {candidate.column}
+        and isinstance(rule.get("from"), list)
+        and natural <= set(rule["from"])
+        for rule in naming
+    )
 
 
 def _publishes_children(candidate: ParentCandidate) -> bool:
@@ -1107,17 +1144,88 @@ def _validity(source: HistorySource) -> Tuple[LogicalKind, Tuple[str, ...], str,
     return kinds[0], natural, start, end
 
 
-def _required_end(source: HistorySource, end: str) -> None:
+def declared_end(contract_expose: Mapping[str, Any], end: str) -> Mapping[str, Any]:
+    """The ``validityParams`` the contract declares on its validity window's end, or ``{}``.
+
+    FLUID 0.7.7 declares a versioned table's conventions on the ``isEnd`` dimension: ``openEnd``,
+    the value an open version's end holds (``null`` or a literal of the end column's type), and
+    ``chain``, how a closed version's end meets the same entity's next start.
+    """
+    semantics = contract_expose.get("semantics")
+    dimensions = semantics.get("dimensions") if isinstance(semantics, Mapping) else None
+    for dimension in dimensions if isinstance(dimensions, list) else ():
+        if not isinstance(dimension, Mapping) or not isinstance(dimension.get("name"), str):
+            continue
+        params = dimension.get("typeParams")
+        validity = params.get("validityParams") if isinstance(params, Mapping) else None
+        if (
+            isinstance(validity, Mapping)
+            and validity.get("isEnd")
+            and nfc(dimension["name"]) == end
+        ):
+            return validity
+    return {}
+
+
+def _open_end(source: HistorySource, end: str, declared: Mapping[str, Any]) -> Optional[str]:
+    """The value an open version's end holds: the contract's ``openEnd``, or ``None`` for NULL.
+
+    Raises :class:`_Skip` when no version can be left open as the contract says: the end column is
+    required and the contract declares no open end, or a NULL one, or one that is not text. The
+    value is never read from the profile: an end the data holds is not a declaration of it.
+    """
     from flux_engine.seam.contract import compile_expose
 
-    required = {
+    required = end in {
         column.name for column in compile_expose(source.contract_expose).columns if column.required
     }
-    if end in required:
+    if "openEnd" not in declared or declared["openEnd"] is None:
+        if required:
+            declared_null = "openEnd" in declared
+            raise _Skip(
+                f"the end column {end!r} is required, and the contract declares "
+                + ("a NULL open end" if declared_null else "no open end")
+                + ": declare the value an open version's end holds as openEnd on the validity "
+                "window's end dimension"
+            )
+        return None
+    value = declared["openEnd"]
+    if not isinstance(value, str):
+        raise _Skip(f"the contract's openEnd {value!r} is not a literal of the end column's type")
+    return value
+
+
+def _declared_chain(declared: Mapping[str, Any], kind: LogicalKind) -> Optional[str]:
+    """The chain the contract declares on its validity window's end, or ``None`` when it declares none.
+
+    Raises :class:`_Skip` for a chain the engine does not generate: ``none`` (versions that need
+    not meet), and ``dayBefore`` on TIMESTAMP columns.
+    """
+    chain = declared.get("chain")
+    if chain is None:
+        return None
+    if chain == "none":
         raise _Skip(
-            f"the end column {end!r} is required, and an open version needs an openEnd, "
-            "which init does not write"
+            "the contract declares chain none, versions that need not meet, which the engine does "
+            "not generate"
         )
+    if chain not in _CHAINS:
+        raise _Skip(f"the contract declares chain {chain!r}, which the engine does not generate")
+    if chain == "dayBefore" and kind is not LogicalKind.DATE:
+        raise _Skip("the contract declares chain dayBefore, which a TIMESTAMP column cannot take")
+    return str(chain)
+
+
+def _chain_reason(history: Mapping[str, Any], kind: LogicalKind, level: str) -> str:
+    """What the profile's share of how versions meet says, beside the chain the contract declares."""
+    declared = f"the contract declares the chain {level}, which sets the entry's chain"
+    try:
+        found, share = _chain_level(history.get("chain"), kind)
+    except _Skip:
+        return declared
+    if found == level:
+        return f"{declared}; it holds on {_percent(share)} of consecutive versions"
+    return f"{declared}; the versions meet by {found} on {_percent(share)} of consecutive versions"
 
 
 def _until(source: HistorySource, kind: LogicalKind) -> str:
@@ -1148,8 +1256,14 @@ def _build(source: HistorySource, written: HistoryWritten) -> None:
     history = source.table["history"]
     base = ("tables", source.expose_id, "history")
     kind, natural, start, end = _validity(source)
-    _required_end(source, end)
-    level, share = _chain_level(history.get("chain"), kind)
+    declared = declared_end(source.contract_expose, end)
+    open_end = _open_end(source, end, declared)
+    level = _declared_chain(declared, kind)
+    if level is not None:
+        chain_reason = _chain_reason(history, kind, level)
+    else:
+        level, share = _chain_level(history.get("chain"), kind)
+        chain_reason = f"{level} holds on {_percent(share)} of consecutive versions, which sets the entry's chain"
     entities, versions, used, unused, notes = _versions(history, base, source)
     written.used += used
     written.unused += unused
@@ -1182,12 +1296,10 @@ def _build(source: HistorySource, written: HistoryWritten) -> None:
         )
     entry["until"] = _until(source, kind)
     entry["chain"] = level
-    written.used.append(
-        (
-            base + ("chain",),
-            f"{level} holds on {_percent(share)} of consecutive versions, which sets the entry's chain",
-        )
-    )
+    if open_end is not None:
+        entry["openEnd"] = open_end
+    if "chain" in history:
+        written.used.append((base + ("chain",), chain_reason))
     written.exempt = _fixed(source, (start, end, *natural)) | source.set_by_rules
     _write_parent(source, entry, entities, written)
     _tracked_and_end(history, base, source, entry, written)

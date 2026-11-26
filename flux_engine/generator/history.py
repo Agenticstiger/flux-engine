@@ -113,6 +113,7 @@ __all__ = [
     "entity_chain",
     "entity_states",
     "first_start_at",
+    "validity_bound",
     "fit_lengths",
     "largest_count",
     "limit_of",
@@ -239,6 +240,10 @@ class HistoryPick:
     #: ``--scale``. The layout is worked out from them and may hold fewer (ADR 0017, amendment of
     #: 2026-11-24), when ``rows`` is what it holds.
     declared_rows: Optional[int] = None
+    #: The first unit a version may start on and the unit every chain must end by, in the chain's
+    #: unit, from the contract's ranges on the validity columns (:data:`Ranged`); ``None`` when the
+    #: ranges cut nothing or the plan does not hold the history to them.
+    ranged: Optional["Ranged"] = None
 
     @property
     def laid_rows(self) -> int:
@@ -260,6 +265,9 @@ class HistoryPick:
         if self.declared_rows is not None and self.declared_rows != self.rows:
             # The layout holds fewer rows than the contract declares.
             document["declaredRows"] = self.declared_rows
+        if self.ranged is not None:
+            # Only a history its validity columns' ranges cut says where (ADR 0024, 2026-11-25).
+            document["validityRange"] = list(self.ranged)
         return document
 
 
@@ -290,6 +298,13 @@ class OuterInputs:
                 None if self.expected is None else tuple(self.expected),
             )
         return (self.relationship, self.parents, self.shape, self.minimum, held)
+
+
+#: ``(low, limit)``: a version starts at ``low`` or later, and a chain ends by ``limit`` (every
+#: start before it and every closed end at most one unit before it), in the chain's unit; either is
+#: ``None`` for no bound. The contract's ranges on a history's validity columns (ADR 0024, the
+#: amendment of 2026-11-25), shared by every entity.
+Ranged = Tuple[Optional[int], Optional[int]]
 
 
 @dataclass(frozen=True, eq=False)
@@ -354,7 +369,10 @@ class ParentCut:
     """What a parent's lifetime does to the entities of a history (ADR 0017, amendment of 2026-11-24).
 
     ``limits[e]`` is where entity ``e``'s chain must end, in the chain's unit. ``forced`` flags the
-    entities whose parent ended inside the horizon (they end). ``capped`` is the number of entities
+    entities whose parent ended inside the horizon (they end), and ``last_days`` holds a forced
+    entity's parent's last day (``limits`` elsewhere): what a projection holds its open version to,
+    which, unlike ``limits``, leaves out the validity columns' range, since the range closes no
+    version (ADR 0017, the amendment of 2026-11-26). ``capped`` is the number of entities
     whose version count was cut to the room their parent leaves them, ``moved`` the versions they
     lost that went to entities with room to spare, and ``shortfall`` the versions no entity had
     room for, which the layout does not hold (its rows are the declared ones less the shortfall).
@@ -362,6 +380,7 @@ class ParentCut:
 
     limits: "np.ndarray"
     forced: "np.ndarray"
+    last_days: "np.ndarray"
     capped: int = 0
     moved: int = 0
     shortfall: int = 0
@@ -530,7 +549,9 @@ def largest_count(entities: int, rows: int, versions: Optional[ChildShape]) -> i
     return int(_count_multiset(entities, rows, versions).max())
 
 
-def parent_bound_notes(expose_id: str, chain: "HistoryPlan") -> List[str]:
+def parent_bound_notes(
+    expose_id: str, chain: "HistoryPlan", bound: str = "the parents' lifetimes leave"
+) -> List[str]:
     """What ``plan`` says of a history that keeps to its parent's lifetime, one sentence each.
 
     The entities whose parent's lifetime leaves room for fewer versions than they were given, and
@@ -538,13 +559,15 @@ def parent_bound_notes(expose_id: str, chain: "HistoryPlan") -> List[str]:
     parents leave no room for), and the count of entities forced to end with their parent in one
     version, whose one version is the ending version itself and carries the end value from its
     start (ADR 0017, amendment of 2026-11-24). Advice only, except the shortfall, which the plan
-    document records too (``declaredRows`` and ``shortfall``).
+    document records too (``declaredRows`` and ``shortfall``). *bound* says what cut the room, with
+    its verb: the parents' lifetimes, or the validity columns' range (ADR 0024, the amendment of
+    2026-11-25).
     """
     notes: List[str] = []
     cut = chain.cut
     if cut is not None and cut.capped:
         said = (
-            f"note: history ({expose_id}): the parents' lifetimes leave {cut.capped} of "
+            f"note: history ({expose_id}): {bound} {cut.capped} of "
             f"{chain.entities} entities room for fewer versions than they were given; "
             f"{cut.moved} versions moved to entities with room to spare"
         )
@@ -1090,6 +1113,7 @@ def _parent_interval(
     parents: "np.ndarray",
     span: Tuple[int, int, int, int],
     closing: int,
+    ranged: Optional[Ranged] = None,
 ) -> Tuple["np.ndarray", "np.ndarray", "np.ndarray", "np.ndarray"]:
     """Each entity's first-start interval, where its chain must end, and which entities have no room.
 
@@ -1099,7 +1123,9 @@ def _parent_interval(
     limit - c' - 1]`` when that is not empty, so the entity has the room for ``c`` versions
     (``c' = c + closing``), and so draws what it would draw without the bound where its parent cuts
     nothing; otherwise in ``[max(first, ps), limit - closing - 2]``, the room for one version.
-    An entity with no such start is the third array's ``True``.
+    An entity with no such start is the fourth array's ``True``. *ranged* is a bound every entity
+    shares, the validity columns' ranges: ``first`` is at least its ``low`` and ``limit`` at most
+    its ``limit``.
     """
     first, _last, until, c = span
     low = np.where(
@@ -1108,10 +1134,36 @@ def _parent_interval(
     limit = np.where(bound.has_end[parents], np.minimum(until, bound.ends[parents]), until).astype(
         np.int64
     )
+    if ranged is not None and ranged[0] is not None:
+        low = np.maximum(low, ranged[0])
+    if ranged is not None and ranged[1] is not None:
+        limit = np.minimum(limit, ranged[1])
     full = limit - (c + closing) - 1
     one = limit - (1 + closing) - 1
     high = np.where(low <= full, full, one)
     return low, high, limit, low > one
+
+
+def _cut_interval(
+    entry: HistoryEntry,
+    span: Tuple[int, int, int],
+    bounds: Tuple[Optional[Ranged], Optional[Ranged]],
+) -> Tuple[int, int]:
+    """``J`` cut to a parent's lifetime and the range, as :func:`_parent_interval` cuts it, for one entity.
+
+    *span* is ``J``'s first unit, the horizon and ``c``; each of *bounds* is a low end and a limit.
+    """
+    first, until, c = span
+    closing = 1 if _closes_last(entry) else 0
+    lows = [first, *(bound[0] for bound in bounds if bound is not None and bound[0] is not None)]
+    limits = [until, *(bound[1] for bound in bounds if bound is not None and bound[1] is not None)]
+    low, limit = max(lows), min(limits)
+    high = limit - (c + closing) - 1
+    if low > high:
+        high = limit - (1 + closing) - 1
+    if low > high:
+        raise _refuse(f"history ({entry.emit}): the bound leaves no room for one version")
+    return low, high
 
 
 def first_start_at(
@@ -1125,6 +1177,7 @@ def first_start_at(
     c: int,
     time_bounds: Any,
     parent: Optional[Tuple[Optional[int], Optional[int]]] = None,
+    ranged: Optional[Ranged] = None,
 ) -> int:
     """Entity *entity*'s first start drawn on its own stream: the per-row counterpart of the planner's.
 
@@ -1132,21 +1185,12 @@ def first_start_at(
     ``bounded`` over ``J``, at draw index 0 of ``("sim", sim_id, "gen", exposeId, "history",
     entity)``. *parent* is the entity's parent lifetime in the chain's unit, its start and its last
     day (``None`` for no bound): ``J`` is cut to it as the planner cuts it, to the room for ``c``
-    versions, else for one (:func:`_parent_interval`).
+    versions, else for one (:func:`_parent_interval`). *ranged* is the validity columns' range
+    (:data:`Ranged`), which cuts ``J`` the same way.
     """
     first, last, until = _first_start_interval(entry, kind, window_start(time_bounds), c)
-    if parent is not None:
-        closing = 1 if _closes_last(entry) else 0
-        low, high = first, last
-        if parent[0] is not None:
-            low = max(low, parent[0])
-        limit = until if parent[1] is None else min(until, parent[1])
-        high = limit - (c + closing) - 1
-        if low > high:
-            high = limit - (1 + closing) - 1
-        if low > high:
-            raise _refuse(f"history ({entry.emit}).parent.lifetime: the parent leaves no room")
-        first, last = low, high
+    if parent is not None or ranged is not None:
+        first, last = _cut_interval(entry, (first, until, c), (parent, ranged))
     table = _start_table(entry.start, kind, first, last, entry.emit)
     stream = counter_stream(root, history_path(sim_id, expose_id, entity), HISTORY_PATH_SHAPE)
     if table is not None:
@@ -1179,6 +1223,51 @@ class HistoryBinding:
     #: Whether a tracked foreign key's levels are checked against its parent's keys (false replays
     #: a recorded plan that never checked them).
     tracked_levels: bool = True
+    #: The instants, in milliseconds, the versions' starts and closed ends keep to: the ranges the
+    #: contract declares on the validity columns and on the projected columns that copy them (ADR
+    #: 0024, the amendment of 2026-11-25); ``None`` for none, or a plan that does not hold them.
+    validity_range: Optional[Tuple[Optional[int], Optional[int]]] = None
+
+
+def _unmet(
+    entry: HistoryEntry, kind: LogicalKind, ranged: Ranged, span: Tuple[int, int]
+) -> FluxError:
+    """``FLX-3403`` for a validity range that leaves no unit between the window's start and ``until``."""
+    low, limit = ranged
+    named = " ".join(
+        f"{word} {_unit_text(value, kind)}"
+        for word, value in (("from", low), ("up to", None if limit is None else limit - 1))
+        if value is not None
+    )
+    return _refuse(
+        f"history ({entry.emit}): the contract's range on its validity columns and the columns "
+        f"that copy them ({named}) does not meet the window from timeBounds.start "
+        f"({_unit_text(span[0], kind)}) to until ({_unit_text(span[1], kind)}), so no version can "
+        "start inside it; widen the range, or move the window or until to meet it"
+    )
+
+
+def validity_bound(binding: HistoryBinding, kind: LogicalKind, window: int) -> Optional[Ranged]:
+    """The validity columns' range as the layout reads it (:data:`Ranged`), or ``None`` where it cuts nothing.
+
+    *binding*'s ``validity_range`` is in milliseconds, a strict end already held one millisecond
+    inward; a DATE chain keeps to the days inside it. A range that leaves no unit between
+    ``timeBounds.start`` (*window*, in milliseconds) and ``until`` is ``FLX-3403``.
+    """
+    held = binding.validity_range
+    if held is None:
+        return None
+    scale = _DAY_MS if kind is LogicalKind.DATE else 1
+    first, until = _in_unit(window, kind), unit_of(binding.entry.until, kind)
+    low = None if held[0] is None else -(-held[0] // scale)
+    limit = None if held[1] is None else held[1] // scale + 1
+    if max(first, first if low is None else low) >= min(until, until if limit is None else limit):
+        raise _unmet(binding.entry, kind, (low, limit), (first, until))
+    cut = (
+        None if low is None or low <= first else low,
+        None if limit is None or limit >= until else limit,
+    )
+    return None if cut == (None, None) else cut
 
 
 def plan_history(
@@ -1193,6 +1282,7 @@ def plan_history(
     time_bounds: Any,
     outer: Optional[OuterInputs] = None,
     bound: Optional[Union[ParentBound, DeferredBound]] = None,
+    ranged: Optional[Ranged] = None,
 ) -> HistoryPlan:
     """The layout of *entry*'s emit, worked out once per process (KERNEL-SPEC-2 section 8.4).
 
@@ -1204,6 +1294,10 @@ def plan_history(
     *bound* is the lifetime of each parent row, given exactly when the entry declares
     ``parent.lifetime``: the entity layout is then worked out first, since each entity's first
     start and room read its parent's lifetime (ADR 0017, amendment of 2026-11-24).
+
+    *ranged* is the bound the validity columns' ranges set every entity (:data:`Ranged`, ADR 0024,
+    the amendment of 2026-11-25): each first start and room keep to it as to a parent's lifetime,
+    and no entity is made to end by it.
     """
     window = window_start(time_bounds)
     chain_unit_kind(kind)
@@ -1227,6 +1321,7 @@ def plan_history(
         rows,
         entities,
         _in_unit(window, kind),
+        ranged,
     )
     if bound is not None:
         assert outer is not None
@@ -1242,7 +1337,7 @@ def plan_history(
             rows,
             entities,
             window,
-            None if bound is None or per_parent is None else (per_parent, bound),
+            (None if bound is None or per_parent is None else (per_parent, bound), ranged),
         )
         if len(_PLANS) >= _PLANS_KEPT:
             _PLANS.clear()
@@ -1292,12 +1387,12 @@ def _chain(
     rows: int,
     entities: int,
     window: int,
-    bound_by: Optional[Tuple[CountedLayout, Union[ParentBound, DeferredBound]]] = None,
+    bounds: Tuple[Optional[_BoundBy], Optional[Ranged]] = (None, None),
 ) -> HistoryPlan:
     """The version layout and the first starts: everything but the entities' parents.
 
-    With *bound_by*, the entities' layout per parent and the parents' lifetimes, each entity's
-    first start and room read its parent's lifetime (:func:`_bounded_chain`).
+    *bounds* is the entities' layout per parent with the parents' lifetimes, and the validity
+    columns' range; with either, each entity's first start and room read it (:func:`_bounded_chain`).
     """
     c = largest_count(entities, rows, entry.versions)
     until = unit_of(entry.until, kind)
@@ -1305,12 +1400,13 @@ def _chain(
     cut = None
     if entities:
         first, last, until = _first_start_interval(entry, kind, window, c)
-        if bound_by is None:
+        if bounds == (None, None):
             table = _start_table(entry.start, kind, first, last, entry.emit)
             starts = _first_starts(root, sim_id, expose_id, entities, (first, last), table)
         else:
             span = (first, last, until, c)
-            starts, cut = _bounded_chain(root, sim_id, expose_id, (entry, kind), span, bound_by)
+            held = (*_bound_rows(entities, bounds[0]), bounds[1])
+            starts, cut = _bounded_chain(root, sim_id, expose_id, (entry, kind), span, held)
     versions = counted_layout(
         versions_key(root, sim_id, expose_id),
         entities,
@@ -1340,44 +1436,68 @@ def _chain(
     return _with_endings(root, sim_id, expose_id, entry, plan)
 
 
+_BoundBy = Tuple[CountedLayout, Union[ParentBound, DeferredBound]]
+
+
+def _bound_rows(entities: int, bound_by: Optional[_BoundBy]) -> Tuple["np.ndarray", ParentBound]:
+    """Each entity's parent row and the parents' lifetimes; with no parent bound, one parent that bounds nothing."""
+    if bound_by is None:
+        return np.zeros(entities, dtype=np.int64), ParentBound.of([None], None)
+    per_parent, bound = bound_by
+    return per_parent.parents_of(np.arange(per_parent.children, dtype=np.int64)), bound.get()
+
+
 def _bounded_chain(
     root: SeedTreeRoot,
     sim_id: str,
     expose_id: str,
     declared: Tuple[HistoryEntry, LogicalKind],
     span: Tuple[int, int, int, int],
-    bound_by: Tuple[CountedLayout, Union[ParentBound, DeferredBound]],
+    held: Tuple["np.ndarray", ParentBound, Optional[Ranged]],
 ) -> Tuple["np.ndarray", ParentCut]:
-    """Every entity's first start inside its parent's lifetime, and what the lifetimes do to it.
+    """Every entity's first start inside its parent's lifetime and the range, and what they do to it.
 
     *span* is the first starts' interval, the horizon and the largest count of versions an entity
-    takes. A parent that leaves an entity no room for even one version is ``FLX-3403``.
+    takes; *held* each entity's parent row, the parents' lifetimes and the validity columns' range.
+    A bound that leaves an entity no room for even one version is ``FLX-3403``. Only a parent that
+    ended makes an entity end: the range keeps a last version open.
     """
     entry, kind = declared
     until = span[2]
-    per_parent, bound = bound_by
-    lifetimes = bound.get()
-    parents = per_parent.parents_of(np.arange(per_parent.children, dtype=np.int64))
+    parents, lifetimes, ranged = held
     low, high, limits, short = _parent_interval(
-        lifetimes, parents, span, 1 if _closes_last(entry) else 0
+        lifetimes, parents, span, 1 if _closes_last(entry) else 0, ranged
     )
+    if bool(short.any()) and not bool(lifetimes.has_start.any() or lifetimes.has_end.any()):
+        raise _refuse(
+            f"history ({entry.emit}): the contract's range on its validity columns leaves no room "
+            f"for one version{_closing_words(entry)} between timeBounds.start and until "
+            f"({_unit_text(until, kind)}); widen the range, or move the window or until into it"
+        )
     if bool(short.any()):
-        raise _no_room(entry, kind, lifetimes, parents[short], int(parents.shape[0]), until)
+        found = (lifetimes, parents[short], int(parents.shape[0]))
+        raise _no_room(entry, kind, found, until, None if ranged is None else ranged[0])
     starts = _bounded_first_starts(root, sim_id, expose_id, entry, kind, low, high)
     closing = lifetimes.has_end[parents]
     forced = closing & (lifetimes.ends[parents] <= until)
-    return starts, ParentCut(limits, forced)
+    last_days = np.where(forced, lifetimes.ends[parents], limits).astype(np.int64)
+    return starts, ParentCut(limits, forced, last_days)
 
 
 def _no_room(
     entry: HistoryEntry,
     kind: LogicalKind,
-    bound: ParentBound,
-    parents: "np.ndarray",
-    entities: int,
+    found: Tuple[ParentBound, "np.ndarray", int],
     until: int,
+    low: Optional[int] = None,
 ) -> FluxError:
-    """``FLX-3403`` for the entities whose parent leaves no room for one version: how many, and their parents' lifetimes."""
+    """``FLX-3403`` for the entities whose parent leaves no room for one version: how many, and their parents' lifetimes.
+
+    *found* is the parents' lifetimes, the short entities' parent rows and the count of entities;
+    *low* is the first unit the validity columns' range lets a version start on, when it cuts the
+    window, and the message names it, since a parent that closes before it has no room either.
+    """
+    bound, parents, entities = found
     opened = bound.starts[parents][bound.has_start[parents]]
     closed = bound.ends[parents][bound.has_end[parents]]
 
@@ -1390,10 +1510,12 @@ def _no_room(
 
     return _refuse(
         f"history ({entry.emit}).parent.lifetime: {int(parents.shape[0])} of {entities} entities "
-        "have a parent whose lifetime leaves no room for one version before "
-        f"until ({_unit_text(until, kind)}){_closing_words(entry)}; the parents of those entities "
-        f"open {spread(opened)} and close {spread(closed)}; give the parents longer lifetimes, "
-        "move until later, or drop parent.lifetime"
+        "have a parent whose lifetime leaves no room for one version "
+        f"{'' if low is None else f'from the range on its validity columns ({_unit_text(low, kind)}) '}"
+        f"before until ({_unit_text(until, kind)}){_closing_words(entry)}; the parents of those "
+        f"entities open {spread(opened)} and close {spread(closed)}; give the parents longer "
+        f"lifetimes, {'' if low is None else 'widen the range, '}move until later, or drop "
+        "parent.lifetime"
     )
 
 

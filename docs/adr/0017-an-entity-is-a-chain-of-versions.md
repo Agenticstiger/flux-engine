@@ -704,3 +704,115 @@ scale 0.25 with the plan still exiting 0.
   bundle with no tracked foreign key. A bundle whose levels are keys of the parent at scale 1 and not at a scale
   below 1 plans with the parent kept, where it ran before with a link below 100 %. A bundle with a level that is no
   key of the parent at any row count is refused at plan at every scale.
+
+## Amendment of 2026-11-25: dates outside the window read the draw
+
+Section 11 refused a date column of a history's emit whose declared range or bins leave `spec.timeBounds`, and read
+every edge the column declares. A column read from a noisy profile declares the profile's full year grid as its range
+(0001-01-01 to the last instant), because a histogram property's bins must partition the declared range, while its
+bins carry weight only inside the window. The grid placed no row outside the window and was refused all the same.
+
+- **The rule.** Section 11 reads the edges the draw can reach. For a column that declares bins, those run from the lower
+  edge of its first bin with a positive weight to the upper edge of its last: a weightless bin at either end does not
+  count, and one between weighted bins lies inside that hull. For a column with no bins, they are its declared range.
+  A column with neither is handled as before.
+- **Why.** A range wider than the draw places no date outside the window. The range of a profile's column stays its
+  full grid, since the bins must partition it, and the draw is what decides which dates a row can carry.
+- **The same edges elsewhere.** The warning of `validate` and `plan` for an emit with no history (the declared range or
+  bins leave the run's `timeBounds`) reads these edges too, so the two checks say the same of one column.
+- **What stays refused.** A bin outside the window that carries weight, and a column that declares no range and no
+  bins unless the history or another source sets it (`FLX-3403`).
+- **What moves.** Nothing already planned. This changes what `plan` accepts and not what the generator draws, so a plan
+  recorded before replays to its recorded digest, and a bundle accepted before keeps its run digest.
+
+## Amendment of 2026-11-25: `init` writes the open end and the chain a contract declares
+
+FLUID 0.7.7 declares a versioned table's conventions on its validity window's end dimension:
+`validityParams.openEnd`, the value an open version's end holds (`null` or a literal of the end
+column's type), and `validityParams.chain`, how a closed version's end meets the same entity's next
+start (`nextStart`, `dayBefore` or `none`). Section 13 wrote neither, so a history whose end column
+the contract requires was never written: an open version had nothing to hold.
+
+- **`openEnd`.** `init` copies a declared literal into the entry's `openEnd`, so an end column the
+  contract requires no longer keeps the history out, and each open version ends on exactly that
+  value. A required end column with no `openEnd`, or a `null` one, still writes no history, and the
+  reason says to declare the value. The value is never read from the profile: a value the data
+  holds is not a declaration of what it means.
+- **The window.** The declared open end marks no instant, so it gives the run's window nothing, as a
+  value in the year 9999 does: a published maximum that is the open end does not stretch the window
+  or `until`, and a contract range that ends at it is no range of dates (the 300-year rule of
+  `init` does not refuse it). Section 11 does not read an edge of the end column at or past its
+  `openEnd`.
+- **An end that holds only the open end.** A column whose only published value is the declared open
+  end declares no draw: the history writes it on every open version. Without a history to write
+  it, `init` refuses the bundle and says why no history is written, since no draw spells such a
+  value on every row (`FLX-3125`, whose message now names declaring `openEnd` first).
+- **`chain`.** A declared `nextStart` or `dayBefore` sets the entry's chain, whatever share of
+  consecutive versions meets so in the profile, and the ledger records that share beside it. A
+  declared `none` (versions that need not meet), and `dayBefore` on TIMESTAMP columns, write no
+  history, with the reason: the engine generates neither.
+- **What does not move.** A contract that declares neither key reads as before, so its bundle is
+  unchanged.
+
+## Amendment of 2026-11-25: the open end is one value, and no closed version holds it
+
+Section 5 lets an entry write `openEnd` in the end column of an open version, and `verify` read NULL and that value
+alike as open. Nothing kept the two apart: an end column could mix NULL and the value, and a value a closed version
+can end on read that version as open. dbt snapshots make the same choice per table (`dbt_valid_to` is NULL, or the
+`dbt_valid_to_current` day, such as `9999-12-31`, for current rows; a table changed to it keeps its old NULLs until
+they are updated by hand), and SQLMesh's SCD type 2 kinds write NULL only. The value is a day no row ends on.
+
+- **Plan.** An `openEnd` before `until` is `FLX-3403`: a closed version may end there. Under `nextStart` so is an
+  `openEnd` inside `timeBounds`, its ends included, since a closed version ends on the next version's start and a
+  projection reads an open version up to the window's end, where this value would close it. Under `dayBefore` a
+  closed version ends the day before a start, so an `openEnd` at `until` is allowed. A value in the year 9999 or
+  later, which a contract's range reads as an open end (`WINDOW_END_LIMIT_MS`, ADR 0024), is after every window.
+- **Verify.** A fifth line, `history:open_end`, enforced like the others. With an `openEnd`, an entity holds it when
+  none of its versions' ends is NULL and none but its last carries the value: an end column that mixes NULL and the
+  value fails, as a closed version that carries it does. Without an `openEnd` the line is present only when some end
+  is in the year 9999 or later, an open end the entry does not declare, and an entity with one fails it. The check
+  is the one dbt-utils' `mutually_exclusive_ranges` leaves to the author: it fails a NULL upper bound outright, and
+  this line says which spelling of the open end the table uses.
+- **An `until` in the year 9999.** `until` is the horizon versions start before, not an open end: one in the year
+  9999 is `FLX-3403` at plan, pointing at `openEnd` for the open end. A periodic step past such a horizon would
+  leave the calendar.
+- **What moves.** No row: the generator already writes the value on every open version and NULL nowhere. A run whose
+  entry declares `openEnd` gains the line in its report; an entry that a closed version could end on is refused.
+
+## Amendment of 2026-11-26: a forced entity's projections stop at its parent's last day
+
+The amendment of 2026-11-24 keeps every version of a bound history inside its parent's lifetime, and ADR 0027 reads
+an open version as valid up to the window's end. Under `finalVersion`, the ending version of an entity forced to
+end with its parent (point 3 there) is open, so a periods projection held it for every period up to the window's end,
+long after the parent's last day `pe`: the periodic rows left the lifetime the versions keep to.
+
+- **The rule.** In the projections of a history with `parent.lifetime: true`, the open last version of a forced
+  entity is valid up to the end of `pe`, the last unit of the parent's lifetime, when that is before the window's
+  end. A period it holds under `match` is read against that validity. The written version is unchanged: its end
+  cell stays NULL or `openEnd`. Closed versions, and the entities of parents that did not end by `until`, read as
+  before.
+- **A range on the validity columns** (ADR 0024, the amendment of 2026-11-25) moves no cut. It is folded into where a
+  chain must end, so versions start and close inside it, but it closes no version: the open version of a forced
+  entity is still valid up to the end of `pe`, even where the range ends before `pe`. The layout keeps `pe` for each
+  forced entity apart from the chain's end for this reason.
+- **Events and snapshots** read no validity beyond a version's start, so they are unchanged.
+- **What moves.** The periodic rows of a bundle that declares `parent.lifetime: true` with a `finalVersion` end and
+  an entity forced to end, and that emit's count, so its plan digest and run id. No released version carries the key.
+  Every other bundle, and every recorded plan, keeps its bytes. `--jobs`, `--shard` and the column and per-row paths
+  read one layout, so they agree.
+
+## Amendment of 2026-11-26: `init` keeps a parent whose key a held dependency sets
+
+The amendment of 2026-11-24 that lets `init` write the parent left out every relationship whose column a rule, copy
+or dependency sets. The amendment of 2026-11-25 then let the plan accept a dependency the parent layout holds, but
+`init` still left the parent out for it. The history was written with no parent, so no expose keyed by the natural
+entity could be its snapshot. Such an expose was drawn apart from the history, with keys of its own, and most of the
+versions named an entity that it did not hold.
+
+- **What is accepted.** A candidate whose column only contract dependencies set, each from columns that include the
+  natural entity's column and to that column alone: the dependency the plan accepts beside a parent. `init` writes
+  the parent as for any candidate, and a snapshot or periods entry that needs it can follow.
+- **What stays refused.** A column that a derive or a copy sets, and a dependency whose `from` lacks the natural
+  entity's column or whose `to` names another column. A `nullFraction` on the column refuses the parent as before.
+- **What moves.** A bundle `init` writes for a contract with such a dependency. Every other bundle keeps its bytes,
+  and no plan changes: the generator and replay of recorded plans are untouched.

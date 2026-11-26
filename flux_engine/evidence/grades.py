@@ -58,7 +58,7 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Set,
 from flux_engine.core.grades import ORDER, Pattern, at_least, weakest
 from flux_engine.evidence.provenance import quoted_name
 from flux_stats.errors import FluxError
-from flux_stats.profile import SCHEMA_URL_1_4_0, Profile, parse_profile
+from flux_stats.profile import SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0, Profile, parse_profile
 
 __all__ = [
     "Accounting",
@@ -75,7 +75,7 @@ __all__ = [
 ]
 
 #: The sections of a profile whose statistics cannot carry a ``noise`` block.
-_NOT_NOISY_SECTIONS = ("queries", "invariants", "references")
+_NOT_NOISY_SECTIONS = ("invariants", "references")
 
 #: What the declaration about structure covers (``publicStructure``), for the reason a profile that
 #: does not make it is not ``P3``. A profile that names format 1-4-0 declares more.
@@ -147,6 +147,12 @@ class Accounting:
     #: noisy statistics, every ``rowFloor`` and every ``maxChildren``), and a labelled column of a
     #: table its unit does not reach counts as ``P1`` for the minimum grade.
     from_1_4: bool = False
+    #: The profile names format 1-5-0, which may hold a noisy history and a noisy query.
+    from_1_5: bool = False
+    #: A table's ``history`` holds a member that carries noise (format 1-5-0).
+    noisy_history: bool = False
+    #: A query's statistic carries noise (format 1-5-0).
+    noisy_query: bool = False
     #: The relationships the unit follows, as ``(parent table, child table, maxChildren)``.
     follows: Tuple[Tuple[str, str, int], ...] = ()
     #: ``m_T`` of every table the unit reaches, the expose included, by table name. Empty when the
@@ -286,12 +292,45 @@ def _account(profile: Optional[Mapping[str, Any]]) -> Tuple[Optional[Accounting]
         parts=len(parts or ()),
         spent={key: _decimal(value) for key, value in spent.items()},
         public_structure=block.get("publicStructure") is True,
-        from_1_4=profile.get("_schemaURL") == SCHEMA_URL_1_4_0,
+        from_1_4=profile.get("_schemaURL") in (SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0),
+        from_1_5=profile.get("_schemaURL") == SCHEMA_URL_1_5_0,
+        noisy_history=_holds_noisy_history(read),
+        noisy_query=_holds_noisy_query(read),
         follows=follows,
         reached=reach,
         fixed=fixed,
     )
     return accounting, parts is not None
+
+
+def _holds_noisy_history(read: Optional[Profile]) -> bool:
+    """Whether a table of the profile has a ``history`` member that carries noise."""
+    if read is None:
+        return False
+    for table in read.tables.values():
+        history = table.history
+        if history is None:
+            continue
+        members = [
+            history.versions_per_entity,
+            history.first_start,
+            history.version_length,
+            history.chain,
+            history.last_version,
+            history.reasons,
+        ]
+        for column in history.columns.values():
+            members += [column.initial, column.transitions]
+        if any(member is not None and member.noise is not None for member in members):
+            return True
+    return False
+
+
+def _holds_noisy_query(read: Optional[Profile]) -> bool:
+    """Whether a query of the profile has a statistic that carries noise."""
+    return read is not None and any(
+        statistic.noise is not None for query in read.queries for statistic in query.statistics
+    )
 
 
 def _spent(total: Mapping[str, Any], parts: Iterable[Any]) -> Dict[str, Fraction]:
@@ -439,10 +478,16 @@ def _statistic_reasons(
 
 
 def _table_structure_reasons(
-    table: Mapping[str, Any], found: Set[str], *, links: bool, tables: Any = None
+    table: Mapping[str, Any],
+    found: Set[str],
+    *,
+    links: bool,
+    tables: Any = None,
+    noisy_parts: bool = False,
 ) -> None:
     """Add to *found* the reasons the statistics of a table's columns, date pairs and column pairs
-    state data."""
+    state data, and with *noisy_parts* (a profile of format 1-5-0, which may release a history
+    with noise) those of its history's members."""
     columns = table.get("columns")
     table_columns = columns if isinstance(columns, Mapping) else {}
     for key in ("datePairs", "columnPairs"):
@@ -456,6 +501,107 @@ def _table_structure_reasons(
             _structure_reasons(
                 column.get("statistics"), table_columns, found, links=links, tables=tables
             )
+    history = table.get("history")
+    if noisy_parts and isinstance(history, Mapping):
+        _structure_reasons(
+            _history_members(history), table_columns, found, links=links, tables=tables
+        )
+
+
+def _query_structure_reasons(
+    queries: Any, tables: Any, found: Set[str], *, links: bool, noisy_parts: bool
+) -> None:
+    """Add to *found* the reasons the statistics of the ``queries`` state data, when the profile
+    names format 1-5-0 (*noisy_parts*), which may release a query's rate with noise.
+
+    A query's ``groupBy`` names a column of its unit's table. A query that states no unit, or one
+    whose table the profile does not hold, has no column to look it up in.
+    """
+    if not noisy_parts:
+        return
+    for query in queries if isinstance(queries, list) else ():
+        if not isinstance(query, Mapping):
+            continue
+        unit = query.get("unit")
+        table = (
+            tables.get(unit.get("table"))
+            if isinstance(tables, Mapping)
+            and isinstance(unit, Mapping)
+            and isinstance(unit.get("table"), str)
+            else None
+        )
+        columns = table.get("columns") if isinstance(table, Mapping) else None
+        _structure_reasons(
+            query.get("statistics"),
+            columns if isinstance(columns, Mapping) else {},
+            found,
+            links=links,
+            tables=tables,
+        )
+
+
+def _history_members(history: Mapping[str, Any]) -> List[Any]:
+    """The members of a table's ``history``: its statistics, and each tracked column's two.
+
+    A tracked column that is not an object counts as a member that is absent.
+    """
+    members: List[Any] = [
+        history.get(key)
+        for key in ("versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion")
+    ]
+    if "reasons" in history:
+        members.append(history["reasons"])
+    columns = history.get("columns")
+    for column in columns.values() if isinstance(columns, Mapping) else ():
+        if isinstance(column, Mapping):
+            members += [column.get("initial"), column.get("transitions")]
+        else:
+            members.append(None)
+    return members
+
+
+def _history_released_exact(history: Any) -> bool:
+    """Whether a table's ``history`` holds a member released without noise (format 1-5-0 allows it).
+
+    A history with no member that carries a ``noise`` block is exact, as is one that has any member
+    without one; an empty or absent history holds nothing. A member the grade does not recognise
+    counts as released without noise.
+    """
+    if not history:
+        return False
+    if not isinstance(history, Mapping):
+        return True
+    members = _history_members(history)
+    return any(not (isinstance(member, Mapping) and "noise" in member) for member in members)
+
+
+def _queries_released_exact(queries: Any) -> bool:
+    """Whether the ``queries`` section holds a statistic released without noise (format 1-5-0 allows it)."""
+    if not queries:
+        return False
+    if not isinstance(queries, list):
+        return True
+    return any(
+        not isinstance(query, Mapping)
+        or not query.get("statistics")
+        or any(
+            not (isinstance(statistic, Mapping) and "noise" in statistic)
+            for statistic in query["statistics"]
+        )
+        for query in queries
+    )
+
+
+#: Why a profile that holds a section no format releases with noise is not P3, as an earlier format
+#: words it, and as format 1-5-0 does, where a query's rate may carry noise.
+_EXACT_OTHER = (
+    "the profile holds period, query or fact statistics, or reference rows, which cannot be "
+    "released with noise in this format"
+)
+_EXACT_OTHER_1_5 = (
+    "the profile holds period statistics, fact statistics or reference rows, which cannot be "
+    "released with noise, or a query statistic released without noise"
+)
 
 
 def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> ProfileGrade:
@@ -504,6 +650,9 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
     ]
     data_stated: Set[str] = set()
     tables = profile.get("tables")
+    # Format 1-5-0 may release a history and a query's rate with noise, so their statistics are
+    # checked for what they state as the columns' are; an earlier document keeps its reasons.
+    noisy_parts = profile.get("_schemaURL") == SCHEMA_URL_1_5_0
     for table_id, table in tables.items() if isinstance(tables, Mapping) else ():
         if not isinstance(table, Mapping):
             continue
@@ -516,7 +665,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             for index, pair in enumerate(table.get("columnPairs") or ())
             if not _pair_is_noisy(pair)
         ]
-        exact["history"] |= bool(table.get("history"))
+        exact["history"] |= _history_released_exact(table.get("history"))
         if any(
             isinstance(pair, Mapping)
             and (
@@ -543,6 +692,7 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
             data_stated,
             links=accounting is None or not accounting.from_1_4,
             tables=tables,
+            noisy_parts=noisy_parts,
         )
         for name, column in (table.get("columns") or {}).items():
             if not isinstance(column, Mapping):
@@ -557,6 +707,14 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
                 isinstance(s, Mapping) and "noise" not in s for s in column.get("statistics") or ()
             )
     exact["other"] |= any(profile.get(section) for section in _NOT_NOISY_SECTIONS)
+    exact["other"] |= _queries_released_exact(profile.get("queries"))
+    _query_structure_reasons(
+        profile.get("queries"),
+        tables,
+        data_stated,
+        links=accounting is None or not accounting.from_1_4,
+        noisy_parts=noisy_parts,
+    )
     relationships = profile.get("relationships")
     for index, relationship in enumerate(relationships if isinstance(relationships, list) else ()):
         if not isinstance(relationship, Mapping):
@@ -599,14 +757,10 @@ def grade_profile(profile: Optional[Mapping[str, Any]], *, pinned: bool) -> Prof
         reasons.append("the profile holds a statistic released without noise")
     if exact["history"]:
         reasons.append(
-            "the profile holds a history of versions, whose statistics are released without noise "
-            "because one row can move an entity between cells"
+            "the profile holds a history of versions with a member released without noise"
         )
     if exact["other"]:
-        reasons.append(
-            "the profile holds period, query or fact statistics, or reference "
-            "rows, which cannot be released with noise in this format"
-        )
+        reasons.append(_EXACT_OTHER_1_5 if noisy_parts else _EXACT_OTHER)
     reasons.extend(sorted(data_stated))
     for path in sections:
         reasons.append(f"the profile holds a statistic released without noise in {path}")

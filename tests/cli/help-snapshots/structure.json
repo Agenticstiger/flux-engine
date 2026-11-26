@@ -609,6 +609,21 @@
         "choices": null
       },
       {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-rows"
+        ],
+        "dest": "max_rows",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_max_rows_type",
+        "required": false,
+        "help": "the rows each periodic emit may be estimated to derive when the plan is made, checked before its periods are laid out (default 50000000, at most 10000000000). A plan above it is refused (FLX-3403); plan.json records another budget as maxRows",
+        "metavar": "N",
+        "choices": null
+      },
+      {
         "class": "_AppendAction",
         "option_strings": [
           "--allow-generator"
@@ -905,6 +920,21 @@
         "required": false,
         "help": "multiply every emit's rows, the records bounds of its fidelity block and the span of every integer or decimal key column that declares a range, by F (above 0, at most 1000000); the plan records it and apply reads it back, and 1 changes nothing; a table built from the run's events is left as it is; read only when a fresh plan is taken, since the plan of --run-id records its own",
         "metavar": "F",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-rows"
+        ],
+        "dest": "max_rows",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_max_rows_type",
+        "required": false,
+        "help": "the rows each periodic emit may be estimated to derive when the plan is made, checked before its periods are laid out (default 50000000, at most 10000000000). A plan above it is refused (FLX-3403); plan.json records another budget as maxRows; read only when a fresh plan is taken, since the plan of --run-id states its rows",
+        "metavar": "N",
         "choices": null
       },
       {
@@ -1288,6 +1318,21 @@
         "required": false,
         "help": "multiply every emit's rows, the records bounds of its fidelity block and the span of every integer or decimal key column that declares a range, by F (above 0, at most 1000000); the plan records it and apply reads it back, and 1 changes nothing; a table built from the run's events is left as it is",
         "metavar": "F",
+        "choices": null
+      },
+      {
+        "class": "_StoreAction",
+        "option_strings": [
+          "--max-rows"
+        ],
+        "dest": "max_rows",
+        "nargs": null,
+        "const": "None",
+        "default": "None",
+        "type": "_max_rows_type",
+        "required": false,
+        "help": "the rows each periodic emit may be estimated to derive when the plan is made, checked before its periods are laid out (default 50000000, at most 10000000000). A plan above it is refused (FLX-3403); plan.json records another budget as maxRows",
+        "metavar": "N",
         "choices": null
       },
       {

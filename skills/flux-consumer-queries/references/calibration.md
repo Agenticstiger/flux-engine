@@ -1,7 +1,7 @@
 # Calibration and the held-out check
 
 Calibration fits numbers the data does not state to the rates of the calibration queries, and writes the result as a calibration patch. Held-out queries, which no fit sees, decide whether the result may be called calibrated. The worked page is
-[check consumer queries](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/check-consumer-queries.md).
+[check consumer queries](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/check-consumer-queries.md).
 
 Two things share the name. `fluxsim calibrate` with no `--fit` reads a Playback's declared scorecard and fits nothing. `fluxsim calibrate --fit BUNDLE` is the fit below. Do not mix their options up.
 

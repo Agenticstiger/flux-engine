@@ -132,7 +132,7 @@ def test_a_1_2_0_request_holds_what_1_1_0_holds_and_the_reader_reads_all_three()
     assert load_request_text(text).tables[0].calendar == ("b",)
     for url in (REQUEST_SCHEMA_URL, REQUEST_SCHEMA_URL_1_1_0, URL_1_2_0):
         assert load_request_text(_text(url, "")).tables[0].rank_correlations == ()
-    assert "FLX-5038" in _refusal(_text(URL_1_2_0.replace("1-2-0", "1-3-0"), ""))
+    assert "FLX-5038" in _refusal(_text(URL_1_2_0.replace("1-2-0", "1-4-0"), ""))
 
 
 @pytest.mark.parametrize("url", [REQUEST_SCHEMA_URL, REQUEST_SCHEMA_URL_1_1_0])
@@ -249,5 +249,5 @@ def test_the_list_of_keys_that_need_1_2_0_is_the_one_the_reader_and_the_writer_u
         ("relationship", "groupBy"),
         ("relationship", "linked"),
     ]
-    assert module._keys_of_1_2_0("table") == ("rankCorrelations", "cliqueColumns")
-    assert module._keys_of_1_2_0("relationship") == ("groupBy", "linked")
+    assert module._keys_of(module._FORMAT_1_2_0, "table") == ("rankCorrelations", "cliqueColumns")
+    assert module._keys_of(module._FORMAT_1_2_0, "relationship") == ("groupBy", "linked")

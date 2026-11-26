@@ -1,7 +1,7 @@
 # Refusals of forecasts
 
 For any code: run `fluxsim explain FLX-nnnn` (offline, the same text as its page), apply the remedy, then run the same step again. `fluxsim explain --list` lists every code of the installed engine. The index of
-[all error codes](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/reference/errors/README.md)
+[all error codes](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/reference/errors/README.md)
 links each page. Never weaken a check, never change a registered forecast, never record past a refusal.
 
 ## Code families

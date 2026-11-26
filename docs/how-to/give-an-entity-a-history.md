@@ -344,7 +344,7 @@ A history never writes a version it knows breaks the bound:
 | `length` | Required: a version's length, a histogram whose edges are whole days of at least one, in the spelling of a fidelity `distribution` (`bins`, `binWeights`, `closed`). A TIMESTAMP chain draws whole milliseconds inside its day bins. |
 | `until` | Required: the history's horizon, a value of the start column's type, inside the window. Every version starts before it. |
 | `chain` | `nextStart`, the default, or `dayBefore` (DATE columns only). |
-| `openEnd` | Optional: the text written in the end column of an open version, read as the column's type. Without it an open end is NULL. The one date allowed outside the window. |
+| `openEnd` | Optional: the text written in the end column of an open version, read as the column's type. Without it an open end is NULL. The one date allowed outside the window: one before `until`, or under `nextStart` one inside `timeBounds`, is refused, because a closed version could end there. `fluxsim init` copies it from the contract's `validityParams.openEnd` on the validity window's end dimension, and the declared `chain` sets `chain` the same way. |
 | `activation` | Optional: a column of the start's type that holds the entity's first start on every version. |
 | `tracked` | The columns that change between versions: each is `{column, initial, transitions}`, a categorical column with `levels`. `initial` gives the first version's value (the column's own levels by default), and `transitions` gives each level the weights of the levels it moves to, never itself. |
 | `reasons` | `levels` with `levelWeights`, naming tracked columns: the share of the changes each makes. Required when more than one column is tracked. |
@@ -414,6 +414,7 @@ Each line is enforced, so one violating entity fails the run, except the `asOf:`
 | `history:one_current` | an entity has one open version, its last, unless it ended under `closeLast`, when it has none. |
 | `history:ended_is_last` | with an `end.column` and `end.value`, the value appears only on an entity's last version. |
 | `history:within_parent` | with `parent.lifetime: true`: an entity's first start is not before its parent's start, no version starts after the parent's last day, every closed end is at or before it, and an entity whose parent ended by `until` has ended. With no `end` column, a closed last version is allowed only when the parent's last day is at most `until`; any other entity keeps its last version open. It covers the entities whose parent row has a start. |
+| `history:open_end` | with an `openEnd`, no version's end is NULL and only an entity's last version carries the `openEnd` value, so an end column that mixes NULL and the value fails. Without one, the line is present only when some end is in the year 9999 or later, an open end the entry does not declare, and each entity with one fails it. |
 | `asOf:<relationship>.<date>` | how many rows read a version. Not enforced. |
 
 A rule that reads `previous` is checked like any other rule, on every row.

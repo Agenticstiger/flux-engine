@@ -48,6 +48,11 @@ from typing import (
 
 import yaml
 
+from flux_engine.author.association import (
+    association_entry,
+    association_pair,
+    edge_rows,
+)
 from flux_engine.author.basis import Basis, Label, assumed, default, from_profile
 from flux_engine.author.catalogue import (
     catalogue_foreign_keys,
@@ -74,6 +79,7 @@ from flux_engine.author.columns import (
     copy_column,
     declared_span,
     determine_column,
+    draw_in_window,
     draw_within_key,
     drawn_span,
     few_int_levels,
@@ -117,6 +123,7 @@ from flux_engine.author.history import (
     HistorySource,
     Published,
     declare_date_ranges,
+    declared_end,
     decline_history,
     restate_assumptions,
     write_history,
@@ -131,18 +138,21 @@ from flux_engine.author.projection import (
     history_target,
     project,
     release_counts,
+    say_per_entity,
     span_primary_key,
 )
 from flux_engine.author.ranges import column_range
-from flux_engine.author.replace import replacements_for
+from flux_engine.author.replace import ask_for_private_release, replacements_for
 from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_window, instant_ms
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
+from flux_engine.expr2.errors import FLX_6204
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.governance.privacy import effective_floors, sensitivities_of
 from flux_engine.seam.asof import ASOF_KEY
+from flux_engine.seam.associations import ASSOCIATIONS_KEY
 from flux_engine.seam.contract import LogicalKind, compile_expose
 from flux_engine.seam.copies import COPIES_KEY, declares_copies
 from flux_engine.seam.copula import COPULA_KEY
@@ -168,6 +178,7 @@ from flux_engine.seam.parameters import (
 from flux_engine.seam.profile import FLX_3125, load_profile
 from flux_engine.seam.profile_request import column_domains
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
+from flux_engine.seam.range_rules import RangeBounds, declared_range_bounds
 from flux_engine.seam.resolve import EXTENSION_NAMESPACE, FLX_3105, ExactLoader, read_bundle_file
 from flux_engine.starter import StarterFile
 from flux_stats.cliques import CliqueEntry
@@ -280,6 +291,9 @@ class AuthoredExpose:
     drawn_by_cliques: Set[str] = field(default_factory=set)
     #: What the table's published rank correlations came to: its copula, and what was said of it.
     copula: Optional[CopulaPlan] = None
+    #: The ``associations`` entry of a table of two foreign keys and no other column, once both its
+    #: relationships are laid out by counts (ADR 0039).
+    association: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -518,6 +532,23 @@ def _emit_rows(
     return rows, assumed(reason), reason
 
 
+def _noise_of(
+    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str, attribute: str
+) -> Tuple[Tuple[int, Any], ...]:
+    """One *attribute* of the noise note of each noisy statistic of *column*, by statistic.
+
+    ``clear`` is the cells of a noisy histogram that stand clear of the noise, and ``floor`` the
+    noise floor of a noisy null count (profile format 1-5-0).
+    """
+    prefix = ("tables", expose_id, "columns", column, "statistics")
+    found = [
+        (int(tokens[-1]), getattr(note, attribute))
+        for tokens, note in (noisy or {}).items()
+        if tokens[:-1] == prefix and getattr(note, attribute, None) is not None
+    ]
+    return tuple(sorted(found))
+
+
 def _plan_expose(
     contract: Mapping[str, Any],
     expose_index: int,
@@ -573,6 +604,9 @@ def _plan_expose(
             rounding_base=rounding_base,
             range_rule=column_range(schema[position]),
             asked_levels=_levels_asked(asked, column.name),
+            noise_clear=_noise_of(noisy, expose_id, column.name, "clear"),
+            noise_floors=_noise_of(noisy, expose_id, column.name, "floor"),
+            open_end=_open_end_ms(expose, column.name) if "history" in table else None,
         )
         if _draws_int_levels(context, grouping, set_by_rules):
             context = replace(context, int_levels=True)
@@ -1094,7 +1128,7 @@ def _finish_expose(authored: AuthoredExpose) -> None:
             if fallback is not None:
                 authored.properties = [fallback]
                 break
-    if not authored.properties and not _declares_a_column(authored):
+    if not authored.properties and not _declares_a_column(authored) and not authored.association:
         authored.skipped = (
             "no column has a range or levels the fidelity block could declare, so it would "
             "declare no column (FLX-5034); declare one by hand"
@@ -1224,25 +1258,30 @@ def _time_bounds(
     :data:`WINDOW_END_LIMIT_MS` (an open end of 9999-12-31 on every row) gives the window nothing,
     as a contract range that ends there gives nothing. A contract range that reaches beyond every
     span the profile and the bundle give, or the hull of contract ranges alone, is a ``time
-    window`` note, which is a gap at ``/spec/timeBounds``. With nothing to go on, a year is
+    window`` note, which is a gap at ``/spec/timeBounds``; one that makes the window longer than
+    :data:`PLAUSIBLE_WINDOW_YEARS` is refused (:func:`_refuse_a_stretching_contract_range`). A
+    window the profile and the bundle make that long is a ``time window`` note too, naming the
+    columns that reach its ends (:func:`_a_long_window`). With nothing to go on, a year is
     assumed.
     """
     if given is not None:
         return given, None
-    own: List[Tuple[int, int]] = list(declared)
+    named: List[Tuple[str, Tuple[int, int]]] = [("the --history file", span) for span in declared]
     contract_ranges: List[Tuple[str, Tuple[int, int]]] = []
     for expose in exposes:
         for column in expose.columns:
             found, from_contract = _spans_of(expose, column, contract)
-            own += found
+            named += [(f"{expose.expose_id}.{column.name}", span) for span in found]
             if from_contract is not None:
                 contract_ranges.append((f"{expose.expose_id}.{column.name}", from_contract))
+    own = [span for _, span in named]
     spans = own + [span for _, span in contract_ranges]
     if spans:
         start = min(span[0] for span in spans)
         end = max(span[1] for span in spans)
         if end <= start:
             end = start + 1
+        _refuse_a_stretching_contract_range(own, contract_ranges, (start, end))
         window = (format_rfc3339_ms(start), format_rfc3339_ms(end))
         widening = sorted(
             {
@@ -1253,34 +1292,111 @@ def _time_bounds(
                 or span[1] > max(item[1] for item in own)
             }
         )
-        if not widening:
+        reasons: List[str] = []
+        if widening:
+            columns = ", ".join(widening)
+            if own:
+                given_span = (
+                    f"{format_rfc3339_ms(min(item[0] for item in own))} to "
+                    f"{format_rfc3339_ms(max(item[1] for item in own))}"
+                )
+                reasons.append(
+                    f"the contract range of {columns} reaches beyond the span the profile and "
+                    f"the bundle give, {given_span}"
+                )
+            else:
+                reasons.append(
+                    f"it comes only from the contract range of {columns}: nothing the profile or "
+                    "the bundle gives holds a span"
+                )
+        long_window = _a_long_window(named)
+        if long_window is not None:
+            reasons.append(long_window)
+        if not reasons:
             return window, None
-        columns = ", ".join(widening)
-        if own:
-            given_span = (
-                f"{format_rfc3339_ms(min(item[0] for item in own))} to "
-                f"{format_rfc3339_ms(max(item[1] for item in own))}"
-            )
-            reason = (
-                f"the contract range of {columns} reaches beyond the span the profile and the "
-                f"bundle give, {given_span}"
-            )
-        else:
-            reason = (
-                f"it comes only from the contract range of {columns}: nothing the profile or "
-                "the bundle gives holds a span"
-            )
         note = (
-            f"The run covers {window[0]} to {window[1]}, since {reason}. "
+            f"The run covers {window[0]} to {window[1]}, since {'; and '.join(reasons)}. "
             "Set spec.timeBounds to the span your data covers."
         )
         return window, ("time window", note)
+    noise = any(column.noise_floored for expose in exposes for column in expose.columns)
     note = (
-        "No date or timestamp column publishes its range, so the run covers "
-        f"{ASSUMED_WINDOW[0][:10]} to {ASSUMED_WINDOW[1][:10]}. Set spec.timeBounds to the "
-        "span your data covers."
+        "No date or timestamp column publishes its range"
+        + (", or a released histogram with a bin that stands clear of the noise" if noise else "")
+        + f", so the run covers {ASSUMED_WINDOW[0][:10]} to {ASSUMED_WINDOW[1][:10]}. Set "
+        "spec.timeBounds to the span your data covers."
     )
     return ASSUMED_WINDOW, ("time window", note)
+
+
+#: The longest run window that is not remarked on. A few hundred years holds the dates a data
+#: product records; a longer window comes from what marks no data: a contract range with an open
+#: end spelled before the year 9999 or a placeholder, which is refused, or a published span that
+#: reaches that far, which is a ``time window`` note and a gap.
+PLAUSIBLE_WINDOW_YEARS = 300
+
+#: A Gregorian year of 365.2425 days, in milliseconds.
+_YEAR_MS = 31_556_952_000
+
+
+#: How many columns a time window note names before it counts the rest.
+_NAMED_COLUMNS = 5
+
+
+def _a_long_window(named: Sequence[Tuple[str, Tuple[int, int]]]) -> Optional[str]:
+    """Why the spans the profile and the bundle give make a window past :data:`PLAUSIBLE_WINDOW_YEARS`.
+
+    *named* is each span with what gives it (a column, or the history file). ``None`` when their
+    hull is no longer than that. Otherwise the reason names what reaches either end of the hull, so
+    a person can see which column, or which noise in a column, stretches the window.
+    """
+    if not named:
+        return None
+    low = min(first for _, (first, _) in named)
+    high = max(last for _, (_, last) in named)
+    if high - low <= PLAUSIBLE_WINDOW_YEARS * _YEAR_MS:
+        return None
+    reaching = sorted({name for name, (first, last) in named if first == low or last == high})
+    listed = ", ".join(reaching[:_NAMED_COLUMNS])
+    if len(reaching) > _NAMED_COLUMNS:
+        listed += f" and {len(reaching) - _NAMED_COLUMNS} more"
+    return (
+        f"the span the profile and the bundle give runs longer than {PLAUSIBLE_WINDOW_YEARS} "
+        f"years, from {format_rfc3339_ms(low)[:10]} to {format_rfc3339_ms(high)[:10]}: {listed} "
+        "reach its ends"
+    )
+
+
+def _refuse_a_stretching_contract_range(
+    own: Sequence[Tuple[int, int]],
+    contract_ranges: Sequence[Tuple[str, Tuple[int, int]]],
+    window: Tuple[int, int],
+) -> None:
+    """Refuse a contract range that makes the run's window longer than :data:`PLAUSIBLE_WINDOW_YEARS`.
+
+    *own* is the spans the profile and the bundle give, *contract_ranges* each contract range by
+    its column, and *window* the hull of both. Each range that reaches beyond *own* is named. A
+    window *own* already makes that long is not the contract's doing, so nothing is refused.
+    """
+    longest = PLAUSIBLE_WINDOW_YEARS * _YEAR_MS
+    if window[1] - window[0] <= longest:
+        return
+    if own and max(last for _, last in own) - min(first for first, _ in own) > longest:
+        return
+    low = min((first for first, _ in own), default=None)
+    high = max((last for _, last in own), default=None)
+    named = [
+        f"{name} ({format_rfc3339_ms(first)[:10]} to {format_rfc3339_ms(last)[:10]})"
+        for name, (first, last) in contract_ranges
+        if low is None or high is None or first < low or last > high
+    ]
+    raise AuthorError(
+        f"the contract range of {', '.join(named)} would make the run's window longer than "
+        f"{PLAUSIBLE_WINDOW_YEARS} years, from {format_rfc3339_ms(window[0])[:10]} to "
+        f"{format_rfc3339_ms(window[1])[:10]}, and such a window is refused; declare the range "
+        "the data covers, or, when its high end marks an open end, write that end in the year "
+        "9999, which no window reads"
+    )
 
 
 def _weighted_edges(edges: List[Any], weights: Any) -> List[Any]:
@@ -1319,7 +1435,9 @@ def _spans_of(
         if isinstance(listed, list):
             instants.extend(moment for moment in map(instant_ms, listed) if moment is not None)
     declared = declaration.get("range")
-    if isinstance(declared, Mapping):
+    if isinstance(declared, Mapping) and not column.noise_floored:
+        # A noisy histogram's range is its whole grid (its property partitions it), so it says
+        # nothing of where the data lies: the clear bins and time_span do.
         instants.extend(
             moment
             for moment in (instant_ms(declared.get("min")), instant_ms(declared.get("max")))
@@ -1333,15 +1451,37 @@ def _spans_of(
         found = []
     context = expose.contexts.get(column.name)
     try:
-        schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
+        contract_expose = contract["exposes"][expose.index]  # type: ignore[index]
+        schema = contract_expose["contract"]["schema"]
         contract_range = (
             declared_window(schema[context.schema_index], expose.kinds.get(column.name))
             if context
             else None
         )
     except (KeyError, IndexError, TypeError):
-        contract_range = None
+        contract_expose, contract_range = None, None
+    open_end = _open_end_ms(contract_expose, column.name)
+    if open_end is not None:
+        # The end of a validity window that declares its open end: an open version holds that
+        # value, which marks no instant, so it gives the window nothing, as a value in the year
+        # 9999 does (ADR 0017 section 11).
+        below = [moment for moment in instants if moment < open_end]
+        found = [
+            (first, last if last < open_end else max(below, default=first))
+            for first, last in found
+            if first < open_end
+        ]
+        if contract_range is not None and contract_range[1] >= open_end:
+            contract_range = None
     return found, contract_range
+
+
+def _open_end_ms(contract_expose: Optional[Mapping[str, Any]], column: str) -> Optional[int]:
+    """The open end the contract declares for *column*, as milliseconds, when it is the window's end."""
+    if not isinstance(contract_expose, Mapping):
+        return None
+    value = declared_end(contract_expose, column).get("openEnd")
+    return instant_ms(value) if isinstance(value, str) else None
 
 
 def _owner(contract: Mapping[str, Any]) -> Tuple[str, Optional[Tuple[str, str]]]:
@@ -1558,6 +1698,8 @@ def _cite_and_replace(
         fractional_bits=bits,
     )
     ledger.replacements = replaceable
+    if asked is not None and "privacy" in pinned:
+        asked = ask_for_private_release(asked, document, column_domains(document))
     return cited, asked
 
 
@@ -1914,8 +2056,13 @@ def _lay_out_children(
     *,
     minimum_cell: int,
     fractional_bits: int,
-) -> _Placed:
-    """Place one relationship by counts when the layout can, and as its foreign key's spread if not."""
+    into_a_history: Optional[str] = None,
+) -> Optional[_Placed]:
+    """Place one relationship by counts when the layout can, and as its foreign key's spread if not.
+
+    Returns ``None`` when the layout would place it but *into_a_history* says why it may not: the
+    relationship is then laid out by no entry.
+    """
     child_table = child_expose.expose_id
     notes: List[Tuple[str, str]] = []
     held = _counting_hold(keys, child_expose, child_plan, declared)
@@ -1938,6 +2085,8 @@ def _lay_out_children(
             (f"{child_table}.{declared.name}", f"not laid out by counts: {counted.why_not}")
         )
         held, counted = counted.why_not, None
+    if counted is not None and into_a_history is not None:
+        return None
     if counted is not None:
         declare_counted(child_plan, counted.assumption)
         counts = {"emit": child_table, "relationship": declared.name, **counted.members}
@@ -1967,11 +2116,47 @@ def _lay_out_children(
     return _Placed(list(spread.used), list(spread.unused), None, notes, False, laid)
 
 
-def _settle_given(placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int) -> _Placed:
+#: Why the grouping of an association side's children is not read (ADR 0039 section 5).
+_PAIRED_GIVEN = (
+    "an association table pairs its two sides stub by stub, so its children per parent follow no "
+    "column of the parent"
+)
+
+
+def _association_tables(
+    planned: Mapping[str, AuthoredExpose], keys: Optional[ContractKeys], slots: Sequence[_Slot]
+) -> FrozenSet[str]:
+    """The drawn tables of two foreign keys and no other column whose two sides are laid out by counts.
+
+    Only such a table is written as an association (ADR 0039): a table with one side counted keeps
+    what that side's entry holds, and a reference expose is written whole.
+    """
+    if keys is None:
+        return frozenset()
+    counted = {
+        (slot.child_table, slot.declared.name)
+        for slot in slots
+        if slot.placed is not None and slot.placed.entry is not None
+    }
+    held = set()
+    for expose_id, expose in planned.items():
+        if expose.reference:
+            continue
+        pair = association_pair(keys.expose(expose_id), [plan.name for plan in expose.columns])
+        if pair is not None and all((expose_id, item.name) in counted for item in pair):
+            held.add(expose_id)
+    return frozenset(held)
+
+
+def _settle_given(
+    placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int, paired: bool = False
+) -> _Placed:
     """*placed* with the given column of its ``counts`` entry chosen, when the profile groups one.
 
     This reads which columns of the parent are drawn given a column of a linked row, so it runs
-    once those are declared. A grouping by one of them is passed over, with the reason.
+    once those are declared. A grouping by one of them is passed over, with the reason. The side of
+    an association table (*paired*) takes no given column: its rows pair with the other side's stub
+    by stub, so the statistic a given would rest on is listed unused.
     """
     pending = placed.pending
     if pending is None or placed.entry is None:
@@ -1985,6 +2170,9 @@ def _settle_given(placed: _Placed, tokens: Tuple[str, ...], *, minimum_cell: int
     )
     if given is None:
         return placed
+    if paired:
+        passed = [(pointer, _PAIRED_GIVEN) for pointer, _ in given.used]
+        return placed._replace(unused=[*placed.unused, *passed, *given.unused])
     placed.entry.update(given.members)
     notes = list(placed.notes)
     _take_given(given, pending.child_plan, pending.parent_expose, (notes, pending.name))
@@ -2094,6 +2282,53 @@ def _structural_classes(entry: Mapping[str, Any]) -> List[str]:
     return [str(name) for name in structural] if isinstance(structural, list) else []
 
 
+#: Why no layout reads the children per parent of a relationship into a table with a history.
+_INTO_A_HISTORY = (
+    "the relationship reaches {target}, which has a history, by {key}, and a child picks a "
+    "version as any child does, so no layout places its children per {unit}"
+)
+
+
+def _into_a_history(
+    keys: Optional[ContractKeys], histories: FrozenSet[str], emit: str, name: str
+) -> Optional[str]:
+    """Why relationship *name* of *emit* is laid out by no entry, or ``None`` when it may be.
+
+    A ``counts`` entry over a relationship into a table with a history is refused (``FLX-3403``,
+    ADR 0017 section 8), and a foreign key's spread over the parent's keys moves no pick of a
+    version. *histories* holds the tables that have one: those a history file declares, or else
+    those whose profile table publishes a history. Over the natural entity, which every version
+    of an entity holds, the profile counts children per entity; over another key, per version.
+    """
+    if keys is None:
+        return None
+    for relationship in keys.expose(emit).relationships:
+        if relationship.name == name and relationship.target in histories:
+            entity = tuple(relationship.to_columns) == _natural_of(keys, relationship.target)
+            return _INTO_A_HISTORY.format(
+                target=relationship.target,
+                key="its natural entity" if entity else "a key of its versions",
+                unit="entity" if entity else "version",
+            )
+    return None
+
+
+def _history_tables(
+    declared: Optional[DeclaredHistory], keys: Optional[ContractKeys], tables: Mapping[str, Any]
+) -> FrozenSet[str]:
+    """The versioned tables a history file declares a history for, or else whose profile publishes one."""
+    if declared is not None:
+        return frozenset(str(entry["emit"]) for entry in declared.history)
+    return frozenset(
+        name
+        for name, table in tables.items()
+        if isinstance(table, Mapping)
+        and isinstance(table.get("history"), Mapping)
+        and keys is not None
+        and keys.expose(name).versioned
+    )
+
+
 def _resolved(
     entry: Mapping[str, Any],
     keys: Optional[ContractKeys],
@@ -2107,6 +2342,56 @@ def _resolved(
     return why, declared, tables, columns
 
 
+def _slot_of(
+    tokens: Tuple[str, ...],
+    entry: Mapping[str, Any],
+    keys: Optional[ContractKeys],
+    planned: Mapping[str, AuthoredExpose],
+    tables: Mapping[str, Any],
+    holds: Tuple[
+        Optional[Callable[[str, str], Optional[str]]], Optional[Callable[[str, str], Optional[str]]]
+    ],
+    numbers: Tuple[int, int],
+) -> _Slot:
+    """The :class:`_Slot` of one profile relationship *entry*: placed, or why nothing places it.
+
+    *holds* are the reasons a relationship is laid out by no entry (``held_back``), and by none
+    that counts it because its table has a history (``into_a_history``).
+    """
+    held_back, into_a_history = holds
+    every = statistic_tokens(entry, tokens)
+    why, declared, (parent_table, child_table), (parent_columns, child_columns) = _resolved(
+        entry, keys, planned, held_back
+    )
+    if why is not None or declared is None:
+        return _Slot(tokens, entry, None, "", None, [(p, why or "") for p in every])
+    child_expose, parent_expose = planned[child_table], planned[parent_table]
+    reason = into_a_history(child_table, declared.name) if into_a_history is not None else None
+    child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
+    parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
+    child_table_entry = tables.get(child_table)
+    child_entries = (
+        child_table_entry.get("columns") if isinstance(child_table_entry, Mapping) else None
+    )
+    placed = _lay_out_children(
+        entry,
+        tokens,
+        keys,
+        declared,
+        child_expose,
+        parent_expose,
+        child_plan,
+        parent_plan,
+        child_entries,
+        minimum_cell=numbers[0],
+        fractional_bits=numbers[1],
+        into_a_history=reason,
+    )
+    if placed is None:
+        return _Slot(tokens, entry, None, "", None, [(p, reason or "") for p in every])
+    return _Slot(tokens, entry, declared, child_table, placed, [])
+
+
 def _spread_relationships(
     exposes: Sequence[AuthoredExpose],
     keys: Optional[ContractKeys],
@@ -2115,6 +2400,7 @@ def _spread_relationships(
     minimum_cell: int,
     fractional_bits: int,
     held_back: Optional[Callable[[str, str], Optional[str]]] = None,
+    into_a_history: Optional[Callable[[str, str], Optional[str]]] = None,
     declare_links: Optional[Callable[[], None]] = None,
 ) -> _Spreads:
     """Lay each relationship's children per parent out (ADR 0014 section 5, ADR 0016 section 7).
@@ -2126,7 +2412,9 @@ def _spread_relationships(
     its foreign key's spread (:func:`flux_engine.author.children.spread_children`). Returns what
     was used and, with the reasons, what was not, and the ``counts`` entries, in relationship
     order. A relationship that *held_back* gives a reason for, by its child table and name, is laid
-    out by no entry: every statistic of its profile entry is unused for that reason.
+    out by no entry: every statistic of its profile entry is unused for that reason. So is one
+    that *into_a_history* gives a reason for, but only when the counted layout would have placed
+    it; any other lays its children out as its foreign key's spread, as it does for any table.
 
     The given column of each ``counts`` entry is chosen last, after *declare_links* has run: it
     declares the columns drawn given a column of a linked row, and a grouping by one of them is
@@ -2145,44 +2433,31 @@ def _spread_relationships(
     planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
     slots: List[_Slot] = []
     for index, entry in enumerate(found if isinstance(found, list) else ()):
-        if not isinstance(entry, Mapping):
-            continue
-        tokens = ("relationships", str(index))
-        every = statistic_tokens(entry, tokens)
-        why, declared, (parent_table, child_table), (parent_columns, child_columns) = _resolved(
-            entry, keys, planned, held_back
-        )
-        if why is not None or declared is None:
-            slots.append(_Slot(tokens, entry, None, "", None, [(p, why or "") for p in every]))
-            continue
-        child_expose, parent_expose = planned[child_table], planned[parent_table]
-        child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
-        parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
-        child_table_entry = tables.get(child_table)
-        child_entries = (
-            child_table_entry.get("columns") if isinstance(child_table_entry, Mapping) else None
-        )
-        placed = _lay_out_children(
-            entry,
-            tokens,
-            keys,
-            declared,
-            child_expose,
-            parent_expose,
-            child_plan,
-            parent_plan,
-            child_entries,
-            minimum_cell=minimum_cell,
-            fractional_bits=fractional_bits,
-        )
-        slots.append(_Slot(tokens, entry, declared, child_table, placed, []))
+        if isinstance(entry, Mapping):
+            slots.append(
+                _slot_of(
+                    ("relationships", str(index)),
+                    entry,
+                    keys,
+                    planned,
+                    tables,
+                    (held_back, into_a_history),
+                    (minimum_cell, fractional_bits),
+                )
+            )
     if declare_links is not None:
         declare_links()
+    paired = _association_tables(planned, keys, slots)
     for slot in slots:
         unused += slot.passed
         if slot.placed is None:
             continue
-        settled = _settle_given(slot.placed, slot.tokens, minimum_cell=minimum_cell)
+        settled = _settle_given(
+            slot.placed,
+            slot.tokens,
+            minimum_cell=minimum_cell,
+            paired=slot.child_table in paired,
+        )
         used += settled.used
         unused += settled.unused
         written_notes = list(settled.notes)
@@ -2361,19 +2636,21 @@ def _check_histories(
 
 
 def _projections(
-    exposes: Sequence[AuthoredExpose],
-    keys: Optional[ContractKeys],
-    contract: Mapping[str, Any],
+    planned: _Planned,
     histories: _Histories,
     published: Published,
     declined: Optional[str],
+    window: Tuple[str, str],
 ) -> Projected:
     """The ``snapshots``, ``events`` and ``periods`` entries of the written exposes (ADR 0027 section 9).
 
     Each expose without a validity window is read against each expose that has a history
-    (:func:`flux_engine.author.projection.project`). With *declined*, the reason plan refuses the
-    bundle that holds them, none is written and the note says so.
+    (:func:`flux_engine.author.projection.project`); a periods entry also reads its emit's
+    profile table and the run's *window*. With *declined*, the reason plan refuses the bundle
+    that holds them, none is written and the note says so.
     """
+    exposes, keys, contract = planned.authored, planned.keys, planned.contract
+    tables = planned.reading.tables
     if keys is None or not histories.entries:
         return Projected()
     index = {expose.expose_id: expose for expose in exposes}
@@ -2393,6 +2670,8 @@ def _projections(
             counts=tuple(
                 entry for entry in published.spread.entries if entry["emit"] == expose.expose_id
             ),
+            table=tables.get(expose.expose_id),
+            window=window,
         )
         for expose in exposes
         if not expose.reference
@@ -2406,20 +2685,28 @@ def _projections(
         )
         return Projected(notes=[(f"{emit}: projection", why) for emit in sorted(found.emits)])
     freed = release_counts(found, histories.entries, keys.expose, published)
+    say_per_entity(found, targets, keys.expose, published)
     for emit, reason in found.emits.items():
         index[emit].projected = reason
         if emit in found.carried:
             _release_carried(index[emit], *found.carried[emit])
     for emit, column in freed:
         follow_history(index[emit], column, found.carried[emit][0])
-    for entry in (*found.events, *found.periods):
-        emit = str(entry["emit"])
+    for emit in (str(entry["emit"]) for entry in (*found.events, *found.periods)):
         span_primary_key(index[emit].columns, keys.expose(emit))
     return found
 
 
 #: The keys of a column's declaration that ``verify`` holds the rows to, as against the ones the draw reads.
 _CHECKED_DECLARATION = ("range", "support", "maxCardinality")
+
+#: The keys that parameterise a column's draw once its checked keys are gone (``FLX-3402``).
+_DRAWN_DECLARATION = ("levels", "levelWeightsGiven", "bins", "binWeightsGiven", "rate")
+
+_CARRIED_LEVELS = (
+    "The history sets the column's values, so its support is not checked, and the draw keeps "
+    "the levels the support named, at the equal weights it drew them at."
+)
 
 
 def _release_carried(expose: AuthoredExpose, history: str, names: Sequence[str]) -> None:
@@ -2429,17 +2716,29 @@ def _release_carried(expose: AuthoredExpose, history: str, names: Sequence[str])
     statistics nor the range or levels they would declare describe it: a value of the history
     outside them would fail the check (``FLX-5005``). The projection's own checks hold the
     column to the history.
+
+    The plan still chooses a draw for each such column but a key and one a contract rule sets
+    (:attr:`ColumnPlan.fixed`). One drawn by its support alone (levels the contract or the profile
+    lists, at equal weights) keeps those levels at equal weights, so its draw still has parameters
+    (``FLX-3402``) and the bundle keeps its projections.
     """
     held = set(names)
     expose.carries = history
     for plan in expose.columns:
         if plan.name not in held:
             continue
+        by_support = "support" in plan.declaration and not any(
+            key in plan.declaration for key in _DRAWN_DECLARATION
+        )
         for key in _CHECKED_DECLARATION:
             plan.declaration.pop(key, None)
         plan.labels = [
             label for label in plan.labels if label.tokens[0] not in _CHECKED_DECLARATION
         ]
+        if by_support and plan.fixed is None and plan.level_names:
+            texts = share_texts([Fraction(1)] * len(plan.level_names))
+            plan.declaration["levels"] = dict(zip(plan.level_names, texts, strict=True))
+            plan.labels.append(Label(("levels",), assumed(_CARRIED_LEVELS)))
         plan.properties = []
     expose.properties = [
         prop for prop in expose.properties if not _property_on(prop.document, held)
@@ -2492,10 +2791,13 @@ def _histories(
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
             set_by_rules=frozenset(expose.derives) | frozenset(expose.copies) | expose.dependents,
+            dependents=frozenset(expose.dependents - set(expose.derives) - set(expose.copies)),
             parents=reads.candidates(expose.expose_id, held),
             catalogues=reads.catalogues(held),
         )
         written = write_history(source) if declined is None else decline_history(source, declined)
+        if written.entry is None:
+            _refuse_an_unset_open_end(expose, written)
         if written.entry is not None:
             result.entries.append(written.entry)
             restate_assumptions(expose)
@@ -2507,6 +2809,25 @@ def _histories(
             [(f"{expose.expose_id}: {subject}", text) for subject, text in written.notes]
         )
     return result
+
+
+def _refuse_an_unset_open_end(expose: AuthoredExpose, written: Any) -> None:
+    """Refuse an expose whose end column holds the declared open end on every row, with no history.
+
+    Such a column declares no draw (:attr:`ColumnPlan.open_end_only`): the history writes the open
+    end on every open version. Without one, no draw the engine has spells the value, so the bundle
+    is refused, naming the column and why no history is written.
+    """
+    for plan in expose.columns:
+        if plan.open_end_only:
+            why = "; ".join(
+                reason for pointer, reason in written.unused if pointer[-1] == "history"
+            )
+            raise AuthorError(
+                f"{printable(expose.expose_id)}.{printable(plan.name)} holds the open end the "
+                "contract declares on every row, which only the table's history writes, and no "
+                "history is written" + (f": {why}" if why else "")
+            )
 
 
 #: Why no counts entry lays out a projected emit's relationships.
@@ -3080,6 +3401,7 @@ def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
     """
     fallbacks = _Fallbacks({}, {}, {}, {})
     last_was_trial = False
+    asked: Mapping[Tuple[str, str], Tuple[int, int]] = {}
     for _ in range(_MOST_WIDENINGS):
         try:
             return _author_with_fallbacks(inputs, fallbacks)
@@ -3092,13 +3414,36 @@ def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
             fallbacks.unrated.update(fewer.rates)
         except _RangesWidened as more:
             last_was_trial = False
+            asked = more.ranges
+            before = dict(fallbacks.widened)
             _widen_to_hold(fallbacks.widened, more.ranges)
+            if fallbacks.widened == before:
+                break  # the widened ranges are already written, and the plan asks for them again
     if last_was_trial:
         raise AuthorError(
             "the trial runs did not settle which exposures, rates entries or within entries the "
             f"run reproduces within {_MOST_WIDENINGS} passes"
         )
-    raise AuthorError("the declared date ranges cannot be widened to meet the plan's check")
+    raise FluxError(FLX_6204, _unwidened(asked))
+
+
+def _unwidened(asked: Mapping[Tuple[str, str], Tuple[int, int]]) -> str:
+    """Name each date column whose declared range ``init`` could not widen to what the plan asks."""
+    spans = "; ".join(
+        f"{expose}.{column} to {_day_text(low)} .. {_day_text(high)}"
+        for (expose, column), (low, high) in sorted(asked.items())
+    )
+    return (
+        "init widened the declared date ranges the plan's check asks for, and the plan still "
+        "asks for them: "
+        + (spans or "no column named")
+        + "; declare a range in the contract that holds the span named for each column"
+    )
+
+
+def _day_text(milliseconds: int) -> str:
+    """The UTC day of an instant in milliseconds, as ``YYYY-MM-DD``."""
+    return (date(1970, 1, 1) + timedelta(days=milliseconds // _DAY_MILLISECONDS)).isoformat()
 
 
 def _leave_undated(
@@ -3132,6 +3477,9 @@ def _author_with_fallbacks(inputs: AuthorInputs, fallbacks: _Fallbacks) -> Autho
         return _author_bundle(inputs, fallbacks)
     except _ProjectionRefused as refused:
         projection = str(refused)
+    except _HistoryRefused as refused:
+        # The bundle holds no projection, so the history is the layer the plan refuses.
+        return _author_bundle(inputs, fallbacks, str(refused))
     try:
         return _author_bundle(inputs, fallbacks, None, projection)
     except _HistoryRefused as refused:
@@ -3252,6 +3600,53 @@ def _plan_guarded(
         return AuthoredExpose(expose_id=expose_id, skipped=_beyond_note(error))
 
 
+def _with_edge_rows(
+    reading: _Reading, keys: Optional[ContractKeys], drawn: Sequence[AuthoredExpose]
+) -> None:
+    """Give each association table whose profile publishes no rowCount its edge rows (ADR 0039).
+
+    The rows are bounded by the pairs of the two parents as they are written, so this runs once
+    every expose has its rows and before any relationship is laid out.
+    """
+    rows_of = {expose.expose_id: expose.rows for expose in drawn}
+    for authored in drawn:
+        table = reading.tables.get(authored.expose_id) or {}
+        if keys is None or table.get("rowCount") is not None:
+            continue
+        pair = association_pair(
+            keys.expose(authored.expose_id), [plan.name for plan in authored.columns]
+        )
+        if pair is None or not all(item.target in rows_of for item in pair):
+            continue
+        parents = (rows_of[pair[0].target], rows_of[pair[1].target])
+        found = edge_rows(reading.profile, pair, parents, reading.fractional_bits)
+        if found is not None:
+            rows, note = found
+            authored.assumptions = [item for item in authored.assumptions if item[0] != "rows"]
+            authored.rows, authored.rows_basis, authored.rows_note = rows, assumed(note), note
+            authored.assumptions.append(("rows", note))
+
+
+def _mark_associations(
+    exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys], spread: "_Spreads"
+) -> None:
+    """Give each association table its ``associations`` entry, once both sides are laid out by counts."""
+    rows_of = {expose.expose_id: expose.rows for expose in exposes}
+    for expose in exposes:
+        if keys is None or expose.skipped is not None or expose.reference:
+            continue
+        pair = association_pair(
+            keys.expose(expose.expose_id), [plan.name for plan in expose.columns]
+        )
+        if pair is None or not all(item.target in rows_of for item in pair):
+            continue
+        rows = (expose.rows, rows_of[pair[0].target], rows_of[pair[1].target])
+        found = association_entry(expose.expose_id, pair, spread.entries, rows)
+        if found is not None:
+            expose.association, note = found
+            spread.notes.append((expose.expose_id, note))
+
+
 def _cliques_of(table: Any) -> Tuple[CliqueEntry, ...]:
     """The cliques of a profile's *table* of either definition, in the order the document lists them."""
     if table is None:
@@ -3265,9 +3660,11 @@ def _draw_and_link(
     exposes: Sequence[AuthoredExpose],
     drawn: Sequence[AuthoredExpose],
     held_back: Optional[Callable[[str, str], Optional[str]]] = None,
+    into_a_history: Optional[Callable[[str, str], Optional[str]]] = None,
 ) -> _Spreads:
     """Span the keys of the drawn exposes, lay their relationships out and link their givens."""
     try:
+        _with_edge_rows(reading, keys, drawn)
         _span_keys(drawn, keys)
         for expose in drawn:
             for plan in expose.columns:
@@ -3294,8 +3691,10 @@ def _draw_and_link(
             minimum_cell=reading.minimum_cell,
             fractional_bits=reading.fractional_bits,
             held_back=held_back,
+            into_a_history=into_a_history,
             declare_links=declare_links,
         )
+        _mark_associations(written, keys, spread)
     except (ArithmeticError, ValueError) as error:
         raise AuthorError(_beyond_note(error)) from error
     return spread
@@ -3368,6 +3767,9 @@ def _namespace_block(
         namespace[COUNTS_KEY] = sorted(
             spread.entries, key=lambda item: (item["emit"], item["relationship"])
         )
+    associations = [expose.association for expose in authored if expose.association]
+    if associations:
+        namespace[ASSOCIATIONS_KEY] = sorted(associations, key=lambda item: str(item["emit"]))
     if dated.lifetimes:
         namespace[LIFETIMES_KEY] = dated.lifetimes
     if dated.within:
@@ -3689,15 +4091,10 @@ def _author_bundle(
     written again without them.
     """
     declared = inputs.history
-    planned = _plan_bundle(inputs)
-    team, owner_note = _owner(planned.contract)
-    window, window_note, given_window = _bundle_window(planned, inputs)
-    _widen_ranges(planned.authored, fallbacks.widened)
-    if given_window is not None:
-        _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
-    histories, projections = _histories_and_projections(
-        planned, window, declared, (declined_history, declined_projection)
+    planned, window, (window_note, given_window), (histories, projections) = _laid_out(
+        inputs, fallbacks, (declined_history, declined_projection)
     )
+    team, owner_note = _owner(planned.contract)
     exact_notes = allot_small_tables(
         [expose for expose in planned.drawn if expose.skipped is None],
         _follows_the_entity(planned.authored, histories),
@@ -3717,7 +4114,7 @@ def _author_bundle(
         drafted.simulation,
         planned.scoped,
     )
-    _refuse_unless_widened(files, planned.authored, fallbacks.widened)
+    _refuse_unless_widened(files, planned.authored, fallbacks.widened, planned.contract)
     _check_histories(
         files,
         planned.pinned,
@@ -3779,6 +4176,8 @@ class _Planned:
     drawn: List[AuthoredExpose]
     spread: _Spreads
     authored: List[AuthoredExpose]
+    #: The tables with a history whose relationships no counts entry lays out.
+    held: FrozenSet[str] = frozenset()
 
 
 class _Layers(NamedTuple):
@@ -3803,8 +4202,47 @@ class _Drafted(NamedTuple):
     asked: Any
 
 
-def _plan_bundle(inputs: AuthorInputs) -> _Planned:
-    """Read the contract and the profile of *inputs*, plan each expose and draw what links them."""
+def _laid_out(
+    inputs: AuthorInputs,
+    fallbacks: _Fallbacks,
+    declined: Tuple[Optional[str], Optional[str]],
+) -> Tuple[
+    _Planned,
+    Tuple[str, str],
+    Tuple[Optional[Tuple[str, str]], Optional[Tuple[str, str]]],
+    Tuple[_Histories, Projected],
+]:
+    """The plan, the window, the window's notes and the histories and projections of one authoring run.
+
+    A relationship into a table with a history is laid out by no entry, but only a history that is
+    written holds one back. The history of a table is not written when the plan refuses it
+    (*declined* names the reason), or when its profile gives no history init writes. Then the
+    relationships held back for it are counted as they are for any other table, so the run plans
+    again with that table's history unwritten. Each pass leaves out one table at least, so the
+    passes end.
+    """
+    declared = inputs.history
+    unwritten: FrozenSet[str] = frozenset()
+    while True:
+        planned = _plan_bundle(inputs, unwritten)
+        window, window_note, given_window = _bundle_window(planned, inputs)
+        _widen_ranges(planned.authored, fallbacks.widened)
+        if given_window is not None:
+            _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
+        written = _histories_and_projections(planned, window, declared, declined)
+        gone = planned.held - {str(entry["emit"]) for entry in written[0].entries}
+        if not gone:
+            return planned, window, (window_note, given_window), written
+        unwritten = unwritten | gone
+
+
+def _plan_bundle(inputs: AuthorInputs, unwritten: FrozenSet[str] = frozenset()) -> _Planned:
+    """Read the contract and the profile of *inputs*, plan each expose and draw what links them.
+
+    No counts entry lays out a relationship into a table with a history, so those relationships are
+    held back, except those into the tables of *unwritten*, for which no history is written: they
+    are counted as they would be without one.
+    """
     contract_path = Path(inputs.contract_path)
     contract, contract_bytes = _read_contract(contract_path)
     pinned = load_profile(Path(inputs.profile_path))
@@ -3820,8 +4258,15 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
     _skip_unreadable_references(exposes, keys)
     drawn = [expose for expose in exposes if expose.skipped is None and not expose.reference]
     declared = inputs.history
-    held_back = _held_back(declared) if declared is not None else None
-    spread = _draw_and_link(reading, keys, exposes, drawn, held_back)
+    held = _history_tables(declared, keys, reading.tables) - unwritten
+    spread = _draw_and_link(
+        reading,
+        keys,
+        exposes,
+        drawn,
+        _held_back(declared) if declared is not None else None,
+        lambda emit, name: _into_a_history(keys, held, emit, name),
+    )
     authored = _authored_exposes(contract_path, reading, exposes, drawn)
     _refuse_a_needed_one_value(exposes, keys)
     spread = _without_unwritten(
@@ -3840,6 +4285,7 @@ def _plan_bundle(inputs: AuthorInputs) -> _Planned:
         drawn,
         spread,
         authored,
+        held,
     )
 
 
@@ -3890,6 +4336,11 @@ def _bundle_window(
         given_window,
         declared_spans(declared) if declared is not None else (),
     )
+    for expose in authored:
+        for column in expose.columns:
+            draw_in_window(column, expose.kinds[column.name], window)
+        # A column drawn over its whole range, its range and the window apart, says so.
+        restate_assumptions(expose)
     if given_window is not None:
         for expose in authored:
             for column in expose.columns:
@@ -3940,10 +4391,17 @@ def _refuse_a_window_that_misses_ranges(
 def _declared_ranges_of(
     expose: AuthoredExpose, column: ColumnPlan, contract: Optional[Mapping[str, Any]]
 ) -> List[Tuple[int, int]]:
-    """The ranges (milliseconds) a date column declares: its own ``range`` and its contract's."""
+    """The ranges (milliseconds) a date column declares: its own ``range`` and its contract's.
+
+    A column read from a noisy histogram draws only inside the bins that stand clear of the noise,
+    so their span stands in for its range, the histogram's whole grid.
+    """
     found: List[Tuple[int, int]] = []
     declared = column.declaration.get("range")
-    if isinstance(declared, Mapping):
+    if column.noise_floored:
+        if column.time_span is not None:
+            found.append(column.time_span)
+    elif isinstance(declared, Mapping):
         ends = (instant_ms(declared.get("min")), instant_ms(declared.get("max")))
         if ends[0] is not None and ends[1] is not None:
             found.append((ends[0], ends[1]))
@@ -4020,7 +4478,7 @@ def _histories_and_projections(
         published=published,
         declined=declined[0],
     )
-    projections = _projections(authored, keys, contract, histories, published, declined[1])
+    projections = _projections(planned, histories, published, declined[1], window)
     return histories, projections
 
 
@@ -4100,6 +4558,21 @@ def _setters(
     return [(name, held[nfc(name)]) for name in expose.kinds if nfc(name) in held]
 
 
+def _carried_by_snapshot(
+    expose: AuthoredExpose, projections: Projected, snapshots: Set[str]
+) -> FrozenSet[str]:
+    """The columns a ``snapshots`` entry takes from the history for *expose*, less those a rule sets."""
+    if expose.expose_id not in snapshots or expose.expose_id not in projections.carried:
+        return frozenset()
+    ruled = (
+        set(expose.derives)
+        | set(expose.dependents)
+        | set(expose.copies)
+        | {plan.name for plan in expose.columns if plan.fixed}
+    )
+    return frozenset(projections.carried[expose.expose_id][1]) - ruled
+
+
 def _dated_columns(
     planned: _Planned,
     window: Tuple[str, str],
@@ -4110,9 +4583,11 @@ def _dated_columns(
     """Declare the dates of the written exposes: ``within`` entries, exposures and ``rates``.
 
     A column a written history, or a projection entry of it, sets is dated by no lifetime and no
-    ``within`` entry.
+    ``within`` entry, and a snapshot whose history sets both dates of a pair takes no lifetime
+    over them.
     """
     history_columns = _history_columns(planned, histories, projections)
+    snapshots = {str(entry["emit"]) for entry in projections.snapshots}
     return declare_dates(
         planned.reading.profile,
         {
@@ -4132,6 +4607,7 @@ def _dated_columns(
                     for name, label in _setters(expose, history_columns)
                     if label != _HISTORY_LABEL
                 },
+                carried=_carried_by_snapshot(expose, projections, snapshots),
             )
             for expose in planned.authored
             if not expose.reference
@@ -4514,6 +4990,7 @@ def _refuse_unless_widened(
     files: Sequence[StarterFile],
     exposes: Sequence[AuthoredExpose],
     widened: Mapping[Tuple[str, str], Tuple[int, int]],
+    contract: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Raise :class:`_RangesWidened` when the plan's check of the declared ranges asks for wider ones.
 
@@ -4521,6 +4998,10 @@ def _refuse_unless_widened(
     plan would refuse (``FLX-6204``) is given the range the plan's own check accepts
     (:func:`flux_engine.stages.pipeline.widened_ranges_of`). A bundle the plan accepts, or refuses
     for another reason, raises nothing here: :func:`_check` reports it.
+
+    A range the plan asks for that moves an end past the range the *contract* declares for the
+    column is not written: a row outside it would break the contract. The date it repairs is not
+    dated by its entry (:class:`_WithinDeclined`, :func:`_past_contract_ranges`).
     """
     from flux_engine.runtime import resolve_cast
     from flux_engine.seam.resolve import load_bundle, resolve_all_emits
@@ -4529,6 +5010,7 @@ def _refuse_unless_widened(
     kinds = {expose.expose_id: expose.kinds for expose in exposes}
     asked: Dict[Tuple[str, str], Tuple[int, int]] = {}
     unrepairable: Dict[Tuple[str, str], str] = {}
+    periods: Dict[str, Tuple[str, str]] = {}
     with tempfile.TemporaryDirectory(prefix="fluxsim-init-") as scratch:
         directory = Path(scratch)
         for entry in files:
@@ -4546,12 +5028,98 @@ def _refuse_unless_widened(
                 for (expose_id, column), (low, high) in found.items():
                     unit = _DAY_MILLISECONDS if kinds[expose_id][column] is LogicalKind.DATE else 1
                     asked[(expose_id, column)] = (low * unit, high * unit)
+                periods.update(_period_lifetimes(emits))
         except (FluxError, ArithmeticError, ValueError, KeyError):
             return  # what is wrong is not a range: the check that follows says what
     if unrepairable:
         raise _WithinDeclined(unrepairable)
+    past = _past_contract_ranges(asked, exposes, contract, periods)
+    if past:
+        raise _WithinDeclined(past)
     if asked:
         raise _RangesWidened(asked)
+
+
+def _period_lifetimes(emits: Sequence[Any]) -> Dict[str, Tuple[str, str]]:
+    """The lifetime start and end of each of *emits* whose ``within`` entries hold a period."""
+    from flux_engine.seam.dates import lifetime_entries_of, within_entries_of
+
+    found: Dict[str, Tuple[str, str]] = {}
+    for emit in emits:
+        own = lifetime_entries_of(emit.extension, emit.expose_id)[:1]
+        entries = within_entries_of(emit.extension, emit.expose_id)
+        if own and own[0].end is not None and any(item.lifetime for item in entries):
+            found[emit.expose_id] = (own[0].start, str(own[0].end))
+    return found
+
+
+def _past_contract_ranges(
+    asked: Mapping[Tuple[str, str], Tuple[int, int]],
+    exposes: Sequence[AuthoredExpose],
+    contract: Optional[Mapping[str, Any]],
+    periods: Mapping[str, Tuple[str, str]],
+) -> Dict[Tuple[str, str], str]:
+    """Why each date whose range the plan asks for would leave the range the contract declares.
+
+    *asked* holds, per ``(exposeId, column)``, the range in milliseconds the plan's check accepts.
+    An end it moves (below the declared minimum, above the declared maximum) past the column's
+    contract range, or onto a strict end of it, is one no row may hold. The reason is keyed by the
+    date the entry sets: the column itself, or for the end of a period (*periods* holds each
+    emit's lifetime start and end, for an emit with a period) the start the period entry dates.
+    """
+    found: Dict[Tuple[str, str], str] = {}
+    by_id = {expose.expose_id: expose for expose in exposes}
+    for (expose_id, name), (low, high) in sorted(asked.items()):
+        expose = by_id.get(expose_id)
+        if expose is None:
+            continue
+        plans = {plan.name: plan for plan in expose.columns}
+        _, _, declared = _declared_range_of(expose, plans.get(name), name)
+        rule = _contract_range(expose, name, contract)
+        if declared is None or rule is None or not _leaves_contract(rule, declared, low, high):
+            continue
+        start, end = periods.get(expose_id, ("", ""))
+        key = (expose_id, start if end == name else name)
+        found[key] = (
+            f"the declared range of {name!r} would have to be widened to {_day_text(low)} .. "
+            f"{_day_text(high)} for the entry to plan (FLX-6204), past the range the contract "
+            "declares for it, which every row must hold"
+        )
+    return found
+
+
+def _contract_range(
+    expose: AuthoredExpose, name: str, contract: Optional[Mapping[str, Any]]
+) -> Optional[RangeBounds]:
+    """The range the contract's rules declare for column *name* of *expose*, or ``None``."""
+    context = expose.contexts.get(name)
+    if contract is None or context is None:
+        return None
+    try:
+        column = contract["exposes"][expose.index]["contract"]["schema"][context.schema_index]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return declared_range_bounds(column)
+
+
+def _leaves_contract(rule: RangeBounds, declared: Mapping[str, Any], low: int, high: int) -> bool:
+    """Whether *low* to *high* (milliseconds) moves an end of the *declared* range past the contract's *rule*.
+
+    An end moves when it lies below the declared minimum or above the declared maximum. A moved
+    end leaves the rule when it lies beyond the rule's end, or on that end where the rule is
+    strict. An end the widening does not move never counts, wherever it lies.
+    """
+    below = (
+        rule.low is not None
+        and low < _milliseconds(declared["min"])
+        and (low < rule.low or (rule.low_strict and low == rule.low))
+    )
+    above = (
+        rule.high is not None
+        and high > _milliseconds(declared["max"])
+        and (high > rule.high or (rule.high_strict and high == rule.high))
+    )
+    return below or above
 
 
 def _chained_exposures(

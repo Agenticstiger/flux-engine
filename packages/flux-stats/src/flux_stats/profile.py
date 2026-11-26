@@ -80,6 +80,7 @@ from flux_stats.column_metrics import (
     QUANTILES,
     TIMESTAMP,
 )
+from flux_stats.definitions import LEVEL_HISTOGRAM as _LEVEL_HISTOGRAM
 from flux_stats.definitions import QUANTILE_BINNED, level_order
 from flux_stats.fixedpoint import MAX_FRACTIONAL_BITS
 from flux_stats.noise import (
@@ -141,10 +142,13 @@ __all__ = [
     "MAX_DATE_PAIRS",
     "MAX_EXPOSURES",
     "MetricEntry",
+    "NULL_COUNT_LEVELS",
+    "NullCountEntry",
     "Accounting",
     "Noise",
     "PairEntry",
     "PeriodEntry",
+    "QueryUnit",
     "Profile",
     "ProfileGroup",
     "QueryEntry",
@@ -156,6 +160,8 @@ __all__ = [
     "SCHEMA_URL_1_2_0",
     "SCHEMA_URL_1_3_0",
     "SCHEMA_URL_1_4_0",
+    "NULL_COUNT_2",
+    "SCHEMA_URL_1_5_0",
     "SEVERAL",
     "STRUCTURAL_CLASSES",
     "SampleSize",
@@ -193,6 +199,30 @@ SCHEMA_URL_1_3_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-3
 #: :data:`_FORMS_OF_1_4_0` names it.
 SCHEMA_URL_1_4_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-4-0/FluxProfile.json"
 
+#: Format ``1-5-0``, the ``$id`` of ``docs/spec/profile-1-5.schema.json``. It adds ``nullCount/2`` of a
+#: column and a ``noise`` block on a member of a table's ``history``, both released only under the
+#: account. :data:`_FORMS_OF_1_5_0` names them.
+SCHEMA_URL_1_5_0 = "https://agenticstiger.github.io/flux/engine/spec/profile/1-5-0/FluxProfile.json"
+
+#: Every form that only format ``1-5-0`` holds, by the key the reader names it with, and what the
+#: refusal calls it (:meth:`_Reader.require_1_5_0`).
+_FORMS_OF_1_5_0: Mapping[str, str] = MappingProxyType(
+    {
+        "nullCount": "a nullCount/2 statistic",
+        "noisyHistory": "a noise block on a member of a history",
+        "queryUnit": "a unit on a query",
+        "noisyQuery": "a noise block on a query's statistic",
+    }
+)
+
+#: The two cells of a ``nullCount/2``, in order: the rows where the column is known, then NULL.
+NULL_COUNT_LEVELS: Tuple[str, ...] = ("known", "null")
+
+#: The identifier of the statistic that states how many rows of a column are known and NULL.
+#: The definition of a column's noisy count of its known and NULL rows (format 1-5-0).
+NULL_COUNT_2 = "nullCount/2"
+_NULL_COUNT = NULL_COUNT_2
+
 #: Every form that only format ``1-4-0`` holds, by the key the reader names it with, and what the
 #: refusal calls it. A document that names an earlier format and holds one is refused
 #: (:meth:`_Reader.require_1_4_0`). A later form of the format is one more entry here and one call at
@@ -223,8 +253,8 @@ CHAIN_LEVELS: Tuple[str, ...] = ("dayBefore", "gap", "nextStart", "overlap")
 #: How an entity's last version ends (format 1-3-0, ``history.lastVersion``), in code point order.
 LAST_VERSION_LEVELS: Tuple[str, ...] = ("closed", "open")
 
-#: Why a ``noise`` block is refused beside ``per`` and in a history: one changed row can move an
-#: entity between two cells, and this reader charges a sensitivity of 1 for a noisy statistic.
+#: Why a ``noise`` block is refused beside ``per``: one changed row can move an entity between two
+#: cells, and this reader charges a sensitivity of 1 for a noisy statistic.
 _MOVES_AN_ENTITY = (
     "is not read: one changed row can move an entity between two cells, and this reader charges "
     "a sensitivity of 1 for a noisy statistic"
@@ -241,13 +271,17 @@ _READ_FORMATS = (
     SCHEMA_URL_1_2_0,
     SCHEMA_URL_1_3_0,
     SCHEMA_URL_1_4_0,
+    SCHEMA_URL_1_5_0,
 )
 
 #: The formats that hold the sections of format ``1-2-0`` (``invariants``, ``privacy``).
-_FROM_1_2_0 = (SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0)
+_FROM_1_2_0 = (SCHEMA_URL_1_2_0, SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0)
 
 #: The formats that hold the forms of format ``1-3-0``.
-_FROM_1_3_0 = (SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0)
+_FROM_1_3_0 = (SCHEMA_URL_1_3_0, SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0)
+
+#: The formats that hold the forms of format ``1-4-0``.
+_FROM_1_4_0 = (SCHEMA_URL_1_4_0, SCHEMA_URL_1_5_0)
 
 #: The most columns a ``per`` names (PROFILE-SPEC.md section 3).
 MAX_PER_COLUMNS = 8
@@ -501,6 +535,9 @@ class ColumnEntry:
     #: answers too (:func:`_derived`): the draw of a column in a clique rests on these, so a
     #: comparison against the document's own statistic carries both noises (SCORECARD-SPEC.md 9).
     clique_statistics: Tuple[StatisticEntry, ...] = ()
+    #: The column's ``nullCount/2`` statistic (format 1-5-0), at most one, kept apart from
+    #: ``statistics`` as the cliques are.
+    null_counts: Tuple[NullCountEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -625,6 +662,21 @@ class HistoryColumn:
 
 
 @dataclass(frozen=True)
+class NullCountEntry:
+    """A ``nullCount/2`` statistic of a column (format 1-5-0): two noisy cells, known then NULL.
+
+    ``group`` is the one noisy group, read as any noisy group is: its ``noisy`` values are the
+    published cells and its statistic is their point estimate, whose ``k`` is the estimated number
+    of rows and whose two counts are the rows where the column is known and where it is NULL.
+    """
+
+    sample_size: SampleSize
+    disclosure: str
+    noise: Noise
+    group: ProfileGroup
+
+
+@dataclass(frozen=True)
 class HistoryEntry:
     """What a profile says about the versions of one table's entities (format 1-3-0).
 
@@ -698,11 +750,26 @@ class RelationshipEntry:
 
 
 @dataclass(frozen=True)
+class QueryUnit:
+    """The records a query's rate counts (format 1-5-0): rows of ``table``, or groups of them.
+
+    Without ``by`` each row of ``table`` is a record. With ``by``, the columns of
+    ``table`` that group its rows, a record is one group: the rows of one parent row of a
+    relationship, or one entity of the table's ``history``.
+    """
+
+    table: str
+    by: Tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class QueryEntry:
     """A query's rate: how many records it matches, over a two-level count."""
 
     name: str
     statistics: Tuple[StatisticEntry, ...]
+    #: The unit of the records counted (format 1-5-0); required when a statistic carries noise.
+    unit: Optional[QueryUnit] = None
 
 
 @dataclass(frozen=True)
@@ -1138,6 +1205,21 @@ def _every_bin_published(groups: Sequence[Any], grouping: BinGrouping, where: st
         )
 
 
+def _require_form(
+    version: str, forms: Mapping[str, str], named: bool, form: str, where: str
+) -> None:
+    """Refuse (``FLX-5036``) a form of format *version* (one of *forms*) in a document that names
+    an earlier format (*named* is false)."""
+    if form not in forms:
+        raise KeyError(f"{form!r} is no form of format {version}")
+    if not named:
+        raise refuse(
+            where,
+            f"{forms[form]} is a form of format {version}, and this document names an earlier "
+            "format",
+        )
+
+
 class _Reader:
     """One profile's reading state: the rules a statistic may name."""
 
@@ -1149,6 +1231,7 @@ class _Reader:
         accounting: Optional[Accounting] = None,
         from_1_3: bool = False,
         from_1_4: bool = False,
+        from_1_5: bool = False,
         allow_emptied_entries: bool = False,
     ) -> None:
         self.rules = rules
@@ -1161,6 +1244,9 @@ class _Reader:
         #: Whether the document names format ``1-4-0``, the only one that holds the forms of
         #: :data:`_FORMS_OF_1_4_0`.
         self.from_1_4 = from_1_4
+        #: Whether the document names format ``1-5-0``, the only one that holds the forms of
+        #: :data:`_FORMS_OF_1_5_0`.
+        self.from_1_5 = from_1_5
         #: Every statistic grouped by a link, with the place it was read at and its own table,
         #: checked against the tables once all of them are read (:meth:`check_links`).
         self.links: List[Tuple[str, str, StatisticEntry]] = []
@@ -1174,14 +1260,11 @@ class _Reader:
 
     def require_1_4_0(self, form: str, where: str) -> None:
         """Refuse (``FLX-5036``) a form of format 1-4-0 in a document that names an earlier one."""
-        if form not in _FORMS_OF_1_4_0:
-            raise KeyError(f"{form!r} is no form of format 1-4-0")
-        if not self.from_1_4:
-            raise refuse(
-                where,
-                f"{_FORMS_OF_1_4_0[form]} is a form of format 1-4-0, and this document names an "
-                "earlier format",
-            )
+        _require_form("1-4-0", _FORMS_OF_1_4_0, self.from_1_4, form, where)
+
+    def require_1_5_0(self, form: str, where: str) -> None:
+        """Refuse (``FLX-5036``) a form of format 1-5-0 in a document that names an earlier one."""
+        _require_form("1-5-0", _FORMS_OF_1_5_0, self.from_1_5, form, where)
 
     # -- statistics ----------------------------------------------------------
 
@@ -1642,11 +1725,17 @@ class _Reader:
             )
         return reach
 
-    def statistics(self, value: Any, where: str, **section: Any) -> Tuple[StatisticEntry, ...]:
-        """Read a section's list of statistics; no two may answer one question."""
+    def statistics(
+        self, value: Any, where: str, *, skip: FrozenSet[int] = frozenset(), **section: Any
+    ) -> Tuple[StatisticEntry, ...]:
+        """Read a section's list of statistics; no two may answer one question.
+
+        The positions in *skip* are read by the caller (a column's ``nullCount/2``).
+        """
         read = tuple(
             self.statistic(item, f"{where}[{index}]", **section)
             for index, item in enumerate(_list(value, where))
+            if index not in skip
         )
         self._no_repeats(read, where)
         return read
@@ -1904,9 +1993,22 @@ class _Reader:
                 f"{where}.metrics.{metric_name}",
                 domain=domain,
             )
+        listed = _list(raw.get("statistics", []), f"{where}.statistics")
+        null_at = frozenset(
+            index
+            for index, item in enumerate(listed)
+            if isinstance(item, Mapping) and item.get("definition") == _NULL_COUNT
+        )
+        null_counts = tuple(
+            self._null_count(listed[index], f"{where}.statistics[{index}]", expose_id)
+            for index in sorted(null_at)
+        )
+        if len(null_counts) > 1:
+            raise refuse(f"{where}.statistics", "repeats a statistic already in this list")
         statistics = self.statistics(
-            raw.get("statistics", []),
+            listed,
             f"{where}.statistics",
+            skip=null_at,
             kinds=_COLUMN_KINDS,
             grouped_by=categorical - {name},
             domain=domain,
@@ -1924,6 +2026,57 @@ class _Reader:
             domain=domain,
             metrics=MappingProxyType(found_metrics),
             statistics=statistics,
+            null_counts=null_counts,
+        )
+
+    def _null_count(self, value: Any, where: str, expose_id: Optional[str]) -> NullCountEntry:
+        """A column's ``nullCount/2`` (format 1-5-0): two noisy cells, charged as a count table.
+
+        One row lands in exactly one cell (known or NULL), so a unit that contributes ``m_T`` rows
+        of the column's table moves the cells by ``m_T`` in L1 and in L2 (PROFILE-SPEC.md section
+        3a). It is released with noise only, ungrouped, and in a table the unit changes.
+        """
+        self.require_1_5_0("nullCount", f"{where}.definition")
+        if isinstance(value, Mapping) and "noise" not in value:
+            raise refuse(where, "a nullCount/2 is released with a noise block only")
+        raw = _mapping(
+            value,
+            where,
+            required=("definition", "sampleSize", "disclosure", "levels", "noise", "groups"),
+        )
+        if expose_id is None:
+            raise refuse(where, "a nullCount/2 lies in a column of a table of the profile")
+        disclosure = raw["disclosure"]
+        if not isinstance(disclosure, str) or disclosure not in self.rules:
+            raise refuse(f"{where}.disclosure", "names no rule in disclosureRules")
+        if tuple(read_texts(raw["levels"], f"{where}.levels")) != NULL_COUNT_LEVELS:
+            raise refuse(f"{where}.levels", f"are exactly {list(NULL_COUNT_LEVELS)}")
+        at = f"{where}.noise"
+        accounting = self._require_account(at)
+        reach = self._reach(expose_id, at, accounting)
+        noise = read_noise(
+            raw["noise"],
+            at,
+            accounting,
+            l1=Fraction(reach),
+            l2_squared=Fraction(reach * reach),
+        )
+        groups = _list(raw["groups"], f"{where}.groups")
+        if len(groups) != 1:
+            raise refuse(f"{where}.groups", "an ungrouped statistic has one group")
+        group = self._noisy_group(
+            groups[0], f"{where}.groups[0]", _LEVEL_HISTOGRAM, cells=len(NULL_COUNT_LEVELS)
+        )
+        if group.key != "":
+            raise refuse(
+                f"{where}.groups[0]", "a nullCount/2 is ungrouped, keyed by the empty string"
+            )
+        self.parts.append((where, noise))
+        return NullCountEntry(
+            sample_size=_sample_size(raw["sampleSize"], f"{where}.sampleSize"),
+            disclosure=disclosure,
+            noise=noise,
+            group=group,
         )
 
     def table(self, expose_id: str, value: Any, where: str) -> TableEntry:
@@ -2216,15 +2369,23 @@ class _Reader:
         It is ungrouped, unless *grouped_by* names the column it is grouped by, and a history
         statistic holds no ``groupByLink`` and no ``per``.
         """
-        if isinstance(value, Mapping) and "noise" in value:
-            raise refuse(f"{where}.noise", _MOVES_AN_ENTITY + " in a history statistic")
+        noisy = isinstance(value, Mapping) and "noise" in value
+        if noisy:
+            self._noisy_history_allowed(f"{where}.noise", expose_id)
         statistic = self.statistic(
             value,
             where,
             kinds=frozenset({kind}),
             grouped_by=None if grouped_by is None else {grouped_by},
-            noisy_in=None,
+            noisy_in=expose_id if noisy else None,
         )
+        if noisy and grouped_by is not None:
+            if [group.key for group in statistic.groups] != list(statistic.levels):
+                raise refuse(
+                    f"{where}.groups",
+                    "a noisy transitions statistic publishes every current-value group, one for "
+                    "each of its levels",
+                )
         if levels is not None and statistic.levels != levels:
             raise refuse(f"{where}.levels", f"are exactly {list(levels)}")
         if statistic.group_by != grouped_by:
@@ -2232,6 +2393,22 @@ class _Reader:
         if statistic.group_by_link is not None or statistic.per:
             raise refuse(where, "a history statistic holds no groupByLink and no per")
         return statistic
+
+    def _noisy_history_allowed(self, where: str, expose_id: str) -> None:
+        """A history member carries noise (format 1-5-0) only in a table the unit follows into.
+
+        The table is reached by the unit through ``follows`` (``m_T >= 1``) and is not the unit's
+        own expose: one unit is one row there, and an entity's versions are several rows, so one
+        unit would not hold a whole entity (PROFILE-SPEC.md section 3a).
+        """
+        self.require_1_5_0("noisyHistory", where)
+        accounting = self._require_account(where)
+        if expose_id == accounting.unit or accounting.reach(expose_id) < 1:
+            raise refuse(
+                where,
+                "a history member carries noise only in a table the unit of privacy follows into, "
+                "which is not the unit's own expose",
+            )
 
     def _history_columns(
         self,
@@ -2734,16 +2911,168 @@ class _Reader:
             raise refuse(f"{where}.dates", "names one pair twice")
         return tuple(found)
 
-    def query(self, value: Any, where: str) -> QueryEntry:
-        raw = _mapping(value, where, required=("name", "statistics"))
+    def query(
+        self,
+        value: Any,
+        where: str,
+        tables: Mapping[str, TableEntry] = MappingProxyType({}),
+        relationships: Sequence[RelationshipEntry] = (),
+    ) -> QueryEntry:
+        """A query's rate; in format 1-5-0 it may state its ``unit`` and carry noise.
+
+        A noisy statistic needs the unit, which says how many records one unit of privacy changes:
+        rows of a table (``m_T``), groups of its rows by the columns of a followed relationship
+        (``m_P`` of the parent; twice that, ``L1 = 2 m_P`` and ``L2^2 = 2 m_P^2``, when the table
+        is one the unit does not reach, where a group can change cell without leaving), or its
+        history's entities (``m_T``). Both cells of the rate are a count table, charged that
+        sensitivity (PROFILE-SPEC.md section 3a).
+        """
+        raw = _mapping(value, where, required=("name", "statistics"), optional=("unit",))
+        name = _name(raw["name"], f"{where}.name")
+        unit = self._query_unit(raw["unit"], f"{where}.unit") if "unit" in raw else None
+        noisy = any(
+            isinstance(item, Mapping) and "noise" in item
+            for item in _list(raw["statistics"], f"{where}.statistics")
+        )
+        charge_of: Optional[Callable[[str], _Charge]] = None
+        if noisy:
+            at = f"{where}.statistics"
+            self.require_1_5_0("noisyQuery", at)
+            if unit is None:
+                raise refuse(f"{where}.unit", f"query {name!r} is noisy and states no unit")
+            charge = self._query_charge(unit, where, name, tables, relationships)
+            charge_of = lambda _at: charge  # noqa: E731
         statistics = self.statistics(
-            raw["statistics"], f"{where}.statistics", kinds=_QUERY_KINDS, query_group=True
+            raw["statistics"],
+            f"{where}.statistics",
+            kinds=_QUERY_KINDS,
+            query_group=True,
+            charge_of=charge_of,
         )
         if any(statistic.levels != QUERY_LEVELS for statistic in statistics):
             raise refuse(
                 f"{where}.statistics", f"a query's rate counts the levels {list(QUERY_LEVELS)}"
             )
-        return QueryEntry(name=_name(raw["name"], f"{where}.name"), statistics=statistics)
+        if noisy and unit is not None and unit.by:
+            if any(
+                item.group_by is not None or item.group_by_bins is not None for item in statistics
+            ):
+                raise refuse(
+                    f"{where}.statistics",
+                    f"query {name!r} groups its records, groups of rows, by a column too: one "
+                    "group can hold several levels of that column and land in more than one cell",
+                )
+        return QueryEntry(name=name, statistics=statistics, unit=unit)
+
+    def _query_unit(self, value: Any, where: str) -> QueryUnit:
+        """The shape of a query's ``unit`` (format 1-5-0): a table, and optionally columns to group by."""
+        self.require_1_5_0("queryUnit", where)
+        raw = _mapping(value, where, required=("table",), optional=("by",))
+        by: Tuple[str, ...] = ()
+        if "by" in raw:
+            by = tuple(read_texts(raw["by"], f"{where}.by"))
+            if not by or len(set(by)) != len(by):
+                raise refuse(f"{where}.by", "names distinct columns, at least one")
+        return QueryUnit(table=_name(raw["table"], f"{where}.table"), by=by)
+
+    def _query_charge(
+        self,
+        unit: QueryUnit,
+        where: str,
+        name: str,
+        tables: Mapping[str, TableEntry],
+        relationships: Sequence[RelationshipEntry],
+    ) -> _Charge:
+        """The sensitivity of a noisy query over *unit*, a count table of its records.
+
+        ``{table}``: each row is a record, ``m_T`` of them change, ``(m_T, m_T^2)``. With ``by``,
+        the child columns of a listed relationship from a parent ``P`` into the table: one group is
+        one row of ``P``. When the unit follows that relationship, a group leaves with its row of
+        ``P`` whole and the charge is ``(m_P, m_P^2)``. When the table is a table the unit does not
+        reach, its rows are the same in every neighbouring data set, so a group stays when its row
+        of ``P`` leaves, and a query that reads that row can move the group from one cell of the
+        rate to the other: ``(2 m_P, 2 m_P^2)``, as a row moving between cells of a relationship
+        statistic (section 3a). When those columns, in any order, are the child columns of
+        relationships from more than one parent the unit reaches, one unit's rows of each can move
+        a group, and their charges would add: such a unit is refused. Or the table's ``history``
+        entity columns: ``m_T``, under the history's whole-entity obligation (a profiler's, stated
+        and not checked), in a table the unit follows into. In the unit's own expose one unit is
+        one version, and removing it can move its entity from one cell of the rate to the other, so
+        the entity form is refused there, as a noisy history member is. Anything else, an unknown
+        table or column, or a figure of 0 (a table the unit does not reach, with no parent the unit
+        reaches), is refused, naming the query and no value.
+        """
+        accounting = self._require_account(f"{where}.unit")
+        refused = f"query {name!r} states a unit that does not give a charge: "
+        entry = tables.get(unit.table)
+        if entry is None:
+            raise refuse(f"{where}.unit.table", refused + "its table is not in the profile")
+        if not set(unit.by) <= set(entry.columns):
+            raise refuse(f"{where}.unit.by", refused + "a column is not one of its table")
+        reach = accounting.reach(unit.table)
+        charges: List[_Charge] = []
+        if not unit.by:
+            charges.append(_Charge(Fraction(reach), Fraction(reach * reach)))
+        else:
+            charging: List[str] = []
+            for link in relationships:
+                if link.child_table == unit.table and set(link.child_columns) == set(unit.by):
+                    key = (link.parent_table, link.parent_columns, unit.table, link.child_columns)
+                    followed = any(
+                        (f.parent_table, f.parent_columns, f.child_table, f.child_columns) == key
+                        for f in accounting.follows
+                    )
+                    parent = accounting.reach(link.parent_table)
+                    if (followed or reach == 0) and parent >= 1:
+                        charging.append(f"{link.parent_table}({', '.join(link.parent_columns)})")
+                    if link.child_columns != unit.by:
+                        # The same columns in another order group the rows the same way, so
+                        # they count among the parents above; only the order ``by`` names is
+                        # form (a) and gives a charge.
+                        continue
+                    # A group leaves with its unit whole only when the table's rows follow their
+                    # parent row. When they are the same in every neighbouring data set, the
+                    # group stays when its row of the parent leaves and may change cell.
+                    if followed:
+                        charges.append(_Charge(Fraction(parent), Fraction(parent * parent)))
+                    elif reach == 0:
+                        charges.append(_Charge(Fraction(2 * parent), Fraction(2 * parent * parent)))
+            if len(charging) > 1:
+                # One unit's rows of every such parent leave together, and each can move a
+                # group between the cells, so their charges would add.
+                raise refuse(
+                    f"{where}.unit.by",
+                    refused
+                    + "its columns are the child columns of relationships from more than one "
+                    f"parent the unit reaches ({', '.join(sorted(charging))}), and one unit's rows "
+                    "of each can move a group between the rate's cells",
+                )
+            history = entry.history
+            if history is not None and history.entity == unit.by:
+                if unit.table == accounting.unit:
+                    raise refuse(
+                        f"{where}.unit.by",
+                        refused + "it groups by the history's entity in the unit's own expose, "
+                        "where one unit is one version and can move its entity between the "
+                        "rate's cells",
+                    )
+                charges.append(_Charge(Fraction(reach), Fraction(reach * reach)))
+            if not charges:
+                raise refuse(
+                    f"{where}.unit.by",
+                    refused
+                    + "its columns are neither the child columns of a followed relationship "
+                    "into the table (or into a table the unit does not reach) nor its history's "
+                    "entity",
+                )
+        for charge in charges:
+            if charge.l1 >= 1:
+                return charge
+        raise refuse(
+            f"{where}.unit",
+            refused + "the unit of privacy does not reach it, so the profile does not state "
+            "how many records one unit contributes",
+        )
 
     def invariant(self, value: Any, where: str) -> InvariantEntry:
         """A declared fact's share: exactly one ungrouped ``levelHistogram/1`` over false and true."""
@@ -2974,7 +3303,8 @@ def parse_profile(document: Any, *, allow_emptied_entries: bool = False) -> Prof
         first_format=raw["_schemaURL"] == SCHEMA_URL,
         accounting=accounting,
         from_1_3=raw["_schemaURL"] in _FROM_1_3_0,
-        from_1_4=raw["_schemaURL"] == SCHEMA_URL_1_4_0,
+        from_1_4=raw["_schemaURL"] in _FROM_1_4_0,
+        from_1_5=raw["_schemaURL"] == SCHEMA_URL_1_5_0,
         allow_emptied_entries=allow_emptied_entries,
     )
     if accounting is not None and accounting.follows:
@@ -2989,7 +3319,7 @@ def parse_profile(document: Any, *, allow_emptied_entries: bool = False) -> Prof
         for index, item in enumerate(_list(raw.get("relationships", []), "profile.relationships"))
     )
     queries = tuple(
-        reader.query(item, f"profile.queries[{index}]")
+        reader.query(item, f"profile.queries[{index}]", tables, relationships)
         for index, item in enumerate(_list(raw.get("queries", []), "profile.queries"))
     )
     if len({query.name for query in queries}) != len(queries):

@@ -438,6 +438,16 @@ lists each noisy statistic with its mechanism, scale and the variance of each ce
 ledger in `--json` carries the same, so you can see how much noise stands behind a number. A
 register citation of a noisy cell points at the profile's own `noisyCounts`.
 
+A date or timestamp column's noisy histogram is read only where its counts stand clear of the
+noise: above `sqrt(2v(5 + ceil(ln m)))` for Gaussian noise of variance `v` over `m` bins, or
+`b(5 + ceil(ln m))` for Laplace noise of scale `b`
+([ADR 0019](../adr/0019-one-privacy-budget-per-profile-release.md), the second amendment of
+2026-11-25). A bin below that floor carries no weight, so noise in a grid's empty years draws no
+dates there, and the run's window is the hull of the bins above it. When no bin is above it, which
+is common for a release of a few hundred records, the column is drawn evenly within the run's
+window, and the output says so. The column still declares the histogram's whole grid as its range,
+and its histogram property still compares the run with the release.
+
 A table whose profile carries noisy cliques (section 5a of the spec) is drawn through a
 junction tree: the cliques are arranged into a tree rooted at the one with the most columns
 (the first by name among equals), and each column is drawn given the columns its clique shares
@@ -580,7 +590,11 @@ Nothing is written when:
 
 - the directory holds anything, or cannot be written;
 - `--contract` comes without `--profile`, or the reverse, or `--overlay` or `--window` comes without both (exit 2);
-- a `--window` value is not a date or an RFC 3339 timestamp in the years 1 to 9999, or START is not before END (exit 2);
+- a `--window` value is not a date or an RFC 3339 timestamp in the years 1 to 9999, START is not before END, or END
+  is in the year 9999, which spells an open end rather than an instant (exit 2);
+- a `--history` file's `timeBounds` end, an entry's `until` or a `start` bin is in the year 9999;
+- a date range the contract declares would make the run's window longer than 300 years (write an open end in
+  the year 9999, which no window reads);
 - an overlay file is refused by the reader, two files name one overlay, an overlay names a table the profile does not hold, or an overlay gives a table with a history another `rowCount`;
 - the profile cannot be read ([FLX-3109](../reference/errors/FLX-3109.md)) or is not a
   profile ([FLX-5036](../reference/errors/FLX-5036.md));

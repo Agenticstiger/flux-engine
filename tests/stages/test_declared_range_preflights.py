@@ -27,7 +27,7 @@ from flux_engine.stages.replay import replay
 from flux_engine.stages.validate import validate
 
 from ._fleet import CONTRACT, NAMESPACE, VISIT, expose, plan_module, repin, run_bundle
-from .test_declared_range_replay import _recorded_digest, _run_without_the_cut
+from .test_declared_range_replay import _run_without_the_cut, recorded_digest
 from .test_declared_range_run import _visits
 
 pytestmark = pytest.mark.integration
@@ -117,7 +117,7 @@ def test_a_plan_recorded_without_the_cut_applies_and_replays_byte_for_byte(
         )
         assert replayed.success, replayed.stderr
         assert layout.emit_path(VISIT).read_bytes() == recorded
-        assert _recorded_digest(state, layout.run_id) == digest
+        assert recorded_digest(state, layout.run_id) == digest
 
 
 @pytest.mark.parametrize("declaration", ["conditions", "copula"])

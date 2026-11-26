@@ -377,3 +377,160 @@ had a different number of rows per parent than the history had entities. `init` 
   has children of its own. Where two snapshots of one history could give, the one whose emit id sorts first does,
   so the result does not depend on the order of the exposes. The ledger says which statistic moved where and why.
 - **What moves.** A bundle for a contract with such an expose. Every other bundle keeps its bytes.
+
+## Amendment of 2026-11-25: a budget on the rows of a periodic emit
+
+`MOST_PERIODS` bounds the periods of an entry, but not its rows, and `plan` generates every row it plans: a monthly
+entry over five thousand years for a thousand entities derives sixty million rows, which took gigabytes before any
+check saw the count.
+
+- **The estimate.** Before it lists a period, `plan` bounds the entry's pairs from the versions alone: a version valid
+  over `[a, b)` inside the periods' span meets at most `(b - a) // shortest + 2` periods, `shortest` the fewest days
+  a period of the grain spans (1, 7, 28, 89 or 365), and never more than there are periods. The estimate is that sum
+  times the most rows a pair takes, over the kinds a count or the high end of the largest class. Spark's `sequence`
+  sizes its array the same way, in exact arithmetic before it allocates. The estimate is never below the rows the
+  layout makes.
+- **A rare high count.** Since the estimate never counts fewer rows than the layout makes, a count class's high
+  level is taken for every pair, however rare the class: a kind whose count is 1 almost always and 100,000 once in
+  a hundred thousand pairs is estimated at 100,000 rows a pair. The refusal then names the kind and that level.
+- **The budget.** An estimate above the budget is `FLX-3403`, naming the emit, the grain, the window, the periods,
+  the pairs, the estimate, the rows a pair takes and the budget, and the two ways out: a smaller estimate (a lower
+  high level where a count class sets it, else a narrower window or a coarser grain), or a larger budget. The budget
+  is 50,000,000 rows a periodic emit; `--max-rows N` on `plan`, `run` or an `apply` that takes a fresh plan sets
+  another, up to `MOST_ROWS`.
+- **When it runs.** Only while a plan is made. A recorded plan states the rows it derives, so `apply --run-id` and
+  `replay` run it with no estimate, and `MOST_ROWS` alone bounds its rows; `apply --run-id` refuses `--max-rows`.
+- **What moves.** Nothing a plan makes. A budget other than the default is recorded in `plan.json` as `maxRows`; a
+  plan with the default carries no key and keeps its bytes and its planDigest. A plan recorded before the budget
+  replays as it did.
+
+## Amendment of 2026-11-25: a `given` over a column of the version is drawn after the projection
+
+The first amendment of 2026-11-24 refused a column of an events or periodic emit drawn `given` a column the entry
+sets, because the draw read the level the other column's own draw made, which the entry then replaced. A bundle
+that projects a column of the version (`model` on a month, or on a change) and draws another column given it
+(`tier` given `model`) is a plain shape, and the refusal left it no way to say so. This amendment draws it:
+
+- **The order.** The entry's cells are set first. A column of the version the entry sets, which some column of the
+  emit is drawn `given`, gives each row the level the version holds, and the emit then draws its own cells: the
+  column drawn `given` it, and every column drawn `given` that one, reads the held level in place of the level its
+  own draw made. Each cell is still drawn once from its own stream, so the order changes no other value, and the
+  column path, the per-row path, `--jobs` and `--shard` give the same bytes. A categorical column's level is the
+  one that renders to the version's value; a column drawn from bins takes the bin that holds it.
+- **What stays refused**, `FLX-3403` at plan, naming both columns and the entry. A column drawn `given` a cell the
+  entry sets that is not a column of the version: the `op`, `at`, `date` and `type` columns, the period column, a
+  kind's override, and the before and after images (an image is NULL where the event has no such version). These
+  are not drawn from the column's levels, so a held level would name a level the column's table is not keyed by.
+  A column with `allocation: exact` drawn `given` a column of the version, whose classes are allotted over the
+  rows by the draw of that column, not by the level a row holds.
+- **A value no level names.** The history may fill a column of the version with a value no level of the emit's
+  column names: it declares a `nullFraction` on it, a rule, a relationship or the history's `end` sets it (an `end`
+  value that is a level of the emit's column is served), it draws levels the emit's column does not hold, or, for a
+  column drawn from bins, it is of another type. A row that holds such a value has no row in the given-table of a
+  column drawn `given` it, so that column is drawn from the marginal the declarations imply: `P(D = d)` is the sum
+  over the levels `c` of the parent `C` of `w_c * P(D = d | C = c)`, with `w` the level weights `C` declares for the
+  levels `D`'s table is keyed by and `P(D | C = c)` the table's row for `c`, taken as shares. It needs no declaration
+  of its own and fits nothing to data. The weights are read from the emit's `C`, and from the history's `C` where
+  the emit's declares none (the emit's wins where both declare, since the table is keyed by its levels). The sum is
+  exact (`Fraction`, the levels in sorted order, normalised), and the plan records the shares (`fallbackMarginals` in
+  the generator document, beside `fallbackGivens`), so the digest covers them. Where `C` declares no level weights
+  (a `support` or nothing), `D` is drawn from the `support` it declares, equal weights, which must name exactly the
+  levels the table names, with a `maxCardinality` (a declared support is a checked property); a column that has
+  neither, or draws from bins, which have no weights apart from the table's, is refused at plan, `FLX-3403` naming
+  both columns and what to declare (level weights for `C`, or a support for `D`). Each cell is still drawn once from
+  its own stream, and only the distribution read for that row changes, so the column path, the per-row path,
+  `--jobs` and `--shard` give the same bytes. Rows whose value is a level of the emit's column are drawn from the
+  given-table as before. The `end` source cannot be reached end to end today (every level the history ends in is one
+  of its own levels, and every level of the history is a level of the emit's), so it is pinned at the plan alone.
+  `plan` prints one note for each such column, naming the column, its parent, what sets the parent's unnamed values
+  and which distribution is drawn. A `conditions` group cannot read such a column: conditions on a projected emit
+  are refused at plan (`FLX-3643`).
+- **Recorded plans.** A plan with such a column says `projectedGivens: "afterProjection"`, which the plan digest
+  covers; plan.json states only that key. The generator document the plan's digest covers (its `generatorDigest`)
+  names the held columns, as `heldGivens` in the projection member of the emit, and those of them that fall back
+  to the column's own distribution, as `fallbackGivens` (absent when none does), with the shares of each marginal
+  as `fallbackMarginals` (absent when none has one). A recorded plan without
+  the key replays the draw engine 0.11.1 made, given the level the column's own draw made, so its rows and its run
+  id keep their bytes. Any other value is `FLX-2102`.
+- **What moves.** Only a bundle the first amendment refused: its plan is now accepted. Every other plan writes no
+  key and keeps its bytes.
+
+## Amendment of 2026-11-26: `init` bounds a periods entry by the months its column publishes
+
+Section 9 wrote a periods entry with neither `from` nor `through`, so its periods ran from the window's start over
+every month a version held, although the profile's histogram of the period column says which months hold rows. A
+history with versions from many years back then wrote periodic rows in each of those years, far outside the months
+the data covers.
+
+- **What is read.** The period column's histogram (`marginalHistogram/1`), only when its one group is published and
+  every edge is a whole day. `from` is the start of the period that holds its first edge, counted from the
+  window's first day as the entry's periods are without it, so no period moves to another day; `through` is its
+  last bin's start, so the last period is the one the last bin opens. A withheld histogram, or none, writes
+  neither key, and no withheld `min` or `max` is read.
+- **Held to the run.** Both are held to the window and to the history's `until`: a `from` on or before the window's
+  first day is left out, as that day is the entry's anchor without one, and so is a `through` at or after the
+  window's last day; a `through` past `until` is the last day before it. A histogram wholly outside them writes
+  neither.
+- **What moves.** A bundle `init` writes whose periods entry's column publishes such a histogram that starts after
+  the window or ends before it. Every other bundle keeps its bytes, and no plan or recorded plan changes.
+
+## Amendment of 2026-11-26: a `given` over a kind's override is drawn after the projection
+
+The amendment of 2026-11-25 drew a column `given` a column of the version after the projection, and kept refusing a
+column drawn `given` a column a kind of a periods entry overrides. A periodic emit whose kinds each set the row's type
+(`charge` is `fuel` on one kind's rows and `toll` on the other's) and that draws a column given that type (`band`
+given `charge`) is a plain shape, and the refusal left it no way to say so. This amendment draws it:
+
+- **The level a row holds.** A column the entry sets, which some column of the emit is drawn `given`, gives each row
+  a level before the emit draws its own cells: on the rows of a kind that overrides it, the override's; on the other
+  kinds' rows, the version's for a column of the version, and none for a column of the emit's own, whose own draw then
+  stands, its level with it. The column drawn `given` it, and every column drawn `given` that one, read the held
+  level. A column one kind overrides is still drawn on the rows of the kinds that do not, so it too is drawn given
+  the level those rows hold. Each cell is still drawn once from its own stream, so the column path, the per-row path,
+  `--jobs` and `--shard` give the same bytes. A categorical column's level is the one that renders to the override; a
+  column drawn from bins takes the bin that holds it, as its own draw would.
+- **An override no level names.** An override that renders to no level of the emit's column has no row in the
+  given-table, so on that kind's rows the column drawn `given` it is drawn from the marginal the declarations imply,
+  `P(D = d)` the sum over the levels `c` of `w_c * P(D = d | C = c)`, as for a version's value no level names (the
+  emit's level weights, else the history's for a column of the version), else from the `support` it declares,
+  evenly, and the plan is refused without either, `FLX-3403` naming both columns, the kind and the value.
+  `plan` prints one note for each such column, as it does for a version's value.
+- **What stays refused**, `FLX-3403` at plan, naming both columns and the entry: a column drawn `given` the period
+  column, and, on an events emit, `given` the `op`, `at`, `date` or `type` column or an image; and an override with no
+  distribution to fall back to. A periodic emit declares no `allocation: exact` (its rows grow with its window), so no
+  column allotted by its parent's draw reaches this step.
+- **Recorded plans.** A plan whose draw holds a level engine 0.12.0 did not hold (an override, or a column some kinds
+  override drawn given the level the other kinds' rows hold) says `projectedGivens: "afterOverrides"`, which the plan
+  digest covers, and `heldGivens`, `fallbackGivens` and `fallbackMarginals` name what it holds, as before. A plan with
+  `"afterProjection"`, or without the key, replays the draw it was made with, so its rows and its run id keep their
+  bytes. Any other value is `FLX-2102`.
+- **What moves.** A bundle the amendment of 2026-11-25 refused for a column drawn `given` an override now plans. A
+  column some kinds override, drawn `given` a column the entry sets, was drawn on the other kinds' rows given the
+  level of its parent's own draw, which the entry then replaced: it now reads the level the row holds, and a new plan
+  of such a bundle says `afterOverrides`. Every other plan keeps its bytes.
+
+## Amendment of 2026-11-26: `init` keeps the history when the profile counts rows per entity
+
+A profiler counts a child's rows per parent over every relationship, so over a relationship whose `toColumns` are
+a versioned expose's natural entity it counts the child's rows per entity. `init` wrote a `counts` entry over it,
+which the plan refuses for a history (ADR 0017 section 8: no counted layout of the versions), so `init` wrote the
+bundle again without its projections and then without its history; with no history the counted layout needed
+each version's entity to be unique, and that was refused too.
+
+- **No layout reads it.** A parent row of a table with a history is a version, which no `counts` entry, and no
+  spread of the foreign key over the parent's keys, turns into an entity: a child picks a version as any child
+  does. So a relationship into a table with a history that the counted layout would place is laid out by no entry,
+  and each statistic of its profile entry is unused, with that reason: children per entity over the natural
+  entity, per version over another key.
+  A table has a history here when the history file declares one, or else when its profile table publishes one; a
+  table with neither is counted as before. The history and its projections are written as they are without it.
+  A relationship the counted layout cannot place is laid out as its foreign key's spread, as it always was.
+  Only a history that is written holds a relationship back: when the plan refuses the history, or the profile's
+  history is one `init` does not write, the bundle is planned again with that table's relationships counted, as
+  they were before this amendment.
+- **A projection says why in its own words.** When the child is an events or a periodic emit, the statistic is
+  unused with the projection's reason: an event is one row per change, so its rows per entity follow from the
+  history's versions; a periodic row is one row per version and period, and the profile counts the rows but not
+  the periods each holds, so no rows per period are read from it. A note says it once per emit.
+- **What moves.** A bundle for a profile with such a statistic into a table whose profile publishes a history,
+  which `init` could not write with its history before. Every other bundle keeps its bytes, and no plan or recorded plan changes.

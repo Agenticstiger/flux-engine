@@ -50,7 +50,12 @@ from typing import (
     Union,
 )
 
-from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity, names_a_snapshot
+from flux_engine.concordance.compiler import (
+    CompiledFidelity,
+    compile_fidelity,
+    may_declare_no_column,
+    names_a_snapshot,
+)
 from flux_engine.concordance.predicate import (
     DeclaredExpose,
     FidelityBlock,
@@ -90,6 +95,7 @@ from flux_engine.generator import GeneratorPlan, build_plan, generate_rows
 # Imported for its registration: the exposure hook gives the counted layout a parent's expected
 # count (ADR 0025 section 4), and must be registered before any plan is related.
 from flux_engine.generator import exposure as _exposure  # noqa: F401
+from flux_engine.generator.associations import association_notes
 from flux_engine.generator.conditions import with_conditions
 from flux_engine.generator.copula import declares_copula
 from flux_engine.generator.counts import TooFewChildRows, TooManyChildRows
@@ -129,7 +135,15 @@ from flux_engine.generator.history import (
     parent_bound_notes,
 )
 from flux_engine.generator.plugin import PluginExpose, check_rows, generate_values, request_of
-from flux_engine.generator.projections import chain_of, derived_rows, project_plan, projection_of
+from flux_engine.generator.projections import (
+    NEW_PLAN_BOUNDS,
+    RunBounds,
+    chain_of,
+    derived_rows,
+    fallback_notes,
+    project_plan,
+    projection_of,
+)
 from flux_engine.generator.rates import Rates
 from flux_engine.generator.reference import ReferenceRows, build_reference_plan
 from flux_engine.generator.relations import (
@@ -290,7 +304,12 @@ from flux_engine.stages._parallel import (
 )
 from flux_engine.stages._plugin_exposes import plugin_exposes, refuse_plugin_combinations
 from flux_engine.stages._prewarm import start_forkserver_early
-from flux_engine.stages._range_setters import range_setter_notes, uncut_columns
+from flux_engine.stages._range_setters import (
+    SetBy,
+    range_setter_notes,
+    uncut_columns,
+    validity_range,
+)
 from flux_engine.stages.scaling import (
     FLX_3404,
     FLX_3405,
@@ -491,6 +510,10 @@ class PipelineResult:
     end_share: str = END_SHARE_OF_ENTITIES
     #: Whether a column may be cut at its contract's range (ADR 0024); false replays a plan as it was.
     cut_ranges: bool = True
+    #: The periodic rows' budget the plan set (``--max-rows``), and whether a history, its
+    #: projections and a periods entry keep to the contract's ranges on the columns they set (ADR
+    #: 0024, the amendment of 2026-11-25); false replays a plan as it was.
+    bounds: RunBounds = NEW_PLAN_BOUNDS
     #: The key columns ``--scale`` widened, by exposeId: their contract range is not verified.
     scale_widened: Mapping[str, FrozenSet[str]] = field(default_factory=dict)
     #: The drawn parents ``--scale`` kept at the rows their children's tracked levels need.
@@ -735,14 +758,25 @@ def end_share_notes(plans: Sequence[GeneratorPlan], root: SeedTreeRoot) -> Tuple
 def parent_bound_history_notes(
     plans: Sequence[GeneratorPlan], root: SeedTreeRoot
 ) -> Tuple[str, ...]:
-    """The notes of each history that keeps to its parent's lifetime (:func:`parent_bound_notes`)."""
+    """The notes of each history that keeps to its parent's lifetime or its validity columns' range (:func:`parent_bound_notes`)."""
     return tuple(
         note
-        for expose_id, _, chain in _history_chains(
-            plans, root, lambda pick: pick.parent_lifetime is not None
+        for expose_id, pick, chain in _history_chains(plans, root, _bounded)
+        for note in parent_bound_notes(
+            expose_id,
+            chain,
+            (
+                "the parents' lifetimes leave"
+                if pick.parent_lifetime
+                else "the validity columns' range leaves"
+            ),
         )
-        for note in parent_bound_notes(expose_id, chain)
     )
+
+
+def _bounded(pick: HistoryPick) -> bool:
+    """Whether *pick*'s layout keeps to a parent's lifetime or to its validity columns' range."""
+    return pick.parent_lifetime is not None or pick.ranged is not None
 
 
 def _history_chains(
@@ -756,7 +790,7 @@ def _history_chains(
 
 
 def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
-    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds and range cuts."""
+    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds, associations and range cuts."""
     outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*result.emits, *result.hidden_emits]
     plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
     emits = [outcome.resolved for outcome in outcomes]
@@ -764,6 +798,8 @@ def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
         period_end_null_notes(emits)
         + end_share_notes(plans, result.root)
         + parent_bound_history_notes(plans, result.root)
+        + association_notes(plans, result.root)
+        + tuple(note for plan in plans for note in fallback_notes(plan))
         + tuple(
             note for plan in plans for note in range_cut_notes(plan.expose.expose_id, plan.columns)
         )
@@ -772,7 +808,10 @@ def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
             for outcome in outcomes
             if outcome.plan is not None
             for note in range_setter_notes(
-                outcome.resolved, outcome.plan, emits, _related_of(outcome.resolved)
+                outcome.resolved,
+                outcome.plan,
+                emits,
+                SetBy(_related_of(outcome.resolved), result.bounds.ranges),
             )
         )
         + tuple(
@@ -1828,7 +1867,7 @@ def _parsed_fidelity(resolved: ResolvedEmit) -> FidelityBlock:
     return parse_fidelity_block(
         canonicalise(resolved.written_fidelity),
         expose=_declared_contract(resolved)[1],
-        allow_no_columns=names_a_snapshot(resolved.extension),
+        allow_no_columns=may_declare_no_column(resolved.extension),
     )
 
 
@@ -1870,7 +1909,8 @@ class PlanEra:
     """What a recorded plan was made under, so that ``apply`` and ``replay`` run it as it was.
 
     A new plan takes the defaults; a recorded plan takes what its keys say
-    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges`` and ``plan_scale_floors``).
+    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges``, ``plan_scale_floors``,
+    ``plan_projected_givens`` and ``plan_override_givens``).
 
     *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
     2026-11-24): every entity, or the entities that can end for a plan without ``historyEndShare``.
@@ -1880,12 +1920,42 @@ class PlanEra:
     the scale gives it. Otherwise a ``--scale`` below 1 that cuts a drawn parent below a key a
     history's tracked level names runs again with that parent kept at the fewest rows that hold
     every level; *scale_floors* is what that has settled so far.
+    *periodic_rows* is the rows a periodic emit may be estimated to derive before its periods are
+    laid out (ADR 0027 section 5, the amendment of 2026-11-25): ``fluxsim plan --max-rows``, or a
+    recorded plan's ``maxRows``; ``None`` takes
+    :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`. It refuses (``FLX-3403``) and
+    changes no row.
+    *hold_ranges* is false for a plan without ``rangeSetters`` (ADR 0024, the amendment of
+    2026-11-25): its history and periods entries replay without keeping to the columns' ranges.
+    *estimate_rows* is false for every recorded plan: it states its rows, so it runs with no
+    estimate against *periodic_rows*, and ``MOST_ROWS`` alone bounds them.
+    *projected_givens* is false for a plan without ``projectedGivens`` (ADR 0027, the amendment of
+    2026-11-25): a column of an events or periods emit drawn given a column of the version replays
+    the draw it was made with, given the level the column's own draw made.
+    *override_givens* is false for a plan without ``projectedGivens: "afterOverrides"`` (the
+    amendment of 2026-11-26): it holds no kind's override as a level, as it was made.
     """
 
     end_share: str = END_SHARE_OF_ENTITIES
     cut_ranges: bool = True
     tracked_levels: bool = True
     scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
+    periodic_rows: Optional[int] = None
+    hold_ranges: bool = True
+    estimate_rows: bool = True
+    projected_givens: bool = True
+    override_givens: bool = True
+
+
+def _run_bounds(era: PlanEra) -> RunBounds:
+    """What a run under *era* holds its projections to (:class:`RunBounds`)."""
+    return RunBounds(
+        era.periodic_rows,
+        era.hold_ranges,
+        era.estimate_rows,
+        era.projected_givens,
+        era.override_givens,
+    )
 
 
 def _execute_with_parent_kept(
@@ -2426,6 +2496,7 @@ def execute(
                 replicate=replicate,
                 end_share=era.end_share,
                 cut_ranges=era.cut_ranges,
+                bounds=_run_bounds(era),
                 scale_widened=widened,
                 scale_floors=era.scale_floors,
             )
@@ -3508,6 +3579,7 @@ def _planned_with_projections(
     """
     namespace = _flux_namespace(simulation)
     projected = _projected_emits(resolved_emits)
+    bounds = _run_bounds(era)
 
     def plan_at(index: int, rows: Optional[int]) -> _PlannedEmit:
         return _plan_emit(
@@ -3543,25 +3615,30 @@ def _planned_with_projections(
         return related
     counts = {
         index: derived_rows(
-            *found,
+            found,
             _history_plan_of(resolved_emits, related, found[1]),
             _plan_of(related[index]),
             root,
+            bounds=bounds,
         )
         for index, found in projected.items()
     }
     if any(counts[index] != guesses[index] for index in counts):
         related = replan({**shrunk, **counts})
-    return _with_projected_plans(resolved_emits, related, projected, root)
+    return _with_projected_plans(resolved_emits, related, projected, (root, bounds))
 
 
 def _with_projected_plans(
     resolved_emits: Sequence[ResolvedEmit],
     related: Sequence[_PlannedEmit],
     projected: Mapping[int, Tuple[str, str, str]],
-    root: SeedTreeRoot,
+    run: Tuple[SeedTreeRoot, RunBounds],
 ) -> Tuple[_PlannedEmit, ...]:
-    """Each emit in *projected* with the plan derived from its history's layouts, and the others as they are."""
+    """Each emit in *projected* with the plan derived from its history's layouts, and the others as they are.
+
+    *run* is the run root and what the run holds a projection to (:func:`_planned_with_projections`').
+    """
+    root, bounds = run
     return tuple(
         (
             replace(
@@ -3569,9 +3646,10 @@ def _with_projected_plans(
                 plan=(
                     projected_plan := project_plan(
                         _plan_of(planned_emit),
-                        *projected[index],
+                        projected[index],
                         _history_plan_of(resolved_emits, related, projected[index][1]),
                         root,
+                        bounds=bounds,
                     )
                 ),
                 coverage=coverage_of_plan(projected_plan),
@@ -3630,7 +3708,7 @@ def _shrunk_histories(
         for index, planned in enumerate(related)
         if planned.plan is not None
         and (pick := history_pick_of(planned.plan)) is not None
-        and pick.parent_lifetime is not None
+        and _bounded(pick)
     }
     found: Dict[int, int] = {}
     left_out: Set[int] = set()  # the histories that are not laid out in this pass
@@ -3767,7 +3845,7 @@ def _relate_group(
 ) -> None:
     """Relate the plans of the emits at *indexes*, one contract's, and set the changed ones in *related*.
 
-    A contract that declares no keys is passed over.
+    A contract that declares no keys is passed over. *era* is :func:`execute`'s.
     """
     contract_keys = compile_keys(resolved_emits[indexes[0]].contract_document)
     if contract_keys is None or not contract_keys.declares_keys:
@@ -3804,7 +3882,9 @@ def _histories_of(
 ) -> Dict[str, HistoryBinding]:
     """The history each emit declares, by exposeId, with the scaled entities and the validity columns (ADR 0017).
 
-    The ``end`` of an entry is a share of the *era*'s ``end_share`` (:func:`execute`'s).
+    The ``end`` of an entry is a share of the *era*'s ``end_share`` (:func:`execute`'s). With its
+    ``hold_ranges``, each carries the range its versions keep to
+    (:func:`~flux_engine.stages._range_setters.validity_range`).
     """
     found: Dict[str, HistoryBinding] = {}
     for emit in resolved:
@@ -3817,14 +3897,18 @@ def _histories_of(
         ends = window_ends(semantics)
         if "start" not in ends:
             continue  # relate_plans refuses the emit with the contract's own words
+        parent_lifetime = _parent_lifetime_of(emit, entries[0], resolved)
+        validity = validity_range(emit, resolved) if era.hold_ranges else None
         found[nfc(emit.expose_id)] = HistoryBinding(
             entries[0],
             entries[0].entities,
             ends["start"],
             ends.get("end"),
-            parent_lifetime := _parent_lifetime_of(emit, entries[0], resolved),
-            None if parent_lifetime is None else emit.declared_row_count,
+            parent_lifetime,
+            # A layout cut by a lifetime or a range is worked out from the declared rows.
+            None if parent_lifetime is None and validity is None else emit.declared_row_count,
             tracked_levels=era.tracked_levels,
+            validity_range=validity,
         )
     return found
 

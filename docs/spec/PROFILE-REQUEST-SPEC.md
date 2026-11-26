@@ -1,4 +1,4 @@
-# Profile request: normative specification (formats 1-0-0, 1-1-0 and 1-2-0)
+# Profile request: normative specification (formats 1-0-0, 1-1-0, 1-2-0 and 1-3-0)
 
 A profile request lists what a profiler must measure for a bundle. `fluxsim init`, given a
 FLUID contract and no profile, writes one (ADR 0018). A profiler reads it, measures exactly
@@ -29,7 +29,7 @@ the document and opens no file: reading a file, and holding it to a size, is the
 
 | Key | Required | Holds |
 |---|---|---|
-| `_schemaURL` | yes | `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-0-0/FluxProfileRequest.json`, or, for a request that asks for date pairs, a calendar or an exposure (sections 2 and 3) or uses an addition of section 6, `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-1-0/FluxProfileRequest.json`, or, for a request that uses an addition of section 7, `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-2-0/FluxProfileRequest.json`. Any other string is refused. It names the format and its version, as a profile's names its own; the reader compares the string, and no JSON Schema document is published for the request format. |
+| `_schemaURL` | yes | `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-0-0/FluxProfileRequest.json`, or, for a request that asks for date pairs, a calendar or an exposure (sections 2 and 3) or uses an addition of section 6, `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-1-0/FluxProfileRequest.json`, or, for a request that uses an addition of section 7, `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-2-0/FluxProfileRequest.json`, or, for a request that uses an addition of section 8, `https://agenticstiger.github.io/flux/engine/spec/profile-request/1-3-0/FluxProfileRequest.json`. Any other string is refused. It names the format and its version, as a profile's names its own; the reader compares the string, and no JSON Schema document is published for the request format. |
 | `contract` | no | `{ digest }`: the `jcs-document` digest of the contract the request was made from, so a profiler and `init` can tell that a request and a contract belong together. |
 | `encoding` | no | `{ fractionalBits, rounding }`: the grid the profile's encoded quantities are formed on (PROFILE-SPEC.md section 2). `rounding` is `floor`. Absent means 16 fractional bits. |
 | `tables` | yes | One entry per table, keyed by the FLUID `exposeId` (section 2). |
@@ -66,7 +66,7 @@ section 5) and, optionally:
   section 4);
 - `statistics`: identifiers of registered statistics that read the domain: `mean/1`,
   `marginalHistogram/1`, `quantile/1` and `quantile/2` for a `number` or `timestamp` column,
-  `levelHistogram/1` and `support/1` for a `category` column.
+  `levelHistogram/1` and `support/1` for a `category` column, and, in format 1-3-0, `nullCount/2` for a column of any domain (section 8).
 
 A list names each entry once. A writer lists a table's columns, and the tables, in name order,
 which is the order the reader gives them back in, so a request that is read and written again
@@ -102,7 +102,7 @@ and `workload` additions of section 6, all optional, and changes nothing 1-0-0 s
 asks for none of them is written as 1-0-0, byte for byte as before, so a profiler that reads only
 1-0-0 reads every request that asks for none. A document that names 1-0-0 and holds an addition of
 1-1-0 is refused with `FLX-5038`, naming the addition, since a reader of 1-0-0 would otherwise
-ignore what it does not know. A request that names 1-0-0 or 1-1-0 and holds an addition of 1-2-0 is refused with `FLX-5038`, naming the addition and the format to name. A request that asks for none of the additions of 1-2-0 keeps the format it named before and its bytes. This reader reads formats 1-0-0, 1-1-0 and 1-2-0 and refuses any other URL.
+ignore what it does not know. A request that names 1-0-0 or 1-1-0 and holds an addition of 1-2-0 is refused with `FLX-5038`, naming the addition and the format to name. A request that asks for none of the additions of 1-2-0 keeps the format it named before and its bytes. A request that names 1-0-0, 1-1-0 or 1-2-0 and holds an addition of 1-3-0 is refused with `FLX-5038`, naming the addition and the format to name, and a request that asks for none of the additions of 1-3-0 keeps the format it named before and its bytes. This reader reads formats 1-0-0, 1-1-0, 1-2-0 and 1-3-0 and refuses any other URL.
 
 ## 6. Format 1-1-0: consumer queries and a column workload
 
@@ -183,7 +183,8 @@ A name that no column of its table holds is refused with `FLX-5038`, naming wher
 only when it asks for one of the keys above, and a request with none of them keeps its bytes and the format it
 named before. For each table it asks for `kendallTau/1` over the number and timestamp columns it would draw from
 histograms (at most 64, and none when the table has fewer than two), and names as `cliqueColumns` the columns a
-clique could hold (at most 1 024, and none when the table has fewer than two). For each relationship it could lay
+clique could hold that the contract requires, since a clique column holds no null (at most 1 024, and none when the
+table has fewer than two). For each relationship it could lay
 out on the counted layout, one column on each side and to another table, whose foreign key no key, other
 relationship or rule of the contract sets, it asks to be grouped by every column its parent draws (at most 64) and
 lists as `linked` the pairs of a child column and a `category` column of the parent (at most 1 024). A column that a
@@ -197,3 +198,32 @@ a bin divided by the number of grid values in it, since the statistics carry no 
 measure is Kendall's when the profile publishes it for any pair of the copula's columns, and Spearman's
 otherwise. The ledger of `init` says why each statistic was used or left unused (the how-to
 [Write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md)).
+
+## 8. Format 1-3-0: a history and a null count
+
+Format 1-3-0 holds everything 1-2-0 does and adds two optional asks, which belong to profile format 1-5-0
+(PROFILE-SPEC.md). A request that uses either names
+`https://agenticstiger.github.io/flux/engine/spec/profile-request/1-3-0/FluxProfileRequest.json`. The request still
+holds names and registered identifiers only, and no budget.
+
+- `tables.<exposeId>.history`: an object, `{}` to ask with the defaults. It asks the profile for the history of the
+  table (PROFILE-SPEC.md section 5). Its entity, start and end are not in the request: they are the contract's, the
+  validity window and the natural entity of the expose, and the request's `contract.digest` names that contract. A
+  profiler refuses the ask when the contract declares no window for the table. The object holds one optional key,
+  `columns`: a list of column names, the candidate tracked columns. Each is a `category` column of the table other
+  than its entity, start and end columns, each is named once, and the list is in name order. When `columns` is
+  absent the candidates are the contract's categorical columns of the table other than those three.
+- `columns.<name>.statistics` may list `nullCount/2`, for a column of any domain. The profile states, for the column,
+  the rows where it is known and the rows where it is NULL (PROFILE-SPEC.md section 3a).
+
+A `history.columns` name that is not a column of its table is refused with `FLX-5038`, naming where. Whether a name is the
+entity, start or end column is the profiler's to refuse, against the contract. A request that names 1-0-0, 1-1-0 or
+1-2-0 and holds either ask is refused with `FLX-5038`, naming the addition and the format to name.
+
+**What `fluxsim init` asks for.** The request `init` writes beside a bundle (the one for the assumptions, above) asks
+for these two only when the profile it was given has a `privacy` block, a private release, and then only of the tables
+that request already holds. It asks `history: {}` for a table whose contract declares a validity window, and
+`nullCount/2` for each column of such a table the contract does not make required. The new `nullCount/2` follows the
+column's other statistics, so no pointer a `replacedBy` names moves. Every other request that asks for neither addition keeps the
+format and the bytes it had. A first request written from a contract alone asks for neither, so it keeps its format;
+its `cliqueColumns` list changed as section 7 says, only the columns the contract requires.

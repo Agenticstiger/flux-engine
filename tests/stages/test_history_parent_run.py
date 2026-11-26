@@ -10,6 +10,7 @@ The ``history-fleet`` fixture gets a ``lifetimes`` entry on its depot (``opened_
 * every version starts inside its depot's lifetime and ends by the depot's last day, and an
   entity of a closed depot has ended;
 * ``verify`` reports ``history:within_parent`` and it holds on every covered entity;
+* the periodic rows of a vehicle whose depot closed start by the depot's last day;
 * ``--jobs 1`` and ``--jobs 4``, shards and a smaller ``--scale`` make the same run;
 * a bundle that declares the key with no ``lifetimes`` entry on the parent is refused (``FLX-3403``).
 """
@@ -18,7 +19,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import pytest
 import yaml
@@ -33,7 +34,9 @@ from flux_engine.stages.verify import verify
 from ._fleet import (
     CONTRACT,
     DEPOT,
+    FINAL,
     NAMESPACE,
+    PERIODIC,
     UNTIL,
     apply_module,
     by_vehicle,
@@ -119,6 +122,28 @@ def _check_bound(layout: RunLayout, mode: Optional[str]) -> int:
     return ended
 
 
+def _closing_days(layout: RunLayout, *, open_last: bool = False) -> Dict[Any, date]:
+    """Each vehicle whose depot closed, with the depot's last day; with *open_last*, only those whose last version is open."""
+    depots = _depots(layout)
+    closing: Dict[Any, date] = {}
+    for vehicle, versions in by_vehicle(read_rows(layout, EMIT)).items():
+        parent = depots[versions[0]["depot_id"]]
+        opened, closed = _day(parent["opened_on"]), _day(parent["closed_on"])
+        if closed is None or opened is None or closed < opened:
+            continue
+        if not open_last or versions[-1]["valid_to"] is None:
+            closing[vehicle] = closed
+    return closing
+
+
+def _months_after_the_depot_closed(layout: RunLayout) -> Tuple[int, int]:
+    """The periodic rows of vehicles whose depot closed: how many start after its last day, of how many."""
+    closing = _closing_days(layout)
+    held = [row for row in read_rows(layout, PERIODIC) if row["vehicle_id"] in closing]
+    late = [row for row in held if _day(row["month"]) > closing[row["vehicle_id"]]]
+    return len(late), len(held)
+
+
 def _lines(verified: Any) -> str:
     return verified.stdout + verified.stderr
 
@@ -137,18 +162,72 @@ def test_a_run_keeps_every_entity_to_its_depots_lifetime_and_verify_holds_it(
     bundle = _bundle(tmp_path, end=end)
     layout = run_bundle(bundle, tmp_path / "state")
     assert _check_bound(layout, None if end is None else end["mode"]) > 0
+    late, held = _months_after_the_depot_closed(layout)
+    assert held > 0 and late == 0
     verified = verify(bundle, run_id=layout.run_id, state_dir=tmp_path / "state")
     assert verified.success, verified.stderr
     assert "history:within_parent 60 of 60" in _lines(verified).replace("\n", " ")
+
+
+def _by_the_day(target: Path) -> None:
+    """The periodic emit at the grain of a day, in the contract and in the periods entry."""
+    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
+    periodic = next(item for item in contract["exposes"] if item["exposeId"] == PERIODIC)
+    for dimension in periodic["semantics"]["dimensions"]:
+        if dimension["name"] == "month":
+            dimension["typeParams"]["timeGranularity"] = "day"
+    repin(target, contract)
+    path = target / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    document["extensions"][NAMESPACE]["periods"][0]["grain"] = "day"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+
+
+def _last_days_held(layout: RunLayout) -> Tuple[Dict[Any, date], Dict[Any, date]]:
+    """Each vehicle whose depot closed and whose last version is open: its depot's last day, and its last periodic day."""
+    closing = _closing_days(layout, open_last=True)
+    last: Dict[Any, date] = {}
+    for row in read_rows(layout, PERIODIC):
+        if row["vehicle_id"] in closing:
+            day = date.fromisoformat(row["month"])
+            last[row["vehicle_id"]] = max(day, last.get(row["vehicle_id"], day))
+    return closing, last
+
+
+def test_a_forced_entity_s_last_day_held_is_its_parent_s_last_day(tmp_path: Path) -> None:
+    """At the grain of a day, the open final version of a vehicle whose depot closed holds that day, and no later one."""
+    bundle = _bundle(tmp_path, end=FINAL)
+    _by_the_day(bundle)
+    closing, last = _last_days_held(run_bundle(bundle, tmp_path / "state"))
+    assert closing and last == closing
+
+
+def test_a_range_on_the_validity_columns_does_not_move_that_last_day(tmp_path: Path) -> None:
+    """The range bounds where versions start and close, and closes no version: the depot's last day still ends the open one."""
+    bundle = _bundle(tmp_path, end=FINAL)
+    _by_the_day(bundle)
+    contract = yaml.safe_load((bundle / CONTRACT).read_text("utf-8"))
+    history = next(item for item in contract["exposes"] if item["exposeId"] == EMIT)
+    column = next(item for item in history["contract"]["schema"] if item["name"] == "valid_from")
+    column["validationRules"] = [
+        {"type": "range", "constraint": "between '2023-01-01' and '2024-06-30'"}
+    ]
+    repin(bundle, contract)
+    closing, last = _last_days_held(run_bundle(bundle, tmp_path / "state"))
+    assert any(day > date(2024, 7, 1) for day in closing.values())
+    assert last == closing
 
 
 def test_a_run_is_the_same_run_again(tmp_path: Path) -> None:
     assert_the_run_repeats(_bundle(tmp_path), tmp_path, run_bundle, EMIT)
 
 
-def test_the_shares_joined_are_the_bytes_of_onerun_bundle(tmp_path: Path) -> None:
-    bundle = _bundle(tmp_path, end={"mode": "closeLast", "share": "0.1"})
-    assert_shares_join_to_the_run(bundle, tmp_path, run_bundle, 3, (EMIT,))
+@pytest.mark.parametrize("end", [{"mode": "closeLast", "share": "0.1"}, FINAL])
+def test_the_shares_joined_are_the_bytes_of_onerun_bundle(
+    tmp_path: Path, end: Dict[str, Any]
+) -> None:
+    bundle = _bundle(tmp_path, end=end)
+    assert_shares_join_to_the_run(bundle, tmp_path, run_bundle, 3, (EMIT, PERIODIC))
 
 
 @pytest.mark.slow
@@ -263,8 +342,6 @@ def test_a_date_parent_end_is_the_last_millisecond_of_its_day_for_a_timestamp_ch
 
 
 def test_plan_says_how_many_entities_end_with_their_parent_in_one_version(tmp_path: Path) -> None:
-    from ._fleet import FINAL
-
     planned = plan_module.plan(
         _bundle(tmp_path, end=FINAL),
         state_dir=tmp_path / "state",

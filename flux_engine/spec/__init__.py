@@ -56,13 +56,15 @@ __all__ = [
     "flux_schema_path",
 ]
 
-_MIN_SPEC_VERSION: Tuple[int, int, int] = (0, 5, 4)
+_MIN_SPEC_VERSION: Tuple[int, int, int] = (0, 5, 5)
 _MAX_SPEC_VERSION_EXCLUSIVE: Tuple[int, int, int] = (0, 6, 0)
 
-#: The ``flux_spec`` versions this engine is pinned against. The floor is 0.5.4, the first
-#: release that reads a bundle's files as UTF-8 whatever the locale, as the engine's own
+#: The ``flux_spec`` versions this engine is pinned against. The floor is 0.5.5, the first
+#: release whose FLUID 0.7.7 preview declares a versioned table's open end and version chain
+#: (``validityParams.openEnd`` and ``chain``), which ``fluxsim init`` reads into a history. 0.5.4
+#: was the first that reads a bundle's files as UTF-8 whatever the locale, as the engine's own
 #: pre-reads of them do (:mod:`flux_engine.seam.resolve`, :mod:`flux_engine.evidence.pack`).
-SUPPORTED_SPEC_VERSION_RANGE = ">=0.5.4,<0.6"
+SUPPORTED_SPEC_VERSION_RANGE = ">=0.5.5,<0.6"
 
 if importlib.util.find_spec("flux_spec") is None:
     raise ModuleNotFoundError(

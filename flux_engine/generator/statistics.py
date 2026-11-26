@@ -38,7 +38,7 @@ import json
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Any, Collection, Dict, FrozenSet, Mapping, Optional, Sequence, Tuple
+from typing import Any, Collection, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.concordance.predicate import (
     COLUMN_KEYS,
@@ -918,6 +918,35 @@ def _read_allocation(value: Any) -> str:
             FLX_3105, f"allocation is {value!r}; the one allocation there is {ALLOCATION_EXACT!r}"
         )
     return ALLOCATION_EXACT
+
+
+def drawn_edges(statistics: ColumnStatistics) -> Tuple[Decimal, ...]:
+    """The edges of the dates a column's draw can reach, in the units its range and bins use.
+
+    A column that declares bins is drawn from them alone: its edges run from the lower edge of
+    its first bin with a positive weight to the upper edge of its last one. A bin with no weight
+    at either end places no row, and one between weighted bins lies inside that hull. A column
+    with ``binWeightsGiven`` only is drawn from the weights of the level it is given, so a bin
+    counts when any level's table weights it. Bins with no weight table at all are refused by the
+    plan, so none is read as weightless: every edge counts, as it did before. A column with no
+    bins is read at its declared range, and one with neither has no edges.
+    """
+    bins = statistics.bins
+    if bins is None:
+        return tuple(v for v in (statistics.range_min, statistics.range_max) if v is not None)
+    tables: List[Sequence[Decimal]] = []
+    if statistics.bin_weights is not None:
+        tables.append(statistics.bin_weights)
+    elif statistics.bin_weights_given is not None:
+        tables.extend(statistics.bin_weights_given.values())
+    reached = [
+        index
+        for index in range(len(bins) - 1)
+        if any(index < len(table) and table[index] > 0 for table in tables)
+    ]
+    if not reached:
+        return tuple(bins)
+    return (bins[reached[0]], bins[reached[-1] + 1])
 
 
 def statistics_from_fidelity(

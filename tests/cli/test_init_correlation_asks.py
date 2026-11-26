@@ -5,7 +5,8 @@
 """``fluxsim init --contract C`` asks for correlations in request format 1-2-0 (ADR 0035 to 0037).
 
 Pinned here: a table is asked for ``kendallTau/1`` over the number and timestamp columns that
-``init`` would draw from histograms and for the columns a clique could hold; a relationship that
+``init`` would draw from histograms and for the columns a clique could hold, the ones the contract
+requires, since a clique column holds no null; a relationship that
 ``init`` would lay out on the counted layout is asked to be grouped by its parent's drawn columns
 and for the link groupings a child column could read; a column that a key, a relationship or a
 rule of the contract sets is asked for none of them; and a request with none of these keeps the
@@ -81,11 +82,11 @@ def test_number_and_timestamp_columns_are_asked_their_kendall_tau(tmp_path: Path
     contract = _contract(
         tmp_path,
         [
-            '{ name: amount, type: "DECIMAL(12,2)" }',
-            "{ name: region, type: STRING }",
-            "{ name: balance, type: INT }",
-            "{ name: opened_at, type: TIMESTAMP }",
-            "{ name: closed_on, type: DATE }",
+            '{ name: amount, type: "DECIMAL(12,2)", required: true }',
+            "{ name: region, type: STRING, required: true }",
+            "{ name: balance, type: INT, required: true }",
+            "{ name: opened_at, type: TIMESTAMP, required: true }",
+            "{ name: closed_on, type: DATE, required: true }",
         ],
     )
     text = _text(tmp_path, contract)
@@ -105,10 +106,10 @@ def test_a_key_a_rule_and_an_identifier_are_asked_for_no_correlation_and_no_cliq
         [
             "{ name: order_id, type: INT, required: true }",
             "{ name: ref, type: STRING, tags: [identifier] }",
-            '{ name: price, type: "DECIMAL(12,2)" }',
-            "{ name: quantity, type: INT }",
-            '{ name: total, type: "DECIMAL(12,2)" }',
-            "{ name: tier, type: STRING }",
+            '{ name: price, type: "DECIMAL(12,2)", required: true }',
+            "{ name: quantity, type: INT, required: true }",
+            '{ name: total, type: "DECIMAL(12,2)", required: true }',
+            "{ name: tier, type: STRING, required: true }",
         ],
         "orders",
     )
@@ -122,6 +123,34 @@ def test_a_key_a_rule_and_an_identifier_are_asked_for_no_correlation_and_no_cliq
     (table,) = _request(tmp_path, path).tables
     assert [each.columns for each in table.rank_correlations] == [("price", "quantity")]
     assert table.clique_columns == ("price", "quantity", "tier")
+
+
+def test_a_column_the_contract_leaves_optional_is_never_asked_for_a_clique(tmp_path: Path) -> None:
+    """A clique column holds no null, so a column that may be NULL is no candidate; its correlation is."""
+    path = _contract(
+        tmp_path,
+        [
+            "{ name: region, type: STRING, required: true }",
+            "{ name: channel, type: STRING }",
+            '{ name: amount, type: "DECIMAL(12,2)", required: true }',
+            "{ name: tier, type: STRING, required: false }",
+            "{ name: balance, type: INT }",
+        ],
+    )
+    (table,) = _request(tmp_path, path).tables
+    assert table.clique_columns == ("region", "amount")
+    assert [each.columns for each in table.rank_correlations] == [("amount", "balance")]
+
+
+def test_a_table_with_one_required_candidate_asks_for_no_clique(tmp_path: Path) -> None:
+    path = _contract(
+        tmp_path,
+        ["{ name: region, type: STRING, required: true }", "{ name: channel, type: STRING }"],
+    )
+    text = _text(tmp_path, path)
+    assert "cliqueColumns" not in text
+    (table,) = load_request_text(text).tables
+    assert table.clique_columns == ()
 
 
 def test_a_table_with_one_candidate_asks_for_nothing_and_keeps_its_format(tmp_path: Path) -> None:
@@ -138,7 +167,11 @@ def test_one_number_column_is_asked_no_rank_correlation_but_a_clique_with_a_cate
     tmp_path: Path,
 ) -> None:
     path = _contract(
-        tmp_path, ['{ name: amount, type: "DECIMAL(12,2)" }', "{ name: region, type: STRING }"]
+        tmp_path,
+        [
+            '{ name: amount, type: "DECIMAL(12,2)", required: true }',
+            "{ name: region, type: STRING, required: true }",
+        ],
     )
     (table,) = _request(tmp_path, path).tables
     assert table.rank_correlations == ()
@@ -149,7 +182,9 @@ def test_the_most_columns_a_request_may_name_are_the_first_in_the_contracts_orde
     tmp_path: Path,
 ) -> None:
     count = MOST_RANK_COLUMNS + 6
-    path = _contract(tmp_path, [f"{{ name: n{n:03d}, type: INT }}" for n in range(count)], "wide")
+    path = _contract(
+        tmp_path, [f"{{ name: n{n:03d}, type: INT, required: true }}" for n in range(count)], "wide"
+    )
     (table,) = _request(tmp_path, path).tables
     (ranked,) = table.rank_correlations
     assert ranked.columns == tuple(f"n{n:03d}" for n in range(MOST_RANK_COLUMNS))
