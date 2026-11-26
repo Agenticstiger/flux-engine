@@ -8,7 +8,8 @@ A self-referencing table is the shape: a vehicle version links to the current ro
 vehicle (``peer``) and derives a column from it, as an employee version links to the current row
 of its manager. The snapshot copies the history's columns, so the history reads its own
 projection. It plans when the columns it reads through the link do not depend on the link, and is
-refused when one does, since its rows then cannot settle (the amendment of 2026-11-26).
+refused when one does, since the engine does not derive a column more than one step away, through
+such a link, from a drawn one (the amendment of 2026-11-26).
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from flux_engine.stages.verify import verify
 from . import _fleet
 from ._same_run import assert_same_run_at_one_and_four_jobs, assert_shares_join_to_the_run
 from .test_declared_range_replay import run_as_before
-from .test_projection_reads_renewed import assert_whole, rule_lines
+from .test_projection_reads_renewed import ZONES, assert_whole, rule_lines, shaped_bundle
 
 pytestmark = pytest.mark.integration
 
@@ -66,15 +67,22 @@ def peering_bundle(
     read: str = "",
     copied: Tuple[str, ...] = (),
     extra: Tuple[Tuple[str, str, str, Dict[str, Any]], ...] = (),
+    crossed: bool = False,
 ) -> Path:
     """The fleet with each version linked to a vehicle, and ``peer_x`` derived from that vehicle.
 
     ``read`` is the text ``peer_x`` is derived from (the shape's column of the peer by default).
     ``copied`` names the columns of the history the snapshot holds as well. ``extra`` adds columns
-    to the history, each ``(name, type, derive text, statistics)``.
+    to the history, each ``(name, type, derive text, statistics)``. ``crossed`` grows the fleet with
+    a second history first, whose snapshot the vehicle history reads (``szone``) as well, and the
+    column read of the peer is that one.
     """
     column, kind, statistics, single = SHAPES[shape]
-    target = _fleet.bundle(tmp_path, name=shape)
+    if crossed:
+        column, kind, statistics, single = "szone", "STRING", {"levels": ZONES}, True
+        target = shaped_bundle(tmp_path, "site")
+    else:
+        target = _fleet.bundle(tmp_path, name=shape)
     path = target / "simulation.flux.yml"
     document = yaml.safe_load(path.read_text("utf-8"))
     contract = yaml.safe_load((target / _fleet.CONTRACT).read_text("utf-8"))
@@ -90,7 +98,7 @@ def peering_bundle(
     derived = [("peer_x", kind, read or f"peer.{column}", statistics), *extra]
     columns = flux["emits"][_fleet.HISTORY]["fidelity"]["columns"]
     columns["peer_id"] = {"range": {"min": "1", "max": "200"}}
-    history["contract"]["invariants"] = []
+    history["contract"]["invariants"] = history["contract"].get("invariants", []) if crossed else []
     for name, held, text, stats in derived:
         if name != "peer_x":
             history["contract"]["schema"].append(_column(name, held))
@@ -164,6 +172,65 @@ def test_a_history_that_links_to_its_own_snapshot_derives_from_the_rows_it_write
         assert_whole(lines[_fleet.HISTORY], "d_peer_x")
     assert_whole(lines[_fleet.SNAPSHOT], "snapshot:equals_last_version")
     assert_whole(lines[_fleet.PERIODIC], "period:matches_valid_version")
+
+
+#: The columns the snapshot copies beside ``szone``, which the vehicle history reads of another
+#: history's snapshot: the one it reads of its own peer, or none.
+CROSSED = {"copied": ("peer_x",), "not_copied": ()}
+
+
+@pytest.mark.parametrize("name", CROSSED)
+def test_a_history_that_reads_a_snapshot_of_another_history_settles_what_it_reads_of_its_peer(
+    tmp_path: Path, name: str
+) -> None:
+    copied = CROSSED[name]
+    state = tmp_path / "state"
+    target = peering_bundle(tmp_path, "date", copied=copied, crossed=True)
+    layout = _fleet.run_bundle(target, state)
+    assert load_recorded_plan(layout)[KEY] == "final"
+    assert peers_that_miss_their_snapshot(layout, "peer_x", "szone") == 0
+    assert snapshots_that_miss_their_history(layout, ["szone", *copied]) == 0
+    verified = verify(target, run_id=layout.run_id, state_dir=state)
+    assert verified.success, verified.stderr
+    lines = {
+        expose_id: {line["rule"]: line for line in found}
+        for expose_id, found in verified.artifacts["rules"]["emits"].items()
+    }
+    assert_whole(lines[_fleet.HISTORY], "d_peer_x")
+    assert_whole(lines[_fleet.SNAPSHOT], "snapshot:equals_last_version")
+
+
+@pytest.mark.parametrize("name", CROSSED)
+def test_the_run_that_reads_two_snapshots_is_the_same_at_one_and_four_jobs_and_in_shares(
+    tmp_path: Path, name: str
+) -> None:
+    target = peering_bundle(tmp_path, "date", copied=CROSSED[name], crossed=True)
+    assert_same_run_at_one_and_four_jobs(target)
+    assert_shares_join_to_the_run(target, tmp_path, _fleet.run_bundle, 3, EMITS)
+
+
+@pytest.mark.parametrize("name", CROSSED)
+def test_a_plan_recorded_before_the_renewal_replays_when_it_reads_two_snapshots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    target = peering_bundle(tmp_path, "date", copied=CROSSED[name], crossed=True)
+    state = tmp_path / "state"
+    layout, digest = run_as_before(
+        target,
+        state,
+        monkeypatch,
+        "_planned_with_projections",
+        era=pipeline.PlanEra(projected_reads=False),
+    )
+    assert KEY not in load_recorded_plan(layout)
+    recorded = {name_: layout.emit_path(name_).read_bytes() for name_ in EMITS}
+    for jobs in (1, 4):
+        replayed = replay(
+            target, run_id=layout.run_id, assert_digest=digest, state_dir=state, jobs=jobs
+        )
+        assert replayed.success, replayed.stderr
+        for emit, content in recorded.items():
+            assert layout.emit_path(emit).read_bytes() == content, emit
 
 
 def test_a_column_that_depends_on_the_link_may_be_copied_when_it_is_not_read_through_it(

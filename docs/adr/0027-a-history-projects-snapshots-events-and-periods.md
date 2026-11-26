@@ -559,8 +559,9 @@ section 5.
   to read the right cells of the link and once to copy the cells that were set from them. The history plans when the
   columns it reads through the link do not depend on the link, and a column that depends on it may be copied. It is
   refused (`FLX-3403`) when a column it reads through the link is set from a rule that reads the link, or from a
-  column that is, as the rows cannot settle: the message names the history, the link and the column, and says that the
-  column read through the link depends on the link.
+  column that is: the engine does not derive a column more than one step away, through such a link, from a drawn one.
+  The message names the history, the link and the column, and says that the column read through the link depends on
+  the link.
 - **Recorded plans.** A new plan with such a link says `projectedReads: "final"`, which the plan digest covers. A plan
   without the key replays the link as it was made, so its rows and its run id keep their bytes. Any other value is
   `FLX-2102`.
