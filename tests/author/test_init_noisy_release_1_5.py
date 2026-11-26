@@ -28,6 +28,7 @@ import tests.author.test_cliques as private_cliques
 import tests.author.test_history_date_pairs as tiers
 import tests.author.test_init_noise_floor as library
 from flux_engine.author.columns import _share_text
+from flux_engine.author.noisy import point_estimates
 from flux_engine.cli._init import run_init
 from flux_engine.stages.plan import plan
 from flux_stats.noise import noise_floor
@@ -295,3 +296,38 @@ def test_strict_refuses_a_released_null_share_a_clique_sets_aside_naming_it(
     assert "gap /extensions/com.agentics.flux~11/emits/subscriber/fidelity/columns/channel: " in (
         inside.stderr
     )
+
+
+def _member_groups(noisy: Iterable[int], scale: str = "2") -> Any:
+    """The groups of a Laplace history member read as its point estimate, with the noise floor."""
+    statistic = {
+        "definition": "levelHistogram/1",
+        "levels": ["a", "b", "c"],
+        "noise": {"mechanism": "laplace", "scale": scale, "privacyLoss": {"rho": "0.5"}},
+        "groups": [{"group": "", "status": "F", "noisyCounts": [str(v) for v in noisy]}],
+    }
+    profile = {"tables": {"t": {"history": {"versionsPerEntity": statistic}}}}
+    view, _ = point_estimates(profile)
+    return view["tables"]["t"]["history"]["versionsPerEntity"]["groups"]  # type: ignore[index]
+
+
+def test_a_cell_exactly_at_the_floor_is_not_clear_of_the_noise() -> None:
+    """Clear means strictly above: under Laplace of scale 2 the floor over three cells is 2 x (5 + 2)."""
+    floor = noise_floor("laplace", Fraction(2), 3)
+    assert floor == 14
+    (group,) = _member_groups([14, 40, 3])
+    assert group["levelCounts"][0] == 0 and group["levelCounts"][1] == 40
+    (just_above,) = _member_groups([15, 40, 3])
+    assert just_above["levelCounts"][0] == 15
+
+
+def test_a_member_with_no_cell_above_the_floor_is_withheld_whole() -> None:
+    (group,) = _member_groups([14, 5, 3])  # the largest is exactly the floor
+    assert group["status"] == "C"
+    assert "k" not in group and "levelCounts" not in group and "noisyCounts" not in group
+
+
+def test_the_records_of_a_floored_member_are_the_sum_of_its_clear_counts() -> None:
+    """The estimate's records are 57; the cells inside the noise carry no weight, so k is 40."""
+    (group,) = _member_groups([14, 40, 3])
+    assert group["k"] == sum(group["levelCounts"]) == 40

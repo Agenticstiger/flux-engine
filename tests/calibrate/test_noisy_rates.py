@@ -35,6 +35,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROFILE = REPO_ROOT / "tests" / "fixtures" / "consumers" / "subscriptions.profile.json"
+HELD_OUT = REPO_ROOT / "tests" / "fixtures" / "consumers" / "subscriptions.held-out-profile.json"
 
 
 def _released(counts: Dict[str, Tuple[str, str]], scale: str = "10") -> Dict[str, Any]:
@@ -194,3 +195,78 @@ def test_the_floor_of_a_grouped_rate_is_over_every_cell_of_its_statistic() -> No
     groups = targets["premium-renewed"][0].groups
     assert sorted(groups) == ["a", "b", "c", "d"]
     assert all(target.rate is None and target.inside_noise for target in groups.values())
+
+
+def _laplace(counts: Dict[str, Tuple[str, str]], scale: str = "10") -> Dict[str, Any]:
+    """:func:`_released` with the noise of every query statistic Laplace instead of Gaussian."""
+    profile = _released(counts, scale)
+    for query in profile["queries"]:
+        for statistic in query["statistics"]:
+            statistic["noise"]["mechanism"] = "laplace"
+    return profile
+
+
+def test_under_laplace_records_of_exactly_twice_the_floor_are_inside_the_noise() -> None:
+    """Records must exceed twice the floor of one cell; equal to it is inside (``<=``)."""
+    floor = noise_floor("laplace", Fraction(10), 2)
+    assert 2 * floor == 120
+    for counts, inside in ((("60", "60"), True), (("61", "60"), False), (("100", "20"), True)):
+        released = {"premium-renewed": counts, "renewed-offered": ("310", "590")}
+        targets = profile_targets(parse_profile(_laplace(released)))
+        premium = targets["premium-renewed"][0].groups[""]
+        assert premium.inside_noise is inside, counts
+        assert (premium.rate is None) is inside, counts
+
+
+def test_a_grouped_query_weighs_the_mean_of_its_groups_variances() -> None:
+    """Two groups of different variances: the query weighs least / mean, not least / largest."""
+    profile = _released(CLEAR)
+    (statistic,) = profile["queries"][0]["statistics"]
+    statistic["groupBy"] = "plan"
+    statistic["groups"] = [
+        {"group": "a", "status": "F", "noisyCounts": ["1020", "180"]},
+        {"group": "b", "status": "F", "noisyCounts": ["900", "900"]},
+    ]
+    targets = profile_targets(parse_profile(profile))
+    first, second = (target.variance for target in targets["premium-renewed"][0].groups.values())
+    assert first is not None and second is not None and first != second
+    mean = (first + second) / 2
+    other = next(iter(targets["renewed-offered"][0].groups.values())).variance
+    assert other is not None
+    least = min(mean, other)
+    weights = query_weights(targets)
+    assert weights["premium-renewed"] == least / mean
+    assert weights["renewed-offered"] == least / other
+
+
+class _Stop(Exception):
+    """Raised by the stand-in calibrator once the evaluator is built."""
+
+
+def test_the_fit_hands_the_weights_of_a_noisy_release_to_the_evaluator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: Dict[str, Any] = {}
+
+    class Calibrator:
+        def __init__(self, parameters: Any, evaluator: Any, **_: Any) -> None:
+            seen["weights"] = evaluator.weights
+
+        def calibrate(self, *_: Any) -> None:
+            raise _Stop
+
+    monkeypatch.setattr(fit_module, "CmaCalibrator", Calibrator)
+    profile = tmp_path / "released.profile.json"
+    profile.write_text(json.dumps(_released(CLEAR)), encoding="utf-8")
+    request = FitRequest(
+        bundle=copy_fit_bundle(tmp_path / "bundle-root"),
+        profile=profile,
+        out=tmp_path / "calibrated",
+        state_dir=tmp_path / "state",
+        held_out=HELD_OUT,
+    )
+    with pytest.raises(_Stop):
+        fit_module.run_fit(request)
+    expected = query_weights(profile_targets(parse_profile(_released(CLEAR))))
+    assert set(expected) == {"premium-renewed", "renewed-offered"} and max(expected.values()) == 1
+    assert seen["weights"] == expected

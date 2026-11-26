@@ -407,6 +407,49 @@ def test_a_noisy_null_count_does_not_keep_a_profile_from_p3() -> None:
     assert graded.accounting is not None and graded.accounting.parts == 12
 
 
+def _released_exact(member: Dict[str, Any]) -> None:
+    """*member* of a history released without noise, its counts the rounded noisy ones."""
+    member.pop("noise")
+    member["disclosure"] = "none"
+    for group in member["groups"]:
+        counts = [max(0, round(float(value))) for value in group.pop("noisyCounts")]
+        group["k"] = sum(counts)
+        group["levelCounts"] = counts
+
+
+def _exact_member(document: Dict[str, Any], member: str) -> Dict[str, Any]:
+    """The 1-5-0 example with a noisy history, its tracked column's *member* released exactly."""
+    history = document["tables"]["card_version"]["history"]
+    if member == "reasons":
+        found = copy.deepcopy(history["columns"]["tier"]["initial"])
+        found["levels"] = ["several", "tier"]
+        history["reasons"] = found
+    else:
+        found = history["columns"]["tier"][member]
+    _released_exact(found)
+    return document
+
+
+@pytest.mark.parametrize("member", ["reasons", "transitions"])
+def test_a_history_member_released_exactly_keeps_a_profile_from_p3(member: str) -> None:
+    document = _noisy_history_example()
+    document["privacy"]["privacyLoss"]["rho"] = "3"
+    if member == "reasons":
+        # a noisy reasons member next to it is P3; only the exact one is not
+        history = document["tables"]["card_version"]["history"]
+        noisy = copy.deepcopy(history["columns"]["tier"]["initial"])
+        noisy["levels"] = ["several", "tier"]
+        history["reasons"] = noisy
+        assert grade_profile(document, pinned=True).pattern is Pattern.P3
+        del history["reasons"]
+    graded = grade_profile(_exact_member(document, member), pinned=True)
+    assert graded.pattern is Pattern.P1
+    assert graded.accounting is not None and graded.accounting.parts > 0, graded.reasons
+    assert any(
+        "history of versions with a member released without noise" in r for r in graded.reasons
+    )
+
+
 def _band(document: Dict[str, Any], statistic: Dict[str, Any]) -> None:
     statistic["sampleSize"] = {"min": 5000, "max": 5000}
 
