@@ -92,6 +92,7 @@ from flux_engine.author.columns import (
     plan_column,
     recheck_key,
     share_texts,
+    weighted_span,
     widen_key_span,
 )
 from flux_engine.author.copula import CopulaPlan, declare_copula
@@ -907,7 +908,14 @@ def _grouping_columns(columns: Mapping[str, Any]) -> Set[str]:
 
 
 def _span_of(plan: ColumnPlan) -> Optional[Tuple[Fraction, Fraction]]:
-    """The values a column can take, for a rule that reads it: its range, else its draw."""
+    """The values a column can take, for a rule that reads it: its range, else its draw.
+
+    A column read from a released histogram keeps to the bins that stand clear of the noise, so
+    its draw stands in for its range, the histogram's whole grid.
+    """
+    held = weighted_span(plan)
+    if held is not None:
+        return Fraction(held[0]), Fraction(held[1])
     checked = plan.declaration.get("range")
     if isinstance(checked, Mapping):
         low, high = numeric(checked.get("min")), numeric(checked.get("max"))
@@ -4603,12 +4611,21 @@ def _laid_out(
     (*declined* names the reason), or when its profile gives no history init writes. Then the
     relationships held back for it are counted as they are for any other table, so the run plans
     again with that table's history unwritten. Each pass leaves out one table at least, so the
-    passes end.
+    passes end: one for each table with a history and a last that leaves none out. A run that
+    plans more often than that has lost a table it had left out, which is a defect of the engine,
+    and it stops with an error instead of planning for ever.
     """
     declared = inputs.history
     unwritten: FrozenSet[str] = frozenset()
+    passes = 0
     while True:
         planned = _plan_bundle(inputs, unwritten)
+        passes += 1
+        if passes > len(planned.held | unwritten) + 1:
+            raise RuntimeError(
+                f"the plan of the bundle was laid out {passes - 1} times for "
+                f"{len(planned.held | unwritten)} tables with a history, and still left one out"
+            )
         window, window_note, given_window = _bundle_window(planned, inputs)
         _widen_ranges(planned.authored, fallbacks.widened)
         if given_window is not None:

@@ -319,7 +319,8 @@ thousands of years.
    `B` is the same number on every platform. For a year grid of 202 cells, `ceil(ln 202) = 6` and
    `B = sqrt(22 v)`, about 4.69 times the noise's scale.
 2. **What `init` does with it.** For a date or timestamp column read from a released
-   `marginalHistogram/1`, a bin that does not clear the floor carries no weight in the draw, and
+   `marginalHistogram/1` (a number column too, since the amendment of 2026-11-26), a bin that does
+   not clear the floor carries no weight in the draw, and
    its register entry says so. The column's span, for the run's window, is the hull of the bins
    that clear it. When none does, the column is drawn evenly within the run's window, cut to its
    declared range, as a noted assumption, the way a column that publishes no order statistic is
@@ -351,3 +352,46 @@ whole histogram, the confidence the widening of point 7 is stated at.
 - A small release has no clear bin, so its dates are an assumption the run says it made, and
   `--strict` refuses it until the profile gives more.
 
+
+## Amendment of 2026-11-26: a released number histogram is read where it stands clear of the noise
+
+### Context
+
+The floor of the amendment of 2026-11-25 read a date or timestamp histogram only. A number
+column's released histogram was still read with every bin at face value, so an outer bin inside the
+noise drew values the column does not hold, and the span a rule that reads the column sees was the
+histogram's whole grid.
+
+### Decision
+
+1. **The same floor.** For an INT or DECIMAL column read from a released ungrouped
+   `marginalHistogram/1`, a bin whose count does not exceed `B` of point 1 of that amendment, over
+   the histogram's `m` cells, carries no weight in the draw, and its register entry says so. There
+   is one floor rule: `flux_stats.noise.noise_floor`, read once for the statistic, as for a date.
+2. **Where its values lie.** A column that has a bin inside the noise at its outer end draws no
+   value there, so the span a rule that reads it takes is the hull of the bins that carry weight,
+   as a date column's span is the hull of the bins that clear the floor. That span is what a
+   contract `derive` over the column bounds its result by. When no bin clears the floor, the column is drawn evenly over its declared
+   range as one bin, a noted assumption in its ledger entry, the way a date column is drawn evenly
+   within the run's window. A number column has no window to be drawn within.
+3. **What stays.** The declared range stays the histogram's whole grid, which its histogram
+   property's bins partition (`FLX-5032`), and the property stays, so `verify` scores the column
+   against the release with the widening of point 7.
+4. **A key keeps its weights.** A column the contract makes a key, alone or with others, is read
+   at face value: its rows hold distinct values, so a bin's count is the room it must have, and a
+   small count inside the noise still asks for its values. Without them the key could hold fewer
+   values than rows, and the bundle would be refused (`FLX-3403`).
+5. **Privacy.** As before: the floor reads the released numbers only, and spends no privacy loss.
+
+### Consequences
+
+- Only bundles written from profiles released with noise change, and only a number column whose
+  histogram holds a bin at or below the floor. An exact histogram, and a release whose bins all
+  clear the floor, keep their bytes.
+- Plans already recorded replay unchanged: this changes what `init` writes, not what the generator
+  draws from a bundle.
+- A column whose release has no clear bin is an assumption the run says it made, evenly over its
+  range, and `--strict` refuses it until the profile gives more.
+- That even draw is one bin, so a children-per-parent histogram grouped by the column's bins is
+  not used for it, and the ledger says so. A published exact `min` or `max` inside a bin that
+  carries no weight stays unreached by the draw.

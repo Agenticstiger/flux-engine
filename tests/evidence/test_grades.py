@@ -412,6 +412,54 @@ def test_a_noisy_history_a_release_cut_in_part_keeps_p3(cut: Tuple[str, ...]) ->
     assert graded.pattern is Pattern.P3, graded.reasons
 
 
+def _history_member(document: Dict[str, Any], member: str) -> Tuple[Dict[str, Any], str]:
+    """The node of the history that holds *member* and its key: a tracked column's, or the history's.
+
+    The history of the 1-5-0 example holds no ``reasons``, so a noisy one (the tracked column's
+    first levels, renamed) is added when it is asked for.
+    """
+    history = document["tables"]["card_version"]["history"]
+    if member == "initial":
+        return history["columns"]["tier"], member
+    if member == "reasons":
+        found = copy.deepcopy(history["columns"]["tier"]["initial"])
+        found["levels"] = ["several", "tier"]
+        history["reasons"] = found
+    return history, member
+
+
+@pytest.mark.parametrize("member", ["lastVersion", "initial", "reasons"])
+def test_a_history_cut_of_a_member_released_exactly_is_graded_by_the_members_left(
+    member: str,
+) -> None:
+    document = _noisy_history_example()
+    document["privacy"]["privacyLoss"]["rho"] = "3"
+    node, key = _history_member(document, member)
+    whole = grade_profile(document, pinned=True)
+    assert whole.pattern is Pattern.P3
+    _released_exact(node[key])
+    held = grade_profile(document, pinned=True)
+    assert held.pattern is Pattern.P1
+    assert any(
+        "history of versions with a member released without noise" in r for r in held.reasons
+    )
+    # The release cuts the member that was released without noise: the members left are noisy.
+    del node[key]
+    cut = grade_profile(document, pinned=True)
+    assert cut.pattern is Pattern.P3 and cut.reasons == (), cut.reasons
+    assert whole.accounting is not None and cut.accounting is not None
+    assert cut.accounting.parts == whole.accounting.parts - 1
+
+
+def test_a_history_cut_of_the_member_without_noise_is_p3() -> None:
+    document = json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8"))
+    history = document["tables"]["card_version"]["history"]
+    assert grade_profile(document, pinned=True).pattern is Pattern.P1
+    del history["versionLength"]
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == (), graded.reasons
+
+
 def test_a_history_with_one_member_without_noise_keeps_a_profile_from_p1() -> None:
     graded = grade_profile(
         json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8")),
@@ -664,6 +712,27 @@ def test_a_noisy_date_pair_a_release_cut_to_its_statistics_keeps_p3() -> None:
     document["tables"]["subscriber"]["datePairs"] = pairs
     graded = grade_profile(document, pinned=True)
     assert graded.pattern is Pattern.P3 and graded.reasons == ()
+
+
+def test_a_date_pair_a_release_cut_to_its_order_is_graded_by_the_order() -> None:
+    document = _calendar_profile(noisy=True)
+    pairs = _date_pairs(noisy=True)
+    pairs[0]["statistics"] = [_exact_histogram(["0", "1", "2"], [1, 0, 0])]
+    document["tables"]["subscriber"]["datePairs"] = pairs
+    held = grade_profile(document, pinned=True)
+    assert held.pattern is Pattern.P1
+    # The release cuts the statistic that was released without noise, and keeps the noisy order.
+    pairs[0]["statistics"] = []
+    graded = grade_profile(document, pinned=True)
+    assert graded.pattern is Pattern.P3 and graded.reasons == (), graded.reasons
+    # Cut to an order released without noise, the pair is graded by that order.
+    pairs[0]["order"] = _exact_histogram(_ORDER_LEVELS, [1, 0, 0])
+    exact = grade_profile(document, pinned=True)
+    assert exact.pattern is Pattern.P1
+    assert (
+        "the profile holds a statistic released without noise in tables.`subscriber`.datePairs"
+        in exact.reasons
+    )
 
 
 def test_a_fully_noisy_calendar_and_date_pair_section_keeps_p3() -> None:
