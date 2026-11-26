@@ -830,18 +830,23 @@ timestamp column. Each histogram follows the rules a column statistic of its for
 including the disclosure rule, a withheld cell reading as unknown and never as zero, and a `noise`
 block (§3a).
 
-**An entry that holds nothing.** A profile cut down after its release, by a step that drops each
-statistic an `init --json` inventory marks unused, can leave an entry with only the keys that name
-it. This holds for a `calendar` entry (`column`), a `datePairs` entry (`start`, `end`), a
-relationship's `dates` entry (`parent`, `child`), an `exposure` entry (`start`, `end` and `window`),
-a `history` (`entity`, `start`, `end`, and its tracked columns named by their keys alone) and a
-tracked column of a history (its key alone). The format requires each of them to hold its
-statistics, so a reader that follows the format to the letter refuses such an entry (`FLX-5036`).
-The engine reads it, where the reader is told to (`allow_emptied_entries`, off by default), as an
-entry that holds nothing: it stays in its place, so the positions and pointers of the entries
-after it do not move, `init` lists nothing of it, and a citation at or under it is refused
-(`FLX-5036`, naming the entry). An entry that holds some of its statistics, but not all of them,
-is refused as before.
+**An entry a release cut.** A profile cut down after its release, by a step that drops each
+statistic an `init --json` inventory marks unused, can leave an entry with some of its members, or
+with only the keys that name it. The inventory marks a member unused only where nothing reads it,
+and it keeps a withheld member's state, so one member of an entry can leave while another stays.
+This holds for a `calendar` entry (`column`), a `datePairs` entry (`start`, `end`), a relationship's
+`dates` entry (`parent`, `child`), an `exposure` entry (`start`, `end` and `window`), a `history`
+(`entity`, `start`, `end`, and its tracked columns named by their keys) and a tracked column of a
+history (its key). The format requires each of them to hold its members, so a reader that follows
+the format to the letter refuses such an entry (`FLX-5036`), naming the member it misses. The
+engine reads it, where the reader is told to (`allow_emptied_entries`, off by default), with the
+members that are left, each checked as it would be in a whole entry: a date pair's `statistics`
+and `order`, an exposure's `children` and `activeDays`, a history's five statistics and its
+`reasons`, and a tracked column's `initial` and `transitions` are each read only when present. An
+entry left with none of them holds nothing: it stays in its place, so the positions and pointers
+of the entries after it do not move, `init` lists nothing of it, and a citation at or under it is
+refused (`FLX-5036`, naming the entry). A citation of a member that is not there is refused as any
+citation of a statistic the profile does not publish is (`FLX-3113`).
 
 **`periods`** is a list of `{ "column", "period", "statistics" }`. `column` is
 a timestamp column, and `period` is `P1M`, a calendar month, the one period

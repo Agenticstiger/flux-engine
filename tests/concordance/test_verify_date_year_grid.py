@@ -13,19 +13,24 @@ A lending library's loans: ``due_date`` is a DATE column and ``branch`` a catego
 * **A level the profile holds no record of is no group.** A noisy release lists every level of a
   grouping column; a level whose noisy counts project to nothing is left out, with or without a
   generated row of it, and the others are compared. A level the profile holds records of that the
-  rows lack still makes the two sides group differently.
+  rows lack still makes the two sides group differently. A level the profile holds no record of is
+  left out whether the generated rows hold none of it or a few, in the full comparison and in a
+  comparison on a sample, and an exact group of no record is still refused.
 """
 
 from __future__ import annotations
 
 import json
+from fractions import Fraction
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
 from flux_engine.cli._init import run_init
+from flux_engine.concordance.sampling import SampleRequest
 from flux_engine.stages.run import run
+from flux_engine.stages.verify import verify
 
 pytestmark = pytest.mark.integration
 
@@ -85,9 +90,8 @@ def _noisy_level_histogram(levels: List[str], counts: List[str]) -> Dict[str, An
     }
 
 
-def _grouped_by_branch(per_branch: Dict[str, List[str]]) -> Dict[str, Any]:
-    """``format`` grouped by ``branch``, each branch's two noisy counts as given."""
-    statistic = _noisy_level_histogram(["audio", "book"], ["0", "0"])
+def _by_branch(statistic: Dict[str, Any], per_branch: Dict[str, List[str]]) -> Dict[str, Any]:
+    """*statistic* grouped by ``branch``, each branch's noisy counts as given."""
     statistic["groupBy"] = "branch"
     statistic["groups"] = [
         {"group": branch, "status": "F", "noisyCounts": counts}
@@ -96,11 +100,28 @@ def _grouped_by_branch(per_branch: Dict[str, List[str]]) -> Dict[str, Any]:
     return statistic
 
 
+def _grouped_by_branch(per_branch: Dict[str, List[str]]) -> Dict[str, Any]:
+    """``format`` grouped by ``branch``, each branch's two noisy counts as given."""
+    return _by_branch(_noisy_level_histogram(["audio", "book"], ["0", "0"]), per_branch)
+
+
+def _dated_by_branch(per_branch: Dict[str, List[str]], edges: List[int]) -> Dict[str, Any]:
+    """``due_date`` over the year grid, grouped by ``branch``, each branch's noisy counts as given."""
+    noisy = _noisy_level_histogram([], [])
+    noisy.update(definition="marginalHistogram/1", bins=[str(edge) for edge in edges])
+    del noisy["levels"]
+    return _by_branch(noisy, per_branch)
+
+
 def _profile(
     edges: List[int],
     per_branch: Dict[str, List[str]],
     branches: Tuple[str, ...] = ("260", "250", "240", "250"),
+    dated: Optional[Dict[str, List[str]]] = None,
 ) -> Dict[str, Any]:
+    dates = [_date_histogram(edges)]
+    if dated is not None:
+        dates.append(_dated_by_branch(dated, edges))
     return {
         "_producer": "https://example.invalid/profiler",
         "_schemaURL": SCHEMA,
@@ -115,7 +136,7 @@ def _profile(
             "loan": {
                 "columns": {
                     "loan_id": {"domain": "number"},
-                    "due_date": {"domain": "timestamp", "statistics": [_date_histogram(edges)]},
+                    "due_date": {"domain": "timestamp", "statistics": dates},
                     "branch": {
                         "domain": "category",
                         "statistics": [_noisy_level_histogram(BRANCHES, list(branches))],
@@ -133,7 +154,37 @@ def _profile(
     }
 
 
-def _verify(tmp_path: Path, profile: Dict[str, Any]) -> Any:
+LEVELS_BY_BRANCH = """\
+          - property: levelHistogram
+            column: format
+            groupBy: branch
+"""
+DATES_BY_BRANCH = """\
+          - property: marginalHistogram
+            column: due_date
+            groupBy: branch
+            bins: ['0001-01-01', '2000-01-01', '2020-01-01', '9999-12-31']
+"""
+TOLERANCE = """\
+            tolerance:
+              type: distance
+              measure: totalVariation
+              max: '0.10'
+              sampling: true
+"""
+
+
+def _bundle(
+    tmp_path: Path,
+    profile: Dict[str, Any],
+    declare: str = "",
+    minimum_records: Optional[int] = None,
+) -> None:
+    """Write the contract and the profile, run ``init``, then declare by hand what it did not.
+
+    ``init`` declares no grouped property over a grouping whose group has no record, so a
+    property that is grouped over one is added to the bundle's simulation, as an author would.
+    """
     (tmp_path / "loans.fluid.yaml").write_text(CONTRACT, encoding="utf-8")
     (tmp_path / "loans.profile.json").write_text(json.dumps(profile), encoding="utf-8")
     result = run_init(
@@ -142,11 +193,52 @@ def _verify(tmp_path: Path, profile: Dict[str, Any]) -> Any:
         profile=str(tmp_path / "loans.profile.json"),
     )
     assert result.exit_code == 0, result.stderr
+    simulation = tmp_path / "bundle" / "simulation.flux.yml"
+    text = simulation.read_text(encoding="utf-8")
+    if declare:
+        anchor = "          budget:\n"
+        assert text.count(anchor) == 1
+        text = text.replace(anchor, declare + TOLERANCE + anchor)
+    if minimum_records is not None:
+        assert text.count("            min: 1\n") == 1
+        text = text.replace("            min: 1\n", f"            min: {minimum_records}\n")
+    simulation.write_text(text, encoding="utf-8")
+
+
+def _verify(
+    tmp_path: Path,
+    profile: Dict[str, Any],
+    declare: str = "",
+    minimum_records: Optional[int] = None,
+) -> Any:
+    _bundle(tmp_path, profile, declare, minimum_records)
     return run(
         tmp_path / "bundle",
         state_dir=tmp_path / "state",
         profile=tmp_path / "loans.profile.json",
         verify=True,
+    )
+
+
+def _sampled(
+    tmp_path: Path,
+    profile: Dict[str, Any],
+    declare: str,
+    minimum_records: Optional[int] = None,
+    fraction: str = "1",
+) -> Any:
+    """``verify --sample`` of a run that holds no verdict of its own: the blocks are 100 records."""
+    _bundle(tmp_path, profile, declare, minimum_records)
+    applied = run(
+        tmp_path / "bundle", state_dir=tmp_path / "state", profile=tmp_path / "loans.profile.json"
+    )
+    assert applied.success, applied.stderr
+    return verify(
+        tmp_path / "bundle",
+        run_id=applied.artifacts["plan"]["run_id"],
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "loans.profile.json",
+        sample=SampleRequest(fraction=Fraction(fraction), block_records=100),
     )
 
 
@@ -193,3 +285,80 @@ def test_a_level_the_profile_holds_records_of_and_the_rows_lack_is_still_refused
         outcome.stdout
     ), outcome.stdout
     assert not outcome.success
+
+
+# ``mill`` holds a noisy count of one record, so a run draws it a single row; the profile's grouped
+# statistics hold no record of it.
+ONE_MILL = ("260", "250", "240", "1")
+NO_MILL_GROUPED = dict(EVEN, mill=["0", "0"])
+NO_MILL_DATED = dict({branch: ["10", "40", "50"] for branch in BRANCHES}, mill=["0", "0", "0"])
+
+
+ROWS_OF_MILL = [
+    pytest.param(NO_MILL, id="the-rows-lack-it"),
+    pytest.param(ONE_MILL, id="the-rows-hold-one"),
+]
+
+
+@pytest.mark.parametrize("branches", ROWS_OF_MILL)
+def test_a_grouped_property_leaves_out_a_level_the_profile_holds_no_record_of(
+    tmp_path: Path, branches: Tuple[str, ...]
+) -> None:
+    # ``init`` declares no grouped property over such a level, so the property is declared by hand.
+    outcome = _verify(tmp_path, _profile(YEAR_GRID, NO_MILL_GROUPED, branches), LEVELS_BY_BRANCH)
+    assert "FLX-5005" not in outcome.stdout, outcome.stdout
+    assert "4 of 4 declared properties within the margin" in outcome.stdout, outcome.stdout
+    assert outcome.success, outcome.stdout + outcome.stderr
+
+
+def test_the_rows_of_a_level_the_profile_holds_no_record_of_are_still_held_to_the_floor(
+    tmp_path: Path,
+) -> None:
+    profile = _profile(YEAR_GRID, NO_MILL_GROUPED, ONE_MILL)
+    outcome = _verify(tmp_path, profile, LEVELS_BY_BRANCH, minimum_records=5)
+    assert "FLX-5005" in outcome.stdout, outcome.stdout
+    assert "1 records, minimum is 5" in outcome.stdout, outcome.stdout
+    assert not outcome.success
+
+
+def test_an_exact_group_of_no_record_is_still_a_group_the_rows_lack(tmp_path: Path) -> None:
+    profile = _profile(YEAR_GRID, EVEN, NO_MILL)
+    exact = {
+        "definition": "levelHistogram/1",
+        "groupBy": "branch",
+        "sampleSize": {"min": 1000, "max": 1000},
+        "disclosure": "none",
+        "levels": ["audio", "book"],
+        "groups": [
+            {"group": branch, "k": 250, "levelCounts": [75, 175], "status": "F"}
+            for branch in BRANCHES[:3]
+        ]
+        + [{"group": "mill", "k": 0, "levelCounts": [0, 0], "status": "F"}],
+    }
+    profile["tables"]["loan"]["columns"]["format"]["statistics"][1] = exact
+    outcome = _verify(tmp_path, profile, LEVELS_BY_BRANCH)
+    assert "the two sides group into different sets: 4 in the profile and 3 synthetic" in (
+        outcome.stdout
+    ), outcome.stdout
+    assert not outcome.success
+
+
+@pytest.mark.parametrize("branches", ROWS_OF_MILL)
+def test_a_sample_leaves_out_a_level_the_profile_holds_no_record_of(
+    tmp_path: Path, branches: Tuple[str, ...]
+) -> None:
+    outcome = _sampled(
+        tmp_path, _profile(YEAR_GRID, EVEN, branches, NO_MILL_DATED), DATES_BY_BRANCH
+    )
+    assert outcome.exit_code == 0, outcome.stdout + outcome.stderr
+    assert "FLX-5005" not in outcome.stdout + outcome.stderr
+    assert "histograms 2 within, 0 outside, 0 undecided" in outcome.stdout, outcome.stdout
+
+
+def test_a_sample_holds_the_rows_of_such_a_level_to_the_floor_as_the_full_comparison_does(
+    tmp_path: Path,
+) -> None:
+    profile = _profile(YEAR_GRID, EVEN, ONE_MILL, NO_MILL_DATED)
+    outcome = _sampled(tmp_path, profile, DATES_BY_BRANCH, minimum_records=5)
+    assert outcome.exit_code == 1, outcome.stdout + outcome.stderr
+    assert "1 records, minimum is 5" in outcome.stdout + outcome.stderr

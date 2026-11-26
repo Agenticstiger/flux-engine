@@ -12,7 +12,7 @@ a run that follows the declared rate exactly passes whatever its time bounds are
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from flux_engine.concordance.exposure_lines import ExposureLine, ExposureSource, exposure_checks
 from flux_stats.reading import MS_PER_DAY
@@ -35,9 +35,9 @@ def _source() -> ExposureSource:
     )
 
 
-def _profile(children: int, days: int) -> Any:
-    def count(value: int) -> Any:
-        return SimpleNamespace(value=value)
+def _profile(children: Optional[int], days: Optional[int]) -> Any:
+    def count(value: Optional[int]) -> Any:
+        return None if value is None else SimpleNamespace(value=value)
 
     entry = SimpleNamespace(
         start="start",
@@ -91,3 +91,30 @@ def test_a_parent_starting_after_the_profiles_window_has_no_day() -> None:
     parents = [{"id": 0, "start": 0, "end": None}, {"id": 1, "start": 150, "end": None}]
     line = _check(_profile(2, 100), parents, 2)
     assert line.run_days == 100
+
+
+def _not_scored(profile: Any) -> List[Any]:
+    parents = [{"id": 0, "start": 0, "end": None}]
+    tables = {"parent": parents, "child": [{"pid": 0}]}
+    found = exposure_checks(
+        [_source()],
+        profile,
+        lambda name: (tables[name], None),
+        lambda _: {"start": "DATE", "end": "DATE"},
+        RUN_WINDOW,
+    )
+    assert found.lines == ()
+    return [reason for _, reason in found.not_scored]
+
+
+def test_an_exposure_a_release_cut_to_one_count_says_which_count_it_misses() -> None:
+    assert _not_scored(_profile(5, None)) == [
+        "the profile holds no count of active days, so the exposure is not compared"
+    ]
+    assert _not_scored(_profile(None, 100)) == [
+        "the profile holds no count of children, so the exposure is not compared"
+    ]
+
+
+def test_an_exposure_a_release_cut_to_no_count_is_not_listed() -> None:
+    assert _not_scored(_profile(None, None)) == []

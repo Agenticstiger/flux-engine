@@ -94,6 +94,15 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - The request `fluxsim init` writes names as `cliqueColumns` only the columns the contract requires. A clique column
   holds no null, and a profiler releases a column the contract leaves optional over its known values, outside the
   cliques. A request init writes for a table with optional columns now names fewer columns than before.
+- The engine reads a profile that a release step cut by dropping each statistic the `init --json` inventory
+  marks unused, when that leaves an entry in part. When one member of an entry is withheld and another unused,
+  only the unused one leaves, and the entry keeps the rest: a date pair its `order` and no statistic, an
+  exposure one of its counts, a history or a tracked column some of its members. The engine reads each member
+  that is left, checked as in a whole entry, and `init` and `plan` accept such a profile, and `init` writes the
+  bundle it wrote from the whole one. A citation of a member that is gone is refused as any citation of an
+  unpublished statistic is (`FLX-3113`). 0.12.0 refused an entry that a release had cut in part. flux-stats'
+  `parse_profile` and `load_profile_text` take `allow_emptied_entries`, off by default, which the engine sets;
+  without it each entry is read as the format writes it, and a cut entry is refused naming the member it misses.
 
 ### Fixed
 
@@ -109,6 +118,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   history. No layout reads such a count now: it is listed as unused with the reason, in an events or periodic
   table's case that its rows per entity follow from the history. Only a history that is written holds a relationship
   back (ADR 0027, the amendment of 2026-11-26 about counts per entity).
+- A sampled `verify` whose run holds a few records of a grouping level that the profile holds no record of, fewer
+  than `records.min`, passed where the full `verify` refused the group (`FLX-5005`). The sample now holds such a
+  level's records to the floor, as the full comparison does.
+- A profile cut in part (see the entry under Changed) was graded as if the cut members had been released without noise:
+  a noisy history or date pair with a member gone fell to `P1`. The grade now counts the members that are left. In
+  `flux_stats`, `holds_nothing` of a date pair, a relationship's date pair and a history is true only when no member is
+  left.
 
 ## 0.12.1 - 2026-11-26
 

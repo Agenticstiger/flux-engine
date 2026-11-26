@@ -171,13 +171,16 @@ never to more (point 4: "A sum below the total is accepted").
    noise blocks add up to, and the number of parts) when a stated share is above its sum. Both
    figures are values the profile states: the total, and the shares its `noise` blocks record.
    Nothing in it depends on the records.
-4. **An entry cut down to its names is read as holding nothing.** The same step can drop every
-   statistic of a calendar entry, a date pair, a relationship's date pair, an exposure, a history
-   or a tracked column of one, which leaves the keys that name it. The profile reader takes
-   `allow_emptied_entries`, off by default and set by the engine: with it such an entry is kept in
-   its place and holds nothing, and a citation at or under it is refused (`FLX-5036`). An entry
-   that holds some of its statistics is refused as before. Unlike point 1 this is an option,
-   because the format itself still requires the statistics of an entry that is published whole.
+4. **An entry a release cut is read with the members it keeps.** The same step can drop some or
+   all of the members of a calendar entry, a date pair, a relationship's date pair, an exposure, a
+   history or a tracked column of one: when one member is withheld and another unused, only the
+   unused one leaves. The inventory stays as it is, each member with the state it has, and the
+   profile reader takes `allow_emptied_entries`, off by default and set by the engine: with it each
+   member of such an entry is read when present, and an entry left with none holds nothing, kept in
+   its place, with a citation at or under it refused (`FLX-5036`). A citation of a member that is
+   gone is refused as a citation of any unpublished statistic is (`FLX-3113`). Unlike point 1 this
+   is an option, because the format itself still requires the members of an entry that is
+   published whole.
 
 ### Consequences
 
