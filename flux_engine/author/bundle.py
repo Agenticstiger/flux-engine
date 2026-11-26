@@ -87,6 +87,7 @@ from flux_engine.author.columns import (
     plan_column,
     recheck_key,
     share_texts,
+    weighted_span,
     widen_key_span,
 )
 from flux_engine.author.copula import CopulaPlan, declare_copula
@@ -901,7 +902,14 @@ def _grouping_columns(columns: Mapping[str, Any]) -> Set[str]:
 
 
 def _span_of(plan: ColumnPlan) -> Optional[Tuple[Fraction, Fraction]]:
-    """The values a column can take, for a rule that reads it: its range, else its draw."""
+    """The values a column can take, for a rule that reads it: its range, else its draw.
+
+    A column read from a released histogram keeps to the bins that stand clear of the noise, so
+    its draw stands in for its range, the histogram's whole grid.
+    """
+    held = weighted_span(plan)
+    if held is not None:
+        return Fraction(held[0]), Fraction(held[1])
     checked = plan.declaration.get("range")
     if isinstance(checked, Mapping):
         low, high = numeric(checked.get("min")), numeric(checked.get("max"))

@@ -451,6 +451,11 @@ is common for a release of a few hundred records, the column is drawn evenly wit
 window, and the output says so. The column still declares the histogram's whole grid as its range,
 and its histogram property still compares the run with the release.
 
+A number column's noisy histogram is read the same way (the amendment of 2026-11-26): a bin below
+the floor carries no weight, a contract `derive` over the column is bounded by the hull of the bins above it, and
+a column with no bin above it is drawn evenly over its declared range, with its note. A column the
+contract makes a key keeps its bins as they stand, since its rows hold distinct values.
+
 A table whose profile carries noisy cliques (section 5a of the spec) is drawn through a
 junction tree: the cliques are arranged into a tree rooted at the one with the most columns
 (the first by name among equals), and each column is drawn given the columns its clique shares

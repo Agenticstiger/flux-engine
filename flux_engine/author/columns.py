@@ -233,6 +233,10 @@ class ColumnPlan:
     #: No bin of that histogram stands clear of the noise, so the column is drawn evenly within
     #: the run's window once it is known (:func:`draw_in_window`).
     drawn_in_window: bool = False
+    #: A number column read from a noisy histogram: a bin of it inside the noise carries no weight,
+    #: and the outer ones do not set where the column's values lie for a rule that reads them
+    #: (:func:`weighted_span`). Its declared range stays the histogram's whole grid.
+    weights_floored: bool = False
     #: The profile gives the column no distribution (it withheld every order statistic), so it is
     #: drawn evenly within the run's window with no declaration of its own.
     even_in_window: bool = False
@@ -1785,6 +1789,41 @@ def _range(ctx: ColumnContext, plan: ColumnPlan, low: _Point, high: _Point) -> N
         plan.time_span = (int(low.value), int(high.value))
 
 
+def _floor_by_noise(
+    ctx: ColumnContext,
+    plan: ColumnPlan,
+    index: int,
+    weights: List[Fraction],
+    bases: List[Basis],
+) -> Tuple[List[Fraction], List[Basis], Optional[Tuple[bool, ...]]]:
+    """A released histogram's bin weights and bases with a bin inside the noise read as none.
+
+    A bin whose count does not stand clear of the noise carries no weight (ADR 0019, amendment of
+    2026-11-25). A date's draw falls to the run's window when no bin clears it, a number's to its
+    range. A key keeps its bins' weights as they stand: its rows hold distinct values, so a bin's
+    count is the values it must have room for, and a small one inside the noise still needs them.
+    Returns the weights, their bases and the bins that stand clear, ``None`` when none are read.
+    """
+    kind = ctx.column.logical_type.kind
+    floors = _temporal(kind) or (_scores_order(kind) and not (ctx.key or ctx.keyed))
+    clear = dict(ctx.noise_clear).get(index) if floors else None
+    if clear is None or len(clear) != len(weights):
+        return weights, bases, None
+    if _temporal(kind):
+        plan.noise_floored = True
+        plan.drawn_in_window = not any(clear)
+    else:
+        plan.weights_floored = True
+    return (
+        [weight if keep else Fraction(0) for weight, keep in zip(weights, clear, strict=True)],
+        [
+            basis if keep else assumed(_NOISE_FLOOR_REASON)
+            for basis, keep in zip(bases, clear, strict=True)
+        ],
+        clear,
+    )
+
+
 def _from_histogram(
     ctx: ColumnContext,
     plan: ColumnPlan,
@@ -1815,19 +1854,13 @@ def _from_histogram(
     weights, bases = cell_weights(
         ctx.minimum_cell, cells, stat_tokens, "binCounts", _HISTOGRAM, total=total
     )
-    clear = dict(ctx.noise_clear).get(index) if _temporal(kind) else None
-    if clear is not None and len(clear) == len(weights):
-        # A released date histogram: a bin whose count does not stand clear of the noise is read
-        # as noise, so it carries no weight (ADR 0019, amendment of 2026-11-25).
-        plan.noise_floored = True
-        plan.drawn_in_window = not any(clear)
-        weights = [
-            weight if keep else Fraction(0) for weight, keep in zip(weights, clear, strict=True)
-        ]
-        bases = [
-            basis if keep else assumed(_NOISE_FLOOR_REASON)
-            for basis, keep in zip(bases, clear, strict=True)
-        ]
+    weights, bases, clear = _floor_by_noise(ctx, plan, index, weights, bases)
+    evenly = clear is not None and not _temporal(kind) and not any(clear)
+    if evenly:
+        # No bin stands clear: the draw is one bin over the histogram's range (as far as a
+        # published min and max leave it), which a published mean shapes as it shapes any bins.
+        drawn, drawn_bases = [drawn[0], drawn[-1]], [drawn_bases[0], drawn_bases[-1]]
+        weights, bases = [Fraction(1)], [assumed(_NOISE_EVERYWHERE_RANGE)]
     mean = _published_mean(ctx)
     shaped = None
     if mean is not None and kind in (LogicalKind.INT, LogicalKind.DECIMAL) and _shapes(ctx):
@@ -1859,6 +1892,12 @@ def _from_histogram(
     else:
         _shaped_bins(ctx, plan, shaped, drawn_bases, bases)
         plan.how = f"a histogram over {len(edges) - 1} bins, from the profile, shaped to its mean"
+    if evenly:
+        plan.how = (
+            "evenly over its range: no bin of its released histogram stands clear of the noise"
+        )
+        plan.assumptions.append(_NOISE_EVERYWHERE_RANGE)
+        plan.reads.append((stat_tokens, _NOISE_EVERYWHERE_RANGE_READ))
     low = _Point(Fraction(0), edges[0], stat_tokens + ("bins", "0"), _HISTOGRAM)
     high = _Point(Fraction(1), edges[-1], stat_tokens + ("bins", str(len(edges) - 1)), _HISTOGRAM)
     if low.value < high.value:
@@ -1896,7 +1935,7 @@ def _from_histogram(
     _mean_property(ctx, plan)
 
 
-#: Why a bin of a released date histogram carries no weight.
+#: Why a bin of a released histogram carries no weight.
 _NOISE_FLOOR_REASON = (
     "its released count does not stand clear of the noise (ADR 0019, amendment of 2026-11-25), "
     "so the bin is read as noise and carries no weight"
@@ -1908,6 +1947,15 @@ _NOISE_EVERYWHERE = (
 _NOISE_EVERYWHERE_READ = (
     "no bin's count stands clear of the noise, so the column is drawn evenly within the run's "
     "time window, inside its range; the histogram property still scores it"
+)
+#: The same for a number column, which has no window to be drawn within.
+_NOISE_EVERYWHERE_RANGE = (
+    "No bin of the column's released histogram stands clear of the noise, so the column is drawn "
+    "evenly over its declared range."
+)
+_NOISE_EVERYWHERE_RANGE_READ = (
+    "no bin's count stands clear of the noise, so the column is drawn evenly over its range; the "
+    "histogram property still scores it"
 )
 #: The same, when the column's declared range and the run's window do not meet.
 _NOISE_OUTSIDE_WINDOW = (
@@ -3002,6 +3050,30 @@ def drawn_span(plan: ColumnPlan) -> List[Decimal]:
     return _numbers(values or list((declaration.get("range") or {}).values()))
 
 
+def weighted_span(plan: ColumnPlan) -> Optional[Tuple[Decimal, Decimal]]:
+    """The hull of the bins of a number column read from a released histogram that carry weight.
+
+    ``None`` for any other column, and for one whose declaration has no weighted bin. The outer
+    bins inside the noise carry no weight, so they do not set where its values lie, as the hull of
+    the bins that stand clear is the span of a released date column (ADR 0019, amendment of
+    2026-11-25). Its declared range stays the histogram's whole grid.
+    """
+    if not plan.weights_floored:
+        return None
+    edges, weights = plan.declaration.get("bins"), plan.declaration.get("binWeights")
+    if (
+        not isinstance(edges, list)
+        or not isinstance(weights, list)
+        or len(edges) != len(weights) + 1
+    ):
+        return None
+    held = [position for position, weight in enumerate(weights) if Fraction(str(weight)) > 0]
+    if not held:
+        return None
+    ends = _numbers([edges[held[0]], edges[held[-1] + 1]])
+    return (ends[0], ends[1]) if len(ends) == 2 else None
+
+
 def _numbers(values: Sequence[Any]) -> List[Decimal]:
     numbers: List[Decimal] = []
     for value in values:
@@ -3339,6 +3411,7 @@ def determine_column(
         # The histogram's own notes (a withheld bin count, its shaping to the mean) speak of
         # weights the column no longer declares.
         plan.assumptions, plan.choices = [], []
+        plan.reads = [item for item in plan.reads if item[1] != _NOISE_EVERYWHERE_RANGE_READ]
         # A histogram property's bins would be the column's draw for the generator, which
         # a rule's column has none of (FLX-3402): its edges are the range, and the mean the
         # property the rule's values are scored on.
