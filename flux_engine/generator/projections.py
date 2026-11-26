@@ -343,6 +343,8 @@ def _projection(
     )
     if not bounds.after:
         _unheld_givens(key, options, sets, plan)
+    if bounds.estimate and key == PERIODS_KEY:
+        _refuse_partly_overridden_givens(options, sets, history, plan, held)
     _refuse_rules_on_projected_cells(key, sets, plan)
     clip = None
     if key == PERIODS_KEY and bounds.ranges and plan.time_bounds is not None:
@@ -514,6 +516,44 @@ def held_givens(
                 marginals[name] = tuple((level, str(share)) for level, share in shares.items())
         held[parent] = None
     return tuple(sorted(held)), tuple(sorted(fallback)), tuple(sorted(marginals.items()))
+
+
+def _refuse_partly_overridden_givens(
+    entry: Any,
+    sets: Mapping[str, str],
+    history: GeneratorPlan,
+    plan: GeneratorPlan,
+    held: Iterable[str],
+) -> None:
+    """Refuse (``FLX-3403``) a column some kinds override, drawn given a cell the others' rows set.
+
+    On the rows of a kind that does not override it, the column is drawn given the level of its
+    parent's own draw, and the entry then replaces the parent's cell with that kind's override, the
+    version's value or the period's day, so the two disagree. A parent held for another column
+    (:func:`held_givens`) gives every row the version's level, and a parent set only on the rows
+    the column is overridden on keeps its own draw where the column is drawn: both are served. Only
+    a plan being made is refused; a recorded plan replays the draw it was made with.
+    """
+    always = {column.column.name for column in history.columns} | {entry.column}
+    overrides = [dict(kind.overrides) for kind in entry.kinds]
+    for column_plan in plan.columns:
+        name = column_plan.column.name
+        drawn = [index for index, kind in enumerate(overrides) if name not in kind]
+        if name not in sets or name in always or not drawn:
+            continue
+        for parent in column_plan.statistics.parents:
+            setting = [index for index in drawn if parent in overrides[index] or parent in always]
+            if parent in sets and parent not in held and setting:
+                by = ", ".join(
+                    f"kinds[{index}]" for index, kind in enumerate(overrides) if name in kind
+                )
+                raise _refuse(
+                    f"periods entry ({plan.expose.expose_id}): column {name!r} is overridden by "
+                    f"{by} and drawn on the rows of kinds[{setting[0]}] given {parent!r}, which the "
+                    f"entry sets on those rows, so the draw would read the level of the own draw of "
+                    f"{parent!r} and not the cell the row holds; override {name!r} in every kind, "
+                    "or draw it on its own"
+                )
 
 
 def _refuse_unservable(where: str, column_plan: ColumnPlan, parent: str, is_own: bool) -> None:

@@ -37,6 +37,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   same way.
 - `fluxsim explain FLX-6204` says that `init` refuses with it too when the date ranges it widens for an enforced
   `within` entry do not settle.
+- `plan` refuses (`FLX-3403`) a column some kinds of a periods entry override, drawn `given` a cell the entry sets on
+  the rows of a kind that does not override it (that kind's override, a column of the version, or the period
+  column). On those rows the column was drawn given the level of its parent's own draw, which the entry then
+  replaced, so the rows disagreed with the column's table, with no error. A parent held for another column, and one
+  the entry sets only on the rows the column is overridden on, are served as before. A recorded plan replays the
+  draw it was made with.
 
 ## 0.12.0 - 2026-11-26
 
