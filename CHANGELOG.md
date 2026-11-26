@@ -243,6 +243,15 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   a UUID) holds every lower case hex identifier of that length, so each level of exactly that form is a key and the link
   is whole; a level of another form is refused, naming it, and so is a parent a `--scale` below 1 cut. A foreign key
   that is not tracked takes a key the parent holds, as before.
+- `init` read a number column's released histogram with every bin at face value, so noise in an outer bin drew values
+  the column does not hold. An INT or DECIMAL column read from a histogram released with noise is now read as a date
+  column is (ADR 0019, the amendment of 2026-11-26): a bin whose count does not exceed `noise_floor` over the
+  histogram's cells carries no weight, its register entry says so, and a contract `derive` over the column
+  bounds its result by the hull of the bins that carry weight, not the histogram's whole grid. When no bin clears the floor, the column is drawn evenly over its declared range as a noted assumption, which
+  `--strict` refuses. The declared range, the histogram's whole grid, and the histogram property stay, so `verify`
+  still scores the column. A column the contract makes a key keeps its bins as they stand, since its rows hold
+  distinct values. Only bundles written from profiles released with noise change, and only for a number column with a
+  bin at or below the floor: an exact histogram, and a release whose bins all clear it, keep their bytes.
 
 ## 0.12.1 - 2026-11-26
 
