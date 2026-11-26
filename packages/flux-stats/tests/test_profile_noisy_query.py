@@ -410,3 +410,63 @@ def test_the_member_form_is_charged_every_row_of_the_parent_one_unit_holds() -> 
     message = _refused(share("0.125"))
     assert "queries[0]" in message and "16 / (2 scale^2)" in message
     assert parse_profile(share("2")).accounting.reach("account") == 4  # type: ignore[union-attr]
+
+
+def _two_parents(document: Dict[str, Any], account_first: bool) -> None:
+    """``card_version`` is a table the unit does not reach, and its ``member_id`` is the child
+    column of two listed relationships: from ``member`` (m_P = 1) and from ``account``, which the
+    unit follows into at a cap of 4 (m_P = 4)."""
+    _unfollow(document)
+    _with_accounts(document)
+    listed = document["relationships"]
+    from_account = {**_link("account", "id", "card_version", "member_id"), "statistics": []}
+    followed = {**_link("member", "id", "account", "member_id"), "statistics": []}
+    document["relationships"] = (
+        [from_account, *listed, followed] if account_first else [*listed, from_account, followed]
+    )
+
+
+@pytest.mark.parametrize("account_first", [False, True])
+def test_two_parents_on_the_same_child_columns_charge_the_larger_in_either_order(
+    account_first: bool,
+) -> None:
+    """In a table the unit does not reach, a row of a parent moves a group: L1 = 2 m_P and
+    L2^2 = 2 m_P^2. From account, at scale 2, Gaussian noise needs rho 32 / 8 = 4 and Laplace
+    noise (8 / 2)^2 / 2 = 8; from member they would need 1/4 and 1/2."""
+
+    def share(rho: str, laplace: bool = False) -> Dict[str, Any]:
+        def change(document: Dict[str, Any]) -> None:
+            _two_parents(document, account_first)
+            _statistic(document, 0)["noise"]["privacyLoss"]["rho"] = rho
+            if laplace:
+                _laplace(document, 0, "2", rho)
+
+        return _edit(change)
+
+    message = _refused(share("0.25"))
+    assert "queries[0]" in message and "32 / (2 scale^2)" in message
+    parse_profile(share("4"))
+    assert "queries[0]" in _refused(share("0.5", laplace=True))
+    assert "queries[0]" in _refused(share("7.99", laplace=True))
+    parse_profile(share("8", laplace=True))
+
+
+@pytest.mark.parametrize("account_first", [False, True])
+def test_a_relationship_the_unit_does_not_follow_leaves_the_followed_charge_in_either_order(
+    account_first: bool,
+) -> None:
+    """``card_version`` is reached through ``member``, and its ``member_id`` is also the child
+    column of a relationship from ``account``, a table the unit does not reach: a group still
+    leaves whole with its member, m_P = 1, whichever relationship is listed first."""
+
+    def change(document: Dict[str, Any]) -> None:
+        identifier = document["tables"]["member"]["columns"]["id"]
+        document["tables"]["account"] = {"columns": {"id": copy.deepcopy(identifier)}}
+        from_account = {**_link("account", "id", "card_version", "member_id"), "statistics": []}
+        listed = document["relationships"]
+        document["relationships"] = (
+            [from_account, *listed] if account_first else [*listed, from_account]
+        )
+
+    profile = parse_profile(_edit(change))
+    assert profile.queries[MEMBERS].statistics[0].noise.scale == 2  # type: ignore[union-attr]

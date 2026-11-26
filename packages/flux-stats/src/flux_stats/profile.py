@@ -3001,13 +3001,15 @@ class _Reader:
         reach, its rows are the same in every neighbouring data set, so a group stays when its row
         of ``P`` leaves, and a query that reads that row can move the group from one cell of the
         rate to the other: ``(2 m_P, 2 m_P^2)``, as a row moving between cells of a relationship
-        statistic (section 3a). Or the table's ``history`` entity columns: ``m_T``, under the
-        history's whole-entity obligation (a profiler's, stated and not checked), in a table the
-        unit follows into. In the unit's own expose one unit is one version, and removing it can
-        move its entity from one cell of the rate to the other, so the entity form is refused
-        there, as a noisy history member is. Anything else, an unknown table or column, or a figure
-        of 0 (a table the unit does not reach, with no parent the unit reaches), is refused, naming
-        the query and no value.
+        statistic (section 3a). When relationships from more than one parent have those child
+        columns, each is read and the charge is the largest of theirs, in L1 and in squared L2, so
+        the order they are listed in never lowers it. Or the table's ``history`` entity columns:
+        ``m_T``, under the history's whole-entity obligation (a profiler's, stated and not
+        checked), in a table the unit follows into. In the unit's own expose one unit is one
+        version, and removing it can move its entity from one cell of the rate to the other, so the
+        entity form is refused there, as a noisy history member is. Anything else, an unknown table
+        or column, or a figure of 0 (a table the unit does not reach, with no parent the unit
+        reaches), is refused, naming the query and no value.
         """
         accounting = self._require_account(f"{where}.unit")
         refused = f"query {name!r} states a unit that does not give a charge: "
@@ -3036,7 +3038,16 @@ class _Reader:
                         charges.append(_Charge(Fraction(parent), Fraction(parent * parent)))
                     elif reach == 0:
                         charges.append(_Charge(Fraction(2 * parent), Fraction(2 * parent * parent)))
-                    break
+            if len(charges) > 1:
+                # Relationships from two parents on the same child columns read the same groups
+                # as rows of each parent: one unit can move as many as the larger reach gives,
+                # whatever order the relationships are listed in.
+                charges = [
+                    _Charge(
+                        max(charge.l1 for charge in charges),
+                        max(charge.l2_squared for charge in charges),
+                    )
+                ]
             history = entry.history
             if history is not None and history.entity == unit.by:
                 if unit.table == accounting.unit:

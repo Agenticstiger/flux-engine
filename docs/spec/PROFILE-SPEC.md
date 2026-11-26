@@ -614,7 +614,9 @@ names an earlier format and holds one is refused (`FLX-5036`), as before.
   charge is `L1 = 2 m_P` and `L2^2 = 2 m_P^2`, as for a relationship statistic whose rows can move between cells
   (above). Otherwise one unit's rows, reached through another relationship, could move a group between the cells, and the
   query is refused. The reader takes (a) when it matches and holds and `P` is reached, and (b)
-  otherwise. A query whose `unit` has `by` states no `groupBy` and no `groupByBins` on its statistics: a record is a group
+  otherwise. When entries of `relationships` from more than one parent have those child columns, the reader reads each,
+  and the charge is the largest L1 and the largest squared L2 of those that hold, so the order of the entries never
+  lowers it. A query whose `unit` has `by` states no `groupBy` and no `groupByBins` on its statistics: a record is a group
   of rows and can hold several levels of a grouping column, so it can land in more than one cell. A `{ "table": T }` unit
   may group, since one row lands in one group. What the profiler owes, stated and not checked (the evidence says so): the
   query and its unit pass the checks of ADR 0028; whether a record matches reads only rows of that record's own unit and
