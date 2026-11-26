@@ -91,8 +91,8 @@ The repair needs a global pass: it reads every row's pair. The process that star
 once and hands it to every worker, and a process without a pool works it out itself, from the same keys, so a slice's
 rows are the same in any process and `--jobs` and `--shard` change no byte. The pass is not slice-independent and
 holds `O(E)` integers in memory. Each round of switches draws its partners in one array call, and the membership of a
-pair is one bisection into the sorted pairs: 400,000 rows at a density of 0.8 take about 13 s and 3,000,000 rows at
-0.5 about 18 s on one core. A table that allows repeats has no such pass.
+pair is one bisection into the sorted pairs: 400,000 rows at a density of 0.8 take about 5 s and 3,000,000 rows at
+0.5 about 14 s on one core. A table that allows repeats has no such pass.
 
 ### 4. What the plan and verify say
 
