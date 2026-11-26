@@ -39,11 +39,53 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   are more than the pairs of the two parents; with no published `rowCount` its rows are the inverse-variance mean of
   the two sides' totals, kept within the pairs. A grouping of a side's children by a column of its parent is listed
   unused, as the sides pair stub by stub. Kernel 0.2.0 only; a bundle that declares none keeps its digests.
+- Profile format 1-5-0 and profile-request format 1-3-0, written down (PROFILE-SPEC section 3a, PROFILE-REQUEST-SPEC
+  section 8, ADR 0019). Each member of a table's `history` may carry a `noise` block, with its groups in the noisy
+  form, when the table is one a unit of privacy follows into and is not the unit's own expose; it is charged as a
+  count table over that table, L1 = L2 = `m_T`, and its share adds to the budget. A column of any domain may state
+  `nullCount/2`, a noisy count of its known and NULL rows, charged the same way. A history whose every member is noisy
+  no longer keeps a profile from P3. A request may ask for `history: {}` and for `nullCount/2`. The schema is
+  `docs/spec/profile-1-5.schema.json`; documents of format 1-4-0 and earlier read as before.
+- flux-stats reads profile format 1-5-0: a noisy history member is charged `m_T` and refused outside a table the unit
+  follows into, a column's `nullCount/2` is read into `ColumnEntry.null_counts`, and a history whose every member is
+  noisy no longer keeps a run from P3. Before, a `noise` block on any history member was refused in every format.
+- The profile-request reader and writer read and write format 1-3-0 (`history` on a table, `nullCount/2` on a column).
+  `init` asks for them, in the request it writes beside a bundle, only when the profile it was given is a private
+  release, and every other request keeps its format and bytes.
+- Profile format 1-5-0 lets a query's rate carry noise: the query states its `unit` (a table's rows, groups of them by the
+  child columns of a relationship, or a history's entities), which gives the charge, and flux-stats reads, checks
+  and charges it: groups by a followed relationship are charged `m_P`, groups by a relationship into a table the unit does
+  not reach `2 m_P` in L1 and `2 m_P^2` in the squared L2, since a group can change cell without leaving. A query
+  grouped by child columns that relationships from more than one parent the unit reaches give a charge, on the same
+  columns in any order, is refused,
+  since one unit's rows of each can move a group and the charges would add. The entity form
+  is refused in the unit's own expose, where one unit is one version, and a query over groups of rows is refused a
+  `groupBy`. What the profiler owes (a record matches by reading only rows of its own unit and of tables the unit does not
+  reach) is stated and not checked. The P3 checks that a noisy statistic still states data (a `groupBy` on a column
+  that is not a category, a `sampleSize` band of one size) run on every history member and every query statistic. The
+  evidence of a P3 grade for a 1-5-0 profile names it, with the
+  obligations of a noisy history, for each part the profile holds. A noisy query in an earlier format is refused as before.
+- `fluxsim init` reads a private release's noisy history and noisy null counts (profile format 1-5-0). A noisy history
+  member is read through its point estimate, its cells inside the noise (`noise_floor` over all its cells) carrying no
+  weight; one with no cell clear of it is read as withheld. A `nullCount/2` gives a nullable column the NULL share its
+  estimate states when the NULL cell stands clear of the noise. Otherwise the release cannot tell the count from none,
+  and no nulls are drawn, as for a null count withheld as small, with an assumption that names the interval the release
+  allows; the column can still be one another is drawn given, a clique column or a tracked one. A column a clique draws
+  holds no null, so a released share of one is set aside, named in the ledger with the share, and the cliques are drawn;
+  `--strict` refuses it as an unused statistic.
+- `fluxsim calibrate --fit` reads a noisy query rate (profile format 1-5-0) through its point estimate. A rate whose
+  unit's records, the sum of its two cells, are at most twice the noise floor over every cell of its statistic is left
+  out, with a note in the fit's output (`noiseNotes` in `--json`), and a profile whose rates are all inside it gives
+  `FLX-3707` naming them. Each query's squared gaps weigh the inverse of its rate's variance, scaled so the least noisy
+  weighs 1, as an exact rate does.
 
 ### Changed
 
 - `init` writes a table of two foreign keys whose relationships are both laid out by counts as an association, where
   it left the table out and took its `counts` entries back (see Association tables under Added).
+- The request `fluxsim init` writes names as `cliqueColumns` only the columns the contract requires. A clique column
+  holds no null, and a profiler releases a column the contract leaves optional over its known values, outside the
+  cliques. A request init writes for a table with optional columns now names fewer columns than before.
 
 ## 0.12.1 - 2026-11-26
 

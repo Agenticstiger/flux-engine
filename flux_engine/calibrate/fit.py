@@ -44,7 +44,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
@@ -60,7 +60,7 @@ from flux_engine.calibrate.errors import (
     FLX_7101,
 )
 from flux_engine.calibrate.gate import GateReport, judge
-from flux_engine.calibrate.objective import score, stated_queries
+from flux_engine.calibrate.objective import inside_noise, query_weights, score, stated_queries
 from flux_engine.calibrate.parameters import FitParameter, exact_text, resolve_parameters
 from flux_engine.calibrate.patch import (
     METHOD_ID,
@@ -138,6 +138,9 @@ class FitOutcome:
     bundle: Optional[CalibratedBundle] = None
     #: Why no held-out check was made when the bundle declares no held-out query; else ``None``.
     held_out_note: Optional[str] = None
+    #: The calibration queries a noisy release states rates for only inside the noise (profile
+    #: format 1-5-0), which the fit left out, each with why.
+    noise_notes: Tuple[str, ...] = ()
 
     @property
     def calibrated(self) -> bool:
@@ -216,11 +219,13 @@ class _Evaluator:
     runner: Any
     #: The unpatched bundle: every evaluation seeds its rows from its ``H`` (common random numbers).
     draws_of: Path
+    #: The weight of each query a noisy release states a rate for (:func:`query_weights`).
+    weights: Mapping[str, Fraction] = field(default_factory=dict)
     count: int = 0
 
     def __call__(self, values: Tuple[Fraction, ...]) -> Evaluation:
         rows = self._rows(values, self.calibration, self.targets, None)
-        return score(rows, self.stated)
+        return score(rows, self.stated, self.weights)
 
     def held_out_rows(
         self, values: Tuple[Fraction, ...], targets: Mapping[str, Tuple[QueryTarget, ...]]
@@ -318,6 +323,10 @@ class _Prepared:
     calibration_ids: Tuple[str, ...]
     #: The calibration queries the pinned profile states a rate for.
     stated: FrozenSet[str]
+    #: The weight of each query a noisy release states a rate for (:func:`query_weights`).
+    weights: Mapping[str, Fraction] = field(default_factory=dict)
+    #: The calibration queries whose rates stand inside the noise, which the fit leaves out.
+    inside: Tuple[str, ...] = ()
 
 
 def _register_of(loaded: Any, cast: Any) -> ParameterRegister:
@@ -336,6 +345,23 @@ def _register_of(loaded: Any, cast: Any) -> ParameterRegister:
         entries=(),
         profile_digest=None,
         code=FLX_3105,
+    )
+
+
+def _nothing_to_fit(inside: Sequence[str]) -> FluxError:
+    """``FLX-3707`` for a pinned profile that states no calibration query's rate, naming the
+    queries whose rates it states only inside the noise (profile format 1-5-0), if any."""
+    if inside:
+        return FluxError(
+            FLX_3707,
+            "the pinned profile states the rate of no calibration query outside its noise: "
+            f"the rates of {', '.join(repr(name) for name in inside)} stand inside it, so "
+            "there is nothing to fit to; nothing was run",
+        )
+    return FluxError(
+        FLX_3707,
+        "the pinned profile states the rate of no calibration query, so there is nothing "
+        "to fit to; nothing was run",
     )
 
 
@@ -358,12 +384,9 @@ def _prepare(request: FitRequest, ceilings: Ceilings) -> _Prepared:
     targets = profile_targets(pinned.profile)
     calibration_ids = tuple(query.id for query in registry.queries if not query.held_out)
     stated = stated_queries((q for q in registry.queries if not q.held_out), targets)
+    inside = sorted(inside_noise(targets) & frozenset(calibration_ids))
     if not stated:
-        raise FluxError(
-            FLX_3707,
-            "the pinned profile states the rate of no calibration query, so there is nothing "
-            "to fit to; nothing was run",
-        )
+        raise _nothing_to_fit(inside)
     if registry.compiled_sqlglot is not None and registry.compiled_sqlglot != SQLGLOT_VERSION:
         raise FluxError(
             FLX_3709,
@@ -406,6 +429,8 @@ def _prepare(request: FitRequest, ceilings: Ceilings) -> _Prepared:
         targets=targets,
         calibration_ids=calibration_ids,
         stated=stated,
+        weights=query_weights(targets),
+        inside=tuple(inside),
     )
 
 
@@ -615,6 +640,7 @@ def run_fit(request: FitRequest) -> FitOutcome:
                 stated=prepared.stated,
                 runner=runner,
                 draws_of=request.bundle,
+                weights=prepared.weights,
             )
             calibrator = CmaCalibrator(
                 prepared.parameters,
@@ -675,4 +701,8 @@ def run_fit(request: FitRequest) -> FitOutcome:
         gate=gate,
         bundle=bundle,
         held_out_note=held_out_note,
+        noise_notes=tuple(
+            f"query {name!r} is left out: the release states its rate inside the noise"
+            for name in prepared.inside
+        ),
     )

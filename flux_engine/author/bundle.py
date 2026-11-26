@@ -141,7 +141,7 @@ from flux_engine.author.projection import (
     span_primary_key,
 )
 from flux_engine.author.ranges import column_range
-from flux_engine.author.replace import replacements_for
+from flux_engine.author.replace import ask_for_private_release, replacements_for
 from flux_engine.author.window import WINDOW_END_LIMIT_MS, declared_window, instant_ms
 from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
@@ -531,15 +531,19 @@ def _emit_rows(
     return rows, assumed(reason), reason
 
 
-def _noise_clear(
-    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str
-) -> Tuple[Tuple[int, Tuple[bool, ...]], ...]:
-    """The cells of each noisy histogram of *column* that stand clear of the noise, by statistic."""
+def _noise_of(
+    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str, attribute: str
+) -> Tuple[Tuple[int, Any], ...]:
+    """One *attribute* of the noise note of each noisy statistic of *column*, by statistic.
+
+    ``clear`` is the cells of a noisy histogram that stand clear of the noise, and ``floor`` the
+    noise floor of a noisy null count (profile format 1-5-0).
+    """
     prefix = ("tables", expose_id, "columns", column, "statistics")
     found = [
-        (int(tokens[-1]), note.clear)
+        (int(tokens[-1]), getattr(note, attribute))
         for tokens, note in (noisy or {}).items()
-        if tokens[:-1] == prefix and getattr(note, "clear", None) is not None
+        if tokens[:-1] == prefix and getattr(note, attribute, None) is not None
     ]
     return tuple(sorted(found))
 
@@ -599,7 +603,8 @@ def _plan_expose(
             rounding_base=rounding_base,
             range_rule=column_range(schema[position]),
             asked_levels=_levels_asked(asked, column.name),
-            noise_clear=_noise_clear(noisy, expose_id, column.name),
+            noise_clear=_noise_of(noisy, expose_id, column.name, "clear"),
+            noise_floors=_noise_of(noisy, expose_id, column.name, "floor"),
             open_end=_open_end_ms(expose, column.name) if "history" in table else None,
         )
         if _draws_int_levels(context, grouping, set_by_rules):
@@ -1692,6 +1697,8 @@ def _cite_and_replace(
         fractional_bits=bits,
     )
     ledger.replacements = replaceable
+    if asked is not None and "privacy" in pinned:
+        asked = ask_for_private_release(asked, document, column_domains(document))
     return cited, asked
 
 
