@@ -213,6 +213,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - A `dependency` whose `from` and `to` name the same column stopped `plan` and `validate` with a bare `ValueError` and
   a traceback. It is `FLX-6208` now, naming the column: a dependency reads its `from` columns to determine its `to`
   columns, so a column on both sides is a cycle of one.
+- `init`'s check of the bundle it is about to write built each emit's plan without the columns that a history, a
+  projection or a snapshot sets, so a contract date range on such a column that missed its own statistics was refused
+  by `init` with `FLX-3403` although `plan` accepts it. The check plans each emit as `plan` does.
 
 ## 0.12.1 - 2026-11-26
 
