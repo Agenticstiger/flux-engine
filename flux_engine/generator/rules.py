@@ -1606,8 +1606,13 @@ class _Reader:
             raise ValueError(f"{where}: dependency is {{from, to, bothWays}}")
         sources = self._column_list(raw.get("from"), where, "from")
         targets = self._column_list(raw.get("to"), where, "to")
-        if set(sources) & set(targets):
-            raise ValueError(f"{where}: a column is on both sides of the dependency")
+        shared = [name for name in sources if name in targets]
+        if shared:
+            raise Expr2Error(
+                FLX_6208,
+                f"{where}: dependency names {', '.join(map(repr, shared))} on both sides; a "
+                "column cannot be read to determine itself, so `from` and `to` share none",
+            )
         both_ways = raw.get("bothWays", False)
         if not isinstance(both_ways, bool):
             raise ValueError(f"{where}: dependency.bothWays is true or false")

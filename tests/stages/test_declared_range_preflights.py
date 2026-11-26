@@ -97,6 +97,37 @@ def test_a_range_that_holds_none_of_the_bins_is_refused_by_both_alike(
     assert _codes(target, tmp_path) == ["FLX-3403", "FLX-3403"]
 
 
+EMPTY = [
+    "between '2005-12-31' and '2001-01-01'",
+    "> '2005-12-31' and < '2005-12-31'",
+    "> '2005-12-31' and <= '2001-01-01'",
+]
+
+
+@pytest.mark.parametrize("rule", EMPTY)
+@pytest.mark.parametrize("rows", [True, False])
+def test_an_empty_range_is_refused_by_validate_as_plan_refuses_it(
+    tmp_path: Path, rule: str, rows: bool
+) -> None:
+    """With or without a row count: an emit that takes its rows from the run is planned by ``plan`` alone."""
+    target = _visits(tmp_path, rule=rule)
+    if not rows:
+        path = target / "simulation.flux.yml"
+        document = yaml.safe_load(path.read_text("utf-8"))
+        del document["extensions"][NAMESPACE]["emits"][VISIT]["rows"]
+        path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    assert _codes(target, tmp_path) == ["FLX-3403", "FLX-3403"]
+
+
+def test_a_range_that_holds_one_day_is_accepted_by_both_with_no_row_count(tmp_path: Path) -> None:
+    target = _visits(tmp_path, rule="between '2005-12-31' and '2005-12-31'")
+    path = target / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    del document["extensions"][NAMESPACE]["emits"][VISIT]["rows"]
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    assert _codes(target, tmp_path) == [None, None]
+
+
 @pytest.mark.parametrize("declaration", ["conditions", "copula"])
 def test_a_plan_recorded_without_the_cut_applies_and_replays_byte_for_byte(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declaration: str

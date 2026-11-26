@@ -53,6 +53,7 @@ from flux_engine.api.stages import StageResult
 from flux_engine.core.clock import declared_time_bounds
 from flux_engine.core.errors import FluxError
 from flux_engine.core.kernels import new_plan_is_counter_based
+from flux_engine.generator.declared_range import refuse_empty_range
 from flux_engine.generator.rows import declared_range_findings
 from flux_engine.runtime import resolve_cast
 from flux_engine.seam.overlay import require_in_contract
@@ -136,6 +137,13 @@ def _check_emit(
     )
     if entry.fidelity is None:
         return []
+    # `plan` refuses a column whose contract range holds no value, whatever draws it. The relation
+    # check builds no plan for a bundle with an emit that takes its rows from the run, so the
+    # ranges of every drawn emit are read here as well.
+    if not entry.is_reference:
+        planned = entry.compile_planned()
+        for column in planned.columns:
+            refuse_empty_range(planned.expose_id, column)
     # A bin outside its range, or a range outside its integer width, is
     # refused here; a date range outside timeBounds is a warning.
     return list(

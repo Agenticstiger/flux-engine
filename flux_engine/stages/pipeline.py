@@ -318,7 +318,6 @@ from flux_engine.stages.scaling import (
     child_rows_note,
     floor_for_cut,
     key_space_note,
-    scale_emit,
     scale_emits,
     scale_text,
     scaled_rows,
@@ -1986,6 +1985,7 @@ def _common_draw_digests(
     *,
     simulation_id: Optional[str],
     scale: Optional[Decimal],
+    scale_floors: Mapping[str, ScaleFloor],
     tolerate_additive: bool,
     counter_based: bool,
 ) -> Tuple[SeamDigests, ...]:
@@ -1993,9 +1993,9 @@ def _common_draw_digests(
 
     ``H`` binds the fidelity block, so a candidate that moves one parameter would otherwise draw
     every row again. Each emit keeps its own ``G`` and takes the other bundle's ``H``, found by the
-    emit's expose id and computed as this run computes it (the same scale), so the two bundles'
-    rows differ only where a changed value decides them. An emit the other bundle does not have
-    keeps its own ``H``.
+    emit's expose id and computed as this run computes it (the same scale, and the rows a floor
+    raised a parent to), so the two bundles' rows differ only where a changed value decides them.
+    An emit the other bundle does not have keeps its own ``H``.
     """
     if common_draws_of is None:
         return tuple(per_emit_digests)
@@ -2003,7 +2003,7 @@ def _common_draw_digests(
     cast = resolve_cast(loaded.flux_documents, simulation_id=simulation_id)
     base = resolve_all_emits(loaded, simulation_id=cast.simulation_id, counter_based=counter_based)
     if scale is not None and scale != 1:
-        base = tuple(scale_emit(emit, scale) for emit in base)
+        base = scale_emits(base, scale, scale_floors)
     base_h = {
         emit.expose_id: seam_digests(
             emit.contract_document, emit.emit, emit.compile().column_names, emit.extension
@@ -2292,6 +2292,7 @@ def execute(
             resolved_emits,
             simulation_id=simulation_id,
             scale=scale,
+            scale_floors=era.scale_floors,
             tolerate_additive=tolerate_additive,
             counter_based=run_kernel.seed_tree_version == kernel2.SEED_TREE_VERSION,
         )

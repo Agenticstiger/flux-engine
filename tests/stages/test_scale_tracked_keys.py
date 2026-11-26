@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import pytest
 import yaml
@@ -41,6 +41,7 @@ from flux_engine.generator import relations
 from flux_engine.stages.apply import load_recorded_plan, plan_scale_floors
 from flux_engine.stages.layout import RunLayout
 from flux_engine.stages.replay import replay
+from flux_engine.stages.run import run_on_common_draws
 from flux_engine.stages.verify import verify
 
 from ._fleet import (
@@ -263,6 +264,106 @@ def test_an_untracked_foreign_key_takes_the_nearest_key_of_the_cut_catalogue(
     assert KEY not in load_recorded_plan(RunLayout.for_state_dir(state, _only_run(state)))
 
 
+def _identifier_catalogue(
+    tmp_path: Path,
+    *,
+    tracked: bool,
+    length: int = 4,
+    parent_rows: Optional[int] = None,
+    levels: Sequence[str] = ("aa", "bb"),
+) -> Path:
+    """The catalogue with a STRING key (an identifier of *length* hex digits) and a tracked column.
+
+    The history column takes *levels* at equal weights; the catalogue has *parent_rows* rows
+    (26 unless given), so ``16 ** length`` rows make the identifier key dense.
+    """
+    share = str(Decimal(1) / len(levels))
+    target = _catalogue_bundle(
+        tmp_path, levels=list(levels), weights={level: share for level in levels}, tracked=tracked
+    )
+    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
+    for item in contract["exposes"]:
+        for column in item["contract"]["schema"]:
+            if column["name"] == COLUMN:
+                column["type"] = "STRING"
+    path = target / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    emit = document["extensions"][NAMESPACE]["emits"][CATALOGUE]
+    if parent_rows is not None:
+        emit["rows"] = parent_rows
+    emit["fidelity"]["columns"][COLUMN] = {"identifierLength": length}
+    emit["fidelity"]["properties"] = []
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    repin(target, contract)
+    return target
+
+
+def test_a_tracked_foreign_key_into_a_sparse_identifier_key_is_refused(tmp_path: Path) -> None:
+    """An identifier is a permutation of the row index: a sparse one holds few of its values."""
+    text = _refused(_identifier_catalogue(tmp_path, tracked=True), tmp_path / "state")
+    assert f"expose '{HISTORY}' column '{COLUMN}'" in text and f"'{CATALOGUE}'" in text
+    assert "identifier" in text and "stop tracking" in text
+
+
+@pytest.mark.parametrize(
+    ("length", "levels"),
+    [(1, list("0123456789abcdef")), (1, ["a", "b"]), (2, ["aa", "bb"])],
+)
+def test_a_tracked_foreign_key_into_a_dense_identifier_key_links_every_cell(
+    tmp_path: Path, length: int, levels: List[str]
+) -> None:
+    """Rows equal to the whole space hold every key of the length, so each level is one."""
+    target = _identifier_catalogue(
+        tmp_path, tracked=True, length=length, parent_rows=16**length, levels=levels
+    )
+    assert "found 200 of 200 (100.00%)" in _link(target, tmp_path / "state")
+
+
+def test_a_dense_identifier_key_one_row_short_is_sparse(tmp_path: Path) -> None:
+    target = _identifier_catalogue(
+        tmp_path, tracked=True, length=1, parent_rows=15, levels=["a", "b"]
+    )
+    assert "identifier" in _refused(target, tmp_path / "state")
+
+
+def test_a_dense_identifier_key_cut_by_scale_is_sparse(tmp_path: Path) -> None:
+    """At ``--scale 0.25`` the parent keeps a quarter of its rows, so most levels are no key."""
+    target = _identifier_catalogue(
+        tmp_path, tracked=True, length=1, parent_rows=16, levels=list("0123456789abcdef")
+    )
+    text = _refused(target, tmp_path / "state", scale="0.25")
+    assert "identifier" in text and f"expose '{HISTORY}' column '{COLUMN}'" in text
+
+
+@pytest.mark.parametrize(
+    ("length", "levels", "bad"),
+    [
+        (2, ["aa", "gg"], "gg"),  # not hex
+        (2, ["aa", "b"], "b"),  # shorter than the key
+        (2, ["aa", "bbb"], "bbb"),  # longer than the key
+        (2, ["aa", "BB"], "BB"),  # an identifier spells its hex digits in lower case
+        (1, ["a", " "], " "),  # a blank
+    ],
+)
+def test_a_dense_identifier_key_is_refused_for_a_level_that_is_no_key_of_its_form(
+    tmp_path: Path, length: int, levels: List[str], bad: str
+) -> None:
+    target = _identifier_catalogue(
+        tmp_path, tracked=True, length=length, parent_rows=16**length, levels=levels
+    )
+    text = _refused(target, tmp_path / "state")
+    assert f"level {bad!r}" in text and "identifier" in text
+
+
+def test_an_untracked_foreign_key_into_an_identifier_key_takes_a_key_it_holds(
+    tmp_path: Path,
+) -> None:
+    target = _identifier_catalogue(tmp_path, tracked=False)
+    layout = run_bundle(target, tmp_path / "state")
+    keys = {row[COLUMN] for row in rows(layout, CATALOGUE)}
+    assert {row[COLUMN] for row in rows(layout, HISTORY)} <= keys
+
+
 def test_a_run_at_scale_one_and_above_writes_no_marker(tmp_path: Path) -> None:
     target = _catalogue_bundle(tmp_path)
     for scale in (None, "1", "2"):
@@ -294,6 +395,25 @@ def test_a_plan_recorded_without_the_marker_replays_as_it_was_made(
     applied = apply_module.apply(target, run_id=layout.run_id, state_dir=state)
     assert applied.success, applied.stderr
     assert layout.emit_path(HISTORY).read_bytes() == recorded
+
+
+def test_a_run_on_its_own_common_draws_is_the_run_at_the_same_scale(tmp_path: Path) -> None:
+    """``calibrate --fit`` seeds its candidates from the unpatched bundle's ``H`` at the run's scale.
+
+    The floors a scale raised a parent to are part of that scale, so the unpatched bundle read as a
+    candidate draws the rows of the plain run: the same bytes, floored parent included.
+    """
+    target = _catalogue_bundle(tmp_path)
+    plain = run_bundle(target, tmp_path / "plain", scale="0.25")
+    common = run_on_common_draws(
+        target, common_draws_of=target, state_dir=tmp_path / "common", scale="0.25"
+    )
+    assert common.success, common.stderr
+    (run_id,) = (path.name for path in (tmp_path / "common" / "runs").iterdir())
+    again = RunLayout.for_state_dir(tmp_path / "common", run_id)
+    assert again.run_id == plain.run_id
+    for expose_id in (CATALOGUE, HISTORY):
+        assert again.emit_path(expose_id).read_bytes() == plain.emit_path(expose_id).read_bytes()
 
 
 def test_the_marker_moves_the_plan_digest_of_a_plan_that_floored_only(tmp_path: Path) -> None:

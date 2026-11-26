@@ -165,6 +165,19 @@ def test_plan_and_validate_refuse_what_each_other_refuses(tmp_path: Path) -> Non
     assert validate(_bundle(tmp_path, name="good")).exit_code == 0
 
 
+@pytest.mark.integration
+def test_a_column_on_both_sides_is_refused_by_plan_and_validate_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    from flux_engine.stages.validate import validate
+
+    same = _DEPENDENCY.replace("to: [ss_sold_date_sk, ", "to: [ss_ticket_number, ss_sold_date_sk, ")
+    error = _refusal(tmp_path, same, "plan")
+    assert error is not None and error.code.code == "FLX-6208" and "both sides" in str(error)
+    refused = validate(_bundle(tmp_path, invariants=same, name="validate"))
+    assert refused.exit_code != 0 and "FLX-6208" in refused.stderr
+
+
 _BANDED = _DEPENDENCY + "          mustBeLessOrEqualTo: 20\n          unit: percent\n"
 
 
