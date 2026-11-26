@@ -382,16 +382,22 @@ def _distinct(names: Sequence[str], where: str) -> None:
 
 
 def _statistics(
-    value: Any, where: str, domain: Optional[str], *, from_1_3_0: bool = True
+    value: Any,
+    where: str,
+    domain: Optional[str],
+    *,
+    from_1_3_0: bool = True,
+    null_count: bool = True,
 ) -> Tuple[str, ...]:
     """Registered statistic identifiers; for a column, those that read its domain.
 
-    A column may also ask for ``nullCount/2`` in format 1-3-0, whatever its domain.
+    A column may also ask for ``nullCount/2`` in format 1-3-0, whatever its domain; with
+    *null_count* false (a relationship) it is no registered statistic of the entry.
     """
     found = _names(value, where, most=MOST_STATISTICS_PER_ENTRY)
     _distinct(found, where)
     for index, identifier in enumerate(found):
-        if identifier == NULL_COUNT and domain is not None:
+        if identifier == NULL_COUNT and domain is not None and null_count:
             if not from_1_3_0:
                 raise _refuse(
                     f"{where}[{index}]",
@@ -583,7 +589,7 @@ def _relationship(
     child = _end(raw["child"], f"{where}.child", tables)
     if len(parent.columns) != len(child.columns):
         raise _refuse(where, "a parent and a child key have the same number of columns")
-    statistics = _statistics(raw["statistics"], f"{where}.statistics", NUMBER)
+    statistics = _statistics(raw["statistics"], f"{where}.statistics", NUMBER, null_count=False)
     links = tuple(
         _date_link(item, f"{where}.dates[{index}]", tables[parent.table], tables[child.table])
         for index, item in enumerate(

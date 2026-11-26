@@ -148,3 +148,22 @@ def test_a_request_that_asks_for_either_names_1_3_0_and_reads_back_equal() -> No
         text = render_request(request)
         assert URL_1_3_0 in text
         assert load_request_text(text) == request
+
+
+@pytest.mark.parametrize("url", [REQUEST_SCHEMA_URL, URL_1_3_0])
+def test_a_relationship_may_not_ask_for_a_null_count(url: str) -> None:
+    """A relationship states the four statistics of section 3; ``nullCount/2`` is a column's."""
+    text = (
+        f'_schemaURL: "{url}"\n'
+        "tables:\n"
+        "  loan:\n"
+        "    columns:\n"
+        "      due: {domain: number}\n"
+        "relationships:\n"
+        "  - parent: {table: loan, columns: [due]}\n"
+        "    child: {table: loan, columns: [due]}\n"
+        '    statistics: ["nullCount/2"]\n'
+    )
+    message = _refusal(text)
+    assert "relationships[0].statistics[0]" in message
+    assert "names no registered statistic" in message
