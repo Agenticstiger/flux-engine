@@ -44,6 +44,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   window. They are now drawn over the span the window's start column is declared over, cut to the contract ranges
   of the start and the end. A lifetime's closing that would fall past the shorter window is left open, as
   `endPastWindow: open` says, rather than placed beyond it.
+- `plan` refuses (`FLX-3403`) a column some kinds of a periods entry override, drawn `given` a cell the entry sets on
+  the rows of a kind that does not override it (that kind's override, a column of the version, or the period
+  column). On those rows the column was drawn given the level of its parent's own draw, which the entry then
+  replaced, so the rows disagreed with the column's table, with no error. A parent held for another column, and one
+  the entry sets only on the rows the column is overridden on, are served as before. A recorded plan replays the
+  draw it was made with.
 
 ## 0.12.0 - 2026-11-26
 
