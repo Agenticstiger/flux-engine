@@ -580,6 +580,15 @@ _DRAWN = (
 )
 
 
+#: The keys of a column's declaration that draw it given another column.
+_DRAWN_GIVEN = ("given", "binWeightsGiven", "levelWeightsGiven")
+
+
+def draws_itself(child: ColumnPlan) -> bool:
+    """Whether *child* declares a draw of its own, which a layout that sets the column refuses (``FLX-3403``)."""
+    return any(key in child.declaration for key in (*_DRAWN, *_DRAWN_GIVEN))
+
+
 @dataclass(frozen=True)
 class Counted:
     """What :func:`count_children` made of one relationship of the profile."""

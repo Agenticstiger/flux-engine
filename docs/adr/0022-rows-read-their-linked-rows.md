@@ -236,3 +236,33 @@ The rules, each decided here:
 A contract's own `sharedColumns` copies nothing from a slowly changing dimension through a relationship,
 so a slowly changing target, and a projection of one, are out of reach of this amendment, and a copy through
 either is refused (point 4).
+
+## Amendment of 2026-11-26: init writes no counted layout and no draw for a pick a copy sets
+
+### Context
+
+A copy into the foreign key of another relationship `S` sets `S`'s pick, and a copy sets the pick alone
+(rule 4 of the amendment of 2026-11-24): the plan refuses a `counts` entry over `S` (`FLX-3403`, "it is on
+the counted layout") and a draw that `S`'s column declares. `init` read a profile's children per parent for `S`
+as it reads them for any relationship, wrote a `counts` entry and left the key declared by its own statistics,
+so a contract that copies a foreign key had no bundle that `init` could write: it refused its own.
+
+### Decision
+
+1. **The contract's copy stays.** Where the Simulation copies (`copies: true`, kernel `0.2.0`) and a
+   `sharedColumns` entry lists the one-column foreign key of another relationship of the expose, `init` keeps
+   the declaration and writes nothing that sets the pick a second time. The contract declares the copy, and
+   the profile's statistics describe its outcome without choosing it: a copy makes the child's key equal to
+   the key of a row it reaches, which no count of children per parent could keep, while the counts are
+   what the copy's keys give the parents on their own.
+2. **No counts entry, no draw.** The relationship is laid out by no `counts` entry, and its foreign key
+   declares no levels, bins, range or null share, as a key a layout sets declares none. The relationships are
+   found as the plan finds them, by one function (`flux_engine.seam.keys.copied_pick`).
+3. **No exposure either.** A `within` exposure over the relationship (ADR 0025 section 4) counts it too, so
+   none is declared for it: its statistics are unused, with a reason that names the relationship the copy goes
+   through and no value.
+4. **What the profile's statistics say.** Every statistic of the relationship's profile entry is unused, with
+   a reason that names the relationship the copy goes through and no value, and the statistics of the key's
+   own column are passed over as they are for any key a layout sets.
+5. **What does not change.** A relationship no copy sets, a copy of a column that is no foreign key, a
+   copy of the relationship's own foreign key, and every bundle without `copies: true` keep their bytes.
