@@ -258,6 +258,23 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   still scores the column. A column the contract makes a key keeps its bins as they stand, since its rows hold
   distinct values. Only bundles written from profiles released with noise change, and only for a number column with a
   bin at or below the floor: an exact histogram, and a release whose bins all clear it, keep their bytes.
+- `fluxsim init` keeps the ends of an order lifetime inside the range their contract declares. A check such as
+  `returned_on IS NULL OR returned_on >= borrowed_on` becomes a lifetime whose gap is drawn evenly over the run's
+  window, and the generator cuts the gap to the end column's declared range. A column the profile gives no
+  distribution declares no range, so nothing was cut, and a window wider than the data put most ends outside the
+  range the contract holds the column to. `init` now declares the contract's range on such an end (both ends given,
+  a strict end moved in) and bounds the gap by it, from the earliest start to the range's last day. With a range
+  the lifetime can be shown to hold, a required end or a check with no NULL branch is ordered too, where `init`
+  wrote none. An end that already declares a span, from a published histogram or range, keeps its bytes (ADR 0024,
+  the amendment of 2026-11-26).
+- `fluxsim init` no longer writes an association whose pairs rest on an assumed parent row count. A parent the
+  profile gives no row count for has an assumed one, and the total of children over it is none: the pairs came out
+  of a mean of two totals, one of which was the assumption, and broke the shape of the other side. The pairs now come
+  from the side whose parent rows are published, and the assumed parent takes the rows its own mean children per
+  parent make of them (both sides of an association count the same pairs). Where both parents are assumed, where a
+  side publishes no mean, where another table also refers to the parent, or where the rows derived cannot hold the
+  pairs, no association is written, the table keeps the rows it had and a note says why. Parents with published row
+  counts keep their bytes (ADR 0039, the amendment of 2026-11-26).
 
 ## 0.12.1 - 2026-11-26
 
