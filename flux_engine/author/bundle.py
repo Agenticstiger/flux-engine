@@ -2342,6 +2342,56 @@ def _resolved(
     return why, declared, tables, columns
 
 
+def _slot_of(
+    tokens: Tuple[str, ...],
+    entry: Mapping[str, Any],
+    keys: Optional[ContractKeys],
+    planned: Mapping[str, AuthoredExpose],
+    tables: Mapping[str, Any],
+    holds: Tuple[
+        Optional[Callable[[str, str], Optional[str]]], Optional[Callable[[str, str], Optional[str]]]
+    ],
+    numbers: Tuple[int, int],
+) -> _Slot:
+    """The :class:`_Slot` of one profile relationship *entry*: placed, or why nothing places it.
+
+    *holds* are the reasons a relationship is laid out by no entry (``held_back``), and by none
+    that counts it because its table has a history (``into_a_history``).
+    """
+    held_back, into_a_history = holds
+    every = statistic_tokens(entry, tokens)
+    why, declared, (parent_table, child_table), (parent_columns, child_columns) = _resolved(
+        entry, keys, planned, held_back
+    )
+    if why is not None or declared is None:
+        return _Slot(tokens, entry, None, "", None, [(p, why or "") for p in every])
+    child_expose, parent_expose = planned[child_table], planned[parent_table]
+    reason = into_a_history(child_table, declared.name) if into_a_history is not None else None
+    child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
+    parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
+    child_table_entry = tables.get(child_table)
+    child_entries = (
+        child_table_entry.get("columns") if isinstance(child_table_entry, Mapping) else None
+    )
+    placed = _lay_out_children(
+        entry,
+        tokens,
+        keys,
+        declared,
+        child_expose,
+        parent_expose,
+        child_plan,
+        parent_plan,
+        child_entries,
+        minimum_cell=numbers[0],
+        fractional_bits=numbers[1],
+        into_a_history=reason,
+    )
+    if placed is None:
+        return _Slot(tokens, entry, None, "", None, [(p, reason or "") for p in every])
+    return _Slot(tokens, entry, declared, child_table, placed, [])
+
+
 def _spread_relationships(
     exposes: Sequence[AuthoredExpose],
     keys: Optional[ContractKeys],
@@ -2383,42 +2433,18 @@ def _spread_relationships(
     planned = {expose.expose_id: expose for expose in exposes if expose.skipped is None}
     slots: List[_Slot] = []
     for index, entry in enumerate(found if isinstance(found, list) else ()):
-        if not isinstance(entry, Mapping):
-            continue
-        tokens = ("relationships", str(index))
-        every = statistic_tokens(entry, tokens)
-        why, declared, (parent_table, child_table), (parent_columns, child_columns) = _resolved(
-            entry, keys, planned, held_back
-        )
-        if why is not None or declared is None:
-            slots.append(_Slot(tokens, entry, None, "", None, [(p, why or "") for p in every]))
-            continue
-        child_expose, parent_expose = planned[child_table], planned[parent_table]
-        reason = into_a_history(child_table, declared.name) if into_a_history is not None else None
-        child_plan = next(plan for plan in child_expose.columns if plan.name == child_columns[0])
-        parent_plan = next(plan for plan in parent_expose.columns if plan.name == parent_columns[0])
-        child_table_entry = tables.get(child_table)
-        child_entries = (
-            child_table_entry.get("columns") if isinstance(child_table_entry, Mapping) else None
-        )
-        placed = _lay_out_children(
-            entry,
-            tokens,
-            keys,
-            declared,
-            child_expose,
-            parent_expose,
-            child_plan,
-            parent_plan,
-            child_entries,
-            minimum_cell=minimum_cell,
-            fractional_bits=fractional_bits,
-            into_a_history=reason,
-        )
-        if placed is None:
-            slots.append(_Slot(tokens, entry, None, "", None, [(p, reason or "") for p in every]))
-            continue
-        slots.append(_Slot(tokens, entry, declared, child_table, placed, []))
+        if isinstance(entry, Mapping):
+            slots.append(
+                _slot_of(
+                    ("relationships", str(index)),
+                    entry,
+                    keys,
+                    planned,
+                    tables,
+                    (held_back, into_a_history),
+                    (minimum_cell, fractional_bits),
+                )
+            )
     if declare_links is not None:
         declare_links()
     paired = _association_tables(planned, keys, slots)
