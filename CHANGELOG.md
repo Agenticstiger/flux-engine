@@ -35,6 +35,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   listed as unused with the reason, and the column is drawn inside its range. The widened range let most of the
   column's rows fall outside the contract's range. The end column of a period is held to its contract range the
   same way.
+- `fluxsim explain FLX-6204` says that `init` refuses with it too when the date ranges it widens for an enforced
+  `within` entry do not settle.
 
 ## 0.12.0 - 2026-11-26
 
