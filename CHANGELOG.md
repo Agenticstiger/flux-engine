@@ -29,6 +29,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   A projected column declares no support, and the support was all its draw read, so the plan refused the bundle
   (`FLX-3402`) and `init` wrote it without any projection: a table projected from a history then drew keys of its
   own. The column now keeps those levels, at equal weights.
+- `init` no longer widens a date column's declared range past the range the contract declares for it. When the
+  plan's check of an enforced `within` entry (ADR 0024 section 5) would need that widening, because the parent's
+  lifetime can end before the column's range starts, say, the entry is not written, the statistic it rests on is
+  listed as unused with the reason, and the column is drawn inside its range. The widened range let most of the
+  column's rows fall outside the contract's range. The end column of a period is held to its contract range the
+  same way.
 
 ## 0.12.0 - 2026-11-26
 

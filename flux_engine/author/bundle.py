@@ -171,6 +171,7 @@ from flux_engine.seam.parameters import (
 from flux_engine.seam.profile import FLX_3125, load_profile
 from flux_engine.seam.profile_request import column_domains
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
+from flux_engine.seam.range_rules import RangeBounds, declared_range_bounds
 from flux_engine.seam.resolve import EXTENSION_NAMESPACE, FLX_3105, ExactLoader, read_bundle_file
 from flux_engine.starter import StarterFile
 from flux_stats.cliques import CliqueEntry
@@ -3914,7 +3915,7 @@ def _author_bundle(
         drafted.simulation,
         planned.scoped,
     )
-    _refuse_unless_widened(files, planned.authored, fallbacks.widened)
+    _refuse_unless_widened(files, planned.authored, fallbacks.widened, planned.contract)
     _check_histories(
         files,
         planned.pinned,
@@ -4741,6 +4742,7 @@ def _refuse_unless_widened(
     files: Sequence[StarterFile],
     exposes: Sequence[AuthoredExpose],
     widened: Mapping[Tuple[str, str], Tuple[int, int]],
+    contract: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Raise :class:`_RangesWidened` when the plan's check of the declared ranges asks for wider ones.
 
@@ -4748,6 +4750,10 @@ def _refuse_unless_widened(
     plan would refuse (``FLX-6204``) is given the range the plan's own check accepts
     (:func:`flux_engine.stages.pipeline.widened_ranges_of`). A bundle the plan accepts, or refuses
     for another reason, raises nothing here: :func:`_check` reports it.
+
+    A range the plan asks for that moves an end past the range the *contract* declares for the
+    column is not written: a row outside it would break the contract. The date it repairs is not
+    dated by its entry (:class:`_WithinDeclined`, :func:`_past_contract_ranges`).
     """
     from flux_engine.runtime import resolve_cast
     from flux_engine.seam.resolve import load_bundle, resolve_all_emits
@@ -4756,6 +4762,7 @@ def _refuse_unless_widened(
     kinds = {expose.expose_id: expose.kinds for expose in exposes}
     asked: Dict[Tuple[str, str], Tuple[int, int]] = {}
     unrepairable: Dict[Tuple[str, str], str] = {}
+    periods: Dict[str, Tuple[str, str]] = {}
     with tempfile.TemporaryDirectory(prefix="fluxsim-init-") as scratch:
         directory = Path(scratch)
         for entry in files:
@@ -4773,12 +4780,98 @@ def _refuse_unless_widened(
                 for (expose_id, column), (low, high) in found.items():
                     unit = _DAY_MILLISECONDS if kinds[expose_id][column] is LogicalKind.DATE else 1
                     asked[(expose_id, column)] = (low * unit, high * unit)
+                periods.update(_period_lifetimes(emits))
         except (FluxError, ArithmeticError, ValueError, KeyError):
             return  # what is wrong is not a range: the check that follows says what
     if unrepairable:
         raise _WithinDeclined(unrepairable)
+    past = _past_contract_ranges(asked, exposes, contract, periods)
+    if past:
+        raise _WithinDeclined(past)
     if asked:
         raise _RangesWidened(asked)
+
+
+def _period_lifetimes(emits: Sequence[Any]) -> Dict[str, Tuple[str, str]]:
+    """The lifetime start and end of each of *emits* whose ``within`` entries hold a period."""
+    from flux_engine.seam.dates import lifetime_entries_of, within_entries_of
+
+    found: Dict[str, Tuple[str, str]] = {}
+    for emit in emits:
+        own = lifetime_entries_of(emit.extension, emit.expose_id)[:1]
+        entries = within_entries_of(emit.extension, emit.expose_id)
+        if own and own[0].end is not None and any(item.lifetime for item in entries):
+            found[emit.expose_id] = (own[0].start, str(own[0].end))
+    return found
+
+
+def _past_contract_ranges(
+    asked: Mapping[Tuple[str, str], Tuple[int, int]],
+    exposes: Sequence[AuthoredExpose],
+    contract: Optional[Mapping[str, Any]],
+    periods: Mapping[str, Tuple[str, str]],
+) -> Dict[Tuple[str, str], str]:
+    """Why each date whose range the plan asks for would leave the range the contract declares.
+
+    *asked* holds, per ``(exposeId, column)``, the range in milliseconds the plan's check accepts.
+    An end it moves (below the declared minimum, above the declared maximum) past the column's
+    contract range, or onto a strict end of it, is one no row may hold. The reason is keyed by the
+    date the entry sets: the column itself, or for the end of a period (*periods* holds each
+    emit's lifetime start and end, for an emit with a period) the start the period entry dates.
+    """
+    found: Dict[Tuple[str, str], str] = {}
+    by_id = {expose.expose_id: expose for expose in exposes}
+    for (expose_id, name), (low, high) in sorted(asked.items()):
+        expose = by_id.get(expose_id)
+        if expose is None:
+            continue
+        plans = {plan.name: plan for plan in expose.columns}
+        _, _, declared = _declared_range_of(expose, plans.get(name), name)
+        rule = _contract_range(expose, name, contract)
+        if declared is None or rule is None or not _leaves_contract(rule, declared, low, high):
+            continue
+        start, end = periods.get(expose_id, ("", ""))
+        key = (expose_id, start if end == name else name)
+        found[key] = (
+            f"the declared range of {name!r} would have to be widened to {_day_text(low)} .. "
+            f"{_day_text(high)} for the entry to plan (FLX-6204), past the range the contract "
+            "declares for it, which every row must hold"
+        )
+    return found
+
+
+def _contract_range(
+    expose: AuthoredExpose, name: str, contract: Optional[Mapping[str, Any]]
+) -> Optional[RangeBounds]:
+    """The range the contract's rules declare for column *name* of *expose*, or ``None``."""
+    context = expose.contexts.get(name)
+    if contract is None or context is None:
+        return None
+    try:
+        column = contract["exposes"][expose.index]["contract"]["schema"][context.schema_index]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return declared_range_bounds(column)
+
+
+def _leaves_contract(rule: RangeBounds, declared: Mapping[str, Any], low: int, high: int) -> bool:
+    """Whether *low* to *high* (milliseconds) moves an end of the *declared* range past the contract's *rule*.
+
+    An end moves when it lies below the declared minimum or above the declared maximum. A moved
+    end leaves the rule when it lies beyond the rule's end, or on that end where the rule is
+    strict. An end the widening does not move never counts, wherever it lies.
+    """
+    below = (
+        rule.low is not None
+        and low < _milliseconds(declared["min"])
+        and (low < rule.low or (rule.low_strict and low == rule.low))
+    )
+    above = (
+        rule.high is not None
+        and high > _milliseconds(declared["max"])
+        and (high > rule.high or (rule.high_strict and high == rule.high))
+    )
+    return below or above
 
 
 def _chained_exposures(
