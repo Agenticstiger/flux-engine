@@ -222,8 +222,8 @@ FLX_3403 = register(
     "one DATE or TIMESTAMP type), when its until, openEnd, chain or start bins leave no room "
     "inside timeBounds for an entity's versions, when a tracked column is not categorical, names "
     "an undeclared level or has no transition row for a level a chain can reach, when a tracked "
-    "foreign key has a level that is no key its parent holds in the plan, or when its parent is "
-    "not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
+    "foreign key has a level that is no key its parent holds in the plan (an identifier key holds "
+    "none a contract can name), or when its parent is not a to-one relationship. A history's parent.lifetime is refused when the parent emit "
     "declares no lifetimes entry, or declares a history of its own that sets a lifetime column (a "
     "validity, tracked, end or rule-set column), which differs between versions; when the parent's "
     "lifetime leaves no room for one version of an entity (the message names "
@@ -5621,6 +5621,18 @@ def _check_declared_keys(
                 )
 
 
+def _identifier_parent(shape: _Shape, column: str, relationship: Relationship) -> FluxError:
+    """``FLX-3403`` for a tracked foreign key whose parent's key is an identifier."""
+    return _refuse(
+        f"expose {shape.plan.expose.expose_id!r} column {column!r} is tracked by its history over "
+        f"levels and points at {relationship.target!r}, whose key {relationship.to_columns[0]!r} "
+        "is an identifier drawn by a keyed permutation of the row index, so no level a contract "
+        "declares can be shown to be a key it holds; a tracked foreign key writes its level as "
+        "the key: lay the parent's key out over a range, or stop tracking the column so its "
+        "foreign key takes a key the parent holds"
+    )
+
+
 def _check_tracked_keys(
     shape: _Shape, column: str, view: Callable[[str, Sequence[str]], ParentView]
 ) -> None:
@@ -5640,6 +5652,8 @@ def _check_tracked_keys(
     ):
         return
     parent = view(relationship.target, relationship.to_columns).driver(relationship.to_columns[0])
+    if isinstance(parent, IdentifierKey):
+        raise _identifier_parent(shape, column, relationship)
     if not isinstance(parent, (KeyGrid, ReferenceColumn)):
         return
     statistics = shape.plan.column_plan(column).statistics

@@ -222,6 +222,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `calibrate --fit` seeded each candidate from the unpatched bundle's `H` at the run's `--scale` without the rows a
   tracked foreign key's floor raised a parent to, so the unpatched bundle read as a candidate drew other rows than a
   plain run at that scale. The common draws take the floors the run has.
+- A tracked foreign key into a parent whose key is an identifier is refused at `plan` (`FLX-3403`). The parent's keys
+  are a keyed permutation of the row index, so no level a contract declares can be shown to be one of them; the plan
+  was accepted before, and every cell of the child then named a key the parent lacks (`verify` scored the link at 0 %). A foreign
+  key that is not tracked takes a key the parent holds, as before.
 
 ## 0.12.1 - 2026-11-26
 

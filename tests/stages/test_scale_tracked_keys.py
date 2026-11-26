@@ -264,6 +264,42 @@ def test_an_untracked_foreign_key_takes_the_nearest_key_of_the_cut_catalogue(
     assert KEY not in load_recorded_plan(RunLayout.for_state_dir(state, _only_run(state)))
 
 
+def _identifier_catalogue(tmp_path: Path, *, tracked: bool) -> Path:
+    """The catalogue with a STRING key (an identifier of four hex digits) and a history column of two levels."""
+    target = _catalogue_bundle(
+        tmp_path, levels=["aa", "bb"], weights={"aa": "0.5", "bb": "0.5"}, tracked=tracked
+    )
+    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
+    for item in contract["exposes"]:
+        for column in item["contract"]["schema"]:
+            if column["name"] == COLUMN:
+                column["type"] = "STRING"
+    path = target / "simulation.flux.yml"
+    document = yaml.safe_load(path.read_text("utf-8"))
+    emit = document["extensions"][NAMESPACE]["emits"][CATALOGUE]["fidelity"]
+    emit["columns"][COLUMN] = {"identifierLength": 4}
+    emit["properties"] = []
+    path.write_text(yaml.safe_dump(document, sort_keys=False), "utf-8")
+    repin(target, contract)
+    return target
+
+
+def test_a_tracked_foreign_key_into_an_identifier_key_is_refused(tmp_path: Path) -> None:
+    """An identifier is a permutation of the row index: no level a contract declares is one of its keys."""
+    text = _refused(_identifier_catalogue(tmp_path, tracked=True), tmp_path / "state")
+    assert f"expose '{HISTORY}' column '{COLUMN}'" in text and f"'{CATALOGUE}'" in text
+    assert "identifier" in text and "stop tracking" in text
+
+
+def test_an_untracked_foreign_key_into_an_identifier_key_takes_a_key_it_holds(
+    tmp_path: Path,
+) -> None:
+    target = _identifier_catalogue(tmp_path, tracked=False)
+    layout = run_bundle(target, tmp_path / "state")
+    keys = {row[COLUMN] for row in rows(layout, CATALOGUE)}
+    assert {row[COLUMN] for row in rows(layout, HISTORY)} <= keys
+
+
 def test_a_run_at_scale_one_and_above_writes_no_marker(tmp_path: Path) -> None:
     target = _catalogue_bundle(tmp_path)
     for scale in (None, "1", "2"):
