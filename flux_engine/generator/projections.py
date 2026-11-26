@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
-from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -48,6 +48,7 @@ from flux_engine.generator.history import HistoryPlan, plan_history
 from flux_engine.generator.rows import (
     ColumnPlan,
     GeneratorPlan,
+    bin_class,
     generate_row_slice,
     is_binned,
     level_index,
@@ -113,14 +114,18 @@ class ProjectionPlan:
     ``history`` is the plan of the emit the entry's ``of`` names, as the relational plan left it.
     ``ended`` is a snapshot's ``ended`` (``keep`` or ``drop``) and ``entry`` the entry of an
     events or a periods projection. ``root`` is the run root a kind's functions read; it is set
-    for the moment of a call and is no part of the plan. ``held`` names the columns of the version
-    the entry sets that a column of the emit is drawn given: their levels are the version's, held
-    in the row before the emit's own cells are drawn (ADR 0027, the amendment of 2026-11-25).
-    ``fallback`` names those of them the history may hold a value no level of the emit's column
-    names in: a column drawn given such a column is drawn from its own distribution there.
-    ``marginals`` holds that distribution for each such column that has one implied by the
-    declarations (:func:`implied_marginal`): the column, then each of its levels with its exact
-    share (``"n/d"``); a fallback column with none is drawn from its declared support, evenly.
+    for the moment of a call and is no part of the plan. ``held`` names the columns the entry sets
+    that a column of the emit is drawn given: a column of the version, whose level is the
+    version's (ADR 0027, the amendment of 2026-11-25), and a column a kind of a periods entry
+    overrides, whose level is the override's on that kind's rows (the amendment of 2026-11-26);
+    the level is held in the row before the emit's own cells are drawn. ``fallback`` names those
+    of them that may hold a value no level of the emit's column names: a column drawn given such a
+    column is drawn from its own distribution there. ``marginals`` holds that distribution for
+    each such column that has one implied by the declarations (:func:`implied_marginal`): the
+    column, then each of its levels with its exact share (``"n/d"``); a fallback column with none
+    is drawn from its declared support, evenly. ``overridden`` says the draw holds a level engine
+    0.12.0 did not hold (:func:`held_givens`), which ``plan.json`` records; it is no part of the
+    projection member, which names what is held.
     """
 
     kind: str
@@ -141,6 +146,7 @@ class ProjectionPlan:
     held: Tuple[str, ...] = ()
     fallback: Tuple[str, ...] = ()
     marginals: Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...] = ()
+    overridden: bool = field(default=False, compare=False)
 
     def as_document(self) -> Dict[str, Any]:
         """The ``projection`` member of the plan's document: where the rows come from."""
@@ -173,12 +179,16 @@ class RunBounds:
     (ADR 0024, the amendment of 2026-11-25), which a recorded plan without ``rangeSetters`` does
     not. ``after`` draws a column given a column of the version after the projection (ADR 0027,
     the amendment of 2026-11-25), which a recorded plan without ``projectedGivens`` does not.
+    ``overrides`` draws one given a kind's override too, and a column only some kinds override
+    given the level the other kinds' rows hold (the amendment of 2026-11-26), which a recorded
+    plan without ``projectedGivens: "afterOverrides"`` does not.
     """
 
     budget: Optional[int] = None
     ranges: bool = False
     estimate: bool = False
     after: bool = True
+    overrides: bool = True
 
 
 #: What a new plan holds its projections to: the default budget, estimated, and the columns' ranges.
@@ -324,7 +334,8 @@ def _projection(
 
     With *bounds*' ``after`` (every new plan), a column drawn given a column of the version is drawn
     given the level the version holds; without it (a recorded plan without ``projectedGivens``) it
-    is drawn as engine 0.11.1 drew it, given the level the column's own draw made.
+    is drawn as engine 0.11.1 drew it, given the level the column's own draw made. With its
+    ``overrides`` as well, a kind's override is held as a column of the version is.
     """
     key, of, options = found
     if key not in KINDS:
@@ -337,13 +348,8 @@ def _projection(
                 f"{key} ({plan.expose.expose_id}): {missing[0]!r} is not a column of {of!r}"
             )
         return ProjectionPlan(key, of, history, options)
-    sets = projected_cells(key, options, history, plan)
-    held, fallback, marginals = (
-        held_givens(key, options, sets, history, plan) if bounds.after else ((), (), ())
-    )
-    if not bounds.after:
-        _unheld_givens(key, options, sets, plan)
-    _refuse_rules_on_projected_cells(key, sets, plan)
+    (held, fallback, marginals), overridden = _draw_after(key, options, history, plan, bounds)
+    _refuse_rules_on_projected_cells(key, projected_cells(key, options, history, plan), plan)
     clip = None
     if key == PERIODS_KEY and bounds.ranges and plan.time_bounds is not None:
         declared = plan.column_plan(options.column).column.declared_range
@@ -360,7 +366,43 @@ def _projection(
         held=held,
         fallback=fallback,
         marginals=marginals,
+        overridden=overridden,
     )
+
+
+#: What a projected emit holds for its columns drawn given a cell the entry sets:
+#: :class:`ProjectionPlan`'s ``held``, ``fallback`` and ``marginals``.
+HeldDraw = Tuple[
+    Tuple[str, ...], Tuple[str, ...], Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...]
+]
+
+
+def _draw_after(
+    key: str, entry: Any, history: GeneratorPlan, plan: GeneratorPlan, bounds: RunBounds
+) -> Tuple[HeldDraw, bool]:
+    """What the emit holds (:func:`held_givens`), and whether engine 0.12.0 would have held other.
+
+    The second member is false for a plan made under the bounds of a recorded plan, which holds
+    what that plan held.
+    """
+    if not bounds.after:
+        _unheld_givens(key, entry, projected_cells(key, entry, history, plan), plan)
+        return ((), (), ()), False
+    found = held_givens(key, entry, history, plan, bounds)
+    if not bounds.overrides:
+        return found, False
+    return found, found != _held_before_overrides(key, entry, history, plan)
+
+
+def _held_before_overrides(
+    key: str, entry: Any, history: GeneratorPlan, plan: GeneratorPlan
+) -> Optional[HeldDraw]:
+    """What engine 0.12.0 held for the emit, or ``None`` where it refused a given over an override."""
+    sets = projected_cells(key, entry, history, plan)
+    overridden = {name for _, name, _ in _overrides_of(key, entry)}
+    if any(parent in overridden for _, parent in _given_over_projected(sets, plan)):
+        return None
+    return held_givens(key, entry, history, plan, RunBounds(overrides=False))
 
 
 def projected_cells(
@@ -462,14 +504,16 @@ def _refuse_rules_on_projected_cells(
 
 
 def _given_over_projected(
-    sets: Mapping[str, str], plan: GeneratorPlan
+    sets: Mapping[str, str], plan: GeneratorPlan, drawn: FrozenSet[str] = frozenset()
 ) -> Iterable[Tuple[ColumnPlan, str]]:
     """Each column the emit draws given a column the projection sets, with that column.
 
-    A column the entry sets itself is replaced as well and is no source of a disagreement.
+    A column the entry sets itself is replaced as well and is no source of a disagreement, unless
+    it is one of *drawn*: a column some kinds of a periods entry override and the others leave to
+    the emit's draw (:func:`_drawn_in_some_kind`).
     """
     for column_plan in plan.columns:
-        if column_plan.column.name in sets:
+        if column_plan.column.name in sets and column_plan.column.name not in drawn:
             continue
         for parent in column_plan.statistics.parents:
             if parent in sets:
@@ -477,35 +521,53 @@ def _given_over_projected(
 
 
 def held_givens(
-    key: str, entry: Any, sets: Mapping[str, str], history: GeneratorPlan, plan: GeneratorPlan
-) -> Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...]]:
-    """The columns of the version a column of the emit is drawn given, those that may hold no level, and the draws there.
+    key: str,
+    entry: Any,
+    history: GeneratorPlan,
+    plan: GeneratorPlan,
+    bounds: RunBounds = RunBounds(),
+) -> HeldDraw:
+    """The columns the entry sets a column of the emit is drawn given, those that may hold no level, and the draws there.
 
-    Such a column's level is the version's: the entry's cells are set before the emit draws its
-    own, so the column drawn given it reads the level the row holds (ADR 0027, the amendment of
-    2026-11-25). Refused (``FLX-3403``), as a draw this cannot serve, is a column drawn given any
-    other cell the entry sets (an op, at, date, type or period column, a kind's override, a before
-    or after image), whose values are not drawn from the column's levels; and a column with
-    ``allocation: exact``, whose classes are allotted by the draw of its parent.
+    Such a column's level is the one the row holds: the entry's cells are set before the emit
+    draws its own, so the column drawn given it reads the version's level for a column of the
+    version (ADR 0027, the amendment of 2026-11-25). With *bounds*' ``overrides`` (every new plan)
+    it reads, for a column a kind of a periods entry overrides, the override's level on that
+    kind's rows, and on the other kinds' rows the version's, or the level of the row's own draw
+    for a column of the emit's own (the amendment of 2026-11-26); a column some kinds override is
+    drawn on the other kinds' rows, so it is drawn given the level those rows hold. Refused
+    (``FLX-3403``), as a draw this cannot serve, is a column drawn given any other cell the entry
+    sets (an op, at, date, type or period column, a before or after image, and without
+    ``overrides`` a kind's override), whose values are not drawn from the column's levels; and a
+    column with ``allocation: exact``, whose classes are allotted by the draw of its parent.
 
-    A column of the version the history may fill with a value that is none of the emit's levels
-    (:func:`_unheld_reason`) is the second member. Where a row holds such a value, the column drawn
+    A column the entry may fill with a value that is none of the emit's levels
+    (:func:`_held_reason`) is the second member. Where a row holds such a value, the column drawn
     given it is drawn from the marginal its parent's level weights and its own table imply
     (:func:`implied_marginal`, the third member, one entry for each such column), else from its
     own declared support, evenly, and is refused when it has neither.
     """
+    sets = projected_cells(key, entry, history, plan)
     own, _ = _period_cells(entry) if key == PERIODS_KEY else _event_cells(entry)
+    kinds = bounds.overrides and key == PERIODS_KEY
+    if kinds:
+        own = {entry.column: own[entry.column]}
+    drawn = _drawn_in_some_kind(entry, history) if kinds else frozenset()
     held: Dict[str, None] = {}
     fallback: Dict[str, None] = {}
     marginals: Dict[str, Tuple[Tuple[str, str], ...]] = {}
-    for column_plan, parent in _given_over_projected(sets, plan):
+    for column_plan, parent in _given_over_projected(sets, plan, drawn):
         name = column_plan.column.name
         where = (
             f"{key} entry ({plan.expose.expose_id}): column {name!r} is drawn given {parent!r}, "
             f"which the entry sets as {sets[parent]}"
         )
-        _refuse_unservable(where, column_plan, parent, parent in own)
-        reason = _unheld_reason(history, plan, parent)
+        _refuse_unservable(where, column_plan, parent, parent in own, kinds)
+        reason = (
+            _held_reason(entry, history, plan, parent)
+            if kinds
+            else _unheld_reason(history, plan, parent)
+        )
         if reason is not None:
             unnamed = f"{where}, and {reason}, which no level of {parent!r} names"
             shares = _fallback_draw(unnamed, column_plan, parent, history, plan)
@@ -516,9 +578,19 @@ def held_givens(
     return tuple(sorted(held)), tuple(sorted(fallback)), tuple(sorted(marginals.items()))
 
 
-def _refuse_unservable(where: str, column_plan: ColumnPlan, parent: str, is_own: bool) -> None:
-    """Refuse (``FLX-3403``) a column drawn given a cell of the entry's own, or allotted by its parent."""
+def _refuse_unservable(
+    where: str, column_plan: ColumnPlan, parent: str, is_own: bool, kinds: bool
+) -> None:
+    """Refuse (``FLX-3403``) a column drawn given a cell of the entry's own, or allotted by its parent.
+
+    With *kinds* a kind's override is served, and the cell is a periods entry's period column.
+    """
     name = column_plan.column.name
+    if is_own and kinds:
+        raise _refuse(
+            f"{where}; only a column of the version or a kind's override holds the level a column "
+            f"of a periodic emit is drawn given; draw {name!r} given one of those, or on its own"
+        )
     if is_own:
         raise _refuse(
             f"{where}; only a column of the version can be drawn given, since its level is the "
@@ -597,6 +669,9 @@ def implied_marginal(
     ):
         return None
     for source, label in ((plan, "the emit's"), (history, "the history's")):
+        if not _has_column(source, parent):
+            # A kind's override of a column the history does not have: the emit's weights alone.
+            continue
         weights = _level_weights_of(source.column_plan(parent), table)
         if weights is not None:
             found = _mix(weights, table)
@@ -657,12 +732,18 @@ def fallback_notes(plan: GeneratorPlan) -> Tuple[str, ...]:
         return ()
     expose_id = plan.expose.expose_id
     sets = projected_cells(projection.kind, projection.entry, projection.history, plan)
+    kinds = projection.kind == PERIODS_KEY
+    partly = _drawn_in_some_kind(projection.entry, projection.history) if kinds else frozenset()
     notes = []
-    for column_plan, parent in _given_over_projected(sets, plan):
+    for column_plan, parent in _given_over_projected(sets, plan, partly):
         if parent not in projection.fallback:
             continue
         name = column_plan.column.name
-        reason = _unheld_reason(projection.history, plan, parent)
+        reason = (
+            _held_reason(projection.entry, projection.history, plan, parent)
+            if kinds
+            else _unheld_reason(projection.history, plan, parent)
+        )
         shares = implied_marginal(column_plan, parent, projection.history, plan)
         if shares is None:
             drawn = f"{name} is drawn from {name}'s support, evenly"
@@ -731,6 +812,77 @@ def _unheld_reason(history: GeneratorPlan, plan: GeneratorPlan, name: str) -> Op
     if end is not None and end.column == name and end.value not in (None, *index.values()):
         return f"the history's end writes {end.value!r} in it"
     return None
+
+
+def _held_reason(
+    entry: Any, history: GeneratorPlan, plan: GeneratorPlan, name: str
+) -> Optional[str]:
+    """Why the column *name* a periods entry sets may hold a value no level of the emit's names.
+
+    ``None`` for none. A kind's override that is no level of the emit's column (ADR 0027, the
+    amendment of 2026-11-26); then, on the rows of the kinds that override none, what the version
+    may hold (:func:`_unheld_reason`) for a column of the version. A column of the emit's own holds
+    its own draw on those rows, and the level that draw makes.
+    """
+    target = plan.column_plan(name)
+    overriding = [
+        (index, text) for index, column, text in _overrides_of(PERIODS_KEY, entry) if column == name
+    ]
+    for index, text in overriding:
+        if _override_level(target, text) is None:
+            return f"kinds[{index}] overrides it with {text!r}"
+    every = bool(overriding) and len(overriding) == len(entry.kinds)
+    if every or not _has_column(history, name):
+        return None
+    return _unheld_reason(history, plan, name)
+
+
+def _override_level(column_plan: ColumnPlan, text: str) -> Optional[str]:
+    """The level of the emit's column a kind's override *text* holds, or ``None`` for none.
+
+    The value the row holds (:func:`~flux_engine.generator.periods.override_value`), read as
+    :func:`~flux_engine.generator.rows.held_levels` reads it: the level that renders to it, or the
+    bin that holds it.
+    """
+    value = _periods.override_value(text, column_plan.column)
+    if is_binned(column_plan):
+        return bin_class(column_plan, value)
+    return level_index(column_plan).get((type(value), value))
+
+
+def _overrides_of(key: str, entry: Any) -> Tuple[Tuple[int, str, str], ...]:
+    """Each override the kinds of a periods entry declare: the kind's index, the column, the value.
+
+    None for any other entry.
+    """
+    if key != PERIODS_KEY:
+        return ()
+    return tuple(
+        (index, name, text)
+        for index, kind in enumerate(entry.kinds)
+        for name, text in kind.overrides
+    )
+
+
+def _drawn_in_some_kind(entry: Any, history: GeneratorPlan) -> FrozenSet[str]:
+    """The columns some kinds of a periods entry override that the other kinds' rows draw.
+
+    A column of the version holds the version's value on those rows, and the period column the
+    period's day (no kind overrides it), so neither is one.
+    """
+    counts: Dict[str, int] = {}
+    for _, name, _ in _overrides_of(PERIODS_KEY, entry):
+        counts[name] = counts.get(name, 0) + 1
+    return frozenset(
+        name
+        for name, count in counts.items()
+        if count < len(entry.kinds) and not _has_column(history, name)
+    )
+
+
+def _has_column(plan: GeneratorPlan, name: str) -> bool:
+    """Whether *plan*'s emit has a column called *name*."""
+    return name in {column_plan.column.name for column_plan in plan.columns}
 
 
 def _refuse_reads_through_projected_keys(

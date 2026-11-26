@@ -20,6 +20,26 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+### Added
+
+- A column of a periodic emit drawn `given` a column a kind of its periods entry overrides is drawn after the
+  projection, given the level the row holds (kernel 0.2.0, ADR 0027, the amendment of 2026-11-26); the plan refused it
+  before (`FLX-3403`). On a kind's rows the column reads the override's level, and on the rows of a kind that
+  overrides nothing the version's, for a column of the version, or the row's own draw, for any other column. An
+  override that is no level of the column it sets reads the marginal the declarations imply, else the declared
+  `support`, evenly, and is refused (`FLX-3403`) with neither, as a version's value no level names is. A plan with
+  such a column says `projectedGivens: "afterOverrides"`; a plan that says `"afterProjection"`, or has no key, replays
+  as it was made. A column drawn `given` the period column is still refused.
+
+### Fixed
+
+- A column some kinds of a periods entry override, drawn `given` a column the entry sets, was drawn on the other
+  kinds' rows given the level of its parent's own draw, which the entry then replaced with the version's value or
+  another kind's override, so the two disagreed. It now reads the level the row holds, and a new plan of such a bundle
+  says `projectedGivens: "afterOverrides"`; a recorded plan without that value replays the draw it was made with.
+
 ## 0.12.0 - 2026-11-26
 
 A Kafka sink, `fluxsim init --window` and `--history`, `validate --profile`, history and periods declarations
