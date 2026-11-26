@@ -224,9 +224,8 @@ def test_a_histogram_within_the_noise_is_drawn_evenly_over_its_range(tmp_path: P
     assert days and all(0 <= day <= 120 for day in days)
 
 
-def test_a_published_min_and_max_bound_the_even_draw(tmp_path: Path) -> None:
-    # The draw keeps to the published ends: the loans were kept at least 5 and at most 115 days.
-    profile = _profile(INSIDE, "2.5")
+def _published_ends(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """*profile* with the loans kept at least 5 and at most 115 days, as exact metrics."""
     metrics = {
         name: {
             "definition": f"{name}/1",
@@ -238,7 +237,12 @@ def test_a_published_min_and_max_bound_the_even_draw(tmp_path: Path) -> None:
         for name, value in (("min", "5"), ("max", "115"))
     }
     profile["tables"]["loan"]["columns"]["days_kept"]["metrics"] = metrics
-    _init(tmp_path, profile)
+    return profile
+
+
+def test_a_published_min_and_max_bound_the_even_draw(tmp_path: Path) -> None:
+    # The draw keeps to the published ends: the loans were kept at least 5 and at most 115 days.
+    _init(tmp_path, _published_ends(_profile(INSIDE, "2.5")))
     column = _column(tmp_path)
     assert column["bins"] == ["5", "115"] and column["binWeights"] == ["1"]
     assert column["range"] == {"min": "0", "max": "120"}
@@ -265,6 +269,18 @@ def test_a_release_whose_bins_all_stand_clear_is_read_as_before(tmp_path: Path) 
         "does not stand clear" in entry.get("reason", "")
         for entry in _block(tmp_path)["parameters"]
     )
+
+
+def test_a_published_min_and_max_do_not_change_what_a_rule_reads_of_a_release_that_all_clears(
+    tmp_path: Path,
+) -> None:
+    # No bin is zeroed, so the column is read as it was before the floor: a rule over it reads the
+    # histogram's whole grid, and the published ends 5 and 115 do not narrow the fee to 10 to 230.
+    counts = ["120", "150", "200", "310", "500", "300", "260", "190", "150", "120", "90", "70"]
+    profile = _published_ends(_profile(counts, "2.5", fee=True))
+    _init(tmp_path, profile, _contract(fee=True))
+    assert _column(tmp_path, "fee") == {"range": {"min": "0", "max": "240"}}
+    assert len(_column(tmp_path)["binWeights"]) == 12
 
 
 @pytest.mark.parametrize(
@@ -359,3 +375,21 @@ def test_a_column_a_rule_sets_is_not_noted_as_drawn_evenly(tmp_path: Path) -> No
     assert "bins" not in _column(tmp_path, "fee")
     states = {entry["pointer"]: entry for entry in result.artifacts["ledger"]["statistics"]}
     assert "drawn evenly" not in states["/tables/loan/columns/fee/statistics/0"]["note"]
+
+
+def test_strict_refuses_a_column_drawn_evenly_because_no_bin_stands_clear(tmp_path: Path) -> None:
+    (tmp_path / "library.fluid.yaml").write_text(_contract(), encoding="utf-8")
+    (tmp_path / "library.profile.json").write_text(
+        json.dumps(_profile(INSIDE, "2.5")), encoding="utf-8"
+    )
+    result = run_init(
+        str(tmp_path / "bundle"),
+        contract=str(tmp_path / "library.fluid.yaml"),
+        profile=str(tmp_path / "library.profile.json"),
+        strict=True,
+    )
+    assert result.exit_code == 1, result.stdout
+    assert "--strict refuses this bundle" in result.stderr
+    gaps = [line for line in result.stderr.splitlines() if line.strip().startswith("gap ")]
+    assert any("days_kept" in line for line in gaps), result.stderr
+    assert not (tmp_path / "bundle").exists()

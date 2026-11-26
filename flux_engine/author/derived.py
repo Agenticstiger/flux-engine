@@ -208,6 +208,52 @@ def contract_copies(
     return copies
 
 
+def contract_pick_copies(contract: Mapping[str, Any]) -> Dict[Tuple[str, str], Tuple[str, str]]:
+    """The relationships whose pick a copy sets: (emit, relationship) -> (through, column).
+
+    A ``sharedColumns`` entry of relationship ``R`` that lists the one-column foreign key of another
+    relationship ``S`` of the same expose copies it into ``S``'s pick (ADR 0022 section 4, the
+    amendment of 2026-11-24): ``S`` draws nothing of its own then, and a counts entry over it is
+    ``FLX-3403`` ("a copy sets the pick alone"). Found as the plan finds them, by
+    :func:`flux_engine.seam.keys.copied_pick`, where ``R``'s target holds the column. The caller
+    asks only where the Simulation copies at all (kernel 0.2.0 and ``copies: true``).
+    """
+    from flux_engine.core.canonical import nfc
+    from flux_engine.seam.keys import compile_keys, copied_pick, declared_exposes
+
+    exposes = declared_exposes(contract)
+    keys = compile_keys(contract)
+    found: Dict[Tuple[str, str], Tuple[str, str]] = {}
+    if keys is None:
+        return found
+    for expose_id, entry in exposes.items():
+        for name, target, listed in _copying_relationships(entry):
+            if target == expose_id:
+                continue
+            held = _schema_names(exposes.get(target))
+            for column in (nfc(item) for item in listed if isinstance(item, str)):
+                picked = copied_pick(keys, expose_id, name, column) if column in held else None
+                if picked is not None:
+                    found.setdefault((expose_id, picked[0].name), (name, column))
+    return found
+
+
+def _copying_relationships(entry: Mapping[str, Any]) -> List[Tuple[str, str, List[Any]]]:
+    """The relationships of an expose that list ``sharedColumns``, as (name, target, columns)."""
+    from flux_engine.core.canonical import nfc
+
+    semantics = entry.get("semantics")
+    relationships = semantics.get("relationships") if isinstance(semantics, Mapping) else None
+    found: List[Tuple[str, str, List[Any]]] = []
+    for relationship in relationships if isinstance(relationships, list) else ():
+        if not isinstance(relationship, Mapping):
+            continue
+        name, listed = relationship.get("name"), relationship.get("sharedColumns")
+        if isinstance(name, str) and isinstance(listed, list):
+            found.append((name, nfc(str(relationship.get("to"))), listed))
+    return found
+
+
 def _schema_names(expose: Optional[Mapping[str, Any]]) -> Set[str]:
     from flux_engine.core.canonical import nfc
 

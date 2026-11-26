@@ -175,20 +175,26 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   entry, which the plan refuses over a table with a history, so the bundle lost its projections and then its
   history. No layout reads such a count now: it is listed as unused with the reason, in an events or periodic
   table's case that its rows per entity follow from the history. Only a history that is written holds a relationship
-  back (ADR 0027, the amendment of 2026-11-26 about counts per entity).
+  back (ADR 0027, the amendment of 2026-11-26 about counts per entity). When the plan refuses a history, `init` lists
+  each statistic of the history as unused, in the ledger and in the list it prints, with the plan's own reason for the
+  refusal, where it gave the text of the `counts` refusal before.
 - A sampled `verify` whose run holds a few records of a grouping level that the profile holds no record of, fewer
   than `records.min`, passed where the full `verify` refused the group (`FLX-5005`). The sample now holds such a
   level's records to the floor, as the full comparison does.
 - A profile cut in part (see the entry under Changed) was graded as if the cut members had been released without noise:
   a noisy history or date pair with a member gone fell to `P1`. The grade now counts the members that are left. In
   `flux_stats`, `holds_nothing` of a date pair, a relationship's date pair and a history is true only when no member is
-  left.
+  left. A profile entry cut to its names alone is graded by the members it keeps as well, so a fresh plan of such a
+  profile can grade higher (`P3` where it was `P1`), and its plan digest changes, since the plan records the grade. A
+  recorded plan keeps the grade it records and replays as it was made.
 - A table that links to a projected emit (a snapshot or an events emit) read the rows the emit would draw
   without its projection, not the rows it writes, so a `within` entry through a link into a snapshot kept a date
   inside a lifetime the snapshot does not hold, and `verify` reported the entry met on fewer rows than it covers. The
   link now reads the rows the projected emit writes, in a rule, a `within` entry and a column drawn `given` the linked
   row. So does a parent's summary over a child that reads one, and a snapshot, events or periodic emit projected from
-  a history that reads one of another history, which is derived from the history as it reads it. A new plan that has such
+  a history that reads one of another history, which is derived from the history as it reads it. A path of two links or
+  more that passes through an events emit whose foreign key the projection sets still reads the row that emit would
+  draw, not the row its cell names, and `verify` reports a rule over it as violated. A new plan that has such
   a link says `projectedReads: "final"`, and a recorded plan without it replays the link as it was made (ADR 0027, the
   amendment of 2026-11-26 about linked rows).
 - A history that keeps to its parent's lifetime (`parent.lifetime`) with a rule that reads `previous` was refused at
@@ -252,6 +258,19 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   still scores the column. A column the contract makes a key keeps its bins as they stand, since its rows hold
   distinct values. Only bundles written from profiles released with noise change, and only for a number column with a
   bin at or below the floor: an exact histogram, and a release whose bins all clear it, keep their bytes.
+- `init` wrote an exposure on two exposes that reach one parent through relationships of the same name, and `plan`
+  refused the bundle (`FLX-3403`, "at most one declares it"): the parent's counts cannot tell the two apart. It now
+  declares the one whose exposure is published over the most children, the lowest expose id when they are equal,
+  whatever order the profile lists them in. The other's exposure statistics are unused, with a reason that names the
+  expose that declares it, and its `within` entry is written without `exposure` (ADR 0025, the amendment of
+  2026-11-26). An exposure over a relationship whose foreign key `init` leaves drawn is no longer declared either,
+  since the plan refused that bundle too. A bundle with no two such exposures keeps its bytes.
+- `init` wrote a `counts` entry over a relationship whose pick a `sharedColumns` copy sets, and `plan` refused its own
+  bundle (`FLX-3403`, "it is on the counted layout; a copy sets the pick alone"). The contract's copy now stays
+  and the relationship is laid out by no counts entry: its foreign key declares no draw of its own, and every
+  statistic of its profile entry is unused, with a reason that names the relationship the copy goes through. No
+  exposure is declared over that relationship either. A copy of a column that is no other relationship's foreign
+  key, and every bundle without `copies: true`, keep their bytes (ADR 0022, the amendment of 2026-11-26).
 - `init` left a version's end drawn apart from its start when a release publishes the two as one `history` entry and
   withholds that entry's lengths (and with them, often, the versions per entity, the first starts, the chain and the
   last versions): the history was skipped, the one date pair left became the only lifetime, and the end took its own

@@ -231,3 +231,36 @@ calendar writes the scorecard it wrote before, format name included.
   stream, with its own statistics as the base.
 - A measured dependence of children on exposure that is not proportional (a saturating one) would need an
   exponent on `E`, which the profile would have to measure.
+
+## Amendment of 2026-11-26: init declares one exposure through relationships of one name to one parent
+
+### Context
+
+An exposure is the parent's expected count of children (section 4), and the counted layout keeps
+that count by the relationship's name and the parent's expose, so two child exposes that declare an
+exposure through relationships of the same name to the same parent could not be told apart: `plan`
+refuses the bundle (`FLX-3403`, "at most one declares it"). Two tables of one parent can share the
+relationship's name, as a table and the snapshot of a versioned table both reach their branch through a
+relationship called `branch`. `init` declared each exposure the profile published and fit, in the order the
+profile listed the relationships, so it wrote a bundle that the plan refused.
+
+### Decision
+
+1. **One declares it.** Of the exposes whose written `within` entries reach one parent through
+   relationships of one name, `init` declares `exposure: true` on one entry only. Exposes with
+   different relationship names or different parents are not rivals, and each declares its own as before.
+2. **Which one.** The exposure whose published `children` count is the largest, then the lowest expose
+   id (by code point) when the counts are equal. The count is the number of child rows the exposure was
+   measured over, so the choice rests on the statistic published with the most support, and neither the
+   order of the profile's `relationships` nor of the contract's exposes decides it. A rival that fits only
+   because another does not, such as one whose rival a trial run declined, takes its place on the next
+   pass, by the same rule.
+3. **Only one the plan can take competes.** An exposure makes the relationship counted, and the plan
+   refuses a counted relationship whose foreign key declares a draw of its own (`FLX-3403`). An exposure over
+   a key that `init` leaves drawn, because it lays out no children per parent for the relationship, is left
+   out whether or not it has a rival: it never made a bundle the plan accepted, so no written byte moves.
+   It does not rank, and another exposure through that name declares in its place.
+4. **What the others say.** The statistics of an exposure that fits and is not declared are unused, with a
+   reason that names the expose that declares it and the rule above. Its `within` entry is written as
+   before, without `exposure`.
+5. **What does not change.** A bundle with no two such exposures keeps every byte.
