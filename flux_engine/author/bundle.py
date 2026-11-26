@@ -63,7 +63,6 @@ from flux_engine.author.children_given import (
 )
 from flux_engine.author.cliques import draw_cliques
 from flux_engine.author.columns import (
-    LADDER_LOW_REASON,
     MOST_PLACES,
     ColumnContext,
     ColumnPlan,
@@ -1468,105 +1467,6 @@ def _open_end_ms(contract_expose: Optional[Mapping[str, Any]], column: str) -> O
         return None
     value = declared_end(contract_expose, column).get("openEnd")
     return instant_ms(value) if isinstance(value, str) else None
-
-
-_CLOSED_ENDS_REASON = (
-    "The profile withheld min, and every quantile it publishes lies in the bin that holds the "
-    "open end: the closed versions' ends are drawn over the span the window's start column is "
-    "declared over, where a closed version's end lies, not in the bin next to the open end."
-)
-
-
-def _place_closed_ends(
-    exposes: Sequence[AuthoredExpose], contract: Optional[Mapping[str, Any]]
-) -> None:
-    """Draw the closed ends of a validity window over its starts, not in the bin beside its open end.
-
-    A validity window's end column holds the open end its contract declares on every open
-    version. When the profile withholds the column's minimum and every quantile it publishes lies
-    in the bin that holds the open end, the share below them is the closed versions' ends, which
-    :mod:`flux_engine.author.columns` puts in the next bin down of the profile's ladder: the bin
-    right below the open end, past every date the data holds, which stretches the run's window to
-    it. That share is drawn over the span the window's start column is declared over instead, cut
-    to the contract range of the start and of the end, and the open end's bin starts where it
-    ends. Nothing the profile withholds is read.
-    """
-    for expose in exposes:
-        try:
-            contract_expose = contract["exposes"][expose.index]  # type: ignore[index]
-        except (KeyError, IndexError, TypeError):
-            continue
-        ends = window_ends(contract_expose.get("semantics"))
-        plans = {plan.name: plan for plan in expose.columns}
-        start, end = plans.get(ends.get("start", "")), plans.get(ends.get("end", ""))
-        open_end = _open_end_ms(contract_expose, ends.get("end", ""))
-        if start is None or end is None or open_end is None:
-            continue
-        span = _closed_ends_span(expose, start, end, contract)
-        if span is not None:
-            _draw_closed_ends(end, expose.kinds[end.name], span, open_end)
-
-
-def _closed_ends_span(
-    expose: AuthoredExpose,
-    start: ColumnPlan,
-    end: ColumnPlan,
-    contract: Optional[Mapping[str, Any]],
-) -> Optional[Tuple[int, int]]:
-    """The span (ms) of the start column's declaration, cut to the start's and the end's contract ranges."""
-    found, start_rule = _spans_of(expose, start, contract)
-    if not found:
-        return None
-    low, high = min(first for first, _ in found), max(last for _, last in found)
-    for rule in (start_rule, _spans_of(expose, end, contract)[1]):
-        if rule is not None:
-            low, high = max(low, rule[0]), min(high, rule[1])
-    return (low, high) if low < high else None
-
-
-def _draw_closed_ends(
-    plan: ColumnPlan, kind: LogicalKind, span: Tuple[int, int], open_end: int
-) -> None:
-    """Move the closed ends of an end column from the ladder bin beside its open end onto *span*.
-
-    Only a column with two bins, the lower one closing its withheld minimum on the ladder
-    (:data:`flux_engine.author.columns.LADDER_LOW_REASON`) and the upper one holding the open end,
-    changes. The closed ends stay below the upper bin, as the profile counts them, so *span* is cut
-    at its lower edge. The weights stay as published.
-    """
-    bins = plan.declaration.get("bins")
-    weights = plan.declaration.get("binWeights")
-    if not (isinstance(bins, list) and len(bins) == 3 and isinstance(weights, list)):
-        return
-    edges = [instant_ms(edge) for edge in bins]
-    lower, upper, last = edges
-    if lower is None or upper is None or last is None or not upper < open_end <= last:
-        return
-    ladder = [label for label in plan.labels if label.tokens == ("bins", "0")]
-    if not ladder or any(label.basis.reason != LADDER_LOW_REASON for label in ladder):
-        return
-    low, high = span
-    if kind is LogicalKind.DATE:
-        # Whole days, so a span inside one day still holds that day.
-        low = low // _DAY_MILLISECONDS * _DAY_MILLISECONDS
-        high = max(-(-high // _DAY_MILLISECONDS) * _DAY_MILLISECONDS, low + _DAY_MILLISECONDS)
-    high = min(high, upper)
-    if not low < high:
-        return
-    plan.declaration["bins"] = [_range_text(kind, low), _range_text(kind, high), bins[2]]
-    moved: List[Tuple[str, ...]] = (
-        [("bins", "0")] if high == upper else [("bins", "0"), ("bins", "1")]
-    )
-    if any(
-        label.tokens == ("binWeights", "0") and label.basis.reason == LADDER_LOW_REASON
-        for label in plan.labels
-    ):
-        moved.append(("binWeights", "0"))
-    plan.labels = [label for label in plan.labels if label.tokens not in moved]
-    plan.labels += [Label(tokens, assumed(_CLOSED_ENDS_REASON)) for tokens in moved]
-    plan.assumptions = [
-        _CLOSED_ENDS_REASON if text == LADDER_LOW_REASON else text for text in plan.assumptions
-    ]
 
 
 def _owner(contract: Mapping[str, Any]) -> Tuple[str, Optional[Tuple[str, str]]]:
@@ -3989,7 +3889,6 @@ def _author_bundle(
     declared = inputs.history
     planned = _plan_bundle(inputs)
     team, owner_note = _owner(planned.contract)
-    _place_closed_ends(planned.authored, planned.contract)
     window, window_note, given_window = _bundle_window(planned, inputs)
     _widen_ranges(planned.authored, fallbacks.widened)
     if given_window is not None:
