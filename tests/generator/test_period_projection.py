@@ -42,7 +42,13 @@ from flux_engine.core.clock import parse_rfc3339_ms
 from flux_engine.expr2.functions import add_months
 from flux_engine.generator import projections
 from flux_engine.generator.periods import _period_range, kind_key, period_grid, period_matrix
-from flux_engine.generator.projections import KINDS, project_plan, sources_of
+from flux_engine.generator.projections import (
+    KINDS,
+    NEW_PLAN_BOUNDS,
+    RunBounds,
+    project_plan,
+    sources_of,
+)
 from flux_engine.generator.rows import (
     GeneratorPlan,
     build_plan,
@@ -101,6 +107,7 @@ def periods_plan(
     bounds: Optional[Mapping[str, str]] = None,
     seed: int = 5,
     named: bool = False,
+    run_bounds: RunBounds = NEW_PLAN_BOUNDS,
     **options: Any,
 ) -> GeneratorPlan:
     """The plan of a periodic emit of the versioned emit, as the pipeline makes it.
@@ -140,7 +147,7 @@ def periods_plan(
     found = PeriodsEntry(
         emit=PERIODIC, of=EMIT, column="month", grain=grain, match=match, **options
     )
-    return project_plan(plan, PERIODS_KEY, EMIT, found, plans[EMIT], root_for(seed))
+    return project_plan(plan, (PERIODS_KEY, EMIT, found), plans[EMIT], root_for(seed), run_bounds)
 
 
 def period_rows(plan: GeneratorPlan, seed: int = 5) -> List[Dict[str, Any]]:

@@ -350,6 +350,22 @@ def test_an_open_end_that_reads_as_the_end_columns_type_reads(tmp_path: Path) ->
     assert "subscription_version" in resolved(bundle)
 
 
+@pytest.mark.parametrize(
+    ("name", "changes"),
+    [
+        # Past the window, where no version ends: the reading dbt's dbt_valid_to_current gives.
+        ("after", {"openEnd": "2026-10-01"}),
+        # Under dayBefore a closed version ends the day before a start, so before until.
+        ("daybefore", {"openEnd": "2026-09-30", "chain": "dayBefore"}),
+    ],
+)
+def test_an_open_end_no_closed_version_can_hold_reads(
+    tmp_path: Path, name: str, changes: Dict[str, Any]
+) -> None:
+    bundle = bundle_with(tmp_path, name, [entry_with(**changes)], end_required=True)
+    assert "subscription_version" in resolved(bundle)
+
+
 def test_the_member_round_trips_through_the_extension(tmp_path: Path) -> None:
     emit = resolved(bundle_with(tmp_path, "trip", [ENTRY]))["subscription_version"]
     (entry,) = history_entries_of(emit.extension, "subscription_version")
@@ -647,8 +663,31 @@ REFUSED: List[Tuple[str, Change, str]] = [
 ]
 
 
+#: The open end's refusals (ADR 0017, the amendment of 2026-11-25): an ``until`` in its year, and an
+#: ``openEnd`` a closed version could hold.
+OPEN_END_REFUSED: List[Tuple[str, Change, str]] = [
+    (
+        "an until in the year 9999",
+        lambda: entry_with(until="9999-12-31"),
+        "until '9999-12-31' is in the year 9999",
+    ),
+    (
+        "an openEnd before until",
+        lambda: entry_with(openEnd="2026-09-01"),
+        "openEnd '2026-09-01' is before until '2026-09-30'",
+    ),
+    (
+        "an openEnd inside the window under nextStart",
+        lambda: entry_with(openEnd="2026-09-30"),
+        "openEnd '2026-09-30' is inside timeBounds",
+    ),
+]
+
+
 @pytest.mark.parametrize(
-    ("change", "fragment"), [(c, f) for _, c, f in REFUSED], ids=[name for name, _, _ in REFUSED]
+    ("change", "fragment"),
+    [(c, f) for _, c, f in REFUSED + OPEN_END_REFUSED],
+    ids=[name for name, _, _ in REFUSED + OPEN_END_REFUSED],
 )
 def test_a_refused_entry_is_flx_3403_naming_the_entry_and_the_key(
     tmp_path: Path, change: Change, fragment: str

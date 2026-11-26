@@ -420,3 +420,34 @@ and the JSON envelope's `rangeConformance` holds `{"ok": false, "problems": [...
 declares no range, or whose rows all lie inside, prints and returns what it did before: the line and the key
 are present only when rows lie outside. A bundle read after the run, whose contract is not the run's, adds
 nothing.
+
+## Amendment of 2026-11-25: a history and a periods entry keep to the ranges of the columns they set
+
+The amendment above leaves a column another construct sets uncut and notes it, so a history whose validity
+columns declare a range wrote versions outside it, and `verify` failed the run it had planned. The setters
+that can keep to a range now do, on kernel `0.2.0`:
+
+- **A history.** The range is the intersection of the ranges declared on the history's validity start and end
+  columns and on every projected column that copies a version's start or end: a column of a snapshot, an
+  events or a periodic emit named as the history's start or end column, an events entry's `at`, and its
+  `date` when the entry has no `lag` (a lag moves the date past the change it records). It is one bound every
+  entity shares, read as a parent's lifetime is (ADR 0017, the amendment of 2026-11-24): each first start lies
+  at or after its low end, and each chain ends by the day after its high end, so every start and every closed
+  end lies inside it. Each entity takes the room for its versions where the range leaves it, else the room for
+  one; the counts are held to the room and passed on as under a parent's lifetime, and the rows no entity has
+  room for are a shortfall the plan records (`declaredRows`, `shortfall`) and `plan` notes. Unlike a parent
+  that ended, the range closes no version: an open last version stays open. The per-row path cuts the first
+  start the same way.
+- **A periods entry.** A period is kept when its first day lies in the range of the period column; the
+  periods keep their anchor, and the ones before the low end or after the high end are dropped.
+- **What is refused (`FLX-3403`).** Only a range that does not meet the window: one that leaves no unit between
+  `timeBounds.start` and `until` for a history, or holds the first day of none of the entry's periods. A range
+  that leaves no entity room for one version is refused as a parent's lifetime is.
+- **What is noted.** A column whose setter keeps to its range is not noted. A history's end column whose
+  `openEnd` lies outside its range is still noted, since the open end is written as declared (ADR 0017, the
+  amendment of 2026-11-25), as are a lagged events `date` and every other column of the list above.
+- **What moves.** A range that cuts nothing changes nothing. A plan in which a range cut a history or a periods
+  entry carries `rangeSetters: "held"` at the top of `plan.json`, and its history pick (`validityRange`) or
+  projection (`periodRange`) says where. A recorded plan without the key replays as it was made, with no
+  setter held; any other value is `FLX-2102`.
+
