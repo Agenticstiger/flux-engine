@@ -407,6 +407,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   recorded shortfall. A range on a periods entry's period column keeps the periods whose first day lies in it.
   Only a range that does not meet the window is refused (`FLX-3403`). Such a plan records `rangeSetters: "held"`;
   a recorded plan without it replays as it was made (ADR 0024, the amendment of 2026-11-25).
+- `init` left out the history's parent when a contract dependency sets the parent's key from the natural entity,
+  although the plan accepts that dependency beside a parent. With no parent, the expose keyed by the natural entity
+  was no snapshot of the history: it was drawn apart, with keys of its own, and many of its rows had no version.
+  `init` now writes the parent for such a dependency; a dependency from other columns, or to another column too,
+  still leaves it out (ADR 0017, the amendment of 2026-11-26).
 
 ## 0.11.1 - 2026-11-24
 

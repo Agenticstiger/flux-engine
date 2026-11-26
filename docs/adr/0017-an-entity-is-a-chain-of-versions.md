@@ -778,3 +778,19 @@ they are updated by hand), and SQLMesh's SCD type 2 kinds write NULL only. The v
   leave the calendar.
 - **What moves.** No row: the generator already writes the value on every open version and NULL nowhere. A run whose
   entry declares `openEnd` gains the line in its report; an entry that a closed version could end on is refused.
+
+## Amendment of 2026-11-26: `init` keeps a parent whose key a held dependency sets
+
+The amendment of 2026-11-24 that lets `init` write the parent left out every relationship whose column a rule, copy
+or dependency sets. The amendment of 2026-11-25 then let the plan accept a dependency the parent layout holds, but
+`init` still left the parent out for it. The history was written with no parent, so no expose keyed by the natural
+entity could be its snapshot. Such an expose was drawn apart from the history, with keys of its own, and most of the
+versions named an entity that it did not hold.
+
+- **What is accepted.** A candidate whose column only contract dependencies set, each from columns that include the
+  natural entity's column and to that column alone: the dependency the plan accepts beside a parent. `init` writes
+  the parent as for any candidate, and a snapshot or periods entry that needs it can follow.
+- **What stays refused.** A column that a derive or a copy sets, and a dependency whose `from` lacks the natural
+  entity's column or whose `to` names another column. A `nullFraction` on the column refuses the parent as before.
+- **What moves.** A bundle `init` writes for a contract with such a dependency. Every other bundle keeps its bytes,
+  and no plan changes: the generator and replay of recorded plans are untouched.

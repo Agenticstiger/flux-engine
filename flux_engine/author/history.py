@@ -106,7 +106,8 @@ class HistorySource:
 
     ``rows`` is the expose's versions. ``plans`` holds each column's plan, by name, and ``kinds``
     its type. ``set_by_rules`` is the columns a rule, a dependency or a copy sets, which a history
-    never tracks. ``window`` is ``timeBounds`` as RFC 3339 text.
+    never tracks, and ``dependents`` those of them a contract ``dependency`` alone sets.
+    ``window`` is ``timeBounds`` as RFC 3339 text.
     """
 
     expose_id: str
@@ -120,6 +121,7 @@ class HistorySource:
     minimum_cell: int
     fractional_bits: int
     set_by_rules: FrozenSet[str] = frozenset()
+    dependents: FrozenSet[str] = frozenset()
     parents: Tuple[ParentCandidate, ...] = ()
     #: Each foreign key of the emit into a reference expose, by column: the expose and the keys the
     #: profile publishes for it, or ``None`` when they are not all published.
@@ -723,7 +725,7 @@ def _parent_hold(source: HistorySource, candidate: ParentCandidate, fixed: Froze
         return "its column is not one the bundle plans"
     if candidate.column in fixed:
         return "its column is a key, or a validity column, which the history sets"
-    if candidate.column in source.set_by_rules:
+    if candidate.column in source.set_by_rules and not _held_by_layout(source, candidate):
         return "a rule, a dependency or a copy sets its column"
     nulls = plan.declaration.get("nullFraction")
     if nulls is not None and Decimal(str(nulls)) != 0:
@@ -733,6 +735,40 @@ def _parent_hold(source: HistorySource, candidate: ParentCandidate, fixed: Froze
     if candidate.parent_rows < 1:
         return "its parent holds no row"
     return ""
+
+
+def _held_by_layout(source: HistorySource, candidate: ParentCandidate) -> bool:
+    """Whether the only rule that sets *candidate*'s column is a dependency the layout holds.
+
+    The layout gives every version of an entity one parent row, so a contract ``dependency`` from
+    columns that include the natural entity to the parent's foreign key alone holds by it, and the
+    plan draws nothing for it (ADR 0017, amendment of 2026-11-25). Any other dependency, or a
+    derive or copy of the column, keeps the column from the layout.
+    """
+    keys = source.keys
+    if keys is None or candidate.column not in source.dependents:
+        return False
+    natural = {entity.column for entity in keys.entities if entity.kind == "natural"}
+    if len(natural) != 1:
+        return False
+    contract = source.contract_expose.get("contract")
+    invariants = contract.get("invariants") if isinstance(contract, Mapping) else None
+    naming = [
+        rule
+        for rule in (
+            entry.get("dependency") if isinstance(entry, Mapping) else None
+            for entry in (invariants if isinstance(invariants, list) else ())
+        )
+        if isinstance(rule, Mapping)
+        and isinstance(rule.get("to"), list)
+        and candidate.column in rule["to"]
+    ]
+    return bool(naming) and all(
+        set(rule["to"]) == {candidate.column}
+        and isinstance(rule.get("from"), list)
+        and natural <= set(rule["from"])
+        for rule in naming
+    )
 
 
 def _publishes_children(candidate: ParentCandidate) -> bool:

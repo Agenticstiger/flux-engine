@@ -2615,6 +2615,7 @@ def _histories(
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
             set_by_rules=frozenset(expose.derives) | frozenset(expose.copies) | expose.dependents,
+            dependents=frozenset(expose.dependents - set(expose.derives) - set(expose.copies)),
             parents=reads.candidates(expose.expose_id, held),
             catalogues=reads.catalogues(held),
         )
