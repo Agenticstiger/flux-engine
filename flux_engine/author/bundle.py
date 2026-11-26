@@ -59,7 +59,12 @@ from flux_engine.author.catalogue import (
     link_givens,
     reference_table,
 )
-from flux_engine.author.children import count_children, declare_counted, spread_children
+from flux_engine.author.children import (
+    count_children,
+    declare_counted,
+    draws_itself,
+    spread_children,
+)
 from flux_engine.author.children_given import (
     Given,
     GivenParent,
@@ -3125,6 +3130,34 @@ def _held_back(declared: DeclaredHistory) -> Callable[[str, str], Optional[str]]
     return reason
 
 
+#: Why no exposure counts the children of a relationship whose foreign key declares a draw.
+_DRAWN_EXPOSURE = (
+    "the foreign key of this relationship is drawn on its own, and an exposure counts a "
+    "relationship's children on the counted layout, which sets the key"
+)
+
+
+def _drawn_exposures(
+    exposes: Sequence[AuthoredExpose], keys: Optional[ContractKeys]
+) -> Dict[Tuple[str, str], str]:
+    """The (emit, relationship) whose foreign key declares a draw, each with why no exposure counts it.
+
+    An exposure makes the relationship counted (ADR 0025 section 4), and the plan refuses one whose
+    foreign key declares a draw of its own (``FLX-3403``). Such a bundle was never one the plan
+    accepted, so declaring no exposure over the relationship moves no written byte.
+    """
+    held: Dict[Tuple[str, str], str] = {}
+    if keys is None:
+        return held
+    for expose in exposes:
+        columns = {plan.name: plan for plan in expose.columns}
+        for relationship in keys.expose(expose.expose_id).relationships:
+            plan = columns.get(relationship.from_columns[0]) if relationship.from_columns else None
+            if plan is not None and draws_itself(plan):
+                held[(expose.expose_id, relationship.name)] = _DRAWN_EXPOSURE
+    return held
+
+
 def _declared_exempt(
     expose: AuthoredExpose,
     entry: Mapping[str, Any],
@@ -4947,7 +4980,10 @@ def _dated_columns(
         window_end=window_end_ms(window[1]),
         window_start=window_start_ms(window[0]),
         minimum_cell=planned.reading.minimum_cell,
-        declined_exposures=fallbacks.declined,
+        declined_exposures={
+            **fallbacks.declined,
+            **_drawn_exposures(planned.authored, planned.keys),
+        },
         declined_within=fallbacks.undated,
         declined_rates=fallbacks.unrated,
     )

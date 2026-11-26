@@ -223,6 +223,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   column and says to declare the `openEnd` on it. Nothing is read as an open end from the profile (ADR 0017, the
   amendment of 2026-11-26 about an undeclared open end). Another date column that reaches the year 9999 still gives
   the window its span.
+- `init` wrote an exposure on two exposes that reach one parent through relationships of the same name, and `plan`
+  refused the bundle (`FLX-3403`, "at most one declares it"): the parent's counts cannot tell the two apart. It now
+  declares the one whose exposure is published over the most children, the lowest expose id when they are equal,
+  whatever order the profile lists them in. The other's exposure statistics are unused, with a reason that names the
+  expose that declares it, and its `within` entry is written without `exposure` (ADR 0025, the amendment of
+  2026-11-26). An exposure over a relationship whose foreign key `init` leaves drawn is no longer declared either,
+  since the plan refused that bundle too. A bundle with no two such exposures keeps its bytes.
 
 ## 0.12.1 - 2026-11-26
 
