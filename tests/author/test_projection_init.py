@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import copy
 import json
+from datetime import date
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 import yaml
 
+from flux_engine.author.projection import published_period_range
 from flux_engine.seam.history import history_entries_of
 from flux_engine.seam.projections import EVENTS_KEY, PERIODS_KEY, SNAPSHOTS_KEY
 from flux_engine.stages.plan import plan
@@ -31,6 +33,7 @@ from flux_engine.stages.plan import plan
 from ._written import plan_written, resolved_emits
 from .test_history_init import (
     TIER,
+    _bins,
     _init,
     _levels,
     _metrics,
@@ -377,3 +380,93 @@ def _namespace_spec(tmp_path: Path) -> Dict[str, Any]:
     text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
     found: Dict[str, Any] = yaml.safe_load(text)["spec"]
     return found
+
+
+def _monthly(first: date, months: int, status: str = "F") -> Dict[str, Any]:
+    """A month column of ``plan_month`` whose histogram has *months* monthly bins from *first*."""
+    edges = []
+    year, month = first.year, first.month
+    for _ in range(months + 1):
+        edges.append(_ms(year, month, 1))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    column = _date(4000)
+    histogram = _bins(edges, [4000 // months] * months, 4000)
+    histogram["groups"][0]["status"] = status
+    if status != "F":
+        histogram["groups"][0] = {"group": "", "status": status}
+    column["statistics"] = [histogram]
+    return column
+
+
+def _periods_with(tmp_path: Path, month: Dict[str, Any]) -> Dict[str, Any]:
+    profile = _profile_with("plan_month")
+    profile["tables"]["plan_month"]["columns"]["month"] = month
+    _init(tmp_path, profile, CONTRACT.read_text(encoding="utf-8"))
+    (entry,) = _namespace(tmp_path)[PERIODS_KEY]
+    found: Dict[str, Any] = entry
+    return found
+
+
+def test_a_published_histogram_bounds_the_periods_to_the_months_it_covers(
+    tmp_path: Path,
+) -> None:
+    # Three monthly bins from March: the first edge is the first period, the last bin's start
+    # the last one, so no periodic row lies in a month the data never held.
+    entry = _periods_with(tmp_path, _monthly(date(2025, 3, 1), 3))
+    assert (entry["from"], entry["through"]) == ("2025-03-01", "2025-05-01")
+    plan_written(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "first, months, window, until, expected",
+    [
+        # Inside the window: both bounds are written.
+        ("2025-03-01", 3, ("2025-01-01", "2025-10-01"), None, ("2025-03-01", "2025-05-01")),
+        # Before the window's start: periods start where the window does, so no from.
+        ("2024-11-01", 7, ("2025-01-01", "2025-10-01"), None, (None, "2025-05-01")),
+        # Past the window's end: the last period the window holds is the default, so no through.
+        ("2025-06-01", 9, ("2025-01-01", "2025-10-01"), None, ("2025-06-01", None)),
+        # Past until: held to the last day before it.
+        ("2025-03-01", 6, ("2025-01-01", "2025-10-01"), "2025-07-01", ("2025-03-01", "2025-06-30")),
+        # Covering the whole window: nothing to bound.
+        ("2024-01-01", 36, ("2025-01-01", "2025-10-01"), None, (None, None)),
+        # Wholly after the window: no range is left, so nothing is written.
+        ("2026-01-01", 3, ("2025-01-01", "2025-10-01"), None, (None, None)),
+    ],
+)
+def test_bounds_are_held_to_the_window_and_until(
+    first: str,
+    months: int,
+    window: Tuple[str, str],
+    until: Optional[str],
+    expected: Tuple[Optional[str], Optional[str]],
+) -> None:
+    table = {"columns": {"month": _monthly(date.fromisoformat(first), months)}}
+    bounds = (f"{window[0]}T00:00:00.000Z", f"{window[1]}T00:00:00.000Z")
+    found = published_period_range(table, "month", "month", bounds, until)
+    assert (found.get("from"), found.get("through")) == expected
+
+
+def test_from_is_the_start_of_the_period_that_holds_the_first_edge() -> None:
+    # A first edge inside a month opens the month that holds it, so the periods keep the days
+    # they start on without a from, and no row of the first bin falls before the first period.
+    edges = [_ms(2025, 3, 17), _ms(2025, 5, 1), _ms(2025, 6, 1)]
+    table = {"columns": {"month": {"statistics": [_bins(edges, [10, 10], 20)]}}}
+    bounds = ("2025-01-01T00:00:00.000Z", "2025-10-01T00:00:00.000Z")
+    assert published_period_range(table, "month", "month", bounds, None) == {
+        "from": "2025-03-01",
+        "through": "2025-05-01",
+    }
+    # By quarter the first edge lies in the window's first quarter, so the anchor stands.
+    assert published_period_range(table, "month", "quarter", bounds, None) == {
+        "through": "2025-05-01"
+    }
+
+
+def test_a_withheld_histogram_or_none_keeps_the_entry_it_always_had(tmp_path: Path) -> None:
+    entry = _periods_with(tmp_path, _monthly(date(2025, 3, 1), 3, status="C"))
+    assert "from" not in entry and "through" not in entry
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    entry = _periods_with(bare, _date(4000))
+    assert "from" not in entry and "through" not in entry
