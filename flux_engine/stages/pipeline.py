@@ -50,7 +50,12 @@ from typing import (
     Union,
 )
 
-from flux_engine.concordance.compiler import CompiledFidelity, compile_fidelity, names_a_snapshot
+from flux_engine.concordance.compiler import (
+    CompiledFidelity,
+    compile_fidelity,
+    may_declare_no_column,
+    names_a_snapshot,
+)
 from flux_engine.concordance.predicate import (
     DeclaredExpose,
     FidelityBlock,
@@ -90,6 +95,7 @@ from flux_engine.generator import GeneratorPlan, build_plan, generate_rows
 # Imported for its registration: the exposure hook gives the counted layout a parent's expected
 # count (ADR 0025 section 4), and must be registered before any plan is related.
 from flux_engine.generator import exposure as _exposure  # noqa: F401
+from flux_engine.generator.associations import association_notes
 from flux_engine.generator.conditions import with_conditions
 from flux_engine.generator.copula import declares_copula
 from flux_engine.generator.counts import TooFewChildRows, TooManyChildRows
@@ -784,7 +790,7 @@ def _history_chains(
 
 
 def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
-    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds and range cuts."""
+    """The advice a plan prints, one sentence each: period ends, end shares, parent bounds, associations and range cuts."""
     outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*result.emits, *result.hidden_emits]
     plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
     emits = [outcome.resolved for outcome in outcomes]
@@ -792,6 +798,7 @@ def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
         period_end_null_notes(emits)
         + end_share_notes(plans, result.root)
         + parent_bound_history_notes(plans, result.root)
+        + association_notes(plans, result.root)
         + tuple(note for plan in plans for note in fallback_notes(plan))
         + tuple(
             note for plan in plans for note in range_cut_notes(plan.expose.expose_id, plan.columns)
@@ -1860,7 +1867,7 @@ def _parsed_fidelity(resolved: ResolvedEmit) -> FidelityBlock:
     return parse_fidelity_block(
         canonicalise(resolved.written_fidelity),
         expose=_declared_contract(resolved)[1],
-        allow_no_columns=names_a_snapshot(resolved.extension),
+        allow_no_columns=may_declare_no_column(resolved.extension),
     )
 
 
@@ -1902,8 +1909,8 @@ class PlanEra:
     """What a recorded plan was made under, so that ``apply`` and ``replay`` run it as it was.
 
     A new plan takes the defaults; a recorded plan takes what its keys say
-    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges``, ``plan_scale_floors`` and
-    ``plan_projected_givens``).
+    (:func:`flux_engine.stages.apply.plan_end_share`, ``plan_date_ranges``, ``plan_scale_floors``,
+    ``plan_projected_givens`` and ``plan_override_givens``).
 
     *end_share* is what a history's ``end`` share is a share of (ADR 0017, the amendment of
     2026-11-24): every entity, or the entities that can end for a plan without ``historyEndShare``.
@@ -1925,6 +1932,8 @@ class PlanEra:
     *projected_givens* is false for a plan without ``projectedGivens`` (ADR 0027, the amendment of
     2026-11-25): a column of an events or periods emit drawn given a column of the version replays
     the draw it was made with, given the level the column's own draw made.
+    *override_givens* is false for a plan without ``projectedGivens: "afterOverrides"`` (the
+    amendment of 2026-11-26): it holds no kind's override as a level, as it was made.
     """
 
     end_share: str = END_SHARE_OF_ENTITIES
@@ -1935,6 +1944,18 @@ class PlanEra:
     hold_ranges: bool = True
     estimate_rows: bool = True
     projected_givens: bool = True
+    override_givens: bool = True
+
+
+def _run_bounds(era: PlanEra) -> RunBounds:
+    """What a run under *era* holds its projections to (:class:`RunBounds`)."""
+    return RunBounds(
+        era.periodic_rows,
+        era.hold_ranges,
+        era.estimate_rows,
+        era.projected_givens,
+        era.override_givens,
+    )
 
 
 def _execute_with_parent_kept(
@@ -2475,9 +2496,7 @@ def execute(
                 replicate=replicate,
                 end_share=era.end_share,
                 cut_ranges=era.cut_ranges,
-                bounds=RunBounds(
-                    era.periodic_rows, era.hold_ranges, era.estimate_rows, era.projected_givens
-                ),
+                bounds=_run_bounds(era),
                 scale_widened=widened,
                 scale_floors=era.scale_floors,
             )
@@ -3560,7 +3579,7 @@ def _planned_with_projections(
     """
     namespace = _flux_namespace(simulation)
     projected = _projected_emits(resolved_emits)
-    bounds = RunBounds(era.periodic_rows, era.hold_ranges, era.estimate_rows, era.projected_givens)
+    bounds = _run_bounds(era)
 
     def plan_at(index: int, rows: Optional[int]) -> _PlannedEmit:
         return _plan_emit(

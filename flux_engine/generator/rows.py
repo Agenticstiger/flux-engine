@@ -2219,13 +2219,19 @@ def _conditional_row(
 
 
 #: For each column a projection sets that some column is drawn given, the level each row of a slice
-#: holds, in row order (ADR 0027, the amendment of 2026-11-25).
-HeldLevels = Mapping[str, Sequence[str]]
+#: holds, in row order (ADR 0027, the amendment of 2026-11-25). ``None`` on a row the projection
+#: leaves the column to the emit's own draw, whose level that row then holds (the amendment of
+#: 2026-11-26: a column only some kinds of a periods entry override).
+HeldLevels = Mapping[str, Sequence[Optional[str]]]
 
 #: The level a row holds in a column of a projection whose value no level of that column names. No
 #: weight table is keyed by it (a NUL cannot be written in a declaration), so a column drawn given
 #: such a column and declaring a ``support`` draws from that support (:func:`_categorical_levels`).
 UNNAMED_LEVEL = "\x00unnamed"
+
+#: The value :func:`held_levels` reads as no level held: the projection sets no cell in that row,
+#: so the column's own draw stands and so does its level.
+OWN_DRAW: Any = object()
 
 
 def own_plan_of(plan: GeneratorPlan) -> GeneratorPlan:
@@ -2260,10 +2266,13 @@ def own_plan_of(plan: GeneratorPlan) -> GeneratorPlan:
 
 
 def _held_row(held: Optional[HeldLevels], position: int) -> Mapping[str, str]:
-    """The level of each column *held* names at the slice's row *position*."""
-    if not held:
-        return {}
-    return {name: levels[position] for name, levels in held.items()}
+    """The level of each column *held* names at the slice's row *position*, where the row holds one."""
+    found: Dict[str, str] = {}
+    for name, levels in (held or {}).items():
+        level = levels[position]
+        if level is not None:
+            found[name] = level
+    return found
 
 
 def held_levels(
@@ -2278,32 +2287,39 @@ def held_levels(
     (``FLX-3403``) as a plan the generator cannot draw, except in a column of *fallback*, whose
     columns drawn given it have a distribution of their own to draw from where it holds a value no
     level names (a NULL, or a value outside its levels): such a value holds :data:`UNNAMED_LEVEL`,
-    which no weight table is keyed by (ADR 0027, the amendment of 2026-11-25).
+    which no weight table is keyed by (ADR 0027, the amendment of 2026-11-25). :data:`OWN_DRAW`
+    holds no level (``None``): the row's own draw of the column stands (the amendment of
+    2026-11-26).
     """
-    found: Dict[str, Sequence[str]] = {}
+    found: Dict[str, Sequence[Optional[str]]] = {}
     for name, cells in values.items():
-        column_plan = plan.column_plan(name)
-        free = name in fallback
-        if is_binned(column_plan):
-            found[name] = [_bin_held(column_plan, cell, free) for cell in cells]
-            continue
-        index = level_index(column_plan)
-        levels: List[str] = []
-        for cell in cells:
-            level = index.get((type(cell), cell))
-            if level is None and free:
-                level = UNNAMED_LEVEL
-            if level is None:
-                from flux_engine.generator.relations import FLX_3403
-
-                raise FluxError(
-                    FLX_3403,
-                    f"{plan.expose.expose_id}: column {name!r} holds {cell!r}, none of the levels "
-                    "a column drawn given it is drawn given",
-                )
-            levels.append(level)
-        found[name] = levels
+        read = _held_reader(plan, name, name in fallback)
+        found[name] = [None if cell is OWN_DRAW else read(cell) for cell in cells]
     return found
+
+
+def _held_reader(plan: GeneratorPlan, name: str, free: bool) -> Callable[[Any], str]:
+    """How :func:`held_levels` reads a cell of the column *name* as its level; *free* for a fallback."""
+    column_plan = plan.column_plan(name)
+    if is_binned(column_plan):
+        return lambda cell: _bin_held(column_plan, cell, free)
+    index = level_index(column_plan)
+
+    def named(cell: Any) -> str:
+        level = index.get((type(cell), cell))
+        if level is not None:
+            return level
+        if free:
+            return UNNAMED_LEVEL
+        from flux_engine.generator.relations import FLX_3403
+
+        raise FluxError(
+            FLX_3403,
+            f"{plan.expose.expose_id}: column {name!r} holds {cell!r}, none of the levels "
+            "a column drawn given it is drawn given",
+        )
+
+    return named
 
 
 def _bin_held(column_plan: ColumnPlan, cell: Any, free: bool) -> str:

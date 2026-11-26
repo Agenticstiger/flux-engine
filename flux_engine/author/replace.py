@@ -26,15 +26,19 @@ request does.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
+from flux_engine.seam.contract import compile_expose
+from flux_engine.seam.keys import declared_exposes, window_ends
 from flux_engine.seam.parameters import Citation, parse_pointer, render_pointer
 from flux_stats import definition_for_kind, metrics
 from flux_stats.column_metrics import CATEGORY, NUMBER, TIMESTAMP
 from flux_stats.request import (
+    NULL_COUNT,
     ProfileRequest,
     RequestColumn,
+    RequestHistory,
     RequestTable,
     check_request,
 )
@@ -42,6 +46,7 @@ from flux_stats.request import (
 __all__ = [
     "ASSUMPTIONS_REQUEST_PATH",
     "Replacement",
+    "ask_for_private_release",
     "replacement_request",
     "replacements_for",
 ]
@@ -194,6 +199,44 @@ def replacement_request(
     )
     check_request(request)
     return request
+
+
+def ask_for_private_release(
+    request: ProfileRequest,
+    contract: Mapping[str, Any],
+    domains: Mapping[Tuple[str, str], str],
+) -> ProfileRequest:
+    """*request* for a private release: the history and the null counts its tables can have asked too.
+
+    A profile released under differential privacy cannot state a table's history or a column's
+    null count exactly, so the request for it asks for the noisy forms (profile format 1-5-0,
+    request format 1-3-0): ``history: {}`` for a table whose contract declares a validity window,
+    and ``nullCount/2`` for each column of the table the contract allows to be NULL. Only the tables
+    the request already holds are asked, and a statistic already asked keeps its place in its
+    column's list, so no pointer of ``replacedBy`` moves: the new one is last. A request for a
+    release that is not private never goes through here and keeps its format and bytes.
+    """
+    exposes = declared_exposes(contract)
+    tables = []
+    for table in request.tables:
+        expose = exposes.get(table.expose_id)
+        if expose is None:
+            tables.append(table)
+            continue
+        nullable = {column.name for column in compile_expose(expose).columns if not column.required}
+        held = {column.name: column for column in table.columns}
+        columns = []
+        for name in sorted(held.keys() | nullable):
+            column = held.get(name) or RequestColumn(name, domains[(table.expose_id, name)], (), ())
+            if name in nullable and NULL_COUNT not in column.statistics:
+                column = replace(column, statistics=column.statistics + (NULL_COUNT,))
+            columns.append(column)
+        ends = window_ends(expose.get("semantics"))
+        history = RequestHistory() if "start" in ends and "end" in ends else table.history
+        tables.append(replace(table, columns=tuple(columns), history=history))
+    asked = replace(request, tables=tuple(tables))
+    check_request(asked)
+    return asked
 
 
 def replacements_for(

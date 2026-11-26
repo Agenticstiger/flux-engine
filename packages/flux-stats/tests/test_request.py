@@ -384,7 +384,7 @@ def test_the_reader_reads_both_formats_and_no_other() -> None:
     assert load_request_text(_head()).tables[0].workload == ()
     assert load_request_text(_with_additions("")).queries == ()
     assert "FLX-5038" in _refusal(
-        _with_additions("", url=REQUEST_SCHEMA_URL_1_1_0.replace("1-1-0", "1-3-0"))
+        _with_additions("", url=REQUEST_SCHEMA_URL_1_1_0.replace("1-1-0", "1-4-0"))
     )
 
 

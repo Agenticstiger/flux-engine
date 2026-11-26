@@ -474,6 +474,41 @@ the data covers.
 - **What moves.** A bundle `init` writes whose periods entry's column publishes such a histogram that starts after
   the window or ends before it. Every other bundle keeps its bytes, and no plan or recorded plan changes.
 
+## Amendment of 2026-11-26: a `given` over a kind's override is drawn after the projection
+
+The amendment of 2026-11-25 drew a column `given` a column of the version after the projection, and kept refusing a
+column drawn `given` a column a kind of a periods entry overrides. A periodic emit whose kinds each set the row's type
+(`charge` is `fuel` on one kind's rows and `toll` on the other's) and that draws a column given that type (`band`
+given `charge`) is a plain shape, and the refusal left it no way to say so. This amendment draws it:
+
+- **The level a row holds.** A column the entry sets, which some column of the emit is drawn `given`, gives each row
+  a level before the emit draws its own cells: on the rows of a kind that overrides it, the override's; on the other
+  kinds' rows, the version's for a column of the version, and none for a column of the emit's own, whose own draw then
+  stands, its level with it. The column drawn `given` it, and every column drawn `given` that one, read the held
+  level. A column one kind overrides is still drawn on the rows of the kinds that do not, so it too is drawn given
+  the level those rows hold. Each cell is still drawn once from its own stream, so the column path, the per-row path,
+  `--jobs` and `--shard` give the same bytes. A categorical column's level is the one that renders to the override; a
+  column drawn from bins takes the bin that holds it, as its own draw would.
+- **An override no level names.** An override that renders to no level of the emit's column has no row in the
+  given-table, so on that kind's rows the column drawn `given` it is drawn from the marginal the declarations imply,
+  `P(D = d)` the sum over the levels `c` of `w_c * P(D = d | C = c)`, as for a version's value no level names (the
+  emit's level weights, else the history's for a column of the version), else from the `support` it declares,
+  evenly, and the plan is refused without either, `FLX-3403` naming both columns, the kind and the value.
+  `plan` prints one note for each such column, as it does for a version's value.
+- **What stays refused**, `FLX-3403` at plan, naming both columns and the entry: a column drawn `given` the period
+  column, and, on an events emit, `given` the `op`, `at`, `date` or `type` column or an image; and an override with no
+  distribution to fall back to. A periodic emit declares no `allocation: exact` (its rows grow with its window), so no
+  column allotted by its parent's draw reaches this step.
+- **Recorded plans.** A plan whose draw holds a level engine 0.12.0 did not hold (an override, or a column some kinds
+  override drawn given the level the other kinds' rows hold) says `projectedGivens: "afterOverrides"`, which the plan
+  digest covers, and `heldGivens`, `fallbackGivens` and `fallbackMarginals` name what it holds, as before. A plan with
+  `"afterProjection"`, or without the key, replays the draw it was made with, so its rows and its run id keep their
+  bytes. Any other value is `FLX-2102`.
+- **What moves.** A bundle the amendment of 2026-11-25 refused for a column drawn `given` an override now plans. A
+  column some kinds override, drawn `given` a column the entry sets, was drawn on the other kinds' rows given the
+  level of its parent's own draw, which the entry then replaced: it now reads the level the row holds, and a new plan
+  of such a bundle says `afterOverrides`. Every other plan keeps its bytes.
+
 ## Amendment of 2026-11-26: `init` keeps the history when the profile counts rows per entity
 
 A profiler counts a child's rows per parent over every relationship, so over a relationship whose `toColumns` are

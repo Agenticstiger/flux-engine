@@ -91,7 +91,7 @@ def test_the_namespace_carries_its_declared_keys_and_nothing_else(write_bundle: 
     assert raised.value.code.code == "FLX-3105"
     assert (
         "declares ['profiles']; this namespace carries "
-        "['asOf', 'bridges', 'conditions', 'consumers', 'copies', 'counts', 'emits', 'events', 'facts', 'forecasts', 'generators', 'history', 'lifetimes', 'links', 'overlay', 'parameters', 'periods', 'privacy', 'profile', 'rates', 'responses', 'scorecard', 'snapshots', 'strictCoverage', 'unused', 'within']"
+        "['asOf', 'associations', 'bridges', 'conditions', 'consumers', 'copies', 'counts', 'emits', 'events', 'facts', 'forecasts', 'generators', 'history', 'lifetimes', 'links', 'overlay', 'parameters', 'periods', 'privacy', 'profile', 'rates', 'responses', 'scorecard', 'snapshots', 'strictCoverage', 'unused', 'within']"
         in raised.value.detail
     )
     documents[1]["extensions"] = {

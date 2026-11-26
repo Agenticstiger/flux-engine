@@ -61,6 +61,7 @@ from flux_engine.concordance.predicate import (
 from flux_engine.core.canonical import nfc
 from flux_engine.core.digest import DigestRef, digest_of_document
 from flux_engine.core.errors import FluxError
+from flux_engine.seam.associations import ASSOCIATIONS_KEY
 from flux_engine.seam.emit import (
     reusable_extension,
 )
@@ -86,6 +87,7 @@ from flux_stats.fixedpoint import (
 from flux_stats.spelling import parse_exact, render_exact
 
 __all__ = [
+    "may_declare_no_column",
     "names_a_snapshot",
     "CompiledFidelity",
     "CompiledProperty",
@@ -458,6 +460,18 @@ def names_a_snapshot(extension: Optional[Mapping[str, Any]]) -> bool:
     return isinstance(extension, Mapping) and SNAPSHOTS_KEY in extension
 
 
+def may_declare_no_column(extension: Optional[Mapping[str, Any]]) -> bool:
+    """Whether *extension*'s emit may declare an empty ``fidelity.columns``.
+
+    A snapshot's (:func:`names_a_snapshot`), and an association's (ADR 0039): both its foreign keys
+    are set by the pairing, so an association table of two foreign keys and no other column draws
+    no column of its own.
+    """
+    return names_a_snapshot(extension) or (
+        isinstance(extension, Mapping) and ASSOCIATIONS_KEY in extension
+    )
+
+
 def compile_fidelity(
     *,
     contract: Mapping[str, Any],
@@ -503,7 +517,7 @@ def compile_fidelity(
         block = parse_fidelity_block(
             fidelity_without_hidden(raw, extension),
             expose=expose,
-            allow_no_columns=names_a_snapshot(extension),
+            allow_no_columns=may_declare_no_column(extension),
         )
 
     columns = tuple(nfc(str(name)) for name in expose.column_names)

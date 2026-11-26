@@ -186,6 +186,106 @@ never to more (point 4: "A sum below the total is accepted").
 - The guarantee the engine reports for a run is still the stated total (point 4), which bounds
   the loss of every part, spent or not.
 
+## Amendment of 2026-11-25: a noisy history and a noisy null count (format 1-5-0)
+
+### Context
+
+A table's `history` (PROFILE-SPEC section 5) could not carry noise, so a profile that held one never reached P3
+(ADR 0020): one version row moves an entity between cells, and the account charged a noisy statistic a
+sensitivity of 1. A null count had no noisy form either: the `count` and `nullCount` metrics are exact, and a
+private release had no way to state how many rows of a column are NULL. Both are wanted by the owner of a table
+whose rows are versions or have optional values, and both can be charged with the rule the account already uses
+for a table that a unit follows into (ADR 0037).
+
+### Decision
+
+1. **A history member may carry noise.** Each of `versionsPerEntity`, `firstStart`, `versionLength`, `chain`,
+   `lastVersion`, a tracked column's `initial` and `transitions`, and `reasons` may state a `noise` block and write
+   its groups in the noisy form. Members may mix noisy and exact. A noisy `transitions` publishes every
+   current-value group, one cell per next level.
+2. **It is allowed when the history's table `T` is reached by the unit through `follows` (`m_T >= 1`) and is not
+   the unit's own expose.** Otherwise the reader refuses it (`FLX-5036`), naming the member and never a value. The
+   expose is excluded because one unit is one row there, and an entity is several rows.
+3. **The charge is `m_T` for every noisy member, as a count table: L1 = L2 = `m_T`.** One unit holds at most `m_T`
+   rows of `T`, so at most `m_T` entities (the members `versionsPerEntity`, `firstStart`, `lastVersion` and
+   `initial`) and at most `m_T - 1` consecutive pairs of versions (`versionLength`, `chain`, `transitions` and
+   `reasons`). Each moves one cell by one, so the sensitivity is `m_T`, and the pair members are charged `m_T` as
+   well, which is one more than they need. Each noisy member states its own share, and the shares add with every
+   other part of the budget (basic composition, Bun and Steinke 2016, as in point 4 of the decision).
+4. **Three obligations stay the profiler's and are stated, not checked.** Every version of an entity references one
+   row of the parent of `T`'s listed relationship, so an entity lies in one unit (true by construction when that
+   relationship's child columns are the history's `entity` columns); the `maxChildren` bounding of `T` keeps or
+   drops an entity's versions together, by a rule that reads only that parent's rows; and `publicStructure: true`
+   also covers the bins of `versionsPerEntity`, `firstStart` and `versionLength`, the levels of `initial` and
+   `transitions`, and the candidate columns. The evidence says the engine cannot check them.
+5. **`nullCount/2` is a noisy column statistic of two cells.** It states the rows where a column is known and where
+   it is NULL, in that order, for a column of any domain, noisy form only, ungrouped. It is a count table over the
+   column's table: L1 = L2 = `m_T`, since a row lands in exactly one cell, under the same table rules as any noisy
+   column statistic. The reader reads it as it reads any noisy group, so its point estimate gives the rows and the
+   null share; the second cell costs nothing and is the share's denominator, at variance `2 s^2`.
+6. **A history whose every member carries noise under the account no longer keeps a profile from P3.** A history
+   with any member without noise does, as before. A `nullCount/2` carries noise and never keeps a profile from P3.
+7. **Format.** A document that holds a noisy history member or a `nullCount/2` names `1-5-0`, and one that names an
+   earlier format and holds one is refused (`FLX-5036`). Documents of `1-4-0` and earlier read exactly as before.
+
+8. **A query's rate may carry noise, and its query states a `unit`.** A `queries[]` statistic (a `levelHistogram/1`
+   over `["false", "true"]`) may carry a `noise` block, with its groups in the noisy form. A noisy query states its
+   `unit`: `{ "table": T }`, each row of `T` a record (charge `m_T`), or `{ "table": T, "by":
+   [columns] }`, where `by` is the child columns of a relationship from a parent `P` into `T` that the unit follows,
+   or into a table it does not reach (one group is one row of `P`, charge `m_P`, 1 when `P` is the expose; twice that, L1 = 2 `m_P` and L2² = 2 `m_P`², when
+   `T` is not reached, since a group stays when its row of `P` leaves and can change cell) or `T`'s
+   history entity (charge `m_T`, under the history's whole-entity obligation, and refused in the unit's own expose as
+   a noisy history member is: one unit is one version there, and can move its entity between the cells). When
+   relationships from more than one parent the unit reaches give those child columns a charge, in any order, the query
+   is refused:
+   one unit's rows of each can move a group, so the charges would add. A query whose
+   unit has `by` states no `groupBy` or `groupByBins`: a group of rows can hold several levels of a column and land in
+   more than one cell. The profiler owes, stated and not checked: whether a record matches reads only rows of that
+   record's own unit and rows of tables the unit does not reach, so the query uses no aggregate, subquery or join over
+   other units' rows, since removing one unit may change the cells of its own records only. Both cells are a count table,
+   L1 = L2 = the charge (except in the unreached form above), and each query states its own share. A noisy query with no unit, another unit, a charge of 0, a grouping with a `by` unit or an
+   earlier format is refused (`FLX-5036`), naming the query. A run whose queries are all noisy no longer loses P3 for
+   them.
+9. **The engine reads each new part with the noise floor of the amendment above.** `fluxsim init` reads a noisy
+   history member through its point estimate, and only its cells above `noise_floor` over all its cells carry
+   weight; a member with none above it says nothing and is read as withheld. A `nullCount/2` gives a nullable
+   column the NULL share its estimate states when its NULL cell stands clear of the floor over the two cells.
+   Otherwise the release cannot tell the count from none, and no null is drawn, as for a null count withheld as
+   small, with an assumption that names the interval the release allows, 0 to the NULL cell's estimate plus the
+   floor over the rows: a column that declares a share is never the column another is drawn given, a clique
+   column or a tracked one. A clique column holds no null, so the request init writes names as `cliqueColumns`
+   only the columns the contract requires, and a profiler releases a column the contract leaves optional over its
+   known values, outside the cliques. A release that still puts a column with a clear NULL cell in a clique that
+   init draws has that share set aside, named in the ledger with the share, and the cliques are drawn; `--strict`
+   refuses it, naming the column's statistic and the share, as a known loss. `fluxsim calibrate --fit` leaves out
+   a noisy rate
+   whose unit's records, the sum of its two cells, are at most twice the floor over every cell of its statistic
+   (a sum that noise alone made passes that only when one of its two cells passes the floor), with a note
+   (`FLX-3707` naming them when none is left), and weighs
+   each query's squared gaps by the inverse of its rate's variance, scaled so the least noisy weighs 1, as an
+   exact rate does. All of it is post-processing of the release.
+
+### Consequences
+
+- The noise of a history grows with the cap `maxChildren` of its table, as a count's does: a larger bound on how
+  many versions one unit holds means a larger `m_T` and more noise for the same share.
+- The charge is an upper bound. It is not the tightest one for the pair members (`m_T - 1`), and a tighter figure
+  can replace it later without moving a profile that states a share at or above the charge.
+- The profiler's three obligations are part of the guarantee and are not part of what the engine verifies. A release
+  that breaks them is not covered by the stated loss, and the evidence names them.
+
+### Prior art
+
+- **OpenDP identifier truncation** (docs.opendp.org, tabular data, identifier truncation): `truncate_per_group(k)`
+  keeps at most `k` records per identifier, and the noise grows with the bound. `maxChildren` is that bound.
+- **Tumult Analytics**, "Understanding sensitivity" (docs.tmlt.dev): `MaxRowsPerID` makes a count's sensitivity the
+  bound; with `MaxGroupsPerID` and `MaxRowsPerGroupPerID`, Laplace sensitivity is their product and Gaussian
+  sensitivity is rows per group times the square root of groups. A history member is one group per entity, so the
+  charge `m_T` is the conservative reading of it.
+- **SmartNoise SQL** (docs.smartnoise.org, metadata): `max_ids`, how many rows one user can appear in, sampled down
+  when exceeded.
+- **Bun and Steinke 2016** (zero-concentrated DP): `rho` adds under composition, as in the budget above.
+
 ## Amendment of 2026-11-25: a released date histogram is read where it stands clear of the noise
 
 ### Context
