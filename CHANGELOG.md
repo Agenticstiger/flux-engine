@@ -20,7 +20,11 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.12.0 - 2026-11-26
+
+A Kafka sink, `fluxsim init --window` and `--history`, `validate --profile`, history and periods declarations
+on kernel 0.2.0, a declared open end and version chain read by `init`, and fixes to `init`, projections, date
+ranges and `verify`. The engine now needs `flux-spec>=0.5.5,<0.6`.
 
 ### Added
 
@@ -185,6 +189,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the amendment of 2026-11-24). The ledger names where each statistic went. A table whose foreign
   key the history holds without writing a `parent` over the same parent stays unprojected, with the reason in the
   ledger, since it would copy values that are no keys of the parent.
+- In a history bounded by its parent's lifetime, an entity the parent's end forces to end keeps one version as its
+  ending version from its first start (ADR 0017), and its periodic rows stay inside the parent's life.
 
 ### Fixed
 

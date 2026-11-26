@@ -1,7 +1,7 @@
 # Fixed values and seed rows
 
 `conditions` declares groups of rows that hold given values, with the rest of each row drawn consistently with them. It is for a test that needs "a premium subscriber in the EU who bought in a store" and its neighbours. The worked page is
-[fix values and seed rows](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/fix-values-and-seed-rows.md).
+[fix values and seed rows](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/fix-values-and-seed-rows.md).
 
 ## What it is
 

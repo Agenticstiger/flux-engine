@@ -15,7 +15,7 @@ the test suite can see them drift apart:
 
 flux-stats, the second distribution this repository releases (ADR 0009), is
 versioned by its own format and API, and the engine requires a RANGE of it
-(``flux-stats>=0.11,<0.12``), not one release. Two more places, then, that have
+(``flux-stats>=0.12,<0.13``), not one release. Two more places, then, that have
 to agree:
 
     packages/flux-stats/pyproject.toml  [project] version
@@ -151,7 +151,7 @@ FIXTURE_FILES = (PYPROJECT, INIT, STATS_PYPROJECT)
 
 #: The requirement on flux-stats a fixture carries unless it bends it: a floor and
 #: a ceiling around the fixtures' own version, as the real tree's has.
-FIXTURE_STATS_REQUIREMENT = '"flux-stats>=0.11,<0.12"'
+FIXTURE_STATS_REQUIREMENT = '"flux-stats>=0.12,<0.13"'
 
 
 SKILLS_CHECK = Path(__file__).resolve().with_name("check_skills.py")
@@ -261,7 +261,7 @@ def fallback_version(root: Path) -> Tuple[str, int]:
 # The subset of PEP 440 a release uses, ordered here because this script runs
 # before anything is installed. The rules are the PyPA "Version specifiers"
 # specification's: the release segment is compared as if padded with zeros
-# (0.11 is 0.11.0), a pre-release sorts below its release, and the exclusive
+# (0.12 is 0.12.0), a pre-release sorts below its release, and the exclusive
 # comparison ``<V`` does not admit a pre-release of V unless V is itself one.
 # ``packaging`` (PyPA) is the reference implementation; the tests set this
 # code's answers against its own and never import it here.
@@ -270,7 +270,7 @@ def fallback_version(root: Path) -> Tuple[str, int]:
 class Version(NamedTuple):
     """A version as this guard reads it."""
 
-    #: The release segment with its trailing zeros dropped, so 0.11 and 0.11.0 are one key.
+    #: The release segment with its trailing zeros dropped, so 0.12 and 0.12.0 are one key.
     release: Tuple[int, ...]
     #: ``(phase, number)`` of an ``aN``, ``bN`` or ``rcN`` pre-release; ``None`` for a final release.
     pre: Optional[Tuple[int, int]]
@@ -310,7 +310,7 @@ def parse_version(text: str) -> Version:
 
 
 def parse_specifier(text: str) -> List[Tuple[str, Version]]:
-    """The clauses of a plain version range such as ``>=0.11,<0.12``, or a refusal."""
+    """The clauses of a plain version range such as ``>=0.12,<0.13``, or a refusal."""
     clauses: List[Tuple[str, Version]] = []
     for part in text.split(","):
         # PEP 508 allows spaces and tabs around a comparison, and nothing else.
@@ -342,7 +342,7 @@ def clause_admits(operator: str, bound: Version, version: Version) -> bool:
     if version.order >= bound.order:
         return False
     # PEP 440: <V does not admit a pre-release of V itself, unless V is one. Without
-    # this, 0.12.0rc1 would sit under "<0.12" and a tree at 0.12.0rc1 would pass a
+    # this, 0.13.0rc1 would sit under "<0.13" and a tree at 0.13.0rc1 would pass a
     # requirement pip would never resolve it under.
     return not (version.pre is not None and bound.pre is None and version.release == bound.release)
 
@@ -404,7 +404,7 @@ def check_tag_shape(tag: str) -> str:
         raise Refusal(
             f'REFUSED: "{tag}" is not a release tag. A release tag is '
             "v<major>.<minor>.<patch> with an optional a/b/rc pre-release suffix, "
-            'so a working version such as "v0.11.0.dev0" cannot be released.'
+            'so a working version such as "v0.12.0.dev0" cannot be released.'
         )
     return match.group("version")
 
@@ -663,9 +663,9 @@ def build_fixture(
     dest: Path,
     root: Path,
     *,
-    version: str = "0.11.0",
+    version: str = "0.12.0",
     fallback: Optional[str] = None,
-    changelog: Optional[str] = "0.11.0",
+    changelog: Optional[str] = "0.12.0",
     stats: Optional[str] = None,
     stats_requirement: Optional[str] = None,
     drop_stats_pyproject: bool = False,
@@ -813,9 +813,9 @@ def self_test(root: Path) -> int:
         git_repo, on_main_only, off_main = build_git_fixture(scratch / "git")
 
         mismatched, mismatched_head = build_fixture(
-            scratch / "mismatched-pyproject", root, version="0.11.0.dev0"
+            scratch / "mismatched-pyproject", root, version="0.12.0.dev0"
         )
-        stale, stale_head = build_fixture(scratch / "stale-fallback", root, fallback="0.11.0.dev0")
+        stale, stale_head = build_fixture(scratch / "stale-fallback", root, fallback="0.12.0.dev0")
         no_changelog, no_changelog_head = build_fixture(
             scratch / "no-changelog", root, changelog=None
         )
@@ -823,41 +823,41 @@ def self_test(root: Path) -> int:
             scratch / "wrong-changelog", root, changelog="0.0.9"
         )
         stats_behind, stats_behind_head = build_fixture(
-            scratch / "stats-behind", root, stats="0.10.9"
+            scratch / "stats-behind", root, stats="0.11.9"
         )
-        stats_ahead, _ = build_fixture(scratch / "stats-ahead", root, stats="0.12.0")
-        stats_pre_ceiling, _ = build_fixture(scratch / "stats-pre-ceiling", root, stats="0.12.0rc1")
-        stats_pre_floor, _ = build_fixture(scratch / "stats-pre-floor", root, stats="0.11.0rc1")
-        stats_dev, _ = build_fixture(scratch / "stats-dev", root, stats="0.11.0.dev0")
-        stats_patch, stats_patch_head = build_fixture(scratch / "stats-patch", root, stats="0.11.3")
+        stats_ahead, _ = build_fixture(scratch / "stats-ahead", root, stats="0.13.0")
+        stats_pre_ceiling, _ = build_fixture(scratch / "stats-pre-ceiling", root, stats="0.13.0rc1")
+        stats_pre_floor, _ = build_fixture(scratch / "stats-pre-floor", root, stats="0.12.0rc1")
+        stats_dev, _ = build_fixture(scratch / "stats-dev", root, stats="0.12.0.dev0")
+        stats_patch, stats_patch_head = build_fixture(scratch / "stats-patch", root, stats="0.12.3")
         range_elsewhere, range_elsewhere_head = build_fixture(
-            scratch / "range-elsewhere", root, stats_requirement='"flux-stats==0.10.9"'
+            scratch / "range-elsewhere", root, stats_requirement='"flux-stats==0.11.9"'
         )
         range_no_ceiling, _ = build_fixture(
-            scratch / "range-no-ceiling", root, stats_requirement='"flux-stats>=0.11"'
+            scratch / "range-no-ceiling", root, stats_requirement='"flux-stats>=0.12"'
         )
         range_no_floor, _ = build_fixture(
-            scratch / "range-no-floor", root, stats_requirement='"flux-stats<0.12"'
+            scratch / "range-no-floor", root, stats_requirement='"flux-stats<0.13"'
         )
         range_bare, _ = build_fixture(
             scratch / "range-bare", root, stats_requirement='"flux-stats"'
         )
         range_tilde, _ = build_fixture(
-            scratch / "range-tilde", root, stats_requirement='"flux-stats~=0.11.0"'
+            scratch / "range-tilde", root, stats_requirement='"flux-stats~=0.12.0"'
         )
         range_extra, _ = build_fixture(
-            scratch / "range-extra", root, stats_requirement='"flux-stats[yaml]>=0.11,<0.12"'
+            scratch / "range-extra", root, stats_requirement='"flux-stats[yaml]>=0.12,<0.13"'
         )
         range_exact, _ = build_fixture(
-            scratch / "range-exact", root, stats_requirement='"flux-stats==0.11.0"'
+            scratch / "range-exact", root, stats_requirement='"flux-stats==0.12.0"'
         )
         range_missing, _ = build_fixture(
-            scratch / "range-missing", root, stats_requirement='"flux-stats-extras>=0.11,<0.12"'
+            scratch / "range-missing", root, stats_requirement='"flux-stats-extras>=0.12,<0.13"'
         )
         range_twice, _ = build_fixture(
             scratch / "range-twice",
             root,
-            stats_requirement='"flux-stats>=0.11,<0.12", "flux_stats>=0.11,<0.12"',
+            stats_requirement='"flux-stats>=0.12,<0.13", "flux_stats>=0.12,<0.13"',
         )
         no_stats, _ = build_fixture(scratch / "no-stats-pyproject", root, drop_stats_pyproject=True)
         no_skill, no_skill_head = build_fixture(
@@ -867,9 +867,9 @@ def self_test(root: Path) -> int:
         prerelease, prerelease_head = build_fixture(
             scratch / "prerelease",
             root,
-            version="0.11.0rc1",
-            changelog="0.11.0rc1",
-            stats_requirement='"flux-stats>=0.11.0rc1,<0.12"',
+            version="0.12.0rc1",
+            changelog="0.12.0rc1",
+            stats_requirement='"flux-stats>=0.12.0rc1,<0.13"',
         )
         output = scratch / "github-output.txt"
 
@@ -877,27 +877,27 @@ def self_test(root: Path) -> int:
             (
                 "a .dev tag is not a release tag",
                 "is not a release tag",
-                lambda: check_tag_shape("v0.11.0.dev0"),
+                lambda: check_tag_shape("v0.12.0.dev0"),
             ),
             (
                 "a bare number is not a release tag",
                 "is not a release tag",
-                lambda: check_tag_shape("0.11.0"),
+                lambda: check_tag_shape("0.12.0"),
             ),
             (
                 "a .post tag is not a release tag",
                 "is not a release tag",
-                lambda: check_tag_shape("v0.11.0.post1"),
+                lambda: check_tag_shape("v0.12.0.post1"),
             ),
             (
                 "pyproject.toml disagreeing with the tag",
-                'declares version "0.11.0.dev0"',
-                lambda: run_release_checks(mismatched, "v0.11.0", mismatched_head),
+                'declares version "0.12.0.dev0"',
+                lambda: run_release_checks(mismatched, "v0.12.0", mismatched_head),
             ),
             (
                 "a stale __version__ fallback",
-                'falls back to "0.11.0.dev0"',
-                lambda: run_release_checks(stale, "v0.11.0", stale_head),
+                'falls back to "0.12.0.dev0"',
+                lambda: run_release_checks(stale, "v0.12.0", stale_head),
             ),
             (
                 "the two version literals disagreeing, with no tag in sight",
@@ -907,17 +907,17 @@ def self_test(root: Path) -> int:
             (
                 "flux-stats's version disagreeing with the tag",
                 "flux-stats is built at the tag's version",
-                lambda: run_release_checks(stats_behind, "v0.11.0", stats_behind_head),
+                lambda: run_release_checks(stats_behind, "v0.12.0", stats_behind_head),
             ),
             (
                 "a flux-stats release of the line that is not the tag's, though the range admits it",
                 "flux-stats is built at the tag's version",
-                lambda: run_release_checks(stats_patch, "v0.11.0", stats_patch_head),
+                lambda: run_release_checks(stats_patch, "v0.12.0", stats_patch_head),
             ),
             (
                 "a requirement that leaves flux-stats's version out, at a tag",
                 "does not admit the flux-stats in this tree",
-                lambda: run_release_checks(range_elsewhere, "v0.11.0", range_elsewhere_head),
+                lambda: run_release_checks(range_elsewhere, "v0.12.0", range_elsewhere_head),
             ),
             (
                 "flux-stats's version under the floor, with no tag in sight",
@@ -992,12 +992,12 @@ def self_test(root: Path) -> int:
             (
                 "no CHANGELOG.md at all",
                 "A release needs a record",
-                lambda: run_release_checks(no_changelog, "v0.11.0", no_changelog_head),
+                lambda: run_release_checks(no_changelog, "v0.12.0", no_changelog_head),
             ),
             (
                 "a CHANGELOG.md with no section for this version",
-                "has no `## 0.11.0` section",
-                lambda: run_release_checks(wrong_changelog, "v0.11.0", wrong_changelog_head),
+                "has no `## 0.12.0` section",
+                lambda: run_release_checks(wrong_changelog, "v0.12.0", wrong_changelog_head),
             ),
             (
                 "a commit that never went through main",
@@ -1006,14 +1006,14 @@ def self_test(root: Path) -> int:
             ),
             (
                 "a describe.json whose version is not the tagged one",
-                "the installed wheel reports version '0.11.0.dev0'",
-                lambda: check_installed(_describe_fixture(scratch, "0.11.0.dev0"), "0.11.0"),
+                "the installed wheel reports version '0.12.0.dev0'",
+                lambda: check_installed(_describe_fixture(scratch, "0.12.0.dev0"), "0.12.0"),
             ),
             (
                 "a describe.json running the vendored spec fallback",
                 "resolved its spec through 'vendored'",
                 lambda: check_installed(
-                    _describe_fixture(scratch, "0.11.0", source="vendored"), "0.11.0"
+                    _describe_fixture(scratch, "0.12.0", source="vendored"), "0.12.0"
                 ),
             ),
         )
@@ -1028,7 +1028,7 @@ def self_test(root: Path) -> int:
             (
                 "a release tag on a tree missing skills",
                 "agent skills have no",
-                lambda: run_release_checks(no_skill, "v0.11.0", no_skill_head),
+                lambda: run_release_checks(no_skill, "v0.12.0", no_skill_head),
             ),
         )
 
@@ -1049,7 +1049,7 @@ def self_test(root: Path) -> int:
         must_pass: Sequence[Tuple[str, Callable[[], object]]] = (
             (
                 "a consistent tree and tag, classified as a full release",
-                lambda: _expect_outputs(green, "v0.11.0", green_head, output, "false"),
+                lambda: _expect_outputs(green, "v0.12.0", green_head, output, "false"),
             ),
             ("a consistent tree with no tag", lambda: run_tree_checks(green)),
             (
@@ -1068,11 +1068,11 @@ def self_test(root: Path) -> int:
             ("a commit that is on main", lambda: check_ancestry(on_main_only, git_repo)),
             (
                 "a describe.json that agrees with the tag",
-                lambda: check_installed(_describe_fixture(scratch, "0.11.0"), "0.11.0"),
+                lambda: check_installed(_describe_fixture(scratch, "0.12.0"), "0.12.0"),
             ),
             (
                 "a pre-release tag, classified as a pre-release",
-                lambda: _expect_outputs(prerelease, "v0.11.0rc1", prerelease_head, output, "true"),
+                lambda: _expect_outputs(prerelease, "v0.12.0rc1", prerelease_head, output, "true"),
             ),
         )
 
@@ -1155,7 +1155,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--require-skills", action="store_true", help="--check-tree also needs all eight skills"
     )
-    parser.add_argument("--tag", help="the release tag, e.g. v0.11.0")
+    parser.add_argument("--tag", help="the release tag, e.g. v0.12.0")
     parser.add_argument("--commit", help="the commit the tag points at")
     parser.add_argument("--base", default="origin/main", help="the ref a release must come from")
     parser.add_argument("--github-output", type=Path, help="append version/prerelease here")

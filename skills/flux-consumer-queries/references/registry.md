@@ -1,14 +1,14 @@
 # The registry of consumer queries
 
 A bundle declares its consumers' questions in the Simulation's `consumers` key, under the `com.agentics.flux/1` extensions. You write the registry as a file inside the bundle folder or at a path the user names, with the block's keys at the top level, and `fluxsim init --consumers FILE` embeds it in the Simulation. A bundle without the key is read, planned and drawn as before, byte for byte. Kernel 0.1.0 refuses the key (`FLX-3105`, naming the kernel). The page that shows a whole registry is
-[check consumer queries](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/how-to/check-consumer-queries.md);
+[check consumer queries](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/how-to/check-consumer-queries.md);
 copy its shape, and do not invent a key. The block is read with closed keys, so a key nothing reads is refused (`FLX-3601`, `FLX-3613`).
 
 ## The keys
 
 | Key | Holds |
 |---|---|
-| `dialect` | the SQL dialect the consumers write in, from a closed list in [the specification](https://github.com/Agenticstiger/flux-engine/blob/v0.11.1/docs/spec/CONSUMER-QUERIES-SPEC.md); `duckdb` when absent |
+| `dialect` | the SQL dialect the consumers write in, from a closed list in [the specification](https://github.com/Agenticstiger/flux-engine/blob/v0.12.0/docs/spec/CONSUMER-QUERIES-SPEC.md); `duckdb` when absent |
 | `asOf` | the date that `CURRENT_DATE`, `CURRENT_TIMESTAMP` and `NOW()` read as; a query that reads the clock is refused without it (`FLX-3629`) |
 | `tables` | each table name the consumers write, mapped to an expose of the bundle |
 | `prefixes` | qualifiers dropped from any other table name before it is matched |
