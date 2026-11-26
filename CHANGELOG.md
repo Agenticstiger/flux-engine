@@ -216,6 +216,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - `init`'s check of the bundle it is about to write built each emit's plan without the columns that a history, a
   projection or a snapshot sets, so a contract date range on such a column that missed its own statistics was refused
   by `init` with `FLX-3403` although `plan` accepts it. The check plans each emit as `plan` does.
+- `validate` accepted a date range that holds no value (its low end beyond its high end) when any emit of the bundle
+  took its rows from the run, because its relation check builds no plan then; `plan` refused it with `FLX-3403`.
+  `validate` reads the range of every drawn emit and refuses it with the same code.
 
 ## 0.12.1 - 2026-11-26
 
