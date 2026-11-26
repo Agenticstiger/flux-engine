@@ -232,6 +232,29 @@ def test_a_start_column_the_language_reserves_is_quoted_in_the_when(
     ).success
 
 
+@pytest.mark.parametrize("start", ["row", "link", "previous", "children", "valid_from"])
+def test_a_start_column_named_like_a_root_word_is_written_as_the_row_s_column(
+    tmp_path: Path, start: str
+) -> None:
+    _library(
+        tmp_path,
+        "member_renewal",
+        declare={"recorded_on": "between '2024-01-01' and '2025-06-30'"},
+        ending=False,
+        start=start,
+    )
+    (entry,) = _entries(tmp_path, EVENTS_KEY)
+    column = start if start == "valid_from" else f"row.{start}"
+    assert entry["when"] == f"{column} >= DATE '2024-01-01' AND {column} <= DATE '2025-06-30'"
+    assert plan(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / "library.profile.json",
+        kernel="0.2.0",
+        stage=False,
+    ).success
+
+
 def test_no_upper_bound_is_written_where_the_window_ends_on_the_last_day(
     tmp_path: Path,
 ) -> None:

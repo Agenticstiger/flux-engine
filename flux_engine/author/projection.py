@@ -41,7 +41,7 @@ from flux_engine.author.history import (
     structural_record,
 )
 from flux_engine.core.clock import parse_rfc3339_ms
-from flux_engine.expr2.ast import quote_name
+from flux_engine.expr2.ast import Column, unparse
 from flux_engine.expr2.functions import add_months
 from flux_engine.seam.contract import CompiledColumn, LogicalKind, compile_expose
 from flux_engine.seam.keys import ExposeKeys
@@ -415,7 +415,7 @@ def _events_when(
             )
         )
         return None
-    column = quote_name(start)
+    column = unparse(Column(name=start), flux_side=True)
     parts = []
     if low is not None:
         parts.append(f"{column} >= DATE '{_day_text(low)}'")
