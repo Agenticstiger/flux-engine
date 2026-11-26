@@ -520,6 +520,23 @@ def test_both_ways_is_refused() -> None:
 
 
 @pytest.mark.parametrize(
+    ("from_", "to"),
+    [
+        (["ss_ticket_number"], ["ss_ticket_number"]),
+        (["ss_amount"], ["ss_customer_id", "ss_amount"]),
+        (["ss_ticket_number", "ss_amount"], ["ss_amount"]),
+    ],
+)
+def test_a_column_on_both_sides_is_a_cycle_and_not_a_crash(
+    from_: Sequence[str], to: Sequence[str]
+) -> None:
+    """A dependency reads the columns it determines, so one on both sides is a cycle, ``FLX-6208``."""
+    message = refuses("FLX-6208", star_with(dependency(from_, to)))
+    assert "both sides" in message
+    assert all(name in message for name in set(from_) & set(to))
+
+
+@pytest.mark.parametrize(
     "band",
     [
         {"mustBe": 3},
@@ -1054,7 +1071,6 @@ def test_a_dependency_must_name_its_columns_as_the_rfc_says() -> None:
         refuses(code, star_with(invariant))
     for invariant in (
         dependency([], ["ss_amount"]),
-        dependency(["ss_amount"], ["ss_amount"]),
         dependency(["ss_amount", "ss_amount"], ["ss_customer_id"]),
         dependency(["ss_ticket_number"], ["ss_amount"], when="ss_amount > 1"),
         {"id": "x", "dependency": {"from": "ss_ticket_number", "to": ["ss_amount"]}},

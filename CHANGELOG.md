@@ -210,6 +210,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   a bound with no end to draw to, keeps the even draw and the report says why. Before, the column was drawn evenly
   over the whole window and `verify` reported most rows of the derived column outside its range (ADR 0014, the
   amendment of 2026-11-26).
+- A `dependency` whose `from` and `to` name the same column stopped `plan` and `validate` with a bare `ValueError` and
+  a traceback. It is `FLX-6208` now, naming the column: a dependency reads its `from` columns to determine its `to`
+  columns, so a column on both sides is a cycle of one.
 
 ## 0.12.1 - 2026-11-26
 
