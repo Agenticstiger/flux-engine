@@ -423,6 +423,23 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   (`FLX-3403`). The range on such a column is noted again, and `verify` counts the events outside it. When a range
   on the validity columns does leave a parent's entities no room, the refusal now names the range and says to
   widen it (ADR 0024, the amendment of 2026-11-26).
+- `init` left out the history's parent when a contract dependency sets the parent's key from the natural entity,
+  although the plan accepts that dependency beside a parent. With no parent, the expose keyed by the natural entity
+  was no snapshot of the history: it was drawn apart, with keys of its own, and many of its rows had no version.
+  `init` now writes the parent for such a dependency; a dependency from other columns, or to another column too,
+  still leaves it out (ADR 0017, the second amendment of 2026-11-26).
+- A periods entry `init` wrote had no `from` or `through`, so its periods ran over every month of every version,
+  years before the months the data holds. When the period column publishes its histogram, `init` now bounds the
+  entry by it: `from` opens the period that holds the first edge and `through` is the last bin's start, both held
+  to the window and the history's `until`. A withheld histogram, or none, writes the entry as before (ADR 0027,
+  the amendment of 2026-11-26).
+- `init` wrote a lifetime over a snapshot's two dates although the history sets both, so `verify` failed the
+  lifetime on the entities whose history ended otherwise. A date pair of a snapshot whose columns both come from
+  the history is now unused, for the reason "the history sets both dates"; a pair one of whose dates a rule sets
+  keeps its lifetime (ADR 0024, the second amendment of 2026-11-26).
+- When the plan kept asking for the same wider date ranges after `init` had written them, `init` ran every pass
+  and stopped with no code and no column named. It now stops at the first pass that asks for nothing new and
+  refuses with `FLX-6204`, naming each column and the span the plan asks for.
 
 ## 0.11.1 - 2026-11-24
 

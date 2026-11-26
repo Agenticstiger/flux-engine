@@ -467,3 +467,19 @@ entities of a parent that closed before that day had no room, which `plan` refus
   one version, `FLX-3403` names the range's first day beside the parents' lifetimes and says to widen the range.
 - **What moves.** A bundle whose only range on a history was such an entry's no longer records `rangeSetters`, and
   its versions keep the first starts they had before the amendment above. No released version held such a range.
+
+
+## Amendment of 2026-11-26: a snapshot whose history sets both dates takes no lifetime
+
+`init` reads a table's date pair as a lifetime unless a history, or an events or periods entry of one, sets either
+column. A `snapshots` entry was not counted: its emit takes every column it declares from the history's last
+version, so a lifetime over two of them was a second source for both dates. The plan kept it as a check the rows
+could not be drawn to, and `verify` failed it on the share of entities whose history did not end the way the
+profile's durations say.
+
+- **What is dropped.** A date pair of an emit `init` makes the history's snapshot, when both its columns are
+  columns the snapshot takes from the history and no rule of the contract sets either. The pair's statistics are
+  unused, for the reason "the history sets both dates".
+- **What is kept.** A pair one of whose columns a derive, a dependency, a copy or a key sets, and every pair of an
+  emit that is not a snapshot.
+- **What moves.** A bundle `init` writes for such a snapshot. No plan or recorded plan changes.
