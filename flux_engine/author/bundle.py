@@ -142,6 +142,7 @@ from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
+from flux_engine.expr2.errors import FLX_6204
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.governance.privacy import effective_floors, sensitivities_of
 from flux_engine.seam.asof import ASOF_KEY
@@ -3229,6 +3230,7 @@ def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
     """
     fallbacks = _Fallbacks({}, {}, {}, {})
     last_was_trial = False
+    asked: Mapping[Tuple[str, str], Tuple[int, int]] = {}
     for _ in range(_MOST_WIDENINGS):
         try:
             return _author_with_fallbacks(inputs, fallbacks)
@@ -3241,13 +3243,36 @@ def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
             fallbacks.unrated.update(fewer.rates)
         except _RangesWidened as more:
             last_was_trial = False
+            asked = more.ranges
+            before = dict(fallbacks.widened)
             _widen_to_hold(fallbacks.widened, more.ranges)
+            if fallbacks.widened == before:
+                break  # the widened ranges are already written, and the plan asks for them again
     if last_was_trial:
         raise AuthorError(
             "the trial runs did not settle which exposures, rates entries or within entries the "
             f"run reproduces within {_MOST_WIDENINGS} passes"
         )
-    raise AuthorError("the declared date ranges cannot be widened to meet the plan's check")
+    raise FluxError(FLX_6204, _unwidened(asked))
+
+
+def _unwidened(asked: Mapping[Tuple[str, str], Tuple[int, int]]) -> str:
+    """Name each date column whose declared range ``init`` could not widen to what the plan asks."""
+    spans = "; ".join(
+        f"{expose}.{column} to {_day_text(low)} .. {_day_text(high)}"
+        for (expose, column), (low, high) in sorted(asked.items())
+    )
+    return (
+        "init widened the declared date ranges the plan's check asks for, and the plan still "
+        "asks for them: "
+        + (spans or "no column named")
+        + "; declare a range in the contract that holds the span named for each column"
+    )
+
+
+def _day_text(milliseconds: int) -> str:
+    """The UTC day of an instant in milliseconds, as ``YYYY-MM-DD``."""
+    return (date(1970, 1, 1) + timedelta(days=milliseconds // _DAY_MILLISECONDS)).isoformat()
 
 
 def _leave_undated(

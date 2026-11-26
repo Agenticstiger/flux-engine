@@ -421,6 +421,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   lifetime on the entities whose history ended otherwise. A date pair of a snapshot whose columns both come from
   the history is now unused, for the reason "the history sets both dates"; a pair one of whose dates a rule sets
   keeps its lifetime (ADR 0024, the amendment of 2026-11-26).
+- When the plan kept asking for the same wider date ranges after `init` had written them, `init` ran every pass
+  and stopped with no code and no column named. It now stops at the first pass that asks for nothing new and
+  refuses with `FLX-6204`, naming each column and the span the plan asks for.
 
 ## 0.11.1 - 2026-11-24
 
