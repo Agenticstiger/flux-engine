@@ -157,6 +157,25 @@ def test_the_member_form_in_a_table_that_is_not_reached_moves_a_group_between_ce
     parse_profile(share("0.25"))
 
 
+def _group_by_tier(document: Dict[str, Any], index: int) -> None:
+    statistic = _statistic(document, index)
+    statistic["groupBy"] = "tier"
+    statistic["groups"] = [
+        {"group": level, "status": "F", "noisyCounts": ["400.2", "80.1"]}
+        for level in ("basic", "plus")
+    ]
+
+
+@pytest.mark.parametrize("index", [MEMBERS, CARDS])
+def test_a_query_over_groups_of_rows_may_not_group_by_a_column_too(index: int) -> None:
+    """A record is a group of rows and can hold several levels of the column: it can land in
+    more than one cell. A query over rows (``{table}``) with a ``groupBy`` stays allowed."""
+    message = _refused(_edit(lambda document: _group_by_tier(document, index)))
+    assert f"queries[{index}]" in message and "tier" not in message
+    assert ("members_with_a_lapsed_card", "cards_that_lapsed")[index - 1] in message
+    parse_profile(EXAMPLE)  # the rows query groups by tier
+
+
 def test_the_member_form_is_refused_when_the_table_is_reached_through_another_relationship() -> (
     None
 ):

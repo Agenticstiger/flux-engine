@@ -2962,6 +2962,15 @@ class _Reader:
             raise refuse(
                 f"{where}.statistics", f"a query's rate counts the levels {list(QUERY_LEVELS)}"
             )
+        if noisy and unit is not None and unit.by:
+            if any(
+                item.group_by is not None or item.group_by_bins is not None for item in statistics
+            ):
+                raise refuse(
+                    f"{where}.statistics",
+                    f"query {name!r} groups its records, groups of rows, by a column too: one "
+                    "group can hold several levels of that column and land in more than one cell",
+                )
         return QueryEntry(name=name, statistics=statistics, unit=unit)
 
     def _query_unit(self, value: Any, where: str) -> QueryUnit:
