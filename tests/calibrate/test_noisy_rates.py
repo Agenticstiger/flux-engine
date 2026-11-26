@@ -181,6 +181,15 @@ def test_the_records_of_a_rate_must_clear_twice_the_floor_of_a_cell() -> None:
     assert premium.variance == Fraction(100 * (35**2 + 35**2), 70**4)
 
 
+def test_the_records_of_a_rate_are_its_released_sum_before_it_is_rounded() -> None:
+    """At scale 14 twice the floor is just under 97: cells adding up to 96.7 stand inside the
+    noise, though the 97 whole records they round to would clear it."""
+    assert Fraction(967, 10) < 2 * noise_floor("gaussian", Fraction(14), 2) < 97
+    targets, premium = _premium(("48.3", "48.4"), scale="14")
+    assert premium.rate is None and premium.inside_noise
+    assert inside_noise(targets) == frozenset({"premium-renewed"})
+
+
 def test_the_floor_of_a_grouped_rate_is_over_every_cell_of_its_statistic() -> None:
     """A union bound over all the cells: four groups' eight cells give a higher floor than two."""
     four = 2 * noise_floor("gaussian", Fraction(10), 8)

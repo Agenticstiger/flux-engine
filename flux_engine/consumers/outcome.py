@@ -86,10 +86,11 @@ def _target_of(statistic: StatisticEntry) -> Dict[str, Target]:
     """The rate each group of a query's statistic states.
 
     A noisy statistic (profile format 1-5-0) is read through its point estimate. A group's unit's
-    records are the sum of its two cells, so their noise adds: a group whose records do not exceed
-    twice :func:`flux_stats.noise.noise_floor` over every cell of the statistic states no rate,
-    since a sum that noise alone made passes twice the floor only when one of its two cells passes
-    the floor. That covers records the noise takes to zero or below. The rate of one that does
+    records are the sum of its two cells as released, before they are rounded to whole counts, so
+    their noise adds: a group whose records do not exceed twice
+    :func:`flux_stats.noise.noise_floor` over every cell of the statistic states no rate, since a
+    sum that noise alone made passes twice the floor only when one of its two cells passes the
+    floor. That covers records the noise takes to zero or below. The rate of one that does
     carries its variance, ``v (f^2 + t^2) / n^4`` for cell variance ``v``, ``f`` and ``t`` the false
     and true counts and ``n`` their sum, the delta method's, for the fit to weigh it by.
     """
@@ -106,9 +107,12 @@ def _target_of(statistic: StatisticEntry) -> Dict[str, Target]:
             continue
         counts = group.statistic.level_counts
         total = sum(counts)
+        # The records as released, before the point estimate rounds them to whole counts, so a
+        # sum the noise alone made cannot round its way past the floor.
+        released = sum(group.noisy, Fraction(0)) if group.noisy else Fraction(total)
         if len(counts) != 2:
             out[group.key] = Target(None)
-        elif floor is not None and total <= floor:
+        elif floor is not None and released <= floor:
             out[group.key] = Target(None, WITHHELD, inside_noise=True)
         elif total <= 0:
             out[group.key] = Target(None)
