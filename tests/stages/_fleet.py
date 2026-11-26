@@ -130,6 +130,16 @@ def expose(contract: Dict[str, Any], expose_id: str) -> Dict[str, Any]:
     return next(item for item in contract["exposes"] if item["exposeId"] == expose_id)
 
 
+def with_range(target: Path, expose_id: str, column: str, rule: str) -> Path:
+    """Declare ``rule`` as the contract's range on ``expose_id``.``column``, and re-pin the bundle."""
+    contract = yaml.safe_load((target / CONTRACT).read_text("utf-8"))
+    schema = expose(contract, expose_id)["contract"]["schema"]
+    held = next(item for item in schema if item["name"] == column)
+    held["validationRules"] = [{"type": "range", "constraint": rule}]
+    repin(target, contract)
+    return target
+
+
 def rows(layout: RunLayout, expose_id: str) -> List[Dict[str, Any]]:
     """The rows a run wrote for one emit, as dicts."""
     names = json.loads(layout.seam_attestation_path(expose_id).read_text("utf-8"))["columns"]
@@ -151,9 +161,16 @@ def run_bundle(target: Path, state: Path, **options: Any) -> RunLayout:
     return RunLayout.for_state_dir(state, run_id)
 
 
+def plan_outcome(target: Path, state: Path, **options: Any) -> Any:
+    """Plan a bundle under kernel 0.2.0, staging nothing; the outcome, whether it planned or not."""
+    return plan_module.plan(
+        target, state_dir=state, kernel=KERNEL_V2.version, stage=False, **options
+    )
+
+
 def plan_refused(target: Path, state: Path) -> Any:
     """Plan a bundle under kernel 0.2.0, which refuses it; the refused outcome."""
-    planned = plan_module.plan(target, state_dir=state, kernel=KERNEL_V2.version, stage=False)
+    planned = plan_outcome(target, state)
     assert not planned.success
     return planned
 

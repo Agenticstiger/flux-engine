@@ -142,6 +142,7 @@ from flux_engine.core.canonical import JCS_MAX_SAFE_INTEGER, nfc
 from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
+from flux_engine.expr2.errors import FLX_6204
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.governance.privacy import effective_floors, sensitivities_of
 from flux_engine.seam.asof import ASOF_KEY
@@ -2491,19 +2492,21 @@ def _check_histories(
 
 
 def _projections(
-    exposes: Sequence[AuthoredExpose],
-    keys: Optional[ContractKeys],
-    contract: Mapping[str, Any],
+    planned: _Planned,
     histories: _Histories,
     published: Published,
     declined: Optional[str],
+    window: Tuple[str, str],
 ) -> Projected:
     """The ``snapshots``, ``events`` and ``periods`` entries of the written exposes (ADR 0027 section 9).
 
     Each expose without a validity window is read against each expose that has a history
-    (:func:`flux_engine.author.projection.project`). With *declined*, the reason plan refuses the
-    bundle that holds them, none is written and the note says so.
+    (:func:`flux_engine.author.projection.project`); a periods entry also reads its emit's
+    profile table and the run's *window*. With *declined*, the reason plan refuses the bundle
+    that holds them, none is written and the note says so.
     """
+    exposes, keys, contract = planned.authored, planned.keys, planned.contract
+    tables = planned.reading.tables
     if keys is None or not histories.entries:
         return Projected()
     index = {expose.expose_id: expose for expose in exposes}
@@ -2523,6 +2526,8 @@ def _projections(
             counts=tuple(
                 entry for entry in published.spread.entries if entry["emit"] == expose.expose_id
             ),
+            table=tables.get(expose.expose_id),
+            window=window,
         )
         for expose in exposes
         if not expose.reference
@@ -2622,6 +2627,7 @@ def _histories(
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
             set_by_rules=frozenset(expose.derives) | frozenset(expose.copies) | expose.dependents,
+            dependents=frozenset(expose.dependents - set(expose.derives) - set(expose.copies)),
             parents=reads.candidates(expose.expose_id, held),
             catalogues=reads.catalogues(held),
         )
@@ -3231,6 +3237,7 @@ def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
     """
     fallbacks = _Fallbacks({}, {}, {}, {})
     last_was_trial = False
+    asked: Mapping[Tuple[str, str], Tuple[int, int]] = {}
     for _ in range(_MOST_WIDENINGS):
         try:
             return _author_with_fallbacks(inputs, fallbacks)
@@ -3243,13 +3250,36 @@ def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
             fallbacks.unrated.update(fewer.rates)
         except _RangesWidened as more:
             last_was_trial = False
+            asked = more.ranges
+            before = dict(fallbacks.widened)
             _widen_to_hold(fallbacks.widened, more.ranges)
+            if fallbacks.widened == before:
+                break  # the widened ranges are already written, and the plan asks for them again
     if last_was_trial:
         raise AuthorError(
             "the trial runs did not settle which exposures, rates entries or within entries the "
             f"run reproduces within {_MOST_WIDENINGS} passes"
         )
-    raise AuthorError("the declared date ranges cannot be widened to meet the plan's check")
+    raise FluxError(FLX_6204, _unwidened(asked))
+
+
+def _unwidened(asked: Mapping[Tuple[str, str], Tuple[int, int]]) -> str:
+    """Name each date column whose declared range ``init`` could not widen to what the plan asks."""
+    spans = "; ".join(
+        f"{expose}.{column} to {_day_text(low)} .. {_day_text(high)}"
+        for (expose, column), (low, high) in sorted(asked.items())
+    )
+    return (
+        "init widened the declared date ranges the plan's check asks for, and the plan still "
+        "asks for them: "
+        + (spans or "no column named")
+        + "; declare a range in the contract that holds the span named for each column"
+    )
+
+
+def _day_text(milliseconds: int) -> str:
+    """The UTC day of an instant in milliseconds, as ``YYYY-MM-DD``."""
+    return (date(1970, 1, 1) + timedelta(days=milliseconds // _DAY_MILLISECONDS)).isoformat()
 
 
 def _leave_undated(
@@ -4186,7 +4216,7 @@ def _histories_and_projections(
         published=published,
         declined=declined[0],
     )
-    projections = _projections(authored, keys, contract, histories, published, declined[1])
+    projections = _projections(planned, histories, published, declined[1], window)
     return histories, projections
 
 
@@ -4266,6 +4296,21 @@ def _setters(
     return [(name, held[nfc(name)]) for name in expose.kinds if nfc(name) in held]
 
 
+def _carried_by_snapshot(
+    expose: AuthoredExpose, projections: Projected, snapshots: Set[str]
+) -> FrozenSet[str]:
+    """The columns a ``snapshots`` entry takes from the history for *expose*, less those a rule sets."""
+    if expose.expose_id not in snapshots or expose.expose_id not in projections.carried:
+        return frozenset()
+    ruled = (
+        set(expose.derives)
+        | set(expose.dependents)
+        | set(expose.copies)
+        | {plan.name for plan in expose.columns if plan.fixed}
+    )
+    return frozenset(projections.carried[expose.expose_id][1]) - ruled
+
+
 def _dated_columns(
     planned: _Planned,
     window: Tuple[str, str],
@@ -4276,9 +4321,11 @@ def _dated_columns(
     """Declare the dates of the written exposes: ``within`` entries, exposures and ``rates``.
 
     A column a written history, or a projection entry of it, sets is dated by no lifetime and no
-    ``within`` entry.
+    ``within`` entry, and a snapshot whose history sets both dates of a pair takes no lifetime
+    over them.
     """
     history_columns = _history_columns(planned, histories, projections)
+    snapshots = {str(entry["emit"]) for entry in projections.snapshots}
     return declare_dates(
         planned.reading.profile,
         {
@@ -4298,6 +4345,7 @@ def _dated_columns(
                     for name, label in _setters(expose, history_columns)
                     if label != _HISTORY_LABEL
                 },
+                carried=_carried_by_snapshot(expose, projections, snapshots),
             )
             for expose in planned.authored
             if not expose.reference

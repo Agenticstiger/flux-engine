@@ -72,6 +72,8 @@ _GROUPED_UNREAD = (
 )
 
 _NO_DURATION = "no usable duration: an end drawn apart from its start would break the order"
+#: Why a snapshot's date pair is no lifetime when the history it is projected from sets both dates.
+_BOTH_CARRIED = "the history sets both dates"
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,9 @@ class DatedExpose:
     #: entry reads through a relationship, and the plan refuses one whose foreign-key column the
     #: entry sets, since the cell then holds the history's value, not the row the relationship drew.
     projected_keys: Mapping[str, str] = field(default_factory=dict)
+    #: Its columns a ``snapshots`` entry takes from the history and no rule of the contract sets.
+    #: A lifetime over two of them would be a second source for both: the history sets both dates.
+    carried: FrozenSet[str] = frozenset()
 
 
 @dataclass
@@ -585,6 +590,8 @@ class _Declarer:
             reason = self._history_sets(expose, pair.first) or self._history_sets(
                 expose, pair.second
             )
+        if reason is None and {pair.first, pair.second} <= held.carried:
+            reason = _BOTH_CARRIED
         if reason is None and held.kinds[pair.first] is not held.kinds[pair.second]:
             reason = "a lifetime's end is the same kind of column as its start"
         if reason is None and end in held.blocked:

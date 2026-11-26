@@ -36,6 +36,7 @@ import yaml
 from flux_engine.api.stages import StageResult
 from flux_engine.author import bundle as authoring
 from flux_engine.cli._init import run_init
+from flux_engine.core.errors import FluxError
 from flux_engine.stages.apply import apply as apply_stage
 from flux_engine.stages.pipeline import PlannedRowsAboveCeiling
 from flux_engine.stages.plan import plan as plan_stage
@@ -517,15 +518,35 @@ def test_passes_spent_on_trial_declines_end_with_a_message_that_says_so(
     assert "cannot be widened" not in message
 
 
-def test_passes_spent_on_widening_keep_the_widening_message(
-    monkeypatch: pytest.MonkeyPatch,
+_DAY = 86_400_000
+
+
+@pytest.mark.parametrize(
+    "grows, passes_run",
+    [
+        # The second pass asks for the range the first one already wrote: no further pass runs.
+        (False, 2),
+        # A range that grows on every pass spends every pass, and names the last one asked.
+        (True, authoring._MOST_WIDENINGS),
+    ],
+)
+def test_a_widening_that_does_not_settle_is_refused_with_its_code_and_columns(
+    monkeypatch: pytest.MonkeyPatch, grows: bool, passes_run: int
 ) -> None:
+    passes: List[int] = []
+
     def widen(*args: Any, **kwargs: Any) -> None:
-        raise authoring._RangesWidened({("a", "b"): (1, 2)})
+        passes.append(1)
+        days = len(passes) if grows else 31
+        raise authoring._RangesWidened({("shop_order", "ordered_at"): (0, days * _DAY)})
 
     monkeypatch.setattr(authoring, "_author_with_fallbacks", widen)
-    with pytest.raises(authoring.AuthorError, match="cannot be widened"):
+    with pytest.raises(FluxError) as ended:
         authoring.author_bundle(authoring.AuthorInputs(Path("contract"), Path("profile")))
+    assert ended.value.code.code == "FLX-6204"
+    last = "1970-02-01" if not grows else f"1970-01-{passes_run + 1:02d}"
+    assert f"shop_order.ordered_at to 1970-01-01 .. {last}" in str(ended.value)
+    assert len(passes) == passes_run
 
 
 def test_a_profile_whose_history_would_derive_a_hundred_million_rows_is_written_quickly(

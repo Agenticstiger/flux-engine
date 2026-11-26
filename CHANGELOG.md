@@ -34,6 +34,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 - flux-stats reads profile format 1-5-0: a noisy history member is charged `m_T` and refused outside a table the unit
   follows into, a column's `nullCount/2` is read into `ColumnEntry.null_counts`, and a history whose every member is
   noisy no longer keeps a run from P3. Before, a `noise` block on any history member was refused in every format.
+- The profile-request reader and writer read and write format 1-3-0 (`history` on a table, `nullCount/2` on a column).
+  `init` asks for them, in the request it writes beside a bundle, only when the profile it was given is a private
+  release, and every other request keeps its format and bytes.
 - Profile format 1-5-0 lets a query's rate carry noise: the query states its `unit` (a table's rows, groups of them by the
   child columns of a relationship, or a history's entities), which gives the charge, and flux-stats reads, checks
   and charges it: groups by a followed relationship are charged `m_P`, groups by a relationship into a table the unit does
@@ -57,9 +60,20 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   out, with a note in the fit's output (`noiseNotes` in `--json`), and a profile whose rates are all inside it gives
   `FLX-3707` naming them. Each query's squared gaps weigh the inverse of its rate's variance, scaled so the least noisy
   weighs 1, as an exact rate does.
-- The profile-request reader and writer read and write format 1-3-0 (`history` on a table, `nullCount/2` on a column).
-  `init` asks for them, in the request it writes beside a bundle, only when the profile it was given is a private
-  release, and every other request keeps its format and bytes.
+
+### Changed
+
+- The request `fluxsim init` writes names as `cliqueColumns` only the columns the contract requires. A clique column
+  holds no null, and a profiler releases a column the contract leaves optional over its known values, outside the
+  cliques. A request init writes for a table with optional columns now names fewer columns than before.
+
+## 0.12.0 - 2026-11-26
+
+A Kafka sink, `fluxsim init --window` and `--history`, `validate --profile`, history and periods declarations
+on kernel 0.2.0, a declared open end and version chain read by `init`, and fixes to `init`, projections, date
+ranges and `verify`. The engine now needs `flux-spec>=0.5.5,<0.6`.
+
+### Added
 
 - flux-stats: `noise.noise_floor(mechanism, scale, cells)`, the count a released cell must exceed to stand clear
   of the noise among `cells` cells, a union bound at the confidence `noise.widening` uses, and `noise.ceil_ln`,
@@ -222,9 +236,8 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the amendment of 2026-11-24). The ledger names where each statistic went. A table whose foreign
   key the history holds without writing a `parent` over the same parent stays unprojected, with the reason in the
   ledger, since it would copy values that are no keys of the parent.
-- The request `fluxsim init` writes names as `cliqueColumns` only the columns the contract requires. A clique column
-  holds no null, and a profiler releases a column the contract leaves optional over its known values, outside the
-  cliques. A request init writes for a table with optional columns now names fewer columns than before.
+- In a history bounded by its parent's lifetime, an entity the parent's end forces to end keeps one version as its
+  ending version from its first start (ADR 0017), and its periodic rows stay inside the parent's life.
 
 ### Fixed
 
@@ -447,6 +460,39 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   recorded shortfall. A range on a periods entry's period column keeps the periods whose first day lies in it.
   Only a range that does not meet the window is refused (`FLX-3403`). Such a plan records `rangeSetters: "held"`;
   a recorded plan without it replays as it was made (ADR 0024, the amendment of 2026-11-25).
+- In a history kept to its parent's lifetime (`parent.lifetime: true`), the periodic rows of an entity that ends
+  with its parent stay inside the parent's lifetime. Under `finalVersion` that entity's ending version is open, and a
+  periods projection held it up to the window's end, long after the parent had ended; its periods now stop at the
+  parent's last day (ADR 0017, the amendment of 2026-11-26), even where a range on the validity columns ends before
+  it, since the range closes no version. Only a bundle that declares the key changes bytes, and no released version
+  has it; every other bundle and every recorded plan keeps its bytes.
+- As intended, an entity of such a history ends when its parent's lifetime ends inside the horizon, even when the
+  declared end `share` is 0: under `finalVersion` its final version carries the end value, and an entity with one
+  version carries it from its first day, so the share a run reaches can be above the declared one.
+- An events entry with a `when` no longer holds its history to the range on the columns it copies. The entry
+  records only the versions its condition holds for, yet the range on its `date` or `at` was read as a bound on
+  every version, so every entity's first start was moved to the range's low end, and in a history kept to its
+  parent's lifetime the entities of a parent that closed before that day had no room and `plan` refused the bundle
+  (`FLX-3403`). The range on such a column is noted again, and `verify` counts the events outside it. When a range
+  on the validity columns does leave a parent's entities no room, the refusal now names the range and says to
+  widen it (ADR 0024, the amendment of 2026-11-26).
+- `init` left out the history's parent when a contract dependency sets the parent's key from the natural entity,
+  although the plan accepts that dependency beside a parent. With no parent, the expose keyed by the natural entity
+  was no snapshot of the history: it was drawn apart, with keys of its own, and many of its rows had no version.
+  `init` now writes the parent for such a dependency; a dependency from other columns, or to another column too,
+  still leaves it out (ADR 0017, the second amendment of 2026-11-26).
+- A periods entry `init` wrote had no `from` or `through`, so its periods ran over every month of every version,
+  years before the months the data holds. When the period column publishes its histogram, `init` now bounds the
+  entry by it: `from` opens the period that holds the first edge and `through` is the last bin's start, both held
+  to the window and the history's `until`. A withheld histogram, or none, writes the entry as before (ADR 0027,
+  the amendment of 2026-11-26).
+- `init` wrote a lifetime over a snapshot's two dates although the history sets both, so `verify` failed the
+  lifetime on the entities whose history ended otherwise. A date pair of a snapshot whose columns both come from
+  the history is now unused, for the reason "the history sets both dates"; a pair one of whose dates a rule sets
+  keeps its lifetime (ADR 0024, the second amendment of 2026-11-26).
+- When the plan kept asking for the same wider date ranges after `init` had written them, `init` ran every pass
+  and stopped with no code and no column named. It now stops at the first pass that asks for nothing new and
+  refuses with `FLX-6204`, naming each column and the span the plan asks for.
 
 ## 0.11.1 - 2026-11-24
 
