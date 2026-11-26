@@ -5924,11 +5924,15 @@ def _plan_emit(
 ) -> Any:
     """The generator plan of one emit: a reference plan, or the plan of a drawn expose.
 
-    The fidelity block of a drawn expose is compiled first, as ``verify`` does.
+    The fidelity block of a drawn expose is compiled first, as ``verify`` does. The plan is built
+    as ``plan`` builds it: a snapshot's columns and the columns a history or a projection sets are
+    not cut at the contract's date range, since the history's rows write them.
     """
+    from flux_engine.concordance.compiler import names_a_snapshot
     from flux_engine.generator import build_plan
     from flux_engine.generator.reference import ReferenceRows, build_reference_plan
     from flux_engine.generator.relations import related_columns
+    from flux_engine.stages._range_setters import uncut_columns
     from flux_engine.stages.pipeline import compile_declared_fidelity
 
     if resolved.is_reference:
@@ -5952,6 +5956,8 @@ def _plan_emit(
         related=related_columns(resolved.keys),
         rules=rules,
         generator_version=version,
+        projected=names_a_snapshot(resolved.extension),
+        uncut=uncut_columns(resolved, emits),
     )
 
 

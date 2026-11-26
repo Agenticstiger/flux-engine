@@ -68,7 +68,8 @@ FLX_2101: ErrorCode = register(
 
 FLX_2102: ErrorCode = register(
     "FLX-2102",
-    "the recorded plan's own planDigest has moved",
+    "the recorded plan's planDigest has moved, it cannot be read, or it holds a marker or a "
+    "shortfall this engine does not accept",
     "The plan.json read back from the run directory does not hash to the "
     "planDigest it was written with: it was edited, truncated, or "
     "written by an incompatible version after the fact. A plan.json that cannot "
