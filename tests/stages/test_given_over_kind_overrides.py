@@ -90,6 +90,11 @@ EVERY = [
     {"count": 1, "overrides": {"model": "sedan"}},
     {"count": 1, "overrides": {"model": "truck"}},
 ]
+#: Every kind overrides ``band`` as well as ``charge``, so no row draws ``band``.
+BOTH = [
+    {"count": 1, "overrides": {"charge": "fuel", "band": "x"}},
+    {"count": 1, "overrides": {"charge": "toll", "band": "y"}},
+]
 #: The kinds set ``litres``, a number drawn from bins, to a value in each bin.
 LITRES = [{"count": 1, "overrides": {"litres": "20"}}, {"count": 1, "overrides": {"litres": "80"}}]
 #: The first kind overrides ``model``, a column of the version, as well as ``charge``.
@@ -211,6 +216,19 @@ def test_a_column_of_the_version_every_kind_overrides_holds_no_value_of_the_vers
     _, rows = _run(target, tmp_path)
     assert {row["model"] for row in rows} == {"sedan", "truck"}
     assert all(row["tier"] == TIER_OF[row["model"]] for row in rows)
+
+
+def test_a_column_every_kind_overrides_is_drawn_on_no_row_and_holds_nothing_given(
+    tmp_path: Path,
+) -> None:
+    # ``band`` is declared given ``charge``, but every kind sets it, so its own draw is never
+    # kept: nothing is drawn given an override, and the plan keeps the bytes it had before.
+    target = kinds_bundle(tmp_path, BOTH)
+    projection = pipeline.execute(target, kernel=KERNEL_V2).emit(_fleet.PERIODIC).plan.projection
+    assert projection.held == () and projection.fallback == () and not projection.overridden
+    layout, rows = _run(target, tmp_path)
+    assert KEY not in load_recorded_plan(layout)
+    assert {(row["charge"], row["band"]) for row in rows} == {("fuel", "x"), ("toll", "y")}
 
 
 def test_a_column_drawn_given_the_bin_of_an_override_follows_the_row(tmp_path: Path) -> None:

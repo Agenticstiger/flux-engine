@@ -4487,12 +4487,21 @@ def _laid_out(
     (*declined* names the reason), or when its profile gives no history init writes. Then the
     relationships held back for it are counted as they are for any other table, so the run plans
     again with that table's history unwritten. Each pass leaves out one table at least, so the
-    passes end.
+    passes end: one for each table with a history and a last that leaves none out. A run that
+    plans more often than that has lost a table it had left out, which is a defect of the engine,
+    and it stops with an error instead of planning for ever.
     """
     declared = inputs.history
     unwritten: FrozenSet[str] = frozenset()
+    passes = 0
     while True:
         planned = _plan_bundle(inputs, unwritten)
+        passes += 1
+        if passes > len(planned.held | unwritten) + 1:
+            raise RuntimeError(
+                f"the plan of the bundle was laid out {passes - 1} times for "
+                f"{len(planned.held | unwritten)} tables with a history, and still left one out"
+            )
         window, window_note, given_window = _bundle_window(planned, inputs)
         _widen_ranges(planned.authored, fallbacks.widened)
         if given_window is not None:

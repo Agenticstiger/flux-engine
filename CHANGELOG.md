@@ -175,20 +175,26 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   entry, which the plan refuses over a table with a history, so the bundle lost its projections and then its
   history. No layout reads such a count now: it is listed as unused with the reason, in an events or periodic
   table's case that its rows per entity follow from the history. Only a history that is written holds a relationship
-  back (ADR 0027, the amendment of 2026-11-26 about counts per entity).
+  back (ADR 0027, the amendment of 2026-11-26 about counts per entity). When the plan refuses a history, `init` lists
+  each statistic of the history as unused, in the ledger and in the list it prints, with the plan's own reason for the
+  refusal, where it gave the text of the `counts` refusal before.
 - A sampled `verify` whose run holds a few records of a grouping level that the profile holds no record of, fewer
   than `records.min`, passed where the full `verify` refused the group (`FLX-5005`). The sample now holds such a
   level's records to the floor, as the full comparison does.
 - A profile cut in part (see the entry under Changed) was graded as if the cut members had been released without noise:
   a noisy history or date pair with a member gone fell to `P1`. The grade now counts the members that are left. In
   `flux_stats`, `holds_nothing` of a date pair, a relationship's date pair and a history is true only when no member is
-  left.
+  left. A profile entry cut to its names alone is graded by the members it keeps as well, so a fresh plan of such a
+  profile can grade higher (`P3` where it was `P1`), and its plan digest changes, since the plan records the grade. A
+  recorded plan keeps the grade it records and replays as it was made.
 - A table that links to a projected emit (a snapshot or an events emit) read the rows the emit would draw
   without its projection, not the rows it writes, so a `within` entry through a link into a snapshot kept a date
   inside a lifetime the snapshot does not hold, and `verify` reported the entry met on fewer rows than it covers. The
   link now reads the rows the projected emit writes, in a rule, a `within` entry and a column drawn `given` the linked
   row. So does a parent's summary over a child that reads one, and a snapshot, events or periodic emit projected from
-  a history that reads one of another history, which is derived from the history as it reads it. A new plan that has such
+  a history that reads one of another history, which is derived from the history as it reads it. A path of two links or
+  more that passes through an events emit whose foreign key the projection sets still reads the row that emit would
+  draw, not the row its cell names, and `verify` reports a rule over it as violated. A new plan that has such
   a link says `projectedReads: "final"`, and a recorded plan without it replays the link as it was made (ADR 0027, the
   amendment of 2026-11-26 about linked rows).
 - A history that keeps to its parent's lifetime (`parent.lifetime`) with a rule that reads `previous` was refused at
