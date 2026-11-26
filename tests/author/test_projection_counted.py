@@ -19,12 +19,9 @@ from typing import Any, Dict, Optional
 import pytest
 
 from flux_engine.seam.projections import SNAPSHOTS_KEY
-from flux_engine.stages.apply import apply
-from flux_engine.stages.plan import plan
 from flux_engine.stages.validate import validate
-from flux_engine.stages.verify import verify
 
-from ._written import bundle_digests, plan_written
+from ._written import applied_and_verified, bundle_digests, plan_written
 from .test_history_init import _bins, _entries, _init, _metrics, _namespace, _states
 from .test_history_parent import _relationship
 from .test_projection_init import CONTRACT, _profile_with
@@ -189,21 +186,7 @@ def test_the_written_bundle_validates_plans_applies_and_verifies(
     tmp_path: Path, contract: str
 ) -> None:
     _init(tmp_path, _profile(), contract)
-    bundle, state = tmp_path / "bundle", tmp_path / "state"
-    assert validate(bundle).exit_code == 0
-    planned = plan(
-        bundle,
-        state_dir=state,
-        profile=tmp_path / "plans.profile.json",
-        kernel="0.2.0",
-        stage=False,
-    )
-    assert planned.success, planned.stderr
-    run_id = str(planned.artifacts["run_id"])
-    applied = apply(bundle, state_dir=state, run_id=run_id)
-    assert applied.success, applied.stderr
-    checked = verify(bundle, state_dir=state, run_id=run_id)
-    assert checked.success, checked.stdout + checked.stderr
+    applied_and_verified(tmp_path)
 
 
 def test_the_written_bundle_validates_and_plans(tmp_path: Path) -> None:

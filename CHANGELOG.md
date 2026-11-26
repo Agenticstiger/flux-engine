@@ -103,6 +103,12 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   says `projectedGivens: "afterOverrides"`; a recorded plan without that value replays the draw it was made with. The
   `plan` refusal 0.12.1 added for a column drawn `given` a cell only some kinds override is replaced by this rule: such
   a plan is made, and its column follows the row.
+- `init` keeps a history, and the snapshot, events and periodic tables projected from it, when the profile counts a
+  table's rows per parent over a relationship into the table with the history. It wrote that count as a `counts`
+  entry, which the plan refuses over a table with a history, so the bundle lost its projections and then its
+  history. No layout reads such a count now: it is listed as unused with the reason, in an events or periodic
+  table's case that its rows per entity follow from the history. Only a history that is written holds a relationship
+  back (ADR 0027, the amendment of 2026-11-26 about counts per entity).
 
 ## 0.12.1 - 2026-11-26
 
