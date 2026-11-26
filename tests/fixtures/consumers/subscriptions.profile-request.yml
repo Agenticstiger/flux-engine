@@ -93,10 +93,6 @@
     "cliqueColumns":
       - "plan"
       - "region"
-      - "offered"
-      - "renewed"
-      - "renewed_at"
-      - "amount"
 "queries":
   - "name": "premium-renewed"
     "sql": "SELECT \"subscriptions\".\"subscription_id\" AS \"subscription_id\", \"subscriptions\".\"plan\" AS \"plan\", \"subscriptions\".\"region\" AS \"region\", \"subscriptions\".\"offered\" AS \"offered\", \"subscriptions\".\"renewed\" AS \"renewed\", \"subscriptions\".\"renewed_at\" AS \"renewed_at\", \"subscriptions\".\"amount\" AS \"amount\" FROM \"subscriptions\" AS \"subscriptions\" WHERE \"subscriptions\".\"plan\" = 'premium' AND \"subscriptions\".\"renewed\""

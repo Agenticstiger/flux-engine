@@ -64,6 +64,7 @@ from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.coverage import printable
 from flux_stats.cliques import CliqueEntry, edge_text
 from flux_stats.noise import point_estimate
+from flux_stats.profile import NULL_COUNT_2
 
 __all__ = ["draw_cliques"]
 
@@ -88,6 +89,11 @@ _OWN_HISTOGRAM = (
 _NO_BINNED_PARENT = (
     "a new plan runs kernel 0.1.0, which draws no column given a bin, so a clique that holds a "
     "number or timestamp column is not drawn"
+)
+#: Why a column a clique draws sets aside the share of NULL rows a ``nullCount/2`` states.
+_CLIQUE_HOLDS_NO_NULL = (
+    "a clique draws this column, and a clique column holds no null (FLX-3402), so the share of "
+    "its rows that hold a null, {share}, that this count states is not drawn"
 )
 
 
@@ -128,6 +134,8 @@ def draw_cliques(
     labels = [f"/{'/'.join(_tokens(expose_id, clique))}" for clique in cliques]
     for clique in cliques:
         for name in clique.columns:
+            if name in plans:
+                _set_aside_released_nulls(plans[name])
             _check_column(plans, kinds, determined, name, clique, (contexts or {}).get(name))
     steps = junction_tree(
         [clique.columns for clique in cliques],
@@ -142,6 +150,30 @@ def draw_cliques(
             drawn.add(name)
     _properties(plans, cliques, kinds, expose_id)
     return drawn
+
+
+def _set_aside_released_nulls(plan: ColumnPlan) -> None:
+    """Take off a column a clique draws the ``nullFraction`` its ``nullCount/2`` gave, saying why.
+
+    A private release states its cliques and a column's noisy count of known and NULL rows apart
+    (profile format 1-5-0), and the request init writes asks for both. The clique decides how the
+    column is drawn, and a clique column holds no null, so the share is set aside, the count is
+    named as passed over with the share, and the cliques are drawn: ``--strict`` refuses the
+    bundle for it, as for any statistic it does not use.
+    """
+    cited = [
+        label.basis.statistic[0]
+        for label in plan.labels
+        if label.tokens == ("nullFraction",)
+        and label.basis.statistic is not None
+        and label.basis.statistic[1] == NULL_COUNT_2
+    ]
+    if not cited:
+        return
+    share = plan.declaration.pop("nullFraction", None)
+    plan.labels = [label for label in plan.labels if label.tokens != ("nullFraction",)]
+    reason = _CLIQUE_HOLDS_NO_NULL.format(share=share)
+    plan.passed.extend((tokens, reason) for tokens in cited)
 
 
 def _without_binned(

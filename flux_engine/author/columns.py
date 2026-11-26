@@ -61,6 +61,7 @@ from flux_engine.seam.coverage import printable
 from flux_stats.column_metrics import MAX, MIN, NULL_COUNT, QUANTILES
 from flux_stats.definitions import LEVEL_HISTOGRAM, MARGINAL_HISTOGRAM, MEAN, QUANTILE_BINNED
 from flux_stats.definitions import SUPPORT as SUPPORT_STATISTIC
+from flux_stats.profile import NULL_COUNT_2
 from flux_stats.spelling import MOST_DIGITS
 
 __all__ = [
@@ -175,6 +176,9 @@ class ColumnContext:
     #: ``statistics``: whether each cell of its ungrouped histogram stands clear of the noise
     #: (:func:`flux_stats.noise.noise_floor`, ADR 0019, amendment of 2026-11-25).
     noise_clear: Tuple[Tuple[int, Tuple[bool, ...]], ...] = ()
+    #: For each noisy ``nullCount/2`` of the column (profile format 1-5-0), by its position in
+    #: ``statistics``: the count a cell must exceed to stand clear of the noise.
+    noise_floors: Tuple[Tuple[int, Fraction], ...] = ()
     #: The open end (milliseconds) the contract declares when this column is the end of a validity
     #: window whose table publishes a history: an open version's end holds it, and the history
     #: sets it, so a column that publishes only that value needs no draw of its own.
@@ -476,6 +480,58 @@ def plan_column(ctx: ColumnContext) -> ColumnPlan:
     return plan
 
 
+#: A column's noisy count of its known and NULL rows (profile format 1-5-0).
+_NULL_COUNT_2 = NULL_COUNT_2
+
+
+def _released_null_share(ctx: ColumnContext, plan: ColumnPlan, categorical: bool) -> bool:
+    """``nullFraction`` from the column's noisy ``nullCount/2`` (profile format 1-5-0), if it has one.
+
+    Its two cells, the rows where the column is known and where it is NULL, are read through their
+    point estimate. When the NULL cell stands clear of the noise (:func:`flux_stats.noise.noise_floor`
+    over the two cells, ADR 0019, amendment of 2026-11-25), the share is that estimate. When it does
+    not, the release cannot tell the count from none: it allows any share from 0 to the NULL cell's
+    estimate plus the floor, over the rows. Then no null is drawn, as for a null count withheld as
+    small, with an assumption that names the interval: a column that declares a share is never the
+    column another is drawn given, a clique column or a tracked one. Returns whether the column had
+    one to read.
+    """
+    floors = dict(ctx.noise_floors)
+    clears = dict(ctx.noise_clear)
+    for index, item in _statistics(ctx.entry):
+        if item.get("definition") != _NULL_COUNT_2 or index not in floors or index not in clears:
+            continue
+        groups = item.get("groups")
+        group = groups[0] if isinstance(groups, list) and groups else None
+        counts = group.get("levelCounts") if isinstance(group, Mapping) else None
+        if not isinstance(counts, list) or len(counts) != 2:
+            continue
+        known, null = (int(count) for count in counts)
+        tokens = ctx.profile_tokens + ("statistics", str(index))
+        known_clear, null_clear = clears[index]
+        rows = known + null if known_clear else ctx.rows
+        if null_clear and rows:
+            share = min(Fraction(null, rows), Fraction(1))
+            plan.declaration["nullFraction"] = _share_text(share)
+            plan.labels.append(Label(("nullFraction",), from_profile(tokens, _NULL_COUNT_2)))
+            return True
+        upper = min(Fraction(1), (null + floors[index]) / rows) if rows else Fraction(1)
+        reason = (
+            "The released null count stands inside the noise, so it cannot be told from none: the "
+            f"release allows 0 to {_share_text(upper)} of the rows to hold a null, and no nulls "
+            "are drawn."
+        )
+        if not categorical:
+            plan.declaration["nullFraction"] = "0"
+            plan.labels.append(Label(("nullFraction",), assumed(reason)))
+        plan.assumptions.append(reason)
+        plan.reads.append(
+            (tokens, "inside the noise, it bounds the share of rows that hold a null")
+        )
+        return True
+    return False
+
+
 def _required_nulls(ctx: ColumnContext, plan: ColumnPlan, nulls: Any, count: Any) -> None:
     """What a ``required`` column makes of its published null count and count: checks only.
 
@@ -545,6 +601,8 @@ def _null_fraction(ctx: ColumnContext, plan: ColumnPlan) -> None:
         plan.labels.append(
             Label(tokens, from_profile(ctx.profile_tokens + ("metrics", "nullCount"), _NULL_COUNT))
         )
+        return
+    if _metric(ctx.entry, "nullCount") is None and _released_null_share(ctx, plan, categorical):
         return
     if _metric(ctx.entry, "nullCount") is None:
         reason = "The profile has no nullCount, so no nulls are drawn."

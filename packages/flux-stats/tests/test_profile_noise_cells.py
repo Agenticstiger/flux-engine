@@ -4,8 +4,10 @@
 
 """A noisy statistic that can move an entity between two cells is refused.
 
-One changed row can move an entity between two cells of a statistic with ``per`` and of every
-statistic of a ``history``, and the reader charges a sensitivity of 1 for a noisy statistic.
+One changed row can move an entity between two cells of a statistic with ``per``, and the reader
+charges a sensitivity of 1 for a noisy statistic. A history member carries noise only in format
+1-5-0, in a table the unit follows into (``test_profile_noisy_history.py``); in an earlier format
+it is refused.
 """
 
 from __future__ import annotations
@@ -135,7 +137,7 @@ def test_a_noisy_history_statistic_is_refused() -> None:
     history["versionsPerEntity"]["noise"] = NOISE
     message = _refused(document)
     assert "history.versionsPerEntity.noise" in message
-    assert "between two cells" in message and "sensitivity of 1" in message
+    assert "format 1-5-0" in message
 
 
 def test_a_noisy_tracked_column_statistic_of_a_history_is_refused() -> None:

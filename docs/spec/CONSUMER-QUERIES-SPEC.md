@@ -499,7 +499,14 @@ into 1 to 2,147,483,647, since cma reads 0 as "from the clock"), for at most `ev
 evaluation writes the candidate values, each rounded to its `step`, into a copy of the bundle's files, plans
 and applies it at `scale` under the state directory, loads the run's tables into the one query process,
 counts the calibration queries, and removes the copy and its run. The objective is the sum of the squared
-gaps between each calibration query's rate and its target in the pinned profile, an exact fraction. The best
+gaps between each calibration query's rate and its target in the pinned profile, an exact fraction. A target
+a private release states with noise (profile format 1-5-0) is its point estimate. A query whose rate stands
+inside the noise has no target and is left out, with a note: its unit's records, the sum of its two cells, are
+at most twice `noise_floor` over every cell of its statistic, zero and below included, since a sum that noise
+alone made passes that only when one of its cells passes the floor. A profile whose rates all stand inside it
+gives `FLX-3707` naming them. Each noisy query's squared gaps weigh the inverse of its rate's variance (the
+delta method's `v (f^2 + t^2) / n^4`, the mean over its groups for a grouped one), scaled so the least noisy
+weighs 1, as an exact rate does. The best
 evaluation wins, and of equals the earlier one. A run that was refused stops the fit (`FLX-7101`). The fit
 needs a bundle with consumers, at least one parameter, and a pinned profile that states the rate of at least
 one calibration query (`FLX-3707`); a bundle compiled under another sqlglot version than the one installed

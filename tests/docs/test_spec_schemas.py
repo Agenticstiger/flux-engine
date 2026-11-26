@@ -173,3 +173,52 @@ def test_the_profile_1_3_0_example_validates_against_its_schema_and_not_the_1_2_
         Draft202012Validator(schema).validate(old)
     previous = json.loads((SPEC / "profile-1-2.schema.json").read_text(encoding="utf-8"))
     assert list(Draft202012Validator(previous).iter_errors(example))
+
+
+def test_the_profile_1_5_0_schema_and_example_validate_and_1_4_0_documents_still_do() -> None:
+    from jsonschema import Draft202012Validator
+
+    schema = json.loads((SPEC / "profile-1-5.schema.json").read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    assert schema["$id"].endswith("/profile/1-5-0/FluxProfile.json")
+    assert schema["properties"]["_schemaURL"]["enum"][-1] == schema["$id"]
+    example = json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8"))
+    Draft202012Validator(schema).validate(example)
+    assert example["_schemaURL"] == schema["$id"]
+    for name in (
+        "profile-example.json",
+        "profile-1-2-example.json",
+        "profile-1-2-private-example.json",
+        "profile-1-3-example.json",
+        "profile-1-4-example.json",
+        "profile-1-4-cliques-example.json",
+        "profile-1-4-follows-example.json",
+    ):
+        old = json.loads((SPEC / name).read_text(encoding="utf-8"))
+        Draft202012Validator(schema).validate(old)
+    previous = json.loads((SPEC / "profile-1-4.schema.json").read_text(encoding="utf-8"))
+    assert list(Draft202012Validator(previous).iter_errors(example))
+
+
+def test_a_null_count_is_noisy_ungrouped_and_has_two_cells() -> None:
+    import copy
+
+    from jsonschema import Draft202012Validator
+
+    schema = json.loads((SPEC / "profile-1-5.schema.json").read_text(encoding="utf-8"))
+    example = json.loads((SPEC / "profile-1-5-history-example.json").read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema)
+
+    def stat(doc: dict) -> dict:
+        return doc["tables"]["member"]["columns"]["segment"]["statistics"][0]
+
+    assert stat(example)["definition"] == "nullCount/2"
+    without_noise = copy.deepcopy(example)
+    del stat(without_noise)["noise"]
+    assert list(validator.iter_errors(without_noise))
+    grouped = copy.deepcopy(example)
+    stat(grouped)["groupBy"] = "id"
+    assert list(validator.iter_errors(grouped))
+    three_cells = copy.deepcopy(example)
+    stat(three_cells)["groups"][0]["noisyCounts"].append("1")
+    assert list(validator.iter_errors(three_cells))
