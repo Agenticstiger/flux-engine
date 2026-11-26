@@ -2549,6 +2549,14 @@ def _projections(
 #: The keys of a column's declaration that ``verify`` holds the rows to, as against the ones the draw reads.
 _CHECKED_DECLARATION = ("range", "support", "maxCardinality")
 
+#: The keys that parameterise a column's draw once its checked keys are gone (``FLX-3402``).
+_DRAWN_DECLARATION = ("levels", "levelWeightsGiven", "bins", "binWeightsGiven", "rate")
+
+_CARRIED_LEVELS = (
+    "The history sets the column's values, so its support is not checked, and the draw keeps "
+    "the levels the support named, at the equal weights it drew them at."
+)
+
 
 def _release_carried(expose: AuthoredExpose, history: str, names: Sequence[str]) -> None:
     """Declare no column of a projected emit that holds the history's values, and score none.
@@ -2557,17 +2565,29 @@ def _release_carried(expose: AuthoredExpose, history: str, names: Sequence[str])
     statistics nor the range or levels they would declare describe it: a value of the history
     outside them would fail the check (``FLX-5005``). The projection's own checks hold the
     column to the history.
+
+    The plan still chooses a draw for each such column but a key and one a contract rule sets
+    (:attr:`ColumnPlan.fixed`). One drawn by its support alone (levels the contract or the profile
+    lists, at equal weights) keeps those levels at equal weights, so its draw still has parameters
+    (``FLX-3402``) and the bundle keeps its projections.
     """
     held = set(names)
     expose.carries = history
     for plan in expose.columns:
         if plan.name not in held:
             continue
+        by_support = "support" in plan.declaration and not any(
+            key in plan.declaration for key in _DRAWN_DECLARATION
+        )
         for key in _CHECKED_DECLARATION:
             plan.declaration.pop(key, None)
         plan.labels = [
             label for label in plan.labels if label.tokens[0] not in _CHECKED_DECLARATION
         ]
+        if by_support and plan.fixed is None and plan.level_names:
+            texts = share_texts([Fraction(1)] * len(plan.level_names))
+            plan.declaration["levels"] = dict(zip(plan.level_names, texts, strict=True))
+            plan.labels.append(Label(("levels",), assumed(_CARRIED_LEVELS)))
         plan.properties = []
     expose.properties = [
         prop for prop in expose.properties if not _property_on(prop.document, held)

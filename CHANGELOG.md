@@ -20,6 +20,16 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+### Fixed
+
+- `init` keeps a bundle's projections when a column a projection takes from the history is drawn at equal weights
+  over the levels its support names (a contract's enum, or the levels the profile lists, with no counts published).
+  A projected column declares no support, and the support was all its draw read, so the plan refused the bundle
+  (`FLX-3402`) and `init` wrote it without any projection: a table projected from a history then drew keys of its
+  own. The column now keeps those levels, at equal weights.
+
 ## 0.12.0 - 2026-11-26
 
 A Kafka sink, `fluxsim init --window` and `--history`, `validate --profile`, history and periods declarations

@@ -19,6 +19,7 @@ from __future__ import annotations
 import copy
 import json
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -256,6 +257,94 @@ def test_a_before_column_the_contract_requires_is_left_out_and_said(
 ) -> None:
     notes = "\n".join(_bundle_notes(tmp_path, "plan_change"))
     assert "plan_change: events before: before_channel is required" in notes
+
+
+def test_an_image_whose_counts_are_withheld_keeps_its_levels_and_the_events_entry(
+    tmp_path: Path,
+) -> None:
+    # The contract lists the levels of before_tier and the profile withholds every count of it, so
+    # the column is drawn at equal weights over the levels its declared support names. The events
+    # entry sets it from the history, so the support is no longer checked; the levels stay drawn,
+    # and the bundle keeps its projections.
+    contract = CONTRACT.read_text(encoding="utf-8").replace(
+        "{ name: before_tier, type: STRING, required: false }",
+        "{ name: before_tier, type: \"enum('basic','plus','pro')\", required: false }",
+    )
+    profile = _profile_with("plan_change")
+    withheld = _levels(TIER, [0, 0, 0], 3000)
+    withheld["groups"] = [{"group": "", "status": "C"}]
+    profile["tables"]["plan_change"]["columns"]["before_tier"] = {
+        "domain": "category",
+        "statistics": [withheld],
+    }
+    # An image whose counts are published keeps the weights they give.
+    profile["tables"]["plan_change"]["columns"]["after_tier"] = {
+        "domain": "category",
+        "statistics": [_levels(TIER[:2], [2000, 1000], 3000)],
+    }
+    _init(tmp_path, profile, contract)
+    namespace = _namespace(tmp_path)
+    assert [entry["emit"] for entry in namespace.get(EVENTS_KEY, [])] == ["plan_change"]
+    columns = namespace["emits"]["plan_change"]["fidelity"]["columns"]
+    column = columns["before_tier"]
+    assert "support" not in column and "maxCardinality" not in column
+    assert sorted(column["levels"]) == TIER
+    weights = [Decimal(text) for text in column["levels"].values()]
+    assert sum(weights) == 1 and max(weights) - min(weights) <= Decimal("1e-9")
+    published = columns["after_tier"]["levels"]
+    assert abs(Decimal(published["basic"]) - 2 * Decimal(published["plus"])) <= Decimal("1e-8")
+    plan_written(tmp_path)
+
+
+def _listed_tiers(profile: Dict[str, Any], *, derived: bool = False) -> str:
+    """*profile* listing the tiers of ``plan_current`` without counts; the contract, with *derived*.
+
+    With *derived*, a contract ``derive`` sets the snapshot's tier on every row.
+    """
+    listed = _levels(TIER[:2], [0, 0], 1000)
+    listed["definition"] = "support/1"
+    del listed["levels"]
+    listed["groups"] = [{"group": "", "k": 1000, "support": TIER[:2], "status": "F"}]
+    profile["tables"]["plan_current"]["columns"]["tier"] = {
+        "domain": "category",
+        "statistics": [listed],
+    }
+    contract = CONTRACT.read_text(encoding="utf-8")
+    if derived:
+        head, tail = contract.split("  - exposeId: plan_current\n", 1)
+        tail = tail.replace(
+            "        - { name: channel, type: STRING, required: true }\n",
+            "        - { name: channel, type: STRING, required: true }\n"
+            "      invariants:\n"
+            "        - { id: current_tier, derive: tier, expr: \"'basic'\" }\n",
+            1,
+        )
+        contract = head + "  - exposeId: plan_current\n" + tail
+    return contract
+
+
+def test_a_snapshot_column_drawn_by_its_support_alone_keeps_its_levels(tmp_path: Path) -> None:
+    # The profile lists the snapshot's tiers but not their counts, so the column is drawn at equal
+    # weights by its support alone; the plan still draws it, so it keeps those levels.
+    profile = _profile_with("plan_current")
+    contract = _listed_tiers(profile)
+    _init(tmp_path, profile, contract)
+    namespace = _namespace(tmp_path)
+    assert [entry["emit"] for entry in namespace.get(SNAPSHOTS_KEY, [])] == ["plan_current"]
+    column = namespace["emits"]["plan_current"]["fidelity"]["columns"]["tier"]
+    assert "support" not in column and sorted(column["levels"]) == TIER[:2]
+    plan_written(tmp_path)
+
+
+def test_a_snapshot_column_a_derive_sets_keeps_no_levels(tmp_path: Path) -> None:
+    # A derive without a when sets the column on every row, so the plan draws nothing for it.
+    profile = _profile_with("plan_current")
+    contract = _listed_tiers(profile, derived=True)
+    _init(tmp_path, profile, contract)
+    namespace = _namespace(tmp_path)
+    assert [entry["emit"] for entry in namespace.get(SNAPSHOTS_KEY, [])] == ["plan_current"]
+    assert "tier" not in namespace["emits"]["plan_current"]["fidelity"]["columns"]
+    plan_written(tmp_path)
 
 
 WRITTEN = ("plan_current", "plan_change", "plan_month")
