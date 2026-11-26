@@ -5,7 +5,7 @@
 """Profile format 1-5-0: a noisy query rate and its ``unit`` (PROFILE-SPEC.md section 3a).
 
 ``docs/spec/profile-1-5-history-example.json`` holds three noisy queries over ``card_version``, a
-table the unit follows into at a cap of 4: a row-keeping filter (``m_T`` = 4), groups by the child
+table the unit follows into at a cap of 4: each row a record (``m_T`` = 4), groups by the child
 columns of the followed relationship from ``member`` (``m_P`` = 1) and groups by the history's
 entity (``m_T`` = 4).
 """

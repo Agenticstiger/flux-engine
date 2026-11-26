@@ -230,13 +230,17 @@ for a table that a unit follows into (ADR 0037).
 
 8. **A query's rate may carry noise, and its query states a `unit`.** A `queries[]` statistic (a `levelHistogram/1`
    over `["false", "true"]`) may carry a `noise` block, with its groups in the noisy form. A noisy query states its
-   `unit`: `{ "table": T }`, a row-keeping filter (records are rows of `T`, charge `m_T`), or `{ "table": T, "by":
+   `unit`: `{ "table": T }`, each row of `T` a record (charge `m_T`), or `{ "table": T, "by":
    [columns] }`, where `by` is the child columns of a relationship from a parent `P` into `T` that the unit follows,
-   or into a table it does not reach (one group is one row of `P`, charge `m_P`, 1 when `P` is the expose) or `T`'s
+   or into a table it does not reach (one group is one row of `P`, charge `m_P`, 1 when `P` is the expose; twice that, L1 = 2 `m_P` and L2² = 2 `m_P`², when
+   `T` is not reached, since a group stays when its row of `P` leaves and can change cell) or `T`'s
    history entity (charge `m_T`, under the history's whole-entity obligation, and refused in the unit's own expose as
-   a noisy history member is: one unit is one version there, and can move its entity between the cells). Both cells
-   are a count table, L1 = L2 =
-   the charge, and each query states its own share. A noisy query with no unit, another unit, a charge of 0 or an
+   a noisy history member is: one unit is one version there, and can move its entity between the cells). A query whose
+   unit has `by` states no `groupBy` or `groupByBins`: a group of rows can hold several levels of a column and land in
+   more than one cell. The profiler owes, stated and not checked: whether a record matches reads only rows of that
+   record's own unit and rows of tables the unit does not reach, so the query uses no aggregate, subquery or join over
+   other units' rows, since removing one unit may change the cells of its own records only. Both cells are a count table,
+   L1 = L2 = the charge (except in the unreached form above), and each query states its own share. A noisy query with no unit, another unit, a charge of 0, a grouping with a `by` unit or an
    earlier format is refused (`FLX-5036`), naming the query. A run whose queries are all noisy no longer loses P3 for
    them.
 9. **The engine reads each new part with the noise floor of the amendment above.** `fluxsim init` reads a noisy

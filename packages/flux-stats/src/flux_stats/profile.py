@@ -753,7 +753,7 @@ class RelationshipEntry:
 class QueryUnit:
     """The records a query's rate counts (format 1-5-0): rows of ``table``, or groups of them.
 
-    Without ``by`` a record is a row of ``table`` (a row-keeping filter). With ``by``, the columns of
+    Without ``by`` each row of ``table`` is a record. With ``by``, the columns of
     ``table`` that group its rows, a record is one group: the rows of one parent row of a
     relationship, or one entity of the table's ``history``.
     """

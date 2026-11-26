@@ -599,28 +599,39 @@ names an earlier format and holds one is refused (`FLX-5036`), as before.
 
 **The unit.** A noisy query states its `unit`, a member of the query entry that says what one record is:
 
-- `{ "table": T }`: the query is a row-keeping filter of table `T`, so the records are rows of `T`. The charge is `m_T`.
+- `{ "table": T }`: each row of `T` is a record. The charge is `m_T`.
 - `{ "table": T, "by": [columns] }`: the records are groups of the rows of `T`. `by` is either (a) the child columns of
   an entry of the profile's `relationships` from a parent `P` into `T`, and one group is the rows of one row of `P`:
-  the charge is `m_P`, which is 1 when `P` is the unit's expose; or (b) the `history.entity` columns of `T`, and one
+  the charge is `m_P` (1 when `P` is the unit's expose) when the unit follows the relationship, and twice that when `T` is
+  not reached (see below); or (b) the `history.entity` columns of `T`, and one
   group is one entity: the charge is `m_T`. Form (b) is refused when `T` is the unit's own expose, as a noisy history
   member is there: one unit is one version, and removing it can move its entity from one cell of the rate to the other.
-  Form (a) holds only when a group leaves with its unit whole, so that relationship must be listed in `follows` (the rows
-  of `T` then follow their row of `P`), or `T` must not be reached (`m_T = 0`, so the rows of `T` are the same in every
-  neighbouring data set). Otherwise one unit's rows, reached through another relationship, could move a group between the
-  cells, and the query is refused. The reader takes (a) when it matches and holds and `P` is reached, and (b)
-  otherwise. What the profiler owes, stated and not checked (the evidence says so): the query and its unit pass the
-  checks of ADR 0028;
+  Form (a) holds only when that relationship is listed in `follows` (the rows of `T` then follow their row of `P`, and a
+  group leaves with its unit whole), or `T` must not be reached (`m_T = 0`, so the rows of `T` are the same in every
+  neighbouring data set). When `T` is not reached, a group stays when its row of `P` leaves, and a query that reads that
+  row can move the group from one cell of the rate to the other: per row of `P`, L1 is 2 and the squared L2 is 2, so the
+  charge is `L1 = 2 m_P` and `L2^2 = 2 m_P^2`, as for a relationship statistic whose rows can move between cells
+  (above). Otherwise one unit's rows, reached through another relationship, could move a group between the cells, and the
+  query is refused. The reader takes (a) when it matches and holds and `P` is reached, and (b)
+  otherwise. A query whose `unit` has `by` states no `groupBy` and no `groupByBins` on its statistics: a record is a group
+  of rows and can hold several levels of a grouping column, so it can land in more than one cell. A `{ "table": T }` unit
+  may group, since one row lands in one group. What the profiler owes, stated and not checked (the evidence says so): the
+  query and its unit pass the checks of ADR 0028; whether a record matches reads only rows of that record's own unit and
+  rows of tables the unit does not reach, so the query uses no aggregate, subquery or join over other units' rows, since
+  removing one unit may change the cells of its own records only;
   under (b), an entity's rows lie in one unit (obligation 1 of "A noisy history") and the bounding of `T` keeps or drops
   an entity's versions together; and a profiler that cannot run a query withholds every query of that release, rather than
   releasing some.
 
 **What it is charged.** Both cells are a count table, since one record of the unit lands in exactly one cell: L1 and L2 are
-both the charge above. Each noisy query statistic states its own `privacyLoss` share, and the shares add to the budget.
+both the charge above, written as (L1, squared L2): `(m_T, m_T^2)` for a table's rows and for a history's entities, and
+`(m_P, m_P^2)` for groups by a followed relationship. Groups by a relationship into a table the unit does not reach are
+charged `(2 m_P, 2 m_P^2)`, since a group can change cell without leaving. Each noisy query statistic states its own `privacyLoss` share, and the shares add to the budget.
 
 **Refused with `FLX-5036`**, naming the query and never a value: a noisy query with no `unit`; a `unit` of another form,
 including a `by` that matches neither (a) nor (b), a table the profile does not hold and columns its table does not hold;
-a charge of 0, which is a table the unit of privacy does not reach; and a noisy statistic in a document that names an
+a charge of 0, which is a table the unit of privacy does not reach; a `groupBy` or `groupByBins` on a statistic of a query
+whose `unit` has `by`; and a noisy statistic in a document that names an
 earlier format. An exact query reads as before, and its `unit`, if it has one, is checked for its shape only.
 
 **P3.** A profile whose every query statistic carries noise under the account no longer keeps a run from P3 for its
