@@ -15,7 +15,6 @@ import json
 import tracemalloc
 from importlib import import_module
 from pathlib import Path
-from typing import Any
 
 import pytest
 import yaml
@@ -41,10 +40,7 @@ pytestmark = pytest.mark.integration
 LONG_WINDOW = "7023-01-01T00:00:00Z"
 
 
-def _plan(target: Path, state: Path, **options: Any) -> Any:
-    return plan_module.plan(
-        target, state_dir=state, kernel=_fleet.KERNEL_V2.version, stage=False, **options
-    )
+_plan = _fleet.plan_outcome
 
 
 def test_a_long_monthly_window_is_refused_before_its_periods_are_laid(tmp_path: Path) -> None:

@@ -779,6 +779,28 @@ they are updated by hand), and SQLMesh's SCD type 2 kinds write NULL only. The v
 - **What moves.** No row: the generator already writes the value on every open version and NULL nowhere. A run whose
   entry declares `openEnd` gains the line in its report; an entry that a closed version could end on is refused.
 
+## Amendment of 2026-11-26: a forced entity's projections stop at its parent's last day
+
+The amendment of 2026-11-24 keeps every version of a bound history inside its parent's lifetime, and ADR 0027 reads
+an open version as valid up to the window's end. Under `finalVersion`, the ending version of an entity forced to
+end with its parent (point 3 there) is open, so a periods projection held it for every period up to the window's end,
+long after the parent's last day `pe`: the periodic rows left the lifetime the versions keep to.
+
+- **The rule.** In the projections of a history with `parent.lifetime: true`, the open last version of a forced
+  entity is valid up to the end of `pe`, the last unit of the parent's lifetime, when that is before the window's
+  end. A period it holds under `match` is read against that validity. The written version is unchanged: its end
+  cell stays NULL or `openEnd`. Closed versions, and the entities of parents that did not end by `until`, read as
+  before.
+- **A range on the validity columns** (ADR 0024, the amendment of 2026-11-25) moves no cut. It is folded into where a
+  chain must end, so versions start and close inside it, but it closes no version: the open version of a forced
+  entity is still valid up to the end of `pe`, even where the range ends before `pe`. The layout keeps `pe` for each
+  forced entity apart from the chain's end for this reason.
+- **Events and snapshots** read no validity beyond a version's start, so they are unchanged.
+- **What moves.** The periodic rows of a bundle that declares `parent.lifetime: true` with a `finalVersion` end and
+  an entity forced to end, and that emit's count, so its plan digest and run id. No released version carries the key.
+  Every other bundle, and every recorded plan, keeps its bytes. `--jobs`, `--shard` and the column and per-row paths
+  read one layout, so they agree.
+
 ## Amendment of 2026-11-26: `init` keeps a parent whose key a held dependency sets
 
 The amendment of 2026-11-24 that lets `init` write the parent left out every relationship whose column a rule, copy

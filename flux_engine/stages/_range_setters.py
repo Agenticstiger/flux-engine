@@ -56,12 +56,16 @@ def _copies(resolved: "ResolvedEmit", emits: Sequence["ResolvedEmit"]) -> Frozen
 
     A column named as the history's validity start or end column, an events entry's ``at`` and,
     with no ``lag``, its ``date``: each holds a start or a closed end of the versions it is about.
+    An events entry with a ``when`` records only the versions its condition holds for, so a range
+    on its columns says nothing of the others and holds none of them: the range is only noted.
     """
     held = projection_of(resolved.extension, resolved.expose_id)
     source = None if held is None else _source_of(held[1], emits)
     if held is None or source is None:
         return frozenset()
     key, _of, entry = held
+    if key == EVENTS_KEY and entry.when is not None:
+        return frozenset()
     validity = set(_validity_columns(source).values())
     found = {nfc(name) for name in _column_names(resolved) if nfc(name) in validity}
     if key == EVENTS_KEY:
