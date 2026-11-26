@@ -684,8 +684,8 @@ of the profile's unit of privacy.
 **`calendar`** (format `1-3-0`) is a list of `{ "column", "month", "dayOfWeek", "hourOfWeek" }`, at
 most 1 024 of them and at most one per column. `column` is a `timestamp` column of the table (a
 DATE column is a `timestamp` here too, §7). Each of `month`, `dayOfWeek` and `hourOfWeek` is
-optional and at least one is present; the engine reads an entry that holds none as one that holds
-nothing, kept in its place, and a citation into it is refused (`FLX-5036`). Each is exactly one
+optional and at least one is present (see "An entry that holds nothing" below for the one
+exception the engine makes). Each is exactly one
 ungrouped `levelHistogram/1` of the
 column's known values, read in UTC, over exactly these levels, written with leading zeros so that
 their code point order is their number's: `month` over `01` to `12`; `dayOfWeek` over `1` to `7`,
@@ -696,6 +696,19 @@ is a date: the hour of a date is the engine's business, and `hourOfWeek` is acce
 timestamp column. Each histogram follows the rules a column statistic of its form follows,
 including the disclosure rule, a withheld cell reading as unknown and never as zero, and a `noise`
 block (§3a).
+
+**An entry that holds nothing.** A profile cut down after its release, by a step that drops each
+statistic an `init --json` inventory marks unused, can leave an entry with only the keys that name
+it. This holds for a `calendar` entry (`column`), a `datePairs` entry (`start`, `end`), a
+relationship's `dates` entry (`parent`, `child`), an `exposure` entry (`start`, `end` and `window`),
+a `history` (`entity`, `start`, `end`, and its tracked columns named by their keys alone) and a
+tracked column of a history (its key alone). The format requires each of them to hold its
+statistics, so a reader that follows the format to the letter refuses such an entry (`FLX-5036`).
+The engine reads it, where the reader is told to (`allow_emptied_entries`, off by default), as an
+entry that holds nothing: it stays in its place, so the positions and pointers of the entries
+after it do not move, `init` lists nothing of it, and a citation at or under it is refused
+(`FLX-5036`, naming the entry). An entry that holds some of its statistics, but not all of them,
+is refused as before.
 
 **`periods`** is a list of `{ "column", "period", "statistics" }`. `column` is
 a timestamp column, and `period` is `P1M`, a calendar month, the one period

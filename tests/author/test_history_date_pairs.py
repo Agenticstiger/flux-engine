@@ -289,6 +289,33 @@ def test_a_history_the_plan_refuses_leaves_its_date_pairs_to_the_lifetime(tmp_pa
     assert _reasons(tmp_path, "/tables/tier_version/datePairs/0") == []
 
 
+#: ``REFUSED`` with a member table no history projects: its ``nickname`` is no column of the
+#: versions, so the bundle holds the history and no projection.
+UNPROJECTED = REFUSED.replace(
+    "        - { name: member_id, type: INT, required: true }\n    semantics:",
+    "        - { name: member_id, type: INT, required: true }\n"
+    "        - { name: nickname, type: STRING, required: true }\n    semantics:",
+    1,
+)
+
+
+def test_a_history_the_plan_refuses_is_left_out_when_no_projection_is_written(
+    tmp_path: Path,
+) -> None:
+    # Before, the history's refusal was reported (exit 1) when the bundle held no projection to
+    # leave out first; it is left out, as it is when a projection is written.
+    assert UNPROJECTED != REFUSED
+    result = _init(tmp_path, _profile(entity="member_id"), UNPROJECTED)
+    assert result.exit_code == 0, result.stderr
+    block = _block(tmp_path)
+    assert "history" not in block
+    assert not any(key in block for key in ("snapshots", "events", "periods"))
+    reasons = _reasons(tmp_path, "/tables/tier_version/history")
+    assert reasons and all("the bundle written with this history is refused" in r for r in reasons)
+    assert all("the natural entity 'member_id'" in reason for reason in reasons)
+    _planned(tmp_path)
+
+
 #: One of a history's date columns, and one that is not, as a table's date pair names them. Each
 #: case is (first, second, where the history comes from, the column the history sets).
 ONE_HISTORY_COLUMN = {

@@ -122,22 +122,16 @@ def format_rfc3339_ms(t_ms: int) -> str:
 def format_seconds(moment: datetime) -> str:
     """Spell *moment* as ``YYYY-MM-DDTHH:MM:SS``, the fields only, with no offset.
 
-    A four-digit year is formatted straight from the datetime's fields. ``strftime`` costs
-    a libc call, and on some platforms that call is two orders of magnitude slower inside
-    a forked worker than in its parent. Below year 1000 the platform pads a short ``%Y``
-    its own way, so those years keep the ``strftime`` spelling.
+    The year always has four digits, as RFC 3339 writes it, so every platform spells an
+    instant the same way. The text is formatted straight from the datetime's fields:
+    ``strftime`` costs a libc call, which on some platforms is two orders of magnitude slower
+    inside a forked worker than in its parent, and its ``%Y`` pads a year below 1000 on some
+    platforms only (glibc writes the year 1 as ``1``).
     """
-    if moment.year < 1000:
-        return _strftime_seconds(moment)
     return (
-        f"{moment.year}-{moment.month:02d}-{moment.day:02d}"
+        f"{moment.year:04d}-{moment.month:02d}-{moment.day:02d}"
         f"T{moment.hour:02d}:{moment.minute:02d}:{moment.second:02d}"
     )
-
-
-def _strftime_seconds(moment: datetime) -> str:
-    """The ``strftime`` spelling :func:`format_seconds` keeps for years below 1000."""
-    return moment.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def document_ordinals(document_ids: Iterable[str]) -> Mapping[str, int]:

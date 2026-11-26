@@ -69,7 +69,7 @@ def snapshot_plan(
         related={"sub_id"},
         generator_version=plans[EMIT].generator_version,
     )
-    return project_plan(plan, "snapshots", EMIT, ended, plans[EMIT], root_for(seed))
+    return project_plan(plan, ("snapshots", EMIT, ended), plans[EMIT], root_for(seed))
 
 
 def held(
@@ -106,7 +106,7 @@ def test_ended_drop_without_an_end_keeps_every_entity() -> None:
 def test_the_count_follows_from_the_plan_alone() -> None:
     plans = held(FINAL)
     plan = snapshot_plan(plans, ended="drop")
-    counted = derived_rows("snapshots", EMIT, "drop", plans[EMIT], plan, root_for())
+    counted = derived_rows(("snapshots", EMIT, "drop"), plans[EMIT], plan, root_for())
     assert counted == plan.rows
     # No cell was drawn for it: the history's rows were never generated here.
     assert sources_of(plan, root_for()).shape == (plan.rows,)
@@ -144,5 +144,5 @@ def test_a_projection_of_a_column_the_history_lacks_is_refused() -> None:
         generator_version=plans[EMIT].generator_version,
     )
     with pytest.raises(FluxError) as caught:
-        project_plan(plan, "snapshots", EMIT, "keep", plans[EMIT], root_for())
+        project_plan(plan, ("snapshots", EMIT, "keep"), plans[EMIT], root_for())
     assert caught.value.code.code == "FLX-3403" and "'nothing'" in str(caught.value)

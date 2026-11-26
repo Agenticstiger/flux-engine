@@ -93,7 +93,13 @@ def _deliver_step(
     profile: Union[str, Path, None] = None,
 ) -> Optional[StageResult]:
     """Write every stream to *target* and record the receipts; a failed result or ``None``."""
-    from flux_engine.stages.deliver import deliver, deliver_run, receipt_line, write_receipts
+    from flux_engine.stages.deliver import (
+        deliver,
+        deliver_run,
+        receipt_line,
+        write_progress,
+        write_receipts,
+    )
     from flux_engine.stages.layout import RunLayout
 
     layout = RunLayout.for_state_dir(
@@ -102,6 +108,7 @@ def _deliver_step(
     try:
         layout.require_real_dirs()
         record = lambda receipt: write_receipts(layout, [receipt])  # noqa: E731
+        committed = lambda receipt: write_progress(layout, receipt)  # noqa: E731
         pipeline_result = applied.artifacts.get("pipeline")
         if pipeline_result is not None:
             receipts = deliver(
@@ -112,11 +119,17 @@ def _deliver_step(
                 layout=layout,
                 bundle_directory=Path(bundle_directory),
                 profile=profile,
+                record_committed=committed,
             )
         else:
             # A committed run that was kept holds no execution in memory: its files are delivered.
             receipts = deliver_run(
-                layout, Path(bundle_directory), target=target, record=record, profile=profile
+                layout,
+                Path(bundle_directory),
+                target=target,
+                record=record,
+                profile=profile,
+                record_committed=committed,
             )
         receipts_path = layout.sink_receipts_path
     except FluxError as error:
@@ -171,6 +184,7 @@ def run(
     timings: bool = False,
     allow_generators: Sequence[str] = (),
     most_rows: Optional[int] = None,
+    max_rows: Optional[int] = None,
 ) -> StageResult:
     """``plan`` + ``apply``, then ``verify``/``ship`` when asked for.
 
@@ -201,7 +215,8 @@ def run(
 
     *most_rows* bounds the rows the plans hold before any is drawn (the trial of ``init`` uses
     it). A plan above it raises :class:`~flux_engine.stages.pipeline.PlannedRowsAboveCeiling`,
-    which is not a :class:`~flux_engine.core.errors.FluxError`, to the caller.
+    which is not a :class:`~flux_engine.core.errors.FluxError`, to the caller. *max_rows* is
+    :func:`flux_engine.stages.plan.plan`'s, the periodic rows' budget of the plan.
     """
     return timed(
         timings,
@@ -229,6 +244,7 @@ def run(
             allow_generators=allow_generators,
             common_draws_of=None,
             most_rows=most_rows,
+            max_rows=max_rows,
         ),
     )
 
@@ -299,6 +315,7 @@ def _run(
     allow_generators: Sequence[str],
     common_draws_of: Union[str, Path, None],
     most_rows: Optional[int] = None,
+    max_rows: Optional[int] = None,
 ) -> StageResult:
     if ship and out_dir is None:
         return StageResult(stage="run", exit_code=2, stderr="--ship requires --out-dir/-o")
@@ -331,6 +348,7 @@ def _run(
         reuse_committed=True,
         common_draws_of=None if common_draws_of is None else Path(common_draws_of),
         most_rows=most_rows,
+        max_rows=max_rows,
     )
     artifacts: Dict[str, Any] = {"plan": dict(planned.artifacts)}
     stdout_lines = [line for line in (planned.stdout,) if line]

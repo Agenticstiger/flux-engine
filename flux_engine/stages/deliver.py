@@ -23,13 +23,18 @@ line would mean the line was not the engine's, and is refused.
 sink, target and expose: delivering the same run to a second place adds to
 the document, and delivering it again to the same place replaces that
 entry. The run id is a function of the plan, so every receipt in the file
-is about the same streams.
+is about the same streams. A sink that commits what it sends also keeps
+there, under ``progress``, a receipt of the stream so far after each commit,
+until the stream's own receipt replaces it.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
+import os
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
@@ -74,6 +79,7 @@ __all__ = [
     "privacy_grade_of",
     "receipt_line",
     "stream_rows",
+    "write_progress",
     "write_receipts",
 ]
 
@@ -141,7 +147,11 @@ def _require_receipt_of_plan(
 
 
 def privacy_grade_of(
-    layout: RunLayout, bundle_directory: Path, *, profile: Union[str, Path, None] = None
+    layout: RunLayout,
+    bundle_directory: Path,
+    *,
+    profile: Union[str, Path, None] = None,
+    receipt: Optional[Mapping[str, Any]] = None,
 ) -> RecordedGrade:
     """The privacy grade a run is held to, worked out from its bound record and its bundle.
 
@@ -166,6 +176,10 @@ def privacy_grade_of(
     given, there is none and ``profile_problem`` says why a given one does not pair. An external
     audience is held to that grade alone (:mod:`flux_engine.sinks._kafka_gate`).
 
+    *receipt* is the run's ``receipt.json`` as the caller already read it, so that what the caller
+    goes on to read from it (the streams it delivers) is the document these checks covered; without
+    it the file is read here.
+
     When a check fails there is no grade and ``problem`` says which; a sink that needs the grade
     refuses the stream, and any other sink is unaffected. Nothing here raises.
     """
@@ -187,7 +201,8 @@ def privacy_grade_of(
     except (OSError, ValueError) as error:
         return RecordedGrade(problem=_unreadable(error))
     try:
-        receipt = read_json_object(layout.receipt_path, code=FLX_2109, remedy=RUN_FILE_REMEDY)
+        if receipt is None:
+            receipt = read_json_object(layout.receipt_path, code=FLX_2109, remedy=RUN_FILE_REMEDY)
         _require_receipt_of_plan(receipt, plan_document, run_digest)
     except _NotBound as error:
         return RecordedGrade(problem=f"the run's receipt does not belong to its plan: {error}")
@@ -326,6 +341,7 @@ def deliver(
     layout: Optional[RunLayout] = None,
     bundle_directory: Optional[Path] = None,
     profile: Union[str, Path, None] = None,
+    record_committed: Optional[Callable[[SinkReceipt], object]] = None,
 ) -> Tuple[SinkReceipt, ...]:
     """Write every stream of *result* to a sink from *target*; return the receipts.
 
@@ -339,10 +355,13 @@ def deliver(
     the earlier ones on record. With the run's *layout*, each stream's context carries the grade
     is held to (:func:`privacy_grade_of`, which needs *bundle_directory* too, and reads *profile*,
     the file the command was given); with *bundle_directory*, the bundle and the Simulation, so a
-    sink can find a stream's declarations. Neither changes a row.
+    sink can find a stream's declarations. Neither changes a row. *record_committed* goes to every
+    stream's sink as ``StreamContext.record_committed``; a sink that commits what it sends calls
+    it after each commit (:func:`write_progress` keeps what it is given).
     """
     grade = _grade_for(layout, bundle_directory, profile)
-    recorded = _recorded_receipts(layout) if layout is not None else []
+    document = _recorded_document(layout) if layout is not None else {}
+    recorded, progress = _entries(document, "receipts"), _entries(document, "progress")
     contexts = [
         StreamContext(
             run_id=run_id,
@@ -354,6 +373,8 @@ def deliver(
             bundle_directory=bundle_directory,
             simulation_id=getattr(outcome.resolved, "simulation_id", None),
             delivered=_delivered_of(recorded, outcome.resolved.expose_id),
+            committed=_delivered_of(progress, outcome.resolved.expose_id),
+            record_committed=record_committed,
         )
         for outcome in result.emits
     ]
@@ -402,6 +423,7 @@ def deliver_run(
     target: "SinkTarget",
     record: Optional[Callable[[SinkReceipt], object]] = None,
     profile: Union[str, Path, None] = None,
+    record_committed: Optional[Callable[[SinkReceipt], object]] = None,
 ) -> Tuple[SinkReceipt, ...]:
     """Write every stream of an applied run to a sink from the files of its run directory.
 
@@ -412,7 +434,9 @@ def deliver_run(
     recorded. The header comes from the bundle's contract, as the run's own does; the
     column types a file sink writes (an integer's width, a decimal's precision) are the
     contract's own. *profile* is the file the command was given, from which an external audience's
-    grade is worked out (:func:`privacy_grade_of`).
+    grade is worked out (:func:`privacy_grade_of`). ``receipt.json`` is read once, and the grade is
+    worked out from that same document, so the streams delivered are the ones its checks covered.
+    *record_committed* is as for :func:`deliver`.
     """
     from flux_engine.core.digest import DigestRef
     from flux_engine.safeio import read_bytes_nofollow
@@ -426,8 +450,9 @@ def deliver_run(
         for entry in resolve_all_emits(load_bundle(bundle_directory), simulation_id=simulation_id)
     }
     reported = run_receipt["emits"]
-    grade = privacy_grade_of(layout, bundle_directory, profile=profile)
-    recorded = _recorded_receipts(layout)
+    grade = privacy_grade_of(layout, bundle_directory, profile=profile, receipt=run_receipt)
+    document = _recorded_document(layout)
+    recorded, progress = _entries(document, "receipts"), _entries(document, "progress")
     streams = []
     for expose_id in sorted(reported):
         entry = resolved.get(expose_id)
@@ -470,6 +495,8 @@ def deliver_run(
             bundle_directory=bundle_directory,
             simulation_id=simulation_id,
             delivered=_delivered_of(recorded, expose_id),
+            committed=_delivered_of(progress, expose_id),
+            record_committed=record_committed,
         )
         streams.append((header, data, context))
     sinks = _sinks_for(target, [context for _, _, context in streams])
@@ -590,8 +617,8 @@ def _key(entry: Dict[str, Any]) -> Tuple[str, str, str, str, str]:
     )
 
 
-def _recorded_receipts(layout: RunLayout) -> List[Dict[str, Any]]:
-    """The receipts ``<run>/sink-receipts.json`` holds, or none.
+def _recorded_document(layout: RunLayout) -> Dict[str, Any]:
+    """``<run>/sink-receipts.json`` as a document, or an empty one.
 
     Read without following a link, and ignored when it is not a regular file, is unreadable, is
     not this document's version or names another run.
@@ -600,19 +627,25 @@ def _recorded_receipts(layout: RunLayout) -> List[Dict[str, Any]]:
     try:
         existing = json.loads(read_text_nofollow(path)) if is_regular_file(path) else None
     except (OSError, ValueError):
-        return []
+        return {}
     if not (
         isinstance(existing, dict)
         and existing.get("version") == RECEIPTS_VERSION
         and existing.get("runId") == layout.run_id
     ):
-        return []
-    previous = existing.get("receipts")
-    return (
-        [entry for entry in previous if isinstance(entry, dict)]
-        if isinstance(previous, list)
-        else []
-    )
+        return {}
+    return existing
+
+
+def _entries(document: Mapping[str, Any], name: str) -> List[Dict[str, Any]]:
+    """The entries of the list *name* (``receipts`` or ``progress``) of a receipts document."""
+    found = document.get(name)
+    return [entry for entry in found if isinstance(entry, dict)] if isinstance(found, list) else []
+
+
+def _recorded_receipts(layout: RunLayout) -> List[Dict[str, Any]]:
+    """The receipts ``<run>/sink-receipts.json`` holds, or none (:func:`_recorded_document`)."""
+    return _entries(_recorded_document(layout), "receipts")
 
 
 def _delivered_of(recorded: Sequence[Dict[str, Any]], expose_id: str) -> Tuple[Dict[str, Any], ...]:
@@ -620,22 +653,133 @@ def _delivered_of(recorded: Sequence[Dict[str, Any]], expose_id: str) -> Tuple[D
     return tuple(entry for entry in recorded if entry.get("exposeId") == expose_id)
 
 
-def write_receipts(layout: RunLayout, receipts: Sequence[SinkReceipt]) -> Path:
-    """Merge *receipts* into ``<run>/sink-receipts.json``; returns its path."""
+_Entries = Dict[Tuple[str, str, str, str, str], Dict[str, Any]]
+
+
+def _by_key(document: Mapping[str, Any], name: str) -> _Entries:
+    return {_key(entry): entry for entry in _entries(document, name)}
+
+
+def _write_document(layout: RunLayout, receipts: _Entries, progress: _Entries) -> Path:
     path = layout.sink_receipts_path
-    entries: Dict[Tuple[str, str, str, str, str], Dict[str, Any]] = {}
-    for entry in _recorded_receipts(layout):
-        entries[_key(entry)] = entry
-    for receipt in receipts:
-        document = receipt.as_document()
-        entries[_key(document)] = document
-    document = {
+    document: Dict[str, Any] = {
         "version": RECEIPTS_VERSION,
         "runId": layout.run_id,
-        "receipts": [entries[key] for key in sorted(entries)],
+        "receipts": [receipts[key] for key in sorted(receipts)],
     }
+    if progress:
+        document["progress"] = [progress[key] for key in sorted(progress)]
     atomic_write_text(path, json.dumps(document, indent=2, sort_keys=True) + "\n")
     return path
+
+
+def _destination_id(entry: Mapping[str, Any]) -> Optional[str]:
+    """The id a destination gives itself, as a receipt's writer records it (``clusterId``), or ``None``."""
+    writer = entry.get("writer")
+    found = writer.get("clusterId") if isinstance(writer, Mapping) else None
+    return found if isinstance(found, str) else None
+
+
+def _same_place(entry: Mapping[str, Any], receipt: Mapping[str, Any]) -> bool:
+    """Whether *entry* is about the stream and the place *receipt* names.
+
+    The same sink, expose and table, on the same destination: the same destination id when both
+    name one (a Kafka cluster's, however its target was written), else the same target
+    (:func:`_key`).
+    """
+    if any(entry.get(name) != receipt.get(name) for name in ("sink", "exposeId", "table")):
+        return False
+    ours, theirs = _destination_id(entry), _destination_id(receipt)
+    if ours is not None and theirs is not None:
+        return ours == theirs
+    return _key(dict(entry)) == _key(dict(receipt))
+
+
+@contextmanager
+def _receipts_held(layout: RunLayout) -> Iterator[None]:
+    """Hold the run's lock on ``sink-receipts.json`` while it is read, changed and written again.
+
+    Two deliveries of one run, to two targets say, each rewrite the whole file, after every commit
+    for a sink that commits in parts; without the lock one can drop the other's entries, and with
+    them the record that keeps a stream from being sent twice. The lock is advisory, taken by every
+    writer of the file and no reader (the file is replaced whole): ``fcntl.flock`` on the run
+    directory, so the directory holds no file of its own for it, or, where there is no ``fcntl``,
+    ``msvcrt.locking`` on the first byte of a lock file beside it. These are the calls py-filelock
+    (MIT) makes on each platform.
+    """
+    if sys.platform == "win32":  # pragma: no cover - the CI matrix runs Linux and macOS
+        import msvcrt
+
+        lock = layout.run_dir.parent / f".{layout.run_id}.sink-receipts.lock"
+        descriptor = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        finally:
+            os.close(descriptor)
+    else:
+        import fcntl
+
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(layout.run_dir, flags)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+def write_receipts(layout: RunLayout, receipts: Sequence[SinkReceipt]) -> Path:
+    """Merge *receipts* into ``<run>/sink-receipts.json``; returns its path.
+
+    A stream's receipt replaces every entry ``progress`` held for that stream in that place
+    (:func:`write_progress`, :func:`_same_place`). The file is read and written under the run's
+    lock (:func:`_receipts_held`).
+    """
+    with _receipts_held(layout):
+        existing = _recorded_document(layout)
+        entries, progress = _by_key(existing, "receipts"), _by_key(existing, "progress")
+        for receipt in receipts:
+            document = receipt.as_document()
+            entries[_key(document)] = document
+            progress = {
+                key: entry for key, entry in progress.items() if not _same_place(entry, document)
+            }
+        return _write_document(layout, entries, progress)
+
+
+def write_progress(layout: RunLayout, receipt: SinkReceipt) -> Path:
+    """Keep *receipt*, of a stream so far, under ``progress`` in ``<run>/sink-receipts.json``.
+
+    A sink that commits what it sends calls this after each commit, through
+    ``StreamContext.record_committed``. The entry replaces the stream's earlier one, and the
+    stream's own receipt replaces it in turn (:func:`write_receipts`). ``FLX-3505`` when the file
+    cannot be written: the delivery stops there, and the part just committed is not in the record,
+    so the message says to deliver again while the destination still holds the stream's progress.
+    The file is read and written under the run's lock (:func:`_receipts_held`).
+    """
+    document = receipt.as_document()
+    try:
+        with _receipts_held(layout):
+            existing = _recorded_document(layout)
+            entries, progress = _by_key(existing, "receipts"), _by_key(existing, "progress")
+            progress[_key(document)] = document
+            return _write_document(layout, entries, progress)
+    except OSError as error:
+        raise FluxError(
+            FLX_3505,
+            f"sink-receipts.json could not keep how far expose {receipt.expose_id!r} was "
+            f"committed ({type(error).__name__}), so the delivery stops here and that part is not "
+            "in the run's record; deliver again while the destination still holds the stream's "
+            "progress, and the delivery resumes after the part",
+        ) from None
 
 
 def receipt_line(receipt: SinkReceipt) -> str:

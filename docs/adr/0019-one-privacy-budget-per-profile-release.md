@@ -7,7 +7,9 @@ Accepted 2026-11-21. Builds on the second amendment of
 released under differential privacy and says what a run built from them carries. This record
 says how the profile accounts for the loss of that release, and what the engine checks. The
 [amendment of 2026-11-25](#amendment-of-2026-11-25) changes one check: a stated loss that nothing
-spends is accepted.
+spends is accepted. The
+[second amendment of 2026-11-25](#amendment-of-2026-11-25-a-released-date-histogram-is-read-where-it-stands-clear-of-the-noise)
+says how `init` reads a released date histogram: only where its counts stand clear of the noise.
 
 ## Context
 
@@ -169,6 +171,13 @@ never to more (point 4: "A sum below the total is accepted").
    noise blocks add up to, and the number of parts) when a stated share is above its sum. Both
    figures are values the profile states: the total, and the shares its `noise` blocks record.
    Nothing in it depends on the records.
+4. **An entry cut down to its names is read as holding nothing.** The same step can drop every
+   statistic of a calendar entry, a date pair, a relationship's date pair, an exposure, a history
+   or a tracked column of one, which leaves the keys that name it. The profile reader takes
+   `allow_emptied_entries`, off by default and set by the engine: with it such an entry is kept in
+   its place and holds nothing, and a citation at or under it is refused (`FLX-5036`). An entry
+   that holds some of its statistics is refused as before. Unlike point 1 this is an option,
+   because the format itself still requires the statistics of an entry that is published whole.
 
 ### Consequences
 
@@ -176,3 +185,66 @@ never to more (point 4: "A sum below the total is accepted").
   and `plan` read. If every noisy statistic was cut, the run is graded `P1`, not `P3`.
 - The guarantee the engine reports for a run is still the stated total (point 4), which bounds
   the loss of every part, spent or not.
+
+## Amendment of 2026-11-25: a released date histogram is read where it stands clear of the noise
+
+### Context
+
+A histogram released with noise holds noise in every cell, the empty ones too. `init` read a
+released date histogram's point estimate as the column's draw and its outer edges as the column's
+span. On a profiler's year grid (1900 to 2100 by year, with an outer bin on each side to the
+first and last instant), the noise in the empty years put weight on dates across the calendar,
+and the run's window stretched to 0001-01-01 and 9999-12-31. On a release of a few hundred
+records, the noise of one cell can be larger than any year's count, so no year stands out at all.
+A column with no order statistic is drawn evenly within the window, so it drew dates across
+thousands of years.
+
+### Decision
+
+1. **The floor.** A cell of a released histogram stands clear of the noise when its released count
+   exceeds
+
+       B = sqrt(2 v (t + ceil(ln m)))   for Gaussian or discrete Gaussian noise of variance v,
+       B = b (t + ceil(ln m))           for Laplace noise of scale b,
+
+   over the histogram's `m` cells, with `t` the confidence exponent of point 7,
+   `CONFIDENCE_EXPONENT = 5`. It is a union bound over the cells: a cell whose true count is zero
+   exceeds `B` with probability at most `e^-t / m`, so with probability at least `1 - e^-5` no
+   such cell among the `m` does. For a Gaussian the tail is the sub-Gaussian one point 7 uses,
+   `P(eta > a) <= e^(-a^2 / 2v)`; for a Laplace it is `P(eta > a) = e^(-a / b) / 2`.
+   `flux_stats.noise.noise_floor` computes `B`, and `ceil_ln` computes `ceil(ln m)` exactly, so
+   `B` is the same number on every platform. For a year grid of 202 cells, `ceil(ln 202) = 6` and
+   `B = sqrt(22 v)`, about 4.69 times the noise's scale.
+2. **What `init` does with it.** For a date or timestamp column read from a released
+   `marginalHistogram/1`, a bin that does not clear the floor carries no weight in the draw, and
+   its register entry says so. The column's span, for the run's window, is the hull of the bins
+   that clear it. When none does, the column is drawn evenly within the run's window, cut to its
+   declared range, as a noted assumption, the way a column that publishes no order statistic is
+   drawn. When the range and the window do not meet, it is drawn evenly over its whole range,
+   outside the window, and the column's note says so. A window with no span anywhere is the
+   assumed year, and its note says so.
+3. **What stays.** The column's declared range stays the histogram's whole grid, which its
+   histogram property's bins partition (`FLX-5032`), and the property stays, so `verify` scores
+   the column against the release with the widening of point 7. Plan reads the edges the draw can
+   reach, not the range ([ADR 0017](./0017-an-entity-is-a-chain-of-versions.md), amendment of
+   2026-11-25), so a range wider than the draw is accepted.
+4. **Privacy.** The floor reads the released numbers only. It is post-processing of the release
+   and spends no privacy loss.
+
+### Why the union bound
+
+The bound of one cell, `sqrt(2 t v)`, lets an empty cell through with probability `e^-5`. Over
+202 cells, one stray year clears it in most releases, and on a small release the cells that clear
+it are single scattered years, which is noise. The union bound is the same confidence for the
+whole histogram, the confidence the widening of point 7 is stated at.
+
+### Consequences
+
+- Only bundles written from profiles released with noise change: their date columns draw inside
+  the years that stand clear of the noise, or evenly inside the window, and their window shrinks.
+  An exact histogram keeps its weights and its span.
+- Plans already recorded replay unchanged: this changes what `init` writes, not what the generator
+  draws from a bundle.
+- A small release has no clear bin, so its dates are an assumption the run says it made, and
+  `--strict` refuses it until the profile gives more.
+

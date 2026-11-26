@@ -79,6 +79,7 @@ from flux_engine.author.columns import (
     copy_column,
     declared_span,
     determine_column,
+    draw_in_window,
     draw_within_key,
     drawn_span,
     few_int_levels,
@@ -122,6 +123,7 @@ from flux_engine.author.history import (
     HistorySource,
     Published,
     declare_date_ranges,
+    declared_end,
     decline_history,
     restate_assumptions,
     write_history,
@@ -527,6 +529,19 @@ def _emit_rows(
     return rows, assumed(reason), reason
 
 
+def _noise_clear(
+    noisy: Optional[Mapping[Tuple[str, ...], Any]], expose_id: str, column: str
+) -> Tuple[Tuple[int, Tuple[bool, ...]], ...]:
+    """The cells of each noisy histogram of *column* that stand clear of the noise, by statistic."""
+    prefix = ("tables", expose_id, "columns", column, "statistics")
+    found = [
+        (int(tokens[-1]), note.clear)
+        for tokens, note in (noisy or {}).items()
+        if tokens[:-1] == prefix and getattr(note, "clear", None) is not None
+    ]
+    return tuple(sorted(found))
+
+
 def _plan_expose(
     contract: Mapping[str, Any],
     expose_index: int,
@@ -582,6 +597,8 @@ def _plan_expose(
             rounding_base=rounding_base,
             range_rule=column_range(schema[position]),
             asked_levels=_levels_asked(asked, column.name),
+            noise_clear=_noise_clear(noisy, expose_id, column.name),
+            open_end=_open_end_ms(expose, column.name) if "history" in table else None,
         )
         if _draws_int_levels(context, grouping, set_by_rules):
             context = replace(context, int_levels=True)
@@ -1233,25 +1250,30 @@ def _time_bounds(
     :data:`WINDOW_END_LIMIT_MS` (an open end of 9999-12-31 on every row) gives the window nothing,
     as a contract range that ends there gives nothing. A contract range that reaches beyond every
     span the profile and the bundle give, or the hull of contract ranges alone, is a ``time
-    window`` note, which is a gap at ``/spec/timeBounds``. With nothing to go on, a year is
+    window`` note, which is a gap at ``/spec/timeBounds``; one that makes the window longer than
+    :data:`PLAUSIBLE_WINDOW_YEARS` is refused (:func:`_refuse_a_stretching_contract_range`). A
+    window the profile and the bundle make that long is a ``time window`` note too, naming the
+    columns that reach its ends (:func:`_a_long_window`). With nothing to go on, a year is
     assumed.
     """
     if given is not None:
         return given, None
-    own: List[Tuple[int, int]] = list(declared)
+    named: List[Tuple[str, Tuple[int, int]]] = [("the --history file", span) for span in declared]
     contract_ranges: List[Tuple[str, Tuple[int, int]]] = []
     for expose in exposes:
         for column in expose.columns:
             found, from_contract = _spans_of(expose, column, contract)
-            own += found
+            named += [(f"{expose.expose_id}.{column.name}", span) for span in found]
             if from_contract is not None:
                 contract_ranges.append((f"{expose.expose_id}.{column.name}", from_contract))
+    own = [span for _, span in named]
     spans = own + [span for _, span in contract_ranges]
     if spans:
         start = min(span[0] for span in spans)
         end = max(span[1] for span in spans)
         if end <= start:
             end = start + 1
+        _refuse_a_stretching_contract_range(own, contract_ranges, (start, end))
         window = (format_rfc3339_ms(start), format_rfc3339_ms(end))
         widening = sorted(
             {
@@ -1262,34 +1284,111 @@ def _time_bounds(
                 or span[1] > max(item[1] for item in own)
             }
         )
-        if not widening:
+        reasons: List[str] = []
+        if widening:
+            columns = ", ".join(widening)
+            if own:
+                given_span = (
+                    f"{format_rfc3339_ms(min(item[0] for item in own))} to "
+                    f"{format_rfc3339_ms(max(item[1] for item in own))}"
+                )
+                reasons.append(
+                    f"the contract range of {columns} reaches beyond the span the profile and "
+                    f"the bundle give, {given_span}"
+                )
+            else:
+                reasons.append(
+                    f"it comes only from the contract range of {columns}: nothing the profile or "
+                    "the bundle gives holds a span"
+                )
+        long_window = _a_long_window(named)
+        if long_window is not None:
+            reasons.append(long_window)
+        if not reasons:
             return window, None
-        columns = ", ".join(widening)
-        if own:
-            given_span = (
-                f"{format_rfc3339_ms(min(item[0] for item in own))} to "
-                f"{format_rfc3339_ms(max(item[1] for item in own))}"
-            )
-            reason = (
-                f"the contract range of {columns} reaches beyond the span the profile and the "
-                f"bundle give, {given_span}"
-            )
-        else:
-            reason = (
-                f"it comes only from the contract range of {columns}: nothing the profile or "
-                "the bundle gives holds a span"
-            )
         note = (
-            f"The run covers {window[0]} to {window[1]}, since {reason}. "
+            f"The run covers {window[0]} to {window[1]}, since {'; and '.join(reasons)}. "
             "Set spec.timeBounds to the span your data covers."
         )
         return window, ("time window", note)
+    noise = any(column.noise_floored for expose in exposes for column in expose.columns)
     note = (
-        "No date or timestamp column publishes its range, so the run covers "
-        f"{ASSUMED_WINDOW[0][:10]} to {ASSUMED_WINDOW[1][:10]}. Set spec.timeBounds to the "
-        "span your data covers."
+        "No date or timestamp column publishes its range"
+        + (", or a released histogram with a bin that stands clear of the noise" if noise else "")
+        + f", so the run covers {ASSUMED_WINDOW[0][:10]} to {ASSUMED_WINDOW[1][:10]}. Set "
+        "spec.timeBounds to the span your data covers."
     )
     return ASSUMED_WINDOW, ("time window", note)
+
+
+#: The longest run window that is not remarked on. A few hundred years holds the dates a data
+#: product records; a longer window comes from what marks no data: a contract range with an open
+#: end spelled before the year 9999 or a placeholder, which is refused, or a published span that
+#: reaches that far, which is a ``time window`` note and a gap.
+PLAUSIBLE_WINDOW_YEARS = 300
+
+#: A Gregorian year of 365.2425 days, in milliseconds.
+_YEAR_MS = 31_556_952_000
+
+
+#: How many columns a time window note names before it counts the rest.
+_NAMED_COLUMNS = 5
+
+
+def _a_long_window(named: Sequence[Tuple[str, Tuple[int, int]]]) -> Optional[str]:
+    """Why the spans the profile and the bundle give make a window past :data:`PLAUSIBLE_WINDOW_YEARS`.
+
+    *named* is each span with what gives it (a column, or the history file). ``None`` when their
+    hull is no longer than that. Otherwise the reason names what reaches either end of the hull, so
+    a person can see which column, or which noise in a column, stretches the window.
+    """
+    if not named:
+        return None
+    low = min(first for _, (first, _) in named)
+    high = max(last for _, (_, last) in named)
+    if high - low <= PLAUSIBLE_WINDOW_YEARS * _YEAR_MS:
+        return None
+    reaching = sorted({name for name, (first, last) in named if first == low or last == high})
+    listed = ", ".join(reaching[:_NAMED_COLUMNS])
+    if len(reaching) > _NAMED_COLUMNS:
+        listed += f" and {len(reaching) - _NAMED_COLUMNS} more"
+    return (
+        f"the span the profile and the bundle give runs longer than {PLAUSIBLE_WINDOW_YEARS} "
+        f"years, from {format_rfc3339_ms(low)[:10]} to {format_rfc3339_ms(high)[:10]}: {listed} "
+        "reach its ends"
+    )
+
+
+def _refuse_a_stretching_contract_range(
+    own: Sequence[Tuple[int, int]],
+    contract_ranges: Sequence[Tuple[str, Tuple[int, int]]],
+    window: Tuple[int, int],
+) -> None:
+    """Refuse a contract range that makes the run's window longer than :data:`PLAUSIBLE_WINDOW_YEARS`.
+
+    *own* is the spans the profile and the bundle give, *contract_ranges* each contract range by
+    its column, and *window* the hull of both. Each range that reaches beyond *own* is named. A
+    window *own* already makes that long is not the contract's doing, so nothing is refused.
+    """
+    longest = PLAUSIBLE_WINDOW_YEARS * _YEAR_MS
+    if window[1] - window[0] <= longest:
+        return
+    if own and max(last for _, last in own) - min(first for first, _ in own) > longest:
+        return
+    low = min((first for first, _ in own), default=None)
+    high = max((last for _, last in own), default=None)
+    named = [
+        f"{name} ({format_rfc3339_ms(first)[:10]} to {format_rfc3339_ms(last)[:10]})"
+        for name, (first, last) in contract_ranges
+        if low is None or high is None or first < low or last > high
+    ]
+    raise AuthorError(
+        f"the contract range of {', '.join(named)} would make the run's window longer than "
+        f"{PLAUSIBLE_WINDOW_YEARS} years, from {format_rfc3339_ms(window[0])[:10]} to "
+        f"{format_rfc3339_ms(window[1])[:10]}, and such a window is refused; declare the range "
+        "the data covers, or, when its high end marks an open end, write that end in the year "
+        "9999, which no window reads"
+    )
 
 
 def _weighted_edges(edges: List[Any], weights: Any) -> List[Any]:
@@ -1328,7 +1427,9 @@ def _spans_of(
         if isinstance(listed, list):
             instants.extend(moment for moment in map(instant_ms, listed) if moment is not None)
     declared = declaration.get("range")
-    if isinstance(declared, Mapping):
+    if isinstance(declared, Mapping) and not column.noise_floored:
+        # A noisy histogram's range is its whole grid (its property partitions it), so it says
+        # nothing of where the data lies: the clear bins and time_span do.
         instants.extend(
             moment
             for moment in (instant_ms(declared.get("min")), instant_ms(declared.get("max")))
@@ -1342,15 +1443,37 @@ def _spans_of(
         found = []
     context = expose.contexts.get(column.name)
     try:
-        schema = contract["exposes"][expose.index]["contract"]["schema"]  # type: ignore[index]
+        contract_expose = contract["exposes"][expose.index]  # type: ignore[index]
+        schema = contract_expose["contract"]["schema"]
         contract_range = (
             declared_window(schema[context.schema_index], expose.kinds.get(column.name))
             if context
             else None
         )
     except (KeyError, IndexError, TypeError):
-        contract_range = None
+        contract_expose, contract_range = None, None
+    open_end = _open_end_ms(contract_expose, column.name)
+    if open_end is not None:
+        # The end of a validity window that declares its open end: an open version holds that
+        # value, which marks no instant, so it gives the window nothing, as a value in the year
+        # 9999 does (ADR 0017 section 11).
+        below = [moment for moment in instants if moment < open_end]
+        found = [
+            (first, last if last < open_end else max(below, default=first))
+            for first, last in found
+            if first < open_end
+        ]
+        if contract_range is not None and contract_range[1] >= open_end:
+            contract_range = None
     return found, contract_range
+
+
+def _open_end_ms(contract_expose: Optional[Mapping[str, Any]], column: str) -> Optional[int]:
+    """The open end the contract declares for *column*, as milliseconds, when it is the window's end."""
+    if not isinstance(contract_expose, Mapping):
+        return None
+    value = declared_end(contract_expose, column).get("openEnd")
+    return instant_ms(value) if isinstance(value, str) else None
 
 
 def _owner(contract: Mapping[str, Any]) -> Tuple[str, Optional[Tuple[str, str]]]:
@@ -2539,6 +2662,8 @@ def _histories(
             catalogues=reads.catalogues(held),
         )
         written = write_history(source) if declined is None else decline_history(source, declined)
+        if written.entry is None:
+            _refuse_an_unset_open_end(expose, written)
         if written.entry is not None:
             result.entries.append(written.entry)
             restate_assumptions(expose)
@@ -2550,6 +2675,25 @@ def _histories(
             [(f"{expose.expose_id}: {subject}", text) for subject, text in written.notes]
         )
     return result
+
+
+def _refuse_an_unset_open_end(expose: AuthoredExpose, written: Any) -> None:
+    """Refuse an expose whose end column holds the declared open end on every row, with no history.
+
+    Such a column declares no draw (:attr:`ColumnPlan.open_end_only`): the history writes the open
+    end on every open version. Without one, no draw the engine has spells the value, so the bundle
+    is refused, naming the column and why no history is written.
+    """
+    for plan in expose.columns:
+        if plan.open_end_only:
+            why = "; ".join(
+                reason for pointer, reason in written.unused if pointer[-1] == "history"
+            )
+            raise AuthorError(
+                f"{printable(expose.expose_id)}.{printable(plan.name)} holds the open end the "
+                "contract declares on every row, which only the table's history writes, and no "
+                "history is written" + (f": {why}" if why else "")
+            )
 
 
 #: Why no counts entry lays out a projected emit's relationships.
@@ -3175,6 +3319,9 @@ def _author_with_fallbacks(inputs: AuthorInputs, fallbacks: _Fallbacks) -> Autho
         return _author_bundle(inputs, fallbacks)
     except _ProjectionRefused as refused:
         projection = str(refused)
+    except _HistoryRefused as refused:
+        # The bundle holds no projection, so the history is the layer the plan refuses.
+        return _author_bundle(inputs, fallbacks, str(refused))
     try:
         return _author_bundle(inputs, fallbacks, None, projection)
     except _HistoryRefused as refused:
@@ -3985,6 +4132,11 @@ def _bundle_window(
         given_window,
         declared_spans(declared) if declared is not None else (),
     )
+    for expose in authored:
+        for column in expose.columns:
+            draw_in_window(column, expose.kinds[column.name], window)
+        # A column drawn over its whole range, its range and the window apart, says so.
+        restate_assumptions(expose)
     if given_window is not None:
         for expose in authored:
             for column in expose.columns:
@@ -4035,10 +4187,17 @@ def _refuse_a_window_that_misses_ranges(
 def _declared_ranges_of(
     expose: AuthoredExpose, column: ColumnPlan, contract: Optional[Mapping[str, Any]]
 ) -> List[Tuple[int, int]]:
-    """The ranges (milliseconds) a date column declares: its own ``range`` and its contract's."""
+    """The ranges (milliseconds) a date column declares: its own ``range`` and its contract's.
+
+    A column read from a noisy histogram draws only inside the bins that stand clear of the noise,
+    so their span stands in for its range, the histogram's whole grid.
+    """
     found: List[Tuple[int, int]] = []
     declared = column.declaration.get("range")
-    if isinstance(declared, Mapping):
+    if column.noise_floored:
+        if column.time_span is not None:
+            found.append(column.time_span)
+    elif isinstance(declared, Mapping):
         ends = (instant_ms(declared.get("min")), instant_ms(declared.get("max")))
         if ends[0] is not None and ends[1] is not None:
             found.append((ends[0], ends[1]))

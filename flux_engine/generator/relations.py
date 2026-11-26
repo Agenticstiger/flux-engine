@@ -142,6 +142,7 @@ from flux_engine.generator.history import (
     tracked_levels_kept,
     tracked_spec,
     unit_of,
+    validity_bound,
     version_valid_on,
 )
 from flux_engine.generator.parent_bounds import deferred_bound
@@ -246,12 +247,12 @@ FLX_3403 = register(
     "copy through a sharedColumns entry into another relationship's foreign key is refused when "
     "the relationship it goes through reaches an emit that declares a history or is projected from "
     "one, whose rows hold a version's cells, not the pick the copy follows; the message names both "
-    "relationships. An events or periods entry is also refused when a column of its emit is drawn "
-    "given a column the entry sets, which the draw would read as the level it drew; the message "
-    "names both columns. A DATE or TIMESTAMP column drawn from declared statistics is refused when "
-    "its contract's `range` rule holds none of the dates it is drawn from, or would cut the bins "
-    "of a column another column is drawn given; so is an empty `range` rule (no value lies between "
-    "its ends); the message names the column and the range.",
+    "relationships. A column of an events or periods emit drawn given a version's column reads its "
+    "level, or where that holds none the marginal its parent's weights and table imply, else its "
+    "own support; one given another cell the entry sets, with allocation exact, or with neither is "
+    "refused, naming both. A DATE or TIMESTAMP column drawn from declared statistics is refused "
+    "when its contract's `range` rule holds none of its dates, or would cut the bins of a column "
+    "another column is drawn given, or is empty; the message names it.",
 )
 
 #: Domain-separation label of a key layout's permutation key.
@@ -1464,9 +1465,10 @@ class RelationReader:
                 owner.expose_id,
                 pick.entry,
                 kind=pick.kind,
-                rows=pick.rows,
+                rows=pick.laid_rows,
                 entities=pick.entities,
                 time_bounds=(pick.window_start,),
+                ranged=pick.ranged,
             )
             self._histories[address] = found
         return found
@@ -1508,6 +1510,7 @@ class RelationReader:
                 identity=(None if parent is None else parent.digest().value, hook),
             ),
             bound=_deferred_bound(self, owner, driver),
+            ranged=driver.history.ranged,
         )
         self._histories[address] = found
         return found
@@ -3057,6 +3060,11 @@ def _history_shape_of(
         window_start=plan.time_bounds[0],
         parent_lifetime=binding.parent_lifetime,
         declared_rows=binding.declared_rows,
+        ranged=validity_bound(
+            binding,
+            plan.column_plan(binding.start).column.logical_type.kind,
+            plan.time_bounds[0],
+        ),
     )
     # The refusals that follow from declared values alone, before any layout is worked out.
     declared = binding.entry.parent

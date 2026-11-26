@@ -52,7 +52,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from flux_engine.concordance.compiler import CompiledFidelity, CompiledProperty
 from flux_engine.concordance.predicate import PropertyKind
-from flux_engine.concordance.verifier import ClearProfile, Refusal
+from flux_engine.concordance.verifier import (
+    ClearProfile,
+    Refusal,
+    groups_to_compare,
+    holds_no_records,
+)
 from flux_engine.core.canonical import sha256_hex
 from flux_engine.core.errors import FluxError
 from flux_stats.definitions import bin_index
@@ -335,12 +340,14 @@ def _require_groups(
     profiled: Set[str],
     floor: int,
     whole: bool,
+    empty: Set[str],
 ) -> None:
     """Refuse (``FLX-5005``) groups the full comparison would refuse, as far as a sample can tell.
 
     A sample of every block (*whole*) holds the run's groups to their floor
     and the two sides to one set of groups. A partial sample can only show
-    a group the profile does not have.
+    a group the profile does not have. A level the profile holds no record of (*empty*) is left
+    out of the floor, as the full comparison leaves it out.
     """
     seen = sorted({key for totals in per_block for key in totals})
     if not whole:
@@ -352,6 +359,8 @@ def _require_groups(
         return
     grouped = entry.declaration.group_by is not None
     for ordinal, key in enumerate(seen):
+        if key in empty:
+            continue
         count = sum(totals.get(key, (0, 0))[1] for totals in per_block)
         where = f" group #{ordinal}" if grouped else ""
         require_sample(
@@ -393,13 +402,15 @@ def _sampled_property(
     counted = [{key: (0, len(values)) for key, values in found.items()} for found in per_block]
     grouped = entry.declaration.group_by is not None
     floor = compiled.block.records.minimum if grouped else 1
-    profiled = {group.key for group in reference.groups}
-    _require_groups(entry, counted, profiled, floor, whole=len(blocks) == population)
+    seen_keys = {key for found in counted for key in found}
+    profiled, _ = groups_to_compare(reference.groups, seen_keys)
+    empty = {group.key for group in reference.groups if holds_no_records(group)}
+    _require_groups(entry, counted, profiled, floor, len(blocks) == population, empty)
     scale = compiled.block.encoding.grid.scale
     kind = _sampled_kind(entry)
     groups: List[SampledGroup] = []
     for ordinal, group in enumerate(sorted(reference.groups, key=lambda found: found.key)):
-        if not group.published or group.statistic is None:
+        if not group.published or group.statistic is None or holds_no_records(group):
             groups.append(SampledGroup(ordinal=ordinal, outcome=CENSORED))
             continue
         where = f"{entry.property_id} group #{ordinal}" if grouped else entry.property_id

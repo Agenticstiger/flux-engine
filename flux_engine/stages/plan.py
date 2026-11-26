@@ -56,6 +56,7 @@ from flux_engine.core.seedtree import (
     parse_seed_paths,
     seed_paths_digest,
 )
+from flux_engine.core.sizing import MOST_ROWS
 from flux_engine.evidence.provenance import (
     PROVENANCE_DIGEST_KEY,
     BoundProvenance,
@@ -73,6 +74,7 @@ from flux_engine.evidence.register import (
     render_register_line,
 )
 from flux_engine.generator.associations import association_report
+from flux_engine.generator.periods import DEFAULT_PERIODIC_ROWS
 from flux_engine.generator.relations import ForeignKey, history_pick_of
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.generators import environment as _environment
@@ -350,21 +352,92 @@ def _scale_floor_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     return {SCALE_FLOORS_PLAN_KEY: SCALE_FLOORS_TRACKED} if result.scale_floors else {}
 
 
+def _emit_plans(result: "_pipeline.PipelineResult") -> List[Any]:
+    """The generator plan of every emit of *result*, written and hidden, that has one."""
+    outcomes: List[Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"]] = [
+        *result.emits,
+        *result.hidden_emits,
+    ]
+    return [outcome.plan for outcome in outcomes if outcome.plan is not None]
+
+
 def _date_range_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     """``dateRanges``, only for a plan in which some column was cut at its contract's range."""
     if not result.cut_ranges:
+        return {}
+    cut = any(
+        column.range_cut is not None for plan in _emit_plans(result) for column in plan.columns
+    )
+    return {DATE_RANGES_PLAN_KEY: DATE_RANGES_CUT} if cut else {}
+
+
+#: ``plan.json``'s key for the rows a periodic emit may be estimated to derive (ADR 0027 section 5,
+#: the amendment of 2026-11-25): the budget ``--max-rows`` set. Present only for a budget other
+#: than :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`, so every other plan keeps its
+#: bytes and its planDigest. The estimate runs while the plan is made; a run of the recorded plan
+#: makes none.
+MAX_ROWS_PLAN_KEY = "maxRows"
+
+
+#: ``plan.json``'s key for a history and a periods entry keeping to the contract's ranges on the
+#: columns they set (ADR 0024, the amendment of 2026-11-25): ``"held"``. Present only when a range cut
+#: a history's layout or a periods entry's periods, so every other plan keeps its bytes and its
+#: planDigest. A recorded plan without it replays as it was made
+#: (:func:`flux_engine.stages.apply.plan_range_setters`).
+RANGE_SETTERS_PLAN_KEY = "rangeSetters"
+RANGE_SETTERS_HELD = "held"
+
+
+def _range_setter_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``rangeSetters``, only for a plan in which a range cut a history or a periods entry."""
+    if not result.bounds.ranges:
         return {}
     outcomes: List[Union["_pipeline.EmitOutcome", "_pipeline.HiddenOutcome"]] = [
         *result.emits,
         *result.hidden_emits,
     ]
-    cut = any(
-        column.range_cut is not None
-        for outcome in outcomes
-        if outcome.plan is not None
-        for column in outcome.plan.columns
+    plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
+    held = any(
+        ((pick := history_pick_of(plan)) is not None and pick.ranged is not None)
+        or (plan.projection is not None and plan.projection.clip is not None)
+        for plan in plans
     )
-    return {DATE_RANGES_PLAN_KEY: DATE_RANGES_CUT} if cut else {}
+    return {RANGE_SETTERS_PLAN_KEY: RANGE_SETTERS_HELD} if held else {}
+
+
+def _max_rows_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``maxRows``, only for a plan whose periodic rows' budget is not the default."""
+    budget = result.bounds.budget
+    if budget is None or budget == DEFAULT_PERIODIC_ROWS:
+        return {}
+    return {MAX_ROWS_PLAN_KEY: budget}
+
+
+def _periodic_budget(max_rows: Optional[int]) -> Optional[int]:
+    """*max_rows* as the pipeline takes it; a budget that is not a count from 1 to ``MOST_ROWS`` is a ``ValueError``."""
+    if max_rows is not None and (
+        isinstance(max_rows, bool)
+        or not isinstance(max_rows, int)
+        or not 1 <= max_rows <= MOST_ROWS
+    ):
+        raise ValueError(f"max_rows is a whole number from 1 to {MOST_ROWS}, not {max_rows!r}")
+    return max_rows
+
+
+#: ``plan.json``'s key for a column of an events or periods emit drawn given a column of the version
+#: (ADR 0027, the amendment of 2026-11-25): ``"afterProjection"``, the column is drawn given the
+#: level the version holds. Present only when an emit holds such a column, so every other plan
+#: keeps its bytes and its planDigest. A recorded plan without it replays the draw engine 0.11.1
+#: made, given the level the column's own draw made
+#: (:func:`flux_engine.stages.apply.plan_projected_givens`).
+PROJECTED_GIVENS_PLAN_KEY = "projectedGivens"
+PROJECTED_GIVENS_AFTER = "afterProjection"
+
+
+def _projected_given_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``projectedGivens``, only for a plan with a column drawn given a column of the version."""
+    held = any(plan.projection is not None and plan.projection.held for plan in _emit_plans(result))
+    return {PROJECTED_GIVENS_PLAN_KEY: PROJECTED_GIVENS_AFTER} if held else {}
 
 
 def _end_share_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
@@ -457,6 +530,9 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
         **_end_share_entries(result),
         **_date_range_entries(result),
         **_scale_floor_entries(result),
+        **_max_rows_entries(result),
+        **_range_setter_entries(result),
+        **_projected_given_entries(result),
         **(
             {
                 REFERENCES_PLAN_KEY: {
@@ -577,6 +653,7 @@ def plan(
     scale: Any = None,
     timings: bool = False,
     allow_generators: Sequence[str] = (),
+    max_rows: Optional[int] = None,
 ) -> StageResult:
     """Execute the loop once and write ``<state_dir>/runs/<runId>/plan.json``.
 
@@ -612,6 +689,11 @@ def plan(
     one of :data:`flux_engine.core.kernels.KERNELS`, or ``None`` for the default.
     Every later stage reads it back from the plan. One this engine does not
     implement is ``FLX-2119``.
+
+    *max_rows* is the rows a periodic emit may be estimated to derive (``fluxsim plan
+    --max-rows``), at most :data:`~flux_engine.core.sizing.MOST_ROWS`; ``None`` is
+    :data:`~flux_engine.generator.periods.DEFAULT_PERIODIC_ROWS`. Another budget is recorded as
+    ``maxRows``, which ``apply --run-id`` reads back.
     """
     return timed(
         timings,
@@ -629,6 +711,7 @@ def plan(
             allow_generators=allow_generators,
             stage_required=not stage,
             reuse_committed=True,
+            max_rows=max_rows,
         )[0],
     )
 
@@ -731,6 +814,7 @@ def plan_with_result(
     replicate: Optional[Replicate] = None,
     common_draws_of: Optional[Path] = None,
     most_rows: Optional[int] = None,
+    max_rows: Optional[int] = None,
 ) -> Tuple[StageResult, Optional["_pipeline.PipelineResult"]]:
     """:func:`plan`, plus the execution it planned from (``None`` when it failed).
 
@@ -759,6 +843,8 @@ def plan_with_result(
     *most_rows* is the ceiling on the rows the plans hold, passed to the pipeline. A plan above it
     raises :class:`~flux_engine.stages.pipeline.PlannedRowsAboveCeiling`, which is not a
     :class:`~flux_engine.core.errors.FluxError` and so is not turned into a result here.
+
+    *max_rows* is :func:`plan`'s, the periodic rows' budget, a different bound from *most_rows*.
     """
     directory = Path(bundle_directory)
     state = Path(state_dir) if state_dir is not None else Path(".flux")
@@ -811,6 +897,7 @@ def plan_with_result(
             replicate=replicate,
             common_draws_of=common_draws_of,
             most_rows=most_rows,
+            era=_pipeline.PlanEra(periodic_rows=_periodic_budget(max_rows), hold_ranges=True),
         )
         pinned, document, digested = planned_record(result)
     except FluxError as error:
