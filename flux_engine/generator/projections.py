@@ -729,6 +729,10 @@ def fallback_notes(plan: GeneratorPlan) -> Tuple[str, ...]:
     values and which distribution is used. Advice only: nothing here changes how a value is drawn,
     and the plan document and its digests carry the columns (``fallbackGivens``) and their
     marginals (``fallbackMarginals``) rather than the sentence.
+
+    Only the plan stage prints it, and only for a plan made with the draw after the projection:
+    a plan recorded without ``projectedGivens`` holds no fallback (:func:`_draw_after`), so it has
+    no sentence, and a replay prints none.
     """
     projection = plan.projection
     if projection is None or not projection.fallback:
