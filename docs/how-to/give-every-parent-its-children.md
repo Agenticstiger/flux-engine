@@ -329,6 +329,49 @@ $ cp ../simulation.keep simulation.flux.yml
 
 Under `--scale` the child rows and the parent rows are scaled alike but each is rounded on its own. When a run that is planned at scale 1 leaves too few child rows at another scale, the refusal says so and names `--scale`: raise the scale, lower `minChildren` or declare more child rows. See [Size a run, split it and time it](./size-and-split-a-run.md).
 
+## Association tables
+
+A table of two foreign keys and no other column pairs the rows of two parents: an enrolment of a student and a course, or a membership of a person and a club. Neither foreign key is part of a key. Its rows are the edges between the two parents. Each parent's number of rows follows a `counts` shape, and an `associations` entry says that the table pairs them ([ADR 0039](../adr/0039-an-association-table-pairs-two-counted-sides.md)). It needs kernel 0.2.0.
+
+Declare a `counts` entry for each side, then the pair, beside them in the same extensions:
+
+```yaml
+extensions:
+  com.agentics.flux/1:
+    counts:
+      - { emit: enrolment, relationship: student, children: { levels: [1, 2, 3], levelWeights: ["0.5", "0.3", "0.2"] } }
+      - { emit: enrolment, relationship: course, children: { levels: [2, 4, 8], levelWeights: ["0.4", "0.4", "0.2"] } }
+    associations:
+      - { emit: enrolment, relationships: [student, course], distinct: true }
+```
+
+| Key | Meaning |
+|---|---|
+| `emit` | The association table. At most one entry for each emit. |
+| `relationships` | The names of the two relationships, one for each side. |
+| `distinct` | `true` by default. No pair of parent rows repeats. |
+
+The table's rows are its edges, and each side's children sum to exactly that number. With `distinct`, no student takes a course twice. The engine holds each side to at most as many rows per parent as the other side has parents, and checks the pair counts against the Gale-Ryser condition. It moves rows where a side breaks either rule, and the plan says how many moved.
+
+The pairing is a global pass over the table's rows. The process that starts the worker pool makes it once and hands it to the workers, so `--jobs` and `--shard` give the same bytes. A bundle with no `associations` entry keeps every byte and digest it had.
+
+### What the plan and verify say
+
+`fluxsim plan` prints a note when it moved rows to meet a cap or the Gale-Ryser condition, and when it laid out the whole table again to avoid repeated pairs. `plan.json` records, for the emit, the relationships, `distinct`, the rows, each move, and each side's distance from its shape.
+
+`fluxsim verify` adds these lines for a table that holds each pair once:
+
+- `association:<a>,<b>.pairs`: the share of rows whose pair occurs once.
+- `association:<a>,<b>.rows:<side>`: one line for each side that has a shape. It is met when that side's total variation distance from its shape is at most the side's `counts` tolerance, 0.10 by default. A count that no class of the shape holds adds its whole share to the distance.
+
+### What is refused
+
+A side that is a key, a bridge side or `one_to_one`, a side whose `counts` entry has a `parentWhen` or a `given`, an emit that declares a history, and more rows than the two parents make pairs under `distinct` are refused with [FLX-3403](../reference/errors/FLX-3403.md). A summary over the second side's children is refused with [FLX-6210](../reference/errors/FLX-6210.md).
+
+### `init` writes one
+
+`fluxsim init` writes an `associations` entry for such a table, in place of leaving the table out. It sets `distinct: true`, or `distinct: false` when the published rows are more than the two parents make pairs. With no published `rowCount`, the rows are the inverse-variance mean of the two sides' totals, kept within the pairs. A statistic that groups one side's children by a column of its parent is listed unused, because the sides pair stub by stub. See [write a bundle from a profile](./write-a-bundle-from-a-profile.md).
+
 ## Row order
 
 A child table on the counted layout comes out grouped by parent in row order, as a table loaded parent by parent does. A consumer that needs another order sorts it.
