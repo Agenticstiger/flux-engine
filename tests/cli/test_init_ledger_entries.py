@@ -520,20 +520,17 @@ def _edition_profile() -> Dict[str, Any]:
     }
 
 
-def test_a_history_whose_start_and_end_lay_out_a_lifetime_is_not_listed_whole(
-    tmp_path: Path,
-) -> None:
+def test_a_history_no_member_of_which_is_read_is_listed_whole(tmp_path: Path) -> None:
     profile = _edition_profile()
     history = profile["tables"]["edition"]["history"]
-    # Fewer than nine of ten versions chain on the next start, so no entry is written; the entry's
-    # start and end lay out the table's lifetime, so the entry is read and cannot be dropped whole.
+    # Fewer than nine of ten versions chain on the next start, so no entry is written.
     history["chain"] = history_init._levels(
         ["dayBefore", "gap", "nextStart", "overlap"], [0, 51, 449, 0], 500
     )
     written = Authored(tmp_path / "first", profile, EDITION_CONTRACT)
     assert written.result.exit_code == 0, written.result.stderr
-    assert "/tables/edition/history" not in written.pointers
-    assert "/tables/edition/history/versionLength" not in written.pointers
+    assert "/tables/edition/history" in written.pointers
+    assert not [pointer for pointer in written.pointers if "/history/" in pointer]
     dropped = _drop(profile, written.pointers)
     _read(dropped)
     again = Authored(tmp_path / "second", dropped, EDITION_CONTRACT)

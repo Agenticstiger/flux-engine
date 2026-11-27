@@ -94,10 +94,6 @@ _WINDOW_TAKES = (
     "its order shows it ties a date of the contract's validity window to another column, so the "
     "window takes the table's lifetime"
 )
-_HISTORY_NAMES = (
-    "the entry names the start and the end of a version, which lay out the table's lifetime"
-)
-_HISTORY_MEMBERS = ("versionLength", "chain", "firstStart", "versionsPerEntity", "lastVersion")
 _NO_DURATION = "no usable duration: an end drawn apart from its start would break the order"
 #: Why a snapshot's date pair is no lifetime when the history it is projected from sets both dates.
 _BOTH_CARRIED = "the history sets both dates"
@@ -743,7 +739,6 @@ class _Declarer:
                 continue
             if self._derived_lifetime(str(expose), held, (start, end), _HISTORY_SOURCE):
                 self.history_pairs[str(expose)] = (start, end)
-                self._read_history_entry(str(expose), history)
 
     def _gaps_between(
         self, held: DatedExpose, start: str, end: str, source: str
@@ -797,18 +792,6 @@ class _Declarer:
                 "so no gap can match both exactly"
             )
         return note
-
-    def _read_history_entry(self, expose: str, history: Mapping[str, Any]) -> None:
-        """Mark the history entry used: the lifetime is laid out from the start and the end it names.
-
-        The entry's start and end are no statistic of their own, so one of its members stands for
-        the entry; a profile with the unused members of the entry left out then keeps the others
-        the reader needs beside it, and the entry, and so the lifetime.
-        """
-        for key in _HISTORY_MEMBERS:
-            if isinstance(history.get(key), Mapping):
-                self.used.append((("tables", expose, "history", key), _HISTORY_NAMES))
-                return
 
     def _derived_lifetime(
         self, expose: str, held: DatedExpose, pair: Tuple[str, str], source: str
