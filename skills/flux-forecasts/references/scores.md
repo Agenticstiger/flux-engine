@@ -1,7 +1,7 @@
 # Reading the scores
 
 What `fluxsim forecast score` prints, what the drift line means, how the evidence pack shows the forecasts, and how to walk forward over a series of states. The worked page is
-[forecast the next state](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/forecast-the-next-state.md).
+[forecast the next state](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/forecast-the-next-state.md).
 
 ## A verdict
 
@@ -42,7 +42,7 @@ A family, a forecast and a declaration never enter a grade. The grade of a run i
 
 For states 1 to `n`, the bundle pinned to state `k` forecasts state `k + 1`, and state `k + 1` scores it, for `k` up to the one before the last. For each pass:
 
-1. get a bundle pinned to state `k`: a copy of the previous pass's bundle, re-pinned to the new profile's digest (`fluxsim init` does not carry `responses`, `forecasts`, `sweep` or the Treatment, Experiment and Journey documents). No fluxsim command re-pins, and you never open profiles, so ask the user to make or approve the re-pin; [the how-to page](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/forecast-the-next-state.md) shows a script;
+1. get a bundle pinned to state `k`: a copy of the previous pass's bundle, re-pinned to the new profile's digest (`fluxsim init` does not carry `responses`, `forecasts`, `sweep` or the Treatment, Experiment and Journey documents). No fluxsim command re-pins, and you never open profiles, so ask the user to make or approve the re-pin; [the how-to page](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/forecast-the-next-state.md) shows a script;
 2. make the forecasts with the instants the user gives for `k`;
 3. score them when state `k + 1` exists, with the instants the user gives;
 4. ship only if the user asks.

@@ -1,6 +1,6 @@
 # What `fluxsim init` reads and records
 
-Read this when you take path (a) or (b) of the skill. The command's own help (`fluxsim init --help`) is the authority for the installed engine; the pages are [the init reference](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/reference/cli/init.md), [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/write-a-bundle-from-a-profile.md) and [ADR 0014](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0014-init-reads-every-statistic-a-profile-publishes.md).
+Read this when you take path (a) or (b) of the skill. The command's own help (`fluxsim init --help`) is the authority for the installed engine; the pages are [the init reference](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/reference/cli/init.md), [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/write-a-bundle-from-a-profile.md) and [ADR 0014](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/adr/0014-init-reads-every-statistic-a-profile-publishes.md).
 
 ## The three forms
 
@@ -51,7 +51,7 @@ When it refuses:
 
 ## Profiles under noise
 
-A profile that carries statistics released under differential privacy is read as point estimates with a variance; the output lists each noisy statistic with its mechanism and scale. The privacy grade a run needs is the `flux-privacy-and-profiling` skill's matter; see [ADR 0020](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0020-privacy-grades.md) and `fluxsim explain FLX-4005`.
+A profile that carries statistics released under differential privacy is read as point estimates with a variance; the output lists each noisy statistic with its mechanism and scale. The privacy grade a run needs is the `flux-privacy-and-profiling` skill's matter; see [ADR 0020](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/adr/0020-privacy-grades.md) and `fluxsim explain FLX-4005`.
 
 ## A profile request
 

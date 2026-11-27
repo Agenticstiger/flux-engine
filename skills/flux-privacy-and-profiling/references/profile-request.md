@@ -1,6 +1,6 @@
 # The profile request
 
-A profile request lists what a profiler must measure for a bundle. `fluxsim init` writes it from a FLUID contract when no profile is given. The format is in the [profile request specification](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/spec/PROFILE-REQUEST-SPEC.md) (check the installed engine's own text first: the init help names the same file).
+A profile request lists what a profiler must measure for a bundle. `fluxsim init` writes it from a FLUID contract when no profile is given. The format is in the [profile request specification](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/spec/PROFILE-REQUEST-SPEC.md) (check the installed engine's own text first: the init help names the same file).
 
 ## What it holds
 
@@ -30,7 +30,7 @@ When the owner releases the statistics under differential privacy (grade P3), th
 - Several releases of one data set are several profiles, each with its own budget, and the engine cannot add them.
 - Asking for more statistics divides the same budget thinner, so each is noisier. A smaller request is a choice for the owner.
 
-See [ADR 0019](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/adr/0019-one-privacy-budget-per-profile-release.md). Choosing the total is the data owner's decision, not the agent's.
+See [ADR 0019](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/adr/0019-one-privacy-budget-per-profile-release.md). Choosing the total is the data owner's decision, not the agent's.
 
 ## The owner-side step
 
@@ -44,4 +44,4 @@ A profile document of aggregates, for example `orders.profile.json`. Only the pr
 
 writes the bundle: the contract copied unchanged, and a Simulation declared from the profile's published aggregates, pinning its digest. The profile stays outside the bundle. Every number in the Simulation is labelled in its parameter register as from the profile, from the contract, or assumed.
 
-See [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/write-a-bundle-from-a-profile.md).
+See [write a bundle from a profile](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/write-a-bundle-from-a-profile.md).
