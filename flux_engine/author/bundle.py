@@ -106,6 +106,7 @@ from flux_engine.author.dates import (
     DATE_KINDS,
     DatedExpose,
     declare_dates,
+    pair_orders,
     statistic_tokens,
     window_end_ms,
     window_start_ms,
@@ -150,6 +151,7 @@ from flux_engine.author.history import (
 from flux_engine.author.history import _pointers as declared_pointers
 from flux_engine.author.ledger import Ledger
 from flux_engine.author.noisy import cite_noisy, point_estimates
+from flux_engine.author.order_activation import OrderedBy
 from flux_engine.author.orders import contract_date_orders
 from flux_engine.author.projection import (
     DateSpan,
@@ -3077,6 +3079,60 @@ def _property_on(document: Mapping[str, Any], names: Set[str]) -> bool:
     return any(name in names for name in columns)
 
 
+def _may_be_null(table: Any, expose: Mapping[str, Any], column: str) -> bool:
+    """Whether the contract lets *column* be NULL and the profile publishes a count of NULLs that is not zero."""
+    required = {item.name for item in compile_expose(expose).columns if item.required}
+    columns = table.get("columns") if isinstance(table, Mapping) else None
+    entry = columns.get(column) if isinstance(columns, Mapping) else None
+    metrics = entry.get("metrics") if isinstance(entry, Mapping) else None
+    count = metrics.get("nullCount") if isinstance(metrics, Mapping) else None
+    value = count.get("value") if isinstance(count, Mapping) else None
+    return (
+        column not in required
+        and isinstance(count, Mapping)
+        and count.get("status") == "F"
+        and isinstance(value, int)
+        and not isinstance(value, bool)
+        and value > 0
+    )
+
+
+def _orders_of_versions(
+    exposes: Sequence[AuthoredExpose],
+    keys: Optional[ContractKeys],
+    contract: Mapping[str, Any],
+    tables: Mapping[str, Any],
+    history: AuthoredExpose,
+) -> Tuple[OrderedBy, ...]:
+    """The date orders the contract's checks declare on a history's table and on the tables of its entities.
+
+    A table of the entities (one with no validity window whose primary entity is the history's
+    natural one) is read for the orders the profile publishes no order for: a pair whose order is
+    published lays the dates out already (ADR 0024).
+    """
+    if keys is None:
+        return ()
+    held = keys.expose(history.expose_id)
+    natural = tuple(item.column for item in held.entities if item.kind == "natural")
+    found: List[OrderedBy] = []
+    for other in exposes:
+        if other.reference or other.skipped is not None:
+            continue
+        theirs = keys.expose(other.expose_id)
+        if other is not history and (
+            theirs.versioned
+            or tuple(item.column for item in theirs.entities if item.kind == "primary") != natural
+        ):
+            continue
+        for order in contract_date_orders(contract["exposes"][other.index]):
+            if not pair_orders(tables.get(other.expose_id), order.start, order.end)[0]:
+                nulls = _may_be_null(
+                    tables.get(other.expose_id), contract["exposes"][other.index], order.start
+                )
+                found.append(OrderedBy(other.expose_id, order, nulls))
+    return tuple(found)
+
+
 def _histories(
     exposes: Sequence[AuthoredExpose],
     keys: Optional[ContractKeys],
@@ -3120,6 +3176,7 @@ def _histories(
             dependents=frozenset(expose.dependents - set(expose.derives) - set(expose.copies)),
             parents=reads.candidates(expose.expose_id, held),
             catalogues=reads.catalogues(held),
+            orders=_orders_of_versions(exposes, keys, contract, tables, expose),
         )
         written = write_history(source) if declined is None else decline_history(source, declined)
         if written.entry is None:

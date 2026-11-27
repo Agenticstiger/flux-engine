@@ -65,6 +65,18 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
     be widened, and the next pass may lay the table's lifetime out over that date in place of the entry (an open end
     in the year 9999 is the usual case); the range stays widened, but the pair was listed as unused. The statistics of
     the entry that asked for the widening are now read. Such a statistic decides as a pair with its order, not alone.
+- `init` keeps a contract's date order on the table of the current rows of a history when the release publishes no
+  order for the two dates (the pair is listed with its order withheld, suppressed or noisy, or not listed). A check
+  such as `ended_on IS NULL OR ended_on >= began_on`, where a rule sets the end from a version's start or end and the
+  beginning is a plain column of the versions, was left to chance: the beginning was drawn apart from the starts, and
+  the check held on fewer rows than the contract declares. The history now keeps that column with the entity's first
+  start (`activation`, as `lifecycle.activation` does), so every version starts on or after it, the register says so,
+  and the column keeps no `within` entry of its own. A release that publishes the order, a column a rule
+  sets, a strict order, a history refused because the release publishes a column on the start's day, and a contract
+  that declares its own `lifecycle.activation` keep their bytes: the activation read from a check does not lift that
+  refusal. A beginning that may be NULL (not required, with a count of NULLs the profile publishes) keeps its own draw
+  and the register says so; when two checks qualify, the register names the one it leaves unkept. ADR 0024 amendment
+  of 2026-11-27.
 
 ## 0.13.0 - 2026-11-27
 

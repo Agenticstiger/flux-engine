@@ -55,6 +55,7 @@ from flux_engine.author.children import count_children, declare_counted
 from flux_engine.author.columns import ColumnPlan, cell_weights, count_cells, share_texts
 from flux_engine.author.date_spread import DateSpread, declared_spread
 from flux_engine.author.gap_fit import GAP_FIT_ITERATIONS, GapFit, Interval, fit_gap
+from flux_engine.author.order_activation import OrderedBy, ordered_activation
 from flux_engine.core.canonical import nfc
 from flux_engine.core.clock import format_rfc3339_ms, parse_rfc3339_ms
 from flux_engine.seam.contract import LogicalKind
@@ -137,6 +138,9 @@ class HistorySource:
     #: Each foreign key of the emit into a reference expose, by column: the expose and the keys the
     #: profile publishes for it, or ``None`` when they are not all published.
     catalogues: Mapping[str, Tuple[str, Optional[Tuple[str, ...]]]] = field(default_factory=dict)
+    #: The date orders of the contract's checks on this table and on its snapshots, where the
+    #: profile publishes no order of the two dates (ADR 0024).
+    orders: Tuple[OrderedBy, ...] = ()
 
 
 @dataclass
@@ -1505,6 +1509,8 @@ class _Lifecycle:
     """What the contract's lifecycle gives the entry, and why each member it declares is not used."""
 
     activation: Optional[str] = None
+    #: Whether ``activation`` was read from a date order of a check and not declared by the contract.
+    derived: bool = False
     #: The column and the value (as text) an ending version holds.
     marker: Optional[Tuple[str, str]] = None
     notes: List[Tuple[str, str]] = field(default_factory=list)
@@ -1619,13 +1625,83 @@ def _end_marker(
     lifecycle.marker = (column, text)
 
 
+def _draws_nulls(plan: ColumnPlan) -> bool:
+    """Whether the column's own draw holds NULLs."""
+    share = plan.declaration.get("nullFraction")
+    try:
+        return share is not None and Decimal(str(share)) > 0
+    except ArithmeticError:
+        return False
+
+
+def _ordered_activation(
+    source: HistorySource,
+    kind: LogicalKind,
+    held: FrozenSet[str],
+    ends: Tuple[str, str],
+    lifecycle: _Lifecycle,
+) -> None:
+    """Keep a column with the first start where the contract orders it before a version's start or end."""
+    found = ordered_activation(source.contract_expose, source.orders, *ends)
+    if found is None:
+        return
+    column, item, others = found
+    subject = f"{item.expose}.{item.order.rule}"
+    for other in others:
+        lifecycle.notes.append(
+            (
+                "history activation",
+                f"The check {other.expose}.{other.order.rule} orders {other.order.start!r} before "
+                f"{other.order.end!r} too, and the history keeps one column with the first start: "
+                f"it keeps {column!r}, so that check is left unkept.",
+            )
+        )
+    if source.kinds.get(column) is not kind or column in held:
+        lifecycle.notes.append(
+            (
+                "history activation",
+                f"The check {subject} orders {column!r} before {item.order.end!r}, a start or an end "
+                f"of a version, and {column!r} is no plain column of the window's type, so the "
+                "history cannot keep it with the first start.",
+            )
+        )
+        return
+    plan = source.plans.get(column)
+    if item.nulls or (plan is not None and _draws_nulls(plan)):
+        lifecycle.notes.append(
+            (
+                "history activation",
+                f"The check {subject} orders {column!r} before {item.order.end!r}, and {column!r} "
+                "may be NULL, which a column that holds the first start on every version would "
+                "drop: the column keeps its own draw.",
+            )
+        )
+        return
+    lifecycle.activation = column
+    lifecycle.derived = True
+    lifecycle.notes.append(
+        (
+            "history activation",
+            f"The check {subject} orders {column!r} before {item.order.end!r}, which a version's "
+            f"start or end sets, and the profile publishes no order of the two: {column!r} holds "
+            "the entity's first start on every version, so every version starts on or after it.",
+        )
+    )
+
+
 def _read_lifecycle(
-    source: HistorySource, natural: str, kind: LogicalKind, held: FrozenSet[str]
+    source: HistorySource,
+    natural: str,
+    kind: LogicalKind,
+    held: FrozenSet[str],
+    ends: Tuple[str, str],
 ) -> _Lifecycle:
     """The members of the contract's lifecycle that the entry writes, and the reason for each it does not."""
     declared = declared_lifecycle(source.contract_expose, natural)
     lifecycle = _Lifecycle()
     _activation(source, declared, kind, held, lifecycle)
+    if "activation" not in declared:
+        _ordered_activation(source, kind, held, ends, lifecycle)
     _end_marker(source, declared, held, lifecycle)
     if "currentFlag" in declared:
         lifecycle.decline(
@@ -1687,12 +1763,14 @@ def _refuse_a_lost_tie(
 
     A date pair that holds as the same day on nearly every row, between the start and a column the
     history does not set, is a tie the history would cut: the column is drawn apart from the start.
-    ``lifecycle.activation`` is how a contract keeps such a column with the first start.
+    A contract's own ``lifecycle.activation`` is how it keeps such a column with the first start; an
+    activation read from a check's date order does not lift the refusal.
     """
     pairs = source.table.get("datePairs")
     for index, item in enumerate(pairs if isinstance(pairs, list) else ()):
         other = _same_day_other(item, start)
-        if other is not None and other not in held and other != lifecycle.activation:
+        kept = None if lifecycle.derived else lifecycle.activation
+        if other is not None and other not in held and other != kept:
             raise _LostTie(
                 f"the release publishes {other!r} on the same day as {start!r}, and a history "
                 "written from withheld lengths would draw them apart: declare "
@@ -1840,7 +1918,7 @@ def _build(source: HistorySource, written: HistoryWritten) -> None:
         entry["versions"] = versions
     until = _window_units(source, kind)[1]
     held = _fixed(source, (start, end, *natural)) | source.set_by_rules
-    lifecycle = _read_lifecycle(source, natural[0], kind, held)
+    lifecycle = _read_lifecycle(source, natural[0], kind, held, (start, end))
     first = _first_starts(history, base, source, start, kind, until, written, withheld)
     if first is not None:
         entry["start"] = first
