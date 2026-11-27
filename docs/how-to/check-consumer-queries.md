@@ -313,6 +313,16 @@ only what the data does not state. CMA-ES runs for at most `evaluations` runs of
 evaluated as well, and the objective is the sum of the squared gaps between each calibration query's rate
 and its target. It reads the pinned profile only.
 
+When the pinned profile is a private release (format 1-5-0), a query's rate can be noisy. The fit reads it
+through its point estimate, with three rules:
+
+- A rate whose unit's records are at most twice the noise floor over every cell of its statistic stands inside the
+  noise. The fit leaves it out, and the fit's output carries a note. In `--json`, the notes are `noiseNotes`.
+- Each query's squared gap is weighted by the inverse of its rate's variance. The weights are scaled so the least
+  noisy query weighs 1, as an exact rate does.
+- When every rate of the calibration queries stands inside the noise, the profile states none to fit to. The fit
+  refuses with [FLX-3707](../reference/errors/FLX-3707.md) and names the queries. Nothing runs.
+
 ```console
 $ fluxsim calibrate --fit declared --profile fixture/subscriptions.profile.json --held-out fixture/subscriptions.held-out-profile.json --out calibrated   # exit 1
 fit: 24 evaluations, 1 value moved
