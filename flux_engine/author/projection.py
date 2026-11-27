@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.author.basis import Label, assumed
 from flux_engine.author.columns import ColumnPlan
@@ -88,6 +88,10 @@ class HistoryTarget:
     start: Optional[str] = None
     #: Whether the history ends entities (``end`` is written): a ``d`` event is then dated by a version's end.
     closes: bool = False
+    #: Each required column of the history that is the one-column foreign key of a to-one
+    #: relationship, with every (expose, toColumns) such a relationship reaches: the key every
+    #: version of an entity holds there is a key of each of them, and never NULL.
+    keyed: Mapping[str, FrozenSet[Tuple[str, Tuple[str, ...]]]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -182,9 +186,11 @@ def _counted_misses(source: ProjectionSource, target: Optional[HistoryTarget]) -
     """What keeps a ``counts`` entry's foreign key from following the history.
 
     A projected emit takes the history's value in a column the history holds, so a counted
-    relationship's foreign key follows the history only when the history has that column and
-    writes a ``parent`` over the same parent expose, whose keys it then holds. Otherwise the
-    column would hold the history's drawn values, which are no keys of the parent.
+    relationship's foreign key follows the history only when the history has that column and the
+    column holds keys of the parent expose: the history writes its ``parent`` over that expose, or
+    declares a to-one relationship of its own over the same column to the same keys (a pick the
+    history draws from the parent's rows, and carries from the entity's first version). Otherwise
+    the column would hold the history's drawn values, which are no keys of the parent.
     """
     if target is None:
         return []
@@ -199,7 +205,10 @@ def _counted_misses(source: ProjectionSource, target: Optional[HistoryTarget]) -
                 f"its column {column} is set by a counts entry, which a projected emit "
                 f"refuses, and {target.expose_id} has no column of that name to take it from"
             )
-        elif target.parent != item.target:
+        elif target.parent != item.target and (
+            item.target,
+            tuple(item.to_columns),
+        ) not in target.keyed.get(column, frozenset()):
             held = (
                 f"writes no parent over {item.target}"
                 if target.parent is None
@@ -760,15 +769,38 @@ def history_target(
     """The target of the ``history`` *entry* of the emit with the keys *held* and *columns*."""
     declared = entry.get("parent")
     name = declared.get("relationship") if isinstance(declared, dict) else None
+    by_name = {column.name: column for column in columns}
     return HistoryTarget(
         str(entry["emit"]),
         tuple(item.column for item in held.entities if item.kind == "natural"),
-        {column.name: column for column in columns},
+        by_name,
         None if name is None else _target_of(held, str(name)),
         None if entry.get("until") is None else str(entry["until"]),
         start,
         "end" in entry,
+        {column: frozenset(reaches) for column, reaches in _keyed_columns(held, by_name).items()},
     )
+
+
+def _keyed_columns(
+    held: ExposeKeys, by_name: Mapping[str, CompiledColumn]
+) -> Dict[str, List[Tuple[str, Tuple[str, ...]]]]:
+    """Each required one-column foreign key of a to-one relationship of *held*, with each key it reaches.
+
+    A second relationship on one column adds to the keys it reaches, and replaces none: generation
+    allows two on a column only when one implies the other.
+    """
+    found: Dict[str, List[Tuple[str, Tuple[str, ...]]]] = {}
+    for item in held.relationships:
+        column = item.from_columns[0] if len(item.from_columns) == 1 else None
+        if (
+            column is not None
+            and item.cardinality == "many_to_one"
+            and column in by_name
+            and by_name[column].required
+        ):
+            found.setdefault(column, []).append((str(item.target), tuple(item.to_columns)))
+    return found
 
 
 def _target_of(keys: ExposeKeys, name: str) -> Optional[str]:
@@ -784,14 +816,19 @@ def _history_parent(
     counts: Mapping[str, Any],
     declared_target: str,
     keys_of: Callable[[str], ExposeKeys],
+    emit: str,
 ) -> Tuple[Optional[Dict[str, Any]], str]:
-    """The ``parent`` of *history* that may take *counts*, or ``None`` with why it may not."""
+    """The ``parent`` of *history* that may take *counts* of the snapshot *emit*, or ``None`` with why it may not."""
     parent = history.get("parent") if history is not None else None
     if history is None or not isinstance(parent, dict):
         return None, "the history writes no parent"
     target = _target_of(keys_of(str(history["emit"])), str(parent["relationship"]))
     if target != declared_target:
-        return None, f"the history's parent is laid out under {target}, not {declared_target}"
+        return None, (
+            f"the history's parent is laid out under {target}, not {declared_target}, and "
+            f"{emit} takes its {counts['relationship']} from the versions of {history['emit']}, "
+            f"whose own key into {declared_target} holds the keys of {declared_target}"
+        )
     if "children" in parent:
         return None, "the history's own children per parent are written and are kept"
     if "children" not in counts:
@@ -828,7 +865,7 @@ def release_counts(
         history_id = found.carried[emit][0]
         history = next((item for item in histories if item["emit"] == history_id), None)
         if emit in snapshots:
-            parent, why = _history_parent(history, counts, declared.target, keys_of)
+            parent, why = _history_parent(history, counts, declared.target, keys_of, emit)
         else:
             parent, why = None, _NOT_ENTITIES
         if parent is not None:
