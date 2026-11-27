@@ -1686,7 +1686,7 @@ def _chain_of(
     try:
         level, share = _chain_level(history.get("chain"), kind)
     except _Skip:
-        if not (withheld and _withheld_levels(history.get("chain"))):
+        if not _withheld_levels(history.get("chain")):
             raise
         return _CHAINS[0], "", True
     reason = (
@@ -1708,8 +1708,8 @@ def _entities_of(
     try:
         entities, versions, used, unused, notes = _versions(history, base, source)
     except _Skip:
-        entities_of_key = _entities_of_key(source, natural) if withheld else None
-        if entities_of_key is None:
+        entities_of_key = _entities_of_key(source, natural)
+        if entities_of_key is None or not _withheld_levels(history.get("versionsPerEntity")):
             raise
         written.derived[("entities",)] = _KEY_ENTITIES
         if entities_of_key < source.rows:
@@ -1812,7 +1812,8 @@ def _build(source: HistorySource, written: HistoryWritten) -> None:
     until = _window_units(source, kind)[1]
     held = _fixed(source, (start, end, *natural)) | source.set_by_rules
     lifecycle = _read_lifecycle(source, natural[0], kind, held)
-    first = _first_starts(history, base, source, start, kind, until, written, withheld)
+    keyed = ("entities",) in written.derived
+    first = _first_starts(history, base, source, start, kind, until, written, withheld or keyed)
     if first is not None:
         entry["start"] = first
     entry["length"], derived = _length_of(

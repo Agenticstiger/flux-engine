@@ -65,6 +65,9 @@ ACTIVATED = OPEN_ENDED.replace(
     "{ name: pass, type: natural, expr: pass_id, lifecycle: { activation: enrolled_on } }",
 )
 
+#: The same, with the open end declared and no chain: the release's chain, or what init assumes, stands.
+NO_CHAIN = ACTIVATED.replace(", chain: nextStart", "")
+
 OPEN = _ms(9999, 12, 31)
 UNTIL = _ms(2025, 10, 1)
 START_EDGES = [_ms(2025, 1, 1), _ms(2025, 3, 1), _ms(2025, 5, 1), _ms(2025, 7, 1), _ms(2025, 9, 1)]
@@ -462,3 +465,39 @@ def test_a_declared_end_range_the_gaps_cannot_fill_declines_the_lifetime(tmp_pat
     result = _init(tmp_path, profile, NO_OPEN_END)
     assert _lifetimes(tmp_path) == []
     assert "the declared range of 'valid_to' cannot be shown to hold every end" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# A withheld chain does not decline a history that can be written
+# ---------------------------------------------------------------------------
+
+
+def test_one_version_per_entity_needs_no_chain_to_write_the_published_lengths(
+    tmp_path: Path,
+) -> None:
+    result = _init(tmp_path, _profile(keep=["versionLength", "lastVersion"]), NO_CHAIN)
+    entry = _entry(tmp_path)
+    assert entry["entities"] == 1000 and entry["chain"] == "nextStart"
+    assert entry["length"]["bins"] == ["1", "30", "90", "365"]
+    assert _states(result)[f"{HISTORY}/versionLength"]["state"] == "used"
+    assert _states(result)[f"{HISTORY}/chain"]["state"] == "withheld"
+    # One version per entity: no version meets another, so no assumption is made about it.
+    assert not any("chain" in text for _, text in _chain_notes(result))
+
+
+def test_several_versions_assume_next_start_when_the_chain_is_withheld(tmp_path: Path) -> None:
+    keep = ["versionLength", "versionsPerEntity", "firstStart"]
+    result = _init(tmp_path, _profile(rows=1850, entities=1000, open_cell=850, keep=keep), NO_CHAIN)
+    entry = _entry(tmp_path)
+    assert entry["chain"] == "nextStart" and entry["versions"]["bins"] == ["1", "2", "3", "4"]
+    assert entry["length"]["bins"] == ["1", "30", "90", "365"]
+    assert any("consecutive versions" in text for _, text in _chain_notes(result))
+
+
+def _chain_notes(result: Any) -> List[Any]:
+    """The assumptions init prints about how versions meet, as (subject, text)."""
+    return [
+        (line.split(":")[0].strip(), line)
+        for line in result.stdout.splitlines()
+        if "history chain" in line
+    ]

@@ -285,7 +285,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   start and the end of the history entry are laid out as one lifetime with the same derived gaps, or gaps drawn evenly
   over the run's window, and the end's histogram is traded for it with a note; a table with a published date pair on
   that start and end keeps that pair. A histogram property of the end that the derived gaps cannot reproduce within its
-  tolerance is left out, with a note. A release whose history `init` already wrote, and one that publishes the pair as
+  tolerance is left out, with a note. A chain the release withholds no longer declines a history that can be written:
+  with one version per entity (the key's distinct count equals the rows) no chain is needed, and with several `init`
+  assumes `nextStart`, with a note. A release whose history `init` already wrote, and one that publishes the pair as
   a date pair, keep their bytes.
 
 ## 0.12.1 - 2026-11-26
