@@ -957,8 +957,7 @@ end before it started.
   is an assumption in the register. The entities are the natural entity's published distinct count, with the
   versions spread over them as evenly as whole counts allow. The `start` is the first starts' histogram when the
   release publishes it, and else the start column's own histogram, which is exact where each entity has one version.
-  The chain is the contract's, else the published one; a chain the release withholds does not decline the history:
-  with one version per entity none is needed, and with several `nextStart` is assumed, with a note. The `length` is the histogram of gaps that turns the starts into the
+  The chain is the contract's, else `nextStart`. The `length` is the histogram of gaps that turns the starts into the
   closed part of the end's histogram, found by the Richardson-Lucy update from an even start (`author/gap_fit.py`):
   each bin of starts and of gaps spread evenly, a fixed count of updates, whole-number arithmetic so no machine
   reads a different byte. Where the starts or the end are drawn from no histogram, the length is even over the run's

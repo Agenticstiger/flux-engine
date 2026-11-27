@@ -137,11 +137,9 @@ def test_a_cell_inside_the_noise_carries_no_weight(tmp_path: Path) -> None:
 
 
 def test_a_member_with_no_cell_clear_of_the_noise_is_read_as_withheld(tmp_path: Path) -> None:
-    # The chain is withheld, which does not decline a history that can be written: the versions
-    # are assumed to meet by nextStart.
     result = _init(tmp_path, _released_tiers("chain", tiny_cells=range(4)), tiers.TIERS)
-    assert "history" in _block(tmp_path)
-    assert "the versions do not chain" not in result.stdout
+    assert "history" not in _block(tmp_path)
+    assert "/tables/tier_version/history: the versions do not chain" in result.stdout
     _plans(tmp_path)
 
 
