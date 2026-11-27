@@ -32,6 +32,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   is written with the rest of its entry, both columns' initial and transitions are listed as unused with the reason,
   and the grouped statistic is read as before. A table whose candidates are drawn from no other column keeps its
   bytes. ADR 0017 amendment of 2026-11-27.
+- A history's whole-number key whose histogram bins weigh versions is laid out, not refused. The profile
+  counts a bin's weight over the table's rows, so a bin whose entities have more versions than average took
+  more entities than it has values, plan refused it (`FLX-3403`), and `fluxsim init` wrote no history for the
+  table. Over the entities, a bin that would overflow now takes its width and the entities left over are shared
+  again over the other bins by their weights, until none overflows; a key whose bins already fit keeps its
+  bytes, and a key that is not a history's natural entity keeps its refusal. A key whose bins with a weight above
+  zero hold fewer values than the entities is still refused, with a sentence that says so. ADR 0017 amendment
+  of 2026-11-27.
 
 ## 0.13.1 - 2026-11-28
 

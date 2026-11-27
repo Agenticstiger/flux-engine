@@ -5429,6 +5429,8 @@ def _key_grid(
     _check_key_declaration(statistics, rows, where, noun)
     exponent = _exponent(column)
     spans, counts = _key_spans(column, statistics, rows, exponent, where, noun)
+    if entities is not None and statistics.bins is not None and statistics.bin_weights is not None:
+        counts = _fill_to_widths(spans, counts, statistics.bin_weights, rows, where)
     firsts: List[int] = []
     widths: List[int] = []
     kept: List[int] = []
@@ -5456,6 +5458,47 @@ def _key_grid(
         starts=tuple(starts),
         rows=rows,
     )
+
+
+def _fill_to_widths(
+    spans: Sequence[Tuple[int, int]],
+    counts: List[int],
+    weights: Sequence[Decimal],
+    entities: int,
+    where: str,
+) -> List[int]:
+    """A history's key bins, filled up to their widths (ADR 0017 amendment of 2026-11-27).
+
+    The profile weighs each bin by the versions that hold its values, and a bin whose entities
+    have more versions than average would take more entities than it has values. Such a bin
+    takes its width, and the entities left over are allotted again over the other bins by their
+    weights, until no bin takes more than it holds. A bin of weight zero takes no entity. What
+    already fits is returned as it is.
+    """
+    if all(count <= width for (_first, width), count in zip(spans, counts, strict=True)):
+        return counts
+    held = sum(width for (_first, width), weight in zip(spans, weights, strict=True) if weight > 0)
+    if held < entities:
+        raise _refuse(
+            f"{where}: its bins with a weight above zero hold {held} values, fewer than its "
+            f"{entities} entities; widen the bins that carry weight, so that no value repeats"
+        )
+    widths = [width for _first, width in spans]
+    capped: Dict[int, int] = {}
+    while True:
+        open_ = [index for index in range(len(widths)) if index not in capped]
+        left = entities - sum(capped.values())
+        shares = _allot(left, [weights[index] for index in open_], where)
+        over = {
+            index: widths[index]
+            for index, share in zip(open_, shares, strict=True)
+            if share > widths[index]
+        }
+        if not over:
+            result = dict(capped)
+            result.update(zip(open_, shares, strict=True))
+            return [result[index] for index in range(len(widths))]
+        capped.update(over)
 
 
 def _check_key_declaration(statistics: Any, rows: int, where: str, noun: str = "rows") -> None:
