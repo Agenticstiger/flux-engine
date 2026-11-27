@@ -177,9 +177,10 @@ def test_a_pair_the_release_publishes_on_the_start_day_does_not_take_the_lifetim
     # Both pairs hold on every row; the one that starts at the window's start is listed first.
     _, life = _written(tmp_path, _release(SAME_DAY, ENROLLED_TO_END))
     assert life is not None and (life["start"], life["end"]) == ("valid_from", "valid_to")
-    for index in (0, 1):
-        (why,) = _unused(tmp_path, f"/tables/tier_version/datePairs/{index}")
-        assert "validity window" in why
+    # The pair that decided it is used, and the other is unused with a reason that names the window.
+    reasons = [_unused(tmp_path, f"/tables/tier_version/datePairs/{index}") for index in (0, 1)]
+    assert sorted(len(found) for found in reasons) == [0, 1]
+    assert "validity window" in " ".join(reasons[0] + reasons[1])
     assert _ended_before_started(_versions(tmp_path)) == 0
 
 
@@ -373,3 +374,42 @@ def test_the_window_lifetime_declares_the_range_the_contract_gives_its_end(tmp_p
     rows = _versions(tmp_path)
     assert _ended_before_started(rows) == 0
     assert max(row[TO] for row in rows if row[TO] is not None) <= "2026-06-30"
+
+
+# ---------------------------------------------------------------------------
+# What the ledger lists as unused changes no bundle
+# ---------------------------------------------------------------------------
+
+
+def _generated(tmp_path: Path) -> Dict[str, Any]:
+    """What the bundle in *tmp_path* generates from: its namespace less the register, the profile
+    digest and the unused list, which name statistics by position."""
+    found = dict(_block(tmp_path))
+    for key in ("parameters", "unused", "profile"):
+        found.pop(key, None)
+    return found
+
+
+@pytest.mark.parametrize("shape", ["tie", "pair"])
+def test_a_pair_a_decision_reads_is_used_and_a_release_without_the_unused_gives_the_bundle(
+    tmp_path: Path, shape: str
+) -> None:
+    from tests.cli.test_init_ledger_entries import _drop
+
+    # A column published on the start's day keeps the history out; a pair of a window date and
+    # another column gives the window the table's lifetime. Each pair is read by that decision.
+    profile = _release(SAME_DAY, history=True) if shape == "tie" else _release(ENROLLED_TO_END)
+    contract = OPEN_ENDED if shape == "tie" else NO_OPEN_END
+    whole = tmp_path / "whole"
+    whole.mkdir()
+    _init(whole, profile, contract)
+    assert (_block(whole).get("history", []) == []) and (
+        any(item["emit"] == "tier_version" for item in _block(whole)["lifetimes"])
+    )
+    listed = [item["statistic"]["pointer"] for item in _block(whole)["unused"]]
+    pair = "/tables/tier_version/datePairs/0"
+    assert pair not in listed and pair + "/order" not in listed
+    cut = tmp_path / "cut"
+    cut.mkdir()
+    _init(cut, _drop(profile, listed), contract)
+    assert _generated(cut) == _generated(whole)

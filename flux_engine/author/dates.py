@@ -90,6 +90,10 @@ _WINDOW_OWN_NO_DAYS = (
     "the pair is the contract's validity window, and it publishes no days to draw an end from: "
     "the window's lifetime takes its gaps from the two published histograms instead"
 )
+_WINDOW_TAKES = (
+    "its order shows it ties a date of the contract's validity window to another column, so the "
+    "window takes the table's lifetime"
+)
 _NO_DURATION = "no usable duration: an end drawn apart from its start would break the order"
 #: Why a snapshot's date pair is no lifetime when the history it is projected from sets both dates.
 _BOTH_CARRIED = "the history sets both dates"
@@ -961,9 +965,11 @@ class _Declarer:
             return None
         for candidate in candidates:
             if (candidate[3], candidate[4]) == window and self._has_duration(expose, candidate):
+                self.used.append((best[2].tokens + ("order",), _WINDOW_TAKES))
                 return candidate
         if self._derived_lifetime(expose, held, window, _WINDOW_SOURCE):
             self.window_pairs[expose] = window
+            self.used.append((best[2].tokens + ("order",), _WINDOW_TAKES))
             for candidate in candidates:
                 own = (candidate[3], candidate[4]) == window
                 self.reject(

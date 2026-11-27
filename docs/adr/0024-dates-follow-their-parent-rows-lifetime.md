@@ -630,6 +630,9 @@ a column outside the window, and the start, drawn on its own, was then ordered w
   check is (the amendment above): the gap is cut to it, and where the published histogram of the end reaches past it the
   range is declared on the end and the histogram is left out. A history entry's lifetime is read against the spans the
   bundle declares, as before.
+- **Used and unused.** A pair whose order decides that the window takes the lifetime is used, with a reason that holds no
+  value; so is a pair that shows a column on the history's start day, which keeps the history out (ADR 0017). Only a
+  statistic no decision reads is listed unused, so dropping the listed statistics never changes the bundle.
 - **A pair the release withholds.** A pair of the window's two dates whose order the release withholds gives no
   lifetime; with no other pair to take it, the window takes it the same way.
 - **What does not move.** A table whose history is written, a release whose `history` entry names the window (its
