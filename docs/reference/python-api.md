@@ -8,10 +8,10 @@ description: "flux_engine.api and flux_engine.engine: the governed extension con
 This package is the surface a third-party implementation targets and an
 in-process consumer imports against. Everything outside `flux_engine.api`
 and `flux_engine.engine` (the facade described under "The engine facade"
-below) is internal and may move without notice; everything inside this
+below) is internal and may move without notice. Everything inside this
 package is governed by `__api_version__`, which is `"0.1"` today and
-moves on its own schedule; removing or renaming anything listed below is
-a breaking change to that number regardless of what the engine's own
+moves on its own schedule. Removing or renaming anything listed below is
+a breaking change to that number, regardless of what the engine's own
 version does.
 
 The package holds Protocols and frozen records only. There is no logic
@@ -143,7 +143,7 @@ failure. Call `result.raise_for_status()` to get the stage's typed exception.
 
 `flux_engine.api` is the vocabulary; `flux_engine.engine` is the way in.
 It is the library entry point a host process imports: one `async def`
-per stage, dispatching to the synchronous stage functions via
+per stage. Each dispatches to the synchronous stage functions via
 `asyncio.to_thread`, so an in-process consumer never blocks its event
 loop on a run that takes real wall-clock time. It mirrors forge-cli's
 `fluid_build.engine` (the Pulumi Automation API pattern).
@@ -168,6 +168,12 @@ result.raise_for_status()  # does nothing here; on a failed stage it raises RunF
 Seven callables, one per stage, each returning the `StageResult` named
 below: `validate`, `plan`, `apply`, `run`, `verify`, `ship`, `replay`.
 
+`validate` takes an optional `profile=` keyword, the path of the profile the Simulation pins. With it, `validate`
+refuses what `plan` refuses about that profile, as `fluxsim validate --profile FILE` does. It refuses three things.
+One is a profile that is not the pinned one or cannot be read (`FLX-3109`, `FLX-3110`). Another is an overlay that
+names a table or column the profile lacks (`FLX-3105`). The last is a profile that lacks a table or column the
+register cites (`FLX-3113`). Without the keyword, `validate` reads no profile.
+
 Two contracts hold on them:
 
 **Frozen kwarg names**, from that module's first release forward. Adding
@@ -184,27 +190,27 @@ forge-cli's engine documents.
 **More than one job.** `plan`, `apply`, `run`, `verify` and `replay` take `jobs`
 (default 1): how many processes may generate or read an emit's rows from declared
 statistics. The rows and every digest are the ones one job gives. A run starts one
-pool of worker processes for all its emits and gives each worker the plans once. They
-are started from a forkserver (with spawn where there is none), so each one imports the host's
-main module again: a script that passes `jobs` above 1 keeps its work
-under `if __name__ == "__main__":`, and whatever it does at the top level,
-outside that block, happens again in every worker. Runs in one process
-share one worker per CPU: an emit gets the workers it asks for or what
-other runs have left, so the count the run summary prints ("4 processes")
-also tells a caller how busy the process is. The soft timeout stops
+pool of worker processes for all its emits and gives each worker the plans once. They are
+started from a forkserver (with spawn where there is none), so each one imports the host's
+main module again. A script that passes `jobs` above 1 keeps its work under
+`if __name__ == "__main__":`. Whatever it does at the top level, outside that block, happens
+again in every worker. Runs in one process
+share one worker per CPU. An emit gets the workers it asks for or what
+other runs have left. The count the run summary prints ("4 processes")
+therefore also tells a caller how busy the process is. The soft timeout stops
 neither the stage thread nor its workers; after `TimeoutError` they run on,
 and keep their share of the workers, until the stage ends. Workers start
-with the current directory off their import path: unless the host already
+with the current directory off their import path. Unless the host already
 runs with `-P` or with `PYTHONSAFEPATH` set, the engine sets
-`PYTHONSAFEPATH` for the moment it starts them, which other threads of the
-host can see. `fluxsim` sets it for its whole process, so a sink or plugin
+`PYTHONSAFEPATH` for the moment it starts them. Other threads of the host
+can see this setting. `fluxsim` sets it for its whole process. So a sink or plugin
 that starts a Python script of its own as a child process passes that
-script the directories it imports from: its own directory is not on its
+script the directories it imports from. Its own directory is not on its
 path either.
 
 **Strict coverage**. `plan`, `apply` and `run` take `strict_coverage`
 (default `False`). A column that falls back to a type default is named by the
-plan either way; with `strict_coverage=True` it is refused instead, with
+plan either way. With `strict_coverage=True` it is refused instead, with
 `FLX-3304` and a table of every such column, before any row is drawn. So is
 a declaration the contract makes and the run does not generate, with
 `FLX-3305`. The

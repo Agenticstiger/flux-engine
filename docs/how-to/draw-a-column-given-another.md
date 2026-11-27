@@ -339,7 +339,7 @@ never holds, and a list of one name is refused, because one parent is written as
 given column is a categorical with no `nullFraction`, and the links may form any graph with no
 cycle. The draw is from the column's own seed path, as for one parent, so no other column of the
 plan moves. `fluxsim init` writes such a table from a profile's noisy clique marginals (see
-[Write a bundle from a profile](./write-a-bundle-from-a-profile.md)).
+[Write a bundle from a private release](./write-a-bundle-from-a-private-release.md)).
 
 ## Check a column drawn given a linked row's column
 

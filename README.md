@@ -65,7 +65,7 @@ Open `.flux/runs/<runId>/EVIDENCE.md` first: its last section, "What Was Not Pro
 
 ## Roadmap
 
-- **Faster on many cores.** The 0.11.0 changelog logs the causes for the next release; the aim is about 8 times faster at 16 jobs, with every run still byte for byte the same.
+- **Faster on many cores.** The 0.11.0 changelog names the causes, and they are still open after 0.13.0: no performance work shipped in 0.12 or 0.13. The target, with no date, is about 8 times faster at 16 jobs, with every run still byte for byte the same.
 - **A living clone (proposed).** The contract's world kept running on a clock and replayable to the byte, on rules alone or with your own small language model as an opt-in.
 - **Learned generators (designed, build deferred).** `flux-learned`, a separate plugin that trains inside the data owner's own environment under differential privacy.
 
