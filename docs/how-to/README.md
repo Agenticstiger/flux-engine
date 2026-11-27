@@ -1,6 +1,6 @@
 ---
 title: "How-to guides"
-description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, draw a column given the bin of another, draw number columns together, ship with evidence, write a bundle from a profile, score a run against a profile, seal and score a prediction, forecast the next state and score it, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, check consumer queries and calibrate to them, fix values and seed rows, give an entity a history, project a history, keep dates inside their parent's lifetime, stream a simulation into Kafka."
+description: "Steps for one goal each: model customers, add a journey, use the FLUID seam, calibrate from aggregates, draw a column given another, draw a column given the bin of another, draw number columns together, ship with evidence, write a bundle from a profile, write a bundle from a private release, score a run against a profile, seal and score a prediction, forecast the next state and score it, load a simulation into a database, size a run, split it and time it, publish a catalogue whole, give every parent its children, check consumer queries and calibrate to them, fix values and seed rows, give an entity a history, project a history, keep dates inside their parent's lifetime, stream a simulation into Kafka."
 ---
 
 # How-to guides
@@ -18,6 +18,7 @@ from a fresh project made with `fluxsim init`.
 - [Draw number columns together](./draw-number-columns-together.md): declare a Gaussian copula so two number or date columns are drawn with a stated rank correlation, keep each column's histogram, and score the correlation against a profile.
 - [Ship with evidence](./ship-with-evidence.md): the fidelity gate, committed slices, signing, and sending the pack on.
 - [Write a bundle from a profile](./write-a-bundle-from-a-profile.md): turn a FLUID contract and a profile of the data into a bundle that runs, every number labelled by what it rests on.
+- [Write a bundle from a private release](./write-a-bundle-from-a-private-release.md): read a profile the profiler released under differential privacy, with noisy counts, histograms, histories and null counts, and declare a history yourself with `init --history`.
 - [Score a run against a profile, in full or sampled](./score-a-run-against-a-profile.md): pin a data owner's profile, score a run against it, and check its means, histograms and quantile bins on a sample of blocks.
 - [Seal and score a prediction](./seal-and-score-a-prediction.md): register a prediction before its outcome is known, score it against what was observed, and publish the outcomes.
 - [Forecast the next state and score it](./forecast-the-next-state.md): declare a response family and forecasts, make them before the next profile exists, score them against it with an interval score, see what drift flags, and read every forecast in the evidence pack.

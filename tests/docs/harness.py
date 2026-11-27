@@ -111,6 +111,7 @@ TESTED = (
     "docs/reference/python-api.md",
     "docs/reference/schemas.md",
     "docs/reference/plan-and-run-directory.md",
+    "docs/reference/how-init-reads-a-profile.md",
 )
 
 #: Why each other page or folder is not run.
