@@ -74,6 +74,11 @@ The package version is the set of strings below, and only that set.
      `blob/v<old>/` to `blob/vX.Y.Z/`. `make skills-check` holds both to
      `pyproject.toml`'s version and fails while either is stale.
 
+   - The comparison page and the roadmap. Re-verify `docs/explanation/compared.md` against the
+     release's changelog, then update its "checked on" date, its "As published on" date and the version it
+     names for FLUX. Do the same for the roadmap section of `README.md`. The speed roadmap says what is still
+     open, so check it against the release, and say when a release shipped no performance work.
+
    Two more places hold the version only as an example. Nothing fails when they
    go stale, so move them too, for the next reader: the placeholder in
    `.github/ISSUE_TEMPLATE/bug_report.yml`, and the version the release guard's
@@ -98,6 +103,13 @@ The package version is the set of strings below, and only that set.
    own attestation refuses an altered wheel, and publishes the GitHub Release.
    The PyPI upload follows once a reviewer signs off on the `pypi` environment
    (see "Publishing to PyPI").
+
+5. **After the tag, bump the site.** The docs site lives in the `Agenticstiger/flux` repository and
+   carries the pages of the latest release tag. In that repository:
+   - update `scripts/engine-docs.ref` to the new tag;
+   - run `scripts/sync-engine-docs.sh`;
+   - update the version lines of the guide in `docs/guide/from-your-data.md`;
+   - add any engine page that is new in this release to the `/engine/` sidebar in `docs/.vuepress/config.ts`.
 
 ## How the release jobs are split
 
