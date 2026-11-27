@@ -345,12 +345,15 @@ def _reason_places(
 
 
 def _word(op: int, ends: bool, place: int, names: List[str]) -> str:
-    """The key of an event's text in ``type.values``: its op, ``end``, or its reason's column."""
+    """The key of an event's text in ``type.values``: its op, ``end``, its reason's column, or ``u``.
+
+    ``u`` is the text of a change that moves no tracked column (ADR 0017's ``untracked``).
+    """
     if op != _U:
         return OPS[op]
     if ends:
         return "end"
-    return names[place] if names else "u"
+    return names[place] if place < len(names) else "u"
 
 
 def _types(

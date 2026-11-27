@@ -374,6 +374,46 @@ def test_the_member_round_trips_through_the_extension(tmp_path: Path) -> None:
     assert "emit" not in entry.as_member()
 
 
+def test_an_untracked_share_reads_binds_into_h_and_moves_only_its_own_emit(tmp_path: Path) -> None:
+    emit_id = str(ENTRY["emit"])
+    held = entry_with(untracked="0.6")
+    emit = resolved(bundle_with(tmp_path, "share", [held]))[emit_id]
+    (entry,) = history_entries_of(emit.extension, emit_id)
+    assert entry.untracked == "0.6"
+    assert entry.as_member()["untracked"] == "0.6"
+    assert emit.extension is not None and emit.extension[HISTORY_KEY]["untracked"] == "0.6"
+    # The key is bound into the digest of the emit, which it moves.
+    assert _digests(bundle_with(tmp_path, "with-share", [held])) != _digests(
+        bundle_with(tmp_path, "plain", [ENTRY])
+    )
+
+
+def test_an_entry_without_the_key_binds_none_into_h(tmp_path: Path) -> None:
+    emit_id = str(ENTRY["emit"])
+    emit = resolved(bundle_with(tmp_path, "plain", [ENTRY]))[emit_id]
+    (entry,) = history_entries_of(emit.extension, emit_id)
+    assert entry.untracked is None
+    assert "untracked" not in entry.as_member()
+
+
+def test_an_untracked_share_beside_several_tracked_columns_and_reasons_reads(
+    tmp_path: Path,
+) -> None:
+    emit_id = str(ENTRY["emit"])
+    tracked = [
+        ENTRY["tracked"][0],
+        {"column": "tier", "transitions": {"gold": {"silver": "1"}, "silver": {"gold": "1"}}},
+    ]
+    held = entry_with(
+        tracked=tracked,
+        reasons={"levels": ["plan", "tier"], "levelWeights": ["0.5", "0.5"]},
+        untracked="0.25",
+    )
+    emit = resolved(bundle_with(tmp_path, "several", [held]))[emit_id]
+    (entry,) = history_entries_of(emit.extension, emit_id)
+    assert entry.untracked == "0.25"
+
+
 def test_an_empty_block_or_a_null_declares_nothing(
     tmp_path: Path, plain: Dict[str, Tuple[str, str]]
 ) -> None:
@@ -591,6 +631,31 @@ REFUSED: List[Tuple[str, Change, str]] = [
         "reasons naming an untracked column",
         lambda: entry_with(reasons={"levels": ["status"], "levelWeights": ["1"]}),
         "not a tracked column",
+    ),
+    (
+        "an untracked share of zero",
+        lambda: entry_with(untracked="0"),
+        "untracked is a decimal above 0 and below 1",
+    ),
+    (
+        "an untracked share of one",
+        lambda: entry_with(untracked="1"),
+        "untracked is a decimal above 0 and below 1",
+    ),
+    (
+        "an untracked share above one",
+        lambda: entry_with(untracked="1.5"),
+        "untracked is a decimal above 0 and below 1",
+    ),
+    (
+        "an untracked share that is no number",
+        lambda: entry_with(untracked="most"),
+        "untracked is a decimal above 0 and below 1",
+    ),
+    (
+        "an untracked share beside no tracked column",
+        lambda: entry_with(tracked=None, untracked="0.5", end=None),
+        "untracked needs a tracked column",
     ),
     (
         "an end mode of another name",

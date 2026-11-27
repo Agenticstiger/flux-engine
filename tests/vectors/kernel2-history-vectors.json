@@ -1600,6 +1600,583 @@
           ]
         }
       ]
+    },
+    {
+      "name": "(e) finalVersion, one tracked column, a share of changes that move none, DATE",
+      "kind": "DATE",
+      "windowStart": "2023-01-01T00:00:00Z",
+      "until": "2025-12-31",
+      "entities": 12,
+      "rows": 40,
+      "versions": {
+        "bins": [
+          "1",
+          "2",
+          "4",
+          "9"
+        ],
+        "binWeights": [
+          "0.45",
+          "0.35",
+          "0.20"
+        ]
+      },
+      "start": null,
+      "end": {
+        "mode": "finalVersion",
+        "share": "0.5",
+        "column": "status",
+        "value": "gone"
+      },
+      "tracked": [
+        {
+          "column": "plan",
+          "initial": {
+            "levels": [
+              "basic",
+              "pro"
+            ],
+            "levelWeights": [
+              "0.75",
+              "0.25"
+            ]
+          },
+          "transitions": {
+            "basic": {
+              "pro": "0.8",
+              "team": "0.2"
+            },
+            "pro": {
+              "basic": "0.5",
+              "team": "0.5"
+            },
+            "team": {
+              "pro": "1"
+            }
+          },
+          "levels": {
+            "basic": "0.5",
+            "pro": "0.3",
+            "team": "0.2"
+          }
+        }
+      ],
+      "reasons": {
+        "levels": [
+          "plan"
+        ],
+        "levelWeights": [
+          "1"
+        ],
+        "key": "ea651cf04748a5731bbe9b32a49ceffbec9638c5c5537aab1d2c46db2bd61136",
+        "changeOffsets": [
+          0,
+          0,
+          3,
+          3,
+          7,
+          10,
+          10,
+          10,
+          10,
+          20,
+          21,
+          22,
+          22
+        ],
+        "total": 22,
+        "classCounts": [
+          9,
+          13
+        ],
+        "columnOfChange": [
+          1,
+          0,
+          1,
+          1,
+          0,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          0,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          0,
+          0,
+          0
+        ]
+      },
+      "untracked": "0.6",
+      "parentRows": null,
+      "parent": null,
+      "length": {
+        "bins": [
+          "30",
+          "90"
+        ],
+        "binWeights": [
+          "1"
+        ]
+      },
+      "chain": "nextStart",
+      "openEnd": null,
+      "c": 12,
+      "j": [
+        19358,
+        20440
+      ],
+      "untilUnits": 20453,
+      "firstStarts": [
+        20278,
+        19851,
+        20196,
+        19763,
+        19847,
+        20166,
+        20372,
+        20419,
+        19385,
+        20054,
+        20114,
+        20346
+      ],
+      "rooms": [
+        175,
+        602,
+        257,
+        690,
+        606,
+        287,
+        81,
+        34,
+        1068,
+        399,
+        339,
+        107
+      ],
+      "versionKey": "9ecdfcac794c5b44ce4706f3f43c19a50d579e9457190c07d8589ea0cdff424d",
+      "versionSigma": [
+        7,
+        2,
+        11,
+        8,
+        4,
+        3,
+        9,
+        1,
+        5,
+        10,
+        6,
+        0
+      ],
+      "versionCounts": [
+        1,
+        5,
+        1,
+        6,
+        5,
+        1,
+        1,
+        1,
+        12,
+        3,
+        3,
+        1
+      ],
+      "versionOffsets": [
+        0,
+        1,
+        6,
+        7,
+        13,
+        18,
+        19,
+        20,
+        21,
+        33,
+        36,
+        39
+      ],
+      "chains": [
+        {
+          "entity": 0,
+          "versions": 1,
+          "closedLast": false,
+          "drawn": [
+            66
+          ],
+          "compressed": false,
+          "fitted": [],
+          "starts": [
+            20278
+          ],
+          "ends": [
+            null
+          ]
+        },
+        {
+          "entity": 1,
+          "versions": 5,
+          "closedLast": false,
+          "drawn": [
+            73,
+            47,
+            83,
+            90,
+            58
+          ],
+          "compressed": false,
+          "fitted": [
+            73,
+            47,
+            83,
+            90
+          ],
+          "starts": [
+            19851,
+            19924,
+            19971,
+            20054,
+            20144
+          ],
+          "ends": [
+            19924,
+            19971,
+            20054,
+            20144,
+            null
+          ]
+        },
+        {
+          "entity": 3,
+          "versions": 6,
+          "closedLast": false,
+          "drawn": [
+            58,
+            69,
+            86,
+            69,
+            53,
+            53
+          ],
+          "compressed": false,
+          "fitted": [
+            58,
+            69,
+            86,
+            69,
+            53
+          ],
+          "starts": [
+            19763,
+            19821,
+            19890,
+            19976,
+            20045,
+            20098
+          ],
+          "ends": [
+            19821,
+            19890,
+            19976,
+            20045,
+            20098,
+            null
+          ]
+        },
+        {
+          "entity": 8,
+          "versions": 12,
+          "closedLast": false,
+          "drawn": [
+            83,
+            82,
+            48,
+            89,
+            79,
+            82,
+            90,
+            42,
+            56,
+            57,
+            74,
+            53
+          ],
+          "compressed": false,
+          "fitted": [
+            83,
+            82,
+            48,
+            89,
+            79,
+            82,
+            90,
+            42,
+            56,
+            57,
+            74
+          ],
+          "starts": [
+            19385,
+            19468,
+            19550,
+            19598,
+            19687,
+            19766,
+            19848,
+            19938,
+            19980,
+            20036,
+            20093,
+            20167
+          ],
+          "ends": [
+            19468,
+            19550,
+            19598,
+            19687,
+            19766,
+            19848,
+            19938,
+            19980,
+            20036,
+            20093,
+            20167,
+            null
+          ]
+        },
+        {
+          "entity": 11,
+          "versions": 1,
+          "closedLast": false,
+          "drawn": [
+            50
+          ],
+          "compressed": false,
+          "fitted": [],
+          "starts": [
+            20346
+          ],
+          "ends": [
+            null
+          ]
+        }
+      ],
+      "ended": {
+        "key": "79b761516fbc7ac84868a4919ca5eb9b3d640189d97ab1b32c942ac88077d433",
+        "eligible": 6,
+        "count": 6,
+        "ended": [
+          1,
+          3,
+          4,
+          8,
+          9,
+          10
+        ]
+      },
+      "events": {
+        "c": 12,
+        "u": 22,
+        "d": 6,
+        "total": 40,
+        "closingVersions": []
+      },
+      "states": [
+        {
+          "entity": 0,
+          "states": [
+            [
+              "basic"
+            ]
+          ],
+          "draws": [
+            [
+              6501998459109228
+            ]
+          ]
+        },
+        {
+          "entity": 1,
+          "states": [
+            [
+              "basic"
+            ],
+            [
+              "basic"
+            ],
+            [
+              "team"
+            ],
+            [
+              "team"
+            ],
+            [
+              "team"
+            ]
+          ],
+          "draws": [
+            [
+              4576448744213163
+            ],
+            [
+              null
+            ],
+            [
+              7719678011933722
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "entity": 3,
+          "states": [
+            [
+              "pro"
+            ],
+            [
+              "pro"
+            ],
+            [
+              "team"
+            ],
+            [
+              "team"
+            ],
+            [
+              "team"
+            ],
+            [
+              "team"
+            ]
+          ],
+          "draws": [
+            [
+              8881111531556792
+            ],
+            [
+              null
+            ],
+            [
+              5384469155237346
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "entity": 8,
+          "states": [
+            [
+              "basic"
+            ],
+            [
+              "basic"
+            ],
+            [
+              "team"
+            ],
+            [
+              "pro"
+            ],
+            [
+              "pro"
+            ],
+            [
+              "pro"
+            ],
+            [
+              "basic"
+            ],
+            [
+              "basic"
+            ],
+            [
+              "basic"
+            ],
+            [
+              "basic"
+            ],
+            [
+              "team"
+            ],
+            [
+              "team"
+            ]
+          ],
+          "draws": [
+            [
+              489930830675746
+            ],
+            [
+              null
+            ],
+            [
+              7682319824768147
+            ],
+            [
+              5732231506679786
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ],
+            [
+              2087618419814791
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ],
+            [
+              null
+            ],
+            [
+              8305707598738924
+            ],
+            [
+              null
+            ]
+          ]
+        },
+        {
+          "entity": 11,
+          "states": [
+            [
+              "basic"
+            ]
+          ],
+          "draws": [
+            [
+              2274531286111324
+            ]
+          ]
+        }
+      ]
     }
   ],
   "lagHistograms": {

@@ -22,6 +22,15 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ## Unreleased
 
+### Added
+
+- `history[].untracked`, the share of a history's ordinary changes that move no tracked column. Those versions
+  change only their validity window and keep every column. It is a decimal above 0 and below 1 (`FLX-3403`
+  otherwise, and beside no tracked column), works with one tracked column and no `reasons` or with several, and
+  is exact like the other shares. The `u` event of such a change takes `type.values["u"]`, and a history that
+  tracks no column may now declare `u` there. A history without the key keeps its plan and its bytes. ADR 0017
+  and ADR 0027 amendments of 2026-11-27.
+
 ### Fixed
 
 - `init` wrote no history for any table of a bundle when a history candidate was drawn given another column, and

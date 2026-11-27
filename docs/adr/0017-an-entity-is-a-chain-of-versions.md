@@ -1054,3 +1054,41 @@ whole-number key.
   the histogram stays used; a published mean stays read by the check of the histogram, its reading saying that
   the generated rows do not keep it; and a note on the expose says which bins are filled and which scores are left
   out. A key whose bins fit keeps both properties.
+
+## Amendment of 2026-11-27: a change may move no tracked column
+
+Section 6 says a later version always differs from its previous one, and that with one tracked column every
+ordinary change moves it. A profile whose one tracked column is a foreign key into a public reference table
+shows where that is wrong. Such a column moves in far fewer changes than the history has: the profile's
+transitions count 400 moves among 850 changes, and the history moved the column in all 850.
+
+- **The key.** `history[].untracked` is a decimal string above 0 and below 1: the share of the ordinary changes
+  (section 6's `T`) that move no tracked column. Outside that range it is `FLX-3403`, and so it is with no
+  `tracked` entry, since with none no change moves one. A bundle that does not write it keeps its bytes and every
+  digest: the key enters the emit's `H` only when set, and no plan marker is needed, because a recorded plan holds
+  the entry as it was written and an entry without the key reads as before.
+- **The classes.** The classes of section 6 are the tracked columns at places `0` to `k - 1`, with weights
+  `w_i * (1 - s)`, and one more class at place `k`, the number of tracked columns, with weight `s`. With one
+  tracked column and no `reasons` the first class has weight 1 and `reasons` is not needed; with several columns
+  `reasons` gives `w_i` as before. The counts are `LRM(T, weights)`, keyed as section 6 keys them, with the same
+  `K_reason`: so the count of each class is exact and known at plan time, and `--jobs` and `--shard` rebuild the
+  same plan. A change of the class at place `k` draws nothing at `256 + c`, so no counter moves.
+- **What an untracked change keeps.** Every column. Only the validity window moves: the new version starts where
+  the chain says and the previous one ends there. Carried columns are not redrawn. Section 8 reads them as
+  the same on every version, a redraw would break a column drawn `given` another and a link on it, columns that
+  are constant per entity in the data (a sign-up date, a country) would change, and no statistic says which carried
+  columns do change.
+- **`init`.** For exactly one tracked column, `init` writes the key when the profile counts fewer changes that move
+  the column than the history has. The history has `C = rows - entities` ordinary changes, less the change of
+  each entity that ends by an end marker into its final version, which is no ordinary change. The profile
+  counts `M`, the sum of the published sizes of the groups of the column's `transitions`, less the cells into the
+  end marker's value, and the changes that `reasons` counts as moving several columns, which move this one too.
+  `untracked` is `(C - M) / C`, exact, spelled as every share is. It is written only where `C - M` exceeds the
+  rounding the release declares, a rounding base and one for each count summed, as `init` reads a histogram against
+  the groups of its table elsewhere; and not at all when a group or a cell it needs is withheld, or `C` is 0 or less. Noisy counts are
+  read as published. The register says that the share is assumed, and says which counts it follows from. The
+  `reasons` histogram is listed as used where its count of changes that move several columns changed the share,
+  and as unused otherwise. Several tracked columns are a follow-up.
+- **ADR 0027.** The `u` event of such a change takes `type.values["u"]`. See section 4 of ADR 0027.
+- **What does not move.** Nothing changes for an entry without the key, and a profile whose one tracked column
+  moves in as many changes as the history has (within the rounding) writes the entry it wrote before.

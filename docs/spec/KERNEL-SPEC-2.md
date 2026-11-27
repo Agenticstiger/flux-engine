@@ -623,7 +623,11 @@ carries the key to the earlier count and so to other bytes (section 12).
 numbered `t` in row order, `T` of them. With one tracked column it is the reason of every change. Otherwise the
 `reasons` classes take `LRM(T, weights)` changes each, keyed as section 8.1 keys classes, and change `t` takes the
 class of slot `permute/2(K_reason, T, t)`, the slots laid out class by class. The count per reason is known at plan
-time without a draw.
+time without a draw. An entry with `untracked` `s`, a decimal above 0 and below 1 (`FLX-3403` otherwise, and with no
+tracked column), adds one class at place `k`, the number of tracked columns, with weight `s`, and gives each tracked
+class its weight times `1 - s`; one tracked column with no `reasons` has one class of weight 1. A change of the class
+at place `k` moves no tracked column, draws nothing at `256 + c` and keeps every column but its validity window. The
+key is read only where set, so an entry without it keeps its plan.
 
 **The value draws.** The reason's column moves from its value on the previous version to a level drawn from that
 level's row of `transitions`, one `categorical` at position `256 + c` of the version's `change` path, `c` the
