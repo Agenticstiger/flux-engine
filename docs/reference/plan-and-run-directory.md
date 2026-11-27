@@ -23,17 +23,18 @@ masked. The run id is the first sixteen hex digits of it. `apply` and `run` refu
 | `kernelVersion`, `seedTreeVersion` | The kernel and the seed-tree wire version the plan was made with. A recorded plan keeps replaying under them. |
 | `seedTreeDigest` | The digest of `seed-paths.ndjson`. |
 | `seedTreeShapes` | A table of `{canonical path shape name: number of seed paths of that shape}`, in sorted key order, for example `{"world.subject.trait": 75000}`. The shapes are the closed table of [KERNEL-SPEC](../spec/KERNEL-SPEC.md) section 3, and the paths themselves are in `seed-paths.ndjson`. |
+| `privacyGrade` | The privacy grade of the run: `P1`, `P3` or `P5`. It is written only when the Simulation pins a profile or declares a generator plugin. |
 | `columnProvenanceDigest` | The digest of `column-provenance.json`. |
-| `emits` | One entry for each emitted table. See [An emit's entry](#an-emit-s-entry). |
+| `emits` | One entry for each emitted table. See [The entry for an emit](#the-entry-for-an-emit). |
 | `generated_at` | When the plan was made. It is masked out of `planDigest`. |
 
-### An emit's entry
+### The entry for an emit
 
 Each key of `emits` is an expose. These members are in every entry:
 
 | Key | Holds |
 |---|---|
-| `H`, `G` | The two digests of the expose's seam: `H` binds the whole fidelity block, and `G` leaves out its tolerances, so a tolerance changes `H` and keeps `G` ([SEAM-FIDELITY-SPEC](../spec/SEAM-FIDELITY-SPEC.md) section 3). |
+| `H`, `G` | The two digests of the expose's seam. `H` is the digest of the contract, the emit entry, the extension entry and the column names. `G` is the same with every tolerance, every `minVariance` and `budget.maxStateAge` left out, and with every declaration that shapes the rows but not the committed state: links, counts, bridges, associations, history and the like. A tolerance changes `H` and keeps `G` ([SEAM-FIDELITY-SPEC](../spec/SEAM-FIDELITY-SPEC.md) section 3). |
 | `productRef` | The product the expose belongs to. |
 | `declaresFidelity` | Whether the expose declares a fidelity block. |
 | `generator` | `generatorDigest`, `rows` and the `columns` the emit writes, and `hiddenColumns` when some column is drawn and never written. It is `null` for an emit with no generator plan. |
@@ -49,7 +50,7 @@ Top level:
 | Key | Meaning |
 |---|---|
 | `profileDigest` | The digest of the profile the Simulation pins. |
-| `scorecard` | The thresholds the Simulation declares for its scorecard: a `thresholds` list of `target`, `operator` and `value`, and a `shape` member with `maxFlags` when it declares a shape limit. `verify` and `ship` read them through the plan's digest. |
+| `scorecard` | The thresholds the Simulation declares for its scorecard: a `thresholds` list of `target`, `operator` and `value`, and a `shape` member with `maxFlags` when it declares a shape limit. `thresholds` is written only when the Simulation declares thresholds, or declares no shape limit; a declaration of a shape limit alone has no `thresholds`. `verify` and `ship` read them through the plan's digest. |
 | `overlay` | The profile overlay the Simulation declares, as `name` and `patch`, so `verify` and `ship` score against the overlaid profile. |
 | `parameterRegisterDigest` | The digest of `parameter-register.json`, for a Simulation that declares a register. |
 | `generators` | For each expose a plugin generates: the plugin, its distribution and version, whether the install is editable, its grade, the reproducibility the run is recorded with (`none` for an editable install), the environment digest and, when declared, the privacy account and the model digest. |
@@ -109,4 +110,4 @@ directory, so do not edit a file in it.
 Beside `ledger`, `gaps` lists the assumptions that stand in for what the profile did not publish, and `historyFile`
 names the file given to `--history`, when there is one. A profile with a noisy history or `nullCount/2` adds its
 entries to `statistics`, and a NULL share set aside for a clique column is named there with the share. See
-[write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md).
+[write a bundle from a private release](../how-to/write-a-bundle-from-a-private-release.md).

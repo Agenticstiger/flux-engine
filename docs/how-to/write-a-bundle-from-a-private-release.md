@@ -5,7 +5,7 @@ description: "Write a bundle from a profile that the profiler released under dif
 
 # Write a bundle from a private release
 
-Use this page when the profile you hold is a private release: the profiler added noise to its statistics before it left the data owner. `fluxsim init` reads such a profile as it reads any other and takes each noisy statistic through its point estimate. Start from [Write a bundle from a profile](./write-a-bundle-from-a-profile.md), which writes the bundle step by step, and come here for what changes when a statistic is noisy.
+Use this page when the profile you hold is a private release: the profiler added noise to its statistics before it left the data owner. `fluxsim init` reads such a profile as it reads any other and takes each noisy statistic through its point estimate. Start from [Write a bundle from a profile](./write-a-bundle-from-a-profile.md), which writes the bundle step by step, and come here for what changes when a statistic is noisy. Section 1 is background: how `init` reads the members of a private release. Section 2 is the procedure: how to declare a history yourself.
 
 You need a contract, a profile of format 1-2-0 or later that carries noisy statistics, and the command of the other page:
 

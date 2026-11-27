@@ -196,8 +196,8 @@ histograms of children per parent into the `given` of a `counts` entry. A column
 two independent draws of it are equal with probability at least 1/20, the sum over its bins of the squared share of
 a bin divided by the number of grid values in it, since the statistics carry no tie correction. The copula's
 measure is Kendall's when the profile publishes it for any pair of the copula's columns, and Spearman's
-otherwise. The ledger of `init` says why each statistic was used or left unused (the how-to
-[Write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md)).
+otherwise. The ledger of `init` says why each statistic was used or left unused (the reference
+[How init reads a profile](../reference/how-init-reads-a-profile.md)).
 
 ## 8. Format 1-3-0: a history and a null count
 

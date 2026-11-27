@@ -131,12 +131,12 @@ These rules shape the assumptions:
   foreign key takes its nulls from its first column alone.
 - A histogram's outer edges are often round numbers beyond the data. Its draw keeps to
   the published `min` and `max`, while the check reads the histogram's own edges.
-- A column drawn evenly within its quartile bins rarely averages the published mean. So within each quartile bin the values are drawn from the part on the
-  mean's side. Each bin keeps its quarter of the rows, so every published quartile
-  holds, and the mean is the published one. The
-  cuts this adds are assumptions in the register. The worked example of
-  [Write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md) shows it for an
-  `amount` column.
+- Drawn evenly within its quartile bins, a column would average a value away from the published
+  mean: `amount` in the worked example would average about 40, and the profile says 46.25. So
+  within each quartile bin the values are drawn from the part on the mean's side. Each bin
+  keeps its quarter of the rows, so every published quartile holds, and the mean is the
+  published one. The cuts this adds are assumptions in the register. The worked example of
+  [Write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md) shows it.
 - The World and the Persona are the least a run needs. Their numbers are `default` in
   the register: the generator emits read none of them.
 
@@ -144,20 +144,19 @@ These rules shape the assumptions:
 
 A timestamp bound is RFC 3339 text and a date bound `YYYY-MM-DD`, which the register
 does not count, so an assumed time window is in the command's output and nowhere else. When no
-time column publishes its range, because no single instant is held by enough rows, each such
-column is drawn within the run's `timeBounds`.
+time column publishes its range, because no single instant is held by enough rows (in the
+worked example, ten orders), each such column is drawn within the run's `timeBounds`.
 
-When some columns do publish a range, the run's `timeBounds` span all of them. They run from the earliest start
-to the latest end of every date column's published range. They also cover the date range each date column's
-contract declares (a `range` rule such as `between '2020-01-01' and '2026-12-31'` or
-`>= '2020-01-01' and <= '2026-12-31'`), and the bins, levels and range each column is drawn from. No column's
-bins are cut. To choose the window yourself, pass `--window START END`, two dates
-(`YYYY-MM-DD`, midnight UTC) or RFC 3339 timestamps with START before END. The Simulation's
-`timeBounds` are exactly those, a date column's bins that leave them are cut at them (and the
-column says so), and the output notes the window under "time window". The end column of a
-validity window whose contract declares no `openEnd` gives the window nothing from the year
-9999 on, since that year spells an open end. The note names the column and says to declare the
-`openEnd` on it.
+When some columns do publish a range, the run's `timeBounds` span all of them. They run from the earliest
+start to the latest end of every date column's published range. They also cover the date range each date
+column's contract declares (a `range` rule such as `between '2020-01-01' and '2026-12-31'` or `>= '2020-01-01'
+and <= '2026-12-31'`), and the bins, levels and range each column is drawn from. No column's bins are cut. To
+choose the window yourself, pass `--window START END`, two dates (`YYYY-MM-DD`, midnight UTC) or RFC 3339
+timestamps with START before END. The Simulation's `timeBounds` are exactly those, a date column's bins that
+leave them are cut at them (and the column says so), and the output notes the window under "time window". The
+end column of a validity window whose contract declares no `openEnd` gives the window nothing from the year
+9999 on, since that year spells an open end. The note names the column and says to declare the `openEnd` on
+it.
 
 ## Association tables
 

@@ -244,7 +244,8 @@ The generator refuses the entry with [FLX-3403](../reference/errors/FLX-3403.md)
 
 - `given` is no column of the parent, or is neither a category column with declared levels nor a column drawn from bins;
 - `given` declares a `nullFraction`, or is drawn given a column of a linked row;
-- a rule from a link, a previous version, children or siblings sets `given`, or a summary over the children does, since the children wait on the parent's final rows. A key of `childrenGiven` that is no class of the column, or a list that does not match the classes of `children`, is refused as well.
+- a rule from a link, a previous version, children or siblings sets `given`, or a summary over the children does, since the children wait on the parent's final rows;
+- a key of `childrenGiven` is no class of the column, or a list does not match the classes of `children`.
 
 When the pinned profile holds a histogram of children per parent grouped by that column (or by its bins), `fluxsim verify` scores the relationship group by group. Its `childrenPerParent` row names scorecard format `1-5-0`. A profile with only the ungrouped histogram leaves the row as it is.
 
@@ -557,7 +558,9 @@ A bridge is the other table of two foreign keys. It holds every pair of parent r
 - it has more rows than the two parents make pairs;
 - either side has a `nullFraction`;
 - a side is a key or `one_to_one`;
-- a `links` entry gives a side a condition or a weight. `fluxsim verify` checks that no pair repeats.
+- a `links` entry gives a side a condition or a weight.
+
+`fluxsim verify` checks that no pair repeats.
 
 ### What the plan and verify say
 
@@ -575,7 +578,9 @@ A bridge is the other table of two foreign keys. It holds every pair of parent r
 - a side is a key, a bridge side, `one_to_one` or implied by another relationship;
 - a side's `counts` entry has a `parentWhen` or a `given`;
 - the emit declares a history;
-- under `distinct`, the rows exceed the pairs the two parents make. A summary over the second side's children is refused with [FLX-6210](../reference/errors/FLX-6210.md).
+- under `distinct`, the rows exceed the pairs the two parents make.
+
+A summary over the second side's children is refused with [FLX-6210](../reference/errors/FLX-6210.md).
 
 ### `init` writes one when its conditions hold
 
@@ -586,7 +591,7 @@ When exactly one parent's row count is an assumption, `init` derives the pairs f
 - both parents have an assumed row count;
 - a side has no mean number of children per parent;
 - another table refers to a parent, or a parent refers to a parent of its own;
-- the rows are ten times the parents that a side's own statistic counts;
+- the rows are more than ten times, or less than a tenth of, the parents that a side's own statistic counts;
 - a class of either side holds more children than the other side has parents;
 - the rows cannot hold the pairs.
 
