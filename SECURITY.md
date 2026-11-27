@@ -4,8 +4,8 @@
 
 | Version | Supported |
 |---|---|
-| 0.12.x | yes |
-| 0.11.x and earlier | no |
+| 0.13.x | yes |
+| 0.12.x and earlier | no |
 
 Before 1.0, only the latest minor release gets fixes.
 

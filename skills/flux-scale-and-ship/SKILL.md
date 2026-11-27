@@ -78,7 +78,7 @@ The second line is the one-step form: plan, apply, verify and ship.
 
 ## Pages
 
-- [Size a run, split it and time it](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/size-and-split-a-run.md)
-- [Load a simulation into a database](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/load-a-simulation-into-a-database.md)
-- [Ship with evidence](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/ship-with-evidence.md)
-- [The evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/explanation/the-evidence-pack.md)
+- [Size a run, split it and time it](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/size-and-split-a-run.md)
+- [Load a simulation into a database](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/load-a-simulation-into-a-database.md)
+- [Ship with evidence](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/ship-with-evidence.md)
+- [The evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/explanation/the-evidence-pack.md)

@@ -20,7 +20,13 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.13.0 - 2026-11-27
+
+Profile format 1-5-0 and profile-request format 1-3-0 (a noisy history, a noisy null count and a noisy query rate in a
+private release), association tables, the structures a contract declares written by `fluxsim init`, and fixes that keep
+the bundles `init` writes from a private release in order: each version ends on or after its start, a validity window
+stays ordered, an order lifetime keeps its ends inside their declared range, and a declared snapshot is kept. flux-stats
+0.13.0 reads format 1-5-0. A profile whose history entries a release cut in part needs this engine for `fluxsim init`.
 
 ### Added
 

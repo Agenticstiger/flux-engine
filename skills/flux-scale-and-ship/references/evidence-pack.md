@@ -1,6 +1,6 @@
 # The evidence pack
 
-Offline first: `fluxsim ship --help`, then `fluxsim explain FLX-8001`. The pages: [Ship with evidence](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/how-to/ship-with-evidence.md) and [The evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.12.1/docs/explanation/the-evidence-pack.md).
+Offline first: `fluxsim ship --help`, then `fluxsim explain FLX-8001`. The pages: [Ship with evidence](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/ship-with-evidence.md) and [The evidence pack](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/explanation/the-evidence-pack.md).
 
 ## Building it
 

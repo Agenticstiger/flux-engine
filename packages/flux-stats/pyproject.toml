@@ -20,7 +20,7 @@ name = "flux-stats"
 # one's files at the tag's version. scripts/release_guard.py refuses a tag that
 # this version disagrees with, and a tree whose engine requirement does not
 # admit this version.
-version = "0.12.1"
+version = "0.13.0"
 description = "FLUX statistics: one definition per statistic, the record reader, the fixed-point grid they are compared on, and the profile document reader, on the Python standard library alone."
 readme = "README.md"
 # One release below the engine's floor, on purpose: the profiler that imports

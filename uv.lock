@@ -1026,7 +1026,7 @@ wheels = [
 
 [[package]]
 name = "flux-sim-engine"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "." }
 dependencies = [
     { name = "cloudevents" },
@@ -1176,7 +1176,7 @@ wheels = [
 
 [[package]]
 name = "flux-stats"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "packages/flux-stats" }
 
 [package.optional-dependencies]
