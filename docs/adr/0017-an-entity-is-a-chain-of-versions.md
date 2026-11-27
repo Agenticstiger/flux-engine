@@ -1048,8 +1048,9 @@ whole-number key.
   weight zero takes no entity. A key that is not a history's natural entity is laid out over the rows as before, and an
   overflowing bin there is still a declaration that contradicts itself.
 - **What it costs.** The capped bins hold fewer versions than the profile's weights say, so a scorecard that scores
-  the key column's histogram over the generated rows can read a bin below its published share. `fluxsim init`
-  therefore does not write the key's histogram property when the layout fills a bin (it reads the layout's own
-  rule, so the two cannot disagree): the key keeps its bins and binWeights, which the layout reads, so the
-  statistic stays used, and a note on the expose says which bins are filled and why the histogram is not scored.
-  A key whose bins fit keeps its property.
+  the key column over the generated rows, its histogram or its mean, can read it away from what the profile
+  publishes. `fluxsim init` therefore writes neither property for the key when the layout fills a bin (it reads the
+  layout's own rule, so the two cannot disagree): the key keeps its bins and binWeights, which the layout reads, so
+  the histogram stays used; a published mean stays read by the check of the histogram; and a note on the expose
+  says which bins are filled and why the key is not scored over its rows. A key whose bins fit keeps both
+  properties.

@@ -3186,7 +3186,7 @@ def _histories(
             result.entries.append(written.entry)
             _ended_status(expose, written.entry)
             restate_assumptions(expose)
-            kept_out = _drop_filled_key_histogram(expose, held, written.entry)
+            kept_out = _drop_filled_key_scores(expose, held, written.entry)
             if kept_out is not None:
                 result.notes.append((f"{expose.expose_id}: history key", kept_out))
             reads.release(expose.expose_id, written)
@@ -3202,12 +3202,16 @@ def _histories(
     return result
 
 
-#: Why the histogram of a history's key is not scored, when the layout fills its bins to their widths.
+#: Why a history's key is not scored over its rows, when the layout fills its bins to their widths.
 _FILLED_KEY = (
     "The profile's histogram of the key counts versions, and a history lays its key out over its "
     "entities: {bins} every value {they} and still {fall} short of {their} weight, since an "
-    "entity's versions do not follow its key, so the histogram is not scored."
+    "entity's versions do not follow its key, so neither the key's histogram nor its mean is "
+    "scored."
 )
+
+#: The properties that score a key over its rows, which a filled key cannot meet.
+_ROW_SCORES = ("marginalHistogram", "mean")
 
 
 def _filled_sentence(filled: Sequence[int]) -> str:
@@ -3222,17 +3226,18 @@ def _filled_sentence(filled: Sequence[int]) -> str:
     )
 
 
-def _drop_filled_key_histogram(
+def _drop_filled_key_scores(
     expose: AuthoredExpose, held: Optional[ExposeKeys], entry: Mapping[str, Any]
 ) -> Optional[str]:
-    """Leave out the histogram property of a history's natural key whose bins the layout fills.
+    """Leave out the properties that score a history's natural key over its rows, once filled.
 
     The layout shares the entities over the key's bins by their weights and gives a bin that
     would overflow its width (ADR 0017, amendment of 2026-11-27), so the key holds a filled bin's
     values on about its width over the entities of its rows, below the share the profile
-    publishes for it. A property that scores the histogram would fail by construction. The key
-    keeps its bins and binWeights, which the layout reads, so the statistic stays used; the
-    expose says why the property is not written, in the sentence returned. An expose left with no property takes the first
+    publishes for it. A property that scores the key's histogram or its mean over the rows would
+    fail by construction. The key keeps its bins and binWeights, which the layout reads, so the
+    histogram stays used, and a published mean stays read by the check of the histogram. The
+    expose says why, in the sentence returned. An expose left with no property takes the first
     column's assumed check, as :func:`_finish_expose` does.
     """
     natural = tuple(item.column for item in held.entities if item.kind == "natural") if held else ()
@@ -3244,7 +3249,7 @@ def _drop_filled_key_histogram(
         return None
     column = expose.contexts[natural[0]].column
     filled = filled_key_bins(column, {"columns": {plan.name: plan.declaration}}, entities)
-    own = [item for item in plan.properties if _histogram_of(item, plan.name)]
+    own = [item for item in plan.properties if _scores_rows_of(item, plan.name)]
     if not filled or not own:
         return None
     plan.properties = [item for item in plan.properties if item not in own]
@@ -3260,12 +3265,9 @@ def _drop_filled_key_histogram(
     return _filled_sentence(filled)
 
 
-def _histogram_of(prop: PropertyPlan, column: str) -> bool:
-    """Whether *prop* is the histogram property of *column*."""
-    return (
-        prop.document.get("property") == "marginalHistogram"
-        and prop.document.get("column") == column
-    )
+def _scores_rows_of(prop: PropertyPlan, column: str) -> bool:
+    """Whether *prop* scores *column* over its rows: its histogram or its mean."""
+    return prop.document.get("property") in _ROW_SCORES and prop.document.get("column") == column
 
 
 def _refuse_an_unset_open_end(expose: AuthoredExpose, written: Any) -> None:

@@ -39,11 +39,23 @@ pytestmark = pytest.mark.integration
 EDGES = ["1", "101", "1000"]
 
 
-def _binned(counts: Any) -> Dict[str, Any]:
-    """The history profile, its natural key weighed by the versions each bin holds."""
+def _binned(counts: Any, mean: Any = None) -> Dict[str, Any]:
+    """The history profile, its natural key weighed by the versions each bin holds.
+
+    With *mean*, the key also publishes its mean over the versions, as a profile does.
+    """
     profile = _profile()
     column = profile["tables"]["plan_version"]["columns"]["plan_id"]
     column["statistics"] = [_bins(EDGES, counts, 1850)]
+    if mean is not None:
+        column["statistics"].append(
+            {
+                "definition": "mean/1",
+                "sampleSize": {"min": 1850, "max": 1850},
+                "disclosure": "acro-default",
+                "groups": [{"group": "", "k": 1850, "Sx": str(mean * 1850 * 2**16), "status": "F"}],
+            }
+        )
     return profile
 
 
@@ -86,24 +98,24 @@ def _verified_with_profile(tmp_path: Path) -> None:
     assert checked.success, checked.stdout + checked.stderr
 
 
-def _key_properties(tmp_path: Path) -> List[Dict[str, Any]]:
-    """The histogram properties the written bundle declares for the history's key."""
+def _key_properties(tmp_path: Path, kind: str = "marginalHistogram") -> List[Dict[str, Any]]:
+    """The properties of *kind* the written bundle declares for the history's key."""
     found: List[Dict[str, Any]] = []
     for path in sorted((tmp_path / "bundle").glob("*.yml")):
-        found += _histograms_of_the_key(yaml.safe_load(path.read_text(encoding="utf-8")))
+        found += _properties_of_the_key(yaml.safe_load(path.read_text(encoding="utf-8")), kind)
     return found
 
 
-def _histograms_of_the_key(node: Any) -> List[Dict[str, Any]]:
+def _properties_of_the_key(node: Any, kind: str) -> List[Dict[str, Any]]:
     found: List[Dict[str, Any]] = []
     if isinstance(node, dict):
-        if node.get("property") == "marginalHistogram" and node.get("column") == "plan_id":
+        if node.get("property") == kind and node.get("column") == "plan_id":
             found.append(node)
         for value in node.values():
-            found += _histograms_of_the_key(value)
+            found += _properties_of_the_key(value, kind)
     elif isinstance(node, list):
         for value in node:
-            found += _histograms_of_the_key(value)
+            found += _properties_of_the_key(value, kind)
     return found
 
 
@@ -140,7 +152,7 @@ def test_a_filled_key_does_not_score_its_histogram(tmp_path: Path) -> None:
     assert states["/tables/plan_version/columns/plan_id/statistics/0"]["state"] == "used"
     said = " ".join(result.stdout.split()) + json.dumps(result.artifacts, default=str)
     assert "bin 0 takes every value it holds and still falls short of its weight" in said
-    assert "so the histogram is not scored" in said
+    assert "so neither the key's histogram nor its mean is scored" in said
 
 
 def test_a_filled_key_verifies_against_the_profile(tmp_path: Path) -> None:
@@ -153,4 +165,23 @@ def test_a_key_whose_bins_fit_keeps_its_histogram_property(tmp_path: Path) -> No
     _init(tmp_path, _binned([185, 1665]))
     (kept,) = _key_properties(tmp_path)
     assert kept["bins"] == EDGES
+    _verified_with_profile(tmp_path)
+
+
+def test_a_filled_key_does_not_score_its_mean_over_the_versions(tmp_path: Path) -> None:
+    # The mean the histogram implies over the versions, about 388: a third of them hold the first
+    # 100 ids. The filled bin holds a tenth of the generated rows, so their mean is near 500.
+    result = _init(tmp_path, _binned([600, 1250], mean=388))
+    assert _key_properties(tmp_path, "mean") == []
+    # The mean is still read: the key's histogram is checked against it.
+    entry = _states(result)["/tables/plan_version/columns/plan_id/statistics/1"]
+    assert entry["state"] == "used"
+    assert "checked against the histogram" in entry["note"]
+    _verified_with_profile(tmp_path)
+
+
+def test_a_key_whose_bins_fit_keeps_its_mean_property(tmp_path: Path) -> None:
+    _init(tmp_path, _binned([185, 1665], mean=500))
+    (kept,) = _key_properties(tmp_path, "mean")
+    assert kept["column"] == "plan_id"
     _verified_with_profile(tmp_path)
