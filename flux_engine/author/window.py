@@ -35,6 +35,7 @@ __all__ = [
     "WindowError",
     "declared_instants",
     "declared_days",
+    "contract_span",
     "declared_window",
     "instant_ms",
     "parse_window",
@@ -69,6 +70,24 @@ def declared_window(column: Any, kind: Optional[LogicalKind]) -> Optional[Tuple[
     if kind is LogicalKind.DATE:
         return (bounds.low, bounds.low + _DAY_MS) if bounds.low % _DAY_MS == 0 else None
     return bounds.low, bounds.low + 1
+
+
+def contract_span(column: Any, kind: Optional[LogicalKind]) -> Optional[Tuple[int, int]]:
+    """The first and the last instant (milliseconds) a column's ``range`` rules let it hold, or ``None``.
+
+    Both ends must be declared (a high end in the year 9999 is none) and hold an instant. A strict
+    end is moved inward as ``plan`` reads it: a DATE holds whole days, so its span runs from the
+    midnight of the first day to the midnight of the last; a TIMESTAMP's moves one millisecond.
+    """
+    bounds = declared_range_bounds(column)
+    if bounds is None or bounds.low is None or bounds.high is None:
+        return None
+    if kind is LogicalKind.DATE:
+        first, last = declared_days(column)
+        return None if first is None or last is None else (first * _DAY_MS, last * _DAY_MS)
+    low = bounds.low + 1 if bounds.low_strict else bounds.low
+    high = bounds.high - 1 if bounds.high_strict else bounds.high
+    return (low, high) if low <= high else None
 
 
 def declared_days(column: Any) -> Tuple[Optional[int], Optional[int]]:
