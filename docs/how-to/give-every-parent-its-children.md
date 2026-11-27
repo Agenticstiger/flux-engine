@@ -355,6 +355,17 @@ The table's rows are its edges, and each side's children sum to exactly that num
 
 The pairing is a global pass over the table's rows. The process that starts the worker pool makes it once and hands it to the workers, so `--jobs` and `--shard` give the same bytes. A bundle with no `associations` entry keeps every byte and digest it had.
 
+### The `bridges` key
+
+A bridge is the other table of two foreign keys. It holds every pair of parent rows at most once, and it draws its pairs uniformly from all pairs of the two parents, so neither side keeps a number of rows per parent. Use an association table when the sides' counts matter. Declare a bridge under `bridges` in the same extensions ([ADR 0022](../adr/0022-rows-read-their-linked-rows.md) section 8):
+
+| Key | Meaning |
+|---|---|
+| `emit` | The table that holds both foreign keys. |
+| `relationships` | The names of the two distinct many-to-one relationships of that emit. |
+
+A bridge with more rows than the two parents make pairs, a `nullFraction` on either side, a side that is a key or `one_to_one`, and a side that a `links` condition configures are refused with [FLX-3403](../reference/errors/FLX-3403.md). `fluxsim verify` checks that no pair repeats.
+
 ### What the plan and verify say
 
 `fluxsim plan` prints a note when it moved rows to meet a cap or the Gale-Ryser condition, and when it laid out the whole table again to avoid repeated pairs. `plan.json` records, for the emit, the relationships, `distinct`, the rows, each move, and each side's distance from its shape.

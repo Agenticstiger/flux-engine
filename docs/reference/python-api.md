@@ -168,6 +168,12 @@ result.raise_for_status()  # does nothing here; on a failed stage it raises RunF
 Seven callables, one per stage, each returning the `StageResult` named
 below: `validate`, `plan`, `apply`, `run`, `verify`, `ship`, `replay`.
 
+`validate` takes an optional `profile=` keyword, the path of the profile the Simulation pins. With it, `validate`
+refuses what `plan` refuses about that profile, as `fluxsim validate --profile FILE` does: a profile that is not the
+pinned one or cannot be read (`FLX-3109`, `FLX-3110`), an overlay that names a table or column the profile lacks
+(`FLX-3105`), and a profile that lacks a table or column the register cites (`FLX-3113`). Without it, `validate` reads
+no profile.
+
 Two contracts hold on them:
 
 **Frozen kwarg names**, from that module's first release forward. Adding
