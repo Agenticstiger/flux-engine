@@ -39,12 +39,11 @@ These rules shape the assumptions:
 - A column's `range` and `support` are what the fidelity check holds the run, and a
   slice of real records, to: a value outside them is refused. So they are declared only
   from a published value or the contract. A shape that rests on an assumption, such as
-  the opaque `country` levels, is declared with keys only the generator reads. One
-  exception: a fidelity block needs a property, so in a table where no column publishes
+  the opaque `country` levels, is declared with keys only the generator reads. One exception: a fidelity block needs a property. In a table where no column publishes
   a range or its levels, one column's assumed span or levels is declared for the check,
   and the output says so.
 - A count withheld as a small one (status `A`: a bin, a level or the distinct values)
-  lies below its rule's minimum cell, so it is assumed to be half of it: 5, under ACRO's
+  lies below its rule's minimum cell. So it is assumed to be half of that cell: 5, under ACRO's
   default of 10. Any other status says nothing of a count's size, so a cell withheld
   under one is assumed to be the mean of the cells its table publishes. A withheld null
   count is the exception. It is most often a zero, which the checks withhold as
@@ -62,14 +61,21 @@ These rules shape the assumptions:
 - A table the profile publishes whole under `references` (format `1-3-0`) is written as a
   reference expose: `reference: true` and nothing else, so its rows are the published ones. A
   foreign key into it declares the levels the profile counts it over (the child rows of each
-  catalogue row), when they are keys of the catalogue; a foreign key whose statistic is over
-  other values declares none, so it picks a catalogue row uniformly, and its statistic is
+  catalogue row). It does so when they are keys of the catalogue. A foreign key whose statistic is over
+  other values declares none. So it picks a catalogue row uniformly, and its statistic is
   unused with that reason. A statistic of a column grouped by a column of a linked row
-  (`groupByLink`) is read as a two-way table, and the column is drawn
-  `given: <relationship>.<column>` with the grouped counts as its weights, and scored by a
+  (`groupByLink`) is read as a two-way table. The column is drawn
+  `given: <relationship>.<column>` with the grouped counts as its weights. It is scored by a
   property grouped by the same link. It is unused, with the reason the generator would refuse it for, in these cases:
-the contract declares no one relationship over the grouping's columns; the foreign key may be NULL (a NULL has no level to draw given); a rule sets the column; the column is already drawn given another; the parent column is not text or not a categorical drawn from its own levels; or the rows would read each other in a cycle. See
-  [Publish a catalogue whole](../how-to/publish-a-catalogue.md).
+
+  - the contract declares no one relationship over the grouping's columns;
+  - the foreign key may be NULL (a NULL has no level to draw given);
+  - a rule sets the column;
+  - the column is already drawn given another;
+  - the parent column is not text or not a categorical drawn from its own levels; or
+  - the rows would read each other in a cycle.
+
+  See [Publish a catalogue whole](../how-to/publish-a-catalogue.md).
 - A trait that is stable per entity, such as a customer's segment on each of that customer's
   rows, is a contract `dependency` from the entity's key. `fluxsim init` never writes the
   contract, so declare the `dependency` there. Where it is declared and the profile publishes the
@@ -82,39 +88,39 @@ the contract declares no one relationship over the grouping's columns; the forei
   per parent is the published one, class for class, for a key of any type. The class of parents
   with no child is read as published, a zero included. A relationship the profile marks
   `structural: [childless]` (the source enforces at least one child per parent) is written as
-  `minChildren: 1` and its class of none takes no weight; `orphan` is listed as checked, since
+  `minChildren: 1`, and its class of none takes no weight. `orphan` is listed as checked, since
   every foreign key finds its parent. A `one_to_one` relationship is laid out the same way, with `levels: ["0", "1"]` weighted by the
-  profile's classes of none and of one; a histogram with parents in a class above one keeps the
+  profile's classes of none and of one. A histogram with parents in a class above one keeps the
   spread, and `init` says so in a note. A relationship the layout cannot place keeps the
-  approximation: it is a key or part of one, a relationship to its own table, a foreign key with
-  a null share, or one with a draw or a contract rule of its own.
-  Its foreign key spreads each class of parents over the parent's keys, a parent of a class whose
-  mean is `m` receives a Poisson-like number of children, so about `e^-m` of them receive none, and
-  the run's share of parents with no child comes out that much larger than published.
-- A relationship's histogram of children per parent grouped by a `category` column of the parent, or by the
-  bins of a `number` or `timestamp` one (profile format `1-4-0`), becomes the `given` and `childrenGiven` of its
+  approximation. This holds when the relationship is a key or part of one, or a relationship to its own table.
+  It also holds for a foreign key with a null share, and for one with a draw or a contract rule of its own.
+  Its foreign key spreads each class of parents over the parent's keys.
+  A parent of a class whose mean is `m` receives a Poisson-like number of children, so about `e^-m` of them receive none.
+  The run's share of parents with no child comes out that much larger than published.
+- A relationship's histogram of children per parent can be grouped by a `category` column of the parent, or by the
+  bins of a `number` or `timestamp` one (profile format `1-4-0`). Such a grouped histogram becomes the `given` and `childrenGiven` of its
   `counts` entry, beside the `children` of the ungrouped histogram or, failing that, of the sum of the groups. The
   classes are the column's declared levels, or its bins keyed by the text of their lower edges, and the
   statistic's bins must be the entry's. A class the profile has no group for takes the shape's own weights, and
   the bundle says so. A column with a null fraction, one a summary over the children sets, a key, a column of a
-  rule, or one drawn given a linked row cannot be given: the ledger says why and the entry has no `given`.
+  rule, or one drawn given a linked row cannot be given. The ledger says why, and the entry has no `given`.
   A relationship's noisy histogram is read as its point estimate, as a column's is, with its noise in the ledger.
-- A table whose profile publishes `kendallTau/1`, or `spearmanRho/1` when no Kendall value is published for
-  any pair, gets one `fidelity.copula` over the number and timestamp columns that `init` draws from bins and
-  weights, with no `given` and no `allocation`, and that no clique, rule, key, relationship, history or date
+- A table whose profile publishes `kendallTau/1` gets one `fidelity.copula`. The same holds for `spearmanRho/1` when no Kendall value is published for
+  any pair. The copula covers the number and timestamp columns that `init` draws from bins and
+  weights, with no `given` and no `allocation`. It leaves out any column that a clique, rule, key, relationship, history or date
   entry decides (see [Draw number columns together](../how-to/draw-number-columns-together.md)). A column has one
   joint, so what the cliques draw stays theirs. A noisy value is written as the released number clamped to
-  `[-1, 1]`, a pair the profile did not publish is held at 0 and said so as an assumption, and each pair is
-  scored by a `rankCorrelation` property. A column is left to the cliques when it ties often: it is
+  `[-1, 1]`. A pair the profile did not publish is held at 0 and said so as an assumption. Each pair is
+  scored by a `rankCorrelation` property. A column is left to the cliques when it ties often. A column is
   tie-heavy when the sum over its bins of the squared share of the bin divided by the number of grid values in
-  it is at least 1/20, because the statistics carry no tie correction. The rule reads the declared bins and the
+  it is at least 1/20. The reason is that the statistics carry no tie correction. The rule reads the declared bins and the
   grid only, and the report names each column left out. Under kernel 0.1.0 no copula is written.
 - A column of a `cliqueMarginal/2` clique that holds numbers or timestamps is drawn from `bins` and `binWeights`,
-  or `binWeightsGiven` its separator, over the clique's edges, which win over the column's own histogram and
+  or `binWeightsGiven` its separator, over the clique's edges. These edges win over the column's own histogram and
   make its range the span of the edges. A clique whose edges do not cover the range the contract declares, or
   that holds a column with nulls, is refused with [FLX-3402](./errors/FLX-3402.md).
-- Every distance tolerance `init` writes declares `sampling: true`, so the check widens its
-  margin by the sampling error of the run's rows and a small table is not judged by a margin only
+- Every distance tolerance `init` writes declares `sampling: true`. So the check widens its
+  margin by the sampling error of the run's rows, and a small table is not judged by a margin only
   a large one can meet. A table is small when that widening at its rows, for any property `init`
   writes for it, exceeds the default tolerance. Every column of a small table that `allocation: exact` can read then declares it, so each class holds exactly its share of the rows. Such a column is drawn from `levels`, from `bins` with `binWeights`, or given a column that is itself exact. A key, a foreign key and a column a rule sets are left as they are. A bundle that
   declares either key plans only under kernel 0.2.0, the default, and kernel 0.1.0 refuses it
@@ -125,9 +131,9 @@ the contract declares no one relationship over the grouping's columns; the forei
   foreign key takes its nulls from its first column alone.
 - A histogram's outer edges are often round numbers beyond the data. Its draw keeps to
   the published `min` and `max`, while the check reads the histogram's own edges.
-- A column drawn evenly within its quartile bins rarely averages the published mean. So within
-  each quartile bin the values are drawn from the part on the mean's side: each bin keeps its
-  quarter of the rows, so every published quartile holds, and the mean is the published one. The
+- A column drawn evenly within its quartile bins rarely averages the published mean. So within each quartile bin the values are drawn from the part on the
+  mean's side. Each bin keeps its quarter of the rows, so every published quartile
+  holds, and the mean is the published one. The
   cuts this adds are assumptions in the register. The worked example of
   [Write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md) shows it for an
   `amount` column.
@@ -141,16 +147,16 @@ does not count, so an assumed time window is in the command's output and nowhere
 time column publishes its range, because no single instant is held by enough rows, each such
 column is drawn within the run's `timeBounds`.
 
-When some columns do publish a range, the run's `timeBounds` span all of them: the earliest start
-to the latest end of every date column's published range, of the date range its contract column
-declares (a `range` rule such as `between '2020-01-01' and '2026-12-31'` or `>= '2020-01-01' and
-<= '2026-12-31'`), and of the bins, levels and range the column itself is drawn from. No column's
+When some columns do publish a range, the run's `timeBounds` span all of them. They run from the earliest start
+to the latest end of every date column's published range. They also cover the date range each date column's
+contract declares (a `range` rule such as `between '2020-01-01' and '2026-12-31'` or
+`>= '2020-01-01' and <= '2026-12-31'`), and the bins, levels and range each column is drawn from. No column's
 bins are cut. To choose the window yourself, pass `--window START END`, two dates
 (`YYYY-MM-DD`, midnight UTC) or RFC 3339 timestamps with START before END. The Simulation's
 `timeBounds` are exactly those, a date column's bins that leave them are cut at them (and the
 column says so), and the output notes the window under "time window". The end column of a
 validity window whose contract declares no `openEnd` gives the window nothing from the year
-9999 on, since that year spells an open end; the note names the column and says to declare the
+9999 on, since that year spells an open end. The note names the column and says to declare the
 `openEnd` on it.
 
 ## Association tables

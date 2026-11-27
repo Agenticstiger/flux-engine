@@ -100,10 +100,10 @@ Read it from the top.
   purpose. `reproducible` compares the run's digest with a baseline you record, and here
   it says `not checked` because none has been recorded yet; step 6 shows the check that
   runs the plan again. `validity` asks whether the scenario describes the real world, and
-  the engine never claims that: it says `not asserted`. One leg checks the engine rather
-  than the run: `rfc-04 vectors` replays the specification's test cases for the engine's
-  enforcement gate, and `0 failure(s)` means the gate decided every one as the
-  specification says ([what RFC-04 and the gate are](../explanation/architecture.md#words-this-page-uses)).
+  the engine never claims that: it says `not asserted`. One leg checks the engine rather than the run:
+  `rfc-04 vectors` replays the specification's test cases for the engine's enforcement gate. `0 failure(s)`
+  means the gate decided every one as the specification says
+  ([what RFC-04 and the gate are](../explanation/architecture.md#words-this-page-uses)).
 - **ship** packs the bundle, the run and a manifest into `out/demo.flux.tgz`, with two
   in-toto statements beside it.
 
@@ -150,7 +150,7 @@ No column fell back to a type default: every column was produced by a declaratio
 
 The pack records what was run and what was checked. It does not say the simulated
 customers behave like real ones. The section above it, **Column Provenance**, says how each
-column was made; here all four are copied from the simulated world, which is why the
+column was made. Here all four are copied from the simulated world, which is why the
 report's last line says no column fell back to a type default.
 [The evidence pack](../explanation/the-evidence-pack.md) explains what each section is
 for.
@@ -181,8 +181,8 @@ tree](../explanation/determinism-and-the-seed-tree.md) says how it is kept.
 ## 7. Change one number
 
 The seed is in `simulation.flux.yml`. Change it from 42 to 43. The backup file `sed`
-leaves behind has to go: next to the FLUX and FLUID documents (and `flux.lock` and a pack
-manifest) a bundle directory may hold no other file, and the engine refuses one
+leaves behind has to go. Next to the FLUX and FLUID documents (and `flux.lock` and a pack
+manifest), a bundle directory may hold no other file, and the engine refuses one
 ([FLX-3108](../reference/errors/FLX-3108.md)).
 
 ```console

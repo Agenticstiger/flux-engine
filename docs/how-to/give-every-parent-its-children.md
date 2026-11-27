@@ -5,7 +5,7 @@ description: "Declare how many children each parent has with a counts entry, so 
 
 # Give every parent its children
 
-Use this page when the tables you generate are related and a parent should hold a stated number of children. A foreign key that picks its parent one child at a time leaves some parents with no child at all: with 1,000 invoices and 3,000 lines, about 50 invoices receive none, and a total written on the invoice cannot hold, because no row knows every line that names it. A `counts` entry lays the children out parent by parent instead. It needs kernel 0.2.0, which a new plan takes, and the tables must be generated from statistics, as [Use the FLUID seam](./use-the-fluid-seam.md) describes.
+Use this page when the tables you generate are related and a parent should hold a stated number of children. A foreign key that picks its parent one child at a time leaves some parents with no child at all. With 1,000 invoices and 3,000 lines, about 50 invoices receive none. A total written on the invoice cannot hold, because no row knows every line that names it. A `counts` entry lays the children out parent by parent instead. It needs kernel 0.2.0, which a new plan takes, and the tables must be generated from statistics, as [Use the FLUID seam](./use-the-fluid-seam.md) describes.
 
 ## Declare the layout
 
@@ -96,7 +96,7 @@ exposes:
           joinType: inner
 ```
 
-The Simulation adds a `counts` list under the `com.agentics.flux/1` extensions, next to `emits`. This entry says that every invoice that is not void has at least one line, that a void invoice has none, and how many lines the others have: half of them one or two, three tenths three to five, and a fifth six to eleven.
+The Simulation adds a `counts` list under the `com.agentics.flux/1` extensions, next to `emits`. This entry says that every invoice that is not void has at least one line, and that a void invoice has none. It also says how many lines the others have: half of them one or two, three tenths three to five, and a fifth six to eleven.
 
 ```yaml
 # simulation.flux.yml
@@ -240,9 +240,13 @@ counts:
 
 The column is a `category` column of the parent with declared levels, or a column drawn from bins, and it declares no `nullFraction`. Its classes are its levels, or its bins named by the text of their lower edges. Each list has one weight for each class of `children`, in order. Here `business` accounts mostly have three or more invoices, and every other segment takes the weights of `children`, which the plan lists under `countsGiven` for the emit, with the classes that took them in `childrenGivenDefault`. The parents of each class still total the child rows: the layout splits the eligible parents by the class on their final row and lays each class out by the largest remainder, as above. It needs kernel 0.2.0, which refuses the keys under 0.1.0 with [FLX-3105](../reference/errors/FLX-3105.md).
 
-The generator refuses the entry with [FLX-3403](../reference/errors/FLX-3403.md) when `given` is no column of the parent, is not a category column with declared levels nor a column drawn from bins, declares a `nullFraction`, is drawn given a column of a linked row, or is set by a rule from a link, a previous version, children or siblings or by a summary over the children, since the children wait on the parent's final rows. A key of `childrenGiven` that is no class of the column, or a list that does not match the classes of `children`, is refused as well.
+The generator refuses the entry with [FLX-3403](../reference/errors/FLX-3403.md) when:
 
-When the pinned profile holds a histogram of children per parent grouped by that column (or by its bins), `fluxsim verify` scores the relationship group by group and its `childrenPerParent` row names scorecard format `1-5-0`; a profile with only the ungrouped histogram leaves the row as it is.
+- `given` is no column of the parent, or is neither a category column with declared levels nor a column drawn from bins;
+- `given` declares a `nullFraction`, or is drawn given a column of a linked row;
+- a rule from a link, a previous version, children or siblings sets `given`, or a summary over the children does, since the children wait on the parent's final rows. A key of `childrenGiven` that is no class of the column, or a list that does not match the classes of `children`, is refused as well.
+
+When the pinned profile holds a histogram of children per parent grouped by that column (or by its bins), `fluxsim verify` scores the relationship group by group. Its `childrenPerParent` row names scorecard format `1-5-0`. A profile with only the ungrouped histogram leaves the row as it is.
 
 ## Summaries of the children
 
@@ -267,7 +271,7 @@ An aggregate over a relationship that is not counted is refused with [FLX-6210](
 
 ## What `fluxsim verify` checks
 
-`fluxsim verify` checks the layout on the run's rows. Each `counts` entry adds two lines to the rules of the child, `counts:<relationship>.minChildren` and `counts:<relationship>.parentWhen`: the share of eligible parents with at least `minChildren` children, and the share of parents outside the condition that have no child. Both are enforced, so one violating parent fails the run. A contract `derive` with `aggregate` over a counted relationship is checked on every parent row, joining each child to its parent through the relationship, and is enforced too.
+`fluxsim verify` checks the layout on the run's rows. Each `counts` entry adds two lines to the rules of the child: `counts:<relationship>.minChildren` and `counts:<relationship>.parentWhen`. The first is the share of eligible parents with at least `minChildren` children. The second is the share of parents outside the condition that have no child. Both are enforced, so one violating parent fails the run. A contract `derive` with `aggregate` over a counted relationship is checked on every parent row, joining each child to its parent through the relationship, and is enforced too.
 
 ```console
 $ fluxsim verify . --run-id $(ls .flux/runs)
@@ -279,7 +283,7 @@ $ fluxsim verify . --run-id $(ls .flux/runs)
 
 Here 191 invoices are eligible and 9 are void. An aggregate that does not generate, because its relationship is not counted, is refused at plan time as above.
 
-When the pinned profile publishes a `marginalHistogram/1` of children per parent for the relationship, the scorecard gains one more row under `crossTable`, `childrenPerParent`, with the `propertyId` `children:<child exposeId>.<relationship>` (scorecard format `1-4-0`, [SCORECARD-SPEC](../spec/SCORECARD-SPEC.md) section 3). It counts the run's parents into the profile's bins by their children and compares the result as a histogram is compared: the score is one minus the total variation distance, and the row is `within` when the distance is at most the entry's `tolerance`, `0.10` for a relationship with no entry. A scorecard with no such row stays in the format it was.
+When the pinned profile publishes a `marginalHistogram/1` of children per parent for the relationship, the scorecard gains one more row under `crossTable`, `childrenPerParent`, with the `propertyId` `children:<child exposeId>.<relationship>` (scorecard format `1-4-0`, [SCORECARD-SPEC](../spec/SCORECARD-SPEC.md) section 3). It counts the run's parents into the profile's bins by their children and compares the result as a histogram is compared. The score is one minus the total variation distance. The row is `within` when the distance is at most the entry's `tolerance`, `0.10` for a relationship with no entry. A scorecard with no such row stays in the format it was.
 
 ## Exact shares for a column
 
@@ -294,7 +298,7 @@ Kernel 0.1.0 refuses the key with [FLX-3105](../reference/errors/FLX-3105.md). A
 
 ## A tolerance that follows the row count
 
-A distance tolerance may declare `sampling: true`. The run is a sample of its rows, so its shares differ from the profile's by sampling alone even when the generator is exact in expectation, and the margin is widened, group by group, by a term that grows as the group's rows shrink (SCORECARD-SPEC section 9a). For a column under `allocation: exact` only the rounding term remains. A tolerance without the key is compared as before.
+A distance tolerance may declare `sampling: true`. The run is a sample of its rows, so its shares differ from the profile's by sampling alone even when the generator is exact in expectation. The margin is therefore widened, group by group, by a term that grows as the group's rows shrink (SCORECARD-SPEC section 9a). For a column under `allocation: exact` only the rounding term remains. A tolerance without the key is compared as before.
 
 ```text
 tolerance: { type: distance, measure: totalVariation, max: "0.1", sampling: true }
@@ -548,11 +552,16 @@ A bridge is the other table of two foreign keys. It holds every pair of parent r
 | `emit` | The table that holds both foreign keys. |
 | `relationships` | The names of the two distinct many-to-one relationships of that emit. |
 
-A bridge with more rows than the two parents make pairs, a `nullFraction` on either side, a side that is a key or `one_to_one`, and a side that a `links` entry gives a condition or a weight are refused with [FLX-3403](../reference/errors/FLX-3403.md). `fluxsim verify` checks that no pair repeats.
+[FLX-3403](../reference/errors/FLX-3403.md) refuses a bridge in these cases:
+
+- it has more rows than the two parents make pairs;
+- either side has a `nullFraction`;
+- a side is a key or `one_to_one`;
+- a `links` entry gives a side a condition or a weight. `fluxsim verify` checks that no pair repeats.
 
 ### What the plan and verify say
 
-`fluxsim plan` prints a note when it moved rows to meet a cap or the Gale-Ryser condition, and when it laid out the whole table again to avoid repeated pairs. `plan.json` records, for the emit, the relationships, `distinct`, the rows, each move, and each side's distance from its shape.
+`fluxsim plan` prints a note when it moved rows to meet a cap or the Gale-Ryser condition. It prints a note too when it laid out the whole table again to avoid repeated pairs. For the emit, `plan.json` records the relationships, `distinct`, the rows, each move, and each side's distance from its shape.
 
 `fluxsim verify` adds these lines for a table that holds each pair once:
 
@@ -561,7 +570,12 @@ A bridge with more rows than the two parents make pairs, a `nullFraction` on eit
 
 ### What is refused
 
-A side that is a key, a bridge side, `one_to_one` or implied by another relationship, a side whose `counts` entry has a `parentWhen` or a `given`, an emit that declares a history, and more rows than the two parents make pairs under `distinct` are refused with [FLX-3403](../reference/errors/FLX-3403.md). A summary over the second side's children is refused with [FLX-6210](../reference/errors/FLX-6210.md).
+[FLX-3403](../reference/errors/FLX-3403.md) refuses an association in these cases:
+
+- a side is a key, a bridge side, `one_to_one` or implied by another relationship;
+- a side's `counts` entry has a `parentWhen` or a `given`;
+- the emit declares a history;
+- under `distinct`, the rows exceed the pairs the two parents make. A summary over the second side's children is refused with [FLX-6210](../reference/errors/FLX-6210.md).
 
 ### `init` writes one when its conditions hold
 

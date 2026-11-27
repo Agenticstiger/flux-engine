@@ -26,28 +26,29 @@ they are checked again at each FLUX release.
   statements. See [the evidence pack](./the-evidence-pack.md).
 - **Governed by a contract.** A bundle names a FLUID data contract and pins its bytes, so the rows have the shape
   the contract expects. See [the FLUID seam](./the-seam.md).
-- **Deep on time and relations.** Lifetimes, seasonal rates, versioned entities with as-of reads, snapshots and
-  change events, counted children that can follow a parent column, linked rows, association tables that pair two
-  counted sides ([ADR 0039](../adr/0039-an-association-table-pairs-two-counted-sides.md)), consumer-query
-  calibration and sealed forecasts.
+- **Deep on time and relations.** It covers lifetimes, seasonal rates, versioned entities with as-of reads, and
+  snapshots and change events. It also covers counted children that can follow a parent column, linked rows, and
+  association tables that pair two counted sides
+  ([ADR 0039](../adr/0039-an-association-table-pairs-two-counted-sides.md)). Consumer-query calibration and sealed
+  forecasts complete the list.
 - **Offline by default.** No network is needed to produce results, there is no telemetry, and no AI model is
   embedded. CI blocks sockets, runs a journey with no network, and scans the source for network and model clients.
   See [runs offline](./offline.md).
 
 ## What FLUX is not good at
 
-- **Realism on complex correlations.** Trained models learn joint patterns of any order from the data. FLUX
-  reproduces only the dependence a profile publishes or a bundle declares: noisy multi-column marginals from a
-  differentially private profile, number and timestamp columns through a Gaussian copula of published rank
-  correlations, a column drawn given another, and children per parent that follow a parent column. A pattern that
-  nothing publishes or declares is not reproduced.
+- **Realism on complex correlations.** Trained models learn joint patterns of any order from the data. FLUX reproduces
+  only the dependence a profile publishes or a bundle declares. This covers noisy multi-column marginals from a
+  differentially private profile, and number and timestamp columns through a Gaussian copula of published rank
+  correlations. It also covers a column drawn given another, and children per parent that follow a parent column. A
+  pattern that nothing publishes or declares is not reproduced.
 - **Getting started.** Point a trained-model tool at a table and it learns. FLUX needs a contract and a bundle,
   written by hand or drafted by `fluxsim init` from a profile
   ([write a bundle from a profile](../how-to/write-a-bundle-from-a-profile.md)).
 - **Breadth.** No GANs, VAEs, diffusion models or LLM text generation in the core. A learned generator plugin,
   `flux-learned`, is designed but deferred.
-- **Many-core scaling.** A run is quick on one core, but extra workers stop paying off: the 536,500-row links
-  world takes 3.64 seconds on one job and 1.09 on 16, and on 2.68 million rows 16 jobs are no faster than 12.
+- **Many-core scaling.** A run is quick on one core, but extra workers stop paying off. The 536,500-row links world
+  takes 3.64 seconds on one job and 1.09 on 16. On 2.68 million rows, 16 jobs are no faster than 12.
   About 0.6 seconds of every run does not split across workers. No performance work shipped in 0.12 or 0.13. The
   other tools have not been benchmarked on the same worlds. The [speed roadmap](#roadmap-faster-on-many-cores)
   lists the fixes, which are still open.
@@ -106,7 +107,7 @@ evidence behind each cell.
 <summary>Notes behind each cell</summary>
 
 - **FLUX** (flux-sim-engine 0.13.0)
-  - Approach: Declared rules and statistics from a contract and an aggregate profile; joint patterns from a DP profile's noisy multi-column marginals through a junction tree, and number and timestamp columns together through a Gaussian copula of published rank correlations
+  - Approach: Declared rules and statistics from a contract and an aggregate profile. Joint patterns come from a DP profile's noisy multi-column marginals through a junction tree. Number and timestamp columns are drawn together through a Gaussian copula of published rank correlations.
   - Needs real records: Generation reads only the bundle or an aggregate profile; fitting on records is ruled out (ADR 0003). An optional check, `--committed-slice`, reads a file of records you pass; ADR 0003 moves it into the profiler.
   - Reproducible: Every run is fingerprinted, and `replay` refuses a run that does not reach the digest you give it. A generator plugin declares its own reproducibility, and a plugin run that cannot be generated again is refused.
   - Formal privacy (DP): Grade P3 only when the profile states one DP release, declares its public structure and holds only noisy statistics, with a few more conditions (ADR 0020); anything else grades P1. A noisy history, a noisy `nullCount/2` and noisy query rates (profile format 1-5-0) do not stop a profile from P3 (ADR 0019). The profiler adds the noise, and its unit of privacy, such as a customer, can cover that unit's child rows too. FLUX checks the stated budget.
@@ -265,7 +266,7 @@ with no date, not a commitment.
   0.10.0).
 - **Verify large runs faster.** `verify` scores rows grouped by bins one row at a time.
 
-Available today: `apply --shard I/N` makes the I-th of N shares of every emit's rows, and the shares joined in
+Available today: `apply --shard I/N` makes the I-th of N shares of every emit's rows. The shares joined in
 order are the bytes of the run's emits, so a large world can be split across machines. A share carries no run
 digest or receipt of its own. See [size and split a run](../how-to/size-and-split-a-run.md).
 
@@ -277,13 +278,13 @@ if the engine comes to hold columns as arrays
 ## Roadmap: from a static dataset to a living clone
 
 This part is a proposal. Every tool in the table above produces a dataset: a snapshot that stops the moment it is
-written. The proposal is that FLUX goes further and runs a **living clone** of the specs: the contract's world
-kept moving on a clock, its entities ageing, changing state and producing events, reacting to scenarios, and
-replayable to the byte.
+written. The proposal is that FLUX goes further and runs a **living clone** of the specs. The clone is the
+contract's world kept moving on a clock. Its entities age, change state, produce events and react to
+scenarios. The clone is replayable to the byte.
 
 FLUX already holds most of the pieces. Lifetimes, rates, versions and as-of reads describe how entities move
-through time; overlays describe scenarios; sealed forecasts and outcome scoring describe how a prediction is
-checked against what happened; the seed tree makes every draw replayable. What is missing is the clock that keeps
+through time. Overlays describe scenarios. Sealed forecasts and outcome scoring describe how a prediction is
+checked against what happened. The seed tree makes every draw replayable. What is missing is the clock that keeps
 the world running.
 
 A bundle says which mode its clone runs in. The deterministic mode needs nothing beyond FLUX. The model-assisted
@@ -329,14 +330,14 @@ and only the engine changes the world's state (`fidelity: agentic`).
 A run that declares a zone outside its `allowedZones` is blocked or audited, as the bundle says.
 
 Status: deterministic runs ship today, and the clock is proposed. The model-assisted mode is designed
-([ADR 0004](../adr/0004-concordia-tinytroupe-adapt-the-pattern.md)) and partly in place: the core already has the
-propose-only model port, the gate with its token budgets, the decision log file and the sovereignty zones, but no
-run calls the gate yet and the answer cache is not built. No model adapter ships beyond a development stub, and
+([ADR 0004](../adr/0004-concordia-tinytroupe-adapt-the-pattern.md)) and partly in place. The core already has the
+propose-only model port, the gate with its token budgets, the decision log file and the sovereignty zones. No run
+calls the gate yet, and the answer cache is not built. No model adapter ships beyond a development stub, and
 today's engine refuses `fidelity: agentic` unless the separate package is installed.
 
-Borrowed patterns: Temporal replays a workflow by reading recorded results instead of calling out again;
-TinyTroupe caches model calls and simulation state so a rerun can skip calls it has already made; Concordia has a
-game master entity that resolves the players' actions, a role the FLUX engine plays itself, without a model.
+Borrowed patterns: Temporal replays a workflow by reading recorded results instead of calling out again.
+TinyTroupe caches model calls and simulation state so a rerun can skip calls it has already made. Concordia has a
+game master entity that resolves the players' actions. The FLUX engine plays that role itself, without a model.
 
 The proposal would run in four steps. The decisions behind them are in the ADRs
 ([0003](../adr/0003-sdv-bsl-and-aggregate-only-rule.md), [0004](../adr/0004-concordia-tinytroupe-adapt-the-pattern.md)
@@ -350,7 +351,7 @@ and [0032](../adr/0032-a-generator-plugin-is-declared-graded-and-stored.md)).
    a model you run yourself. Each proposal would stay within bounds the engine enforces, and each call would be
    budgeted, gated and recorded.
 4. **Model-assisted mode: agents with memory and goals.** Entities could act as agents with their own memory and
-   goals, in the style of Concordia, under the same rules: proposals only, a hard token budget, and a replay that
+   goals, in the style of Concordia. The same rules would hold: proposals only, a hard token budget, and a replay that
    reads the recorded answers.
 
 Risks, stated up front:

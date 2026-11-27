@@ -13,8 +13,8 @@ run's files to the same directory. This page lists what is in them. The commands
 ## `plan.json`
 
 `plan.json` is canonical JSON. Its `planDigest` is the digest of the document with `planDigest` and `generated_at`
-masked, and the run id is the first sixteen hex digits of it. `apply` and `run` refuse a plan whose `inputDigest` or `planDigest` no
-longer matches.
+masked. The run id is the first sixteen hex digits of it. `apply` and `run` refuse a plan whose `inputDigest` or
+`planDigest` no longer matches.
 
 | Key | Holds |
 |---|---|

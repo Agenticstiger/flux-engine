@@ -210,25 +210,17 @@ Simulation pins its digest instead. Before it writes a file, the command checks 
 bundle as `fluxsim validate` does, and as `plan` does from the documents alone before a
 row is drawn, and writes nothing either refuses.
 
-The `profile:` line is the command's ledger ([ADR 0014](../adr/0014-init-reads-every-statistic-a-profile-publishes.md)). It lists every statistic and metric of the profile, by its JSON Pointer, in one of three states. A statistic is used when a number of the bundle rests on it, a rule read it, a property is scored against it, or the bundle was checked against it. It is unused when none of these holds. It is withheld when the profile published no value. Each unused
-one is named with the reason no rule reads it, and the Simulation lists them under
-`unused` beside the register: `plan`, `verify` and `ship` count them, and `ship` names
-each one under "What Was Not Proven" in `EVIDENCE.md`. In `--json`, `ledger.statistics` names
+The `profile:` line is the command's ledger ([ADR 0014](../adr/0014-init-reads-every-statistic-a-profile-publishes.md)). It lists every statistic and metric of the profile, by its JSON Pointer, in one of three states. A statistic is used when a number of the bundle rests on it, a rule read it, a property is scored against it, or the bundle was checked against it. It is unused when none of these holds. It is withheld when the profile published no value. Each unused one is named with the reason no rule reads it. The Simulation lists them under `unused` beside the register. `plan`, `verify` and `ship` count them, and `ship` names each one under "What Was Not Proven" in `EVIDENCE.md`. In `--json`, `ledger.statistics` names
 each statistic on its own, with its state, and `ledger.unused` is the Simulation's list: what an
 owner can leave out of the profile. The profile reader sometimes needs one of an entry's statistics: a calendar entry holds at least one of its three histograms. Then `ledger.unused` names the whole entry when none of it is read, so a profile with exactly those pointers dropped is one the reader accepts. Drop that list, not every statistic marked unused.
 
-A profile cut by dropping the `ledger.unused` list can leave an entry in part: a date pair
-with its `order` and no statistic, an exposure with one of its counts, or a history with some
-of its members. From 0.13.0 the engine reads each member that is left, checks it as in a whole
+A profile cut by dropping the `ledger.unused` list can leave an entry in part. Examples are a date pair with its `order` and no statistic, an exposure with one of its counts, or a history with some of its members. From 0.13.0 the engine reads each member that is left, checks it as in a whole
 entry, and `init` and `plan` accept the profile. `init` then writes the bundle it wrote from the
 whole profile, except for a few shapes the 0.13.0 changelog lists as known issues. A register
 citation of a member that is gone is refused as any citation of an unpublished statistic is
 ([FLX-3113](../reference/errors/FLX-3113.md)). Engine 0.12.0 refused an entry cut in part.
 
-`--strict` turns the ledger into a gate. It writes nothing, and exits 1, when a statistic
-is unused or an assumption stands in for something the profile
-did not publish; the tolerances and the bounds of a committed state are settings, not
-gaps. Each finding is named, and `--allow POINTER` accepts the ones at or below a profile
+`--strict` turns the ledger into a gate. It writes nothing, and exits 1, when a statistic is unused or an assumption stands in for something the profile did not publish. The tolerances and the bounds of a committed state are settings, not gaps. Each finding is named, and `--allow POINTER` accepts the ones at or below a profile
 pointer or a Simulation pointer. An `--allow` that accepts nothing is refused too:
 
 ```console
@@ -273,7 +265,7 @@ might:
 Most assumptions are the answer to a question a profiler can measure: how many rows, which
 levels, which histogram, how many nulls. Each assumed number of that kind says which statistic
 would replace it, in `replacedBy` on its register entry (a pointer and a definition into a
-profile of the contract), and the ledger lists the statistics with how many numbers each would
+profile of the contract). The ledger lists the statistics with how many numbers each would
 replace. `init` also writes `requests/assumptions.profile-request.yml` inside the bundle, a
 [profile request](../spec/PROFILE-REQUEST-SPEC.md) for exactly those statistics, which a
 profiler measures where the data lives. Run `init` again with the profile it writes, and each
@@ -328,7 +320,7 @@ run ... complete; shipped to out
 The run's mean `amount` is within the property's 10 % of the profile's, so the check
 passes, the scorecard scores it, and `ship` packs the run with its evidence.
 `created_at` is reported as a type default, because the profile gave it nothing to
-declare: it is drawn within the run's time window, and the evidence report names it under
+declare. It is drawn within the run's time window. The evidence report names it under
 "What Was Not Proven", beside the register's shares.
 
 ## 6. What the check does not cover
@@ -336,16 +328,16 @@ declare: it is drawn within the run's time window, and the evidence report names
 A run is checked against the statistics a profile publishes, and this one publishes a mean
 for `amount` alone. Nothing checks the `country` levels, which the profile never names,
 or `created_at`, whose time window is assumed. A profile with no statistic a property can
-be checked against, as `fluid profile` wrote before it wrote `mean/1`, gives a table with
-`properties: []`: `init` writes no property that `verify --profile` would refuse with
-[FLX-5037](../reference/errors/FLX-5037.md), names what it left out in its output (and under
-`leftOut` of the table in `--json`), and says the table has nothing to verify. Given more
+be checked against gives a table with `properties: []`. `fluid profile` wrote such profiles before it wrote `mean/1`.
+In that case `init` writes no property that `verify --profile` would refuse with
+[FLX-5037](../reference/errors/FLX-5037.md). It names what it left out in its output (and under
+`leftOut` of the table in `--json`). It also says the table has nothing to verify. Given more
 statistics (histograms, level counts), `fluxsim init` declares a property for each one it
 can carry: [Score a run against a profile](./score-a-run-against-a-profile.md) shows the
 check.
 
 A table the profile gives no statistic to score, such as one whose columns have only a
-minimum and a maximum (a date column's usual case), gets `properties: []`: the block keeps each column's range, and the command
+minimum and a maximum (a date column's usual case), gets `properties: []`. The block keeps each column's range, and the command
 says the table has nothing to verify. `verify --profile` reports it as not scored, and
 never as passed, and adds a note naming any statistic the profile publishes that a
 property could be scored against.
@@ -406,7 +398,7 @@ named after the overlay (`[a-z][a-z0-9-]*`, at most 63 characters). The bundle i
 from the overlaid profile, so `rows` is 1200 above, and its Simulation declares the overlay
 under `extensions["com.agentics.flux/1"].overlay` beside the pin of the profile as published.
 The register cites the overlay (`source: overlay`) for each number whose statistic the patch
-changed, and the profile for every other number: a number the patch changed cannot be cited
+changed, and the profile for every other number. A number the patch changed cannot be cited
 as the profile's, and `plan` refuses that ([FLX-3113](../reference/errors/FLX-3113.md)).
 
 A patch may touch only numbers a profile publishes: a table's `rowCount`, a column's `metrics`
@@ -426,8 +418,9 @@ Nothing is written when:
 
 - the directory holds anything, or cannot be written;
 - `--contract` comes without `--profile`, or the reverse, or `--overlay` or `--window` comes without both (exit 2);
-- a `--window` value is not a date or an RFC 3339 timestamp in the years 1 to 9999, START is not before END, or END
-  is in the year 9999, which spells an open end rather than an instant (exit 2);
+- a `--window` value is not a date or an RFC 3339 timestamp in the years 1 to 9999 (exit 2);
+- a `--window` START is not before END (exit 2);
+- a `--window` END is in the year 9999, which spells an open end rather than an instant (exit 2);
 - a `--history` file's `timeBounds` end, an entry's `until` or a `start` bin is in the year 9999;
 - a date range the contract declares would make the run's window longer than 300 years (write an open end in
   the year 9999, which no window reads);
@@ -439,7 +432,14 @@ Nothing is written when:
 - the bundle would not validate or plan, for example because the contract does not: the
   message gives the engine's own reason.
 
-`init` names an expose it leaves out of the bundle, with the reason. It leaves one out when the profile does not describe it, when a column of it is JSON or bytes (the generator has no draw for them), when a DECIMAL column of it has more than 38 decimal places, or when no column of it has a range or levels a property could read. The exposes of one contract
+`init` names an expose it leaves out of the bundle, with the reason. It leaves one out when:
+
+- the profile does not describe it;
+- a column of it is JSON or bytes (the generator has no draw for them);
+- a DECIMAL column of it has more than 38 decimal places;
+- no column of it has a range or levels a property could read.
+
+The exposes of one contract
 are generated together, so a foreign key into an expose left out is refused, as `plan`
 refuses it ([FLX-3403](../reference/errors/FLX-3403.md)), and nothing is written. If the
 profile has no table for the expose it references, profile that table too. If the command

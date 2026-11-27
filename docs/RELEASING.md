@@ -1,9 +1,9 @@
 # Releasing
 
 A release is a `vX.Y.Z` tag on a commit contained in `main`, plus a GitHub
-Release carrying five assets: the wheel and the sdist of each of the two
-distributions that `make packaging-smoke` builds, and a CycloneDX SBOM of the
-engine's wheel installed into a clean environment.
+Release. The Release carries five assets. Four are the wheel and the sdist of
+each of the two distributions that `make packaging-smoke` builds. The fifth
+is a CycloneDX SBOM of the engine's wheel installed into a clean environment.
 
 The repository releases two distributions from one tag
 ([ADR 0009](adr/0009-flux-stats-distribution.md)): `flux-sim-engine`, and
@@ -85,9 +85,9 @@ The package version is the set of strings below, and only that set.
    self-test fixtures use (`scripts/release_guard.py` and
    `tests/release/test_release_guard.py`).
 2. **Run the guard locally**: `make release-guard`. It runs its own self-test
-   first, then checks that the two literals agree with each other and that the
-   engine's requirement on flux-stats is a plain range with a floor and a
-   ceiling that admits flux-stats's version.
+   first. It then checks that the two literals agree with each other. It also
+   checks that the engine's requirement on flux-stats is a plain range with a
+   floor and a ceiling that admits flux-stats's version.
 3. **Merge to `main`** through the normal gate. The required status check is
    `CI gate`.
 4. **Tag the merge commit and push the tag** (see "Tags and attestations"):
@@ -97,10 +97,10 @@ The package version is the set of strings below, and only that set.
    git push origin vX.Y.Z
    ```
 
-   `.github/workflows/release.yml` takes it from there: it refuses a tag that
-   disagrees with the tree, runs the whole suite on seven cells, builds both
-   distributions in a read-only job, attests them in a second job, checks its
-   own attestation refuses an altered wheel, and publishes the GitHub Release.
+   `.github/workflows/release.yml` takes it from there. It refuses a tag that
+   disagrees with the tree and runs the whole suite on seven cells. It builds both
+   distributions in a read-only job and attests them in a second job. It then checks
+   that its own attestation refuses an altered wheel, and publishes the GitHub Release.
    The PyPI upload follows once a reviewer signs off on the `pypi` environment
    (see "Publishing to PyPI").
 
@@ -191,13 +191,13 @@ as `flux-spec @ git+https://...`, so every dependency stays a version range.
 
 The setup below is done for this repository. `flux-stats` was registered on
 2026-11-16 with a placeholder, 0.0.1, that holds no code and only keeps the
-name: a pending publisher reserves nothing, and the engine's dependency on it
+name. A pending publisher reserves nothing, and the engine's dependency on it
 made the name worth taking before that dependency was published. Before the
-first release that carries flux-stats, check that its trusted publisher (the
-project's own Publishing page on pypi.org) names `Agenticstiger`,
-`flux-engine`, `release.yml` and `pypi`; without it the job's first upload is
-refused and nothing reaches PyPI. A fork, or a renamed project, repeats all of
-it, for each project:
+first release that carries flux-stats, check its trusted publisher on the
+project's own Publishing page on pypi.org. The publisher must name
+`Agenticstiger`, `flux-engine`, `release.yml` and `pypi`. Without the
+publisher, the job's first upload is refused and nothing reaches PyPI. A fork, or a
+renamed project, repeats all of it, for each project:
 
 1. On pypi.org, open your account's Publishing page and add a pending publisher
    on the GitHub Actions tab, once for each project:
@@ -212,7 +212,7 @@ it, for each project:
    name, so register it before anyone else registers the project. It becomes an
    ordinary publisher on the first upload. To hold a name before the first
    release, upload a placeholder instead and add the publisher on the project's
-   page, at a version no release will use (0.0.1): the flux-stats upload step
+   page. Use a version no release will use (0.0.1). The flux-stats upload step
    skips a file PyPI already holds, so a placeholder at the release version
    would stand in for the attested file.
 2. On GitHub, create the environment `pypi` (Settings, Environments), add yourself
@@ -258,9 +258,9 @@ and that is deliberate: a mistyped tag has to be removable.
 
 Release tags are covered by a repository ruleset, "release tags are
 immutable", which applies `deletion` and `non_fast_forward` to `refs/tags/v*`.
-Read its limit honestly. An admin can bypass it, so it does not stop an admin;
-what it stops is a workflow token, an automation, and an accidental
-force-push, and it puts a bypass on the record when an admin does move a tag.
+Read its limit honestly. An admin can bypass it, so it does not stop an admin.
+It stops a workflow token, an automation, and an accidental force-push. When
+an admin does move a tag, it puts a bypass on the record.
 The workflow's ancestry check constrains what a tag may RELEASE; the ruleset
 constrains what it may become afterwards, for everything that is not an admin.
 
