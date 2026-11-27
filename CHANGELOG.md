@@ -20,6 +20,18 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+### Fixed
+
+- `fluxsim init` writes the end share of a contract that marks an entity's end by a value
+  (`lifecycle.endMarker`). A profile of such a table closes no last version, so init read an end share
+  of 0, wrote no `end`, and no generated entity ended. The share is now the ended entities over the
+  entities: the marker column's first values and changes into the marker where every cell is
+  published, else the rows its histogram puts on the marker. A withheld last-version share no longer
+  takes the marker's share of rows for the share of entities. A table without an end marker keeps
+  its bytes. ADR 0017 amendment of 2026-11-27.
+
 ## 0.13.0 - 2026-11-27
 
 Profile format 1-5-0 and profile-request format 1-3-0 (a noisy history, a noisy null count and a noisy query rate in a
