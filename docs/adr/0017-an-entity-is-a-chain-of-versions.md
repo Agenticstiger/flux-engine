@@ -1051,6 +1051,6 @@ whole-number key.
   the key column over the generated rows, its histogram or its mean, can read it away from what the profile
   publishes. `fluxsim init` therefore writes neither property for the key when the layout fills a bin (it reads the
   layout's own rule, so the two cannot disagree): the key keeps its bins and binWeights, which the layout reads, so
-  the histogram stays used; a published mean stays read by the check of the histogram; and a note on the expose
-  says which bins are filled and why the key is not scored over its rows. A key whose bins fit keeps both
-  properties.
+  the histogram stays used; a published mean stays read by the check of the histogram, its reading saying that
+  the generated rows do not keep it; and a note on the expose says which bins are filled and which scores are left
+  out. A key whose bins fit keeps both properties.

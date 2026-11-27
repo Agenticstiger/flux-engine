@@ -35,14 +35,14 @@ pytestmark = pytest.mark.integration
 EDGES = ["1", "101", "1000"]
 
 
-def _binned(counts: Any, mean: Any = None) -> Dict[str, Any]:
+def _binned(counts: Any, mean: Any = None, edges: List[str] = EDGES) -> Dict[str, Any]:
     """The history profile, its natural key weighed by the versions each bin holds.
 
     With *mean*, the key also publishes its mean over the versions, as a profile does.
     """
     profile = _profile()
     column = profile["tables"]["plan_version"]["columns"]["plan_id"]
-    column["statistics"] = [_bins(EDGES, counts, 1850)]
+    column["statistics"] = [_bins(edges, counts, 1850)]
     if mean is not None:
         column["statistics"].append(
             {
@@ -126,9 +126,26 @@ def test_a_filled_key_does_not_score_its_histogram(tmp_path: Path) -> None:
     assert len(declared["binWeights"]) == 2
     states = _states(result)
     assert states["/tables/plan_version/columns/plan_id/statistics/0"]["state"] == "used"
-    said = " ".join(result.stdout.split()) + json.dumps(result.artifacts, default=str)
+    said = _said(result)
     assert "bin 0 takes every value it holds and still falls short of its weight" in said
-    assert "so neither the key's histogram nor its mean is scored" in said
+    # The profile publishes no mean of the key, so the note names the histogram alone.
+    assert "so the key's histogram is not scored" in said
+
+
+def _said(result: Any) -> str:
+    """What ``init`` printed and returned, with its line breaks folded."""
+    return " ".join(result.stdout.split()) + json.dumps(result.artifacts, default=str)
+
+
+def test_a_key_with_two_filled_bins_names_both(tmp_path: Path) -> None:
+    # 600 and 600 of the 1850 versions fall in the first two hundred ids, so each of those bins
+    # would take 324 of the 1000 entities: both take their 100 values, and the last takes 800.
+    edges = ["1", "101", "201", "1000"]
+    result = _init(tmp_path, _binned([600, 600, 650], edges=edges))
+    assert _key_properties(tmp_path) == []
+    said = _said(result)
+    assert "bins 0 and 1 take every value they hold and still fall short of their weight" in said
+    applied_and_verified(tmp_path, scored=True)
 
 
 def test_a_filled_key_verifies_against_the_profile(tmp_path: Path) -> None:
@@ -149,10 +166,13 @@ def test_a_filled_key_does_not_score_its_mean_over_the_versions(tmp_path: Path) 
     # 100 ids. The filled bin holds a tenth of the generated rows, so their mean is near 500.
     result = _init(tmp_path, _binned([600, 1250], mean=388))
     assert _key_properties(tmp_path, "mean") == []
-    # The mean is still read: the key's histogram is checked against it.
+    # The mean is still read, the key's histogram checked against it, and its reading says the
+    # generated rows do not keep it.
     entry = _states(result)["/tables/plan_version/columns/plan_id/statistics/1"]
     assert entry["state"] == "used"
     assert "checked against the histogram" in entry["note"]
+    assert "so the generated rows do not keep it, and it is not scored" in entry["note"]
+    assert "so neither the key's histogram nor its mean is scored" in _said(result)
     applied_and_verified(tmp_path, scored=True)
 
 

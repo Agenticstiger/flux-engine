@@ -628,6 +628,34 @@ def test_a_natural_key_that_weighted_bins_cannot_hold_is_refused() -> None:
     assert "hold 5 values, fewer than its 8 entities" in message and "sub_id" in message
 
 
+def test_weighted_bins_one_value_short_of_the_entities_are_refused() -> None:
+    # The bins that weigh hold 3 and 4 values: 7, one fewer than the 8 entities.
+    short = {"bins": ["1", "4", "8", "30"], "binWeights": ["3", "3", "0"]}
+    message = refused(lambda: plans_of(natural_type="INT", natural=short))
+    assert "hold 7 values, fewer than its 8 entities" in message
+
+
+def test_weighted_bins_that_hold_as_many_values_as_entities_take_every_one() -> None:
+    exact = {"bins": ["1", "4", "9", "30"], "binWeights": ["3", "3", "0"]}
+    plans = plans_of(natural_type="INT", natural=exact)
+    data = table(plans[EMIT], generate_rows(plans[EMIT], root=root_for()))
+    assert sorted({row["sub_id"] for row in data}) == list(range(1, ENTITIES + 1))
+
+
+def test_a_bin_of_weight_zero_takes_no_entity_however_much_room_it_has() -> None:
+    # The third bin weighs zero and holds ten values. The entities the first two bins cannot
+    # take go to the last bin, by its weight, and none to the third.
+    gap = {"bins": ["1", "4", "6", "16", "40"], "binWeights": ["3", "3", "0", "2"]}
+    plans = plans_of(natural_type="INT", natural=gap)
+    data = table(plans[EMIT], generate_rows(plans[EMIT], root=root_for()))
+    keys = {row["sub_id"] for row in data}
+    assert Counter(0 if k < 4 else 1 if k < 6 else 2 if k < 16 else 3 for k in keys) == {
+        0: 3,
+        1: 2,
+        3: 3,
+    }
+
+
 def test_the_rows_path_keeps_its_refusal_for_overflowing_bins() -> None:
     message = refused(
         lambda: plans_of(natural_type="INT", natural=SKEWED, invoices=True, no_history=True, rows=8)
