@@ -56,10 +56,12 @@ def _noisy(statistic: Dict[str, Any], tiny: Iterable[int] = ()) -> Dict[str, Any
 
 
 def _released_tiers(
-    tiny_member: Optional[str] = None, tiny_cells: Iterable[int] = ()
+    tiny_member: Optional[str] = None,
+    tiny_cells: Iterable[int] = (),
+    profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """The tiers' profile released with the gym's members as the unit, its history noisy."""
-    profile = tiers._profile()
+    """The tiers' profile (or *profile*) released with the gym's members as the unit, its history noisy."""
+    profile = copy.deepcopy(profile) if profile is not None else tiers._profile()
     profile["_schemaURL"] = SCHEMA_URL_1_5_0
     profile["disclosureRules"] = {**profile["disclosureRules"], "noisy": {}}
     link = {

@@ -1,0 +1,56 @@
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: gym.tiers
+name: Tiers
+metadata:
+  owner:
+    team: gym-team
+exposes:
+  - exposeId: gym_member
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/gym_member.parquet }
+    contract:
+      schema:
+        - { name: member_id, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: member, type: primary, expr: member_id }
+  - exposeId: tier_version
+    kind: table
+    binding:
+      platform: local
+      format: parquet
+      location: { path: ./out/tier_version.parquet }
+    contract:
+      schema:
+        - { name: version_id, type: INT, required: true }
+        - { name: pass_id, type: STRING, required: true }
+        - { name: member_id, type: INT, required: true }
+        - { name: valid_from, type: DATE, required: true }
+        - { name: valid_to, type: DATE, required: false }
+        - { name: status, type: "enum('ACTIVE','ENDED','PAUSED')", required: true }
+        - { name: enrolled_on, type: DATE, required: true }
+        - { name: renewed_on, type: DATE, required: false }
+    semantics:
+      entities:
+        - { name: tier_version, type: primary, expr: version_id }
+        - name: pass
+          type: natural
+          expr: pass_id
+          lifecycle:
+            endMarker: { column: status, value: ENDED }
+      dimensions:
+        - { name: valid_from, type: time, typeParams: { validityParams: { isStart: true } } }
+        - { name: valid_to, type: time, typeParams: { validityParams: { isEnd: true } } }
+        - { name: status, type: categorical }
+        - { name: enrolled_on, type: time }
+        - { name: renewed_on, type: time }
+      relationships:
+        - name: member
+          to: gym_member
+          fromColumns: [member_id]
+          toColumns: [member_id]
+          cardinality: many_to_one

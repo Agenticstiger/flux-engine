@@ -976,3 +976,32 @@ end before it started.
   its tolerance is left out, with a note.
 - **What does not move.** A release that publishes its lengths, and one that publishes the pair as a date pair, keep
   every byte. No generator or plan code changes.
+
+## Amendment of 2026-11-27: the end share under an end marker
+
+The amendment of 2026-11-24 about the lifecycle took the share of an `endMarker` entry from the closed share of
+last versions, as `closeLast` does. A contract that declares an end marker ends an entity with a final version that
+holds the value (dbt's `hard_deletes: new_record`), so no last version of such a table is closed, and a profiler
+publishes that share as 0. `init` then wrote no end, and declined the marker with the reason that no entity ends, so
+no generated entity ended although a share of the source's did. Where a release withheld the closed share, the
+marker's branch also took the marker level's share of rows as the share of entities, which understates it by the
+versions per entity: an ended entity holds the marker on one version.
+
+- **The share.** When `endMarker` is accepted, the entry's `end` is `finalVersion` with the ended entities over the
+  entry's `entities`, capped at 1; a share of 0 or less is not written. The closed share of last versions is not
+  read.
+- **Its source, in order.**
+  1. The tracked marker column's published history: the first values on the marker plus the changes into it from
+     every other level, which is every entity that ends, since no change leaves the marker. It is used only when each
+     of those cells is published; a withheld cell, a withheld or missing group, or a noisy group with no cell clear
+     of the noise, which reads as withheld (ADR 0019, amendment of 2026-11-25), sends the entry to the next source,
+     as does a count of 0, which is no share. A single noisy cell inside the noise reads as 0, as it does everywhere
+     else, so such a release gives a share that stands clear of the noise.
+  2. The marker column's level histogram: its weight on the marker, times the table's rows, is the ended entities,
+     rounded to a whole entity.
+  3. Otherwise no end is written and a note says that no entity ends by the marker, without a value.
+- **The register.** The share is assumed from those members, and the sentence says which. The ledger marks the
+  marker column's first values and moves, or its histogram, as used for the end, and marks the last versions unused
+  with the reason that an end marker closes none.
+- **What does not move.** A table with no end marker keeps `closeLast` and the bytes it had. No generator or plan
+  code changes: `finalVersion` already keeps the final version open (section 5).
