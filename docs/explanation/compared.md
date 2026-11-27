@@ -10,7 +10,7 @@ model to real records. Most synthetic data tools take the opposite route: they t
 sample from it. This page says what FLUX is good at, where it is not, and how it compares with the other tools,
 so you can pick the right one for the job.
 
-The facts here were checked on 25 November 2026 against FLUX 0.11.1 and the [sources](#sources) at the end, and
+The facts here were checked on 27 November 2026 against FLUX 0.13.0 and the [sources](#sources) at the end, and
 they are checked again at each FLUX release.
 
 ## What FLUX is good at
@@ -27,8 +27,9 @@ they are checked again at each FLUX release.
 - **Governed by a contract.** A bundle names a FLUID data contract and pins its bytes, so the rows have the shape
   the contract expects. See [the FLUID seam](./the-seam.md).
 - **Deep on time and relations.** Lifetimes, seasonal rates, versioned entities with as-of reads, snapshots and
-  change events, counted children that can follow a parent column, linked rows, consumer-query calibration and
-  sealed forecasts.
+  change events, counted children that can follow a parent column, linked rows, association tables that pair two
+  counted sides ([ADR 0039](../adr/0039-an-association-table-pairs-two-counted-sides.md)), consumer-query
+  calibration and sealed forecasts.
 - **Offline by default.** No network is needed to produce results, there is no telemetry, and no AI model is
   embedded. CI blocks sockets, runs a journey with no network, and scans the source for network and model clients.
   See [runs offline](./offline.md).
@@ -47,62 +48,70 @@ they are checked again at each FLUX release.
   `flux-learned`, is designed but deferred.
 - **Many-core scaling.** A run is quick on one core, but extra workers stop paying off: the 536,500-row links
   world takes 3.64 seconds on one job and 1.09 on 16, and on 2.68 million rows 16 jobs are no faster than 12.
-  About 0.6 seconds of every run does not split across workers. The other tools have not been benchmarked on the
-  same worlds. The [speed roadmap](#roadmap-faster-on-many-cores) lists the fixes.
+  About 0.6 seconds of every run does not split across workers. No performance work shipped in 0.12 or 0.13. The
+  other tools have not been benchmarked on the same worlds. The [speed roadmap](#roadmap-faster-on-many-cores)
+  lists the fixes, which are still open.
 - **Not evidence, and not a privacy tool by itself.** The rows reproduce the scenario you describe, not the real
   world. Only a P3 run carries a formal privacy guarantee: the profiler adds the noise, and FLUX checks the stated
   budget.
 - **Unfinished parts.** A bundle asking for `fidelity: stochastic` is refused, the agentic tier is not built, and
-  generator plugins are not sandboxed. The 0.11.0 known issues, which the 0.11.1 fixes do not address, include a
-  bundle that `validate` passes but `plan` refuses.
+  generator plugins are not sandboxed. Plain `validate` still reads no profile, so it passes a bundle that `plan`
+  refuses for the profile the bundle pins. `validate --profile FILE` (added in 0.12.0) refuses what `plan` refuses
+  about that profile; see [`validate`](../reference/cli/validate.md). A profile that a private release published
+  with a noisy history, a noisy `nullCount/2` or noisy query rates (profile format 1-5-0) can stay at grade P3.
+  The 0.13.0 known issues are listed in the [0.13.0 changelog](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/CHANGELOG.md).
 
 ## The comparison
 
-As published on 25 November 2026, from each project's own documentation and, for commercial products, the
-vendor's. **Reproducible** means documented to give identical output for the same inputs and seed. **Claimed**
-means advertised but not documented. **Unverified** means no fetched source says either way. None of the tools was
-run offline for this page. The notes under the table give the evidence behind each cell.
+As published on 27 November 2026, from each project's own documentation and, for commercial products, the
+vendor's. **Yes** means documented, **partly** means documented for some cases only, **no** means documented as
+absent, **unverified** means no fetched source says either way, and **n/a** means the question does not apply. In
+the "Needs real records" column, "no" is the good answer: it means no real records are needed. **Kind** tags a
+tool as a trained model, privacy-first, rule and schema, or commercial; one tool can carry two tags.
+**Reproducible** means documented to give identical output for the same inputs and seed. **Claimed** means
+advertised but not documented. None of the tools was run offline for this page. The notes under the table give the
+evidence behind each cell.
 
-| Tool | Approach | Licence | Needs real records | Reproducible | Formal privacy (DP) | Multi-table | Time and sequence | Audit evidence | Runs offline |
-|---|---|---|---|---|---|---|---|---|---|
-| **FLUX** 0.11.1 | Declared rules and published aggregates | Apache-2.0 | never to generate | yes | via profile | yes | yes | yes | yes |
-| **SDV** 2.2.0 | Copula, GAN and deep models | BUSL-1.1 | to train | resampling | no | yes | yes | quality score | yes |
-| **synthcity** 0.2.12 | GANs, VAEs, flows, diffusion | Apache-2.0 | to train | unverified | some models | not stated | yes | metrics | yes |
-| **MOSTLY AI SDK** 6.2.1 | Deep model (TabularARGN) | Apache-2.0 | to train | unverified | option | yes | yes | reports | local mode |
-| **NeMo Data Designer** 1.0.1 | LLM with samplers | Apache-2.0 | no | not documented | no | not stated | not stated | validators | not by default |
-| **NeMo Safe Synthesizer** 0.2.0 | Fine-tuned LLM | Apache-2.0 | to train | unverified | opt-in | not stated | experimental | report | local GPU |
-| **Gretel** 0.22.20, archived | LSTM and GANs | source-available | to train | unverified | option | unverified | yes | unverified | unverified |
-| **fg-data-synthetic** 2.1.0 | GANs and Gaussian mixtures | MIT | to train | unverified | none documented | not stated | yes | unverified | yes |
-| **DataSynthesizer** 0.1.13 | Bayesian network | MIT | to describe | seeded | noise | no | no | none | yes |
-| **SmartNoise Synth** 1.0.8 | DP marginals and GANs | MIT | to train | unverified | epsilon | not stated | no | none | yes |
-| **private-pgm** mbi 2.1.0 | Model from noisy marginals | Apache-2.0 | noisy marginals | unverified | caller's job | not stated | no | none | yes |
-| **REaLTabFormer** 0.2.4 | GPT-2 transformer | MIT | to train | unverified | none documented | two tables | not stated | none | yes |
-| **GReaT** 0.0.14 | Fine-tuned small LLM | MIT | to train | mock only | no | not stated | not stated | metrics | yes |
-| **Faker** 40.63.0 | Field providers | MIT | no | same version | n/a | no | date fields | none | yes |
-| **Mimesis** 22.2.0 | Field providers and schemas | MIT | no | seeded | n/a | yes | date fields | none | yes |
-| **Hypothesis** 6.170.17 | Test-data strategies | MPL-2.0 | no | per version | n/a | composite | date fields | counterexamples | yes |
-| **dbldatagen** 0.4.0.post1 | Spark rules | Databricks License | optional | seeded | n/a | yes | date ranges | none | needs Spark |
-| **Synth** 0.6.9, dormant | Declarative schema | Apache-2.0 | on import | seeded | no | yes | series | none | yes |
-| **Snaplet Seed** 0.98.0 | Database seeding | MIT | no | claimed | n/a | yes | unverified | none | mostly |
-| **Mockaroo** hosted | Field types and formulas | Proprietary | no | unverified | n/a | datasets | date fields | unverified | claimed |
-| **Tonic** | Masking, subsetting, generators | Proprietary | most modes | seeded | some generators | yes | unverified | privacy report | self-hosted |
-| **Synthesized** 1.187 | Masking and generation | Proprietary | optional | seeded | unverified | yes | unverified | audit log | documented |
-| **SAS Data Maker** | Bayesian network, MST, SMOTE | Proprietary | to train | unverified | listed | claimed | claimed | unverified | unverified |
-| **K2view** TDM 10.1.1 | Masking, rules, trained model | Proprietary | AI mode | unverified | unverified | claimed | unverified | reports | unverified |
-| **MOSTLY AI platform** 5.10.0 | Deep models per table | Proprietary | to train | unverified | Opacus | yes | sequences | QA reports | claimed |
+| Tool | Kind | Approach | Licence | Needs real records? | Reproducible | Formal privacy (DP) | Multi-table | Time and sequence | Audit evidence | Runs offline |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **FLUX** 0.13.0 | declared rules and aggregates | Declared rules and published aggregates | Apache-2.0 | no, never to generate | yes | via profile | yes, with association tables | yes | yes | yes |
+| **SDV** 2.2.0 | trained model | Copula, GAN and deep models | BUSL-1.1 | yes, to train | resampling | no | yes | yes | quality score | yes |
+| **synthcity** 0.2.12 | trained model, privacy-first | GANs, VAEs, flows, diffusion | Apache-2.0 | yes, to train | unverified | some models | not stated | yes | metrics | yes |
+| **MOSTLY AI SDK** 6.2.1 | trained model, privacy-first | Deep model (TabularARGN) | Apache-2.0 | yes, to train | unverified | option | yes | yes | reports | local mode |
+| **NeMo Data Designer** 1.0.1 | trained model | LLM with samplers | Apache-2.0 | no, none needed | not documented | no | not stated | not stated | validators | not by default |
+| **NeMo Safe Synthesizer** 0.2.0 | trained model, privacy-first | Fine-tuned LLM | Apache-2.0 | yes, to train | unverified | opt-in | not stated | experimental | report | local GPU |
+| **Gretel** 0.22.20, archived | trained model, commercial | LSTM and GANs | source-available | yes, to train | unverified | option | unverified | yes | unverified | unverified |
+| **fg-data-synthetic** 2.1.0 | trained model | GANs and Gaussian mixtures | MIT | yes, to train | unverified | none documented | not stated | yes | unverified | yes |
+| **DataSynthesizer** 0.1.13 | privacy-first | Bayesian network | MIT | yes, to describe | seeded | noise | no | no | none | yes |
+| **SmartNoise Synth** 1.0.8 | privacy-first | DP marginals and GANs | MIT | yes, to train | unverified | epsilon | not stated | no | none | yes |
+| **private-pgm** mbi 2.1.0 | privacy-first | Model from noisy marginals | Apache-2.0 | noisy marginals only | unverified | caller's job | not stated | no | none | yes |
+| **REaLTabFormer** 0.2.4 | trained model | GPT-2 transformer | MIT | yes, to train | unverified | none documented | two tables | not stated | none | yes |
+| **GReaT** 0.0.14 | trained model | Fine-tuned small LLM | MIT | yes, to train | mock only | no | not stated | not stated | metrics | yes |
+| **Faker** 40.63.0 | rule and schema | Field providers | MIT | no, none needed | same version | n/a | no | date fields | none | yes |
+| **Mimesis** 22.2.0 | rule and schema | Field providers and schemas | MIT | no, none needed | seeded | n/a | yes | date fields | none | yes |
+| **Hypothesis** 6.170.17 | rule and schema | Test-data strategies | MPL-2.0 | no, none needed | per version | n/a | composite | date fields | counterexamples | yes |
+| **dbldatagen** 0.4.0.post1 | rule and schema | Spark rules | Databricks License | optional | seeded | n/a | yes | date ranges | none | needs Spark |
+| **Synth** 0.6.9, dormant | rule and schema | Declarative schema | Apache-2.0 | on import | seeded | no | yes | series | none | yes |
+| **Snaplet Seed** 0.98.0 | rule and schema | Database seeding | MIT | no, none needed | claimed | n/a | yes | unverified | none | mostly |
+| **Mockaroo** hosted | rule and schema, commercial | Field types and formulas | Proprietary | no, none needed | unverified | n/a | datasets | date fields | unverified | claimed |
+| **Tonic** | commercial | Masking, subsetting, generators | Proprietary | most modes | seeded | some generators | yes | unverified | privacy report | self-hosted |
+| **Synthesized** 1.187 | commercial | Masking and generation | Proprietary | optional | seeded | unverified | yes | unverified | audit log | documented |
+| **SAS Data Maker** | commercial, privacy-first | Bayesian network, MST, SMOTE | Proprietary | yes, to train | unverified | listed | claimed | claimed | unverified | unverified |
+| **K2view** TDM 10.1.1 | commercial | Masking, rules, trained model | Proprietary | AI mode | unverified | unverified | claimed | unverified | reports | unverified |
+| **MOSTLY AI platform** 5.10.0 | commercial, privacy-first | Deep models per table | Proprietary | yes, to train | unverified | Opacus | yes | sequences | QA reports | claimed |
 
 <details>
 <summary>Notes behind each cell</summary>
 
-- **FLUX** (flux-sim-engine 0.11.1)
+- **FLUX** (flux-sim-engine 0.13.0)
   - Approach: Declared rules and statistics from a contract and an aggregate profile; joint patterns from a DP profile's noisy multi-column marginals through a junction tree, and number and timestamp columns together through a Gaussian copula of published rank correlations
   - Needs real records: Generation reads only the bundle or an aggregate profile; fitting on records is ruled out (ADR 0003). An optional check, `--committed-slice`, reads a file of records you pass; ADR 0003 moves it into the profiler.
   - Reproducible: Every run is fingerprinted, and `replay` refuses a run that does not reach the digest you give it. A generator plugin declares its own reproducibility, and a plugin run that cannot be generated again is refused.
-  - Formal privacy (DP): Grade P3 only when the profile states one DP release, declares its public structure and holds only noisy statistics, with a few more conditions (ADR 0020); anything else grades P1. The profiler adds the noise, and its unit of privacy, such as a customer, can cover that unit's child rows too. FLUX checks the stated budget.
-  - Multi-table: Keys, links, and counted children whose number can follow a parent column; a child reads its parent's values through links and conditions. Patterns across tables come only from what the profile publishes or the bundle declares.
+  - Formal privacy (DP): Grade P3 only when the profile states one DP release, declares its public structure and holds only noisy statistics, with a few more conditions (ADR 0020); anything else grades P1. A noisy history, a noisy `nullCount/2` and noisy query rates (profile format 1-5-0) do not stop a profile from P3 (ADR 0019). The profiler adds the noise, and its unit of privacy, such as a customer, can cover that unit's child rows too. FLUX checks the stated budget.
+  - Multi-table: Keys, links, counted children whose number can follow a parent column, and association tables that pair two counted sides (ADR 0039); a child reads its parent's values through links and conditions. Patterns across tables come only from what the profile publishes or the bundle declares.
   - Time and sequence: Lifetimes, rates, versions, as-of reads, snapshots and events.
   - Audit evidence: EVIDENCE.md with "What Was Not Proven", two unsigned in-toto statements, a privacy grade.
-  - Runs offline: Network is used only for destinations you configure. CI blocks sockets in tests, runs a journey with no network, and scans the source.
+  - Runs offline: Network is used only for destinations you configure, such as a Kafka sink ([stream a simulation into Kafka](../how-to/stream-a-simulation-into-kafka.md)). CI blocks sockets in tests, runs a journey with no network, and scans the source.
 - **SDV** (2.2.0; CTGAN 0.13.0 is the latest)
   - Approach: Trained models: Gaussian copula, CTGAN and other deep models
   - Licence: Source-available; each version becomes MIT after 4 years.
@@ -123,7 +132,7 @@ run offline for this page. The notes under the table give the evidence behind ea
   - Approach: LLM and sampler pipeline with column dependencies
   - Needs real records: Seed data optional.
   - Audit evidence: Validators, LLM judges and a column-statistics report (HTML or SVG).
-  - Runs offline: Default providers are hosted APIs; telemetry on by default.
+  - Runs offline: Default providers are hosted APIs. Its README documents `NEMO_TELEMETRY_ENABLED=false` to turn telemetry off.
 - **NeMo Safe Synthesizer** (NVIDIA, nemo-safe-synthesizer 0.2.0)
   - Approach: Fine-tunes an LLM on tabular data after PII replacement
   - Formal privacy (DP): DP-SGD, off by default; epsilon defaults to 8, delta is set automatically, Rényi DP accounting.
@@ -139,7 +148,7 @@ run offline for this page. The notes under the table give the evidence behind ea
   - Licence: The LICENSE file and GitHub say MIT; the PyPI classifier says GPLv3+.
 - **DataSynthesizer** (0.1.13)
   - Approach: Describes the data, then samples (independent or Bayesian network)
-  - Reproducible: A seed parameter, 0 by default, seeds Python's and NumPy's generators; identical output is not promised.
+  - Reproducible: A seed parameter seeds Python's and NumPy's generators; identical output is not promised. It is 0 by default in 0.1.13; the development branch's DataDescriber defaults it to None.
   - Formal privacy (DP): Laplace noise under an epsilon (0.1 by default; 0 turns it off), documented in its code rather than its README.
 - **SmartNoise Synth** (OpenDP, 1.0.8)
   - Approach: Marginal (AIM, MST, MWEM), neural (DP-CTGAN, PATE-CTGAN and others) and hybrid DP synthesizers
@@ -193,7 +202,7 @@ run offline for this page. The notes under the table give the evidence behind ea
   - Approach: Masking and de-identification with column generators, and subsetting; Fabricate drafts generation rules from prompts with an LLM
   - Needs real records: Structural transforms source data; its data-free generators need none.
   - Reproducible: A statistics seed gives consistent values across runs, for generators with consistency enabled.
-  - Formal privacy (DP): A DP option on the categorical and continuous generators, off by default (epsilon 1, delta 1/(10n)); data-free generators always apply DP. No privacy accounting described.
+  - Formal privacy (DP): A DP option on the categorical generator, documented as off by default; the continuous generator has the option too, with no default stated (epsilon 1, delta 1/(10n)); data-free generators always apply DP. No privacy accounting described.
   - Multi-table: Subsetting keeps foreign keys, including virtual ones.
   - Audit evidence: A privacy report per job (CSV and PDF), an audit-event API for user access and permission changes, and audit logs in Fabricate and Textual.
   - Runs offline: Self-hosted on Docker or Kubernetes; air-gapped use not documented.
@@ -216,7 +225,7 @@ run offline for this page. The notes under the table give the evidence behind ea
   - Approach: Masking and entity-based subsetting; rule-based generation, and AI generation from a model you train on source entities
   - Needs real records: The AI mode trains on source entities; the rule mode's needs are not stated.
   - Multi-table: Cross-application integrity is described; the mechanism is not.
-  - Audit evidence: Masking policy and execution reports, described as audit-ready, and audit-level security logging; both are off by default.
+  - Audit evidence: Masking execution reports are off by default (`MASKING_REPORT_FLAG`).
 - **MOSTLY AI platform** (5.10.0, Jan 2026; Syntho bought the MOSTLY AI trademark and related assets in June 2026)
   - Approach: Trained generative models per table; language models for text
   - Needs real records: Trains on source tables.
@@ -229,7 +238,7 @@ run offline for this page. The notes under the table give the evidence behind ea
 ## Roadmap: faster on many cores
 
 A run is already quick on one core. What holds it back is the part of a run that does not split across workers,
-so extra jobs stop paying off, and the smaller the world, the sooner. Measured on 0.11.0, on an Apple M4 Max with
+so extra jobs stop paying off, and the smaller the world, the sooner. Measured on 0.11.0, and still open after 0.13.0, on an Apple M4 Max with
 16 CPUs, best of 2, in wall seconds:
 
 | World | Rows | 1 job | 16 jobs | Faster by |
@@ -240,8 +249,9 @@ so extra jobs stop paying off, and the smaller the world, the sooner. Measured o
 | counts | 145,800 | 1.73 | 0.88 | 2.0× |
 | history | 54,954 | 1.40 | 1.04 | 1.3× |
 
-The 0.11.0 changelog names the causes and logs them for the next release. The aim is about 8 times faster at 16
-jobs, with every run still byte for byte what it was.
+The 0.11.0 changelog names the causes. They are still open after 0.13.0, and no performance work shipped in 0.12 or
+0.13. The target is about 8 times faster at 16 jobs, with every run still byte for byte what it was. It is a target
+with no date, not a commitment.
 
 - **Shrink the serial phases.** Start-up, load, simulate and digest take about 0.6 seconds on one process whatever
   the job count, and generation itself stops gaining past 8 to 12 workers.
@@ -326,16 +336,18 @@ Borrowed patterns: Temporal replays a workflow by reading recorded results inste
 TinyTroupe caches model calls and simulation state so a rerun can skip calls it has already made; Concordia has a
 game master entity that resolves the players' actions, a role the FLUX engine plays itself, without a model.
 
-The proposed steps:
+The proposal would run in four steps. The decisions behind them are in the ADRs
+([0003](../adr/0003-sdv-bsl-and-aggregate-only-rule.md), [0004](../adr/0004-concordia-tinytroupe-adapt-the-pattern.md)
+and [0032](../adr/0032-a-generator-plugin-is-declared-graded-and-stored.md)).
 
-1. **Deterministic mode: the clock.** Add integer ticks to today's time model, so a clone emits events and state
-   changes continuously, ordered by time and then by id, and replays from its bundle and seed.
-2. **Deterministic mode: scenarios on a running clone.** Apply overlays while the clone runs (a price change, an
-   outage, a new product), and score its forecasts against what it then produces.
-3. **Model-assisted mode: your SLM proposes, the engine decides.** Ship the separate package with an adapter for a
-   model you run yourself. Each proposal stays within bounds the engine enforces, and each call is budgeted, gated
-   and recorded.
-4. **Model-assisted mode: agents with memory and goals.** Let entities act as agents with their own memory and
+1. **Deterministic mode: the clock.** Integer ticks could join today's time model, so a clone would emit events and
+   state changes continuously, ordered by time and then by id, and replay from its bundle and seed.
+2. **Deterministic mode: scenarios on a running clone.** Overlays could apply while the clone runs (a price change,
+   an outage, a new product), and its forecasts could be scored against what it then produces.
+3. **Model-assisted mode: your SLM proposes, the engine decides.** A separate package could ship with an adapter for
+   a model you run yourself. Each proposal would stay within bounds the engine enforces, and each call would be
+   budgeted, gated and recorded.
+4. **Model-assisted mode: agents with memory and goals.** Entities could act as agents with their own memory and
    goals, in the style of Concordia, under the same rules: proposals only, a hard token budget, and a replay that
    reads the recorded answers.
 
@@ -367,16 +379,16 @@ Status: designed and deferred; the build is not yet scheduled
 
 ## Sources
 
-Fetched on 23 November 2026; FLUX and the tool rows re-checked on 25 November 2026.
+Fetched on 23 November 2026; FLUX and the tool rows re-checked on 27 November 2026.
 
-- FLUX: README, docs/explanation (determinism, the evidence pack, offline), ADR 0003, ADR 0010, ADR 0014, ADR 0020, ADR 0021, ADR 0022, ADR 0032, ADR 0035, ADR 0036, ADR 0037, docs/spec/PROFILE-SPEC.md, docs/spec/PROFILE-REQUEST-SPEC.md, docs/reference/cli/replay.md, docs/reference/cli/apply.md, CHANGELOG, at tag v0.11.1 (579df3a)
+- FLUX, at release 0.13.0: the README, the explanation pages ([determinism](./determinism-and-the-seed-tree.md), [the evidence pack](./the-evidence-pack.md), [offline](./offline.md)), ADRs [0003](../adr/0003-sdv-bsl-and-aggregate-only-rule.md), [0010](../adr/0010-faster-generation-through-a-second-kernel.md), [0014](../adr/0014-init-reads-every-statistic-a-profile-publishes.md), [0019](../adr/0019-one-privacy-budget-per-profile-release.md), [0020](../adr/0020-privacy-grades.md), [0021](../adr/0021-clique-marginals-are-drawn-through-a-junction-tree.md), [0022](../adr/0022-rows-read-their-linked-rows.md), [0032](../adr/0032-a-generator-plugin-is-declared-graded-and-stored.md), [0035](../adr/0035-number-columns-are-drawn-through-a-gaussian-copula-of-published-rank-correlations.md), [0036](../adr/0036-binned-number-columns-join-clique-marginals.md), [0037](../adr/0037-child-columns-and-child-counts-follow-their-parent-and-a-unit-can-follow-its-children.md), [0038](../adr/0038-a-kafka-sink-keys-records-by-entity-delivers-each-stream-exactly-once-and-sends-only-what-its-audience-may-see.md), [0039](../adr/0039-an-association-table-pairs-two-counted-sides.md), the [profile specification](../spec/PROFILE-SPEC.md), the [profile request specification](../spec/PROFILE-REQUEST-SPEC.md), the [`replay`](../reference/cli/replay.md), [`apply`](../reference/cli/apply.md) and [`validate`](../reference/cli/validate.md) references, and the changelog
 - [SDV sampling](https://docs.sdv.dev/sdv/single-table-data/sampling/sample-realistic-data), [SDV DP bundle](https://docs.sdv.dev/sdv/explore/sdv-bundles/differential-privacy), [github.com/sdv-dev/SDV](https://github.com/sdv-dev/SDV), [pypi sdv](https://pypi.org/pypi/sdv/json), [pypi ctgan](https://pypi.org/pypi/ctgan/json)
 - [github.com/vanderschaarlab/synthcity](https://github.com/vanderschaarlab/synthcity)
 - [github.com/mostly-ai/mostlyai](https://github.com/mostly-ai/mostlyai), [pypi mostlyai](https://pypi.org/pypi/mostlyai/json)
 - [github.com/gretelai/gretel-synthetics](https://github.com/gretelai/gretel-synthetics), [TechCrunch, 19 Mar 2025](https://techcrunch.com/2025/03/19/nvidia-reportedly-acquires-synthetic-data-startup-gretel)
-- [github.com/NVIDIA-NeMo/DataDesigner](https://github.com/NVIDIA-NeMo/DataDesigner), [github.com/NVIDIA-NeMo/Safe-Synthesizer](https://github.com/NVIDIA-NeMo/Safe-Synthesizer), [Data Designer analysis report](https://github.com/NVIDIA-NeMo/DataDesigner/blob/main/packages/data-designer-config/src/data_designer/config/analysis/utils/reporting.py), [Safe Synthesizer data synthesis](https://nvidia-nemo.github.io/Safe-Synthesizer/latest/product-overview/data_synthesis/)
+- [github.com/NVIDIA-NeMo/DataDesigner](https://github.com/NVIDIA-NeMo/DataDesigner) (README, telemetry), [github.com/NVIDIA-NeMo/Safe-Synthesizer](https://github.com/NVIDIA-NeMo/Safe-Synthesizer), [Data Designer analysis report](https://github.com/NVIDIA-NeMo/DataDesigner/blob/main/packages/data-designer-config/src/data_designer/config/analysis/utils/reporting.py), [Safe Synthesizer data synthesis](https://nvidia-nemo.github.io/Safe-Synthesizer/latest/product-overview/data_synthesis/)
 - [github.com/Data-Centric-AI-Community/fg-data-synthetic](https://github.com/Data-Centric-AI-Community/fg-data-synthetic), [pypi fg-data-synthetic](https://pypi.org/pypi/fg-data-synthetic/json)
-- [github.com/DataResponsibly/DataSynthesizer](https://github.com/DataResponsibly/DataSynthesizer), [DataSynthesizer 0.1.13 on PyPI](https://pypi.org/project/DataSynthesizer/0.1.13/) (DataDescriber.py)
+- [github.com/DataResponsibly/DataSynthesizer](https://github.com/DataResponsibly/DataSynthesizer), [DataSynthesizer 0.1.13 on PyPI](https://pypi.org/project/DataSynthesizer/0.1.13/) (DataDescriber.py, also on the [development branch](https://github.com/DataResponsibly/DataSynthesizer/blob/master/DataSynthesizer/DataDescriber.py))
 - [github.com/opendp/smartnoise-sdk](https://github.com/opendp/smartnoise-sdk)
 - [github.com/ryan112358/mbi](https://github.com/ryan112358/mbi) (formerly private-pgm), [pypi mbi](https://pypi.org/pypi/mbi/json)
 - [github.com/worldbank/REaLTabFormer](https://github.com/worldbank/REaLTabFormer)
@@ -392,6 +404,6 @@ Fetched on 23 November 2026; FLUX and the tool rows re-checked on 25 November 20
 - NVIDIA: [NeMo data synthesis](https://docs.nvidia.com/nemo-platform/documentation/synthesize-safe-data/about/data-synthesis), [Data Designer docs](https://docs.nvidia.com/nemo/datadesigner/getting-started/welcome)
 - [github.com/google-deepmind/concordia](https://github.com/google-deepmind/concordia), [pypi gdm-concordia](https://pypi.org/pypi/gdm-concordia/json)
 - [github.com/microsoft/TinyTroupe](https://github.com/microsoft/TinyTroupe), [Temporal event history](https://docs.temporal.io/encyclopedia/event-history/event-history-python), [Defeating Nondeterminism in LLM Inference](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/) (Thinking Machines, 10 Sep 2025)
-- FLUX: ADR 0004, `flux_engine/governance`, `flux_engine/api/agentic.py` and `flux_engine/stages/pipeline.py` at tag v0.11.1 (579df3a)
+- FLUX: [ADR 0004](../adr/0004-concordia-tinytroupe-adapt-the-pattern.md), at release 0.13.0
 - [github.com/mesa/mesa](https://github.com/mesa/mesa), [SimPy time and scheduling](https://simpy.readthedocs.io/en/latest/topical_guides/time_and_scheduling.html)
 - [github.com/AgentTorch/AgentTorch](https://github.com/AgentTorch/AgentTorch), [github.com/tsinghua-fib-lab/AgentSociety](https://github.com/tsinghua-fib-lab/AgentSociety), [github.com/joonspk-research/generative_agents](https://github.com/joonspk-research/generative_agents)
