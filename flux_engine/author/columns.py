@@ -89,6 +89,7 @@ __all__ = [
     "shape_to_mean",
     "SHAPED_REASON",
     "share_texts",
+    "weight_text",
     "widen_key_span",
 ]
 
@@ -421,6 +422,11 @@ def _share_text(value: Fraction) -> str:
         Decimal(1).scaleb(-_SHARE_PLACES), rounding=ROUND_HALF_EVEN
     )
     return _decimal_text(Fraction(rounded))
+
+
+def weight_text(value: Fraction) -> str:
+    """A bin weight as decimal text: exact when it is a finite decimal, else rounded to nine places."""
+    return _share_text(value)
 
 
 def share_texts(weights: Sequence[Fraction]) -> List[str]:

@@ -38,7 +38,15 @@ from flux_engine.expr2.rows import Rows
 from flux_engine.expr2.scope import model_from_json
 from flux_engine.seam.contract import LogicalKind
 
-__all__ = ["DateDifference", "bound_derived_dates", "date_difference", "preimage"]
+__all__ = [
+    "DateDifference",
+    "bound_derived_dates",
+    "date_difference",
+    "derived_instants",
+    "derives_leave_no_day",
+    "preimage",
+    "record_assumption",
+]
 
 _DAY_MS = 86_400_000
 _EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
@@ -264,6 +272,59 @@ def _bound_of(
     return _Bound(span, sentence)
 
 
+def _bounds_of(
+    entry: Mapping[str, Any],
+    derives: Mapping[str, Tuple[int, str]],
+    kinds: Mapping[str, LogicalKind],
+    column: str,
+) -> List[_Bound]:
+    """What each derive of *derives* over numbers says of the date *column*."""
+    return [
+        found
+        for derived, (index, text) in derives.items()
+        if kinds.get(derived) in _NUMBERS
+        for found in [_bound_of(entry, derived, index, text, column)]
+        if found is not None
+    ]
+
+
+def derived_instants(
+    entry: Mapping[str, Any],
+    derives: Mapping[str, Tuple[int, str]],
+    kinds: Mapping[str, LogicalKind],
+    column: str,
+) -> Optional[Tuple[Optional[int], Optional[int]]]:
+    """The first and last instant (milliseconds) of the days the derives of *column* keep in range.
+
+    An end is ``None`` when no derive bounds that side. ``None`` when no derive bounds the column,
+    and when the derives leave no day: then the contract's range says nothing the column can keep
+    (:func:`derives_leave_no_day` tells the two apart).
+    """
+    spans = [item.span for item in _bounds_of(entry, derives, kinds, column)]
+    if not spans or any(span is None for span in spans):
+        return None
+    joined = _intersect([span for span in spans if span is not None])
+    if joined is None:
+        return None
+    first, last = joined
+    return (None if first is None else _ms(first), None if last is None else _ms(last))
+
+
+def derives_leave_no_day(
+    entry: Mapping[str, Any],
+    derives: Mapping[str, Tuple[int, str]],
+    kinds: Mapping[str, LogicalKind],
+    column: str,
+) -> bool:
+    """Whether the derives of *column* bound it and no day holds the range of every one."""
+    spans = [item.span for item in _bounds_of(entry, derives, kinds, column)]
+    if not spans:
+        return False
+    return any(span is None for span in spans) or (
+        _intersect([span for span in spans if span is not None]) is None
+    )
+
+
 def bound_derived_dates(
     exposes: Sequence[Any],
     contract: Mapping[str, Any],
@@ -296,13 +357,7 @@ def bound_derived_dates(
                 continue
             if not (plan.even_in_window or plan.drawn_in_window):
                 continue
-            bounds = [
-                found
-                for derived, (index, text) in expose.derives.items()
-                if expose.kinds.get(derived) in _NUMBERS
-                for found in [_bound_of(entry, derived, index, text, plan.name)]
-                if found is not None
-            ]
+            bounds = _bounds_of(entry, expose.derives, expose.kinds, plan.name)
             if bounds:
                 _declare(expose, plan, bounds, (span[0], span[1]), ranges_of(expose, plan))
 
@@ -359,10 +414,10 @@ def _declare(
     )
     declare_one_bin(plan, LogicalKind.DATE, _ms(where[0]), _ms(where[1]), reason)
     plan.how = f"evenly over the dates its derives allow, {_spelled(where)}{note}"
-    _say(expose, plan, reason)
+    record_assumption(expose, plan, reason)
 
 
-def _say(expose: Any, plan: ColumnPlan, sentence: str) -> None:
+def record_assumption(expose: Any, plan: ColumnPlan, sentence: str) -> None:
     """Record an assumption of the column on its plan and on the expose's list the report reads."""
     plan.assumptions.append(sentence)
     expose.assumptions.append((plan.name, sentence))
@@ -370,7 +425,7 @@ def _say(expose: Any, plan: ColumnPlan, sentence: str) -> None:
 
 def _keep(expose: Any, plan: ColumnPlan, reason: str) -> None:
     """The column keeps its even draw; the report says why its derives are not honoured."""
-    _say(
+    record_assumption(
         expose,
         plan,
         "The contract's derives over it are not honoured, so it keeps its even draw and a "

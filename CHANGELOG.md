@@ -31,6 +31,16 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   published, else the rows its histogram puts on the marker. A withheld last-version share no longer
   takes the marker's share of rows for the share of entities. A table without an end marker keeps
   its bytes. ADR 0017 amendment of 2026-11-27.
+- `init` holds a date column's declared range to the days the contract's derives over it keep in range. A `derive` that
+  is `DAYS_BETWEEN`, `MONTHS_BETWEEN` or `YEARS_BETWEEN` of a date literal and the column, whose derived column declares a
+  `range` rule, bounds the column as a range of its own does. An end of the range past those days, whether it came
+  from a histogram's last edge, the contract or a widening, is cut to them; a range inside them keeps its bytes, and a
+  widening that would need an end past them leaves its entry out and lists it as unused. The draw's bins keep the
+  profile's shape inside the cut: a bin the cut reaches into has its edge moved and its weight scaled by the share of
+  its days kept, a bin wholly outside is left out, and the summary and the register say so. The column's histogram
+  property is left out with the reason, and a table left with no property is not scored. Days that leave one day of
+  the range, none of it, or no day at all keep the range as published, and the assumptions say that the derive is not
+  honoured.
 
 ## 0.13.0 - 2026-11-27
 

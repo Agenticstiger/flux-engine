@@ -285,8 +285,9 @@ range of the derived column was missing.
 1. **The family.** A `derive` (with no `when`) whose text the engine's parser reads as
    `DAYS_BETWEEN`, `MONTHS_BETWEEN` or `YEARS_BETWEEN` of a date literal and one column of the row,
    in either argument order, bounds that column when the derived column declares a `range` rule.
-   Any other shape (a sum, a rounding, a column of another row), a derived column with no declared
-   range, and a column the profile publishes a distribution for change nothing.
+   Any other shape (a sum, a rounding, a column of another row) and a derived column with no
+   declared range change nothing. A column the profile publishes a distribution for is not drawn
+   evenly: its declared range is held to the same days (amendment of 2026-11-27).
 2. **The bound is the preimage.** The difference is a monotone step function of the date, so each
    end of the dates whose difference lies in the range is found by bisection over the day ordinals
    with the engine's evaluator, and then checked with it: the difference lies in the range at each
@@ -307,3 +308,43 @@ range of the derived column was missing.
 - Only an authoring change: no kernel behaviour or golden digest moves, and a contract that
   declares none of this gets the bundle it got before.
 - A bin's upper edge is a date the draw can reach, so the bin runs to the last date that holds.
+
+## Amendment of 2026-11-27: a date's declared range is held to the days a derive over it keeps in range
+
+### Context
+
+A range `init` writes from a histogram ends on the histogram's last edge, which a profile leaves
+out of its last bin and a range counts as a day, so the last day of the range can lie past the days
+a derive over the column keeps in range. A widening that lets a `within` entry plan can move an end
+past those days too. Rows dated there write the derived column outside its declared range.
+
+### Decision
+
+1. **The family.** The derive of the amendment of 2026-11-26: a whole-unit difference between a
+   date literal and the column, whose derived column declares a `range` rule.
+2. **The range.** An end of the column's declared range, whether it comes from a histogram, from
+   the contract or from a widening, that lies past the days the derives keep is cut to them. A
+   range inside the days keeps its bytes. A widening that would need an end past the days leaves
+   its entry out, as it does for a range the contract declares.
+3. **The bins.** The bins keep the profile's shape inside the cut: a bin the cut reaches into has
+   its edge moved to the cut and its weight scaled by the share of its days that are kept, the last
+   kept day counted, and a bin wholly outside the cut is left out. A scaled weight is labelled as an
+   assumption and a moved edge is stated in the assumptions text, and the statistic they came from
+   is recorded as used, with the reason. A cut that keeps only bins whose scaled weights add up to
+   nothing leaves the draw no bins, and it draws evenly within the cut range, which the assumptions
+   say.
+4. **The histogram property.** The column's `marginalHistogram` property is left out, with the
+   reason given in the bundle's assumptions: its bins partition the range (`FLX-5032`) and `verify`
+   compares them with the bins the profile publishes (`FLX-5037`), and neither holds once the range
+   is cut. A table left with no property is not scored.
+5. **`within`.** An entry that needs the range past the days is left out and listed as unused.
+6. **Nothing to cut to.** Days that leave no day of the published range, one day of it, or no day
+   at all (two derives with an empty intersection) keep the range as published, and the assumptions
+   say that the derive is not honoured and the derived column may fall outside its range.
+
+### Consequences
+
+- The contract wins over the profile where they disagree on a derive-bounded date: the generated
+  range is narrower than the profile's, and the histogram of the column is not compared.
+- A range inside the days, and a column no derive bounds, keep their bytes. Only an authoring
+  change: no kernel behaviour or golden digest moves.

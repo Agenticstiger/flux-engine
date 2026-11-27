@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""``fluxsim init`` draws a date the profile gives no distribution where its contract derives hold.
+"""``fluxsim init`` draws a date the profile gives no distribution, or cuts a published one, where its contract derives hold.
 
 ADR 0014, amendment of 2026-11-26: a DATE column the profile withholds (or whose released
 histogram is noise everywhere) is drawn evenly within the run's window. When a contract ``derive``
@@ -11,7 +11,8 @@ range, the draw is bounded to the dates whose difference lies in that range (the
 ``MONTHS_BETWEEN`` and ``DAYS_BETWEEN`` decide), cut to the column's own declared range, and
 declared as one bin with weight 1 labelled as an assumption. Two derives over the column
 intersect; an empty intersection keeps the even draw and says why. A column the profile
-publishes, a derived column with no declared range and a derive of another shape change nothing.
+publishes keeps its bins, but its range is cut to those days and its histogram property is left
+out; a derived column with no declared range and a derive of another shape change nothing.
 """
 
 from __future__ import annotations
@@ -266,12 +267,17 @@ def test_no_declared_range_leaves_the_bundle_as_it_was(
     assert _fee_month(tmp_path) is None
 
 
-def test_a_published_date_is_not_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_published_date_keeps_its_bins_inside_the_days_a_derive_keeps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     published = _profile()["tables"]["member"]["columns"]["joined_on"]
     _as_before(tmp_path, monkeypatch, _contract(), _profile(published))
+    # The draw is not bounded as an unpublished one is, but the range it is written with is held to
+    # the days the derive keeps in range: the published bins that lie inside them stay.
     column = _fee_month(tmp_path)
-    assert column is not None and column["bins"][0] == "2015-01-01"
-    assert len(column["binWeights"]) == 12
+    assert column is not None and column["bins"][0] == "2019-12-02"
+    assert column["bins"][-1] == "2020-12-31"
+    assert len(column["binWeights"]) == len(column["bins"]) - 1
 
 
 def test_a_derive_of_another_shape_is_left_alone(

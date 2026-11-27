@@ -570,7 +570,8 @@ plan reads the first and last edges as its range (`declared_bounds`). The wideni
   does for a column that declares both. A histogram property whose edge sat on a moved end is left out with the same
   reason.
 - **The contract.** The check that keeps the widening inside the range the contract declares reads the same range, so
-  a bins-only date is not widened past it, and its entry is left out as for a declared range.
+  a bins-only date is not widened past it, or past the days a derive over the column keeps in range, and its entry is
+  left out as for a declared range.
 - **What does not move.** A bins-only column no entry asks to widen declares no `range`, and keeps its bytes.
 
 
