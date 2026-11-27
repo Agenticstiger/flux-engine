@@ -25,8 +25,8 @@ into a virtual environment instead.) To try it without installing anything, writ
 `uvx --from flux-sim-engine fluxsim init demo`. Every command on this page works
 either way.
 
-These pages follow the `main` branch, which can be ahead of the release on PyPI. To
-install `main` instead, see [which version these pages
+In the repository, `docs/` follows the `main` branch, which can be ahead of the release on
+PyPI. The docs site carries the pages of the latest release. To install `main` instead, see [which version these pages
 describe](../README.md#which-version-these-pages-describe).
 
 ```console

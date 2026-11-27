@@ -223,6 +223,14 @@ owner can leave out of the profile. Where the profile reader needs one of an ent
 entry when none of it is read, so a profile with exactly those pointers dropped is one the reader
 accepts. Drop that list, not every statistic marked unused.
 
+A profile cut by dropping the `ledger.unused` list can leave an entry in part: a date pair
+with its `order` and no statistic, an exposure with one of its counts, or a history with some
+of its members. From 0.13.0 the engine reads each member that is left, checks it as in a whole
+entry, and `init` and `plan` accept the profile. `init` then writes the bundle it wrote from the
+whole profile, except for a few shapes the 0.13.0 changelog lists as known issues. A register
+citation of a member that is gone is refused as any citation of an unpublished statistic is
+([FLX-3113](../reference/errors/FLX-3113.md)). Engine 0.12.0 refused an entry cut in part.
+
 `--strict` turns the ledger into a gate. It writes nothing, and exits 1, when a statistic
 is unused or an assumption stands in for something the profile
 did not publish; the tolerances and the bounds of a committed state are settings, not
@@ -465,7 +473,82 @@ Cliques that cannot form a tree (the running intersection property fails) are re
 them, and the levels a clique lists for a column must be the ones the contract declares. The
 run is scored on the one- and two-way level histograms the cliques answer.
 
+A release can also carry a noisy history, a noisy null count and a noisy query rate
+(profile format 1-5-0, [PROFILE-SPEC.md](../spec/PROFILE-SPEC.md) section 3a). `init` reads each of
+them through its point estimate, as it reads any noisy statistic:
+
+- **A noisy `history` member.** A cell of the member that is inside the noise carries no
+  weight. The test is the noise floor over all the member's cells. When no cell stands clear of
+  the floor, `init` reads the member as withheld.
+- **A noisy `nullCount/2`.** The statistic is a noisy count of a column's known and NULL
+  rows. When the NULL cell stands clear of the noise, a nullable column takes the NULL share the
+  estimate states. When it does not, the release cannot tell the count from none, so `init`
+  draws no nulls and writes an assumption that names the interval the release allows. Such a
+  column can still be one that another column is drawn given, a clique column or a tracked one.
+- **A clique column.** A column that a clique draws holds no null. If the release states a NULL
+  share for one, `init` sets that share aside and draws the cliques. The ledger names the
+  share it set aside, and `--strict` refuses it as an unused statistic.
+- **The request.** The profile request `init` writes beside a bundle asks for `history` on a
+  table and for `nullCount/2` on a column (request format 1-3-0) only when the profile you gave
+  is a private release. Every other request keeps its format and its bytes. The request names as
+  `cliqueColumns` only the columns the contract requires, since a profiler releases an optional
+  column over its known values, outside the cliques.
+
+A table of two foreign keys and no other column, laid out by counts on both sides, is written
+as an association: see [give every parent its children](./give-every-parent-its-children.md#association-tables).
+`init` gives it `distinct: true`, or `distinct: false` when the published rows are more than the
+pairs of the two parents.
+
+## 4b. Declare the history yourself
+
+A profile need not publish a history. With `--history FILE`, you declare the history of a
+versioned table and its projections, and `init` merges them into the bundle in place of the ones
+it would infer from the profile:
+
+```text
+fluxsim init bundle --contract contract.fluid.yaml --profile profile.json --history history.yml
+```
+
+The file is one YAML document: a mapping with these keys, and no others.
+
+| Key | Holds |
+|---|---|
+| `history` | A non-empty list of history entries, as [give an entity a history](./give-an-entity-a-history.md) describes them. |
+| `snapshots`, `events`, `periods` | Lists of the projections of the history, as [project a history](./project-a-history.md) describes them. |
+| `asOf` | A list of as-of reads. |
+| `timeBounds` | `start` and `end` of the run's time window. |
+
+`init` writes the bundle to fit the file. It writes no counts entry over a projected emit or
+over the history's parent relationship, no exact allotment on the columns of the history or of a
+projected emit, and no weight for the ended status on a column the history carries its end in. It
+lists the profile's statistics for those as unused, with the reason. The numbers of the history
+are assumed, for the reason "declared by --history", and cite nothing of the profile's history.
+
+A file that cannot be read, holds more than one document or another key, names a history entry
+wrongly, or spells an open end in the year 9999 in `until`, a `start` bin or the `timeBounds`
+end is refused, and the message names the file and the position. When `plan` still refuses the
+bundle, `init` says so, names the file and writes nothing. `init --json` carries the file's name
+as `historyFile`.
+
 ## 5. Run it, check it, ship it
+
+Before the run, check the bundle against the profile it pins. Plain `fluxsim validate` reads no
+profile. `validate --profile` reads it and refuses what `plan` would refuse about it:
+
+```text
+fluxsim validate bundle --profile orders.profile.json
+```
+
+- [FLX-3109](../reference/errors/FLX-3109.md) and [FLX-3110](../reference/errors/FLX-3110.md):
+  the profile is not the one the Simulation pins, or it cannot be read.
+- [FLX-3105](../reference/errors/FLX-3105.md): an overlay names a table or a column the profile
+  lacks.
+- [FLX-3113](../reference/errors/FLX-3113.md): the register cites a table or a column the profile
+  lacks.
+
+A profile given to a Simulation that pins none, and the grade floor
+([FLX-4005](../reference/errors/FLX-4005.md)), are left to `plan`. See
+[`validate`](../reference/cli/validate.md).
 
 `fluxsim run --verify --ship` is the one-pass path: one command plans, applies, checks and
 ships, and the rows are drawn once.
