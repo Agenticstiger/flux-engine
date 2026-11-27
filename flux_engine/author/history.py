@@ -416,7 +416,11 @@ def _derive_length(
         return None
     scale = 1 if kind is LogicalKind.DATE else _DAY_MS
     low_unit, _ = _window_units(source, kind)
-    window_days = max(1, (until - low_unit) // scale)
+    window_days = (until - low_unit) // scale
+    if window_days <= 1:
+        raise _Skip(
+            f"the run's window holds {max(window_days, 0)} days, too few to draw a version's length in"
+        )
     closed_bins, closed = _closed_ends(ends, Fraction(until, scale))
     starts = declared_spread(plans[start], kind) if start in plans else None
     fit: Optional[GapFit] = None

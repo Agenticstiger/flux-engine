@@ -802,7 +802,7 @@ class _Declarer:
                 "binWeights": share_texts(weights),
             },
         }
-        if end in held.required and self._max_after_window(expose, end):
+        if self._max_after_window(expose, end):
             entry["endPastWindow"] = "kept"
         elif source == _WINDOW_SOURCE and self._null_end_breaks(held, start, end):
             # The contract's check does not hold on a NULL end: the end keeps a date past the window.
