@@ -1063,6 +1063,10 @@ class _Declarer:
             # An end drawn from its own statistics is ordered after its start only by chance, so
             # the lifetime keeps its start, which children can still be dated after.
             self.lifetimes[expose] = {"emit": expose, "start": start}
+            # The pair's order named the start, so it was read although the pair is rejected.
+            self.used.append(
+                (pair.tokens + ("order",), "its direction names the start the lifetime keeps")
+            )
             self.reject(pair, _NO_DURATION)
             return
         entry["duration"] = duration
@@ -1543,12 +1547,7 @@ class _Declarer:
     def _published_pair(self, expose: str, order: DateOrder) -> bool:
         tables = self.profile.get("tables")
         table = tables.get(expose) if isinstance(tables, Mapping) else None
-        items = table.get("datePairs") if isinstance(table, Mapping) else None
-        names = {order.start, order.end}
-        return any(
-            isinstance(item, Mapping) and {str(item.get("start")), str(item.get("end"))} == names
-            for item in (items if isinstance(items, list) else ())
-        )
+        return pair_order_published(table, order.start, order.end)
 
     def _order_refusal(self, expose: str, held: DatedExpose, order: DateOrder) -> Optional[str]:
         """Why no lifetime can order the two dates of *order*, whatever the run's window."""
@@ -2255,6 +2254,16 @@ def pair_orders(table: Any, first: str, second: str) -> Tuple[bool, bool]:
     """
     orders = [_read_order(order)[0] is not None for order in _listed_orders(table, first, second)]
     return any(orders), not all(orders)
+
+
+def pair_order_published(table: Any, first: str, second: str) -> bool:
+    """Whether a profile table lists a date pair of the two columns with an order it publishes.
+
+    Only such a pair lays the two dates out and claims them: a pair whose order is withheld,
+    suppressed or noisy is listed and orders nothing, so the contract's check of the two dates
+    still decides them.
+    """
+    return pair_orders(table, first, second)[0]
 
 
 def declare_dates(

@@ -419,15 +419,16 @@ def test_a_column_drawn_from_a_table_grouped_by_it_checks_its_own_histogram(
     )
 
 
-def test_a_column_s_histogram_the_groups_it_is_drawn_from_contradict_is_unused(
+def test_a_column_s_histogram_the_groups_it_is_drawn_from_contradict_is_still_read(
     tmp_path: Path,
 ) -> None:
     groups = {"A": ([450, 50], 500), "B": ([50, 450], 500)}
     result = _init(tmp_path, _profile(region_tier=True, tier_groups=groups))
     assert _fidelity(tmp_path)["columns"]["segment"]["given"] == "tier"
+    # Its labels no longer cite the histogram, but the property still scores the column against it.
     state = _states(result)[SEGMENT_STATISTIC]
-    assert state["state"] == "unused"
-    assert "counts 600 of A" in state["note"] and "has 500 records" in state["note"]
+    assert state["state"] == "used"
+    assert "scored against" in state["note"]
 
 
 def _table_of_counts(rows: Dict[str, List[int]]) -> Any:
