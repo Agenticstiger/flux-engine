@@ -292,13 +292,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   out from the other column, the start was drawn on its own, and a share of the versions ended before they started. The
   window the contract declares now takes the lifetime from a start to an end (the window's own pair where the release
   publishes one that holds, and else gaps derived from the two published histograms, or drawn evenly over the run's
-  window, as an assumption in the register), and the pair that would have laid the date out is unused with a reason that
-  names the window. The same holds for a pair between a window date and a column outside it, for a pair of the window
+  window, as an assumption in the register), and the pair that would have laid the date out is unused, with a reason that
+  names the window (or the history, where the release's history entry already gave the window its lifetime). The same holds for a pair between a window date and a column outside it, for a pair of the window
   the release withholds, and for a window whose two histograms would not keep the order drawn apart; a window they
-  already keep in order, a table whose history `init` writes, a release whose history entry already gave the window its
+  already keep in order (also where a pair lays out its start), a table whose history `init` writes, a release whose history entry already gave the window its
   lifetime, and a table with no declared window keep their bytes. A nullable end whose declared range stops short of
   the last start is laid out all the same, as an end past the run is NULL and no gap can draw one outside the range (the
-  lifetime was declined before, and the end drawn on its own). A column that the other pair tied to a window date
+  lifetime was declined before, and the end was drawn on its own or laid out by another pair). A column that the other pair tied to a window date
   (the same day, say) is then drawn on its own, since a table declares one lifetime (ADR 0024, the amendment of
   2026-11-27).
 

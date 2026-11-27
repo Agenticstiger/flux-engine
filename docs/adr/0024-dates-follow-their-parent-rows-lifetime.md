@@ -581,9 +581,10 @@ version ends on or after its start. The lifetime a published date pair gave a ta
 a column outside the window, and the start, drawn on its own, was then ordered with it only by chance.
 
 - **When the window takes the lifetime.** The best pair of the profile is the pair of a window date and a column
-  outside the window, and it either lays out a window date (the end of the lifetime is a date of the window) or leaves
-  the window to its two histograms, which drawn apart would break its order (the check's tolerance where the contract
-  declares one, none otherwise).
+  outside the window. It takes the lifetime from the window where it lays out the window's end, since the end then
+  follows a column the start does not. Where it lays out the window's start, or a column outside the window from the
+  start, the window takes it only if the window's two histograms, drawn apart, would break its order (the check's
+  tolerance where the contract declares one, none otherwise); a window they keep in order is left alone.
 - **What the lifetime is.** The window's own pair where the profile publishes one that holds on enough rows (section 5
   applies to it as it does to any pair). Otherwise a lifetime from the window's start to its end with the gaps derived
   from the two published histograms (the amendment of 2026-11-26 to ADR 0017, `author/gap_fit.py`), or drawn evenly
@@ -593,7 +594,8 @@ a column outside the window, and the start, drawn on its own, was then ordered w
   where the end's declared range cannot be shown to hold every end the gaps can draw; a nullable end that is NULL past
   the run needs no such proof, since no end the gaps draw falls outside the range.
 - **What is unused.** Every pair of the profile that was a candidate for the lifetime, with a reason that names the
-  window. A column the other pair tied to a window date (published on the same day, say) is drawn on its own: a table
+  window (the history, where the release's history entry already gave the window its lifetime; a window pair that
+  publishes no days says so). A column the other pair tied to a window date (published on the same day, say) is drawn on its own: a table
   declares one lifetime, and the order the contract states for its window is the one kept.
 - **A pair the release withholds.** A pair of the window's two dates whose order the release withholds gives no
   lifetime; with no other pair to take it, the window takes it the same way.

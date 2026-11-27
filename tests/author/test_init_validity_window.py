@@ -246,6 +246,18 @@ def test_a_pair_the_release_withholds_for_the_window_is_laid_out_all_the_same(
     assert _ended_before_started(_versions(tmp_path)) == 0
 
 
+def test_a_pair_that_lays_the_start_out_leaves_a_window_the_histograms_keep_in_order_alone(
+    tmp_path: Path,
+) -> None:
+    pair = _pair("enrolled_on", "valid_from", [1000, 0, 0], [300, 400, 300])
+    profile = _release(pair)
+    ends = profile["tables"]["tier_version"]["columns"]["valid_to"]
+    ends["statistics"] = [_bins([_ms(2025, 10, 1), _ms(2025, 12, 1), OPEN], [600, 400], 1000)]
+    _, life = _written(tmp_path, profile)
+    assert life is not None and (life["start"], life["end"]) == ("enrolled_on", "valid_from")
+    assert life["duration"]["bins"] == ["1", "30", "90", "365"]
+
+
 def test_a_withheld_pair_leaves_a_window_the_histograms_keep_in_order_alone(
     tmp_path: Path,
 ) -> None:
@@ -263,6 +275,7 @@ def test_a_published_window_pair_with_no_days_does_not_take_the_lifetime_from_a_
     _, life = _written(tmp_path, _release(ENROLLED_TO_END, no_days))
     assert life is not None and (life["start"], life["end"]) == ("valid_from", "valid_to")
     assert "duration" in life
+    assert "publishes no days" in " ".join(_unused(tmp_path, "/tables/tier_version/datePairs/1"))
     assert _ended_before_started(_versions(tmp_path)) == 0
 
 

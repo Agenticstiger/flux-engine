@@ -85,6 +85,10 @@ _GROUPED_UNREAD = (
 
 _HISTORY_SOURCE = "the release's history entry"
 _WINDOW_SOURCE = "the contract's validity window"
+_WINDOW_OWN_NO_DAYS = (
+    "the pair is the contract's validity window, and it publishes no days to draw an end from: "
+    "the window's lifetime takes its gaps from the two published histograms instead"
+)
 _NO_DURATION = "no usable duration: an end drawn apart from its start would break the order"
 #: Why a snapshot's date pair is no lifetime when the history it is projected from sets both dates.
 _BOTH_CARRIED = "the history sets both dates"
@@ -898,19 +902,26 @@ class _Declarer:
         Returns the candidate of the window's own pair, which is then the one declared. Where the
         window's lifetime is written here (``window_pairs``), every candidate is rejected and
         ``None`` is returned; where no lifetime can be written for the window, the best pair
-        stands and ``None`` is returned.
+        stands and ``None`` is returned. A window whose two histograms already keep its order is left
+        alone when the best pair ends its start or a column outside it; a pair that ends its end
+        lays that date out, so the histograms keep nothing there.
         """
         window = held.window
         if window is None or (best[3], best[4]) == window or not ({best[3], best[4]} & set(window)):
             return None
-        if best[4] not in window and self._window_kept(held, window):
+        if best[4] != window[1] and self._window_kept(held, window):
             return None
         for candidate in candidates:
             if (candidate[3], candidate[4]) == window and self._has_duration(expose, candidate):
                 return candidate
         if self._derived_lifetime(expose, held, window, _WINDOW_SOURCE):
             self.window_pairs[expose] = window
-            self._reject_beaten(candidates, None, self._window_reason(window))
+            for candidate in candidates:
+                own = (candidate[3], candidate[4]) == window
+                self.reject(
+                    candidate[2],
+                    _WINDOW_OWN_NO_DAYS if own else self._window_reason(window),
+                )
         return None
 
     def _has_duration(self, expose: str, candidate: _Candidate) -> bool:
