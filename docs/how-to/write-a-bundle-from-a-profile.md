@@ -210,18 +210,12 @@ Simulation pins its digest instead. Before it writes a file, the command checks 
 bundle as `fluxsim validate` does, and as `plan` does from the documents alone before a
 row is drawn, and writes nothing either refuses.
 
-The `profile:` line is the command's ledger ([ADR 0014](../adr/0014-init-reads-every-statistic-a-profile-publishes.md)):
-every statistic and metric of the profile, by its JSON Pointer, is used (a number of the
-bundle rests on it, a rule read it, a property is scored against it, or the bundle was
-checked against it), unused, or withheld (the profile published no value). Each unused
+The `profile:` line is the command's ledger ([ADR 0014](../adr/0014-init-reads-every-statistic-a-profile-publishes.md)). It lists every statistic and metric of the profile, by its JSON Pointer, in one of three states. A statistic is used when a number of the bundle rests on it, a rule read it, a property is scored against it, or the bundle was checked against it. It is unused when none of these holds. It is withheld when the profile published no value. Each unused
 one is named with the reason no rule reads it, and the Simulation lists them under
 `unused` beside the register: `plan`, `verify` and `ship` count them, and `ship` names
 each one under "What Was Not Proven" in `EVIDENCE.md`. In `--json`, `ledger.statistics` names
 each statistic on its own, with its state, and `ledger.unused` is the Simulation's list: what an
-owner can leave out of the profile. Where the profile reader needs one of an entry's statistics
-(a calendar entry holds at least one of its three histograms), `ledger.unused` names the whole
-entry when none of it is read, so a profile with exactly those pointers dropped is one the reader
-accepts. Drop that list, not every statistic marked unused.
+owner can leave out of the profile. The profile reader sometimes needs one of an entry's statistics: a calendar entry holds at least one of its three histograms. Then `ledger.unused` names the whole entry when none of it is read, so a profile with exactly those pointers dropped is one the reader accepts. Drop that list, not every statistic marked unused.
 
 A profile cut by dropping the `ledger.unused` list can leave an entry in part: a date pair
 with its `order` and no statistic, an exposure with one of its counts, or a history with some
@@ -290,10 +284,7 @@ These rules shape the assumptions:
   the foreign keys that reference it are declared over, or moved inside the key it
   references when that key's span is published, down a chain of keys. A foreign key the
   profile says nothing of is drawn over the span of the key it references.
-- Grouped statistics are read as two-way tables. Each pair of columns is scored by its
-  mutual information, and the tree of the most informative links that makes no cycle
-  decides which column is drawn given which: at most one `given` per column, a number
-  column only at the end of a link, and never given a column that holds nulls. A grouping
+- Grouped statistics are read as two-way tables. Each pair of columns is scored by its mutual information. The tree of the most informative links that makes no cycle decides which column is drawn given which. A column has at most one `given`, a number column only at the end of a link, and never given a column that holds nulls. A grouping
   the tree leaves out is unused, and the output says why. An INT column the profile groups
   another column by, and lists at most 64 whole numbers of, is a categorical over those
   levels for this purpose. A statistic grouped by a number column of the profile (format
@@ -306,11 +297,8 @@ These rules shape the assumptions:
   unused with that reason. A statistic of a column grouped by a column of a linked row
   (`groupByLink`) is read as a two-way table, and the column is drawn
   `given: <relationship>.<column>` with the grouped counts as its weights, and scored by a
-  property grouped by the same link. It is unused, with the reason the generator would refuse it
-  for, when the contract declares no one relationship over the grouping's columns, the foreign
-  key may be NULL (a NULL has no level to draw given), a rule sets the column, the column is
-  already drawn given another, the parent column is not text or not a categorical drawn from its
-  own levels, or the rows would read each other in a cycle. See
+  property grouped by the same link. It is unused, with the reason the generator would refuse it for, in these cases:
+the contract declares no one relationship over the grouping's columns; the foreign key may be NULL (a NULL has no level to draw given); a rule sets the column; the column is already drawn given another; the parent column is not text or not a categorical drawn from its own levels; or the rows would read each other in a cycle. See
   [Publish a catalogue whole](./publish-a-catalogue.md).
 - A trait that is stable per entity, such as a customer's segment on each of that customer's
   rows, is a contract `dependency` from the entity's key. `fluxsim init` never writes the
@@ -358,10 +346,7 @@ These rules shape the assumptions:
 - Every distance tolerance `init` writes declares `sampling: true`, so the check widens its
   margin by the sampling error of the run's rows and a small table is not judged by a margin only
   a large one can meet. A table is small when that widening at its rows, for any property `init`
-  writes for it, exceeds the default tolerance. Every column of a small table that
-  `allocation: exact` can read (a column drawn from `levels`, from `bins` with `binWeights`, or
-  given a column that is itself exact) then declares it, so each class holds exactly its share of
-  the rows; a key, a foreign key and a column a rule sets are left as they are. A bundle that
+  writes for it, exceeds the default tolerance. Every column of a small table that `allocation: exact` can read then declares it, so each class holds exactly its share of the rows. Such a column is drawn from `levels`, from `bins` with `binWeights`, or given a column that is itself exact. A key, a foreign key and a column a rule sets are left as they are. A bundle that
   declares either key plans only under kernel 0.2.0, the default, and kernel 0.1.0 refuses it
   with [FLX-3105](../reference/errors/FLX-3105.md).
 - A column of a key over several columns spans its rows the same way, and a text one
@@ -439,35 +424,22 @@ loader and `inputDigest` do not read it (see [PARAMETER-REGISTER-SPEC.md](../spe
 
 A profile of format 1-2-0 can carry statistics that the profiler released under noise
 ([PROFILE-SPEC.md](../spec/PROFILE-SPEC.md) section 3a). `fluxsim init` reads one of them as a
-point estimate with a variance. The noisy counts can be negative or fractional, so they are
-made a distribution by one rule, in exact arithmetic: the counts are projected onto the
-non-negative vectors that add up to their noisy total (a vector that is non-negative already
-is only normalised), the shares are those counts over the total, and the draw takes them as
-whole counts that add up to the estimated number of records. A table with no `rowCount` takes
+point estimate with a variance. The noisy counts can be negative or fractional, so one rule, in exact arithmetic, makes them a distribution. The counts are projected onto the non-negative vectors that add up to their noisy total. A vector that is non-negative already is only normalised. The shares are those counts over the total. The draw takes them as whole counts that add up to the estimated number of records. A table with no `rowCount` takes
 its row count from the larger estimate of the records its noisy statistics give. The output
 lists each noisy statistic with its mechanism, scale and the variance of each cell, and the
 ledger in `--json` carries the same, so you can see how much noise stands behind a number. A
 register citation of a noisy cell points at the profile's own `noisyCounts`.
 
-A date or timestamp column's noisy histogram is read only where its counts stand clear of the
-noise: above `sqrt(2v(5 + ceil(ln m)))` for Gaussian noise of variance `v` over `m` bins, or
-`b(5 + ceil(ln m))` for Laplace noise of scale `b`
-([ADR 0019](../adr/0019-one-privacy-budget-per-profile-release.md), the second amendment of
-2026-11-25). A bin below that floor carries no weight, so noise in a grid's empty years draws no
+A date or timestamp column's noisy histogram is read only where its counts stand clear of the noise. The floor is `sqrt(2v(5 + ceil(ln m)))` for Gaussian noise of variance `v` over `m` bins, and `b(5 + ceil(ln m))` for Laplace noise of scale `b` ([ADR 0019](../adr/0019-one-privacy-budget-per-profile-release.md), the second amendment of 2026-11-25). A count must be above it. A bin below that floor carries no weight, so noise in a grid's empty years draws no
 dates there, and the run's window is the hull of the bins above it. When no bin is above it, which
 is common for a release of a few hundred records, the column is drawn evenly within the run's
 window, and the output says so. The column still declares the histogram's whole grid as its range,
 and its histogram property still compares the run with the release.
 
-A number column's noisy histogram is read the same way (the amendment of 2026-11-26): a bin below
-the floor carries no weight, a contract `derive` over the column is bounded by the hull of the bins above it, and
-a column with no bin above it is drawn evenly over its declared range, with its note. A column the
+A number column's noisy histogram is read the same way (the amendment of 2026-11-26). A bin below the floor carries no weight. A contract `derive` over the column is bounded by the hull of the bins above it. A column with no bin above it is drawn evenly over its declared range, with its note. A column the
 contract makes a key keeps its bins as they stand, since its rows hold distinct values.
 
-A table whose profile carries noisy cliques (section 5a of the spec) is drawn through a
-junction tree: the cliques are arranged into a tree rooted at the one with the most columns
-(the first by name among equals), and each column is drawn given the columns its clique shares
-with the one before it, so the chain of conditionals reproduces the cliques' joint. Each row of
+A table whose profile carries noisy cliques (section 5a of the spec) is drawn through a junction tree. The cliques are arranged into a tree rooted at the one with the most columns (the first by name among equals). Each column is drawn given the columns its clique shares with the one before it, so the chain of conditionals reproduces the cliques' joint. Each row of
 weights is the point estimate of the clique's noisy counts for that combination of levels.
 Cliques that cannot form a tree (the running intersection property fails) are refused, naming
 them, and the levels a clique lists for a column must be the ones the contract declares. The
@@ -518,15 +490,11 @@ The file is one YAML document: a mapping with these keys, and no others.
 | `asOf` | A list of as-of reads. |
 | `timeBounds` | `start` and `end` of the run's time window. |
 
-`init` writes the bundle to fit the file. It writes no counts entry over a projected emit or
-over the history's parent relationship, no exact allotment on the columns of the history or of a
-projected emit, and no weight for the ended status on a column the history carries its end in. It
+`init` writes the bundle to fit the file. It writes no counts entry over a projected emit or over the history's parent relationship. It writes no exact allotment on the columns of the history or of a projected emit. It writes no weight for the ended status on a column the history carries its end in. It
 lists the profile's statistics for those as unused, with the reason. The numbers of the history
 are assumed, for the reason "declared by --history", and cite nothing of the profile's history.
 
-A file that cannot be read, holds more than one document or another key, names a history entry
-wrongly, or spells an open end in the year 9999 in `until`, a `start` bin or the `timeBounds`
-end is refused, and the message names the file and the position. When `plan` still refuses the
+`init` refuses a file that cannot be read, holds more than one document, or holds a key not in the table. It also refuses an open end spelled as the year 9999 in `until`, a `start` bin or the `timeBounds` end. The message names the file and the position. When `plan` still refuses the
 bundle, `init` says so, names the file and writes nothing. `init --json` carries the file's name
 as `historyFile`.
 
@@ -658,16 +626,7 @@ as the profile's, and `plan` refuses that ([FLX-3113](../reference/errors/FLX-31
 A patch may touch only numbers a profile publishes: a table's `rowCount`, a column's `metrics`
 and `statistics`, a table's `columnPairs` and `periods`, and the top-level `relationships`
 and `invariants`. A patch replaces a list whole, so it restates a column's `statistics` to
-change one of them, and a statistic it restates carries no `noise`. Anything else is
-refused ([FLX-3105](../reference/errors/FLX-3105.md)), and so are a table or a column the
-profile does not hold, a patch that makes a document the profile reader refuses, and a new
-`rowCount` for a table that publishes a `history`: its rows are the versions of the history's
-entities, which no patch can change, so more rows would only lengthen each chain. A patch
-that restates a column's `mean/1` beyond what the column's published minimum, maximum,
-quantiles and histogram allow, such as a mean of 69 for a column whose quarters sit at
-or below 20, 35, 50 and 100, is refused by `init` and `plan`
-([FLX-3402](../reference/errors/FLX-3402.md)), and the message gives the bound it breaks,
-because no column the profile describes has that mean. Run each
+change one of them, and a statistic it restates carries no `noise`. Anything else is refused ([FLX-3105](../reference/errors/FLX-3105.md)). So are a table or a column the profile does not hold, and a patch that makes a document the profile reader refuses. So is a new `rowCount` for a table that publishes a `history`: its rows are the versions of the history's entities, which no patch can change, so more rows would only lengthen each chain. `init` and `plan` refuse a patch that restates a column's `mean/1` beyond what the column's published minimum, maximum, quantiles and histogram allow ([FLX-3402](../reference/errors/FLX-3402.md)). An example is a mean of 69 for a column whose quarters sit at or below 20, 35, 50 and 100. No column the profile describes has that mean, and the message gives the bound it breaks. Run each
 bundle with the profile as published: `plan` and `verify` read the overlay from the bundle and
 the plan, `verify` scores against the overlaid profile, and the scorecard names the overlay.
 
@@ -694,10 +653,7 @@ Nothing is written when:
 - the bundle would not validate or plan, for example because the contract does not: the
   message gives the engine's own reason.
 
-An expose is left out of the bundle, and named in the output with the reason, when the
-profile does not describe it, when a column of it is JSON or bytes (the generator has no
-draw for them), when a DECIMAL column of it has more than 38 decimal places, or when no
-column of it has a range or levels a property could read. The exposes of one contract
+`init` names an expose it leaves out of the bundle, with the reason. It leaves one out when the profile does not describe it, when a column of it is JSON or bytes (the generator has no draw for them), when a DECIMAL column of it has more than 38 decimal places, or when no column of it has a range or levels a property could read. The exposes of one contract
 are generated together, so a foreign key into an expose left out is refused, as `plan`
 refuses it ([FLX-3403](../reference/errors/FLX-3403.md)), and nothing is written. If the
 profile has no table for the expose it references, profile that table too. If the command
