@@ -100,6 +100,15 @@ def _release(*pairs: Dict[str, Any], history: bool = False) -> Dict[str, Any]:
     return profile
 
 
+def _ends_by_the_last_start(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """*profile* whose end publishes nothing after the last start: the gaps can draw past it."""
+    ends = profile["tables"]["tier_version"]["columns"]["valid_to"]
+    edges = [_ms(2025, 2, 1), _ms(2025, 5, 1), _ms(2025, 8, 1), _ms(2025, 9, 1)]
+    ends["statistics"] = [_bins(edges, [300, 300, 400], 1000)]
+    ends["metrics"] = {**ends["metrics"], "max": {**ends["metrics"]["max"], "value": edges[-1]}}
+    return profile
+
+
 def _written(tmp_path: Path, profile: Dict[str, Any], contract: str = NO_OPEN_END) -> Any:
     result = _init(tmp_path, profile, contract)
     life = [item for item in _lifetimes(tmp_path) if item["emit"] == "tier_version"]
@@ -282,10 +291,20 @@ def test_a_release_that_publishes_no_pair_for_the_window_writes_none(tmp_path: P
 # ---------------------------------------------------------------------------
 
 
-def test_a_nullable_end_stays_open_past_the_run_and_never_ends_before_it_starts(
+def test_a_nullable_end_that_the_release_publishes_past_the_run_keeps_the_date(
     tmp_path: Path,
 ) -> None:
     _, life = _written(tmp_path, _release(ENROLLED_TO_END), NULLABLE_END)
+    assert life is not None and (life["start"], life["end"]) == ("valid_from", "valid_to")
+    assert life.get("endPastWindow") == "kept"
+    assert _ended_before_started(_versions(tmp_path)) == 0
+
+
+def test_a_nullable_end_the_release_publishes_nothing_past_the_run_of_stays_open(
+    tmp_path: Path,
+) -> None:
+    profile = _ends_by_the_last_start(_release(ENROLLED_TO_END))
+    _, life = _written(tmp_path, profile, NULLABLE_END)
     assert life is not None and (life["start"], life["end"]) == ("valid_from", "valid_to")
     assert "endPastWindow" not in life
     assert _ended_before_started(_versions(tmp_path)) == 0
@@ -308,15 +327,6 @@ def test_a_window_with_a_declared_open_end_is_written_as_a_history_and_no_lifeti
 # ---------------------------------------------------------------------------
 # An end the contract's range stops short of the start's reach
 # ---------------------------------------------------------------------------
-
-
-def _ends_by_the_last_start(profile: Dict[str, Any]) -> Dict[str, Any]:
-    """*profile* whose end publishes nothing after the last start: the gaps can draw past it."""
-    ends = profile["tables"]["tier_version"]["columns"]["valid_to"]
-    edges = [_ms(2025, 2, 1), _ms(2025, 5, 1), _ms(2025, 8, 1), _ms(2025, 9, 1)]
-    ends["statistics"] = [_bins(edges, [300, 300, 400], 1000)]
-    ends["metrics"] = {**ends["metrics"], "max": {**ends["metrics"]["max"], "value": edges[-1]}}
-    return profile
 
 
 def test_a_nullable_end_is_laid_out_though_the_gaps_can_draw_past_its_range(
