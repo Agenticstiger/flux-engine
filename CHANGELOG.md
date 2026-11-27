@@ -38,8 +38,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   table. Over the entities, a bin that would overflow now takes its width and the entities left over are shared
   again over the other bins by their weights, until none overflows; a key whose bins already fit keeps its
   bytes, and a key that is not a history's natural entity keeps its refusal. A key whose bins with a weight above
-  zero hold fewer values than the entities is still refused, with a sentence that says so. ADR 0017 amendment
-  of 2026-11-27.
+  zero hold fewer values than the entities is still refused, with a sentence that says so. `fluxsim init` does
+  not write the key's histogram property when a bin is filled, since the generated rows cannot meet the published
+  share of a filled bin, and a note on the expose says why. ADR 0017 amendment of 2026-11-27.
 
 ## 0.13.1 - 2026-11-28
 

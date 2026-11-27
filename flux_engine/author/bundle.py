@@ -178,6 +178,7 @@ from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
 from flux_engine.expr2.errors import FLX_6204
+from flux_engine.generator.relations import filled_key_bins
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.governance.privacy import effective_floors, sensitivities_of
 from flux_engine.seam.asof import ASOF_KEY
@@ -3185,6 +3186,9 @@ def _histories(
             result.entries.append(written.entry)
             _ended_status(expose, written.entry)
             restate_assumptions(expose)
+            kept_out = _drop_filled_key_histogram(expose, held, written.entry)
+            if kept_out is not None:
+                result.notes.append((f"{expose.expose_id}: history key", kept_out))
             reads.release(expose.expose_id, written)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)
             result.derived[expose.expose_id] = dict(written.derived)
@@ -3196,6 +3200,72 @@ def _histories(
             [(f"{expose.expose_id}: {subject}", text) for subject, text in written.notes]
         )
     return result
+
+
+#: Why the histogram of a history's key is not scored, when the layout fills its bins to their widths.
+_FILLED_KEY = (
+    "The profile's histogram of the key counts versions, and a history lays its key out over its "
+    "entities: {bins} every value {they} and still {fall} short of {their} weight, since an "
+    "entity's versions do not follow its key, so the histogram is not scored."
+)
+
+
+def _filled_sentence(filled: Sequence[int]) -> str:
+    """:data:`_FILLED_KEY`, naming the bins the layout fills."""
+    several = len(filled) > 1
+    named = " and ".join(str(index) for index in filled) if several else str(filled[0])
+    return _FILLED_KEY.format(
+        bins=(f"bins {named} take" if several else f"bin {named} takes"),
+        they="they hold" if several else "it holds",
+        fall="fall" if several else "falls",
+        their="their" if several else "its",
+    )
+
+
+def _drop_filled_key_histogram(
+    expose: AuthoredExpose, held: Optional[ExposeKeys], entry: Mapping[str, Any]
+) -> Optional[str]:
+    """Leave out the histogram property of a history's natural key whose bins the layout fills.
+
+    The layout shares the entities over the key's bins by their weights and gives a bin that
+    would overflow its width (ADR 0017, amendment of 2026-11-27), so the key holds a filled bin's
+    values on about its width over the entities of its rows, below the share the profile
+    publishes for it. A property that scores the histogram would fail by construction. The key
+    keeps its bins and binWeights, which the layout reads, so the statistic stays used; the
+    expose says why the property is not written, in the sentence returned. An expose left with no property takes the first
+    column's assumed check, as :func:`_finish_expose` does.
+    """
+    natural = tuple(item.column for item in held.entities if item.kind == "natural") if held else ()
+    entities = entry.get("entities")
+    if len(natural) != 1 or not isinstance(entities, int) or natural[0] not in expose.contexts:
+        return None
+    plan = next((item for item in expose.columns if item.name == natural[0]), None)
+    if plan is None:
+        return None
+    column = expose.contexts[natural[0]].column
+    filled = filled_key_bins(column, {"columns": {plan.name: plan.declaration}}, entities)
+    own = [item for item in plan.properties if _histogram_of(item, plan.name)]
+    if not filled or not own:
+        return None
+    plan.properties = [item for item in plan.properties if item not in own]
+    expose.properties = [item for item in expose.properties if item not in own]
+    if not expose.properties:
+        for other in expose.columns:
+            before = len(other.assumptions)
+            fallback = assumed_check(other, expose.kinds[other.name], scorable_only=True)
+            if fallback is not None:
+                expose.properties = [fallback]
+                expose.assumptions.extend((other.name, text) for text in other.assumptions[before:])
+                break
+    return _filled_sentence(filled)
+
+
+def _histogram_of(prop: PropertyPlan, column: str) -> bool:
+    """Whether *prop* is the histogram property of *column*."""
+    return (
+        prop.document.get("property") == "marginalHistogram"
+        and prop.document.get("column") == column
+    )
 
 
 def _refuse_an_unset_open_end(expose: AuthoredExpose, written: Any) -> None:

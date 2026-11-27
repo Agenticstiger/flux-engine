@@ -160,7 +160,7 @@ from flux_engine.generator.rules import (
     RulePlan,
     parent_condition,
 )
-from flux_engine.generator.statistics import DATE_EPOCH_ORDINAL
+from flux_engine.generator.statistics import DATE_EPOCH_ORDINAL, statistics_for
 from flux_engine.seam.associations import (
     ASSOCIATIONS_KEY,
     AssociationEntry,
@@ -189,6 +189,7 @@ __all__ = [
     "RelationReader",
     "Relations",
     "check_links_resolved",
+    "filled_key_bins",
     "layout_key",
     "related_columns",
     "relate_plans",
@@ -5460,6 +5461,32 @@ def _key_grid(
     )
 
 
+def _overflows(spans: Sequence[Tuple[int, int]], counts: Sequence[int]) -> bool:
+    """Whether some bin takes more entities than it has values."""
+    return any(count > width for (_first, width), count in zip(spans, counts, strict=True))
+
+
+def filled_key_bins(
+    column: CompiledColumn, fidelity: Mapping[str, Any], entities: int
+) -> List[int]:
+    """The bins of a history's natural key that :func:`_fill_to_widths` fills, laid out over *entities*.
+
+    A filled bin takes every value it holds and still falls short of the entities its weight
+    says (ADR 0017, amendment of 2026-11-27). Empty when the plain allotment fits, and for a
+    declaration the layout would refuse. Read by the layout's own rule, so the two cannot disagree.
+    """
+    try:
+        statistics = statistics_for(column, fidelity)
+        if statistics.bins is None or statistics.bin_weights is None:
+            return []
+        spans, counts = _key_spans(column, statistics, entities, _exponent(column), "", "entities")
+        if not _overflows(spans, counts):
+            return []
+        return _fill(spans, counts, statistics.bin_weights, entities, "")[1]
+    except FluxError:
+        return []
+
+
 def _fill_to_widths(
     spans: Sequence[Tuple[int, int]],
     counts: List[int],
@@ -5475,8 +5502,19 @@ def _fill_to_widths(
     weights, until no bin takes more than it holds. A bin of weight zero takes no entity. What
     already fits is returned as it is.
     """
-    if all(count <= width for (_first, width), count in zip(spans, counts, strict=True)):
+    if not _overflows(spans, counts):
         return counts
+    return _fill(spans, counts, weights, entities, where)[0]
+
+
+def _fill(
+    spans: Sequence[Tuple[int, int]],
+    counts: List[int],
+    weights: Sequence[Decimal],
+    entities: int,
+    where: str,
+) -> Tuple[List[int], List[int]]:
+    """The filled allotment of an overflowing key, and the bins that were filled to their widths."""
     held = sum(width for (_first, width), weight in zip(spans, weights, strict=True) if weight > 0)
     if held < entities:
         raise _refuse(
@@ -5497,7 +5535,7 @@ def _fill_to_widths(
         if not over:
             result = dict(capped)
             result.update(zip(open_, shares, strict=True))
-            return [result[index] for index in range(len(widths))]
+            return [result[index] for index in range(len(widths))], sorted(capped)
         capped.update(over)
 
 
