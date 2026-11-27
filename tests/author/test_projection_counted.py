@@ -21,7 +21,7 @@ import pytest
 from flux_engine.seam.projections import SNAPSHOTS_KEY
 from flux_engine.stages.validate import validate
 
-from ._written import applied_and_verified, bundle_digests, plan_written
+from ._written import applied_and_verified, bundle_digests, generated, plan_written
 from .test_history_init import _bins, _entries, _init, _metrics, _namespace, _states
 from .test_history_parent import _relationship
 from .test_projection_init import CONTRACT, _profile_with
@@ -120,15 +120,18 @@ def test_the_ledger_says_which_statistic_moved_where(tmp_path: Path) -> None:
     assert "plan_current: counts" in result.stdout
 
 
-def test_the_history_keeps_its_own_children_and_the_statistic_is_unused(tmp_path: Path) -> None:
+def test_the_history_keeps_its_own_children_and_the_statistic_is_read_for_the_key(
+    tmp_path: Path,
+) -> None:
     result = _written(tmp_path, _profile(history_children=True))
     parent = _entries(tmp_path)[0]["parent"]
     assert parent["children"]["bins"] == ["0", "1", "2", "3", "9"]
     assert _namespace(tmp_path)[SNAPSHOTS_KEY]
     assert "counts" not in _namespace(tmp_path)
     state = _states(result)["/relationships/1/statistics/0"]
-    assert state["state"] == "unused"
+    assert state["state"] == "used"
     assert "own children per parent are written and are kept" in state["note"]
+    assert "follow the history" in state["note"]
 
 
 #: ``COUNTED`` with the history's relationship to the account removed: the history writes no
@@ -275,7 +278,7 @@ def test_an_events_or_periodic_table_gives_no_count_to_the_history_parent(
     parent = _entries(tmp_path)[0].get("parent")
     assert parent is None or "children" not in parent
     state = _states(result)["/relationships/0/statistics/0"]
-    assert state["state"] == "unused"
+    assert state["state"] == "used"
     assert "the emit is projected from a history" in state["note"]
     assert "count events or periods, not entities" in state["note"]
 
@@ -316,5 +319,115 @@ def test_the_snapshot_takes_the_count_whichever_projection_comes_first(tmp_path:
         )
         index = profile["relationships"].index(snapshot)
         for position in (0, 1):
-            wanted = "used" if position == index else "unused"
-            assert states[f"/relationships/{position}/statistics/0"]["state"] == wanted
+            assert states[f"/relationships/{position}/statistics/0"]["state"] == "used"
+        # Only the snapshot's count is given to the history's parent.
+        assert "takes it as its children" in states[f"/relationships/{index}/statistics/0"]["note"]
+        other = 1 - index
+        assert (
+            "takes it as its children" not in states[f"/relationships/{other}/statistics/0"]["note"]
+        )
+
+
+_EVENT_ID = "        - { name: event_id, type: INT, required: true }"
+_PERIOD_ID = "        - { name: period_id, type: INT, required: true }"
+
+
+@pytest.mark.parametrize(
+    ("contract", "profile"),
+    [
+        (COUNTED, _profile(history_children=True)),
+        (_counted_child("plan_change", _EVENT_ID), _counted_profile("plan_change")),
+        (_counted_child("plan_month", _PERIOD_ID), _counted_profile("plan_month")),
+    ],
+    ids=["snapshot-with-its-own-history-count", "events", "periods"],
+)
+def test_a_count_a_projected_emit_refuses_and_no_history_parent_takes_is_read_by_its_key(
+    tmp_path: Path, contract: str, profile: Dict[str, Any]
+) -> None:
+    from tests.cli.test_init_ledger_entries import _drop
+
+    # The profile counts the emit's rows per account. The count is refused and no layout places
+    # it, but its presence is what has the emit's key follow the history instead of being drawn
+    # over the span of the key it references: dropping it alone gives another bundle.
+    whole = tmp_path / "whole"
+    whole.mkdir()
+    result = _init(whole, profile, contract)
+    pointer = next(
+        f"/relationships/{index}/statistics/0"
+        for index, item in enumerate(profile["relationships"])
+        if item["child"]["table"] != "plan_version"
+    )
+    assert pointer not in [item["statistic"]["pointer"] for item in _namespace(whole)["unused"]]
+    assert _states(result)[pointer]["state"] == "used"
+    alone = tmp_path / "alone"
+    alone.mkdir()
+    # The reader takes a profile without the statistic, and the bundle it gives is another one.
+    _init(alone, _drop(profile, [pointer]), contract)
+    assert generated(_namespace(alone)) != generated(_namespace(whole))
+
+
+@pytest.mark.parametrize(
+    ("contract", "profile"),
+    [
+        (COUNTED, _profile(history_children=True)),
+        (_counted_child("plan_change", _EVENT_ID), _counted_profile("plan_change")),
+        (_counted_child("plan_month", _PERIOD_ID), _counted_profile("plan_month")),
+    ],
+    ids=["snapshot-with-its-own-history-count", "events", "periods"],
+)
+def test_a_release_cut_by_the_unused_list_gives_the_bundle_of_the_whole_profile(
+    tmp_path: Path, contract: str, profile: Dict[str, Any]
+) -> None:
+    from tests.cli.test_init_ledger_entries import _drop
+
+    whole = tmp_path / "whole"
+    whole.mkdir()
+    _init(whole, profile, contract)
+    listed = [item["statistic"]["pointer"] for item in _namespace(whole)["unused"]]
+    cut = tmp_path / "cut"
+    cut.mkdir()
+    _init(cut, _drop(profile, listed), contract)
+    assert generated(_namespace(cut)) == generated(_namespace(whole))
+
+
+@pytest.mark.parametrize(
+    ("contract", "profile", "table"),
+    [
+        (COUNTED, _profile(history_children=True), "plan_current"),
+        (_counted_child("plan_change", _EVENT_ID), _counted_profile("plan_change"), "plan_change"),
+        (_counted_child("plan_month", _PERIOD_ID), _counted_profile("plan_month"), "plan_month"),
+    ],
+    ids=["snapshot-with-its-own-history-count", "events", "periods"],
+)
+def test_a_mean_beside_the_refused_histogram_stays_unused_and_the_cut_is_the_same(
+    tmp_path: Path, contract: str, profile: Dict[str, Any], table: str
+) -> None:
+    import copy
+
+    from tests.author.test_children import _mean
+    from tests.cli.test_init_ledger_entries import _drop
+
+    # Only the histogram has the emit's key follow the history. A mean beside it decides nothing:
+    # it is listed as unused, and the bundle without it is the one of the whole profile.
+    profile = copy.deepcopy(profile)
+    index, relationship = next(
+        (position, item)
+        for position, item in enumerate(profile["relationships"])
+        if item["child"]["table"] == table
+    )
+    relationship["statistics"].append(_mean(profile["tables"][table]["rowCount"], 400))
+    histogram = f"/relationships/{index}/statistics/0"
+    mean = f"/relationships/{index}/statistics/1"
+    whole = tmp_path / "whole"
+    whole.mkdir()
+    result = _init(whole, profile, contract)
+    listed = [item["statistic"]["pointer"] for item in _namespace(whole)["unused"]]
+    assert _states(result)[histogram]["state"] == "used"
+    assert histogram not in listed
+    assert _states(result)[mean]["state"] == "unused"
+    assert mean in listed
+    for name, dropped in (("alone", [mean]), ("cut", listed)):
+        other = tmp_path / name
+        other.mkdir()
+        _init(other, _drop(profile, dropped), contract)
+        assert generated(_namespace(other)) == generated(_namespace(whole))

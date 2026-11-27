@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from ._written import emitted_rows
+from ._written import emitted_rows, generated
 from .test_history_init import _bins, _levels, _ms, _states
 from .test_init_history_without_lengths import (
     HISTORY,
@@ -383,15 +383,6 @@ def test_the_window_lifetime_declares_the_range_the_contract_gives_its_end(tmp_p
 # ---------------------------------------------------------------------------
 
 
-def _generated(tmp_path: Path) -> Dict[str, Any]:
-    """What the bundle in *tmp_path* generates from: its namespace less the register, the profile
-    digest and the unused list, which name statistics by position."""
-    found = dict(_block(tmp_path))
-    for key in ("parameters", "unused", "profile"):
-        found.pop(key, None)
-    return found
-
-
 @pytest.mark.parametrize("shape", ["tie", "pair"])
 def test_a_pair_a_decision_reads_is_used_and_a_release_without_the_unused_gives_the_bundle(
     tmp_path: Path, shape: str
@@ -414,7 +405,7 @@ def test_a_pair_a_decision_reads_is_used_and_a_release_without_the_unused_gives_
     cut = tmp_path / "cut"
     cut.mkdir()
     _init(cut, _drop(profile, listed), contract)
-    assert _generated(cut) == _generated(whole)
+    assert generated(_block(cut)) == generated(_block(whole))
 
 
 HISTORY_MEMBERS = ["versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion"]
@@ -447,7 +438,7 @@ def test_a_history_entry_whose_start_and_end_lay_out_the_lifetime_stays_in_a_cut
     # The reader takes the cut release whether or not it is told to read an entry cut in part.
     load_profile_text(json.dumps(dropped))
     _init(cut, dropped, NO_OPEN_END)
-    assert _generated(cut) == _generated(whole)
+    assert generated(_block(cut)) == generated(_block(whole))
     # The entry that names the start and the end is not listed whole, and its statistics stay unused.
     assert "/tables/tier_version/history" not in listed
     assert _states(result)[HISTORY + "/firstStart"]["state"] == "unused"

@@ -602,6 +602,16 @@ class Counted:
     #: Why the relationship is not laid out by counts although its histogram was read, else
     #: ``None``. The other members are then empty.
     why_not: Optional[str] = None
+    #: The pointer of the histogram the entry's presence rests on, empty when none was read.
+    pointer: Tuple[str, ...] = ()
+
+
+def children_histogram_pointer(
+    relationship: Mapping[str, Any], tokens: Tuple[str, ...]
+) -> Optional[Tuple[str, ...]]:
+    """The pointer of the histogram of children per parent a relationship's counts entry is read from."""
+    histogram, _mean, _others = _read_statistics(relationship, tokens)
+    return None if histogram is None else tokens + ("statistics", str(histogram[0]))
 
 
 def _whole_edges(bins: Any) -> Optional[List[int]]:
@@ -796,7 +806,9 @@ def _count_open_classes(
                 "upper edge",
             )
         )
-    return Counted(members, tuple(used), tuple(others), _withheld(classes, withheld))
+    return Counted(
+        members, tuple(used), tuple(others), _withheld(classes, withheld), pointer=pointer
+    )
 
 
 def _withheld(classes: Sequence[CountClass], withheld: Sequence[int]) -> Optional[str]:
@@ -857,7 +869,7 @@ def _count_one_to_one(
             )
         )
     kept = [position for position in withheld if position < 2]
-    return Counted(members, tuple(used), tuple(unused), _withheld(classes, kept))
+    return Counted(members, tuple(used), tuple(unused), _withheld(classes, kept), pointer=pointer)
 
 
 def declare_counted(

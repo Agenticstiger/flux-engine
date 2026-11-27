@@ -49,9 +49,9 @@ def _stages(
     window = ("2024-01-01", "2024-12-31")
     monkeypatch.setattr(bundle, "_plan_bundle", plan_bundle)
     monkeypatch.setattr(bundle, "_bundle_window", lambda planned, inputs: (window, None, None))
-    monkeypatch.setattr(bundle, "_widen_ranges", lambda authored, widened: None)
+    monkeypatch.setattr(bundle, "_widen_ranges", lambda authored, widened, asked: None)
     monkeypatch.setattr(bundle, "_histories_and_projections", histories)
-    return SimpleNamespace(history=None), SimpleNamespace(widened=None), (None, None)
+    return SimpleNamespace(history=None), SimpleNamespace(widened=None, asked_by=None), (None, None)
 
 
 def test_a_table_left_out_only_once_another_is_has_its_history_left_out_too(

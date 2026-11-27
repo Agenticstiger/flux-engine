@@ -327,6 +327,9 @@ class AuthoredExpose:
     association_edges: Optional[Tuple[int, str]] = None
     #: Why an association table writes no ``associations`` entry, and keeps the rows it has.
     association_declined: Optional[str] = None
+    #: The statistics of the profile whose counts entries took a foreign key of the expose off every
+    #: draw of its own. An expose left with no column to declare rests on them.
+    counted_reads: List[Tuple[Tuple[str, ...], str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1319,6 +1322,18 @@ def _widen_once(links: Sequence[_Link]) -> bool:
     return moved
 
 
+_DECLARES_NO_COLUMN = (
+    "no column has a range or levels the fidelity block could declare, so it would "
+    "declare no column (FLX-5034); declare one by hand"
+)
+
+#: Why a count a skipped expose rests on is read.
+_COUNTED_DECIDES = (
+    "its counts entry would take the expose's foreign key off every draw of its own, which leaves "
+    "the expose no column to declare, so the expose is not written"
+)
+
+
 def _finish_expose(authored: AuthoredExpose) -> None:
     """Choose the expose's properties, and gather its assumptions, once its keys are laid out.
 
@@ -1343,10 +1358,7 @@ def _finish_expose(authored: AuthoredExpose) -> None:
                 authored.properties = [fallback]
                 break
     if not authored.properties and not _declares_a_column(authored) and not authored.association:
-        authored.skipped = (
-            "no column has a range or levels the fidelity block could declare, so it would "
-            "declare no column (FLX-5034); declare one by hand"
-        )
+        authored.skipped = _DECLARES_NO_COLUMN
     authored.assumptions.extend(
         (plan.name, sentence) for plan in authored.columns for sentence in plan.assumptions
     )
@@ -2107,6 +2119,16 @@ def _reset_unwritten_relationships(
                 ("relationships", str(index)),
                 "the bundle writes no generator emit of one of its two tables",
             )
+            _read_counted_keys(ledger, exposes, index)
+
+
+def _read_counted_keys(ledger: Ledger, exposes: Sequence[AuthoredExpose], index: int) -> None:
+    """Read the histogram of relationship *index* where an expose left with no column rests on it."""
+    for expose in exposes:
+        if expose.skipped == _DECLARES_NO_COLUMN:
+            for read, how in expose.counted_reads:
+                if read[:2] == ("relationships", str(index)):
+                    ledger.use(read, how)
 
 
 #: A pointer into the profile, with how it was used or why it was not.
@@ -2361,6 +2383,8 @@ def _lay_out_children(
         return None
     if counted is not None:
         declare_counted(child_plan, counted.assumption)
+        if counted.pointer:
+            child_expose.counted_reads.append((counted.pointer, _COUNTED_DECIDES))
         counts = {"emit": child_table, "relationship": declared.name, **counted.members}
         # Its given column is chosen by `_settle_given`, after the columns drawn given a linked
         # row are known: the generator refuses a given column that is one.
@@ -3715,6 +3739,8 @@ class _RangesWidened(Exception):
     def __init__(self, ranges: Mapping[Tuple[str, str], Tuple[int, int]]) -> None:
         super().__init__("a declared date range is widened to the parent's lifetime")
         self.ranges = dict(ranges)
+        #: What each column's range was asked for by: the statistics of the entry that dates it.
+        self.reads: Dict[Tuple[str, str], List[_Note]] = {}
 
 
 class _WithinDeclined(Exception):
@@ -3766,6 +3792,12 @@ _WIDENED_RANGE = (
     "declared range widened to the parent's lifetime so every child date can lie inside it"
 )
 
+#: Why a statistic of a date's entry is read by the range the entry had widened.
+_ASKED_RANGE = (
+    "the entry that dates the column had the plan ask for its declared range to be widened, and the "
+    "range stays widened, whatever dates the column in the end"
+)
+
 
 @dataclass(frozen=True)
 class AuthorInputs:
@@ -3791,6 +3823,8 @@ class _Fallbacks:
     declined: Dict[Tuple[str, str], str]
     undated: Dict[Tuple[str, str], str]
     unrated: Dict[Tuple[str, str], str]
+    #: The statistics of the entries that asked for each widened range, by exposeId and column.
+    asked_by: Dict[Tuple[str, str], List[_Note]] = field(default_factory=dict)
 
 
 def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
@@ -3833,7 +3867,7 @@ def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
             return _author_with_fallbacks(inputs, fallbacks)
         except _WithinDeclined as fewer_dates:
             last_was_trial = True
-            _leave_undated(fallbacks.undated, fallbacks.widened, fewer_dates.reasons)
+            _leave_undated(fallbacks, fewer_dates.reasons)
         except _ExposuresDeclined as fewer:
             last_was_trial = True
             fallbacks.declined.update(fewer.reasons)
@@ -3841,6 +3875,7 @@ def author_bundle(inputs: AuthorInputs) -> AuthoredBundle:
         except _RangesWidened as more:
             last_was_trial = False
             asked = more.ranges
+            _remember_asked(fallbacks.asked_by, more.reads)
             before = dict(fallbacks.widened)
             _widen_to_hold(fallbacks.widened, more.ranges)
             if fallbacks.widened == before:
@@ -3872,15 +3907,24 @@ def _day_text(milliseconds: int) -> str:
     return (date(1970, 1, 1) + timedelta(days=milliseconds // _DAY_MILLISECONDS)).isoformat()
 
 
-def _leave_undated(
-    undated: Dict[Tuple[str, str], str],
-    widened: Dict[Tuple[str, str], Tuple[int, int]],
-    reasons: Mapping[Tuple[str, str], str],
-) -> None:
-    """Leave each column in *reasons* without its ``within`` date, and drop any widening kept for it."""
-    undated.update(reasons)
+def _leave_undated(fallbacks: _Fallbacks, reasons: Mapping[Tuple[str, str], str]) -> None:
+    """Leave each column in *reasons* without its ``within`` date, and drop what was kept for it.
+
+    What was kept is its widened range and the statistics of the entry that asked for that range.
+    """
+    fallbacks.undated.update(reasons)
     for key in reasons:
-        widened.pop(key, None)
+        fallbacks.widened.pop(key, None)
+        fallbacks.asked_by.pop(key, None)
+
+
+def _remember_asked(
+    held: Dict[Tuple[str, str], List[_Note]], reads: Mapping[Tuple[str, str], Sequence[_Note]]
+) -> None:
+    """Keep, by column, the statistics of the entries that asked for its range to be widened."""
+    for key, notes in reads.items():
+        kept = held.setdefault(key, [])
+        kept.extend(note for note in notes if note not in kept)
 
 
 def _widen_to_hold(
@@ -4661,7 +4705,11 @@ def _author_bundle(
         drafted.simulation,
         planned.scoped,
     )
-    _refuse_unless_widened(files, planned.authored, fallbacks.widened, planned.contract)
+    try:
+        _refuse_unless_widened(files, planned.authored, fallbacks.widened, planned.contract)
+    except _RangesWidened as more:
+        more.reads = _asking_entries(dated, more.ranges)
+        raise
     _check_histories(
         files,
         planned.pinned,
@@ -4784,7 +4832,7 @@ def _laid_out(
                 f"{len(planned.held | unwritten)} tables with a history, and still left one out"
             )
         window, window_note, given_window = _bundle_window(planned, inputs)
-        _widen_ranges(planned.authored, fallbacks.widened)
+        _widen_ranges(planned.authored, fallbacks.widened, fallbacks.asked_by)
         _hold_derived_ranges(planned.authored, planned.contract)
         if given_window is not None:
             _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
@@ -5564,8 +5612,30 @@ def _range_text(kind: LogicalKind, milliseconds: int) -> str:
 _DAY_MILLISECONDS = 86_400_000
 
 
+def _asking_entries(
+    dated: Any, asked: Mapping[Tuple[str, str], Tuple[int, int]]
+) -> Dict[Tuple[str, str], List[_Note]]:
+    """The statistics each ``within`` entry that dates a column in *asked* was written from.
+
+    The plan asks for a wider range of a column because of the entry that dates it, and the range
+    stays widened in the passes that follow, whether or not they keep the entry (a lifetime of the
+    table may date the column instead). The statistics the entry rests on are what the range rests
+    on, so the pass that writes the range reads them.
+    """
+    found: Dict[Tuple[str, str], List[_Note]] = {}
+    for entry, _member, tokens, _how in dated.cited:
+        key = (str(entry.get("emit")), str(entry.get("date")))
+        if tokens is not None and key in asked:
+            held = found.setdefault(key, [])
+            if (tokens, _ASKED_RANGE) not in held:
+                held.append((tokens, _ASKED_RANGE))
+    return found
+
+
 def _widen_ranges(
-    exposes: Sequence[AuthoredExpose], widened: Mapping[Tuple[str, str], Tuple[int, int]]
+    exposes: Sequence[AuthoredExpose],
+    widened: Mapping[Tuple[str, str], Tuple[int, int]],
+    asked_by: Mapping[Tuple[str, str], Sequence[_Note]],
 ) -> None:
     """Declare each range in *widened* on its column, with the note that it was widened.
 
@@ -5591,6 +5661,7 @@ def _widen_ranges(
             _drop_widened_histograms(expose, plan, before, moved)
             _widen_edges(plan, before, declared, moved)
             _note_widened_range(plan, declared, moved)
+            plan.reads.extend(asked_by.get((expose_id, name), ()))
 
 
 def _declared_range_of(

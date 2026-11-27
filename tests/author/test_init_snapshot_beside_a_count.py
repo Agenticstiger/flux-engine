@@ -276,7 +276,9 @@ def _written(tmp_path: Path, contract: str, profile: Dict[str, Any]) -> Any:
     return _init(tmp_path, json.loads(json.dumps(profile)), contract)
 
 
-def test_the_snapshot_is_kept_and_the_count_over_its_shelf_is_unused(tmp_path: Path) -> None:
+def test_the_snapshot_is_kept_and_the_count_over_its_shelf_is_read_for_its_key(
+    tmp_path: Path,
+) -> None:
     result = _written(tmp_path, _library(), _published())
     namespace = _namespace(tmp_path)
     assert namespace[SNAPSHOTS_KEY] == [
@@ -287,7 +289,8 @@ def test_the_snapshot_is_kept_and_the_count_over_its_shelf_is_unused(tmp_path: P
     # The history is laid out under its member, which the count over the shelf does not touch.
     assert _entries(tmp_path)[0]["parent"]["relationship"] == "member"
     state = _states(result)["/relationships/1/statistics/0"]
-    assert state["state"] == "unused"
+    # No layout places the count, but its presence has the snapshot's key follow the history.
+    assert state["state"] == "used"
     assert "loan_current" in state["note"]
     assert "loan_version" in state["note"]
     assert "shelf" in state["note"]

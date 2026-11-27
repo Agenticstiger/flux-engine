@@ -373,8 +373,8 @@ had a different number of rows per parent than the history had entities. `init` 
   per parent are entities per parent: when the history has a `parent` under the same parent expose and no `children`
   of its own, the entry's `children` become the parent's, and so does its `minChildren` when the parent has none.
   An events or periodic emit counts events or periods per parent, which is another unit, so its statistic is never
-  given to the parent: it is unused, with that reason. A statistic is unused with its reason too when the history
-  has children of its own. Where two snapshots of one history could give, the one whose emit id sorts first does,
+  given to the parent: no parent takes it, with that reason (see the amendment of 2026-11-27 for how the ledger
+  records it). The same holds when the history has children of its own. Where two snapshots of one history could give, the one whose emit id sorts first does,
   so the result does not depend on the order of the exposes. The ledger says which statistic moved where and why.
 - **What moves.** A bundle for a contract with such an expose. Every other bundle keeps its bytes.
 
@@ -622,3 +622,13 @@ out under one parent only, so a table counted per a second parent was left unpro
 - **What moves.** A bundle for a contract with a snapshot, events or periodic table that is counted over a parent the
   history does not lay out its entities under, when the history requires the column and declares a relationship over it
   to that parent. Every other bundle keeps its bytes.
+
+## Amendment of 2026-11-27: a count no parent takes is still read
+
+The statistic paragraph above said that a `counts` entry no history parent takes leaves its statistic unused. That
+was not right for the histogram of the entry. The entry is refused and given to no parent, but its presence is what
+has the emit's foreign key follow the history, in place of a draw over the span of the key it references, so a
+profile without it gives another bundle. The ledger therefore lists the histogram of the relationship's children per
+parent as used, with the reason it was refused and the part it still has, and not as unused. A statistic beside it,
+such as a mean, decides nothing: dropping it alone gives the same bundle, so it stays unused. Only the unused
+list of the ledger changes: what the bundle generates from does not.

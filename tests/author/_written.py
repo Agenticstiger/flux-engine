@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 from flux_engine.seam.resolve import load_bundle, resolve_all_emits
 from flux_engine.stages.apply import apply
@@ -18,6 +18,15 @@ from flux_engine.stages.run import run
 from flux_engine.stages.validate import validate
 from flux_engine.stages.verify import verify
 from tests.bundles import by_file
+
+
+def generated(namespace: Mapping[str, Any]) -> Dict[str, Any]:
+    """What a bundle generates from: its namespace less the register, the profile digest and the
+    unused list, which name statistics by position."""
+    found = dict(namespace)
+    for key in ("parameters", "unused", "profile"):
+        found.pop(key, None)
+    return found
 
 
 def bundle_digests(tmp_path: Path) -> Dict[str, str]:
