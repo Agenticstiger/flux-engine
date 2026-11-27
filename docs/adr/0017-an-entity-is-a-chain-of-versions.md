@@ -410,7 +410,8 @@ For each expose with a validity window whose profile table publishes `history`, 
 `start` and `length` from their histograms; `until` as the window's end it writes; `chain` as the member of
 `chain` that holds on at least 90 % of consecutive versions, the constant `CHAIN_HOLDS_AT_LEAST`, or no entry,
 recorded as unused because the versions do not chain, when neither does; `tracked` as each candidate column that
-moves in at least one published change, with its `initial` and `transitions`, and the others carried;
+moves in at least one published change, with its `initial` and `transitions`, and the others carried, among them a
+candidate drawn given another column and the column another candidate is drawn given (amendment of 2026-11-27);
 `reasons` from their histogram, without `several`; `end` as `closeLast` with the closed share of `lastVersion` as
 its `share`, when that share is above zero. `init` writes no `parent`: a profile publishes children per parent
 over rows, which are versions here, and no relationship of the contract says which parent holds an entity, so a
@@ -1005,3 +1006,28 @@ versions per entity: an ended entity holds the marker on one version.
   with the reason that an end marker closes none.
 - **What does not move.** A table with no end marker keeps `closeLast` and the bytes it had. No generator or plan
   code changes: `finalVersion` already keeps the final version open (section 5).
+
+## Amendment of 2026-11-27: `init` carries a candidate drawn given another column, and the column it is drawn given
+
+A candidate column that the bundle draws given another column (`levelWeightsGiven`, `given`) declares no `levels`
+in its emit, since its weights belong to the grouped draw. `init` tracked it all the same, and the seam refused the
+entry (`FLX-3403`, the column "is not categorical"), so `init` wrote no history for any table of the bundle, and
+failed outright when a window or a history file asked for one. A candidate that never moves, drawn given one that
+does, was refused at the seam by section 6's rule on a carried column drawn given a tracked one, with the same
+result. Which of two candidates was drawn from the other followed the order of their names.
+
+- **Carried.** A candidate that is drawn given another column is carried, and so is a candidate another candidate is
+  drawn given. A tracked column takes its values from the history alone, so its own given draw would never be read,
+  and a carried column keeps its first value, which a tracked parent would change under it. The outcome does not
+  depend on which column the grouped draw takes as the parent.
+- **The register.** Both columns' `initial` and `transitions` are listed as unused, each with its reason: "the column
+  is drawn given another, and a tracked column takes its values from the history alone, so it is carried", and
+  "another column is drawn given it, and a carried column keeps its first value". The grouped statistic is read, as
+  it was before the history. A candidate that moves no change keeps the reason it had, which is read first.
+- **The cost.** When the carried columns are the only ones that move, the entry tracks nothing, and every version
+  differs from the one before it by its validity window alone, as it already does for a table whose candidates never
+  move.
+- **What does not move.** A column drawn given a column that is no candidate was carried before, with the reason of
+  section 13, and keeps it; so does every bundle `init` wrote with a history before. The seam's refusals are
+  unchanged, and no generator or plan code changes. A release cut by the unused list gives the generated bundle of
+  the whole profile.

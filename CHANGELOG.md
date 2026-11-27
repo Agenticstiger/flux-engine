@@ -20,6 +20,19 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
+## Unreleased
+
+### Fixed
+
+- `init` wrote no history for any table of a bundle when a history candidate was drawn given another column, and
+  failed when a window or a history file asked for one. The candidate lost its levels to the grouped draw but was
+  tracked all the same, and the seam refused the entry ("not categorical"); a candidate that never moves and is
+  drawn given one that does was refused the same way, and which of two was drawn from the other followed the order
+  of their names. Such a candidate is now carried, and so is the column another candidate is drawn given: the history
+  is written with the rest of its entry, both columns' initial and transitions are listed as unused with the reason,
+  and the grouped statistic is read as before. A table whose candidates are drawn from no other column keeps its
+  bytes. ADR 0017 amendment of 2026-11-27.
+
 ## 0.13.1 - 2026-11-28
 
 Fixes to the bundles `fluxsim init` writes from a profile. This resolves the three known issues listed for 0.13.0: a
