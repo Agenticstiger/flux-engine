@@ -333,16 +333,200 @@ Under `--scale` the child rows and the parent rows are scaled alike but each is 
 
 A table of two foreign keys and no other column pairs the rows of two parents: an enrolment of a student and a course, or a membership of a person and a club. Neither foreign key is part of a key. Its rows are the edges between the two parents. Each parent's number of rows follows a `counts` shape, and an `associations` entry says that the table pairs them ([ADR 0039](../adr/0039-an-association-table-pairs-two-counted-sides.md)). It needs kernel 0.2.0.
 
-Declare a `counts` entry for each side, then the pair, beside them in the same extensions:
+The bundle below enrols 40 students in 20 courses. Make a directory for it and write its four documents there.
+
+```console
+$ mkdir enrol
+$ cd enrol
+```
 
 ```yaml
+# persona.flux.yml
+fluxVersion: "0.5.0"
+kind: Persona
+id: persona-school
+name: Persona for School
+metadata:
+  owner:
+    team: school
+spec:
+  traits: { digitalFluency: 0.5 }
+```
+
+```yaml
+# world.flux.yml
+fluxVersion: "0.5.0"
+kind: World
+id: world-school
+name: World for School
+metadata:
+  owner:
+    team: school
+spec:
+  seed: 42
+  vertical: telco
+  population: { size: 1, lifecycleMix: { active: 1 } }
+```
+
+The contract has three tables. `enrolment` holds the two foreign keys and nothing else, and names each parent through a relationship.
+
+```yaml
+# school.fluid.yml
+fluidVersion: "0.7.7"
+kind: DataProduct
+id: campus.school
+name: School
+metadata:
+  owner:
+    team: school
+exposes:
+  - exposeId: student
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: campus, table: student, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: student_id, type: INT, required: true }
+        - { name: age, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: student, type: primary, expr: student_id }
+  - exposeId: course
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: campus, table: course, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: course_id, type: INT, required: true }
+        - { name: credits, type: INT, required: true }
+    semantics:
+      entities:
+        - { name: course, type: primary, expr: course_id }
+  - exposeId: enrolment
+    kind: table
+    binding:
+      platform: aws
+      format: glue_table
+      location: { database: campus, table: enrolment, region: eu-west-1 }
+    contract:
+      schema:
+        - { name: student_id, type: INT, required: true }
+        - { name: course_id, type: INT, required: true }
+    semantics:
+      relationships:
+        - { name: student, to: student, fromColumns: [student_id], toColumns: [student_id], cardinality: many_to_one }
+        - { name: course, to: course, fromColumns: [course_id], toColumns: [course_id], cardinality: many_to_one }
+```
+
+The Simulation declares a `counts` entry for each side, and the pair beside them in the same extensions. A student takes one, two or three courses, and a course holds two, four or eight students. The 80 rows of `enrolment` are the edges: 10 students take one course, 20 take two and 10 take three, which makes 80, and the courses add up to 80 alike.
+
+```yaml
+# simulation.flux.yml
+fluxVersion: "0.5.0"
+kind: Simulation
+id: sim-school
+name: School
+metadata:
+  owner:
+    team: school
+spec:
+  worldRef: world-school
+  fidelity: deterministic
+  seed: 42
+  timeBounds:
+    start: "2026-07-01T00:00:00Z"
+    end: "2026-09-30T23:59:59Z"
+  personaRefs: [persona-school]
+  emits:
+    - productRef: campus.school
+      exposeId: student
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:25335c6a328d70cccdf0ef6f6f5f770f026d1ceba69992a86a46c69a66e265f3" }
+    - productRef: campus.school
+      exposeId: course
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:25335c6a328d70cccdf0ef6f6f5f770f026d1ceba69992a86a46c69a66e265f3" }
+    - productRef: campus.school
+      exposeId: enrolment
+      fluidVersion: "0.7.7"
+      provenance: { contractDigest: "sha256:25335c6a328d70cccdf0ef6f6f5f770f026d1ceba69992a86a46c69a66e265f3" }
 extensions:
   com.agentics.flux/1:
     counts:
-      - { emit: enrolment, relationship: student, children: { levels: [1, 2, 3], levelWeights: ["0.5", "0.3", "0.2"] } }
-      - { emit: enrolment, relationship: course, children: { levels: [2, 4, 8], levelWeights: ["0.4", "0.4", "0.2"] } }
+      - { emit: enrolment, relationship: student, children: { levels: ["1", "2", "3"], levelWeights: ["0.25", "0.5", "0.25"] } }
+      - { emit: enrolment, relationship: course, children: { levels: ["2", "4", "8"], levelWeights: ["0.4", "0.4", "0.2"] } }
     associations:
       - { emit: enrolment, relationships: [student, course], distinct: true }
+    emits:
+      student:
+        rows: 40
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            student_id: { range: { min: '1', max: '40' } }
+            age: { range: { min: '17', max: '30' } }
+          properties:
+            - property: mean
+              column: age
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      course:
+        rows: 20
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns:
+            course_id: { range: { min: '1', max: '20' } }
+            credits: { range: { min: '1', max: '9' } }
+          properties:
+            - property: mean
+              column: credits
+              tolerance: { type: absolute, value: "1000" }
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+      enrolment:
+        rows: 80
+        fidelity:
+          encoding: { fractionalBits: 16, rounding: floor }
+          records: { min: 1, max: 1000000 }
+          columns: {}
+          properties: []
+          budget: { maxChecksPerState: 20, maxStateAge: P30D }
+          failureAction: withholdBundle
+```
+
+Run it and check the pairs:
+
+```console
+$ fluxsim run .
+plan written to ...
+applied to ...
+emitted student: 40 rows (generator); course: 20 rows (generator); enrolment: 80 rows (generator)
+run ... complete
+$ fluxsim verify . --run-id $(ls .flux/runs)
+...
+  rules enrolment: association:student,course.pairs 80 of 80 (100.00%); association:student,course.rows:student 160 of 160 (100.00%); association:student,course.rows:course 100 of 100 (100.00%)
+...
+$ cd ..
+```
+
+Read the rows back. No student takes a course twice, and each side follows its shape:
+
+```python
+import glob
+import json
+from collections import Counter
+
+enrolments = [json.loads(line) for line in open(glob.glob("enrol/.flux/runs/*/emits/enrolment.ndjson")[0])]
+assert len(enrolments) == 80 and len(set(map(tuple, enrolments))) == 80
+assert Counter(Counter(row[0] for row in enrolments).values()) == {1: 10, 2: 20, 3: 10}
+assert Counter(Counter(row[1] for row in enrolments).values()) == {2: 8, 4: 8, 8: 4}
 ```
 
 | Key | Meaning |
@@ -364,7 +548,7 @@ A bridge is the other table of two foreign keys. It holds every pair of parent r
 | `emit` | The table that holds both foreign keys. |
 | `relationships` | The names of the two distinct many-to-one relationships of that emit. |
 
-A bridge with more rows than the two parents make pairs, a `nullFraction` on either side, a side that is a key or `one_to_one`, and a side that a `links` condition configures are refused with [FLX-3403](../reference/errors/FLX-3403.md). `fluxsim verify` checks that no pair repeats.
+A bridge with more rows than the two parents make pairs, a `nullFraction` on either side, a side that is a key or `one_to_one`, and a side that a `links` entry gives a condition or a weight are refused with [FLX-3403](../reference/errors/FLX-3403.md). `fluxsim verify` checks that no pair repeats.
 
 ### What the plan and verify say
 
@@ -377,11 +561,22 @@ A bridge with more rows than the two parents make pairs, a `nullFraction` on eit
 
 ### What is refused
 
-A side that is a key, a bridge side or `one_to_one`, a side whose `counts` entry has a `parentWhen` or a `given`, an emit that declares a history, and more rows than the two parents make pairs under `distinct` are refused with [FLX-3403](../reference/errors/FLX-3403.md). A summary over the second side's children is refused with [FLX-6210](../reference/errors/FLX-6210.md).
+A side that is a key, a bridge side, `one_to_one` or implied by another relationship, a side whose `counts` entry has a `parentWhen` or a `given`, an emit that declares a history, and more rows than the two parents make pairs under `distinct` are refused with [FLX-3403](../reference/errors/FLX-3403.md). A summary over the second side's children is refused with [FLX-6210](../reference/errors/FLX-6210.md).
 
-### `init` writes one
+### `init` writes one when its conditions hold
 
-`fluxsim init` writes an `associations` entry for such a table, in place of leaving the table out. It sets `distinct: true`, or `distinct: false` when the published rows are more than the two parents make pairs. With no published `rowCount`, the rows are the inverse-variance mean of the two sides' totals, kept within the pairs. A statistic that groups one side's children by a column of its parent is listed unused, because the sides pair stub by stub. See [write a bundle from a profile](./write-a-bundle-from-a-profile.md).
+`fluxsim init` writes an `associations` entry for such a table, in place of leaving the table out, when its conditions hold. It sets `distinct: true`, or `distinct: false` when the published rows are more than the two parents make pairs. With no published `rowCount`, the rows are the inverse-variance mean of the two sides' totals, kept within the pairs. A statistic that groups one side's children by a column of its parent is listed unused, because the sides pair stub by stub. See [write a bundle from a profile](./write-a-bundle-from-a-profile.md).
+
+When exactly one parent's row count is an assumption, `init` derives the pairs from the other side and gives the assumed parent the rows that follow, and the register says so ([ADR 0039](../adr/0039-an-association-table-pairs-two-counted-sides.md), amendment of 2026-11-26). `init` writes no entry, and notes why, in these cases:
+
+- both parents have an assumed row count;
+- a side has no mean number of children per parent;
+- another table refers to a parent, or a parent refers to a parent of its own;
+- the rows are ten times the parents that a side's own statistic counts;
+- a class of either side holds more children than the other side has parents;
+- the rows cannot hold the pairs.
+
+The table is then left out, as before associations.
 
 ## Row order
 

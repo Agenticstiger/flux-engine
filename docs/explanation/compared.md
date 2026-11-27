@@ -66,39 +66,41 @@ they are checked again at each FLUX release.
 As published on 27 November 2026, from each project's own documentation and, for commercial products, the
 vendor's. **Yes** means documented, **partly** means documented for some cases only, **no** means documented as
 absent, **unverified** means no fetched source says either way, and **n/a** means the question does not apply. In
-the "Needs real records" column, "no" is the good answer: it means no real records are needed. **Kind** tags a
-tool as a trained model, privacy-first, rule and schema, or commercial; one tool can carry two tags.
+the "Needs real records" column, every cell starts with yes, partly or no, and "no" is the good answer: it means no
+real records are needed. The words in brackets say when. **Kind** tags a tool as a trained model, privacy-first, rule
+and schema, or commercial; one tool can carry two tags. FLUX carries its own tag, declared rules and aggregates, since
+its numbers are declared or published as aggregates and none is fitted to records.
 **Reproducible** means documented to give identical output for the same inputs and seed. **Claimed** means
 advertised but not documented. None of the tools was run offline for this page. The notes under the table give the
 evidence behind each cell.
 
 | Tool | Kind | Approach | Licence | Needs real records? | Reproducible | Formal privacy (DP) | Multi-table | Time and sequence | Audit evidence | Runs offline |
 |---|---|---|---|---|---|---|---|---|---|---|
-| **FLUX** 0.13.0 | declared rules and aggregates | Declared rules and published aggregates | Apache-2.0 | no, never to generate | yes | via profile | yes, with association tables | yes | yes | yes |
-| **SDV** 2.2.0 | trained model | Copula, GAN and deep models | BUSL-1.1 | yes, to train | resampling | no | yes | yes | quality score | yes |
-| **synthcity** 0.2.12 | trained model, privacy-first | GANs, VAEs, flows, diffusion | Apache-2.0 | yes, to train | unverified | some models | not stated | yes | metrics | yes |
-| **MOSTLY AI SDK** 6.2.1 | trained model, privacy-first | Deep model (TabularARGN) | Apache-2.0 | yes, to train | unverified | option | yes | yes | reports | local mode |
-| **NeMo Data Designer** 1.0.1 | trained model | LLM with samplers | Apache-2.0 | no, none needed | not documented | no | not stated | not stated | validators | not by default |
-| **NeMo Safe Synthesizer** 0.2.0 | trained model, privacy-first | Fine-tuned LLM | Apache-2.0 | yes, to train | unverified | opt-in | not stated | experimental | report | local GPU |
-| **Gretel** 0.22.20, archived | trained model, commercial | LSTM and GANs | source-available | yes, to train | unverified | option | unverified | yes | unverified | unverified |
-| **fg-data-synthetic** 2.1.0 | trained model | GANs and Gaussian mixtures | MIT | yes, to train | unverified | none documented | not stated | yes | unverified | yes |
-| **DataSynthesizer** 0.1.13 | privacy-first | Bayesian network | MIT | yes, to describe | seeded | noise | no | no | none | yes |
-| **SmartNoise Synth** 1.0.8 | privacy-first | DP marginals and GANs | MIT | yes, to train | unverified | epsilon | not stated | no | none | yes |
-| **private-pgm** mbi 2.1.0 | privacy-first | Model from noisy marginals | Apache-2.0 | noisy marginals only | unverified | caller's job | not stated | no | none | yes |
-| **REaLTabFormer** 0.2.4 | trained model | GPT-2 transformer | MIT | yes, to train | unverified | none documented | two tables | not stated | none | yes |
-| **GReaT** 0.0.14 | trained model | Fine-tuned small LLM | MIT | yes, to train | mock only | no | not stated | not stated | metrics | yes |
-| **Faker** 40.63.0 | rule and schema | Field providers | MIT | no, none needed | same version | n/a | no | date fields | none | yes |
-| **Mimesis** 22.2.0 | rule and schema | Field providers and schemas | MIT | no, none needed | seeded | n/a | yes | date fields | none | yes |
-| **Hypothesis** 6.170.17 | rule and schema | Test-data strategies | MPL-2.0 | no, none needed | per version | n/a | composite | date fields | counterexamples | yes |
-| **dbldatagen** 0.4.0.post1 | rule and schema | Spark rules | Databricks License | optional | seeded | n/a | yes | date ranges | none | needs Spark |
-| **Synth** 0.6.9, dormant | rule and schema | Declarative schema | Apache-2.0 | on import | seeded | no | yes | series | none | yes |
-| **Snaplet Seed** 0.98.0 | rule and schema | Database seeding | MIT | no, none needed | claimed | n/a | yes | unverified | none | mostly |
-| **Mockaroo** hosted | rule and schema, commercial | Field types and formulas | Proprietary | no, none needed | unverified | n/a | datasets | date fields | unverified | claimed |
-| **Tonic** | commercial | Masking, subsetting, generators | Proprietary | most modes | seeded | some generators | yes | unverified | privacy report | self-hosted |
-| **Synthesized** 1.187 | commercial | Masking and generation | Proprietary | optional | seeded | unverified | yes | unverified | audit log | documented |
-| **SAS Data Maker** | commercial, privacy-first | Bayesian network, MST, SMOTE | Proprietary | yes, to train | unverified | listed | claimed | claimed | unverified | unverified |
-| **K2view** TDM 10.1.1 | commercial | Masking, rules, trained model | Proprietary | AI mode | unverified | unverified | claimed | unverified | reports | unverified |
-| **MOSTLY AI platform** 5.10.0 | commercial, privacy-first | Deep models per table | Proprietary | yes, to train | unverified | Opacus | yes | sequences | QA reports | claimed |
+| **FLUX** 0.13.0 | declared rules and aggregates | Declared rules and published aggregates | Apache-2.0 | no (never to generate) | yes | via profile | yes, with association tables | yes | yes | yes |
+| **SDV** 2.2.0 | trained model | Copula, GAN and deep models | BUSL-1.1 | yes (to train) | resampling | no | yes | yes | quality score | yes |
+| **synthcity** 0.2.12 | trained model, privacy-first | GANs, VAEs, flows, diffusion | Apache-2.0 | yes (to train) | unverified | some models | not stated | yes | metrics | yes |
+| **MOSTLY AI SDK** 6.2.1 | trained model, privacy-first | Deep model (TabularARGN) | Apache-2.0 | yes (to train) | unverified | option | yes | yes | reports | local mode |
+| **NeMo Data Designer** 1.0.1 | trained model | LLM with samplers | Apache-2.0 | no (none needed) | not documented | no | not stated | not stated | validators | not by default |
+| **NeMo Safe Synthesizer** 0.2.0 | trained model, privacy-first | Fine-tuned LLM | Apache-2.0 | yes (to train) | unverified | opt-in | not stated | experimental | report | local GPU |
+| **Gretel** 0.22.20, archived | trained model, commercial | LSTM and GANs | source-available | yes (to train) | unverified | option | unverified | yes | unverified | unverified |
+| **fg-data-synthetic** 2.1.0 | trained model | GANs and Gaussian mixtures | MIT | yes (to train) | unverified | none documented | not stated | yes | unverified | yes |
+| **DataSynthesizer** 0.1.13 | privacy-first | Bayesian network | MIT | yes (to describe) | seeded | noise | no | no | none | yes |
+| **SmartNoise Synth** 1.0.8 | privacy-first | DP marginals and GANs | MIT | yes (to train) | unverified | epsilon | not stated | no | none | yes |
+| **private-pgm** mbi 2.1.0 | privacy-first | Model from noisy marginals | Apache-2.0 | partly (noisy marginals only) | unverified | caller's job | not stated | no | none | yes |
+| **REaLTabFormer** 0.2.4 | trained model | GPT-2 transformer | MIT | yes (to train) | unverified | none documented | two tables | not stated | none | yes |
+| **GReaT** 0.0.14 | trained model | Fine-tuned small LLM | MIT | yes (to train) | mock only | no | not stated | not stated | metrics | yes |
+| **Faker** 40.63.0 | rule and schema | Field providers | MIT | no (none needed) | same version | n/a | no | date fields | none | yes |
+| **Mimesis** 22.2.0 | rule and schema | Field providers and schemas | MIT | no (none needed) | seeded | n/a | yes | date fields | none | yes |
+| **Hypothesis** 6.170.17 | rule and schema | Test-data strategies | MPL-2.0 | no (none needed) | per version | n/a | composite | date fields | counterexamples | yes |
+| **dbldatagen** 0.4.0.post1 | rule and schema | Spark rules | Databricks License | partly (optional) | seeded | n/a | yes | date ranges | none | needs Spark |
+| **Synth** 0.6.9, dormant | rule and schema | Declarative schema | Apache-2.0 | partly (on import) | seeded | no | yes | series | none | yes |
+| **Snaplet Seed** 0.98.0 | rule and schema | Database seeding | MIT | no (none needed) | claimed | n/a | yes | unverified | none | mostly |
+| **Mockaroo** hosted | rule and schema, commercial | Field types and formulas | Proprietary | no (none needed) | unverified | n/a | datasets | date fields | unverified | claimed |
+| **Tonic** | commercial | Masking, subsetting, generators | Proprietary | partly (most modes) | seeded | some generators | yes | unverified | privacy report | self-hosted |
+| **Synthesized** 1.187 | commercial | Masking and generation | Proprietary | partly (optional) | seeded | unverified | yes | unverified | audit log | documented |
+| **SAS Data Maker** | commercial, privacy-first | Bayesian network, MST, SMOTE | Proprietary | yes (to train) | unverified | listed | claimed | claimed | unverified | unverified |
+| **K2view** TDM 10.1.1 | commercial | Masking, rules, trained model | Proprietary | partly (AI mode) | unverified | unverified | claimed | unverified | reports | unverified |
+| **MOSTLY AI platform** 5.10.0 | commercial, privacy-first | Deep models per table | Proprietary | yes (to train) | unverified | Opacus | yes | sequences | QA reports | claimed |
 
 <details>
 <summary>Notes behind each cell</summary>
@@ -238,8 +240,8 @@ evidence behind each cell.
 ## Roadmap: faster on many cores
 
 A run is already quick on one core. What holds it back is the part of a run that does not split across workers,
-so extra jobs stop paying off, and the smaller the world, the sooner. Measured on 0.11.0, and still open after 0.13.0, on an Apple M4 Max with
-16 CPUs, best of 2, in wall seconds:
+so extra jobs stop paying off, and the smaller the world, the sooner. Measured on 0.11.0, and still open after
+0.13.0, on an Apple M4 Max with 16 CPUs, best of 2, in wall seconds:
 
 | World | Rows | 1 job | 16 jobs | Faster by |
 |---|--:|--:|--:|--:|
