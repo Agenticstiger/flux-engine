@@ -707,13 +707,7 @@ class _Declarer:
     @staticmethod
     def _pair_withheld(table: Any, window: Tuple[str, str]) -> bool:
         """Whether a table's date pairs list the two dates of *window* with an order that is not published."""
-        items = table.get("datePairs") if isinstance(table, Mapping) else None
-        return any(
-            isinstance(item, Mapping)
-            and {str(item.get("start")), str(item.get("end"))} == set(window)
-            and _read_order(item.get("order"))[0] is None
-            for item in (items if isinstance(items, list) else ())
-        )
+        return pair_orders(table, *window)[1]
 
     def lifetimes_of_histories(self) -> None:
         """A lifetime for the start and the end a release's ``history`` entry names, when none is written for it.
@@ -2240,6 +2234,27 @@ def _factor_of(
     if any(len(text) - text.count(".") > MOST_DIGITS for text in spelled):
         return f"a weight needs more than {MOST_DIGITS} digits at six significant digits"
     return spelled
+
+
+def _listed_orders(table: Any, first: str, second: str) -> List[Any]:
+    """The ``order`` of each date pair a profile table lists for the two columns."""
+    items = table.get("datePairs") if isinstance(table, Mapping) else None
+    return [
+        item.get("order")
+        for item in (items if isinstance(items, list) else ())
+        if isinstance(item, Mapping)
+        and {str(item.get("start")), str(item.get("end"))} == {first, second}
+    ]
+
+
+def pair_orders(table: Any, first: str, second: str) -> Tuple[bool, bool]:
+    """Whether a profile table lists a date pair of the two columns with an order it publishes, and with one it does not.
+
+    A pair whose order is withheld, suppressed or released with noise is listed and says nothing
+    of the order, so a contract's check of the two dates is still an order to keep.
+    """
+    orders = [_read_order(order)[0] is not None for order in _listed_orders(table, first, second)]
+    return any(orders), not all(orders)
 
 
 def declare_dates(

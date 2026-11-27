@@ -641,3 +641,35 @@ a column outside the window, and the start, drawn on its own, was then ordered w
   tolerance, a table with no declared window, and a window the profile publishes the pair of as the best pair, keep their
   bytes.
 
+## Amendment of 2026-11-27: a history keeps the first start with a date the contract orders before a version's start or end
+
+A contract can order two dates of the table that holds the current row of each entity (the snapshot of a history), or
+of the history itself: `ended_on IS NULL OR ended_on >= began_on`. When the later date is the start or the end of a
+version (a validity column, or a column a `derive` rule takes only from those and NULL, as
+`CASE WHEN status = 'ENDED' THEN valid_from END`), the history sets it, and so a snapshot's two dates are both the
+history's and take no lifetime (the amendment of 2026-11-26). The earlier date was left to its own histogram and to
+the `within` entry that lays it in its parent's life, drawn apart from the starts, and the check held on fewer rows
+than it declares. A release that withholds the pair's order, or lists no pair, gave `init` nothing to read the order
+from, and the check was not read either, since the pair was listed.
+
+- **What is read.** A `check` of the contract of the history's table, or of a table without a validity window whose
+  primary entity is the history's natural one, that is not strict, whose later date is a validity column or is set by
+  a `derive` (with no `when`) whose result is only validity columns and NULL, and whose earlier date is a plain column
+  of the window's type that a key, a rule, a dependency or a copy does not set. The profile publishes no readable order
+  for the two dates of that table: no pair, or a pair whose order is withheld, suppressed or noisy. A pair whose order
+  is published lays the dates out already, as the amendment of 2026-11-26 says, and nothing is read.
+- **What is written.** The history entry's `activation` is the earlier date (ADR 0017 section 5): every version holds
+  the entity's first start there, and every start and end of a version is on or after it, so the check holds on every
+  row. The first check by rule id, then column, is taken, and the register names it; when another check qualifies for
+  a different column, the register names that check as left unkept. A contract that declares its own
+  `lifecycle.activation` keeps it, and that member is the only one read. An activation read from a check is not one the
+  contract declared: it does not lift the refusal below.
+- **What is declined.** When the earlier date may be NULL (the contract does not require it and the profile publishes a
+  count of NULLs that is not zero), an activation would drop those NULLs, so none is written and the column keeps its own
+  draw. The register says so, with no value in it.
+- **The tie refusal stays.** A history is not written when the release publishes a column on the start's day and the
+  lengths are withheld, unless the contract declares `lifecycle.activation` as that column. The activation read from a
+  check does not lift that refusal: a history refused for the tie keeps its bytes.
+- **What does not move.** A release that publishes the order, a strict check, a check whose later date no version sets,
+  a column a rule or a key sets, a contract that declares its own `lifecycle.activation`, a history refused for the tie
+  and a contract with no such check keep their bytes. No generator or plan code changes.
