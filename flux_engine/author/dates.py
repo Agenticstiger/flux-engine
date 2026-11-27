@@ -823,23 +823,60 @@ class _Declarer:
             # The contract's check does not hold on a NULL end: the end keeps a date past the window.
             entry["endPastWindow"] = "kept"
         open_past = end not in held.required and "endPastWindow" not in entry
-        if not open_past and not self._fits(held, start, end, edges[0], edges[-1]):
+        refusal = self._end_range_refusal(held, (start, end), edges, source, open_past)
+        if refusal is not None:
             self.declined_orders.append(
                 (
                     f"{expose}.{end}",
                     f"no lifetime is written from {start!r} to {end!r}, which {source} "
-                    f"names: the declared range of {end!r} cannot be shown to "
-                    "hold every end the gaps can draw",
+                    f"names: {refusal}",
                 )
             )
             return False
         self.cited.append((entry, ("duration",), None, how))
         self.lifetimes[expose] = entry
+        if source == _WINDOW_SOURCE:
+            self._record_end_range(expose, held, end)
         note = self._trade_note(start, end, source, fit)
         if fit is not None:
             self.fit_distances[(expose, end)] = fit.distance
         self.order_notes.append((f"{expose}.{end}", note))
         return True
+
+    def _end_range_refusal(
+        self,
+        held: DatedExpose,
+        pair: Tuple[str, str],
+        edges: Sequence[int],
+        source: str,
+        open_past: bool,
+    ) -> Optional[str]:
+        """Why the gaps of a derived lifetime cannot be shown to keep every end in the end's range, or ``None``.
+
+        A history entry's lifetime is read against the spans the bundle declares. The contract's
+        validity window is read as a lifetime written for a check is: against the range the
+        contract gives the end (:class:`Spans`), which the gaps are cut to and which the lifetime
+        declares on the end where the bundle has none of its own. An end that is NULL past the
+        run needs none of it proved.
+        """
+        start, end = pair
+        spans = self._spans(held) if source == _WINDOW_SOURCE else None
+        if spans is not None:
+            span, written = spans.end(end)
+            if written and span is not None:
+                gap = spans.gap(start, end, span, edges[0], edges[-1])
+                if isinstance(gap, str):
+                    return gap
+        if open_past:
+            return None
+        fits = (
+            self._fits(held, start, end, edges[0], edges[-1])
+            if spans is None
+            else spans.fits(start, end, edges[0], edges[-1])
+        )
+        if fits:
+            return None
+        return f"the declared range of {end!r} cannot be shown to hold every end the gaps can draw"
 
     @staticmethod
     def _null_end_breaks(held: DatedExpose, start: str, end: str) -> bool:

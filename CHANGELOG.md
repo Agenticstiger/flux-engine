@@ -319,8 +319,9 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   lifetime, and a table with no declared window keep their bytes. A nullable end whose declared range stops short of
   the last start is laid out all the same, as an end past the run is NULL and no gap can draw one outside the range (the
   lifetime was declined before, and the end was drawn on its own or laid out by another pair). A column that the other pair tied to a window date
-  (the same day, say) is then drawn on its own, since a table declares one lifetime (ADR 0024, the amendment of
-  2026-11-27).
+  (the same day, say) is then drawn on its own, since a table declares one lifetime. The lifetime keeps the end inside the
+  range its contract declares, as the lifetime of a check does: the gaps are cut to it, and it is declared on the end where
+  the published histogram of the end reaches past it (ADR 0024, the amendments of 2026-11-27).
 
 ## 0.12.1 - 2026-11-26
 

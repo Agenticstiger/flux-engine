@@ -626,6 +626,10 @@ a column outside the window, and the start, drawn on its own, was then ordered w
   window (the history, where the release's history entry already gave the window its lifetime; a window pair that
   publishes no days says so). A column the other pair tied to a window date (published on the same day, say) is drawn on its own: a table
   declares one lifetime, and the order the contract states for its window is the one kept.
+- **The end's range.** The window's lifetime is held to the range the contract gives its end as a lifetime written for a
+  check is (the amendment above): the gap is cut to it, and where the published histogram of the end reaches past it the
+  range is declared on the end and the histogram is left out. A history entry's lifetime is read against the spans the
+  bundle declares, as before.
 - **A pair the release withholds.** A pair of the window's two dates whose order the release withholds gives no
   lifetime; with no other pair to take it, the window takes it the same way.
 - **What does not move.** A table whose history is written, a release whose `history` entry names the window (its

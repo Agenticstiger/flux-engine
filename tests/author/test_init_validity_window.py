@@ -350,3 +350,26 @@ def test_a_nullable_end_is_laid_out_though_the_gaps_can_draw_past_its_range(
     _, life = _written(tmp_path, profile, NULLABLE_END)
     assert life is not None and (life["start"], life["end"]) == ("valid_from", "valid_to")
     assert _ended_before_started(_versions(tmp_path)) == 0
+
+
+# ---------------------------------------------------------------------------
+# The range the contract gives the end
+# ---------------------------------------------------------------------------
+
+#: The end the contract holds inside 2025 to the middle of 2026, which the published end passes.
+BOUNDED_END = NO_OPEN_END.replace(
+    "{ name: valid_to, type: DATE, required: true }",
+    "{ name: valid_to, type: DATE, required: true, validationRules: "
+    "[{ type: range, constraint: \"between '2025-01-01' and '2026-06-30'\" }] }",
+)
+
+
+def test_the_window_lifetime_declares_the_range_the_contract_gives_its_end(tmp_path: Path) -> None:
+    assert BOUNDED_END != NO_OPEN_END
+    _, life = _written(tmp_path, _release(ENROLLED_TO_END), BOUNDED_END)
+    assert life is not None and (life["start"], life["end"]) == ("valid_from", "valid_to")
+    column = _block(tmp_path)["emits"]["tier_version"]["fidelity"]["columns"]["valid_to"]
+    assert column["range"] == {"min": "2025-02-01", "max": "2026-06-30"}
+    rows = _versions(tmp_path)
+    assert _ended_before_started(rows) == 0
+    assert max(row[TO] for row in rows if row[TO] is not None) <= "2026-06-30"
