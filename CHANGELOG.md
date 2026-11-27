@@ -287,6 +287,26 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   that start and end keeps that pair. A histogram property of the end that the derived gaps cannot reproduce within its
   tolerance is left out, with a note. A release whose history `init` already wrote, and one that publishes the pair as
   a date pair, keep their bytes.
+- `fluxsim init` keeps the ends of an order lifetime inside the range their contract declares. A check such as
+  `returned_on IS NULL OR returned_on >= borrowed_on` becomes a lifetime whose gap is drawn evenly over the run's
+  window, and the generator cuts the gap to the end column's declared range. A column the profile gives no
+  distribution declares no range, so nothing was cut, and a window wider than the data put most ends outside the
+  range the contract holds the column to. `init` now declares the contract's range on such an end (both ends given,
+  a strict end moved in) and bounds the gap by it, from the earliest start to the range's last day. With a range
+  the lifetime can be shown to hold, a required end or a check with no NULL branch is ordered too, where `init`
+  wrote none. An end that already declares a span inside its contract's range keeps its bytes. One whose published
+  histogram or range reaches past the contract's range (releases round their extremes outward) takes the part inside it:
+  its range is cut to the contract's, the lifetime draws the column, and its histogram, which cannot partition the
+  cut range, is traded for the order with a note (ADR 0024, the amendment of 2026-11-26).
+- `fluxsim init` no longer writes an association whose pairs rest on an assumed parent row count. A parent the
+  profile gives no row count for has an assumed one, and the total of children over it is none: the pairs came out
+  of a mean of two totals, one of which was the assumption, and broke the shape of the other side. The pairs now come
+  from the side whose parent rows are published, and the assumed parent takes the rows its own mean children per
+  parent make of them (both sides of an association count the same pairs). Where both parents are assumed, where a
+  side publishes no mean, where another table also refers to the parent, or where the rows derived cannot hold the
+  pairs, no association is written, as before associations existed, and a note says why. The assumed parent's mean is
+  read over the cells of a noisy histogram that stand clear of the noise, and a histogram with none gives no mean.
+  Parents with published row counts keep their bytes (ADR 0039, the amendment of 2026-11-26).
 
 ## 0.12.1 - 2026-11-26
 
