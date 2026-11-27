@@ -601,3 +601,24 @@ lies:
   be one of that column's rows.
 - **What moves.** A contract that declares a range on such a column, or a profile that publishes its span. Every
   other bundle keeps its bytes.
+
+## Amendment of 2026-11-26: `init` keeps a snapshot whose foreign key a count would set beside another parent
+
+The amendment of 2026-11-24 on a table that is also a counted child asked a history to write its `parent` over the
+expose a counted foreign key reaches, so that the column holds that expose's keys on every version. A history is laid
+out under one parent only, so a table counted per a second parent was left unprojected: it kept its own rows and its own
+`counts` entry, and its keys and the history's entities no longer matched. `init` now reads what the column holds:
+
+- **The rule.** A foreign key that a `counts` entry would have set is a column of the history, and it holds keys of the
+  parent expose when the history writes its `parent` over that expose, or declares a to-one relationship of its own over
+  the same column to the same key columns, and the history requires the column (a column that may be NULL holds no key
+  in a row). The rule is the one a counted events or periodic table meets too. Such a column is picked from the parent's
+  rows on an entity's first version and carried (ADR 0017 section 6, the carried columns), or tracked over levels that
+  are keys of the parent, so every version holds a key. A history that declares neither has no key of the parent in the
+  column, as before.
+- **The statistic.** The `counts` entry is not written. When the history's parent is another expose, the statistic is
+  unused, with a reason that names the table, the history and that expose, and no value; when the history writes no
+  parent, or has children of its own, the reason says so, as the amendment of 2026-11-24 has it.
+- **What moves.** A bundle for a contract with a snapshot, events or periodic table that is counted over a parent the
+  history does not lay out its entities under, when the history requires the column and declares a relationship over it
+  to that parent. Every other bundle keeps its bytes.

@@ -307,6 +307,17 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   pairs, no association is written, as before associations existed, and a note says why. The assumed parent's mean is
   read over the cells of a noisy histogram that stand clear of the noise, and a histogram with none gives no mean.
   Parents with published row counts keep their bytes (ADR 0039, the amendment of 2026-11-26).
+- `init` dropped a snapshot, and every version it could have named with it, when a `counts` entry would have set one
+  of its foreign keys and the history is laid out under another parent. The snapshot is the history's current rows, so
+  it holds the history's value in that column, and that value is a key of the parent whenever the history declares a
+  relationship of its own over the same column to the same keys and requires the column, as the history's picks come
+  from the parent's rows. The test asked for a history `parent` over that expose instead, so a table that was also
+  counted per a second parent kept its own rows, and its keys and the history's entities no longer matched (a share of
+  the table had no version and a share of the versions named no row). The snapshot is now written when the history
+  declares that relationship, and so is a change-events or periodic table that is counted the same way. The `counts`
+  entry is not written, and its statistic is unused with a reason that names the table and the history. A history
+  that declares no such relationship, or does not require the column, keeps the refusal, and every bundle with no
+  such counted table keeps its bytes (ADR 0027, the amendment of 2026-11-26).
 
 ## 0.12.1 - 2026-11-26
 

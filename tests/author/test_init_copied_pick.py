@@ -25,6 +25,7 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
+from flux_engine.stages.plan import plan
 from flux_engine.stages.run import run
 from tests.bundles import init_from_texts
 
@@ -370,3 +371,79 @@ def test_two_hold_backs_are_one_that_asks_either() -> None:
     assert _either(first, None) is first
     assert _either(None, second) is second
     assert _either(None, None) is None
+
+
+def _grouped_by_the_borrower() -> Any:
+    """The contract and profile with a statistic of the loan's branch grouped by the borrower's tier.
+
+    A grouping by a column of a linked row is how a column comes to be drawn given another
+    (``groupByLink``); here it is offered to the foreign key a copy sets.
+    """
+    from flux_stats.profile import SCHEMA_URL_1_4_0
+
+    contract = CONTRACT.replace(
+        "        - { name: branch_id, type: INT, required: true }\n    semantics:\n"
+        "      entities:\n        - { name: member, type: primary, expr: member_id }",
+        "        - { name: branch_id, type: INT, required: true }\n"
+        "        - { name: tier, type: STRING, required: true }\n    semantics:\n"
+        "      entities:\n        - { name: member, type: primary, expr: member_id }",
+    )
+    assert contract != CONTRACT
+    profile = _profile()
+    profile["_schemaURL"] = SCHEMA_URL_1_4_0
+    sample = {"min": 950, "max": 1050}
+    profile["tables"]["member"]["columns"]["tier"] = {
+        "domain": "category",
+        "statistics": [
+            {
+                "definition": "levelHistogram/1",
+                "levels": ["gold", "plain"],
+                "sampleSize": sample,
+                "disclosure": "acro-default",
+                "groups": [{"group": "", "k": MEMBERS, "levelCounts": [100, 300], "status": "F"}],
+            }
+        ],
+    }
+    profile["tables"]["loan"]["columns"]["branch_id"]["statistics"] = [
+        {
+            "definition": "marginalHistogram/1",
+            "bins": ["1", "10", "30", "51"],
+            "sampleSize": sample,
+            "disclosure": "acro-default",
+            "groupByLink": {
+                "parent": {"table": "member", "columns": ["member_id"]},
+                "columns": ["member_id"],
+                "column": "tier",
+            },
+            "groups": [
+                {"group": "gold", "k": 1000, "binCounts": [500, 300, 200], "status": "F"},
+                {"group": "plain", "k": 2000, "binCounts": [100, 900, 1000], "status": "F"},
+            ],
+        }
+    ]
+    return contract, profile
+
+
+def test_no_draw_given_another_column_reaches_a_foreign_key_a_copy_sets(tmp_path: Path) -> None:
+    # `declare_counted` takes the copy's key off the draws it knows, and a draw given another
+    # column is not among them. None needs to be: a foreign key is never drawn given another, so
+    # a statistic that would make it so is passed over before the copy's key is read.
+    contract, profile = _grouped_by_the_borrower()
+    result = init_from_texts(tmp_path, contract, profile, FILES)
+    assert result.exit_code == 0, result.stderr
+    state = _states(result)["/tables/loan/columns/branch_id/statistics/0"]
+    assert state["state"] == "unused"
+    assert "a foreign key, which is never drawn given another" in state["note"]
+    block = _block(tmp_path)
+    assert "counts" not in block
+    text = (tmp_path / "bundle" / "simulation.flux.yml").read_text(encoding="utf-8")
+    assert "binWeightsGiven" not in text
+    assert "levelWeightsGiven" not in text
+    plan_outcome = plan(
+        tmp_path / "bundle",
+        state_dir=tmp_path / "state",
+        profile=tmp_path / FILES[1],
+        kernel="0.2.0",
+        stage=False,
+    )
+    assert plan_outcome.success, plan_outcome.stderr
