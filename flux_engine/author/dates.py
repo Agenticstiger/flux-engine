@@ -860,8 +860,8 @@ class _Declarer:
         A history entry's lifetime is read against the spans the bundle declares. The contract's
         validity window is read as a lifetime written for a check is: against the range the
         contract gives the end (:class:`Spans`), which the gaps are cut to and which the lifetime
-        declares on the end where the bundle has none of its own. An end that is NULL past the
-        run needs none of it proved.
+        declares on the end where the bundle has none of its own. A window's end that is NULL past
+        the run needs none of it proved.
         """
         start, end = pair
         spans = self._spans(held) if source == _WINDOW_SOURCE else None
@@ -871,7 +871,7 @@ class _Declarer:
                 gap = spans.gap(start, end, span, edges[0], edges[-1])
                 if isinstance(gap, str):
                     return gap
-        if open_past:
+        if open_past and spans is not None:
             return None
         fits = (
             self._fits(held, start, end, edges[0], edges[-1])

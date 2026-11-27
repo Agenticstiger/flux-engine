@@ -334,7 +334,7 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   range its contract declares, as the lifetime of a check does: the gaps are cut to it, and it is declared on the end where
   the published histogram of the end reaches past it. A date pair whose order decides that the window takes the lifetime, or that a column published on the history start's
   day keeps the history out, is listed as used and no longer as unused, so a release made by dropping the unused
-  statistics gives the same bundle The same holds for a history entry whose start and end lay out the table's lifetime. (ADR 0024, the amendments of 2026-11-27).
+  statistics gives the same bundle (ADR 0024, the amendments of 2026-11-27).
 
 ## 0.12.1 - 2026-11-26
 
