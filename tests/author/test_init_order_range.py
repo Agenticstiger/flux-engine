@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import pytest
 
+from flux_engine.author.end_range import Spans
 from flux_engine.cli._init import run_init
 from tests.author.test_init_date_order import SCHEMA, _binned, _block, _notes, _rows
 
@@ -211,3 +212,85 @@ def test_an_end_that_declares_a_span_keeps_the_gap_and_the_bytes_it_had(tmp_path
     assert column["bins"][-1] == "2024-06-30" and column["range"]["max"] == "2024-06-30"
     rows = _rows(tmp_path, "loan")
     assert all(row[2] is None or "2020-01-01" <= row[2] <= "2024-12-31" for row in rows)
+
+
+def test_an_end_histogram_that_reaches_past_the_range_is_cut_to_it(tmp_path: Path) -> None:
+    # A release rounds its extremes outward: the end's published bins run from 2000 to 2100 while
+    # the contract holds the column to five years. Every end lands inside the range, and the order
+    # between the two dates still holds.
+    started = _binned(["2020-01-01", "2022-01-01", "2024-12-31"], [300, 300])
+    ended = _binned(["2000-01-01", "2050-01-01", "2100-01-01"], [100, 500])
+    _init(tmp_path, LOAN, _profile(borrowed_on=started, returned_on=ended))
+    (life,) = _block(tmp_path)["lifetimes"]
+    assert life["duration"]["bins"] == ["0", "1826"]
+    assert _end_column(tmp_path)["range"] == {"min": "2020-01-01", "max": "2024-12-31"}
+    rows = _rows(tmp_path, "loan")
+    ends = [row[2] for row in rows if row[2] is not None]
+    assert len(ends) > 100
+    assert min(ends) >= "2020-01-01" and max(ends) <= "2024-12-31"
+    assert not [row for row in rows if row[2] is not None and row[2] < row[1]]
+
+
+def test_a_required_end_histogram_that_reaches_past_the_range_is_cut_to_it(
+    tmp_path: Path,
+) -> None:
+    started = _binned(["2020-01-01", "2022-01-01", "2024-12-31"], [300, 300])
+    ended = _binned(["2000-01-01", "2050-01-01", "2100-01-01"], [100, 500])
+    _init(tmp_path, RETURNED, _profile(borrowed_on=started, returned_on=ended))
+    (life,) = _block(tmp_path)["lifetimes"]
+    assert "endPastWindow" not in life
+    rows = _rows(tmp_path, "loan")
+    assert all(row[2] is not None and "2020-01-01" <= row[2] <= "2024-12-31" for row in rows)
+    assert not [row for row in rows if row[2] < row[1]]
+
+
+def test_an_end_histogram_inside_the_range_keeps_its_bytes(tmp_path: Path) -> None:
+    started = _binned(["2020-01-01", "2022-01-01", "2024-12-31"], [300, 300])
+    ended = _binned(["2021-01-01", "2023-01-01", "2024-06-30"], [100, 500])
+    _init(tmp_path, LOAN, _profile(borrowed_on=started, returned_on=ended))
+    (life,) = _block(tmp_path)["lifetimes"]
+    assert life["duration"]["bins"] == ["0", "36525"]
+    assert _end_column(tmp_path)["range"] == {"min": "2021-01-01", "max": "2024-06-30"}
+
+
+def test_spans_cut_a_declared_end_to_the_contract_range_and_leave_one_inside_it() -> None:
+    day = 86_400_000
+    spans = Spans(
+        bounds={
+            "inside": (10 * day, 20 * day),
+            "past": (0, 100 * day),
+            "away": (200 * day, 300 * day),
+        },
+        declared={name: (5 * day, 50 * day) for name in ("inside", "past", "away", "none")},
+        window_start=0,
+        window_end=100 * day,
+    )
+    assert spans.end("inside") == ((10 * day, 20 * day), False)
+    assert spans.end("past") == ((5 * day, 50 * day), True)
+    assert spans.end("away") == ((5 * day, 50 * day), True)
+    assert spans.end("none") == ((5 * day, 50 * day), True)
+    assert spans.end("unknown") == (None, False)
+
+
+def test_the_cut_end_keeps_no_histogram_and_says_why(tmp_path: Path) -> None:
+    started = _binned(["2020-01-01", "2022-01-01", "2024-12-31"], [300, 300])
+    ended = _binned(["2000-01-01", "2050-01-01", "2100-01-01"], [100, 500])
+    result = _init(tmp_path, LOAN, _profile(borrowed_on=started, returned_on=ended))
+    column = _end_column(tmp_path)
+    assert "bins" not in column and "binWeights" not in column
+    fidelity = _block(tmp_path)["emits"]["loan"]["fidelity"]
+    assert [item["column"] for item in fidelity["properties"]] == ["borrowed_on"]
+    assert "reaches past the range its contract declares" in result.stdout
+
+
+def test_a_timestamp_end_histogram_that_reaches_past_the_range_is_cut_to_it(
+    tmp_path: Path,
+) -> None:
+    contract = LOAN.replace("type: DATE", "type: TIMESTAMP")
+    started = _binned(["2020-01-01", "2022-01-01", "2024-12-31"], [300, 300])
+    ended = _binned(["2000-01-01", "2050-01-01", "2100-01-01"], [100, 500])
+    _init(tmp_path, contract, _profile(borrowed_on=started, returned_on=ended))
+    rows = _rows(tmp_path, "loan")
+    ends = [row[2] for row in rows if row[2] is not None]
+    assert ends and min(ends) >= "2020-01-01" and max(ends) <= "2024-12-31T23:59:59.999"
+    assert not [row for row in rows if row[2] is not None and row[2] < row[1]]

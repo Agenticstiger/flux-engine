@@ -204,6 +204,26 @@ def test_rows_far_from_the_parents_a_side_counts_are_refused() -> None:
     assert isinstance(found, str) and f"far from the {CLUBS} that" in found
 
 
+@pytest.mark.parametrize(
+    ("mean", "rows", "accepted"),
+    [(12, 150, True), (3, 600, False), (300, 6, True), (1200, 2, False)],
+)
+def test_rows_five_times_the_counted_parents_are_kept_and_twenty_times_are_not(
+    mean: int, rows: int, accepted: bool
+) -> None:
+    # 1,800 pairs over 12 children per club make 150 clubs, five times the 30 the club side counts;
+    # over 3 they make 600, twenty times. The bound is ten times, either way round.
+    profile = _profile()
+    profile["relationships"][1]["statistics"] = [
+        _mean_with(total=mean * CLUBS * 65536, parents=CLUBS)
+    ]
+    found = derive_parent_rows(profile, _pair(), (MEMBERS, 5), (False, True), 16)
+    if accepted:
+        assert not isinstance(found, str) and found.parent_rows == rows
+    else:
+        assert isinstance(found, str) and f"the {rows} 'club' the pairs give are far from" in found
+
+
 def _mean_with(total: int, parents: int) -> Dict[str, Any]:
     """A ``mean/1`` of *parents* parents whose children add up to *total* units of the encoding."""
     found = _profile()["relationships"][1]["statistics"][-1]

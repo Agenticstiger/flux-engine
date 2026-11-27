@@ -35,16 +35,23 @@ class Spans:
     def end(self, end: str) -> Tuple[Optional[Span], bool]:
         """The span an end column's draw is held to, and whether the bundle is to declare it.
 
-        The span the bundle declares for the column (its bins' ends, or its ``range``) is the
-        range the generator cuts a lifetime's gap to, and is left as it is. A column the bundle
-        declares no span for takes the one its contract's range rules give, which a lifetime that
-        ends on it then writes as the column's ``range``; with neither there is no span.
+        A span the bundle declares for the column (its bins' ends, or its ``range``) that lies
+        inside what the contract's range rules give is the range the generator cuts a lifetime's
+        gap to, and is left as it is. One that reaches past the contract's range is cut to it, and
+        the lifetime then writes the cut as the column's ``range``; so does a column the bundle
+        declares no span for, which takes the contract's. With neither there is no span.
         """
         found = self.bounds.get(end)
-        if found is not None:
-            return found, False
         declared = self.declared.get(end)
-        return declared, declared is not None
+        if found is None:
+            return declared, declared is not None
+        if declared is None:
+            return found, False
+        low, high = max(found[0], declared[0]), min(found[1], declared[1])
+        if (low, high) == found:
+            return found, False
+        # A draw wholly outside the contract's range keeps nothing of itself: the range is the contract's.
+        return ((low, high) if low <= high else declared), True
 
     def reach(self, start: str) -> Optional[Span]:
         """The span a start column's draw reaches, where it is known.

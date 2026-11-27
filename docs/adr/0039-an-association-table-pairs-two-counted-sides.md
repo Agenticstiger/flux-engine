@@ -144,8 +144,8 @@ column count published) gives no total, and the mean put the pairs far from the 
 - **Derived rows.** Both sides count the same pairs, so the parents of a side times its mean children per parent equal the
   pairs, the degree-sum identity of a bipartite graph that `networkx.bipartite.configuration_model` asks of the two degree
   sequences and PopulationSim keeps between a household and a person table. When exactly one parent's rows are assumed,
-  the pairs are the other side's parents times its mean children per parent (a published total when the statistic gives
-  one), and the assumed parent takes `round(pairs / mean children per parent)` rows, as an assumption in the register
+  the pairs are the other side's parents times its mean children per parent (the mean over the parents the statistic counts
+  times the parents of this side; the statistic's total of children only where it counts none), and the assumed parent takes `round(pairs / mean children per parent)` rows, as an assumption in the register
   that says what was derived.
 - **The mean of the assumed side.** A noisy histogram of children per parent is read for this mean over the cells that
   stand clear of the noise (`noise_floor` over all its cells, ADR 0019), as `init` reads a noisy date or number histogram:

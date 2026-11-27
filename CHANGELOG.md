@@ -278,8 +278,10 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   range the contract holds the column to. `init` now declares the contract's range on such an end (both ends given,
   a strict end moved in) and bounds the gap by it, from the earliest start to the range's last day. With a range
   the lifetime can be shown to hold, a required end or a check with no NULL branch is ordered too, where `init`
-  wrote none. An end that already declares a span, from a published histogram or range, keeps its bytes (ADR 0024,
-  the amendment of 2026-11-26).
+  wrote none. An end that already declares a span inside its contract's range keeps its bytes. One whose published
+  histogram or range reaches past the contract's range (releases round their extremes outward) takes the part inside it:
+  its range is cut to the contract's, the lifetime draws the column, and its histogram, which cannot partition the
+  cut range, is traded for the order with a note (ADR 0024, the amendment of 2026-11-26).
 - `fluxsim init` no longer writes an association whose pairs rest on an assumed parent row count. A parent the
   profile gives no row count for has an assumed one, and the total of children over it is none: the pairs came out
   of a mean of two totals, one of which was the assumption, and broke the shape of the other side. The pairs now come

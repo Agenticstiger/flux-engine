@@ -5232,10 +5232,11 @@ def _dated_columns(
 def _declared_spans(
     expose: AuthoredExpose, contract: Optional[Mapping[str, Any]]
 ) -> Dict[str, Tuple[int, int]]:
-    """The span the contract's range rules give each date column the bundle declares no span for.
+    """The span the contract's range rules give each date column that has one.
 
-    A column whose declaration holds bins, levels or a range already has a span (or is one value),
-    and the contract's range does not replace it.
+    A column the bundle declares a span for (bins or a range) keeps it where it lies inside the
+    contract's span; a lifetime ending on one that reaches past it is cut to the contract's
+    (:class:`~flux_engine.author.end_range.Spans`). A column of levels is one value or a few.
     """
     found: Dict[str, Tuple[int, int]] = {}
     for plan in expose.columns:
@@ -5243,7 +5244,7 @@ def _declared_spans(
         context = expose.contexts.get(plan.name)
         if kind not in DATE_KINDS or context is None or contract is None:
             continue
-        if any(key in plan.declaration for key in ("bins", "levels", "range")):
+        if "levels" in plan.declaration:
             continue
         try:
             column = contract["exposes"][expose.index]["contract"]["schema"][context.schema_index]
@@ -5261,13 +5262,22 @@ _END_RANGE = (
 )
 
 
+_END_CUT = (
+    "The column's published distribution reaches past the range its contract declares and a "
+    "lifetime ends on it, so its range is cut to the contract's: every end the lifetime draws is "
+    "held inside it, and no histogram of the column can partition the cut with the bins the "
+    "profile publishes (FLX-5032), so none is written."
+)
+
+
 def _declare_end_ranges(
     exposes: Sequence[AuthoredExpose], ranges: Mapping[Tuple[str, str], Tuple[int, int]]
 ) -> None:
     """Declare the contract's range on each end column a lifetime was written against it.
 
     The generator cuts a lifetime's gap to the end column's declared range, so a column with no
-    span of its own needs one for the ends to stay inside what the contract lets it hold.
+    span of its own needs one for the ends to stay inside what the contract lets it hold, and a
+    column whose declared span reaches past the contract's takes the part inside it.
     """
     for expose in exposes:
         plans = {plan.name: plan for plan in expose.columns}
@@ -5277,6 +5287,10 @@ def _declare_end_ranges(
             kind = expose.kinds.get(name)
             if expose.expose_id != expose_id or plan is None or context is None or kind is None:
                 continue
+            cut = "bins" in plan.declaration or "range" in plan.declaration
+            reason = _END_CUT if cut else _END_RANGE
+            if cut:
+                _drop_cut_histograms(expose, plan, reason)
             plan.declaration["range"] = {
                 "min": _range_text(kind, low),
                 "max": _range_text(kind, high),
@@ -5284,11 +5298,44 @@ def _declare_end_ranges(
             basis = contract_basis(
                 context.product_ref, context.contract_tokens + ("validationRules",)
             )
+            plan.labels = [item for item in plan.labels if item.tokens[:1] != ("range",)]
             plan.labels.append(Label(("range", "min"), basis))
             plan.labels.append(Label(("range", "max"), basis))
-            plan.assumptions.append(_END_RANGE)
-            plan.choices.append(_END_RANGE)
-            expose.assumptions.append((name, _END_RANGE))
+            plan.assumptions.append(reason)
+            plan.choices.append(reason)
+            expose.assumptions.append((name, reason))
+
+
+def _drop_cut_histograms(expose: AuthoredExpose, plan: ColumnPlan, reason: str) -> None:
+    """Write no histogram of a column whose range is cut: its bins run over the whole grid.
+
+    A draw's bins stay inside the declared range (``FLX-3402``) and a histogram property's bins
+    partition it (``FLX-5032``), and ``verify`` compares them with the bins the profile publishes
+    (``FLX-5037``), so none holds once the range is cut. The lifetime draws the column: its bins,
+    their weights and the property are left out, and a statistic they were read from is recorded
+    as used, with *reason*. An expose left with no property takes the first column's assumed
+    check, as :func:`_finish_expose` does, or declares none, which ``verify`` reports as not
+    scored.
+    """
+    for key in ("bins", "binWeights"):
+        plan.declaration.pop(key, None)
+    for item in plan.labels:
+        if item.tokens[:1] in (("bins",), ("binWeights",)) and item.basis.statistic is not None:
+            plan.reads.append((item.basis.statistic[0], reason))
+    plan.labels = [
+        item for item in plan.labels if item.tokens[:1] not in (("bins",), ("binWeights",))
+    ]
+    dropped = [item for item in plan.properties if "bins" in item.document]
+    if not dropped:
+        return
+    plan.properties = [item for item in plan.properties if item not in dropped]
+    expose.properties = [item for item in expose.properties if item not in dropped]
+    if not expose.properties:
+        for other in expose.columns:
+            fallback = assumed_check(other, expose.kinds[other.name], scorable_only=True)
+            if fallback is not None:
+                expose.properties = [fallback]
+                break
 
 
 def _draft_documents(
