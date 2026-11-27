@@ -32,8 +32,9 @@ from flux_engine.core.kernels import KERNEL_V2
 from flux_engine.stages.plan import plan
 from flux_engine.stages.run import run
 
+from ._written import applied_and_verified
 from .test_history_date_pairs import _block, _init
-from .test_history_init import _levels, _states, _transitions
+from .test_history_init import _levels, _namespace, _states, _transitions
 from .test_init_declared_lifecycle import (
     STATE,
     _entities,
@@ -299,3 +300,61 @@ def test_a_profile_a_profiler_wrote_ends_the_share_of_entities_its_cells_count(
         assert not any(marked[:-1])
         ended += marked[-1]
     assert (ended, len(versions)) == (225, 1000)
+
+
+def _withholding_the_markers_history() -> Dict[str, Any]:
+    """A profile that withholds the marker column's whole history: every group of it is withheld."""
+    profile = _forge_shaped(ended_rows=150)
+    columns = profile["tables"]["tier_version"]["history"]["columns"]["status"]
+    for member in ("initial", "transitions"):
+        columns[member]["groups"] = [
+            {"group": group.get("group"), "status": "D"} if "group" in group else {"status": "D"}
+            for group in columns[member]["groups"]
+        ]
+    return profile
+
+
+def test_a_profile_that_withholds_the_marker_columns_history_ends_the_rows_on_the_marker(
+    tmp_path: Path,
+) -> None:
+    result = _init(tmp_path, _withholding_the_markers_history(), _lifecycle(**MARKER))
+    assert result.exit_code == 0, result.stderr
+    entry = _entry(tmp_path)
+    # The histogram's 150 marked rows are 150 ended entities of 1000, read as an assumption.
+    assert entry["end"] == {
+        "mode": "finalVersion",
+        "share": "0.15",
+        "column": "status",
+        "value": "ENDED",
+    }
+    (share,) = [
+        item
+        for item in _namespace(tmp_path)["parameters"]
+        if item["pointer"].endswith("/history/0/end/share")
+    ]
+    assert share["source"] == "assumption"
+    assert "rows its column holds on the marker" in share["reason"]
+    # The marker column's moves are withheld, so it is not tracked; the other column is.
+    assert [item["column"] for item in entry["tracked"]] == ["tier"]
+    # Its moves are published whole, so the share is not written where they match the changes.
+    assert "untracked" not in entry
+    # The generated status follows the histogram: 150 entities end, each on one marked version.
+    assert _ended_entities(tmp_path) == 150
+    # The ordinary changes untracked counts are the versions after each first, less one forced
+    # ending version for each of those entities: 1850 - 1000 - 150.
+    assert sum(len(v) - 1 for v in _entities(_rows(tmp_path)).values()) - 150 == 700
+    applied_and_verified(tmp_path, "tiers.profile.json")
+
+
+def test_a_marker_column_that_is_the_only_candidate_and_is_withheld_tracks_nothing(
+    tmp_path: Path,
+) -> None:
+    profile = _withholding_the_markers_history()
+    history = profile["tables"]["tier_version"]["history"]
+    del history["columns"]["tier"], history["reasons"]
+    _init(tmp_path, profile, _lifecycle(**MARKER))
+    entry = _entry(tmp_path)
+    assert entry["end"]["share"] == "0.15"
+    assert "tracked" not in entry and "untracked" not in entry
+    assert _ended_entities(tmp_path) == 150
+    applied_and_verified(tmp_path, "tiers.profile.json")

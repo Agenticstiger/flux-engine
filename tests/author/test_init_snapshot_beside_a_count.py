@@ -420,6 +420,6 @@ def test_a_bundle_no_count_touches_keeps_its_bytes(tmp_path: Path) -> None:
 WITHOUT_A_COUNT: Dict[str, str] = {
     "persona.flux.yml": "74f6062c0e15e70d2689583ad345103c7189b244886c3280c244573b49677755",
     "plans.fluid.yml": "0cb17aad95364afc94f84e5026700e035685307d9436bc275d618424a0e51d14",
-    "simulation.flux.yml": "771d0b807ae00835cc1e69e84d8a78f969adc28c91f222b8e50d98fae670e041",
+    "simulation.flux.yml": "1d863caa36b8e858d719ed74b5b74dddd724c6a45cc3c9eb28073a87ecab3628",
     "world.flux.yml": "20a3e0be50c0216bb8ef8ac07cdc72b0100a3cf4bddccbb91b7841fcc96b88cc",
 }

@@ -1079,16 +1079,22 @@ transitions count 400 moves among 850 changes, and the history moved the column 
   are constant per entity in the data (a sign-up date, a country) would change, and no statistic says which carried
   columns do change.
 - **`init`.** For exactly one tracked column, `init` writes the key when the profile counts fewer changes that move
-  the column than the history has. The history has `C = rows - entities` ordinary changes, less the change of
-  each entity that ends by an end marker into its final version, which is no ordinary change. The profile
+  the column than the history has. The history has `C = rows - entities` ordinary changes, less one forced
+  ending version for each entity that ends, which is no ordinary change: the number of entities the entry's `end`
+  ends by the generator's own count (`declared_ended` of its share of every entity), where that `end` names a
+  column, and none where it does not. Under an end marker those are the entities that begin on the marker plus
+  the changes into it, so an entity that begins on the marker counts. The generator ends only an entity with two
+  versions or more: where fewer have them than the share asks, it ends them all, its history has more changes than
+  `C`, and the column moves in more than `M` of them, though never in more than without the key. The profile
   counts `M`, the sum of the published sizes of the groups of the column's `transitions`, less the cells into the
-  end marker's value, and the changes that `reasons` counts as moving several columns, which move this one too.
-  `untracked` is `(C - M) / C`, exact, spelled as every share is. It is written only where `C - M` exceeds the
+  end marker's value. A column's `transitions` cover every change where it moves, those that move several columns
+  too (the profile links them as `several = M_a + M_b - k`), so `M` is the changes that move this column and
+  `reasons` is not read. `untracked` is `(C - M) / C`, exact, spelled as every share is. It is written only where `C - M` exceeds the
   rounding the release declares, a rounding base and one for each count summed, as `init` reads a histogram against
   the groups of its table elsewhere; and not at all when a group or a cell it needs is withheld, or `C` is 0 or less. Noisy counts are
-  read as published. The register says that the share is assumed, and says which counts it follows from. The
-  `reasons` histogram is listed as used where its count of changes that move several columns changed the share,
-  and as unused otherwise. Several tracked columns are a follow-up.
+  read as published. The register gives the share as read from the profile and cites the column's transitions. The
+  `reasons` histogram stays unused, with the reason that the column's moves give the share of changes it makes
+  when the key is written. Several tracked columns are a follow-up.
 - **ADR 0027.** The `u` event of such a change takes `type.values["u"]`. See section 4 of ADR 0027.
 - **What does not move.** Nothing changes for an entry without the key, and a profile whose one tracked column
   moves in as many changes as the history has (within the rounding) writes the entry it wrote before.

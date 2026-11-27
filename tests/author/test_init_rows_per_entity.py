@@ -185,7 +185,7 @@ def test_the_history_and_its_projections_are_those_written_without_the_counts(
 WITHOUT_COUNTS: Dict[str, str] = {
     "persona.flux.yml": "9743f6a2d96613cd7d8cab4ba9f2e124bf3a7010415d4a921c26e9b089169040",
     "plans.fluid.yml": "0318f77bab99dee58868b746010eff203ccc55d977499debb3c053fdfe4a6e1f",
-    "simulation.flux.yml": "1a36d6e2f7c4c0178f10ba647e4607253ce7bd3caf06ec36789c503d9600f5fd",
+    "simulation.flux.yml": "922a13c62bf7e3ecd8c7d173a4988c4adf022cec918b234485cb1191ff7cd493",
     "world.flux.yml": "4b358e01c4453cc7b9f1927a493bbbd7e6ebbf89c5c6c4f22e7c6eb74759e5a0",
 }
 

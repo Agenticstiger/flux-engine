@@ -215,7 +215,7 @@ def test_a_snapshot_that_is_no_counted_child_writes_the_bundle_it_always_did(
 WITHOUT_COUNTS: Dict[str, str] = {
     "persona.flux.yml": "74f6062c0e15e70d2689583ad345103c7189b244886c3280c244573b49677755",
     "plans.fluid.yml": "f50c1adff7eeae2f5dca996a48fa329ca9704765f408013097d796d5cee73e53",
-    "simulation.flux.yml": "263b4653bd06d3622dcc42bf4735ead9ddf0a0dd2d64a85491722f423a82826c",
+    "simulation.flux.yml": "9ce9728463cc8a505d2a0154e481c99d69a0c076adeab41bc152b4eaba850390",
     "world.flux.yml": "20a3e0be50c0216bb8ef8ac07cdc72b0100a3cf4bddccbb91b7841fcc96b88cc",
 }
 

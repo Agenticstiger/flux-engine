@@ -51,6 +51,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `fluxsim init` does not write the key's histogram or mean property when a bin is filled, since the generated
   rows cannot meet the published share of a filled bin, and a note on the expose says why. ADR 0017 amendment
   of 2026-11-27.
+- `fluxsim init` writes `untracked` for a history with one tracked column whose profile counts fewer moves of
+  that column than the history has changes. Before, every later version of such a history changed the column:
+  a foreign key into a reference table moved in all 850 changes of a history whose profile counts 400. The
+  share is the part of the history's changes that the column's transitions do not count. Neither count holds
+  the endings an end marker forces, one for each entity that ends, those that begin on the marker too. It is
+  written only past the rounding the release declares and where every count it needs is published. A history
+  whose column moves in as many changes as the history has keeps its bytes. ADR 0017 amendment of 2026-11-27.
 
 ## 0.13.1 - 2026-11-28
 

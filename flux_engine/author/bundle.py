@@ -3145,6 +3145,7 @@ def _histories(
     fractional_bits: int,
     published: Published,
     declined: Optional[str] = None,
+    rounding_base: int = 1,
 ) -> _Histories:
     """Write the ``history`` entry of each written expose whose profile table publishes one.
 
@@ -3173,6 +3174,7 @@ def _histories(
             window=window,
             minimum_cell=minimum_cell,
             fractional_bits=fractional_bits,
+            rounding_base=rounding_base,
             set_by_rules=frozenset(expose.derives) | frozenset(expose.copies) | expose.dependents,
             dependents=frozenset(expose.dependents - set(expose.derives) - set(expose.copies)),
             parents=reads.candidates(expose.expose_id, held),
@@ -4624,7 +4626,13 @@ def _history_cited(
             found.append((member, None, (derived or {})[member]))
         elif member[0] in entry:
             found.append((member, base + (statistic,), how))
-    for index, tracked in enumerate(entry.get("tracked", ())):
+    tracked_columns = entry.get("tracked", ())
+    if "untracked" in entry and len(tracked_columns) == 1:
+        # The share is the changes the one column's moves leave over: its transitions give the moves
+        # (the entry's versions per entity give the changes, which the register cannot cite as well).
+        moves = base + ("columns", str(tracked_columns[0]["column"]), "transitions")
+        found.append((("untracked",), moves, "the share of changes that move no tracked column"))
+    for index, tracked in enumerate(tracked_columns):
         where = base + ("columns", str(tracked["column"]))
         for key, how in (
             ("initial", "the level a first version takes"),
@@ -5235,6 +5243,7 @@ def _histories_and_projections(
         fractional_bits=planned.reading.fractional_bits,
         published=published,
         declined=declined[0],
+        rounding_base=_rounding_base(planned.reading.profile),
     )
     projections = _projections(planned, histories, published, declined[1], window)
     return histories, projections
