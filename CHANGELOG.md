@@ -48,12 +48,23 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   before they started. The entry now stays, as it does beside a statistic that is read: the members the reader needs of
   it are not listed, and the others are listed one by one. Each statistic keeps the state the rules gave it, and for
   this shape a release cut by the list gives the same bundle as the whole profile. Because those members are no longer
-  listed, an `--allow` naming the history entry now accepts nothing and can be removed. Other shapes of the 0.13.0
-  known issue remain: a relationship's statistic of a table projected from a history, and a sentinel open end.
+  listed, an `--allow` naming the history entry now accepts nothing and can be removed.
 - `init` listed the published maximum of a key column as unused when the key belongs to an emit projected from a
   history, though its presence is what has the column declare a range (the span of the key is then moved out to the
   bound of a committed state, which hid the reading). A release made by dropping the listed statistic lost the range.
   The maximum is now read, and not listed.
+- `init` listed statistics as unused that decide how a table is written, so a release made by dropping the listed
+  statistics gave another bundle. This closes three shapes, and other shapes of the known issue remain.
+  - A relationship's histogram of children per parent over an emit projected from a history. The count is refused and
+    given to no history parent (the history writes its own, or the emit counts events or periods), but its presence
+    has the emit's foreign key follow the history in place of being drawn over the span of the key it references. The
+    histogram is now read and not listed; a mean beside it decides nothing and stays listed.
+  - A table of foreign keys and nothing else whose counts take every key off its own draw is left with no column to
+    declare and is not written, and without the counts it would be. The histogram of each such count is now read.
+  - A date pair that dates a child date by a `within` entry can have the plan ask for the date's declared range to
+    be widened, and the next pass may lay the table's lifetime out over that date in place of the entry (an open end
+    in the year 9999 is the usual case); the range stays widened, but the pair was listed as unused. The statistics of
+    the entry that asked for the widening are now read. Such a statistic decides as a pair with its order, not alone.
 
 ## 0.13.0 - 2026-11-27
 

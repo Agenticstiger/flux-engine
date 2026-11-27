@@ -33,6 +33,7 @@ from decimal import Decimal
 from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from flux_engine.author.basis import Label, assumed
+from flux_engine.author.children import children_histogram_pointer
 from flux_engine.author.columns import ColumnPlan
 from flux_engine.author.history import (
     Published,
@@ -761,6 +762,12 @@ _KEPT = (
 )
 
 
+#: Why a count no layout takes is still read: its presence decides how the emit's key is written.
+_KEY_FOLLOWS_COUNT = (
+    "its presence has the emit's foreign key follow the history, with no draw declared over the "
+    "span of the key it references"
+)
+
 _NOT_ENTITIES = (
     "its children per parent count events or periods, not entities, and the history's parent "
     "takes entities per parent"
@@ -855,9 +862,11 @@ def release_counts(
     stays a projection and the entry is dropped. When the history of the emit has a ``parent``
     under the same parent expose and no ``children`` of its own, and the emit is a snapshot (one
     row per entity, so its children per parent are entities per parent), the entry's ``children``
-    (and ``minChildren``, when the parent has none) become the parent's; otherwise the statistic is
-    unused, with why. An events or periodic emit counts events or periods per parent, so its
-    statistic is never given to the parent. *published* holds the profile's relationships and the lists its layout made
+    (and ``minChildren``, when the parent has none) become the parent's; otherwise the entry is
+    given to no one, with why. An events or periodic emit counts events or periods per parent, so
+    its statistic is never given to the parent. A count given to no parent is still read: its
+    histogram is what has the emit's foreign key follow the history, so it is listed as used, and
+    the statistics beside it (a mean) as unused. *published* holds the profile's relationships and the lists its layout made
     of them, changed in place; *histories* are the ``history`` entries. Returns each
     ``(emit, column)`` whose foreign key the counted layout no longer sets.
     """
@@ -917,7 +926,11 @@ def _move_statistic(
     parent: Optional[Dict[str, Any]],
     sentence: str,
 ) -> None:
-    """Say, in *lists*, where the profile's statistics of a relationship went: *parent* took them, or none did."""
+    """Say, in *lists*, where the profile's statistics of a relationship went: *parent* took them, or none did.
+
+    Without a *parent* the histogram of the count stays read, for its part in how the emit's key
+    is written, and its other statistics are unused.
+    """
     _, used, unused, records, _ = lists
     tokens, entry = published
     size = len(tokens)
@@ -933,8 +946,16 @@ def _move_statistic(
         records.append((tokens + ("structural",), said))
     if parent is not None:
         used += [(pointer, sentence) for pointer, _ in gone]
-    else:
-        unused += [(pointer, sentence) for pointer, _ in gone]
+        return
+    # Refused and given to no parent, the histogram is still what has the emit's key follow the
+    # history in place of a draw of its own (:func:`follow_history`), so it stays read; a mean
+    # beside it decides nothing and stays unused.
+    decides = children_histogram_pointer(entry, tokens)
+    for pointer, _ in gone:
+        if tuple(pointer) == decides:
+            used.append((pointer, f"{sentence}; {_KEY_FOLLOWS_COUNT}"))
+        else:
+            unused.append((pointer, sentence))
 
 
 #: Why the children per entity of the relationship a projection reads its history through are unused.
