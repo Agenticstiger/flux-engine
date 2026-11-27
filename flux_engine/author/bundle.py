@@ -3186,9 +3186,7 @@ def _histories(
             result.entries.append(written.entry)
             _ended_status(expose, written.entry)
             restate_assumptions(expose)
-            kept_out = _drop_filled_key_scores(expose, held, written.entry)
-            if kept_out is not None:
-                result.notes.append((f"{expose.expose_id}: history key", kept_out))
+            result.notes.extend(_drop_filled_key_scores(expose, held, written.entry))
             reads.release(expose.expose_id, written)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)
             result.derived[expose.expose_id] = dict(written.derived)
@@ -3228,7 +3226,7 @@ def _filled_sentence(filled: Sequence[int]) -> str:
 
 def _drop_filled_key_scores(
     expose: AuthoredExpose, held: Optional[ExposeKeys], entry: Mapping[str, Any]
-) -> Optional[str]:
+) -> List[Tuple[str, str]]:
     """Leave out the properties that score a history's natural key over its rows, once filled.
 
     The layout shares the entities over the key's bins by their weights and gives a bin that
@@ -3237,21 +3235,21 @@ def _drop_filled_key_scores(
     publishes for it. A property that scores the key's histogram or its mean over the rows would
     fail by construction. The key keeps its bins and binWeights, which the layout reads, so the
     histogram stays used, and a published mean stays read by the check of the histogram. The
-    expose says why, in the sentence returned. An expose left with no property takes the first
-    column's assumed check, as :func:`_finish_expose` does.
+    note returned says why. An expose left with no property takes the first column's assumed
+    check, as :func:`_finish_expose` does.
     """
     natural = tuple(item.column for item in held.entities if item.kind == "natural") if held else ()
     entities = entry.get("entities")
     if len(natural) != 1 or not isinstance(entities, int) or natural[0] not in expose.contexts:
-        return None
+        return []
     plan = next((item for item in expose.columns if item.name == natural[0]), None)
     if plan is None:
-        return None
+        return []
     column = expose.contexts[natural[0]].column
     filled = filled_key_bins(column, {"columns": {plan.name: plan.declaration}}, entities)
     own = [item for item in plan.properties if _scores_rows_of(item, plan.name)]
     if not filled or not own:
-        return None
+        return []
     plan.properties = [item for item in plan.properties if item not in own]
     expose.properties = [item for item in expose.properties if item not in own]
     if not expose.properties:
@@ -3262,7 +3260,7 @@ def _drop_filled_key_scores(
                 expose.properties = [fallback]
                 expose.assumptions.extend((other.name, text) for text in other.assumptions[before:])
                 break
-    return _filled_sentence(filled)
+    return [(f"{expose.expose_id}: history key", _filled_sentence(filled))]
 
 
 def _scores_rows_of(prop: PropertyPlan, column: str) -> bool:

@@ -55,8 +55,13 @@ def plan_written(tmp_path: Path, profile: str = "plans.profile.json") -> None:
     assert outcome.success, outcome.stderr
 
 
-def applied_and_verified(tmp_path: Path, profile: str = "plans.profile.json") -> None:
-    """The bundle validates, plans under kernel 0.2.0, applies and verifies."""
+def applied_and_verified(
+    tmp_path: Path, profile: str = "plans.profile.json", *, scored: bool = False
+) -> None:
+    """The bundle validates, plans under kernel 0.2.0, applies and verifies.
+
+    With *scored*, ``verify`` also scores the run against the profile.
+    """
     bundle, state = tmp_path / "bundle", tmp_path / "state"
     assert validate(bundle).exit_code == 0
     planned = plan(bundle, state_dir=state, profile=tmp_path / profile, kernel="0.2.0", stage=False)
@@ -64,7 +69,9 @@ def applied_and_verified(tmp_path: Path, profile: str = "plans.profile.json") ->
     run_id = str(planned.artifacts["run_id"])
     applied = apply(bundle, state_dir=state, run_id=run_id)
     assert applied.success, applied.stderr
-    checked = verify(bundle, state_dir=state, run_id=run_id)
+    checked = verify(
+        bundle, state_dir=state, run_id=run_id, profile=tmp_path / profile if scored else None
+    )
     assert checked.success, checked.stdout + checked.stderr
 
 

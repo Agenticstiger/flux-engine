@@ -20,10 +20,6 @@ from typing import Any, Dict, List
 import pytest
 import yaml
 
-from flux_engine.stages.apply import apply
-from flux_engine.stages.plan import plan
-from flux_engine.stages.verify import verify
-
 from ._written import applied_and_verified, emitted_rows
 from .test_history_init import (
     HISTORY,
@@ -76,26 +72,6 @@ def test_the_written_bundle_plans_generates_and_verifies(tmp_path: Path) -> None
     ids = sorted({row[1] for row in rows})
     assert len(ids) == 1000
     assert sum(1 for key in ids if key <= 100) == 100
-
-
-def _verified_with_profile(tmp_path: Path) -> None:
-    """Plan, generate and verify the written bundle, scoring it against the profile."""
-    bundle, state = tmp_path / "bundle", tmp_path / "state"
-    planned = plan(
-        bundle,
-        state_dir=state,
-        profile=tmp_path / "plans.profile.json",
-        kernel="0.2.0",
-        stage=False,
-    )
-    assert planned.success, planned.stderr
-    run_id = str(planned.artifacts["run_id"])
-    applied = apply(bundle, state_dir=state, run_id=run_id)
-    assert applied.success, applied.stderr
-    checked = verify(
-        bundle, state_dir=state, run_id=run_id, profile=tmp_path / "plans.profile.json"
-    )
-    assert checked.success, checked.stdout + checked.stderr
 
 
 def _key_properties(tmp_path: Path, kind: str = "marginalHistogram") -> List[Dict[str, Any]]:
@@ -157,7 +133,7 @@ def test_a_filled_key_does_not_score_its_histogram(tmp_path: Path) -> None:
 
 def test_a_filled_key_verifies_against_the_profile(tmp_path: Path) -> None:
     _init(tmp_path, _binned([600, 1250]))
-    _verified_with_profile(tmp_path)
+    applied_and_verified(tmp_path, scored=True)
 
 
 def test_a_key_whose_bins_fit_keeps_its_histogram_property(tmp_path: Path) -> None:
@@ -165,7 +141,7 @@ def test_a_key_whose_bins_fit_keeps_its_histogram_property(tmp_path: Path) -> No
     _init(tmp_path, _binned([185, 1665]))
     (kept,) = _key_properties(tmp_path)
     assert kept["bins"] == EDGES
-    _verified_with_profile(tmp_path)
+    applied_and_verified(tmp_path, scored=True)
 
 
 def test_a_filled_key_does_not_score_its_mean_over_the_versions(tmp_path: Path) -> None:
@@ -177,11 +153,11 @@ def test_a_filled_key_does_not_score_its_mean_over_the_versions(tmp_path: Path) 
     entry = _states(result)["/tables/plan_version/columns/plan_id/statistics/1"]
     assert entry["state"] == "used"
     assert "checked against the histogram" in entry["note"]
-    _verified_with_profile(tmp_path)
+    applied_and_verified(tmp_path, scored=True)
 
 
 def test_a_key_whose_bins_fit_keeps_its_mean_property(tmp_path: Path) -> None:
     _init(tmp_path, _binned([185, 1665], mean=500))
     (kept,) = _key_properties(tmp_path, "mean")
     assert kept["column"] == "plan_id"
-    _verified_with_profile(tmp_path)
+    applied_and_verified(tmp_path, scored=True)
