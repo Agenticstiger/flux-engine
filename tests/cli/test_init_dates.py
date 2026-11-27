@@ -1398,6 +1398,23 @@ def test_a_child_date_whose_range_starts_after_the_parent_does_gets_a_widened_ra
     assert any("400 of 400" in row for row in lines), lines
 
 
+def _publish_paid_histogram(profile: Dict[str, Any]) -> None:
+    """Give the invoice's ``paid_at`` a published histogram, so its table keeps a property to verify."""
+    paid = _stamp()
+    paid["statistics"] = [
+        _histogram([START + step * 100 * DAY for step in range(4)] + [END], (90, 110, 120, 80))
+    ]
+    profile["tables"]["invoice"]["columns"]["paid_at"] = paid
+
+
+def _publish_issued_histogram(profile: Dict[str, Any], first: int, days: int, high: int) -> None:
+    """Give the invoice's ``issued_at`` a published histogram of four bins of *days* days from *first*."""
+    edges = [first + step * days * DAY for step in range(5)]
+    column = _stamp(first, high)
+    column["statistics"] = [_histogram(edges, (100, 120, 100, 80))]
+    profile["tables"]["invoice"]["columns"]["issued_at"] = column
+
+
 def _published_histogram_profile(*, other: bool) -> Dict[str, Any]:
     """The late-child profile with a ``marginalHistogram/1`` of the child date it widens.
 
@@ -1405,17 +1422,9 @@ def _published_histogram_profile(*, other: bool) -> Dict[str, Any]:
     ``verify`` can compare when the widened date loses its own.
     """
     profile = _late_child_profile()
-    low = START + 100 * DAY
-    edges = [low + step * 65 * DAY for step in range(5)]
-    column = _stamp(low, END)
-    column["statistics"] = [_histogram(edges, (100, 120, 100, 80))]
-    profile["tables"]["invoice"]["columns"]["issued_at"] = column
+    _publish_issued_histogram(profile, START + 100 * DAY, 65, END)
     if other:
-        paid = _stamp()
-        paid["statistics"] = [
-            _histogram([START + step * 100 * DAY for step in range(4)] + [END], (90, 110, 120, 80))
-        ]
-        profile["tables"]["invoice"]["columns"]["paid_at"] = paid
+        _publish_paid_histogram(profile)
     return profile
 
 
@@ -1807,3 +1816,637 @@ def test_a_profile_without_exposure_members_gives_the_bytes_it_gave_before(tmp_p
         assert (first.directory / name).read_bytes().replace(
             first.profile_path.name.encode(), b"P"
         ) == (second.directory / name).read_bytes().replace(second.profile_path.name.encode(), b"P")
+
+
+def _dated_by_a_month_count(low_month: int = 0, high_month: int = 11, ranged: bool = True) -> str:
+    """The contract with the invoice date a DATE, and a month count derived from it.
+
+    The count is the months from 2024-03-01 to the date and, when *ranged*, is declared between
+    *low_month* and *high_month*: that bounds the date to the days whose count is inside.
+    """
+    rule = (
+        f"      validationRules:\n      - type: range\n"
+        f"        constraint: between {low_month} and {high_month}\n"
+        if ranged
+        else ""
+    )
+    return CONTRACT.replace(
+        "    - name: issued_at\n      type: TIMESTAMP\n",
+        "    - name: issued_at\n      type: DATE\n",
+    ).replace(
+        "    - name: paid_at\n      type: TIMESTAMP\n  semantics:",
+        "    - name: paid_at\n      type: TIMESTAMP\n    - name: months_in\n      type: INT\n"
+        f"      required: true\n{rule}"
+        "    invariants:\n    - id: invoice_months_in\n      derive: months_in\n"
+        "      expr: MONTHS_BETWEEN(DATE '2024-03-01', issued_at)\n  semantics:",
+    )
+
+
+def test_a_child_date_is_not_widened_past_the_days_a_derive_over_it_keeps_in_range(
+    tmp_path: Path,
+) -> None:
+    # The late-child profile: the plan would lower the invoice date's minimum to the first day a
+    # customer starts, 2023-11-14. The month count derived from it is declared between 0 and 11
+    # from 2024-03-01, which keeps the dates from the start of February 2024 to the end of February
+    # 2025, so a date in November 2023 would write the count outside its range: no entry dates the
+    # column, and its range keeps the start it was published with.
+    contract = _dated_by_a_month_count()
+    assert contract != CONTRACT
+    profile = _late_child_profile()
+    profile["tables"]["invoice"]["columns"]["months_in"] = {"domain": "number"}
+    unbounded = _written(tmp_path / "unbounded", profile, _dated_by_a_month_count(ranged=False))
+    assert [item for item in unbounded.within if item.get("date") == "issued_at"]
+    column = unbounded.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert column["range"]["min"].startswith(_iso(START)[:10])  # widened where nothing bounds it
+    written = _written(tmp_path / "bounded", profile, contract)
+    assert not [item for item in written.within if item.get("date") == "issued_at"]
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert column["range"]["min"].startswith(_iso(START + 100 * DAY)[:10])
+    reasons = written.unused("/relationships/0/dates/0")
+    assert reasons and all("the days the derive over it keeps in range" in item for item in reasons)
+    state = tmp_path / "state"
+    planned = plan_stage(
+        str(written.directory), state_dir=str(state), profile=str(written.profile_path)
+    )
+    assert planned.exit_code == 0, planned.stderr
+    run_id = str(planned.artifacts["run_id"])
+    applied = apply_stage(written.directory, state_dir=state, run_id=run_id)
+    assert applied.success, applied.stderr
+    rows = run_rows(RunLayout.for_state_dir(state, run_id), "invoice")
+    assert rows and all(0 <= row["months_in"] <= 11 for row in rows)
+
+
+def _dated_by_a_day_count(expression: str, constraint: str) -> str:
+    """The contract with the invoice date a DATE, and a day count derived from it by *expression*.
+
+    The count is declared by the range rule *constraint*, which bounds the date to the days whose
+    count the rule keeps.
+    """
+    return CONTRACT.replace(
+        "    - name: issued_at\n      type: TIMESTAMP\n",
+        "    - name: issued_at\n      type: DATE\n",
+    ).replace(
+        "    - name: paid_at\n      type: TIMESTAMP\n  semantics:",
+        "    - name: paid_at\n      type: TIMESTAMP\n    - name: day_gap\n      type: INT\n"
+        "      required: true\n      validationRules:\n      - type: range\n"
+        f"        constraint: '{constraint}'\n"
+        "    invariants:\n    - id: invoice_day_gap\n      derive: day_gap\n"
+        f"      expr: {expression}\n  semantics:",
+    )
+
+
+def _day(milliseconds: int) -> str:
+    return _iso(milliseconds)[:10]
+
+
+def _issued_range(written: Written) -> Dict[str, str]:
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert isinstance(column["range"], dict)
+    return column["range"]
+
+
+def _late_child_with_a_gap() -> Dict[str, Any]:
+    profile = _late_child_profile()
+    profile["tables"]["invoice"]["columns"]["day_gap"] = {"domain": "number"}
+    return profile
+
+
+def test_a_derive_that_keeps_the_day_the_widening_reaches_leaves_the_entry_and_widens_the_start(
+    tmp_path: Path,
+) -> None:
+    # The plan lowers the date's minimum to the first day a customer starts. A day count from that
+    # very day, kept at zero or more, keeps that day in range: the entry is written, the range
+    # starts there.
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(DATE '{_day(START)}', issued_at)", ">= 0")
+    written = _written(tmp_path, _late_child_with_a_gap(), contract)
+    assert [item for item in written.within if item.get("date") == "issued_at"]
+    assert _issued_range(written)["min"] == _day(START)
+
+
+def test_a_derive_that_keeps_one_day_less_than_the_widening_reaches_leaves_the_entry_out(
+    tmp_path: Path,
+) -> None:
+    # The same count kept at one or more drops the first day the widening needs: the entry is left
+    # out and the range keeps the minimum it was published with.
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(DATE '{_day(START)}', issued_at)", ">= 1")
+    written = _written(tmp_path, _late_child_with_a_gap(), contract)
+    assert not [item for item in written.within if item.get("date") == "issued_at"]
+    assert _issued_range(written)["min"] == _day(START + 100 * DAY)
+    reasons = written.unused("/relationships/0/dates/0")
+    assert reasons and all("the days the derive over it keeps in range" in item for item in reasons)
+
+
+def _early_parent_profile() -> Dict[str, Any]:
+    """Parents start until a hundred days after the child date's last day: the plan raises its maximum."""
+    link = _link_pair("signed_up", "issued_at", _levels(after=300, before=0, same=100))
+    profile = _profile(links=[link])
+    profile["tables"]["customer"]["columns"]["signed_up"] = _stamp(START, END + 100 * DAY)
+    profile["tables"]["invoice"]["columns"]["day_gap"] = {"domain": "number"}
+    return profile
+
+
+def test_a_derive_that_keeps_the_day_the_widening_raises_the_maximum_to_keeps_the_entry(
+    tmp_path: Path,
+) -> None:
+    last = END + 100 * DAY
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(issued_at, DATE '{_day(last)}')", ">= 0")
+    written = _written(tmp_path, _early_parent_profile(), contract)
+    assert [item for item in written.within if item.get("date") == "issued_at"]
+    assert _issued_range(written)["max"] == _day(last)
+
+
+def test_a_derive_that_keeps_a_day_less_than_the_widening_raises_the_maximum_to_leaves_it_out(
+    tmp_path: Path,
+) -> None:
+    last = END + 100 * DAY
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(issued_at, DATE '{_day(last - DAY)}')", ">= 0")
+    written = _written(tmp_path, _early_parent_profile(), contract)
+    assert not [item for item in written.within if item.get("date") == "issued_at"]
+    assert _issued_range(written)["max"] == _day(END)
+
+
+DAY_ZERO = START - START % DAY
+
+
+def _histogram_profile(*, other: bool = True) -> Dict[str, Any]:
+    """A profile with no date pair, whose invoice dates publish a histogram of four bins of sixty days.
+
+    The histogram's outer edges are its range, ``DAY_ZERO`` to two hundred and forty days after it.
+    With *other*, ``paid_at`` publishes a histogram too, so the table keeps a property to verify.
+    """
+    profile = _profile()
+    _publish_issued_histogram(profile, DAY_ZERO, 60, DAY_ZERO + 240 * DAY)
+    profile["tables"]["invoice"]["columns"]["day_gap"] = {"domain": "number"}
+    if other:
+        _publish_paid_histogram(profile)
+    return profile
+
+
+def _issued_edges(written: Written) -> List[str]:
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    return [str(edge) for edge in column["bins"]]
+
+
+def _issued_properties(written: Written) -> List[str]:
+    fidelity = written.block["emits"]["invoice"]["fidelity"]
+    return [
+        item["column"] for item in fidelity["properties"] if item["property"] == "marginalHistogram"
+    ]
+
+
+def test_a_histogram_end_past_the_days_a_derive_keeps_is_cut_to_the_last_of_them(
+    tmp_path: Path,
+) -> None:
+    # No entry moves the range: its end is the histogram's last edge, a day the count over it
+    # does not keep. The range ends on the last day kept, the draw's last edge with it, and the
+    # histogram property that could not partition the cut is left out.
+    first, last = DAY_ZERO, DAY_ZERO + 240 * DAY
+    contract = _dated_by_a_day_count(
+        f"DAYS_BETWEEN(issued_at, DATE '{_day(last - 10 * DAY)}')", ">= 0"
+    )
+    written = _written(tmp_path, _histogram_profile(), contract)
+    assert _issued_range(written) == {"min": _day(first), "max": _day(last - 10 * DAY)}
+    assert _issued_edges(written)[-1] == _day(last - 10 * DAY)
+    assert _issued_properties(written) == ["paid_at"]
+    verified = _verified(written, tmp_path)
+    assert not _issued_at_refusals(verified), verified.stdout
+    assert "fidelity invoice: passed" in verified.stdout
+
+
+def test_a_histogram_end_on_the_last_day_a_derive_keeps_keeps_its_bytes(tmp_path: Path) -> None:
+    last = DAY_ZERO + 240 * DAY
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(issued_at, DATE '{_day(last)}')", ">= 0")
+    written = _written(tmp_path, _histogram_profile(), contract)
+    assert _issued_range(written)["max"] == _day(last)
+    assert _issued_edges(written)[-1] == _day(last)
+    assert _issued_properties(written) == ["issued_at", "paid_at"]
+
+
+def test_a_histogram_start_before_the_days_a_derive_keeps_is_cut_to_the_first_of_them(
+    tmp_path: Path,
+) -> None:
+    first = DAY_ZERO + 10 * DAY
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(DATE '{_day(first)}', issued_at)", ">= 0")
+    written = _written(tmp_path, _histogram_profile(), contract)
+    assert _issued_range(written)["min"] == _day(first)
+    assert _issued_edges(written)[0] == _day(first)
+    assert _issued_properties(written) == ["paid_at"]
+
+
+def test_a_cut_across_whole_bins_keeps_the_bins_inside_it(tmp_path: Path) -> None:
+    last = DAY_ZERO + 100 * DAY  # inside the second bin: the third and fourth are cut off
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(issued_at, DATE '{_day(last)}')", ">= 0")
+    written = _written(tmp_path, _histogram_profile(), contract)
+    assert _issued_range(written)["max"] == _day(last)
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert _issued_edges(written)[-1] == _day(last)
+    assert len(column["binWeights"]) == len(column["bins"]) - 1
+    assert _issued_properties(written) == ["paid_at"]
+    verified = _verified(written, tmp_path)
+    assert not _issued_at_refusals(verified), verified.stdout
+
+
+# -- a cut that leaves a day or none, and one that reaches into a bin ------------------------------
+
+
+def _register_entry(written: Written, pointer_suffix: str) -> Dict[str, Any]:
+    """The register's entry at the pointer that ends with *pointer_suffix*."""
+    entries = written.block["parameters"]
+    return dict(next(item for item in entries if str(item["pointer"]).endswith(pointer_suffix)))
+
+
+def _said_in_the_output(written: Written, text: str) -> bool:
+    return text in written.result.stdout
+
+
+def _a_single_day_keeps_the_range(tmp_path: Path, expression: str, constraint: str) -> Written:
+    """Write the histogram profile under a derive that keeps one day, and check what is written."""
+    last = DAY_ZERO + 240 * DAY
+    contract = _dated_by_a_day_count(expression, constraint)
+    written = _written(tmp_path, _histogram_profile(), contract)
+    assert _issued_range(written) == {"min": _day(DAY_ZERO), "max": _day(last)}
+    assert len(_issued_edges(written)) == 5
+    assert _issued_properties(written) == ["issued_at", "paid_at"]
+    assert _said_in_the_output(written, "keep at most one day of the range")
+    verified = _verified(written, tmp_path)
+    assert not _issued_at_refusals(verified), verified.stdout
+    assert "fidelity invoice: passed" in verified.stdout
+    return written
+
+
+def test_a_derive_that_keeps_one_day_inside_the_range_keeps_the_range_as_published(
+    tmp_path: Path,
+) -> None:
+    day = _day(DAY_ZERO + 100 * DAY)
+    _a_single_day_keeps_the_range(
+        tmp_path, f"DAYS_BETWEEN(issued_at, DATE '{day}')", "between 0 and 0"
+    )
+
+
+def test_a_derive_that_keeps_only_the_last_day_of_the_range_keeps_the_range_as_published(
+    tmp_path: Path,
+) -> None:
+    last = _day(DAY_ZERO + 240 * DAY)
+    _a_single_day_keeps_the_range(tmp_path, f"DAYS_BETWEEN(DATE '{last}', issued_at)", ">= 0")
+
+
+def test_a_derive_that_keeps_only_the_first_day_of_the_range_keeps_the_range_as_published(
+    tmp_path: Path,
+) -> None:
+    first = _day(DAY_ZERO)
+    _a_single_day_keeps_the_range(tmp_path, f"DAYS_BETWEEN(issued_at, DATE '{first}')", ">= 0")
+
+
+def _a_derive_outside_the_range_keeps_it(tmp_path: Path, expression: str, constraint: str) -> None:
+    contract = _dated_by_a_day_count(expression, constraint)
+    written = _written(tmp_path, _histogram_profile(), contract)
+    assert _issued_range(written) == {"min": _day(DAY_ZERO), "max": _day(DAY_ZERO + 240 * DAY)}
+    assert _issued_properties(written) == ["issued_at", "paid_at"]
+    assert _said_in_the_output(written, "the range stays as published")
+    refused = run_init(
+        str(tmp_path / "strict"),
+        contract=str(tmp_path / "dated.fluid.yaml"),
+        profile=str(written.profile_path),
+        strict=True,
+    )
+    assert refused.exit_code != 0
+    assert "the range stays as published" in refused.stderr + refused.stdout
+    verified = _verified(written, tmp_path)
+    assert not _issued_at_refusals(verified), verified.stdout
+
+
+def test_a_derive_that_keeps_days_after_the_range_keeps_the_range_as_published(
+    tmp_path: Path,
+) -> None:
+    after = _day(DAY_ZERO + 300 * DAY)
+    _a_derive_outside_the_range_keeps_it(
+        tmp_path, f"DAYS_BETWEEN(DATE '{after}', issued_at)", ">= 0"
+    )
+
+
+def test_a_derive_that_keeps_days_before_the_range_keeps_the_range_as_published(
+    tmp_path: Path,
+) -> None:
+    before = _day(DAY_ZERO - 30 * DAY)
+    _a_derive_outside_the_range_keeps_it(
+        tmp_path, f"DAYS_BETWEEN(issued_at, DATE '{before}')", ">= 0"
+    )
+
+
+def _dated_by_two_day_counts(late: str, early: str) -> str:
+    """The contract with the invoice date a DATE, and two day counts derived from it.
+
+    The date is kept on or after *late* by the first count, and on or before *early* by the second.
+    """
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(DATE '{late}', issued_at)", ">= 0")
+    return contract.replace(
+        "    - name: day_gap\n      type: INT\n",
+        "    - name: day_back\n      type: INT\n      required: true\n"
+        "      validationRules:\n      - type: range\n        constraint: '>= 0'\n"
+        "    - name: day_gap\n      type: INT\n",
+    ).replace(
+        "    invariants:\n",
+        "    invariants:\n    - id: invoice_day_back\n      derive: day_back\n"
+        f"      expr: DAYS_BETWEEN(issued_at, DATE '{early}')\n",
+    )
+
+
+def test_two_derives_that_keep_no_day_in_common_keep_the_range_as_published(
+    tmp_path: Path,
+) -> None:
+    contract = _dated_by_two_day_counts(_day(DAY_ZERO + 50 * DAY), _day(DAY_ZERO + 20 * DAY))
+    profile = _histogram_profile()
+    profile["tables"]["invoice"]["columns"]["day_back"] = {"domain": "number"}
+    written = _written(tmp_path, profile, contract)
+    assert _issued_range(written) == {"min": _day(DAY_ZERO), "max": _day(DAY_ZERO + 240 * DAY)}
+    assert _issued_properties(written) == ["issued_at", "paid_at"]
+    assert _said_in_the_output(written, "keep no day in common")
+    verified = _verified(written, tmp_path)
+    assert not _issued_at_refusals(verified), verified.stdout
+
+
+def _kept_from(tmp_path: Path, days_in: int, *, other: bool = True) -> Written:
+    """The histogram profile under a derive that keeps the days from *days_in* days after the first."""
+    day = _day(DAY_ZERO + days_in * DAY)
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(DATE '{day}', issued_at)", ">= 0")
+    return _written(tmp_path, _histogram_profile(other=other), contract)
+
+
+def _kept_to(tmp_path: Path, days_in: int, *, other: bool = True) -> Written:
+    """The histogram profile under a derive that keeps the days up to *days_in* days after the first."""
+    day = _day(DAY_ZERO + days_in * DAY)
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(issued_at, DATE '{day}')", ">= 0")
+    return _written(tmp_path, _histogram_profile(other=other), contract)
+
+
+def _issued_weights(written: Written) -> List[str]:
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    return [str(weight) for weight in column["binWeights"]]
+
+
+def test_a_bin_the_cut_reaches_into_has_its_weight_scaled_by_the_share_of_its_days_kept(
+    tmp_path: Path,
+) -> None:
+    # Four bins of sixty days, weighing 100, 120, 100 and 80. The cut starts twenty days into the
+    # second: its forty days keep a third of it, so its weight is a third of 120.
+    written = _kept_from(tmp_path, 100)
+    assert _issued_edges(written) == [
+        _day(DAY_ZERO + 100 * DAY),
+        _day(DAY_ZERO + 120 * DAY),
+        _day(DAY_ZERO + 180 * DAY),
+        _day(DAY_ZERO + 240 * DAY),
+    ]
+    assert _issued_weights(written) == ["40", "100", "80"]
+    state = tmp_path / "state"
+    planned = plan_stage(
+        str(written.directory), state_dir=str(state), profile=str(written.profile_path)
+    )
+    assert planned.exit_code == 0, planned.stderr
+    applied = apply_stage(
+        written.directory, state_dir=state, run_id=str(planned.artifacts["run_id"])
+    )
+    assert applied.success, applied.stderr
+    rows = run_rows(RunLayout.for_state_dir(state, str(planned.artifacts["run_id"])), "invoice")
+    edge = DAY_ZERO + 120 * DAY
+    share = sum(1 for row in rows if _milliseconds_of(row["issued_at"]) < edge) / len(rows)
+    assert 0.10 < share < 0.27, share  # 40 of 220, not 120 of 300
+
+
+def _milliseconds_of(value: Any) -> int:
+    """A generated date as milliseconds since the epoch."""
+    if isinstance(value, str):
+        return parse_rfc3339_ms(value if "T" in value else f"{value}T00:00:00Z")
+    return int(value.toordinal() - 719163) * DAY
+
+
+def test_the_scaled_weight_is_an_assumption_and_the_whole_ones_stay_cited(tmp_path: Path) -> None:
+    written = _kept_from(tmp_path, 100)
+    scaled = _register_entry(written, "/issued_at/binWeights/0")
+    assert scaled["source"] == "assumption"
+    assert "scaled by the share of the bin's days that the cut keeps" in scaled["reason"]
+    assert not any(char.isdigit() for char in scaled["reason"])  # the reason holds no value
+    whole = _register_entry(written, "/issued_at/binWeights/1")
+    assert whole["source"] == "profile"
+    assert whole["statistic"]["pointer"].endswith("/binCounts/2")
+
+
+def test_a_cut_on_an_interior_edge_at_the_low_end_drops_the_bins_before_it(tmp_path: Path) -> None:
+    written = _kept_from(tmp_path, 60)
+    assert _issued_edges(written) == [_day(DAY_ZERO + step * 60 * DAY) for step in (1, 2, 3, 4)]
+    assert _issued_weights(written) == ["120", "100", "80"]
+    # The first bin that stays is the second of the profile: its weight cites that bin's count.
+    entry = _register_entry(written, "/issued_at/binWeights/0")
+    assert entry["source"] == "profile"
+    assert entry["statistic"]["pointer"].endswith("/binCounts/1")
+    last = _register_entry(written, "/issued_at/binWeights/2")
+    assert last["statistic"]["pointer"].endswith("/binCounts/3")
+
+
+def test_a_cut_on_an_interior_edge_at_the_high_end_drops_the_bins_after_it(tmp_path: Path) -> None:
+    written = _kept_to(tmp_path, 120)
+    assert _issued_edges(written) == [_day(DAY_ZERO + step * 60 * DAY) for step in (0, 1, 2)]
+    assert _issued_weights(written) == ["100", "120"]
+    assert _issued_range(written)["max"] == _day(DAY_ZERO + 120 * DAY)
+
+
+def test_a_cut_through_the_last_bin_scales_it_by_the_days_kept_counting_the_last(
+    tmp_path: Path,
+) -> None:
+    # Thirty days into the third bin keeps thirty-one of its sixty days.
+    written = _kept_to(tmp_path, 150)
+    assert _issued_edges(written)[-1] == _day(DAY_ZERO + 150 * DAY)
+    assert _issued_weights(written) == ["100", "120", "51.666666667"]
+
+
+def test_a_cut_is_said_in_the_ledger_and_in_the_output(tmp_path: Path) -> None:
+    from flux_engine.author.bundle import AuthorInputs, author_bundle
+
+    written = _kept_from(tmp_path, 100)
+    cut = "declared range cut to the days the contract's derives over the column keep in range"
+    authored = author_bundle(AuthorInputs(tmp_path / "dated.fluid.yaml", written.profile_path))
+    notes = [
+        entry.note
+        for entry in authored.ledger
+        if entry.tokens[:4] == ("tables", "invoice", "columns", "issued_at")
+    ]
+    assert any(cut in note for note in notes)
+    assert f"issued_at: {cut}" in written.result.stdout
+    assert "issued_at: the declared range was cut to the days a derive" in written.result.stdout
+    row = next(
+        line for line in written.result.stdout.splitlines() if line.startswith("  issued_at ")
+    )
+    assert "a histogram over 3 of 4 bins" in row and "cut to the days a derive keeps" in row
+
+
+def test_a_table_whose_only_histogram_property_is_on_the_cut_date_is_not_scored(
+    tmp_path: Path,
+) -> None:
+    written = _kept_from(tmp_path, 100, other=False)
+    fidelity = written.block["emits"]["invoice"]["fidelity"]
+    assert not [item for item in fidelity.get("properties", []) if item.get("column")]
+    verified = _verified(written, tmp_path)
+    assert "fidelity invoice: not scored" in verified.stdout
+
+
+def _trimmed_histogram_profile() -> Dict[str, Any]:
+    """The histogram profile whose date publishes a minimum and a maximum inside its outer edges.
+
+    The draw keeps to the published ends, thirty days in from the edges, while the declared range
+    is the histogram's whole grid.
+    """
+    profile = _histogram_profile()
+    column = _stamp(DAY_ZERO + 30 * DAY, DAY_ZERO + 210 * DAY)
+    column["statistics"] = profile["tables"]["invoice"]["columns"]["issued_at"]["statistics"]
+    profile["tables"]["invoice"]["columns"]["issued_at"] = column
+    return profile
+
+
+def test_a_cut_that_reaches_past_the_bins_the_draw_keeps_leaves_them_where_they_are(
+    tmp_path: Path,
+) -> None:
+    # The range is the grid, 0 to 240 days; the bins the draw keeps are 30 to 210. A derive that
+    # keeps the days from ten days in cuts the range to them, and no bin moves out to the cut.
+    day = _day(DAY_ZERO + 10 * DAY)
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(DATE '{day}', issued_at)", ">= 0")
+    written = _written(tmp_path, _trimmed_histogram_profile(), contract)
+    assert _issued_range(written)["min"] == day
+    assert _issued_edges(written)[0] == _day(DAY_ZERO + 30 * DAY)
+    assert _issued_edges(written)[-1] == _day(DAY_ZERO + 210 * DAY)
+    assert _issued_weights(written) == ["100", "120", "100", "80"]
+    last = _day(DAY_ZERO + 230 * DAY)
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(issued_at, DATE '{last}')", ">= 0")
+    written = _written(tmp_path / "high", _trimmed_histogram_profile(), contract)
+    assert _issued_range(written)["max"] == last
+    assert _issued_edges(written)[-1] == _day(DAY_ZERO + 210 * DAY)
+
+
+def test_a_cut_that_misses_every_bin_the_draw_keeps_leaves_the_draw_no_bins(
+    tmp_path: Path,
+) -> None:
+    # The days kept end twenty days in, before the first bin the draw keeps: the range is cut to
+    # them and the draw is even within it, with no bins and no histogram property to compare.
+    day = _day(DAY_ZERO + 20 * DAY)
+    contract = _dated_by_a_day_count(f"DAYS_BETWEEN(issued_at, DATE '{day}')", ">= 0")
+    written = _written(tmp_path, _trimmed_histogram_profile(), contract)
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert "bins" not in column and "binWeights" not in column
+    assert column["range"] == {"min": _day(DAY_ZERO), "max": day}
+    assert _issued_properties(written) == ["paid_at"]
+    assert not [item for item in written.block["unused"] if "issued_at" in str(item["statistic"])]
+    verified = _verified(written, tmp_path)
+    assert not _issued_at_refusals(verified), verified.stdout
+
+
+def _zero_weighted_profile(counts: Sequence[int]) -> Dict[str, Any]:
+    """The histogram profile whose four bins of sixty days weigh *counts*."""
+    profile = _histogram_profile()
+    edges = [DAY_ZERO + step * 60 * DAY for step in range(5)]
+    column = _stamp(DAY_ZERO, DAY_ZERO + 240 * DAY)
+    column["statistics"] = [_histogram(edges, counts)]
+    profile["tables"]["invoice"]["columns"]["issued_at"] = column
+    return profile
+
+
+def _a_cut_that_keeps_only_bins_of_no_weight_draws_evenly(
+    tmp_path: Path, counts: Sequence[int], expression: str, kept: Tuple[int, int]
+) -> None:
+    contract = _dated_by_a_day_count(expression, ">= 0")
+    written = _written(tmp_path, _zero_weighted_profile(counts), contract)
+    column = written.block["emits"]["invoice"]["fidelity"]["columns"]["issued_at"]
+    assert "bins" not in column and "binWeights" not in column
+    assert column["range"] == {
+        "min": _day(DAY_ZERO + kept[0] * DAY),
+        "max": _day(DAY_ZERO + kept[1] * DAY),
+    }
+    assert _said_in_the_output(written, "weigh nothing")
+    verified = _verified(written, tmp_path)
+    assert not _issued_at_refusals(verified), verified.stdout
+
+
+def test_a_cut_that_keeps_only_bins_of_no_weight_at_the_top_draws_evenly_within_it(
+    tmp_path: Path,
+) -> None:
+    day = _day(DAY_ZERO + 100 * DAY)
+    _a_cut_that_keeps_only_bins_of_no_weight_draws_evenly(
+        tmp_path, (0, 0, 100, 80), f"DAYS_BETWEEN(issued_at, DATE '{day}')", (0, 100)
+    )
+
+
+def test_a_cut_that_keeps_only_bins_of_no_weight_at_the_bottom_draws_evenly_within_it(
+    tmp_path: Path,
+) -> None:
+    day = _day(DAY_ZERO + 130 * DAY)
+    _a_cut_that_keeps_only_bins_of_no_weight_draws_evenly(
+        tmp_path, (100, 80, 0, 0), f"DAYS_BETWEEN(DATE '{day}', issued_at)", (130, 240)
+    )
+
+
+def test_an_edge_moved_by_a_cut_that_keeps_its_bin_whole_is_noted_on_its_statistic(
+    tmp_path: Path,
+) -> None:
+    from flux_engine.author.bundle import AuthorInputs, author_bundle
+
+    # The last day kept is the day before the last edge: the last bin keeps all its days, so its
+    # weight is as published, and only its edge moves.
+    written = _kept_to(tmp_path, 239)
+    assert _issued_edges(written)[-1] == _day(DAY_ZERO + 239 * DAY)
+    assert _issued_weights(written) == ["100", "120", "100", "80"]
+    authored = author_bundle(AuthorInputs(tmp_path / "dated.fluid.yaml", written.profile_path))
+    notes = [
+        entry.note
+        for entry in authored.ledger
+        if entry.tokens == ("tables", "invoice", "columns", "issued_at", "statistics", "0")
+    ]
+    assert any("declared range cut to the days" in note for note in notes), notes
+    (expose,) = [item for item in authored.exposes if item.expose_id == "invoice"]
+    (plan,) = [item for item in expose.columns if item.name == "issued_at"]
+    labels = {item.tokens: item.basis for item in plan.labels}
+    assert labels[("bins", "4")].source.value == "assumption"  # the moved edge
+    assert labels[("bins", "3")].source.value == "profile"  # an edge the cut leaves be
+
+
+def test_a_weight_scaled_by_a_cut_is_noted_on_its_statistic(tmp_path: Path) -> None:
+    from flux_engine.author.bundle import AuthorInputs, author_bundle
+
+    # The cut starts ten days into the first bin and drops none: the statistic's first note is the
+    # scaled weight's.
+    written = _kept_from(tmp_path, 10)
+    assert _issued_weights(written) == ["83.333333333", "120", "100", "80"]
+    authored = author_bundle(AuthorInputs(tmp_path / "dated.fluid.yaml", written.profile_path))
+    (note,) = [
+        entry.note
+        for entry in authored.ledger
+        if entry.tokens == ("tables", "invoice", "columns", "issued_at", "statistics", "0")
+    ]
+    assert "scaled by the share of the bin's days that the cut keeps" in note
+
+
+def test_two_derives_with_no_day_in_common_over_a_date_with_no_histogram_are_said_once(
+    tmp_path: Path,
+) -> None:
+    # A date the profile gives no distribution keeps its even draw, and the derives' own report
+    # says why: the range the profile publishes is not there to be kept as published.
+    contract = _dated_by_two_day_counts(_day(DAY_ZERO + 50 * DAY), _day(DAY_ZERO + 20 * DAY))
+    profile = _profile()
+    for name in ("day_gap", "day_back"):
+        profile["tables"]["invoice"]["columns"][name] = {"domain": "number"}
+    profile["tables"]["invoice"]["columns"]["issued_at"] = {"domain": "timestamp"}
+    written = _written(tmp_path, profile, contract)
+    output = written.result.stdout
+    assert "no date is inside the range of every derive" in output
+    assert "keep no day in common" not in output
+
+
+def test_a_range_inside_the_days_or_of_one_day_is_cut_to_itself_and_a_miss_is_no_cut() -> None:
+    day = 86_400_000
+    one = {"min": "2024-01-02", "max": "2024-01-02"}
+    wide = {"min": "2024-01-01", "max": "2024-01-31"}
+    first, last = 19_723 * day, 19_753 * day  # 2024-01-01 and 2024-01-31
+    assert authoring._cut_to(one, (19_724 * day, 19_724 * day)) == (19_724 * day, 19_724 * day)
+    assert authoring._cut_to(wide, (None, None)) == (first, last)
+    assert authoring._cut_to(wide, (first - day, last + day)) == (first, last)
+    assert authoring._cut_to(wide, (first + day, None)) == (first + day, last)
+    assert authoring._cut_to(wide, (None, last - day)) == (first, last - day)
+    assert authoring._cut_to(wide, (first + day, first + day)) is None
+    assert authoring._cut_to(wide, (last + day, None)) is None
+    assert authoring._cut_to(wide, (None, first - day)) is None

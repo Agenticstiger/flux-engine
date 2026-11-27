@@ -30,6 +30,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import ROUND_DOWN, Context, Decimal
 from fractions import Fraction
+from itertools import pairwise
 from pathlib import Path
 from typing import (
     Any,
@@ -94,6 +95,7 @@ from flux_engine.author.columns import (
     plan_column,
     recheck_key,
     share_texts,
+    weight_text,
     weighted_span,
     widen_key_span,
 )
@@ -127,7 +129,12 @@ from flux_engine.author.derived import (
     contract_pick_copies,
     numeric,
 )
-from flux_engine.author.derived_dates import bound_derived_dates
+from flux_engine.author.derived_dates import (
+    bound_derived_dates,
+    derived_instants,
+    derives_leave_no_day,
+    record_assumption,
+)
 from flux_engine.author.exact import EXACT_HOW, allot_small_tables
 from flux_engine.author.given import choose_givens
 from flux_engine.author.history import (
@@ -4775,6 +4782,7 @@ def _laid_out(
             )
         window, window_note, given_window = _bundle_window(planned, inputs)
         _widen_ranges(planned.authored, fallbacks.widened)
+        _hold_derived_ranges(planned.authored, planned.contract)
         if given_window is not None:
             _refuse_a_window_that_misses_ranges(planned, window, inputs, declared)
         written = _histories_and_projections(planned, window, declared, declined)
@@ -5613,9 +5621,12 @@ def _move_range_ends(declared: Dict[str, Any], kind: LogicalKind, low: int, high
 
 
 def _note_widened_range(
-    plan: ColumnPlan, declared: Mapping[str, Any], moved: Sequence[str]
+    plan: ColumnPlan,
+    declared: Mapping[str, Any],
+    moved: Sequence[str],
+    reason: str = _WIDENED_RANGE,
 ) -> None:
-    """Record that the ends in *moved* were widened: the labels, the used statistics, the span and the notes.
+    """Record that the ends in *moved* were widened, or cut (*reason*): the labels, the used statistics, the span and the notes.
 
     A label of the whole range is replaced by one of the whole range; a label of one end by one of
     that end. A statistic a replaced label cited is recorded as used, with the note.
@@ -5626,18 +5637,18 @@ def _note_widened_range(
         cited = [item for item in plan.labels if item.tokens == ("range", end)]
         for item in cited:
             if item.basis.statistic is not None:
-                plan.reads.append((item.basis.statistic[0], _WIDENED_RANGE))
+                plan.reads.append((item.basis.statistic[0], reason))
         labels = [item for item in labels if item.tokens != ("range", end)]
         if not whole:
-            labels.append(Label(("range", end), assumed(_WIDENED_RANGE)))
-    plan.labels = labels + ([Label(("range",), assumed(_WIDENED_RANGE))] if whole else [])
+            labels.append(Label(("range", end), assumed(reason)))
+    plan.labels = labels + ([Label(("range",), assumed(reason))] if whole else [])
     plan.published_range = (
         Decimal(_milliseconds(declared["min"])),
         Decimal(_milliseconds(declared["max"])),
     )
     plan.time_span = (_milliseconds(declared["min"]), _milliseconds(declared["max"]))
-    plan.assumptions.append(_WIDENED_RANGE)
-    plan.choices.append(_WIDENED_RANGE)
+    plan.assumptions.append(reason)
+    plan.choices.append(reason)
 
 
 _WIDENED_HISTOGRAM = (
@@ -5658,7 +5669,30 @@ def _drop_widened_histograms(
     property that could not be compared is left out, with the reason. An expose left with no
     property takes the first column's assumed check, as :func:`_finish_expose` does.
     """
-    dropped = []
+    dropped = _properties_on_moved_ends(plan, before, moved)
+    if not dropped:
+        return
+    _withdraw_properties(expose, plan, dropped)
+    plan.choices.append(_WIDENED_HISTOGRAM)
+    plan.assumptions.append(_WIDENED_HISTOGRAM)
+    if not expose.properties:
+        raise _WithinDeclined(
+            {
+                (expose.expose_id, plan.name): (
+                    "its child date's declared range would have to be widened to the parent's "
+                    "lifetime for the entry to plan (FLX-6204), and then no histogram of the "
+                    "column can be compared with the profile's (FLX-5037), which leaves the "
+                    "table no property to verify"
+                )
+            }
+        )
+
+
+def _properties_on_moved_ends(
+    plan: ColumnPlan, before: Mapping[str, Any], moved: Sequence[str]
+) -> List[PropertyPlan]:
+    """The scorable histogram properties of a column with an outer edge on a range end that moved."""
+    found = []
     for item in plan.properties:
         edges = item.document.get("bins")
         # A property the profile cannot score is refused by verify whatever its bins are.
@@ -5671,30 +5705,26 @@ def _drop_widened_histograms(
                 if end in moved
             )
         ):
-            dropped.append(item)
-    if not dropped:
-        return
+            found.append(item)
+    return found
+
+
+def _withdraw_properties(
+    expose: AuthoredExpose, plan: ColumnPlan, dropped: Sequence[PropertyPlan]
+) -> None:
+    """Leave *dropped* out of the column's properties and the expose's.
+
+    An expose left with no property takes the first column's assumed check, as
+    :func:`_finish_expose` does.
+    """
     plan.properties = [item for item in plan.properties if item not in dropped]
     expose.properties = [item for item in expose.properties if item not in dropped]
-    plan.choices.append(_WIDENED_HISTOGRAM)
-    plan.assumptions.append(_WIDENED_HISTOGRAM)
     if not expose.properties:
         for other in expose.columns:
             fallback = assumed_check(other, expose.kinds[other.name], scorable_only=True)
             if fallback is not None:
                 expose.properties = [fallback]
                 break
-    if not expose.properties:
-        raise _WithinDeclined(
-            {
-                (expose.expose_id, plan.name): (
-                    "its child date's declared range would have to be widened to the parent's "
-                    "lifetime for the entry to plan (FLX-6204), and then no histogram of the "
-                    "column can be compared with the profile's (FLX-5037), which leaves the "
-                    "table no property to verify"
-                )
-            }
-        )
 
 
 def _bin_holders(plan: ColumnPlan) -> List[Tuple[List[Any], List[Label]]]:
@@ -5724,14 +5754,250 @@ def _widen_edges(
                 _relabel_edge(plan, labels, str(position))
 
 
-def _relabel_edge(plan: ColumnPlan, labels: List[Label], position: str) -> None:
+def _relabel_edge(
+    plan: ColumnPlan, labels: List[Label], position: str, reason: str = _WIDENED_RANGE
+) -> None:
     """Label the bin edge at *position* as assumed, recording the statistic its old label cited."""
     token = ("bins", position)
     for label in [item for item in labels if item.tokens == token]:
         if label.basis.statistic is not None:
-            plan.reads.append((label.basis.statistic[0], _WIDENED_RANGE))
+            plan.reads.append((label.basis.statistic[0], reason))
     labels[:] = [item for item in labels if item.tokens != token]
-    labels.append(Label(token, assumed(_WIDENED_RANGE)))
+    labels.append(Label(token, assumed(reason)))
+
+
+_CUT_RANGE = (
+    "declared range cut to the days the contract's derives over the column keep in range, so no "
+    "row breaks the range of the column derived from it"
+)
+
+_CUT_HISTOGRAM = (
+    "the declared range was cut to the days a derive over the column keeps in range, so no "
+    "histogram of the column can partition it with the bins the profile publishes (FLX-5032); the "
+    "draw keeps the profile's shape inside the cut and no histogram property is written"
+)
+
+_CUT_WEIGHT = (
+    "the weight of a bin the declared range was cut into, scaled by the share of the bin's days "
+    "that the cut keeps"
+)
+
+_HELD_OUTSIDE = (
+    "the days a derive over the column keeps in range keep at most one day of the range "
+    "the profile publishes, or none of it, so the derive is not honoured: the range stays as published and the "
+    "column derived from it may fall outside its range on every row"
+)
+
+_CUT_NO_WEIGHT = (
+    "the bins the declared range was cut to weigh nothing, so no bin can be drawn: the bins are "
+    "left out and the draw is even within the cut range"
+)
+
+_HELD_NO_DAY = (
+    "the derives over the column keep no day in common, so they are not honoured: the range "
+    "stays as published and the columns derived from it may fall outside their ranges on every "
+    "row"
+)
+
+#: A day, in milliseconds.
+_DAY = 86_400_000
+
+
+def _hold_derived_ranges(
+    exposes: Sequence[AuthoredExpose], contract: Optional[Mapping[str, Any]]
+) -> None:
+    """Cut each date column's declared range to the days the contract's derives over it keep in range.
+
+    A ``derive`` that is a whole-unit difference between a date literal and the column, whose
+    derived column declares a ``range`` rule, keeps the column to the days where the difference
+    lies inside that range (:func:`flux_engine.author.derived_dates.derived_instants`): a row
+    outside them breaks the contract. A range written from a histogram ends on the histogram's
+    last edge, which the profile's own convention leaves out of the data and which a range counts
+    as a day; either end of the range that lies past those days is cut to them, whether or not a
+    widening moved it. A range inside them keeps its bytes. The draw's bins keep the profile's
+    shape inside the cut, and a histogram property, whose bins partition the range
+    (``FLX-5032``), is left out, with the reason. Days that leave the range fewer than two days,
+    or that no day holds, cut nothing, and the assumptions say so.
+    """
+    if contract is None:
+        return
+    for expose in exposes:
+        entry = _expose_entry(expose, contract)
+        if entry is None:
+            continue
+        for column in expose.columns:
+            if expose.kinds.get(column.name) is not LogicalKind.DATE:
+                continue
+            days = derived_instants(entry, expose.derives, expose.kinds, column.name)
+            if days is not None:
+                _hold_to(expose, column, days)
+            elif "bins" in column.declaration and derives_leave_no_day(
+                entry, expose.derives, expose.kinds, column.name
+            ):
+                record_assumption(expose, column, _HELD_NO_DAY)
+
+
+def _hold_to(
+    expose: AuthoredExpose, column: ColumnPlan, days: Tuple[Optional[int], Optional[int]]
+) -> None:
+    """Cut the declared range of date *column* to *days*, with its draw's bins and its properties."""
+    plan, kind, declared = _declared_range_of(expose, column, column.name)
+    if plan is None or kind is None or declared is None:
+        return
+    before = dict(declared)
+    cut = _cut_to(declared, days)
+    if cut is None:
+        record_assumption(expose, plan, _HELD_OUTSIDE)
+        return
+    low, high = cut
+    moved = _move_range_ends(declared, kind, low, high)
+    if not moved:
+        return
+    plan.declaration.setdefault("range", declared)
+    dropped = _properties_on_moved_ends(plan, before, moved)
+    if dropped:
+        _withdraw_properties(expose, plan, dropped)
+        plan.choices.append(_CUT_HISTOGRAM)
+        plan.assumptions.append(_CUT_HISTOGRAM)
+        expose.assumptions.append((plan.name, _CUT_HISTOGRAM))
+    if _cut_bins(plan, low, high):
+        plan.assumptions.append(_CUT_NO_WEIGHT)
+        expose.assumptions.append((plan.name, _CUT_NO_WEIGHT))
+    _note_widened_range(plan, declared, moved, _CUT_RANGE)
+    expose.assumptions.append((plan.name, _CUT_RANGE))
+
+
+def _cut_to(
+    declared: Mapping[str, Any], days: Tuple[Optional[int], Optional[int]]
+) -> Optional[Tuple[int, int]]:
+    """The declared range of a date, in milliseconds, held to *days*.
+
+    The range itself when it lies inside them. ``None`` when the days leave fewer than two days of
+    it, which is no range to cut to: days wholly outside the range, or a single day, so the range
+    stays as published.
+    """
+    low, high = _milliseconds(declared["min"]), _milliseconds(declared["max"])
+    first, last = days
+    cut_low = low if first is None else max(low, first)
+    cut_high = high if last is None else min(high, last)
+    if (cut_low, cut_high) == (low, high):
+        return low, high
+    return (cut_low, cut_high) if cut_low < cut_high else None
+
+
+def _cut_bins(plan: ColumnPlan, low: int, high: int) -> bool:
+    """Cut the draw's bins of a date column to *low* .. *high* (milliseconds), scaling the weights.
+
+    A bin the cut reaches into has its edge moved to the cut and its weight scaled by the share of
+    its days the cut keeps, the day *high* counted; a bin wholly outside it is left out. A cut
+    that leaves no bin of two distinct days, or only bins that weigh nothing once scaled, leaves
+    the draw no bins, and it draws evenly within the range. Returns whether the bins were left out
+    for their weight.
+    """
+    edges, weights = plan.declaration.get("bins"), plan.declaration.get("binWeights")
+    if (
+        not isinstance(edges, list)
+        or not isinstance(weights, list)
+        or len(weights) != len(edges) - 1
+    ):
+        return False
+    at = [_milliseconds(edge) for edge in edges]
+    # Bins that lie inside the cut are kept as they are.
+    low, high = max(low, at[0]), min(high, at[-1])
+    first = max((i for i in range(len(weights)) if at[i] <= low), default=0)
+    last = min((i for i in range(len(weights)) if at[i + 1] >= high), default=len(weights) - 1)
+    kept = [low, *at[first + 1 : last + 1], high]
+    shares = (
+        [_kept_share(at[i], at[i + 1], low, high) for i in range(first, last + 1)]
+        if first <= last
+        else []
+    )
+    scaled = [
+        Fraction(text) * share
+        for text, share in zip(weights[first : last + 1], shares, strict=True)
+    ]
+    unweighted = first <= last and not any(scaled)
+    if first > last or unweighted or any(below >= above for below, above in pairwise(kept)):
+        for key in ("bins", "binWeights"):
+            plan.declaration.pop(key, None)
+        for item in plan.labels:
+            if item.tokens[:1] in (("bins",), ("binWeights",)) and item.basis.statistic is not None:
+                plan.reads.append((item.basis.statistic[0], _CUT_RANGE))
+        plan.labels = [
+            item for item in plan.labels if item.tokens[:1] not in (("bins",), ("binWeights",))
+        ]
+        why = (
+            "the cut keeping only bins that weigh nothing"
+            if unweighted
+            else "the cut leaving no bin of two days"
+        )
+        plan.how = f"{plan.how}; its bins are left out, {why}"
+        return unweighted
+    spelled = list(edges[first : last + 2])
+    if at[first] != low:
+        spelled[0] = _range_text(LogicalKind.DATE, low)
+    if at[last + 1] != high:
+        spelled[-1] = _range_text(LogicalKind.DATE, high)
+    moved = (spelled[0] != edges[first], spelled[-1] != edges[last + 1])
+    plan.declaration["bins"] = spelled
+    plan.declaration["binWeights"] = [
+        text if share == 1 else weight_text(value)
+        for text, share, value in zip(weights[first : last + 1], shares, scaled, strict=True)
+    ]
+    _relabel_cut_bins(plan, first, last, moved, [share != 1 for share in shares])
+    plan.how = _cut_how(plan.how, len(weights), last - first + 1)
+    return False
+
+
+def _kept_share(start: int, end: int, low: int, high: int) -> Fraction:
+    """The share of the days of the bin *start* .. *end* that the cut *low* .. *high* keeps.
+
+    The day *high* is kept, so a bin cut at its own last edge, which the profile leaves out of it,
+    stays whole.
+    """
+    kept = min(end, high + _DAY) - max(start, low)
+    return min(Fraction(kept, end - start), Fraction(1))
+
+
+def _cut_how(how: str, published: int, kept: int) -> str:
+    """The summary's account of a draw over *published* bins, of which *kept* stay after the cut."""
+    said = f"a histogram over {published} bins"
+    if how.startswith(said):
+        rest = how[len(said) :]
+        return f"a histogram over {kept} of {published} bins{rest}, cut to the days a derive keeps"
+    return f"{how}; cut to {kept} of its {published} bins by the days a derive keeps"
+
+
+def _relabel_cut_bins(
+    plan: ColumnPlan, first: int, last: int, moved: Tuple[bool, bool], scaled: Sequence[bool]
+) -> None:
+    """Number the labels of the bins that stay from zero, and label what the cut changed as assumed.
+
+    A moved outer edge and a scaled weight are no longer numbers the profile published. The
+    statistic a label cited that the cut leaves out, moves or scales is recorded as used, with the
+    note.
+    """
+    labels: List[Label] = []
+    for item in plan.labels:
+        family, numbered = item.tokens[:1], item.tokens[1:]
+        if family not in (("bins",), ("binWeights",)) or not numbered:
+            labels.append(item)
+            continue
+        number = int(numbered[0]) - first
+        size = last - first + (2 if family == ("bins",) else 1)
+        if 0 <= number < size:
+            if family == ("binWeights",) and scaled[number]:
+                if item.basis.statistic is not None:
+                    plan.reads.append((item.basis.statistic[0], _CUT_WEIGHT))
+                labels.append(Label((item.tokens[0], str(number)), assumed(_CUT_WEIGHT)))
+            else:
+                labels.append(Label((item.tokens[0], str(number)), item.basis))
+        elif item.basis.statistic is not None:
+            plan.reads.append((item.basis.statistic[0], _CUT_RANGE))
+    plan.labels = labels
+    for end, position in ((0, 0), (1, last - first + 1)):
+        if moved[end]:
+            _relabel_edge(plan, plan.labels, str(position), _CUT_RANGE)
 
 
 def _refuse_unless_widened(
@@ -5828,18 +6094,24 @@ def _past_contract_ranges(
             continue
         start, end = periods.get(expose_id, ("", ""))
         key = (expose_id, start if end == name else name)
+        own = _own_range(expose, name, contract)
+        past = (
+            "the range the contract declares for it"
+            if own is not None and _leaves_contract(own, declared, low, high)
+            else "the days the derive over it keeps in range"
+        )
         found[key] = (
             f"the declared range of {name!r} would have to be widened to {_day_text(low)} .. "
-            f"{_day_text(high)} for the entry to plan (FLX-6204), past the range the contract "
-            "declares for it, which every row must hold"
+            f"{_day_text(high)} for the entry to plan (FLX-6204), past {past}, which every row "
+            "must hold"
         )
     return found
 
 
-def _contract_range(
+def _own_range(
     expose: AuthoredExpose, name: str, contract: Optional[Mapping[str, Any]]
 ) -> Optional[RangeBounds]:
-    """The range the contract's rules declare for column *name* of *expose*, or ``None``."""
+    """The range the contract's own rules declare for column *name* of *expose*, or ``None``."""
     context = expose.contexts.get(name)
     if contract is None or context is None:
         return None
@@ -5848,6 +6120,61 @@ def _contract_range(
     except (KeyError, IndexError, TypeError):
         return None
     return declared_range_bounds(column)
+
+
+def _expose_entry(
+    expose: AuthoredExpose, contract: Optional[Mapping[str, Any]]
+) -> Optional[Mapping[str, Any]]:
+    """The contract's entry of *expose*, or ``None``."""
+    if contract is None:
+        return None
+    try:
+        entry = contract["exposes"][expose.index]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return entry if isinstance(entry, Mapping) else None
+
+
+def _derived_days(
+    expose: AuthoredExpose, name: str, contract: Optional[Mapping[str, Any]]
+) -> Optional[Tuple[Optional[int], Optional[int]]]:
+    """The first and last instant of the days the derives over date *name* keep in range, or ``None``."""
+    entry = _expose_entry(expose, contract)
+    if entry is None:
+        return None
+    return derived_instants(entry, expose.derives, expose.kinds, name)
+
+
+def _contract_range(
+    expose: AuthoredExpose, name: str, contract: Optional[Mapping[str, Any]]
+) -> Optional[RangeBounds]:
+    """The range the contract's rules declare for column *name* of *expose*, or ``None``.
+
+    For a date that includes the days a derive over it keeps in range (:func:`_tightened`).
+    """
+    declared = _own_range(expose, name, contract)
+    derived = _derived_days(expose, name, contract)
+    if derived is None:
+        return declared
+    return _tightened(declared, derived)
+
+
+def _tightened(
+    declared: Optional[RangeBounds], derived: Tuple[Optional[int], Optional[int]]
+) -> RangeBounds:
+    """The range the contract declares for a date, held to the days the derives over it keep in range.
+
+    A derive over the column whose derived column declares a range bounds the column as that range
+    does (:func:`flux_engine.author.derived_dates.derived_instants`): a row outside it breaks the
+    contract. At the same instant the declared end's strictness stays.
+    """
+    low, high = derived
+    held = declared if declared is not None else RangeBounds(None, None)
+    if low is not None and (held.low is None or low > held.low):
+        held = held._replace(low=low, low_strict=False)
+    if high is not None and (held.high is None or high < held.high):
+        held = held._replace(high=high, high_strict=False)
+    return held
 
 
 def _leaves_contract(rule: RangeBounds, declared: Mapping[str, Any], low: int, high: int) -> bool:

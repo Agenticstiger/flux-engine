@@ -38,7 +38,9 @@ def _stages(
 
     def plan_bundle(inputs: Any, unwritten: FrozenSet[str] = frozenset()) -> Any:
         seen.append(unwritten)
-        return SimpleNamespace(held=TABLES - unwritten if keeps else TABLES, authored=[])
+        return SimpleNamespace(
+            held=TABLES - unwritten if keeps else TABLES, authored=[], contract=None
+        )
 
     def histories(planned: Any, *rest: Any) -> Any:
         entries = [{"emit": name} for name in sorted(written(seen[-1]) & planned.held)]

@@ -291,7 +291,7 @@ The first entry is a period: `lifetime: true` says the account's own lifetime, i
 
 The `target` is the percent of rows that may break the fact, and `init` takes it from the pair's `order`: 50 of the 2400 invoices are dated before their account opened, so 2.083% of the rows break the fact. An invoice on the same day as its account's start does not break it. The share of dates after the parent's end is added when the lifetime has an end. An entry with no `target`, as the account's, is enforced: one row that breaks it fails the run. An entry with a target is checked against it.
 
-When an entry is enforced, `init` also checks what `plan` checks, that no row can be left with an empty interval to draw its date in. If the child column's declared range starts after the earliest end its parent can have, `init` widens the range to the parent's lifetime, clipped to the run's time bounds, so that the bundle plans and the entry stays enforced. It never widens past a range the contract declares: it writes no entry for such a date instead. A later section shows both.
+When an entry is enforced, `init` also checks what `plan` checks, that no row can be left with an empty interval to draw its date in. If the child column's declared range starts after the earliest end its parent can have, `init` widens the range to the parent's lifetime, clipped to the run's time bounds, so that the bundle plans and the entry stays enforced. It never widens past a range the contract declares, or past the days a derive over the column keeps in range: it writes no entry for such a date instead. A later section shows both.
 
 Entries chain. The invoice is inside its account's lifetime, and the account is inside its customer's, so the invoice is inside the customer's lifetime too. `verify` scores that outer level on its own line.
 
@@ -456,7 +456,7 @@ plan written to ...
 
 The profile says the opening date starts on 1 March, and the bundle declares 1 January, the earliest day a parent can start: just enough range to meet the plan's check. The entry stays enforced, as the clean profile says.
 
-A range the contract declares is never widened, since a row outside it breaks the contract. Had the contract declared the opening date's range from 1 March, `init` would write no entry for the opening date: it is drawn inside its range from its own statistics, and the relationship's statistic is listed as unused, with the range the plan's check asked for.
+A range the contract declares is never widened, nor is it widened past the days a derive over the column keeps in range, since a row outside them breaks the contract. Had the contract declared the opening date's range from 1 March, `init` would write no entry for the opening date: it is drawn inside its range from its own statistics, and the relationship's statistic is listed as unused, with the range the plan's check asked for.
 
 ## Change a fact
 
