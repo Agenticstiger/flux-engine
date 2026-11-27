@@ -456,22 +456,8 @@ def test_a_history_entry_whose_start_and_end_lay_out_the_lifetime_stays_in_a_cut
 JOURNEY = Path(__file__).resolve().parents[1] / "fixtures" / "init-verifies" / "journey-d"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "a key column's published maximum is listed unused, yet the fidelity range its column "
-        "declares is written from it, so a release without it loses the range"
-    ),
-)
-@pytest.mark.parametrize(
-    "pointer",
-    [
-        "/tables/plan_change/columns/event_id/metrics/max",
-        "/tables/plan_month/columns/period_id/metrics/max",
-    ],
-)
-def test_a_key_columns_maximum_listed_unused_may_be_dropped_from_a_release(
-    tmp_path: Path, pointer: str
+def test_a_key_columns_maximum_that_decides_its_range_is_not_listed_unused(
+    tmp_path: Path,
 ) -> None:
     import yaml
 
@@ -482,21 +468,26 @@ def test_a_key_columns_maximum_listed_unused_may_be_dropped_from_a_release(
     contract = str(JOURNEY / "contract.fluid.yaml")
     profile = json.loads((JOURNEY / "profile.json").read_text(encoding="utf-8"))
 
-    def generated(directory: Path, document: Dict[str, Any]) -> Dict[str, Any]:
-        (directory.parent / f"{directory.name}.profile.json").write_text(
-            json.dumps(document), encoding="utf-8"
-        )
-        result = run_init(
-            str(directory),
-            contract=contract,
-            profile=str(directory.parent / f"{directory.name}.profile.json"),
-        )
+    def written(directory: Path, document: Dict[str, Any]) -> Dict[str, Any]:
+        path = directory.parent / f"{directory.name}.profile.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        result = run_init(str(directory), contract=contract, profile=str(path))
         assert result.exit_code == 0, result.stderr
         text = (directory / "simulation.flux.yml").read_text(encoding="utf-8")
         found: Dict[str, Any] = dict(yaml.safe_load(text)["extensions"][NAMESPACE])
-        for key in ("parameters", "unused", "profile"):
-            found.pop(key, None)
         return found
 
-    whole = generated(tmp_path / "whole", profile)
-    assert generated(tmp_path / "cut", _drop(profile, [pointer])) == whole
+    whole = written(tmp_path / "whole", profile)
+    listed = [item["statistic"]["pointer"] for item in whole["unused"]]
+    # The keys of an emit projected from a history are spanned past the published maximum, but
+    # its presence is what has the column declare a range: it is read, so it is not listed.
+    for pointer in (
+        "/tables/plan_change/columns/event_id/metrics/max",
+        "/tables/plan_month/columns/period_id/metrics/max",
+    ):
+        assert pointer not in listed
+    cut = written(tmp_path / "cut", _drop(profile, listed))
+    for found in (whole, cut):
+        for key in ("parameters", "unused", "profile"):
+            found.pop(key, None)
+    assert cut == whole

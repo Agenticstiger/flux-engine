@@ -46,8 +46,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   made by dropping the listed statistics lost the entry, and with it the two columns the lifetime was read from, so the
   lifetime fell back to another date pair, the end was laid out from the wrong date, and a share of the versions ended
   before they started. The entry now stays, as it does beside a statistic that is read: the members the reader needs of
-  it are not listed, and the others are listed one by one. Each statistic keeps the state the rules gave it, and a
-  release cut by the list gives the same bundle as the whole profile.
+  it are not listed, and the others are listed one by one. Each statistic keeps the state the rules gave it, and for
+  this shape a release cut by the list gives the same bundle as the whole profile. Because those members are no longer
+  listed, an `--allow` naming the history entry now accepts nothing and can be removed. Other shapes of the 0.13.0
+  known issue remain: a relationship's statistic of a table projected from a history, and a sentinel open end.
+- `init` listed the published maximum of a key column as unused when the key belongs to an emit projected from a
+  history, though its presence is what has the column declare a range (the span of the key is then moved out to the
+  bound of a committed state, which hid the reading). A release made by dropping the listed statistic lost the range.
+  The maximum is now read, and not listed.
 
 ## 0.13.0 - 2026-11-27
 
