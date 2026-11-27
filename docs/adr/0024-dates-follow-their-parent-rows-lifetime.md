@@ -601,3 +601,42 @@ drawn evenly over the window put most ends outside the range the contract holds 
   no value of the end fits the range on a row (section 4); every other end lies inside the range. An end whose published
   bins lie wholly outside the contract's range is refused as before (`FLX-3403`).
   Deriving the gap from the two published histograms by deconvolution is a later improvement.
+
+## Amendment of 2026-11-27: the validity window takes a table's lifetime from a pair that lays out one of its dates
+
+A table declares one lifetime. A versioned table whose history `init` does not write (a required end with no declared
+open end, or no history entry in the release) has the window its contract declares, from a start to an end, and every
+version ends on or after its start. The lifetime a published date pair gave a table could lay the window's end out from
+a column outside the window, and the start, drawn on its own, was then ordered with it only by chance.
+
+- **When the window takes the lifetime.** The best pair of the profile is the pair of a window date and a column
+  outside the window. It takes the lifetime from the window where it lays out the window's end, since the end then
+  follows a column the start does not. Where it lays out the window's start, or a column outside the window from the
+  start, the window takes it only if the window's two histograms, drawn apart, would break its order (the check's
+  tolerance where the contract declares one, none otherwise); a window they keep in order is left alone.
+- **What the lifetime is.** The window's own pair where the profile publishes one that holds on enough rows (section 5
+  applies to it as it does to any pair). Otherwise a lifetime from the window's start to its end with the gaps derived
+  from the two published histograms (the amendment of 2026-11-26 to ADR 0017, `author/gap_fit.py`), or drawn evenly
+  from one day to the days of the run's window where either is not published. Each is an assumption in the register, and
+  the end keeps its date past the window where it is required (`endPastWindow: kept`) and is NULL there where it is
+  nullable. For a required end, or a nullable end that keeps its date, no lifetime is written, and the best pair stands,
+  where the end's declared range cannot be shown to hold every end the gaps can draw; a nullable end that is NULL past
+  the run needs no such proof, since no end the gaps draw falls outside the range.
+- **What is unused.** Every pair of the profile that was a candidate for the lifetime, with a reason that names the
+  window (the history, where the release's history entry already gave the window its lifetime; a window pair that
+  publishes no days says so). A column the other pair tied to a window date (published on the same day, say) is drawn on its own: a table
+  declares one lifetime, and the order the contract states for its window is the one kept.
+- **The end's range.** The window's lifetime is held to the range the contract gives its end as a lifetime written for a
+  check is (the amendment above): the gap is cut to it, and where the published histogram of the end reaches past it the
+  range is declared on the end and the histogram is left out. A history entry's lifetime is read against the spans the
+  bundle declares, as before.
+- **Used and unused.** A pair whose order decides that the window takes the lifetime is used, with a reason that holds no
+  value; so is a pair that shows a column on the history's start day, which keeps the history out (ADR 0017). Only a
+  statistic no decision reads is listed unused, so dropping the listed statistics never changes the bundle.
+- **A pair the release withholds.** A pair of the window's two dates whose order the release withholds gives no
+  lifetime; with no other pair to take it, the window takes it the same way.
+- **What does not move.** A table whose history is written, a release whose `history` entry names the window (its
+  lifetime was already written from the entry), a window whose two histograms keep its order within the check's
+  tolerance, a table with no declared window, and a window the profile publishes the pair of as the best pair, keep their
+  bytes.
+

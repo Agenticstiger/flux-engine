@@ -5213,6 +5213,7 @@ def _dated_columns(
                 declared=_declared_spans(expose, planned.contract),
                 spreads=_date_spreads(expose),
                 rows=expose.rows,
+                window=_validity_window(expose, planned.contract["exposes"][expose.index]),
             )
             for expose in planned.authored
             if not expose.reference
@@ -5340,6 +5341,23 @@ def _drop_cut_histograms(expose: AuthoredExpose, plan: ColumnPlan, reason: str) 
             if fallback is not None:
                 expose.properties = [fallback]
                 break
+
+
+def _validity_window(
+    expose: AuthoredExpose, contract_expose: Mapping[str, Any]
+) -> Optional[Tuple[str, str]]:
+    """The start and the end of the validity window the contract declares for an expose, or ``None``.
+
+    Both are columns of the expose of one DATE or TIMESTAMP kind: the dates a lifetime can lay out.
+    """
+    ends = window_ends(contract_expose.get("semantics"))
+    start, end = ends.get("start"), ends.get("end")
+    if start is None or end is None or start == end:
+        return None
+    kinds = expose.kinds
+    if kinds.get(start) not in DATE_KINDS or kinds.get(start) is not kinds.get(end):
+        return None
+    return start, end
 
 
 def _draft_documents(

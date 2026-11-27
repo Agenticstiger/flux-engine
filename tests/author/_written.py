@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from flux_engine.seam.resolve import load_bundle, resolve_all_emits
 from flux_engine.stages.apply import apply
 from flux_engine.stages.plan import plan
+from flux_engine.stages.run import run
 from flux_engine.stages.validate import validate
 from flux_engine.stages.verify import verify
 from tests.bundles import by_file
@@ -55,6 +57,18 @@ def applied_and_verified(tmp_path: Path, profile: str = "plans.profile.json") ->
     assert applied.success, applied.stderr
     checked = verify(bundle, state_dir=state, run_id=run_id)
     assert checked.success, checked.stdout + checked.stderr
+
+
+def emitted_rows(
+    tmp_path: Path, table: str, profile: str, *, verify: bool = False
+) -> List[List[Any]]:
+    """The rows of *table* a run of the bundle draws, each a list in the contract's column order."""
+    outcome = run(
+        tmp_path / "bundle", state_dir=tmp_path / "state", profile=tmp_path / profile, verify=verify
+    )
+    assert outcome.success, outcome.stderr + outcome.stdout
+    (stream,) = (tmp_path / "state").glob(f"runs/*/emits/{table}.ndjson")
+    return [json.loads(line) for line in stream.read_text(encoding="utf-8").splitlines() if line]
 
 
 def assert_state(result: Any, pointer: str, state: str, *notes: str) -> None:

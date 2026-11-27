@@ -75,12 +75,25 @@ DATE_KINDS = (LogicalKind.DATE, LogicalKind.TIMESTAMP)
 _AFTER, _BEFORE, _SAME = 0, 1, 2
 
 _Note = Tuple[Tuple[str, ...], str]
+#: A date pair of a table as a lifetime candidate: (rows it holds on, its position, the pair, the
+#: start, the end, whether the pair is read the other way round, the share that holds forward).
+_Candidate = Tuple[int, int, "_Pair", str, str, bool, Fraction]
 
 _GROUPED_UNREAD = (
     "a statistic grouped by a column is read only as a histogram of the days grouped by a column "
     "of the table, for a dwell family (ADR 0025 section 3)"
 )
 
+_HISTORY_SOURCE = "the release's history entry"
+_WINDOW_SOURCE = "the contract's validity window"
+_WINDOW_OWN_NO_DAYS = (
+    "the pair is the contract's validity window, and it publishes no days to draw an end from: "
+    "the window's lifetime takes its gaps from the two published histograms instead"
+)
+_WINDOW_TAKES = (
+    "its order shows it ties a date of the contract's validity window to another column, so the "
+    "window takes the table's lifetime"
+)
 _NO_DURATION = "no usable duration: an end drawn apart from its start would break the order"
 #: Why a snapshot's date pair is no lifetime when the history it is projected from sets both dates.
 _BOTH_CARRIED = "the history sets both dates"
@@ -128,6 +141,9 @@ class DatedExpose:
     #: The rows the bundle plans for the table (0 where they follow a history), which the share
     #: a kept order breaks the check on is held below its band by a margin of.
     rows: int = 0
+    #: The start and the end of the validity window its contract declares, where both are columns
+    #: of one date kind; every version of the table ends on or after its start.
+    window: Optional[Tuple[str, str]] = None
 
 
 @dataclass
@@ -570,6 +586,9 @@ class _Declarer:
         #: expose -> (start, end) of the lifetime its release's history entry names (see
         #: :meth:`lifetimes_of_histories`).
         self.history_pairs: Dict[str, Tuple[str, str]] = {}
+        #: expose -> (start, end) of the lifetime laid out for the contract's validity window (see
+        #: :meth:`_window_wins`).
+        self.window_pairs: Dict[str, Tuple[str, str]] = {}
         #: (expose, end column) -> total variation between the ends a derived gap gives and the published ones.
         self.fit_distances: Dict[Tuple[str, str], Fraction] = {}
         #: The exposes whose lifetime is only a start a relationship's date pair offered: one is
@@ -656,6 +675,38 @@ class _Declarer:
                 continue
             self._table_lifetime(str(expose), held, items)
 
+    def lifetimes_of_windows(self) -> None:
+        """A lifetime for the contract's validity window that the release publishes as a pair and withholds.
+
+        A pair for the window's two dates whose order the release withholds gives no lifetime
+        (:meth:`_lifetime_candidate`), and the contract's order check on the window is not read for
+        a pair the release lists. With no other pair to take the table's lifetime, the two dates
+        would be drawn apart, so the window is laid out as a lifetime with derived gaps, as it is
+        when another pair would have laid one of its dates out (:meth:`_window_takes`).
+        """
+        tables = self.profile.get("tables")
+        for expose, table in (tables.items() if isinstance(tables, Mapping) else ()):
+            held = self.exposes.get(str(expose))
+            if held is None or held.window is None or str(expose) in self.lifetimes:
+                continue
+            if self._window_kept(held, held.window):
+                continue
+            if self._pair_withheld(table, held.window) and self._derived_lifetime(
+                str(expose), held, held.window, _WINDOW_SOURCE
+            ):
+                self.window_pairs[str(expose)] = held.window
+
+    @staticmethod
+    def _pair_withheld(table: Any, window: Tuple[str, str]) -> bool:
+        """Whether a table's date pairs list the two dates of *window* with an order that is not published."""
+        items = table.get("datePairs") if isinstance(table, Mapping) else None
+        return any(
+            isinstance(item, Mapping)
+            and {str(item.get("start")), str(item.get("end"))} == set(window)
+            and _read_order(item.get("order"))[0] is None
+            for item in (items if isinstance(items, list) else ())
+        )
+
     def lifetimes_of_histories(self) -> None:
         """A lifetime for the start and the end a release's ``history`` entry names, when none is written for it.
 
@@ -686,13 +737,19 @@ class _Declarer:
                 )
             ):
                 continue
-            self._history_lifetime(str(expose), held, start, end)
+            if self._derived_lifetime(str(expose), held, (start, end), _HISTORY_SOURCE):
+                self.history_pairs[str(expose)] = (start, end)
 
-    def _history_lifetime(self, expose: str, held: DatedExpose, start: str, end: str) -> None:
-        if self._pair_refusal(expose, held, start, end) is not None:
-            return
-        if self.window_start is None:
-            return
+    def _gaps_between(
+        self, held: DatedExpose, start: str, end: str, source: str
+    ) -> Optional[Tuple[List[int], List[Fraction], str, Optional[GapFit]]]:
+        """The gaps' edges and weights from *start* to *end*, how they are known, and the fit if there is one.
+
+        Fitted from the published histograms of the two dates where both are published, and else
+        drawn evenly from one day to the days of the run's window; ``None`` where that window holds
+        no day to draw a gap in.
+        """
+        assert self.window_start is not None
         window_days = (self.window_end - self.window_start) // _DAY_MS
         spread_start, spread_end = held.spreads.get(start), held.spreads.get(end)
         fit: Optional[GapFit] = None
@@ -702,26 +759,59 @@ class _Declarer:
             longest = max(longest, int(ends[-1][1] - starts[0][0]))
             longest = min(longest, longest_without_leak(starts, ends))
             fit = fit_gap(starts, ends, 1, longest)
+        given = f"the days from {start!r} to {end!r}, which {source} gives and no statistic of the profile measures: "
         if fit is None or fit.even:
             if window_days <= 1:
-                return
-            edges, weights = [1, window_days], [Fraction(1)]
-            how = (
-                f"the days from {start!r} to {end!r}, which the release's history entry gives "
-                "and no statistic of the profile measures: drawn evenly from 1 to "
-                f"{window_days} days, the most the run's window allows"
+                return None
+            how = f"{given}drawn evenly from 1 to {window_days} days, the most the run's window allows"
+            return [1, window_days], [Fraction(1)], how, None
+        how = (
+            f"{given}derived from the published histograms of {start!r} and {end!r}, as the "
+            f"histogram of gaps that turns the first into the second (each bin spread evenly, "
+            f"{GAP_FIT_ITERATIONS} multiplicative updates from an even start)"
+        )
+        return list(fit.edges), list(fit.weights), how, fit
+
+    @staticmethod
+    def _trade_note(start: str, end: str, source: str, fit: Optional[GapFit]) -> str:
+        """What the note of a derived lifetime says: the end's histogram is traded, and how well the gaps fit."""
+        note = (
+            f"the histogram of {end!r} is traded for a lifetime from {start!r}: {source} "
+            "names them as the start and the end of a version, so no version "
+            "may end before it starts"
+        )
+        if fit is None:
+            return note
+        note += (
+            f"; the gaps are derived from the two published histograms and reproduce the "
+            f"histogram of {end!r} to a total variation of {_percent(fit.distance)}"
+        )
+        if fit.gap > 0:
+            note += (
+                f", and the published ends rise above the starts by up to {_percent(fit.gap)}, "
+                "so no gap can match both exactly"
             )
-            distance = None
-        else:
-            edges, weights = list(fit.edges), list(fit.weights)
-            how = (
-                f"the days from {start!r} to {end!r}, which the release's history entry gives "
-                "and no statistic of the profile measures: derived from the published "
-                f"histograms of {start!r} and {end!r}, as the histogram of gaps that turns the "
-                f"first into the second (each bin spread evenly, {GAP_FIT_ITERATIONS} "
-                "multiplicative updates from an even start)"
-            )
-            distance = fit.distance
+        return note
+
+    def _derived_lifetime(
+        self, expose: str, held: DatedExpose, pair: Tuple[str, str], source: str
+    ) -> bool:
+        """Write a lifetime from *start* to *end* whose gaps no pair of the profile gives, or say why not.
+
+        *source* names what says the two dates bound each version (the release's history entry or
+        the contract's validity window). The gaps are fitted from the published histograms of the two
+        dates, or drawn evenly over the run's window where either is not published. Returns whether
+        the lifetime was written.
+        """
+        start, end = pair
+        if self._pair_refusal(expose, held, start, end) is not None:
+            return False
+        if self.window_start is None:
+            return False
+        gaps = self._gaps_between(held, start, end, source)
+        if gaps is None:
+            return False
+        edges, weights, how, fit = gaps
         entry: Dict[str, Any] = {
             "emit": expose,
             "start": start,
@@ -733,64 +823,192 @@ class _Declarer:
         }
         if self._max_after_window(expose, end):
             entry["endPastWindow"] = "kept"
-        if not self._fits(held, start, end, edges[0], edges[-1]):
+        elif source == _WINDOW_SOURCE and self._null_end_breaks(held, start, end):
+            # The contract's check does not hold on a NULL end: the end keeps a date past the window.
+            entry["endPastWindow"] = "kept"
+        open_past = end not in held.required and "endPastWindow" not in entry
+        refusal = self._end_range_refusal(held, (start, end), edges, source, open_past)
+        if refusal is not None:
             self.declined_orders.append(
                 (
                     f"{expose}.{end}",
-                    f"no lifetime is written from {start!r} to {end!r}, which the release's "
-                    f"history entry names: the declared range of {end!r} cannot be shown to "
-                    "hold every end the gaps can draw",
+                    f"no lifetime is written from {start!r} to {end!r}, which {source} "
+                    f"names: {refusal}",
                 )
             )
-            return
+            return False
         self.cited.append((entry, ("duration",), None, how))
         self.lifetimes[expose] = entry
-        self.history_pairs[expose] = (start, end)
-        note = (
-            f"the histogram of {end!r} is traded for a lifetime from {start!r}: the release's "
-            "history entry names them as the start and the end of a version, so no version "
-            "may end before it starts"
-        )
-        if distance is not None and fit is not None:
-            note += (
-                f"; the gaps are derived from the two published histograms and reproduce the "
-                f"histogram of {end!r} to a total variation of {_percent(distance)}"
-            )
-            if fit.gap > 0:
-                note += (
-                    f", and the published ends rise above the starts by up to {_percent(fit.gap)}, "
-                    "so no gap can match both exactly"
-                )
-            self.fit_distances[(expose, end)] = distance
+        if source == _WINDOW_SOURCE:
+            self._record_end_range(expose, held, end)
+        note = self._trade_note(start, end, source, fit)
+        if fit is not None:
+            self.fit_distances[(expose, end)] = fit.distance
         self.order_notes.append((f"{expose}.{end}", note))
+        return True
+
+    def _end_range_refusal(
+        self,
+        held: DatedExpose,
+        pair: Tuple[str, str],
+        edges: Sequence[int],
+        source: str,
+        open_past: bool,
+    ) -> Optional[str]:
+        """Why the gaps of a derived lifetime cannot be shown to keep every end in the end's range, or ``None``.
+
+        A history entry's lifetime is read against the spans the bundle declares. The contract's
+        validity window is read as a lifetime written for a check is: against the range the
+        contract gives the end (:class:`Spans`), which the gaps are cut to and which the lifetime
+        declares on the end where the bundle has none of its own. A window's end that is NULL past
+        the run needs none of it proved.
+        """
+        start, end = pair
+        spans = self._spans(held) if source == _WINDOW_SOURCE else None
+        if spans is not None:
+            span, written = spans.end(end)
+            if written and span is not None:
+                gap = spans.gap(start, end, span, edges[0], edges[-1])
+                if isinstance(gap, str):
+                    return gap
+        if open_past and spans is not None:
+            return None
+        fits = (
+            self._fits(held, start, end, edges[0], edges[-1])
+            if spans is None
+            else spans.fits(start, end, edges[0], edges[-1])
+        )
+        if fits:
+            return None
+        return f"the declared range of {end!r} cannot be shown to hold every end the gaps can draw"
+
+    @staticmethod
+    def _null_end_breaks(held: DatedExpose, start: str, end: str) -> bool:
+        """Whether the contract orders *start* and *end* by a check that fails on a NULL end."""
+        return end not in held.required and any(
+            (order.start, order.end) == (start, end) and not order.null_end_holds
+            for order in held.orders
+        )
 
     def _table_lifetime(self, expose: str, held: DatedExpose, items: Sequence[Any]) -> None:
-        candidates: List[Tuple[int, int, _Pair, str, str, bool, Fraction]] = []
+        candidates: List[_Candidate] = []
         for index, item in enumerate(items):
-            if isinstance(item, Mapping):
-                candidate = self._lifetime_candidate(expose, held, index, item)
-                if candidate is not None:
-                    candidates.append(candidate)
+            candidate = (
+                self._lifetime_candidate(expose, held, index, item)
+                if isinstance(item, Mapping)
+                else None
+            )
+            if candidate is not None:
+                candidates.append(candidate)
         if not candidates:
             return
         if expose in self.history_pairs:
             start, end = self.history_pairs[expose]
-            for candidate in candidates:
-                self.reject(
-                    candidate[2],
-                    f"the table declares one lifetime, and the history the release publishes "
-                    f"for it gives the pair ({start}, {end}) every row",
-                )
+            self._reject_beaten(
+                candidates,
+                None,
+                f"the table declares one lifetime, and the history the release publishes "
+                f"for it gives the pair ({start}, {end}) every row",
+            )
             return
         best = max(candidates, key=lambda entry: (entry[0], -entry[1]))
+        window = self._window_takes(expose, held, best, candidates)
+        if expose in self.window_pairs:
+            return
+        if window is None:
+            reason = (
+                f"the table declares one lifetime, and the pair ({best[3]}, {best[4]}) "
+                "holds on more rows"
+            )
+        else:
+            reason = self._window_reason((window[3], window[4]))
+        chosen = best if window is None else window
+        self._reject_beaten(candidates, chosen, reason)
+        self._declare_lifetime(expose, chosen)
+
+    def _reject_beaten(
+        self, candidates: Sequence[_Candidate], chosen: Optional[_Candidate], reason: str
+    ) -> None:
+        """Mark each candidate pair but *chosen* unused, with *reason*."""
         for candidate in candidates:
-            if candidate is not best:
+            if candidate is not chosen:
+                self.reject(candidate[2], reason)
+
+    def _window_takes(
+        self,
+        expose: str,
+        held: DatedExpose,
+        best: _Candidate,
+        candidates: Sequence[_Candidate],
+    ) -> Optional[_Candidate]:
+        """The candidate the contract's validity window takes the table's lifetime for, if it does.
+
+        A table's one lifetime lays its end out from its start, and two dates of the window that
+        no lifetime orders are ordered only by chance. When the best pair of the profile is
+        between a date of the contract's validity window and a column outside it, and either lays
+        a date of the window out or leaves the window to the two histograms, which would not keep
+        it (:meth:`_window_kept`), the window takes the lifetime instead: its own pair when the
+        profile publishes one that holds, and else a pair of the two dates with derived gaps
+        (:meth:`_derived_lifetime`), which every row holds. The pairs are then unused.
+
+        Returns the candidate of the window's own pair, which is then the one declared. Where the
+        window's lifetime is written here (``window_pairs``), every candidate is rejected and
+        ``None`` is returned; where no lifetime can be written for the window, the best pair
+        stands and ``None`` is returned. A window whose two histograms already keep its order is left
+        alone when the best pair ends its start or a column outside it; a pair that ends its end
+        lays that date out, so the histograms keep nothing there.
+        """
+        window = held.window
+        if window is None or (best[3], best[4]) == window or not ({best[3], best[4]} & set(window)):
+            return None
+        if best[4] != window[1] and self._window_kept(held, window):
+            return None
+        for candidate in candidates:
+            if (candidate[3], candidate[4]) == window and self._has_duration(expose, candidate):
+                self.used.append((best[2].tokens + ("order",), _WINDOW_TAKES))
+                return candidate
+        if self._derived_lifetime(expose, held, window, _WINDOW_SOURCE):
+            self.window_pairs[expose] = window
+            self.used.append((best[2].tokens + ("order",), _WINDOW_TAKES))
+            for candidate in candidates:
+                own = (candidate[3], candidate[4]) == window
                 self.reject(
                     candidate[2],
-                    f"the table declares one lifetime, and the pair ({best[3]}, {best[4]}) "
-                    "holds on more rows",
+                    _WINDOW_OWN_NO_DAYS if own else self._window_reason(window),
                 )
-        self._declare_lifetime(expose, best)
+        return None
+
+    def _has_duration(self, expose: str, candidate: _Candidate) -> bool:
+        """Whether the pair of *candidate* gives a lifetime a duration to draw its end from."""
+        _, _, pair, start, end, reversed_pair, _ = candidate
+        plain = _cut(pair.histogram, reversed_pair) if pair.histogram is not None else None
+        family, _ = self._family(expose, pair, start, end, reversed_pair)
+        return _lifetime_duration(plain, family) is not None
+
+    @staticmethod
+    def _window_reason(window: Tuple[str, str]) -> str:
+        return (
+            f"the table declares one lifetime, and the contract's validity window, from "
+            f"{window[0]!r} to {window[1]!r}, takes it: a pair of one of its dates with a column "
+            "outside the window would leave the order of the window to chance"
+        )
+
+    @staticmethod
+    def _window_kept(held: DatedExpose, window: Tuple[str, str]) -> bool:
+        """Whether the published histograms of the window's two dates keep its order, drawn apart.
+
+        The contract's check on the two dates gives the tolerance; with none, none is allowed.
+        Where a histogram is not known, nothing is shown.
+        """
+        start, end = held.spreads.get(window[0]), held.spreads.get(window[1])
+        if start is None or end is None:
+            return False
+        order = next(
+            (one for one in held.orders if (one.start, one.end) == window),
+            DateOrder("validity window", window[0], window[1], False, True, False),
+        )
+        share = independent_break_share(start, end, order)
+        return share is not None and order.tolerates(share, held.rows)
 
     def _lifetime_candidate(
         self, expose: str, held: DatedExpose, index: int, item: Mapping[str, Any]
@@ -1190,6 +1408,7 @@ class _Declarer:
                     for order in held.orders
                     if not self._published_pair(expose, order)
                     and self.history_pairs.get(expose) != (order.start, order.end)
+                    and self.window_pairs.get(expose) != (order.start, order.end)
                 ),
                 key=lambda order: (order.rule, order.start, order.end),
             )
@@ -1208,11 +1427,16 @@ class _Declarer:
         """
         subject = f"{expose}.{order.rule}"
         if laid in (order.start, order.end):
+            by = (
+                "the contract's validity window"
+                if expose in self.window_pairs
+                else "the table's published date pair"
+            )
             self.declined_orders.append(
                 (
                     subject,
                     f"the check orders {order.start!r} and {order.end!r}, and no lifetime is "
-                    f"written for it: {laid!r} is laid out by the table's published date pair, "
+                    f"written for it: {laid!r} is laid out by {by}, "
                     "not by its histogram, so the histograms do not keep the check",
                 )
             )
@@ -2049,6 +2273,7 @@ def declare_dates(
     )
     declarer.lifetimes_of_histories()
     declarer.lifetimes_of_tables()
+    declarer.lifetimes_of_windows()
     declarer.lifetimes_of_orders()
     declarer.start_only_lifetimes()
     within = declarer.within_entries()

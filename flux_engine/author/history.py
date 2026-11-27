@@ -163,8 +163,23 @@ class HistoryWritten:
     fitted_end: Optional[Tuple[str, Fraction]] = None
 
 
+_TIE_READ = "it shows the column on the start's day, so the history is not written"
+
+
 class _Skip(Exception):
     """The history is not written, and every published member is unused for this reason."""
+
+
+class _LostTie(_Skip):
+    """The history is not written because a date pair of the table shows a tie it would cut.
+
+    The pair's order is read by the decision, so it is used: a profile with it left out would
+    write the history.
+    """
+
+    def __init__(self, reason: str, pair: Tuple[str, ...]) -> None:
+        super().__init__(reason)
+        self.pair = pair
 
 
 def _group(statistic: Any) -> Optional[Mapping[str, Any]]:
@@ -1662,13 +1677,14 @@ def _refuse_a_lost_tie(
     ``lifecycle.activation`` is how a contract keeps such a column with the first start.
     """
     pairs = source.table.get("datePairs")
-    for item in pairs if isinstance(pairs, list) else ():
+    for index, item in enumerate(pairs if isinstance(pairs, list) else ()):
         other = _same_day_other(item, start)
         if other is not None and other not in held and other != lifecycle.activation:
-            raise _Skip(
+            raise _LostTie(
                 f"the release publishes {other!r} on the same day as {start!r}, and a history "
                 "written from withheld lengths would draw them apart: declare "
-                f"lifecycle.activation as {other!r} to keep them together"
+                f"lifecycle.activation as {other!r} to keep them together",
+                ("tables", source.expose_id, "datePairs", str(index), "order"),
             )
 
 
@@ -2037,8 +2053,11 @@ def write_history(source: HistorySource) -> HistoryWritten:
     try:
         _build(source, written)
     except _Skip as skipped:
+        read = (
+            [(skipped.pair, _TIE_READ)] if isinstance(skipped, _LostTie) else []
+        )  # a pair the decision read is used
         return HistoryWritten(
-            unused=[(pointer, str(skipped)) for pointer in _pointers(base, history)]
+            used=read, unused=[(pointer, str(skipped)) for pointer in _pointers(base, history)]
         )
     return written
 
