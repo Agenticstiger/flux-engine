@@ -63,8 +63,10 @@ FLX_3707 = register(
     "there is nothing to fit",
     "fluxsim calibrate --fit needs a bundle that declares consumers, a calibration block with "
     "at least one parameter, and a pinned profile whose queries section states the rate of at "
-    "least one calibration query. The held-out queries are never fitted. The message names "
-    "what is missing. Nothing was run.",
+    "least one calibration query. A private release's noisy rate counts only when it stands "
+    "clear of the noise: when every noisy rate of the calibration queries is inside the noise "
+    "floor, the profile states none, and the message names those queries. The held-out "
+    "queries are never fitted. The message names what is missing. Nothing was run.",
 )
 
 FLX_3708 = register(
