@@ -23,6 +23,7 @@ gym's members:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,7 @@ import pytest
 from ._written import emitted_rows
 from .test_history_init import _bins, _levels, _ms, _states
 from .test_init_history_without_lengths import (
+    HISTORY,
     NO_OPEN_END,
     OPEN_ENDED,
     _init,
@@ -413,3 +415,79 @@ def test_a_pair_a_decision_reads_is_used_and_a_release_without_the_unused_gives_
     cut.mkdir()
     _init(cut, _drop(profile, listed), contract)
     assert _generated(cut) == _generated(whole)
+
+
+HISTORY_MEMBERS = ["versionsPerEntity", "firstStart", "versionLength", "chain", "lastVersion"]
+
+
+@pytest.mark.parametrize(
+    "keep",
+    [HISTORY_MEMBERS, ["versionsPerEntity", "firstStart", "lastVersion"]],
+    ids=["every member published", "two members withheld"],
+)
+def test_a_history_entry_whose_start_and_end_lay_out_the_lifetime_stays_in_a_cut_release(
+    tmp_path: Path, keep: List[str]
+) -> None:
+    from flux_stats.profile import load_profile_text
+    from tests.cli.test_init_ledger_entries import _drop
+
+    # The contract needs an open end it does not declare, so no history is written, and the
+    # lifetime is laid out from the start and the end the release's history entry names.
+    profile = _profile(keep=keep)
+    profile["tables"]["tier_version"]["datePairs"] = [ENROLLED_TO_END]
+    whole = tmp_path / "whole"
+    whole.mkdir()
+    result = _init(whole, profile, NO_OPEN_END)
+    assert _block(whole).get("history", []) == []
+    assert any(item["emit"] == "tier_version" for item in _block(whole)["lifetimes"])
+    listed = [item["statistic"]["pointer"] for item in _block(whole)["unused"]]
+    cut = tmp_path / "cut"
+    cut.mkdir()
+    dropped = _drop(profile, listed)
+    # The reader takes the cut release whether or not it is told to read an entry cut in part.
+    load_profile_text(json.dumps(dropped))
+    _init(cut, dropped, NO_OPEN_END)
+    assert _generated(cut) == _generated(whole)
+    # The entry that names the start and the end is not listed whole, and its statistics stay unused.
+    assert "/tables/tier_version/history" not in listed
+    assert _states(result)[HISTORY + "/firstStart"]["state"] == "unused"
+
+
+JOURNEY = Path(__file__).resolve().parents[1] / "fixtures" / "init-verifies" / "journey-d"
+
+
+def test_a_key_columns_maximum_that_decides_its_range_is_not_listed_unused(
+    tmp_path: Path,
+) -> None:
+    import yaml
+
+    from flux_engine.cli._init import run_init
+    from tests.author.test_history_init import NAMESPACE
+    from tests.cli.test_init_ledger_entries import _drop
+
+    contract = str(JOURNEY / "contract.fluid.yaml")
+    profile = json.loads((JOURNEY / "profile.json").read_text(encoding="utf-8"))
+
+    def written(directory: Path, document: Dict[str, Any]) -> Dict[str, Any]:
+        path = directory.parent / f"{directory.name}.profile.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        result = run_init(str(directory), contract=contract, profile=str(path))
+        assert result.exit_code == 0, result.stderr
+        text = (directory / "simulation.flux.yml").read_text(encoding="utf-8")
+        found: Dict[str, Any] = dict(yaml.safe_load(text)["extensions"][NAMESPACE])
+        return found
+
+    whole = written(tmp_path / "whole", profile)
+    listed = [item["statistic"]["pointer"] for item in whole["unused"]]
+    # The keys of an emit projected from a history are spanned past the published maximum, but
+    # its presence is what has the column declare a range: it is read, so it is not listed.
+    for pointer in (
+        "/tables/plan_change/columns/event_id/metrics/max",
+        "/tables/plan_month/columns/period_id/metrics/max",
+    ):
+        assert pointer not in listed
+    cut = written(tmp_path / "cut", _drop(profile, listed))
+    for found in (whole, cut):
+        for key in ("parameters", "unused", "profile"):
+            found.pop(key, None)
+    assert cut == whole

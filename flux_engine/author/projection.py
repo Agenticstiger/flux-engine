@@ -469,6 +469,9 @@ _SPAN_REASON = (
     "i takes the i-th of them."
 )
 
+#: Why a published end of the key stays read when the span moves past it.
+_SPAN_READ = "its presence has the key declare a range, which the span moves out to the bound"
+
 
 def span_primary_key(plans: Sequence[ColumnPlan], keys: ExposeKeys) -> None:
     """Span a projected emit's whole-number primary key up to the bound of a committed state.
@@ -490,6 +493,10 @@ def span_primary_key(plans: Sequence[ColumnPlan], keys: ExposeKeys) -> None:
         if isinstance(range_, dict):
             range_["max"] = str(_SPAN_MOST)
             moved.append(("range", "max"))
+        for label in plan.labels:
+            statistic = label.basis.statistic
+            if label.tokens in moved and statistic is not None:
+                plan.reads.append((statistic[0], _SPAN_READ))
         plan.labels = [
             (Label(label.tokens, assumed(_SPAN_REASON)) if label.tokens in moved else label)
             for label in plan.labels

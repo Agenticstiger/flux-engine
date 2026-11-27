@@ -180,11 +180,12 @@ def test_the_history_and_its_projections_are_those_written_without_the_counts(
 
 
 #: sha256 of each file ``fluxsim init`` wrote for the gym's contract and its profile without the
-#: counts per member, before a count over a versioned table's natural entity was left unused.
+#: counts per member, before a count over a versioned table's natural entity was left unused. Its
+#: unused list no longer names the maximum of a projected emit's key, which is read.
 WITHOUT_COUNTS: Dict[str, str] = {
     "persona.flux.yml": "9743f6a2d96613cd7d8cab4ba9f2e124bf3a7010415d4a921c26e9b089169040",
     "plans.fluid.yml": "0318f77bab99dee58868b746010eff203ccc55d977499debb3c053fdfe4a6e1f",
-    "simulation.flux.yml": "69a2274c3f096a7fd8d233fbefab432b6b1fbd3950efcd3d8cfb66ece2e1cbfb",
+    "simulation.flux.yml": "1a36d6e2f7c4c0178f10ba647e4607253ce7bd3caf06ec36789c503d9600f5fd",
     "world.flux.yml": "4b358e01c4453cc7b9f1927a493bbbd7e6ebbf89c5c6c4f22e7c6eb74759e5a0",
 }
 

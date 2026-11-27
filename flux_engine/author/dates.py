@@ -94,6 +94,9 @@ _WINDOW_TAKES = (
     "its order shows it ties a date of the contract's validity window to another column, so the "
     "window takes the table's lifetime"
 )
+_HISTORY_NAMES = (
+    "the entry names the start and the end of a version, which lay out the table's lifetime"
+)
 _NO_DURATION = "no usable duration: an end drawn apart from its start would break the order"
 #: Why a snapshot's date pair is no lifetime when the history it is projected from sets both dates.
 _BOTH_CARRIED = "the history sets both dates"
@@ -156,6 +159,10 @@ class DateDeclarations:
     unused: List[_Note]
     #: The ``rates`` entries, one per column a calendar shapes.
     rates: List[Dict[str, Any]] = field(default_factory=list)
+    #: The entries of the profile whose own keys a rule read (a history's start and end, which lay
+    #: out a lifetime) and that no statistic of is the reading: the entry stays, whatever is cut of
+    #: its members, so it is no entry to list whole.
+    kept: List[_Note] = field(default_factory=list)
     #: The checks of the contract that order two dates and were not written, as (subject, why).
     declined_orders: List[Tuple[str, str]] = field(default_factory=list)
     #: The checks that order two dates and are held by the published dates, or by a lifetime that
@@ -578,6 +585,7 @@ class _Declarer:
         self.end_ranges: Dict[Tuple[str, str], Tuple[int, int]] = {}
         self.used: List[_Note] = []
         self.unused: List[_Note] = []
+        self.kept: List[_Note] = []
         self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Optional[Tuple[str, ...]], str]] = (
             []
         )
@@ -739,6 +747,7 @@ class _Declarer:
                 continue
             if self._derived_lifetime(str(expose), held, (start, end), _HISTORY_SOURCE):
                 self.history_pairs[str(expose)] = (start, end)
+                self.kept.append((("tables", str(expose), "history"), _HISTORY_NAMES))
 
     def _gaps_between(
         self, held: DatedExpose, start: str, end: str, source: str
@@ -2284,6 +2293,7 @@ def declare_dates(
         within=within,
         used=declarer.used,
         unused=declarer.unused,
+        kept=declarer.kept,
         rates=rates,
         cited=declarer.cited,
         declined_orders=declarer.declined_orders,
