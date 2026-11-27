@@ -181,6 +181,9 @@ class Ledger:
         self._entries: Dict[Tuple[str, ...], LedgerEntry] = {}
         #: The entries of format 1-3-0 whose members the reader does not let leave one by one.
         self._groups: List[_Group] = []
+        #: The entries whose own keys a rule reads, by their tokens: each stays whatever is cut of
+        #: its members, so none is listed whole.
+        self._kept: Dict[Tuple[str, ...], str] = {}
         #: The statistics a profile of the contract would publish in place of the bundle's
         #: assumptions (register format 1-3-0, ``replacedBy``): each statistic's pointer and
         #: definition, with how many assumed numbers it would replace. Set once the register is built.
@@ -442,6 +445,16 @@ class Ledger:
             entry.state = USED
             entry.note = how
 
+    def keep(self, tokens: Tuple[str, ...], how: str) -> None:
+        """Say that a rule reads the keys that name the entry at *tokens*, *how* saying for what.
+
+        A history's ``start`` and ``end`` are keys of the entry and no statistic, so a profile
+        with the whole entry dropped loses what they gave. The entry then stays, as it does beside
+        a member that is read: the members the reader needs of it are not listed, and the others
+        are listed one by one. Every member keeps the state the rules gave it.
+        """
+        self._kept.setdefault(tuple(tokens), how)
+
     def record(self, tokens: Tuple[str, ...], how: str) -> None:
         """List a decision about the profile that is no statistic, as used, *how* saying for what.
 
@@ -495,8 +508,9 @@ class Ledger:
         without some of its members (:class:`_Group`). An entry no member of which the bundle
         reads is listed whole, by its own pointer, in place of its members. In an entry with a
         member the bundle reads, a member is listed alone only if the reader lets it leave alone,
-        and one it needs is not listed. A profile with exactly the listed pointers dropped is one
-        the reader accepts. The inventory (:meth:`__iter__`) still holds each statistic, with the
+        and one it needs is not listed; an entry whose own keys a rule reads (:meth:`keep`) is
+        handled as one with a member that is read. A profile with exactly the listed pointers
+        dropped is one the reader accepts. The inventory (:meth:`__iter__`) still holds each statistic, with the
         state the rules gave it, so the unused ones of it are not this list: an entry the reader
         holds whole has each of its members there. ``init --json`` carries this list as
         ``ledger.unused``.
@@ -509,7 +523,7 @@ class Ledger:
     def _settle(self, group: _Group, listing: Dict[Tuple[str, ...], Optional[LedgerEntry]]) -> None:
         """Replace the members of *group* in *listing* by what an owner can leave out of it."""
         members = [self._entries[tokens] for tokens in group.members]
-        if any(member.state == USED for member in members):
+        if group.tokens in self._kept or any(member.state == USED for member in members):
             for tokens in group.needed:
                 listing[tokens] = None
             return

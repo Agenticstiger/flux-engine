@@ -2008,6 +2008,7 @@ def _ledger(
     contract_ids: Set[str],
     extra: Tuple[List[_Note], List[_Note], List[_Note]] = ([], [], []),
     noisy: Optional[Mapping[Tuple[str, ...], Any]] = None,
+    kept: Sequence[_Note] = (),
 ) -> Ledger:
     """Every statistic of *profile*, marked by what the written *exposes* rest on and read.
 
@@ -2021,6 +2022,8 @@ def _ledger(
         ledger.use(tokens, how)
     for tokens, how in extra[2]:
         ledger.record(tokens, how)
+    for tokens, how in kept:
+        ledger.keep(tokens, how)
     tables = profile.get("tables")
     for name in tables if isinstance(tables, Mapping) else ():
         if str(name) not in contract_ids:
@@ -5402,7 +5405,9 @@ def _draft_documents(
     contract_ids = {
         str(expose.get("exposeId")) for expose in contract["exposes"] if isinstance(expose, Mapping)
     }
-    ledger = _ledger(reading.profile, planned.exposes, contract_ids, children, reading.noisy)
+    ledger = _ledger(
+        reading.profile, planned.exposes, contract_ids, children, reading.noisy, dated.kept
+    )
     labels = _register_labels(
         f"world-{product_ref}",
         f"persona-{product_ref}",

@@ -41,6 +41,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   property is left out with the reason, and a table left with no property is not scored. Days that leave one day of
   the range, none of it, or no day at all keep the range as published, and the assumptions say that the derive is not
   honoured.
+- `init` listed a history entry whole as unused when no statistic of it was read, though its `start` and `end` laid out
+  the table's lifetime (a table whose history is not written, because its contract declares no open end, say). A release
+  made by dropping the listed statistics lost the entry, and with it the two columns the lifetime was read from, so the
+  lifetime fell back to another date pair, the end was laid out from the wrong date, and a share of the versions ended
+  before they started. The entry now stays, as it does beside a statistic that is read: the members the reader needs of
+  it are not listed, and the others are listed one by one. Each statistic keeps the state the rules gave it, and a
+  release cut by the list gives the same bundle as the whole profile.
 
 ## 0.13.0 - 2026-11-27
 
