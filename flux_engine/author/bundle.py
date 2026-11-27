@@ -51,9 +51,11 @@ import yaml
 from flux_engine.author.association import (
     association_entry,
     association_pair,
+    derive_parent_rows,
     edge_rows,
 )
 from flux_engine.author.basis import Basis, Label, assumed, default, from_profile
+from flux_engine.author.basis import from_contract as contract_basis
 from flux_engine.author.catalogue import (
     catalogue_foreign_keys,
     link_givens,
@@ -157,6 +159,7 @@ from flux_engine.author.ranges import column_range
 from flux_engine.author.replace import ask_for_private_release, replacements_for
 from flux_engine.author.window import (
     WINDOW_END_LIMIT_MS,
+    contract_span,
     declared_days,
     declared_window,
     instant_ms,
@@ -182,6 +185,7 @@ from flux_engine.seam.mean_reach import check_restated_means
 from flux_engine.seam.overlay import OVERLAY_KEY, Overlay, overlaid_profile
 from flux_engine.seam.parameters import (
     UNUSED_KEY,
+    Source,
     build_parameter_register,
     changed_by_overlay,
     cited_definition,
@@ -311,6 +315,11 @@ class AuthoredExpose:
     #: The ``associations`` entry of a table of two foreign keys and no other column, once both its
     #: relationships are laid out by counts (ADR 0039).
     association: Optional[Dict[str, Any]] = None
+    #: The rows and the sentence of an association table whose rows follow from the side whose
+    #: parent rows the profile gives, decided before the exposes are planned.
+    association_edges: Optional[Tuple[int, str]] = None
+    #: Why an association table writes no ``associations`` entry, and keeps the rows it has.
+    association_declined: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -497,8 +506,15 @@ def _emit_rows(
     table: Mapping[str, Any],
     minimum_cell: int,
     noisy: Optional[Mapping[Tuple[str, ...], Any]] = None,
+    given: Optional[Tuple[int, Basis, Optional[str]]] = None,
 ) -> Tuple[int, Basis, Optional[str]]:
-    """The emit's row count, its basis, and the assumption a person is told about, if any."""
+    """The emit's row count, its basis, and the assumption a person is told about, if any.
+
+    *given* is a row count settled from the rest of the profile, which stands in place of the
+    assumption the table would otherwise get.
+    """
+    if given is not None:
+        return given
     row_count = table.get("rowCount")
     if isinstance(row_count, int) and not isinstance(row_count, bool) and row_count > 0:
         return row_count, from_profile(("tables", expose_id, "rowCount"), None), None
@@ -579,12 +595,13 @@ def _plan_expose(
     noisy: Optional[Mapping[Tuple[str, ...], Any]] = None,
     cliques: Sequence[CliqueEntry] = (),
     asked: Optional[Mapping[str, Tuple[Tuple[str, Tuple[str, ...]], ...]]] = None,
+    rows_given: Optional[Tuple[int, Basis, Optional[str]]] = None,
 ) -> AuthoredExpose:
     """Declare every column of one expose; its properties are chosen once every key is laid out."""
     expose_id = str(expose.get("exposeId"))
     compiled = compile_expose(expose)
     sets = _key_sets(expose_keys)
-    rows, rows_basis, rows_note = _emit_rows(expose_id, table, minimum_cell, noisy)
+    rows, rows_basis, rows_note = _emit_rows(expose_id, table, minimum_cell, noisy, rows_given)
     profiled = table.get("columns") if isinstance(table.get("columns"), Mapping) else {}
     grouping = _grouping_columns(profiled if isinstance(profiled, Mapping) else {})
     follows = contract_dependencies(expose)
@@ -3934,7 +3951,101 @@ def _plan_exposes(
         if not isinstance(expose, Mapping) or not isinstance(expose.get("exposeId"), str):
             continue
         exposes.append(_plan_one_expose(contract, reading, keys, expose_index, expose, needs))
+    _settle_assumed_parents(contract, reading, keys, needs, exposes)
     return exposes
+
+
+def _pins_parent(keys: ContractKeys, parent: str, association: str) -> Optional[str]:
+    """Why something besides the association sets the rows of *parent*, or ``None``.
+
+    A parent that another table refers to, or that refers to a parent of its own, has rows the
+    counts of that relationship share, so they are not the association's to settle.
+    """
+    if keys.expose(parent).relationships:
+        return f"{parent!r} is a child of a relationship of its own"
+    for expose_id, held in keys.exposes.items():
+        if expose_id != association and any(item.target == parent for item in held.relationships):
+            return f"{expose_id!r} also refers to {parent!r}"
+    return None
+
+
+def _settle_assumed_parents(
+    contract: Mapping[str, Any],
+    reading: _Reading,
+    keys: Optional[ContractKeys],
+    needs: Any,
+    exposes: List[AuthoredExpose],
+) -> None:
+    """Settle an association table whose parent rows are an assumption on one side (ADR 0039).
+
+    The rows of a parent the profile says nothing of are an assumption, so the total of children
+    that rests on them is none. Where the other side's parent rows are known, the pairs come from
+    that side and the assumed parent is planned again with the rows its children per parent give
+    them. Where both parents are assumed, or the rows derived cannot hold the pairs, the table
+    writes no association and keeps the rows it has.
+    """
+    if keys is None:
+        return
+    position = {authored.expose_id: index for index, authored in enumerate(exposes)}
+    for authored in list(exposes):
+        table = reading.tables.get(authored.expose_id) or {}
+        if authored.skipped is not None or authored.reference or table.get("rowCount") is not None:
+            continue
+        pair = association_pair(
+            keys.expose(authored.expose_id), [plan.name for plan in authored.columns]
+        )
+        if pair is None or not all(item.target in position for item in pair):
+            continue
+        sides = [exposes[position[item.target]] for item in pair]
+        if any(side.reference or side.skipped is not None for side in sides):
+            continue  # the table is drawn from rows the pairs do not set
+        guessed = tuple(_assumes_its_rows(side) for side in sides)
+        if not any(guessed):
+            continue
+        found = derive_parent_rows(
+            reading.profile,
+            pair,
+            (sides[0].rows, sides[1].rows),
+            (guessed[0], guessed[1]),
+            reading.fractional_bits,
+            reading.noisy,
+        )
+        if isinstance(found, str):
+            authored.association_declined = found
+            continue
+        parent = sides[found.side]
+        pinned = _pins_parent(keys, parent.expose_id, authored.expose_id)
+        if pinned is not None:
+            authored.association_declined = (
+                f"the rows of {parent.expose_id!r} are an assumption, and {pinned}, so the pairs "
+                "do not settle them"
+            )
+            continue
+        index = position[parent.expose_id]
+        again = _plan_one_expose(
+            contract,
+            reading,
+            keys,
+            parent.index,
+            contract["exposes"][parent.index],
+            needs,
+            rows_given=(found.parent_rows, assumed(found.parent_note), found.parent_note),
+        )
+        if again.skipped is not None:
+            authored.association_declined = again.skipped
+            continue
+        exposes[index] = again
+        authored.association_edges = (found.edges, found.edges_note)
+
+
+def _assumes_its_rows(authored: AuthoredExpose) -> bool:
+    """Whether the rows of a written expose are the assumption no statistic of the profile backs."""
+    return (
+        authored.skipped is None
+        and not authored.reference
+        and authored.rows_basis is not None
+        and authored.rows_basis.source is Source.ASSUMPTION
+    )
 
 
 def _plan_one_expose(
@@ -3944,6 +4055,7 @@ def _plan_one_expose(
     expose_index: int,
     expose: Mapping[str, Any],
     needs: Any,
+    rows_given: Optional[Tuple[int, Basis, Optional[str]]] = None,
 ) -> AuthoredExpose:
     expose_id = expose["exposeId"]
     try:
@@ -3961,7 +4073,7 @@ def _plan_one_expose(
             skipped=whole_refused or "the profile has no table for it",
             declined_reference=declined,
         )
-    planned = _plan_guarded(contract, reading, keys, expose_index, expose, table, needs)
+    planned = _plan_guarded(contract, reading, keys, expose_index, expose, table, needs, rows_given)
     planned.declined_reference = declined
     return planned
 
@@ -3974,6 +4086,7 @@ def _plan_guarded(
     expose: Mapping[str, Any],
     table: Mapping[str, Any],
     needs: Any,
+    rows_given: Optional[Tuple[int, Basis, Optional[str]]] = None,
 ) -> AuthoredExpose:
     expose_id = expose["exposeId"]
     scored_tables = reading.scored.tables
@@ -3990,6 +4103,7 @@ def _plan_guarded(
             noisy=reading.noisy,
             cliques=_cliques_of(scored_tables.get(expose_id)),
             asked=_asked(needs, expose_id, reading.scored),
+            rows_given=rows_given,
         )
     except FluxError as error:
         return AuthoredExpose(expose_id=expose_id, skipped=printable(str(error)))
@@ -4017,8 +4131,12 @@ def _with_edge_rows(
         )
         if pair is None or not all(item.target in rows_of for item in pair):
             continue
+        if authored.association_declined is not None:
+            continue
         parents = (rows_of[pair[0].target], rows_of[pair[1].target])
-        found = edge_rows(reading.profile, pair, parents, reading.fractional_bits)
+        found = authored.association_edges or edge_rows(
+            reading.profile, pair, parents, reading.fractional_bits
+        )
         if found is not None:
             rows, note = found
             authored.assumptions = [item for item in authored.assumptions if item[0] != "rows"]
@@ -4038,6 +4156,14 @@ def _mark_associations(
             keys.expose(expose.expose_id), [plan.name for plan in expose.columns]
         )
         if pair is None or not all(item.target in rows_of for item in pair):
+            continue
+        if expose.association_declined is not None:
+            spread.notes.append(
+                (
+                    expose.expose_id,
+                    f"No association is written: {expose.association_declined}.",
+                )
+            )
             continue
         rows = (expose.rows, rows_of[pair[0].target], rows_of[pair[1].target])
         found = association_entry(expose.expose_id, pair, spread.entries, rows)
@@ -5057,7 +5183,7 @@ def _dated_columns(
     """
     history_columns = _history_columns(planned, histories, projections)
     snapshots = {str(entry["emit"]) for entry in projections.snapshots}
-    return declare_dates(
+    declared = declare_dates(
         planned.reading.profile,
         {
             expose.expose_id: DatedExpose(
@@ -5084,6 +5210,7 @@ def _dated_columns(
                     if name in expose.kinds and context.column.required
                 ),
                 bounds=_date_bounds(expose),
+                declared=_declared_spans(expose, planned.contract),
                 spreads=_date_spreads(expose),
                 rows=expose.rows,
                 window=_validity_window(expose, planned.contract["exposes"][expose.index]),
@@ -5103,6 +5230,117 @@ def _dated_columns(
         declined_within=fallbacks.undated,
         declined_rates=fallbacks.unrated,
     )
+    _declare_end_ranges(planned.authored, declared.end_ranges)
+    return declared
+
+
+def _declared_spans(
+    expose: AuthoredExpose, contract: Optional[Mapping[str, Any]]
+) -> Dict[str, Tuple[int, int]]:
+    """The span the contract's range rules give each date column that has one.
+
+    A column the bundle declares a span for (bins or a range) keeps it where it lies inside the
+    contract's span; a lifetime ending on one that reaches past it is cut to the contract's
+    (:class:`~flux_engine.author.end_range.Spans`). A column of levels is one value or a few.
+    """
+    found: Dict[str, Tuple[int, int]] = {}
+    for plan in expose.columns:
+        kind = expose.kinds.get(plan.name)
+        context = expose.contexts.get(plan.name)
+        if kind not in DATE_KINDS or context is None or contract is None:
+            continue
+        if "levels" in plan.declaration:
+            continue
+        try:
+            column = contract["exposes"][expose.index]["contract"]["schema"][context.schema_index]
+        except (KeyError, IndexError, TypeError):
+            continue
+        span = contract_span(column, kind)
+        if span is not None:
+            found[plan.name] = span
+    return found
+
+
+_END_RANGE = (
+    "The column has no distribution of its own and a lifetime ends on it, so its range is the one "
+    "its contract declares: every end the lifetime draws is held inside it."
+)
+
+
+_END_CUT = (
+    "The column's published distribution reaches past the range its contract declares and a "
+    "lifetime ends on it, so its range is cut to the contract's: every end the lifetime draws is "
+    "held inside it, and no histogram of the column can partition the cut with the bins the "
+    "profile publishes (FLX-5032), so none is written."
+)
+
+
+def _declare_end_ranges(
+    exposes: Sequence[AuthoredExpose], ranges: Mapping[Tuple[str, str], Tuple[int, int]]
+) -> None:
+    """Declare the contract's range on each end column a lifetime was written against it.
+
+    The generator cuts a lifetime's gap to the end column's declared range, so a column with no
+    span of its own needs one for the ends to stay inside what the contract lets it hold, and a
+    column whose declared span reaches past the contract's takes the part inside it.
+    """
+    for expose in exposes:
+        plans = {plan.name: plan for plan in expose.columns}
+        for (expose_id, name), (low, high) in ranges.items():
+            plan = plans.get(name)
+            context = expose.contexts.get(name)
+            kind = expose.kinds.get(name)
+            if expose.expose_id != expose_id or plan is None or context is None or kind is None:
+                continue
+            cut = "bins" in plan.declaration or "range" in plan.declaration
+            reason = _END_CUT if cut else _END_RANGE
+            if cut:
+                _drop_cut_histograms(expose, plan, reason)
+            plan.declaration["range"] = {
+                "min": _range_text(kind, low),
+                "max": _range_text(kind, high),
+            }
+            basis = contract_basis(
+                context.product_ref, context.contract_tokens + ("validationRules",)
+            )
+            plan.labels = [item for item in plan.labels if item.tokens[:1] != ("range",)]
+            plan.labels.append(Label(("range", "min"), basis))
+            plan.labels.append(Label(("range", "max"), basis))
+            plan.assumptions.append(reason)
+            plan.choices.append(reason)
+            expose.assumptions.append((name, reason))
+
+
+def _drop_cut_histograms(expose: AuthoredExpose, plan: ColumnPlan, reason: str) -> None:
+    """Write no histogram of a column whose range is cut: its bins run over the whole grid.
+
+    A draw's bins stay inside the declared range (``FLX-3402``) and a histogram property's bins
+    partition it (``FLX-5032``), and ``verify`` compares them with the bins the profile publishes
+    (``FLX-5037``), so none holds once the range is cut. The lifetime draws the column: its bins,
+    their weights and the property are left out, and a statistic they were read from is recorded
+    as used, with *reason*. An expose left with no property takes the first column's assumed
+    check, as :func:`_finish_expose` does, or declares none, which ``verify`` reports as not
+    scored.
+    """
+    for key in ("bins", "binWeights"):
+        plan.declaration.pop(key, None)
+    for item in plan.labels:
+        if item.tokens[:1] in (("bins",), ("binWeights",)) and item.basis.statistic is not None:
+            plan.reads.append((item.basis.statistic[0], reason))
+    plan.labels = [
+        item for item in plan.labels if item.tokens[:1] not in (("bins",), ("binWeights",))
+    ]
+    dropped = [item for item in plan.properties if "bins" in item.document]
+    if not dropped:
+        return
+    plan.properties = [item for item in plan.properties if item not in dropped]
+    expose.properties = [item for item in expose.properties if item not in dropped]
+    if not expose.properties:
+        for other in expose.columns:
+            fallback = assumed_check(other, expose.kinds[other.name], scorable_only=True)
+            if fallback is not None:
+                expose.properties = [fallback]
+                break
 
 
 def _validity_window(

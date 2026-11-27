@@ -37,6 +37,7 @@ from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tupl
 
 from flux_engine.author.columns import _share_text, cell_weights, count_cells, share_texts
 from flux_engine.author.date_spread import DateSpread, independent_break_share
+from flux_engine.author.end_range import Spans
 from flux_engine.author.forms import SUPERSEDED, grouped, number_grouped
 from flux_engine.author.gap_fit import (
     GAP_FIT_ITERATIONS,
@@ -125,6 +126,11 @@ class DatedExpose:
     required: FrozenSet[str] = frozenset()
     #: The span each date column's declared draw reaches, in milliseconds, where it declares one.
     bounds: Mapping[str, Tuple[int, int]] = field(default_factory=dict)
+    #: The first and the last instant (milliseconds) the contract's range rules let a date column
+    #: hold, for a column the bundle declares no span for (no bins, no levels, no range of its
+    #: own). A lifetime that ends on such a column writes the span as its range, so that the
+    #: generator's cut keeps every end inside it (ADR 0024 section 4).
+    declared: Mapping[str, Tuple[int, int]] = field(default_factory=dict)
     #: The histogram each date column is drawn from, where it is drawn from one the profile
     #: published and the bundle declares (none for a column drawn evenly within the window).
     spreads: Mapping[str, DateSpread] = field(default_factory=dict)
@@ -159,6 +165,10 @@ class DateDeclarations:
     cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Optional[Tuple[str, ...]], str]] = field(
         default_factory=list
     )
+    #: The range each lifetime's end column is to declare, as (expose, column) -> (first, last)
+    #: instant in milliseconds: the span the contract's rules give an end the bundle declares no
+    #: span for, which the lifetime was written against.
+    end_ranges: Dict[Tuple[str, str], Tuple[int, int]] = field(default_factory=dict)
 
 
 def window_end_ms(end: str) -> int:
@@ -561,6 +571,7 @@ class _Declarer:
         self.minimum_cell = minimum_cell
         self.declined_orders: List[Tuple[str, str]] = []
         self.order_notes: List[Tuple[str, str]] = []
+        self.end_ranges: Dict[Tuple[str, str], Tuple[int, int]] = {}
         self.used: List[_Note] = []
         self.unused: List[_Note] = []
         self.cited: List[Tuple[Dict[str, Any], Tuple[str, ...], Optional[Tuple[str, ...]], str]] = (
@@ -1447,6 +1458,7 @@ class _Declarer:
                 continue
             self.lifetimes[expose] = entry
             written = True
+            self._record_end_range(expose, held, order.end)
             share = self._independent_share(held, order)
             if share is not None:
                 self.order_notes.append(
@@ -1458,6 +1470,17 @@ class _Declarer:
                         f"than its tolerance of {_percent(order.tolerance)}",
                     )
                 )
+
+    def _record_end_range(self, expose: str, held: DatedExpose, end: str) -> None:
+        """Note the range a lifetime written for *end* declares on it, when the bundle has none."""
+        span, to_write = self._spans(held).end(end)
+        if to_write and span is not None:
+            self.end_ranges[(expose, end)] = span
+
+    def _spans(self, held: DatedExpose) -> Spans:
+        """The spans of an expose's date columns against the run's window."""
+        assert self.window_start is not None
+        return Spans(held.bounds, held.declared, self.window_start, self.window_end)
 
     @staticmethod
     def _independent_share(held: DatedExpose, order: DateOrder) -> Optional[Fraction]:
@@ -1496,22 +1519,38 @@ class _Declarer:
             refused = "a lifetime's end is the same kind of column as its start"
         return refused
 
+    def _window_gap(
+        self, expose: str, held: DatedExpose, order: DateOrder
+    ) -> Union[Tuple[int, int], str]:
+        """The shortest and the longest gap in days the run's window allows for *order*, or why none can be drawn."""
+        refused = self._order_refusal(expose, held, order)
+        shortest = 1 if order.strict else 0
+        if refused is not None:
+            return refused
+        if self.window_start is None:
+            return "the run's window is not known"
+        longest = (self.window_end - self.window_start) // _DAY_MS
+        if longest <= shortest:
+            return f"the run's window holds {longest} days, too few to draw a gap in"
+        return shortest, longest
+
     def _order_lifetime(
         self, expose: str, held: DatedExpose, order: DateOrder
     ) -> Union[Dict[str, Any], str]:
         """The lifetime that keeps *order*, or why the bundle cannot hold it."""
         start, end = order.start, order.end
-        refused = self._order_refusal(expose, held, order)
-        shortest = 1 if order.strict else 0
-        if refused is None and self.window_start is None:
-            refused = "the run's window is not known"
-        longest = (
-            0 if self.window_start is None else (self.window_end - self.window_start) // _DAY_MS
-        )
-        if refused is None and longest <= shortest:
-            refused = f"the run's window holds {longest} days, too few to draw a gap in"
-        if refused is not None:
-            return refused
+        window = self._window_gap(expose, held, order)
+        if isinstance(window, str):
+            return window
+        shortest, longest = window
+        spans = self._spans(held)
+        span, written = spans.end(end)
+        if written:
+            assert span is not None
+            gap = spans.gap(start, end, span, shortest, longest)
+            if isinstance(gap, str):
+                return gap
+            longest = gap
         entry: Dict[str, Any] = {
             "emit": expose,
             "start": start,
@@ -1523,11 +1562,12 @@ class _Declarer:
         if nullable and not open_end:
             # A NULL end would fail the check: the end keeps a date past the window.
             entry["endPastWindow"] = "kept"
-        if not open_end and not self._fits(held, start, end, shortest, longest):
+        if not open_end and not spans.fits(start, end, shortest, longest):
             return (
                 f"the declared range of {end!r} cannot be shown to hold every end the gap can "
                 f"draw; widen it, or let the check hold on a NULL {end!r}"
             )
+        most = f"the declared range of {end!r}" if written else "the run's window"
         self.cited.append(
             (
                 entry,
@@ -1535,14 +1575,19 @@ class _Declarer:
                 None,
                 f"the days from {start!r} to {end!r}, which the contract's check "
                 f"{order.rule!r} orders and the profile gives no pair for: drawn evenly from "
-                f"{shortest} to {longest} days, the most the run's window allows",
+                f"{shortest} to {longest} days, the most {most} allows",
             )
         )
         return entry
 
     @staticmethod
     def _fits(held: DatedExpose, start: str, end: str, shortest: int, longest: int) -> bool:
-        """Whether a kept end can always be drawn inside its declared range (``FLX-6204``)."""
+        """Whether a kept end can always be drawn inside the span its bundle declares (``FLX-6204``).
+
+        The gaps a history entry's lifetime draws are read against the spans the bundle declares
+        for the two columns; the contract's range is not consulted (:class:`Spans` does that for a
+        lifetime written for a check).
+        """
         reach, span = held.bounds.get(start), held.bounds.get(end)
         if reach is None or span is None:
             return False
@@ -2200,5 +2245,6 @@ def declare_dates(
         cited=declarer.cited,
         declined_orders=declarer.declined_orders,
         order_notes=declarer.order_notes,
+        end_ranges=declarer.end_ranges,
         fit_distances=declarer.fit_distances,
     )

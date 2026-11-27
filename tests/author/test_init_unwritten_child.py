@@ -201,7 +201,8 @@ def _profile(*, loans: Optional[int] = None) -> Dict[str, Any]:
             {
                 "parent": {"table": "branch", "columns": ["branch_id"]},
                 "child": {"table": "loan", "columns": ["branch_id"]},
-                "statistics": [_per_parent([2, 3, 6, 8, 9, 7, 4, 2, 1])],
+                # 420 branches: the number the members' loans make of a branch's mean loans.
+                "statistics": [_per_parent([20, 30, 60, 80, 90, 70, 40, 20, 10])],
             },
             {
                 "parent": {"table": "member", "columns": ["member_id"]},
