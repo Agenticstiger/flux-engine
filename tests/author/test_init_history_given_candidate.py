@@ -21,7 +21,7 @@ import pytest
 
 from flux_engine.core.errors import FluxError
 
-from ._written import generated, plan_written
+from ._written import bundle_digests, generated, plan_written
 from .test_history_init import (
     HISTORY,
     TIER,
@@ -41,10 +41,8 @@ CARRIED_GIVEN = "the column is drawn given another, and a tracked column takes i
 CARRIED_PARENT = "another column is drawn given it, and a carried column keeps its first value"
 
 
-def _given(
-    levels: List[str], child: str, parent: str, rows: Dict[str, List[int]]
-) -> Dict[str, Any]:
-    """The statistic of *child*'s levels by the levels of *parent*."""
+def _given(levels: List[str], parent: str, rows: Dict[str, List[int]]) -> Dict[str, Any]:
+    """The statistic of a column's *levels* grouped by the levels of *parent*."""
     node = _transitions(parent, levels, rows)
     node["groupBy"] = parent
     return node
@@ -53,7 +51,7 @@ def _given(
 def _tier_given_channel(profile: Dict[str, Any]) -> Dict[str, Any]:
     found = copy.deepcopy(profile)
     found["tables"]["plan_version"]["columns"]["tier"]["statistics"].append(
-        _given(TIER, "tier", "channel", {"app": [700, 300, 100], "web": [300, 300, 150]})
+        _given(TIER, "channel", {"app": [700, 300, 100], "web": [300, 300, 150]})
     )
     return found
 
@@ -115,23 +113,26 @@ def test_a_candidate_drawn_given_a_column_that_is_no_candidate_is_carried(tmp_pa
     plan_written(tmp_path)
 
 
-def test_a_candidate_that_never_moves_and_is_drawn_given_one_that_does_is_carried(
-    tmp_path: Path,
-) -> None:
-    profile = _profile()
-    columns = profile["tables"]["plan_version"]["history"]["columns"]
-    # channel moves; tier never does, and is drawn given channel.
+def _sibling(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """*profile* where channel moves, and tier never does and is drawn given channel."""
+    found = copy.deepcopy(profile)
+    columns = found["tables"]["plan_version"]["history"]["columns"]
     columns["channel"]["transitions"] = _transitions(
         "channel", ["app", "web"], {"app": [0, 500], "web": [350, 0]}
     )
     columns["tier"]["transitions"] = _transitions(
         "tier", TIER, {"basic": [0, 0, 0], "plus": [0, 0, 0], "pro": [0, 0, 0]}
     )
-    profile["tables"]["plan_version"]["history"]["reasons"] = _levels(
+    found["tables"]["plan_version"]["history"]["reasons"] = _levels(
         ["channel", "several", "tier"], [850, 0, 0], 850
     )
-    profile = _tier_given_channel(profile)
-    result = _init(tmp_path, profile)
+    return _tier_given_channel(found)
+
+
+def test_a_candidate_that_never_moves_and_is_drawn_given_one_that_does_is_carried(
+    tmp_path: Path,
+) -> None:
+    result = _init(tmp_path, _sibling(_profile()))
     (entry,) = _entries(tmp_path)
     assert "tracked" not in entry
     assert "no published change moves the column" in _note(result, "tier", "transitions")["note"]
@@ -139,19 +140,27 @@ def test_a_candidate_that_never_moves_and_is_drawn_given_one_that_does_is_carrie
     plan_written(tmp_path)
 
 
-def test_a_release_cut_by_the_unused_list_gives_the_same_generated_bundle(tmp_path: Path) -> None:
-    profile = _both_move(_profile())
+def _cut_gives_the_same_bundle(tmp_path: Path, profile: Dict[str, Any], carried: str) -> None:
+    """Dropping the statistics ``init`` lists unused gives the bundle of the whole *profile*."""
     whole = tmp_path / "whole"
     whole.mkdir()
     _init(whole, profile)
     from tests.cli.test_init_ledger_entries import _drop
 
     listed = [item["statistic"]["pointer"] for item in _namespace(whole)["unused"]]
-    assert f"{HISTORY}/columns/tier" in listed
+    assert f"{HISTORY}/columns/{carried}" in listed
     cut = tmp_path / "cut"
     cut.mkdir()
     _init(cut, _drop(profile, listed))
     assert generated(_namespace(cut)) == generated(_namespace(whole))
+
+
+def test_a_release_cut_by_the_unused_list_gives_the_same_generated_bundle(tmp_path: Path) -> None:
+    _cut_gives_the_same_bundle(tmp_path, _both_move(_profile()), "tier")
+
+
+def test_a_release_cut_gives_the_same_bundle_when_only_the_parent_moves(tmp_path: Path) -> None:
+    _cut_gives_the_same_bundle(tmp_path, _sibling(_profile()), "channel")
 
 
 def test_a_never_moving_candidate_drawn_given_a_column_keeps_its_text_and_bytes(
@@ -171,6 +180,17 @@ def test_a_never_moving_candidate_drawn_given_a_column_keeps_its_text_and_bytes(
         )
     assert CARRIED_GIVEN not in str(_states(result))
     assert CARRIED_PARENT not in str(_states(result))
+    # Pinned from the files the previous release wrote for this contract and profile.
+    assert bundle_digests(tmp_path) == NEVER_MOVING
+
+
+#: sha256 of each file of the bundle written when neither candidate moves and tier is drawn given.
+NEVER_MOVING: Dict[str, str] = {
+    "persona.flux.yml": "74f6062c0e15e70d2689583ad345103c7189b244886c3280c244573b49677755",
+    "plans.fluid.yml": "a36ebfc4005a034a13b34c5ab0397ba8192c66a10d5616fced07c2fd1dd29d27",
+    "simulation.flux.yml": "9ff3d3b3ecaf5d93a3d4d9e78588665e1bae1ef77e8e728134d1b04e2ca1321c",
+    "world.flux.yml": "20a3e0be50c0216bb8ef8ac07cdc72b0100a3cf4bddccbb91b7841fcc96b88cc",
+}
 
 
 def test_a_hand_written_bundle_that_tracks_a_column_given_another_is_still_refused(
@@ -195,7 +215,6 @@ def test_an_end_marker_column_drawn_given_another_is_declined_and_the_bundle_val
     profile["tables"]["tier_version"]["columns"]["status"]["statistics"].append(
         _given(
             STATUS,
-            "status",
             "tier",
             {"basic": [300, 100, 100], "plus": [300, 100, 100], "pro": [300, 100, 100]},
         )
