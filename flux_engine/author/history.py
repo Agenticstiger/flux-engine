@@ -22,8 +22,11 @@ Simulation's ``history`` entry:
 * ``end`` is ``closeLast`` with the closed share of ``lastVersion``, when that share is above zero.
   A profile does not say which value marks an end, so ``finalVersion`` is written only from the
   contract: the natural entity's ``lifecycle.endMarker`` (:func:`declared_lifecycle`) names the
-  column and the value, and the share of entities that end is the closed share, as under
-  ``closeLast``;
+  column and the value. An end marker ends an entity with a marked version and closes no last
+  version, so the share of entities that end is not the closed share but the ended entities over
+  the entry's ``entities`` (ADR 0017, the amendment of 2026-11-27): the marker column's published
+  first values plus its changes into the marker where every one of those cells is published, else
+  the rows its histogram puts on the marker, else no end is written;
 * ``activation`` is the natural entity's ``lifecycle.activation`` when the expose has that column
   at the window's type. A ``lifecycle.currentFlag`` is written nowhere: no construct of the
   engine puts a value on an entity's last version alone, so the column keeps its own draw;
@@ -363,17 +366,27 @@ def _entities_of_key(source: HistorySource, natural: str) -> Optional[int]:
     return count if count is not None and 1 <= count <= source.rows else None
 
 
+def _column_statistics(
+    source: HistorySource, column: str
+) -> List[Tuple[Mapping[str, Any], Tuple[str, ...]]]:
+    """Each statistic of a column of the profile table, with its pointer."""
+    columns = source.table.get("columns")
+    found = columns.get(column) if isinstance(columns, Mapping) else None
+    statistics = found.get("statistics") if isinstance(found, Mapping) else None
+    return [
+        (node, ("tables", source.expose_id, "columns", column, "statistics", str(index)))
+        for index, node in enumerate(statistics if isinstance(statistics, list) else ())
+        if isinstance(node, Mapping)
+    ]
+
+
 def _column_start(
     source: HistorySource, start: str, kind: LogicalKind, until: int
 ) -> Optional[Tuple[Dict[str, Any], Tuple[str, ...]]]:
     """The ``start`` of the entry from the start column's own histogram, and where it is read, or ``None``."""
-    columns = source.table.get("columns")
-    column = columns.get(start) if isinstance(columns, Mapping) else None
-    statistics = column.get("statistics") if isinstance(column, Mapping) else None
-    for index, node in enumerate(statistics if isinstance(statistics, list) else ()):
-        if not isinstance(node, Mapping) or node.get("definition") != _MARGINAL:
+    for node, pointer in _column_statistics(source, start):
+        if node.get("definition") != _MARGINAL:
             continue
-        pointer = ("tables", source.expose_id, "columns", start, "statistics", str(index))
         try:
             return _start_histogram(node, pointer, kind, until, source), pointer
         except _Skip:
@@ -525,17 +538,17 @@ def _end(node: Any, pointer: Tuple[str, ...], source: HistorySource) -> Optional
     return {"mode": "closeLast", "share": share_texts([closed, total - closed])[0]}
 
 
-def _final_end(marker: Tuple[str, str], closed: Tuple[Fraction, Fraction]) -> Dict[str, Any]:
-    """The ``finalVersion`` end of the contract's end marker, with the profile's closed share.
+def _final_end(marker: Tuple[str, str], share: Fraction) -> Dict[str, Any]:
+    """The ``finalVersion`` end of the contract's end marker, with the share of entities that end.
 
-    The share is a share of every entity (ADR 0017, the amendment of 2026-11-24), as under
-    ``closeLast``, so the closed share of last versions is written as it is.
+    The share is of every entity (ADR 0017, the amendment of 2026-11-24). Under an end marker it is
+    the ended entities over the entities (the amendment of 2026-11-27), since no last version of a
+    profile is closed there.
     """
     column, value = marker
-    weight, total = closed
     return {
         "mode": "finalVersion",
-        "share": share_texts([weight, total - weight])[0],
+        "share": share_texts([share, 1 - share])[0],
         "column": column,
         "value": value,
     }
@@ -1899,13 +1912,25 @@ def _derived_closed(
     derived: Optional[_Derived],
     lifecycle: _Lifecycle,
 ) -> Optional[Tuple[Fraction, Fraction]]:
-    """The closed share of last versions when the release withholds it, from what else it publishes.
+    """The share of entities that end when the release withholds the closed share of last versions.
 
-    The open versions of the end column's histogram are the entities that have not ended, so the
-    ended share of the entities follows from them; where the end is drawn from no histogram, the
-    share of the lifecycle's ending level stands in.
+    Without an end marker, the open versions of the end column's histogram are the entities that
+    have not ended, so the ended share of the entities follows from them. Under an end marker no
+    last version is closed: an entity ends with a marked version, so the rows the marker's column
+    holds on its value are the ended entities, one row each, and the share is theirs over the
+    entities, not over the rows.
     """
     entities, rows = int(entry["entities"]), source.rows
+    if lifecycle.marker is not None:
+        plan = source.plans.get(lifecycle.marker[0])
+        levels = _levels_weighted(plan) if plan is not None else None
+        total = sum(levels.values(), Fraction(0)) if levels else Fraction(0)
+        if levels and lifecycle.marker[1] in levels and total > 0:
+            # Whole entities: the weights are spelled to nine places.
+            whole = round(levels[lifecycle.marker[1]] / total * rows)
+            if whole > 0:
+                return min(Fraction(whole, entities), Fraction(1)), Fraction(1)
+        return None
     if derived is not None and derived.closed is not None:
         # open rows = rows * (1 - closed share of rows); each entity not ended keeps one open version.
         open_rows = rows * (1 - derived.closed)
@@ -1913,12 +1938,115 @@ def _derived_closed(
         if ended <= 0:
             return None
         return min(ended, Fraction(1)), Fraction(1)
-    if lifecycle.marker is not None:
-        plan = source.plans.get(lifecycle.marker[0])
-        levels = _levels_weighted(plan) if plan is not None else None
-        if levels and lifecycle.marker[1] in levels and sum(levels.values(), Fraction(0)) > 0:
-            return levels[lifecycle.marker[1]], sum(levels.values(), Fraction(0))
     return None
+
+
+_UNREAD_MARKER = (
+    "no entity ends by the marker in the profile (its first values and moves, and its column's "
+    "histogram, put none on it), so the entry writes no end"
+)
+_MARKER_CELLS = (
+    "the entities that end under the contract's end marker: those that begin on the marker plus "
+    "every change into it, which the tracked column's first values and moves publish, over the "
+    "entities"
+)
+_MARKER_ROWS = (
+    "the entities that end under the contract's end marker: each holds it on one version, so the "
+    "rows its column holds on the marker, over the entities (the column's first values and moves "
+    "do not publish every change into it)"
+)
+_MARKER_LAST_VERSIONS = (
+    "the contract's end marker ends an entity with a marked version and closes no last version, so "
+    "the closed share of last versions gives no end share"
+)
+
+
+def _marker_first(first: Any, value: str) -> Optional[int]:
+    """The entities whose first version holds *value*, when that cell is published."""
+    group = _group(first)
+    levels = first.get("levels") if isinstance(first, Mapping) else None
+    if group is None or not isinstance(levels, list) or value not in levels:
+        return None
+    return count_cells(group, "levelCounts")[levels.index(value)].count
+
+
+def _marker_moves(moves: Any, value: str) -> Optional[int]:
+    """The changes into *value* from every other level, when every one of those cells is published."""
+    targets = moves.get("levels") if isinstance(moves, Mapping) else None
+    groups = moves.get("groups") if isinstance(moves, Mapping) else None
+    if not isinstance(targets, list) or not isinstance(groups, list) or value not in targets:
+        return None
+    by_level = {
+        str(item.get("group")): item
+        for item in groups
+        if isinstance(item, Mapping) and item.get("status") == _FREE
+    }
+    total = 0
+    for level in targets:
+        if str(level) == value:
+            continue
+        counts = count_cells(by_level.get(str(level), {}), "levelCounts")
+        if len(counts) != len(targets) or counts[targets.index(value)].count is None:
+            return None
+        total += counts[targets.index(value)].count or 0
+    return total
+
+
+def _marker_cells(
+    history: Mapping[str, Any], base: Tuple[str, ...], marker: Tuple[str, str]
+) -> Optional[Tuple[int, List[Tuple[str, ...]]]]:
+    """The entities that end by the marker, from the tracked column's first values and moves.
+
+    An entity that ends holds the marker on one version: its first, or the one it moves to, since
+    no change leaves the marker. The count is the first values on the marker plus the changes into
+    it from every other level, and is read only when each of those cells is published.
+    """
+    column, value = marker
+    columns = history.get("columns")
+    found = columns.get(column) if isinstance(columns, Mapping) else None
+    if not isinstance(found, Mapping):
+        return None
+    first = _marker_first(found.get("initial"), value)
+    moved = _marker_moves(found.get("transitions"), value)
+    if first is None or moved is None:
+        return None
+    where = base + ("columns", column)
+    return first + moved, [where + ("initial",), where + ("transitions",)]
+
+
+def _level_statistic(source: HistorySource, column: str) -> Optional[Tuple[str, ...]]:
+    """The pointer of a column's own level histogram, or ``None``."""
+    for node, pointer in _column_statistics(source, column):
+        if node.get("definition") == LEVEL_HISTOGRAM.identifier and "groupBy" not in node:
+            return pointer
+    return None
+
+
+def _marker_share(
+    history: Mapping[str, Any],
+    base: Tuple[str, ...],
+    source: HistorySource,
+    entry: Mapping[str, Any],
+    lifecycle: _Lifecycle,
+) -> Optional[Tuple[Fraction, str, List[_Note]]]:
+    """The share of entities that end by the contract's end marker, how it was read, and what gave it.
+
+    The tracked column's published first values and moves give it where every cell is published;
+    else the column's histogram does (:func:`_derived_closed`); else it is ``None``. Either way the
+    entry's share is assumed from them in the register, and the notes list what was read.
+    """
+    assert lifecycle.marker is not None
+    cells = _marker_cells(history, base, lifecycle.marker)
+    if cells is not None and cells[0] > 0:
+        share = min(Fraction(cells[0], int(entry["entities"])), Fraction(1))
+        why = "the entities that end by the contract's end marker, as the entry's end share"
+        return share, _MARKER_CELLS, [(pointer, why) for pointer in cells[1]]
+    closed = _derived_closed(source, entry, None, lifecycle)
+    if closed is None:
+        return None
+    where = _level_statistic(source, lifecycle.marker[0])
+    why = "the rows on the contract's end marker, as the entry's end share"
+    return closed[0], _MARKER_ROWS, [(where, why)] if where is not None else []
 
 
 def _tracked_and_end(
@@ -1930,18 +2058,25 @@ def _tracked_and_end(
     lifecycle: _Lifecycle,
     derived: Optional[_Derived] = None,
 ) -> None:
-    closed = _closed_share(history.get("lastVersion"), base + ("lastVersion",), source)
+    pointer = base + ("lastVersion",)
+    marker = lifecycle.marker
+    found = None
+    if marker is not None:
+        found = _marker_share(history, base, source, entry, lifecycle)
+        if found is None:
+            lifecycle.decline("endMarker", _UNREAD_MARKER)
+            marker = None
+        closed = None
+    else:
+        closed = _closed_share(history.get("lastVersion"), pointer, source)
     withheld_share = (
-        closed is None and derived is not None and _withheld_levels(history.get("lastVersion"))
+        lifecycle.marker is None
+        and closed is None
+        and derived is not None
+        and _withheld_levels(history.get("lastVersion"))
     )
     if withheld_share:
         closed = _derived_closed(source, entry, derived, lifecycle)
-    marker = lifecycle.marker if closed is not None else None
-    if marker is None and lifecycle.marker is not None:
-        lifecycle.decline(
-            "endMarker",
-            "no entity ends in the profile (no last version is closed), so the entry writes no end",
-        )
     tracking = _track(history, base, source, written.exempt - source.set_by_rules, marker)
     written.used += tracking.used
     written.unused += tracking.unused
@@ -1949,20 +2084,15 @@ def _tracked_and_end(
     if tracking.columns:
         entry["tracked"] = tracking.columns
     _reasons_entry(history, base, source, entry, written, names)
-    pointer = base + ("lastVersion",)
+    if lifecycle.marker is not None:
+        last = pointer if "lastVersion" in history else None
+        _marker_end(entry, written, lifecycle.marker, found, last)
+        return
     if withheld_share:
-        _withheld_end(source, entry, written, pointer, closed, marker, derived)
+        _withheld_end(source, entry, written, pointer, closed, derived)
         return
     end = _end(history.get("lastVersion"), pointer, source)
-    if end is not None and marker is not None and closed is not None:
-        entry["end"] = _final_end(marker, closed)
-        written.used.append(
-            (
-                pointer,
-                "the closed share of last versions, as the entry's end share under finalVersion",
-            )
-        )
-    elif end is not None:
+    if end is not None:
         entry["end"] = end
         written.used.append(
             (pointer, "the closed share of last versions, as the entry's end share under closeLast")
@@ -1973,13 +2103,30 @@ def _tracked_and_end(
         )
 
 
+def _marker_end(
+    entry: Dict[str, Any],
+    written: HistoryWritten,
+    marker: Tuple[str, str],
+    found: Optional[Tuple[Fraction, str, List[_Note]]],
+    last_versions: Optional[Tuple[str, ...]],
+) -> None:
+    """The entry's ``end`` under the contract's end marker, and what the ledger says of each member."""
+    if found is not None:
+        share, how, gave = found
+        entry["end"] = _final_end(marker, share)
+        written.derived[("end", "share")] = how
+        listed = {note[0] for note in written.used}
+        written.used += [note for note in gave if note[0] not in listed]
+    if last_versions is not None:
+        written.unused.append((last_versions, _MARKER_LAST_VERSIONS))
+
+
 def _withheld_end(
     source: HistorySource,
     entry: Dict[str, Any],
     written: HistoryWritten,
     pointer: Tuple[str, ...],
     closed: Optional[Tuple[Fraction, Fraction]],
-    marker: Optional[Tuple[str, str]],
     derived: Optional[_Derived],
 ) -> None:
     """The entry's ``end`` when the release withholds the last versions' closed share, from what else it publishes."""
@@ -1991,20 +2138,17 @@ def _withheld_end(
             )
         )
         return
-    from_histogram = derived is not None and derived.closed is not None
-    how = "the closed share of last versions, which the release withholds: " + (
-        "the entities that have not ended are the open versions of the histogram of "
+    how = (
+        "the closed share of last versions, which the release withholds: the entities that have "
+        "not ended are the open versions of the histogram of "
         f"{source.table['history'].get('end')!r}, so the rest ended"
-        if from_histogram
-        else "the contract's ending level of the lifecycle's endMarker"
     )
     written.derived[("end", "share")] = how
     written.unused.append((pointer, how))
-    entry["end"] = (
-        _final_end(marker, closed)
-        if marker is not None
-        else {"mode": "closeLast", "share": share_texts([closed[0], closed[1] - closed[0]])[0]}
-    )
+    entry["end"] = {
+        "mode": "closeLast",
+        "share": share_texts([closed[0], closed[1] - closed[0]])[0],
+    }
 
 
 def _reasons_entry(
