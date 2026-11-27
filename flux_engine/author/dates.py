@@ -35,10 +35,17 @@ from fractions import Fraction
 from math import gcd, lcm
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Tuple, Union
 
-from flux_engine.author.columns import _share_text, cell_weights, count_cells
+from flux_engine.author.columns import _share_text, cell_weights, count_cells, share_texts
 from flux_engine.author.date_spread import DateSpread, independent_break_share
 from flux_engine.author.end_range import Spans
 from flux_engine.author.forms import SUPERSEDED, grouped, number_grouped
+from flux_engine.author.gap_fit import (
+    GAP_FIT_ITERATIONS,
+    GapFit,
+    Interval,
+    fit_gap,
+    longest_without_leak,
+)
 from flux_engine.author.orders import DateOrder
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.dates import MOST_STATES
@@ -138,6 +145,8 @@ class DateDeclarations:
     #: The checks that order two dates and are held by the published dates, or by a lifetime that
     #: trades the end's histogram for it, as (subject, what).
     order_notes: List[Tuple[str, str]] = field(default_factory=list)
+    #: (emit, end column) -> total variation between the ends a derived gap gives and the published ones.
+    fit_distances: Dict[Tuple[str, str], Fraction] = field(default_factory=dict)
     #: What each written number rests on: the entry, the member of it (tokens below the entry), the
     #: statistic of the profile it was read from (tokens into the profile) and the sentence that
     #: says how. The entry is one of ``lifetimes``, ``within`` or ``rates``, by identity.
@@ -515,6 +524,14 @@ def _beaten_exposures(weighed: Sequence[_Weighed]) -> Dict[int, str]:
     return beaten
 
 
+def _days_of(spread: DateSpread) -> List[Interval]:
+    """The bins of *spread* on a grid of days, each with its share of the non-null rows."""
+    scale = _DAY_MS if spread.kind is LogicalKind.TIMESTAMP else 1
+    return [
+        (Fraction(low, scale), Fraction(high, scale), share) for low, high, share in spread.bins
+    ]
+
+
 class _Declarer:
     """The state of one run of :func:`declare_dates`."""
 
@@ -550,6 +567,11 @@ class _Declarer:
         )
         #: expose -> (start, end or None, the declaration)
         self.lifetimes: Dict[str, Dict[str, Any]] = {}
+        #: expose -> (start, end) of the lifetime its release's history entry names (see
+        #: :meth:`lifetimes_of_histories`).
+        self.history_pairs: Dict[str, Tuple[str, str]] = {}
+        #: (expose, end column) -> total variation between the ends a derived gap gives and the published ones.
+        self.fit_distances: Dict[Tuple[str, str], Fraction] = {}
         #: The exposes whose lifetime is only a start a relationship's date pair offered: one is
         #: kept only while a within entry reads it.
         self.start_only: set[str] = set()
@@ -634,6 +656,114 @@ class _Declarer:
                 continue
             self._table_lifetime(str(expose), held, items)
 
+    def lifetimes_of_histories(self) -> None:
+        """A lifetime for the start and the end a release's ``history`` entry names, when none is written for it.
+
+        A release that publishes a versioned table's start and end as one ``history`` entry no
+        longer publishes them as a date pair, so a table whose history is not written (its
+        members are cut, or its contract leaves no open end) would draw the end apart from the
+        start. The versions of one entity start on the start and end on the end, so the pair holds
+        on every row, and it is laid out as a lifetime: the days between the dates are the
+        histogram that turns the published starts into the published ends
+        (:func:`~flux_engine.author.gap_fit.fit_gap`), or an even spread over the run's window
+        where either histogram is not published. A pair the release also publishes as a date pair
+        is that pair's, and a table whose history is written takes none.
+        """
+        tables = self.profile.get("tables")
+        for expose, table in (tables.items() if isinstance(tables, Mapping) else ()):
+            held = self.exposes.get(str(expose))
+            history = table.get("history") if isinstance(table, Mapping) else None
+            if held is None or not isinstance(history, Mapping):
+                continue
+            start, end = history.get("start"), history.get("end")
+            if not isinstance(start, str) or not isinstance(end, str) or start == end:
+                continue
+            if any(
+                isinstance(item, Mapping)
+                and {str(item.get("start")), str(item.get("end"))} == {start, end}
+                for item in (
+                    table.get("datePairs") if isinstance(table.get("datePairs"), list) else ()
+                )
+            ):
+                continue
+            self._history_lifetime(str(expose), held, start, end)
+
+    def _history_lifetime(self, expose: str, held: DatedExpose, start: str, end: str) -> None:
+        if self._pair_refusal(expose, held, start, end) is not None:
+            return
+        if self.window_start is None:
+            return
+        window_days = (self.window_end - self.window_start) // _DAY_MS
+        spread_start, spread_end = held.spreads.get(start), held.spreads.get(end)
+        fit: Optional[GapFit] = None
+        longest = window_days
+        if spread_start is not None and spread_end is not None:
+            starts, ends = _days_of(spread_start), _days_of(spread_end)
+            longest = max(longest, int(ends[-1][1] - starts[0][0]))
+            longest = min(longest, longest_without_leak(starts, ends))
+            fit = fit_gap(starts, ends, 1, longest)
+        if fit is None or fit.even:
+            if window_days <= 1:
+                return
+            edges, weights = [1, window_days], [Fraction(1)]
+            how = (
+                f"the days from {start!r} to {end!r}, which the release's history entry gives "
+                "and no statistic of the profile measures: drawn evenly from 1 to "
+                f"{window_days} days, the most the run's window allows"
+            )
+            distance = None
+        else:
+            edges, weights = list(fit.edges), list(fit.weights)
+            how = (
+                f"the days from {start!r} to {end!r}, which the release's history entry gives "
+                "and no statistic of the profile measures: derived from the published "
+                f"histograms of {start!r} and {end!r}, as the histogram of gaps that turns the "
+                f"first into the second (each bin spread evenly, {GAP_FIT_ITERATIONS} "
+                "multiplicative updates from an even start)"
+            )
+            distance = fit.distance
+        entry: Dict[str, Any] = {
+            "emit": expose,
+            "start": start,
+            "end": end,
+            "duration": {
+                "bins": [str(edge) for edge in edges],
+                "binWeights": share_texts(weights),
+            },
+        }
+        if self._max_after_window(expose, end):
+            entry["endPastWindow"] = "kept"
+        if not self._fits(held, start, end, edges[0], edges[-1]):
+            self.declined_orders.append(
+                (
+                    f"{expose}.{end}",
+                    f"no lifetime is written from {start!r} to {end!r}, which the release's "
+                    f"history entry names: the declared range of {end!r} cannot be shown to "
+                    "hold every end the gaps can draw",
+                )
+            )
+            return
+        self.cited.append((entry, ("duration",), None, how))
+        self.lifetimes[expose] = entry
+        self.history_pairs[expose] = (start, end)
+        note = (
+            f"the histogram of {end!r} is traded for a lifetime from {start!r}: the release's "
+            "history entry names them as the start and the end of a version, so no version "
+            "may end before it starts"
+        )
+        if distance is not None and fit is not None:
+            note += (
+                f"; the gaps are derived from the two published histograms and reproduce the "
+                f"histogram of {end!r} to a total variation of {_percent(distance)}"
+            )
+            if fit.gap > 0:
+                note += (
+                    f", and the published ends rise above the starts by up to {_percent(fit.gap)}, "
+                    "so no gap can match both exactly"
+                )
+            self.fit_distances[(expose, end)] = distance
+        self.order_notes.append((f"{expose}.{end}", note))
+
     def _table_lifetime(self, expose: str, held: DatedExpose, items: Sequence[Any]) -> None:
         candidates: List[Tuple[int, int, _Pair, str, str, bool, Fraction]] = []
         for index, item in enumerate(items):
@@ -642,6 +772,15 @@ class _Declarer:
                 if candidate is not None:
                     candidates.append(candidate)
         if not candidates:
+            return
+        if expose in self.history_pairs:
+            start, end = self.history_pairs[expose]
+            for candidate in candidates:
+                self.reject(
+                    candidate[2],
+                    f"the table declares one lifetime, and the history the release publishes "
+                    f"for it gives the pair ({start}, {end}) every row",
+                )
             return
         best = max(candidates, key=lambda entry: (entry[0], -entry[1]))
         for candidate in candidates:
@@ -1046,7 +1185,12 @@ class _Declarer:
         """
         for expose, held in self.exposes.items():
             orders = sorted(
-                (order for order in held.orders if not self._published_pair(expose, order)),
+                (
+                    order
+                    for order in held.orders
+                    if not self._published_pair(expose, order)
+                    and self.history_pairs.get(expose) != (order.start, order.end)
+                ),
                 key=lambda order: (order.rule, order.start, order.end),
             )
             life = self.lifetimes.get(expose)
@@ -1181,7 +1325,10 @@ class _Declarer:
 
     def _order_refusal(self, expose: str, held: DatedExpose, order: DateOrder) -> Optional[str]:
         """Why no lifetime can order the two dates of *order*, whatever the run's window."""
-        start, end = order.start, order.end
+        return self._pair_refusal(expose, held, order.start, order.end)
+
+    def _pair_refusal(self, expose: str, held: DatedExpose, start: str, end: str) -> Optional[str]:
+        """Why no lifetime can run from *start* to *end* of an expose, whatever the run's window."""
         refused = self._usable(expose, start, end)
         if refused is None:
             refused = self._set_already(expose, start) or self._set_already(expose, end)
@@ -1251,6 +1398,19 @@ class _Declarer:
             )
         )
         return entry
+
+    @staticmethod
+    def _fits(held: DatedExpose, start: str, end: str, shortest: int, longest: int) -> bool:
+        """Whether a kept end can always be drawn inside the span its bundle declares (``FLX-6204``).
+
+        The gaps a history entry's lifetime draws are read against the spans the bundle declares
+        for the two columns; the contract's range is not consulted (:class:`Spans` does that for a
+        lifetime written for a check).
+        """
+        reach, span = held.bounds.get(start), held.bounds.get(end)
+        if reach is None or span is None:
+            return False
+        return reach[1] + shortest * _DAY_MS <= span[1] and reach[0] + longest * _DAY_MS >= span[0]
 
     # -- relationships -------------------------------------------------------
 
@@ -1887,6 +2047,7 @@ def declare_dates(
         declined_within=declined_within,
         declined_rates=declined_rates,
     )
+    declarer.lifetimes_of_histories()
     declarer.lifetimes_of_tables()
     declarer.lifetimes_of_orders()
     declarer.start_only_lifetimes()
@@ -1903,4 +2064,5 @@ def declare_dates(
         declined_orders=declarer.declined_orders,
         order_notes=declarer.order_notes,
         end_ranges=declarer.end_ranges,
+        fit_distances=declarer.fit_distances,
     )

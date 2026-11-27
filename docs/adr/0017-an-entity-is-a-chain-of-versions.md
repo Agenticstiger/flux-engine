@@ -945,3 +945,34 @@ far below 100 % at `verify`).
   refused as it was. No row changes for a plan accepted before: a plan
   with such a link was either refused or accepted with a broken link, and a broken one is refused now. A foreign
   key that is not tracked takes a key the parent holds, as before.
+
+## Amendment of 2026-11-26: a history whose lengths a release withholds
+
+A release may publish a versioned table's start and end as a `history` entry and withhold that entry's
+`versionLength`, and with it `versionsPerEntity`, `firstStart`, `chain` and `lastVersion`. Section 13 wrote no entry
+then, the table's date pairs were all that were left, and the end was drawn from its own histogram, so a version could
+end before it started.
+
+- **A history that can be written.** `init` writes it from what the release does publish, and each member it supplies
+  is an assumption in the register. The entities are the natural entity's published distinct count, with the
+  versions spread over them as evenly as whole counts allow. The `start` is the first starts' histogram when the
+  release publishes it, and else the start column's own histogram, which is exact where each entity has one version.
+  The chain is the contract's, else `nextStart`. The `length` is the histogram of gaps that turns the starts into the
+  closed part of the end's histogram, found by the Richardson-Lucy update from an even start (`author/gap_fit.py`):
+  each bin of starts and of gaps spread evenly, a fixed count of updates, whole-number arithmetic so no machine
+  reads a different byte. Where the starts or the end are drawn from no histogram, the length is even over the run's
+  window. The `end` share is the share of entities with no open version in the end's histogram, read at the
+  horizon; with the end drawn from no histogram, no history is written for the length and the table's start and end are one
+  lifetime (below). With no closed part in that histogram, the share of the lifecycle's end marker stands in, and
+  with neither no entity ends.
+- **What is not written.** A history is not written from withheld lengths where the release publishes a column on
+  the start's day that no `lifecycle.activation` keeps with the first start: the history would draw the two apart.
+  Nor where a required end has no declared `openEnd` (section 13's amendment of 2026-11-25). The table's start and
+  end are then one lifetime (ADR 0024), with the same gaps, and a published date pair for the two is still that
+  pair's.
+- **The check it makes.** Independent draws turn the starts into the ends only as far as the ends' cumulative
+  share stays at or below the starts' (Strassen); `init` reports the largest excess, and the total variation between
+  the ends the gaps give and the published ones. An end column's histogram property that the gaps miss by more than
+  its tolerance is left out, with a note.
+- **What does not move.** A release that publishes its lengths, and one that publishes the pair as a date pair, keep
+  every byte. No generator or plan code changes.
