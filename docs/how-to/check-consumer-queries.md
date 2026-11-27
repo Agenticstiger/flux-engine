@@ -5,9 +5,9 @@ description: "Declare the SQL your consumers run, have fluxsim check and count i
 
 # Check consumer queries, calibrate to them
 
-Use this page when the people who read your data ask it questions in SQL (dashboards, tests and reports)
-and you want the synthetic copy to serve those questions: each one runs unchanged, returns rows, and gives
-a rate close to the one the real data gives. The design is
+Use this page when the people who read your data ask it questions in SQL (dashboards, tests and reports),
+and you want the synthetic copy to serve those questions. Each question runs unchanged, returns rows, and
+gives a rate close to the one the real data gives. The design is
 [ADR 0028](../adr/0028-consumer-queries-run-locked-compile-requirements-and-calibrate.md) and the rules are
 in the [specification](../spec/CONSUMER-QUERIES-SPEC.md).
 
@@ -32,8 +32,9 @@ Generation reads no SQL, so a bundle that declares queries plans and applies wit
 then reports the queries as not measured, with that command.
 
 The locks that run the queries are defense in depth, not a sandbox. Each query is checked against a closed
-list before DuckDB sees it, and counted in a process of its own with no network, no file access and a limit
-on time and memory, but DuckDB's own guidance is to treat these as layers and not as a boundary. **Run a
+list before DuckDB sees it. It is then counted in a process of its own with no network, no file access and
+a limit on time and memory. Even so, DuckDB's own guidance is to treat these as layers and not as a
+boundary. **Run a
 bundle that someone else wrote inside a container.** A bundle you wrote yourself is text you have read.
 
 ## 1. The scenario
@@ -123,9 +124,9 @@ limits:
   command, such as `--max-query-seconds`, never a bundle value, so a bundle from someone else cannot claim
   the machine.
 
-The text of each query is checked before anything runs: one statement, a query and not a command, every
-expression and function on a closed list, every table and column resolved, and a total order wherever
-`LIMIT` or a window depends on one. A refusal names the query and the construct. The list is in the
+The text of each query is checked before anything runs. It must be one statement, and a query and not a
+command. Every expression and function must be on a closed list, and every table and column must
+resolve. A total order is required wherever `LIMIT` or a window depends on one. A refusal names the query and the construct. The list is in the
 specification.
 
 ## 3. Ask the profiler, then write the bundle
@@ -167,8 +168,8 @@ $ grep -c '"name"' request-demo.held-out-request.yml
 1
 ```
 
-A profiler is owed these entries as untrusted text: it checks each query again and runs it under the same
-locks or stronger ones, and its disclosure checks look at the queries together, since two that differ by one
+A profiler is owed these entries as untrusted text. It checks each query again and runs it under the same
+locks or stronger ones. Its disclosure checks look at the queries together, since two that differ by one
 literal can reveal a record by differencing.
 
 Once a profile exists, `init` runs again with the same `--consumers` file and writes the bundle. It also
@@ -253,13 +254,13 @@ that passes them takes the status `timedOut` while the others still run.
 
 ## 6. Fit, and let the held-out queries decide
 
-A fit moves only numbers the bundle assumes. The `calibration` block of the fixture's Simulation names one,
-the weight of the first bin of `renewed_at`, but that histogram has one bin, so its weight is a share of
-itself and moves no query's rate: a fit of it would report a value and change nothing. A fit is worth running on
+A fit moves only numbers the bundle assumes. The `calibration` block of the fixture's Simulation names one, the
+weight of the first bin of `renewed_at`. That histogram has one bin, so its weight is a share of itself and
+moves no query's rate. A fit of it would report a value and change nothing. A fit is worth running on
 a number that decides a calibration query's rate. `premium-renewed` counts the premium subscriptions that
 renewed, so the share of `renewed` the generator leaves NULL decides it. The contract allows NULL there and
-the profile publishes no count of it, so the working copy assumes a tenth, enters the assumption in the
-parameter register with its reason, and points the block at it. This edits the page's own copy, `declared`,
+the profile publishes no count of it. The working copy therefore assumes a tenth, enters the assumption in
+the parameter register with its reason, and points the block at it. This edits the page's own copy, `declared`,
 and leaves the shared fixture alone:
 
 ```python
@@ -309,9 +310,19 @@ $ sed -n '/^      calibration:/,$p' declared/simulation.flux.yml
 
 Each parameter names a document of the bundle and a JSON Pointer to a number the parameter register lists
 with the source `assumption` or `default`. A value the profile or the contract states is refused: a fit moves
-only what the data does not state. CMA-ES runs for at most `evaluations` runs of the bundle at `scale`, from a seeded generator, with the start point
-evaluated as well, and the objective is the sum of the squared gaps between each calibration query's rate
+only what the data does not state. CMA-ES runs for at most `evaluations` runs of the bundle at `scale`, from a seeded generator. The start point is evaluated as well. The objective is the sum of the squared gaps between each calibration query's rate
 and its target. It reads the pinned profile only.
+
+When the pinned profile is a private release (format 1-5-0), a query's rate can be noisy. The fit reads it
+through its point estimate, with three rules:
+
+- A rate stands inside the noise when its unit's records are at most twice the noise floor over every cell of its
+  statistic. A query whose every rate lies inside the noise is left out and named in a note (`noiseNotes` in
+  `--json`). A single group inside the noise is dropped without a note.
+- Each query's squared gap is weighted by the inverse of its rate's variance. The weights are scaled so the least
+  noisy query weighs 1, as an exact rate does.
+- When every rate of the calibration queries stands inside the noise, the profile states none to fit to. The fit
+  refuses with [FLX-3707](../reference/errors/FLX-3707.md) and names the queries. Nothing runs.
 
 ```console
 $ fluxsim calibrate --fit declared --profile fixture/subscriptions.profile.json --held-out fixture/subscriptions.held-out-profile.json --out calibrated   # exit 1
@@ -405,14 +416,15 @@ $ grep -A15 'source: calibrated' calibrated/simulation.flux.yml
           duckdb: ...
 ```
 
-The entry names the queries the value was fitted to, the value before and after, the digests of the patch
-and of the profile that held the targets, and the held-out profile with its largest gap and the tolerance it
-met. The calibrated bundle pins the profile that held its targets, so the privacy grade is the pinned
+The entry names the queries the value was fitted to and the value before and after. It also names the
+digests of the patch and of the profile that held the targets, and the held-out profile with its largest gap
+and the tolerance it met. The calibrated bundle pins the profile that held its targets, so the privacy grade is the pinned
 profile's, and the patch, being a declaration, enters no grade.
 
 A bundle that declares no held-out query needs no `--held-out`. `calibrate --fit` fits it anyway, writes the
-patch, and says that no held-out check was made because the bundle declares no held-out query; with nothing
-to hold the result to, the bundle is not called calibrated, so no bundle is written and the command exits 1.
+patch, and says that no held-out check was made because the bundle declares no held-out query. With nothing
+to hold the result to, the bundle is not called calibrated. As a result, no bundle is written and the
+command exits 1.
 A `--held-out` file given to such a bundle is not read, and the output says so. A bundle that does declare a
 held-out query is refused without `--held-out`, as before.
 

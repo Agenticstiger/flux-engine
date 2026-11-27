@@ -3,6 +3,8 @@
 Each record says what was decided, why, and what else was considered. A record keeps the
 text of its date; a later change is written into it as a dated amendment.
 
+ADR numbers 0007, 0026 and 0034 are not used. The repository's history holds no record under them.
+
 - [ADR 0001](./0001-diverge-from-mesa.md): diverge from Mesa for the simulation substrate. Accepted.
 - [ADR 0002](./0002-flux-expr-diverges-from-cel.md): flux-expr/1 diverges from CEL. Accepted.
 - [ADR 0003](./0003-sdv-bsl-and-aggregate-only-rule.md): calibrate from aggregates only, with no SDV and no fitting to records. Accepted, amended 2026-11-11, 2026-11-16, 2026-11-21 and 2026-11-23.

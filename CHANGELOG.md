@@ -354,6 +354,20 @@ stays ordered, an order lifetime keeps its ends inside their declared range, and
   day keeps the history out, is listed as used and no longer as unused, so a release made by dropping the unused
   statistics gives the same bundle (ADR 0024, the amendments of 2026-11-27).
 
+### Known issues
+
+Fixes are planned for 0.13.1.
+
+- `fluxsim init` can widen a date column's declared range far back to meet a `within` entry's offset when the contract
+  declares no range for the column itself but bounds it through a `derive` (for example a count of months with a
+  declared range). The derived column then misses its range on most rows. Declaring a `range` on the date column avoids
+  it.
+- From some private releases that publish a table's history, a contract check that orders a termination after an
+  activation holds on fewer rows than declared.
+- A profile cut by the unused list of `fluxsim init --json` can, for a few shapes, give a bundle that differs from the
+  whole profile's in some fidelity properties and allocations. One such shape is a history entry whose start and end
+  lay out a table's lifetime.
+
 ## 0.12.1 - 2026-11-26
 
 Fixes to the bundles `fluxsim init` writes from a private profile release, and a `plan` refusal of a periods
@@ -809,6 +823,13 @@ ranges and `verify`. The engine now needs `flux-spec>=0.5.5,<0.6`.
 - When the plan kept asking for the same wider date ranges after `init` had written them, `init` ran every pass
   and stopped with no code and no column named. It now stops at the first pass that asks for nothing new and
   refuses with `FLX-6204`, naming each column and the span the plan asks for.
+
+### Known issues
+
+Both are fixed in 0.12.1. Both affect bundles that `fluxsim init` writes from a private profile release.
+
+- **Unbounded invoice months.** When a release publishes a relationship-date statistic as a single wide bin, `init` writes it as a `within` offset that can override the period column's own published range. The column's values can then fall outside the contract's declared range. Declaring the column's range, or reviewing the `within` that `init` writes, avoids it.
+- **No projections from one sparse column.** When a release withholds the level histogram of a sparse categorical column, `init` can drop every projection it would otherwise write, rather than only the one that fails. The snapshot table's keys then no longer all match the history's versions.
 
 ## 0.11.1 - 2026-11-24
 
