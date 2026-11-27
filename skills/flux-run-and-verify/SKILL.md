@@ -130,7 +130,7 @@ the bundle folder (`FLX-3106`). Do not open, sample, print or summarise the real
 - [Reading results](references/reading-results.md): the five legs, the scorecard, fidelity, EVIDENCE.md, and `fluxsim story` for one entity's history.
 - [Refusals](references/refusals.md): the code families and the next step for each.
 - Help of the installed fluxsim first (`fluxsim <command> --help`), then the pages at
-  [the command reference](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/reference/cli/README.md) and
-  [the error codes](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/reference/errors/README.md).
+  [the command reference](https://github.com/Agenticstiger/flux-engine/blob/v0.13.1/docs/reference/cli/README.md) and
+  [the error codes](https://github.com/Agenticstiger/flux-engine/blob/v0.13.1/docs/reference/errors/README.md).
 - Shipping an evidence pack, `--scale`, `--shard` and sinks belong to the `flux-scale-and-ship` skill. Finding
   a page belongs to the `flux-docs-lookup` skill.

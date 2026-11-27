@@ -20,7 +20,16 @@ a release.
 
 Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
-## Unreleased
+## 0.13.1 - 2026-11-28
+
+Fixes to the bundles `fluxsim init` writes from a private profile release. This resolves the three known issues listed
+for 0.13.0: a date column's declared range could be widened past the days a `derive` over it keeps in range, a contract
+check that orders a termination after an activation could hold on fewer rows than declared, and a profile cut by the
+unused list could give another bundle than the whole profile. For every case measured, a profile with the listed
+statistics removed now gives the same bundle; this is checked in CI over the repository's fixtures, and is not proved
+for every profile. `init` also writes the end share of a contract that marks an entity's end by a value. A release
+that lists a date pair with an order it does not publish now gets the lifetime of the contract's check of the two
+dates, so its bundle changes.
 
 ### Fixed
 

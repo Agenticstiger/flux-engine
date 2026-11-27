@@ -53,9 +53,9 @@ fluxsim explain --list
 ```
 
 Each code has a page named after it in the errors reference, for example
-[FLX-4005](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/reference/errors/FLX-4005.md). The
+[FLX-4005](https://github.com/Agenticstiger/flux-engine/blob/v0.13.1/docs/reference/errors/FLX-4005.md). The
 errors index groups the codes by family:
-[error codes](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/reference/errors/README.md).
+[error codes](https://github.com/Agenticstiger/flux-engine/blob/v0.13.1/docs/reference/errors/README.md).
 
 ## 4. A concept
 

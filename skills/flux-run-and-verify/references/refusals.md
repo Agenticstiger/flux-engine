@@ -3,7 +3,7 @@
 A refusal carries an `FLX-nnnn` code. The thousands digit says which part of the engine raised it. For any
 code: run `fluxsim explain FLX-nnnn` (offline, the same text as the page), then, if needed, open
 its page, which `fluxsim explain` prints as the last line, or the index of
-[all error codes](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/reference/errors/README.md). `fluxsim explain --list`
+[all error codes](https://github.com/Agenticstiger/flux-engine/blob/v0.13.1/docs/reference/errors/README.md). `fluxsim explain --list`
 lists every code in the installed engine. Apply the remedy it prints, then run the same step again, except where a remedy asks for the person's own decision (see "Handling a refusal"). Never
 weaken a check, never edit a recorded plan or digest, never record past a refusal.
 

@@ -1,7 +1,7 @@
 # Reading the results
 
 What `fluxsim init` with `--consumers` and `fluxsim verify` print about consumer queries, and how to report it. The worked page is
-[check consumer queries](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/docs/how-to/check-consumer-queries.md).
+[check consumer queries](https://github.com/Agenticstiger/flux-engine/blob/v0.13.1/docs/how-to/check-consumer-queries.md).
 
 ## Requirements, from `init`
 

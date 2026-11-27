@@ -61,7 +61,7 @@ they are checked again at each FLUX release.
   about that profile; see [`validate`](../reference/cli/validate.md). A profile that a private release published
   with a noisy history, a noisy `nullCount/2` or noisy query rates (profile format 1-5-0) can stay at grade P3;
   see [write a bundle from a private release](../how-to/write-a-bundle-from-a-private-release.md).
-  The 0.13.0 known issues are listed in the [0.13.0 changelog](https://github.com/Agenticstiger/flux-engine/blob/v0.13.0/CHANGELOG.md).
+  The three 0.13.0 known issues are fixed in 0.13.1; see the [0.13.1 changelog](https://github.com/Agenticstiger/flux-engine/blob/v0.13.1/CHANGELOG.md).
 
 ## The comparison
 
