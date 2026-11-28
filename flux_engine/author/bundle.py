@@ -106,7 +106,7 @@ from flux_engine.author.dates import (
     DATE_KINDS,
     DatedExpose,
     declare_dates,
-    pair_orders,
+    pair_order_published,
     statistic_tokens,
     window_end_ms,
     window_start_ms,
@@ -3125,7 +3125,7 @@ def _orders_of_versions(
         ):
             continue
         for order in contract_date_orders(contract["exposes"][other.index]):
-            if not pair_orders(tables.get(other.expose_id), order.start, order.end)[0]:
+            if not pair_order_published(tables.get(other.expose_id), order.start, order.end):
                 nulls = _may_be_null(
                     tables.get(other.expose_id), contract["exposes"][other.index], order.start
                 )

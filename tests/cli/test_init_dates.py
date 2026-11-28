@@ -943,8 +943,11 @@ def test_a_pair_with_no_usable_duration_writes_a_start_only_lifetime(tmp_path: P
     pair["statistics"] = []
     written = _written(tmp_path, _profile(customer=[pair]))
     assert written.lifetimes == {"customer": {"emit": "customer", "start": "signed_up"}}
-    reasons = written.unused("/tables/customer/datePairs/0")
-    assert reasons and all("no usable duration" in reason for reason in reasons)
+    # The pair's order named the start the lifetime keeps, so it is read and not listed unused.
+    states = written.result.artifacts["ledger"]["statistics"]
+    assert {item["pointer"]: item["state"] for item in states}[
+        "/tables/customer/datePairs/0/order"
+    ] == "used"
 
 
 def test_a_histogram_with_no_day_from_zero_up_writes_a_start_only_lifetime(tmp_path: Path) -> None:

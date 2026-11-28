@@ -348,3 +348,18 @@ past those days too. Rows dated there write the derived column outside its decla
   range is narrower than the profile's, and the histogram of the column is not compared.
 - A range inside the days, and a column no derive bounds, keep their bytes. Only an authoring
   change: no kernel behaviour or golden digest moves.
+
+## Amendment of 2026-11-27: two more statistics the ledger reads
+
+Cutting a profile by the statistics `init` lists as unused gives the bundle the whole profile gave. Two statistics
+that decided something were not listed as read.
+
+- **A date a rule sets, drawn over the window.** A column a contract rule sets is not drawn, so its histogram is not
+  read for a draw. When the histogram had no bin that stands clear of the noise, the run's window was still declared
+  as the column's one bin, and the noise is what decided it. The histogram is read, with a reason that names no value.
+  The declared bytes do not change.
+- **The property of a column drawn given another.** The `levelHistogram` property scores a column against its own
+  histogram. When the column is later drawn given another column, the labels that cited the histogram go, but the
+  property stays, so the histogram is read for the property. The declared bytes do not change.
+
+The unused list and the ledger's states change; no declared value does.

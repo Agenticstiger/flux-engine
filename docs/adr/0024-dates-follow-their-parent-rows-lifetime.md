@@ -673,3 +673,15 @@ from, and the check was not read either, since the pair was listed.
 - **What does not move.** A release that publishes the order, a strict check, a check whose later date no version sets,
   a column a rule or a key sets, a contract that declares its own `lifecycle.activation`, a history refused for the tie
   and a contract with no such check keep their bytes. No generator or plan code changes.
+
+### Only a readable order claims a pair
+
+The same reading holds for the lifetime of a contract's check. A pair that a table lists claims its two dates for the
+profile (and the check writes no lifetime of its own) only when the pair's order is published and readable. A pair
+whose order is withheld, suppressed or noisy is listed and orders nothing, so the check of the two dates is still an
+order to keep and writes its lifetime, as it does where the release lists no pair. The history's activation above and
+this share one test of whether a pair has a readable order. A release with such a pair gives a bundle that carries the
+check's lifetime where it carried none; a pair with a readable order keeps its bytes.
+
+A pair that gives no usable duration writes a lifetime with its start only, and its order named that start, so the
+order is read and is not listed as unused.

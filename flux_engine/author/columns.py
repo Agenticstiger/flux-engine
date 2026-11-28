@@ -996,6 +996,7 @@ def _level_weights(
             },
             [Label(("tolerance", "max"), assumed(TOLERANCE_REASON))],
             scorable=True,
+            reads=[(stat_tokens, "the histogram the column is scored against")],
         )
     )
 
@@ -3372,6 +3373,15 @@ def copy_column(ctx: ColumnContext, plan: ColumnPlan, *, how: str, reason: str) 
     plan.how = how
 
 
+def _window_noise_reads(ctx: ColumnContext, plan: ColumnPlan) -> List[Tuple[Tuple[str, ...], str]]:
+    """The histogram whose noise sets the one bin a rule-set column is still declared over the window."""
+    found = _ungrouped(ctx.entry, _HISTOGRAM) if plan.drawn_in_window else None
+    if found is None:
+        return []
+    tokens = ctx.profile_tokens + ("statistics", str(found[0]))
+    return [(tokens, "its noise sets the one bin the column is drawn over the run's window")]
+
+
 def determine_column(
     ctx: ColumnContext,
     plan: ColumnPlan,
@@ -3391,7 +3401,7 @@ def determine_column(
         plan.declaration.pop(key, None)
     plan.labels = [label for label in plan.labels if label.tokens[:1] in (("maxCardinality",),)]
     plan.properties = []
-    plan.reads, plan.passed = [], []
+    plan.reads, plan.passed = _window_noise_reads(ctx, plan), []
     plan.assumptions, plan.choices, plan.weight_notes = [], [], []
     plan.placeholder = plan.key_span = plan.key_checked = plan.key_mean = False
     plan.key_notes = []

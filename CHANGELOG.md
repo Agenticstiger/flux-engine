@@ -77,6 +77,20 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   refusal. A beginning that may be NULL (not required, with a count of NULLs the profile publishes) keeps its own draw
   and the register says so; when two checks qualify, the register names the one it leaves unkept. ADR 0024 amendment
   of 2026-11-27.
+- `init`: a release cut by the unused list keeps four more shapes a bundle rests on. For every case measured, a profile
+  with the listed statistics removed gives the same bundle; this is checked in CI over the repository's fixtures, and
+  is not proved for every profile. The shapes closed:
+  - A date column a contract rule sets, whose released histogram is noise everywhere, is still written as one bin over
+    the run's window, which the histogram's noise decides. The histogram is now read.
+  - The `levelHistogram` property of a column that is later drawn given another column is still scored against the
+    column's own histogram once the labels that cited it are gone. The histogram is now read.
+  - A date pair that gives no usable duration writes a lifetime with its start only, and the pair's order named that
+    start. The order is now read.
+  - A pair a table lists with an order that cannot be read (withheld, suppressed or noisy) no longer claims its two
+    dates. The contract's own check of them writes its lifetime, as it does for a release that lists no pair, so such a
+    release gives a different bundle than before. A pair with a readable order keeps its bytes. The unused lists and
+    the ledger's states change for the first three; their bundles generate from the same values. ADR 0014 and ADR 0024
+    amendments of 2026-11-27.
 
 ## 0.13.0 - 2026-11-27
 
