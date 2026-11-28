@@ -178,6 +178,7 @@ from flux_engine.core.clock import format_rfc3339_ms
 from flux_engine.core.digest import digest_of_document
 from flux_engine.core.errors import FluxError
 from flux_engine.expr2.errors import FLX_6204
+from flux_engine.generator.relations import filled_key_bins
 from flux_engine.generator.statistics import FLX_3402
 from flux_engine.governance.privacy import effective_floors, sensitivities_of
 from flux_engine.seam.asof import ASOF_KEY
@@ -3185,6 +3186,7 @@ def _histories(
             result.entries.append(written.entry)
             _ended_status(expose, written.entry)
             restate_assumptions(expose)
+            result.notes.extend(_drop_filled_key_scores(expose, held, written.entry))
             reads.release(expose.expose_id, written)
             declare_date_ranges(plans, expose.kinds, window, written.exempt)
             result.derived[expose.expose_id] = dict(written.derived)
@@ -3196,6 +3198,90 @@ def _histories(
             [(f"{expose.expose_id}: {subject}", text) for subject, text in written.notes]
         )
     return result
+
+
+#: Why a history's key is not scored over its rows, when the layout fills its bins to their widths.
+_FILLED_KEY = (
+    "The profile's histogram of the key counts versions, and a history lays its key out over its "
+    "entities: {bins} every value {they} and still {fall} short of {their} weight, since an "
+    "entity's versions do not follow its key, so {scored}."
+)
+
+#: The properties that score a key over its rows, which a filled key cannot meet, and how the
+#: note names each.
+_ROW_SCORES = {"marginalHistogram": "histogram", "mean": "mean"}
+
+#: Added to the reading of a published mean once the layout fills the key's bins.
+_FILLED_MEAN_READ = (
+    "; the layout then fills the key's bins to their widths, so the generated rows do not keep "
+    "it, and it is not scored"
+)
+
+
+def _filled_sentence(filled: Sequence[int], dropped: Sequence[str]) -> str:
+    """:data:`_FILLED_KEY`, naming the bins the layout fills and the scores left out."""
+    several = len(filled) > 1
+    names = [str(index) for index in filled]
+    named = f"{', '.join(names[:-1])} and {names[-1]}" if several else names[0]
+    kinds = [_ROW_SCORES[kind] for kind in _ROW_SCORES if kind in dropped]
+    scored = (
+        "neither the key's histogram nor its mean is scored"
+        if len(kinds) == 2
+        else f"the key's {kinds[0]} is not scored"
+    )
+    return _FILLED_KEY.format(
+        bins=(f"bins {named} take" if several else f"bin {named} takes"),
+        they="they hold" if several else "it holds",
+        fall="fall" if several else "falls",
+        their="their" if several else "its",
+        scored=scored,
+    )
+
+
+def _drop_filled_key_scores(
+    expose: AuthoredExpose, held: Optional[ExposeKeys], entry: Mapping[str, Any]
+) -> List[Tuple[str, str]]:
+    """Leave out the properties that score a history's natural key over its rows, once filled.
+
+    The layout shares the entities over the key's bins by their weights and gives a bin that
+    would overflow its width (ADR 0017, amendment of 2026-11-27), so the key holds a filled bin's
+    values on about its width over the entities of its rows, below the share the profile
+    publishes for it. A property that scores the key's histogram or its mean over the rows would
+    fail by construction. The key keeps its bins and binWeights, which the layout reads, so the
+    histogram stays used, and a published mean stays read by the check of the histogram, its
+    reading saying the rows do not keep it. The note returned says why. An expose left with no
+    property declares an empty list, which ``verify`` reports as not scored.
+    """
+    natural = tuple(item.column for item in held.entities if item.kind == "natural") if held else ()
+    entities = entry.get("entities")
+    if len(natural) != 1 or not isinstance(entities, int) or natural[0] not in expose.contexts:
+        return []
+    plan = next((item for item in expose.columns if item.name == natural[0]), None)
+    if plan is None:
+        return []
+    column = expose.contexts[natural[0]].column
+    filled = filled_key_bins(column, {"columns": {plan.name: plan.declaration}}, entities)
+    own = [item for item in plan.properties if _scores_rows_of(item, plan.name)]
+    if not filled or not own:
+        return []
+    plan.properties = [item for item in plan.properties if item not in own]
+    expose.properties = [item for item in expose.properties if item not in own]
+    means = {
+        tokens
+        for item in own
+        if item.document.get("property") == "mean"
+        for tokens, _ in item.reads
+    }
+    plan.reads = [
+        (tokens, how + _FILLED_MEAN_READ if tokens in means else how) for tokens, how in plan.reads
+    ]
+    dropped = [str(item.document.get("property")) for item in own]
+    return [(f"{expose.expose_id}: history key", _filled_sentence(filled, dropped))]
+
+
+def _scores_rows_of(prop: PropertyPlan, column: str) -> bool:
+    """Whether *prop* scores *column* over its rows: its histogram or its mean."""
+    return prop.document.get("property") in _ROW_SCORES and prop.document.get("column") == column
 
 
 def _refuse_an_unset_open_end(expose: AuthoredExpose, written: Any) -> None:

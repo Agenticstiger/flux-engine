@@ -1031,3 +1031,26 @@ result. Which of two candidates was drawn from the other followed the order of t
   section 13, and keeps it; so does every bundle `init` wrote with a history before. The seam's refusals are
   unchanged, and no generator or plan code changes. A release cut by the unused list gives the generated bundle of
   the whole profile.
+
+## Amendment of 2026-11-27: a key's bins that weigh versions are filled up to their widths
+
+Section 3 lays the natural entity's key out over the entities, `E`, as KERNEL-SPEC section 8.2 lays a key out over
+rows: each bin takes `LRM(E, binWeights)` entities, and no more than it has values. A profile measures the key's
+histogram over the table's rows, so a bin's weight counts versions, and a bin whose entities have more versions than
+average gets more entities than it has values. Plan refused it, and `init` wrote no history for a table with a dense
+whole-number key.
+
+- **The allotment.** Over the entities, when no bin takes more than it holds, the allotment is the one above and the
+  bytes are unchanged. Otherwise each bin that overflows takes its width, and the entities left over are allotted
+  again over the other bins by their weights with the same rule, the bins keeping their own index as the tie-break,
+  until no bin overflows. It reads declared values and `E` only.
+- **The refusal.** `FLX-3403` only when the bins with a weight above zero hold fewer values than `E`. A bin of
+  weight zero takes no entity. A key that is not a history's natural entity is laid out over the rows as before, and an
+  overflowing bin there is still a declaration that contradicts itself.
+- **What it costs.** The capped bins hold fewer versions than the profile's weights say, so a scorecard that scores
+  the key column over the generated rows, its histogram or its mean, can read it away from what the profile
+  publishes. `fluxsim init` therefore writes neither property for the key when the layout fills a bin (it reads the
+  layout's own rule, so the two cannot disagree): the key keeps its bins and binWeights, which the layout reads, so
+  the histogram stays used; a published mean stays read by the check of the histogram, its reading saying that
+  the generated rows do not keep it; and a note on the expose says which bins are filled and which scores are left
+  out. A key whose bins fit keeps both properties.

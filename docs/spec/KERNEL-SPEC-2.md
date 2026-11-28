@@ -550,7 +550,10 @@ parent order, then entity order, then version order. More entities than versions
 count an entity takes, is worked out at plan time from declared values. `--scale` keeps at least one entity and one parent row, so a history always has an entity. The natural entity's columns are laid out over the
 entities as KERNEL-SPEC section 8.2 lays a key out over rows, the entity index standing for the row index, and every
 version copies its entity's; so the check that a key's declared range holds its rows counts the entities, `E`, for a
-history's emit. The `parent` relationship's foreign key copies parent row `A.parent_of(e)` whole on every version of
+history's emit. A key declared in bins whose weights count versions, as a profile measures them, takes at most as many
+entities as a bin holds values: a bin that would take more takes its width, and the entities left over are allotted again over
+the other bins by their weights with the same rule, until no bin overflows (`FLX-3403` only when the bins with a weight above
+zero hold fewer values than `E`). The `parent` relationship's foreign key copies parent row `A.parent_of(e)` whole on every version of
 `e` and draws nothing. The primary entity is either one column, laid out over the rows as before, or the natural
 entity's columns and the start, the natural columns from the entity's key and the start from the chain; any other
 primary key is `FLX-3403` in this version.
