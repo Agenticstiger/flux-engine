@@ -1,6 +1,6 @@
 {
   "name": "flux-engine",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Agent skills that drive the fluxsim command line of the FLUX engine: look up the docs, author a bundle, run and verify it, choose a privacy grade, scale and ship. They pre-approve nothing, so every command asks the user first.",
   "author": {
     "name": "The FLUX maintainers",

@@ -216,7 +216,9 @@ owner can leave out of the profile. The profile reader sometimes needs one of an
 
 A profile cut by dropping the `ledger.unused` list can leave an entry in part. Examples are a date pair with its `order` and no statistic, an exposure with one of its counts, or a history with some of its members. From 0.13.0 the engine reads each member that is left, checks it as in a whole
 entry, and `init` and `plan` accept the profile. `init` then writes the bundle it wrote from the
-whole profile, except for a few shapes the 0.13.0 changelog lists as known issues. A register
+whole profile. From 0.13.1 that holds for every case measured: it is checked in CI over the
+repository's fixtures, and is not proved for every profile. In 0.13.0 a few shapes gave another
+bundle, and its changelog lists them as known issues. A register
 citation of a member that is gone is refused as any citation of an unpublished statistic is
 ([FLX-3113](../reference/errors/FLX-3113.md)). Engine 0.12.0 refused an entry cut in part.
 
