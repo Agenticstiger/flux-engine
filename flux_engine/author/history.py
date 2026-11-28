@@ -858,14 +858,15 @@ def _track_candidate(
     entry: Mapping[str, Any],
     where: Tuple[str, ...],
     source: HistorySource,
-    held: Tuple[FrozenSet[str], FrozenSet[str]],
+    held: Tuple[FrozenSet[str], FrozenSet[str], FrozenSet[str]],
     end_marker: Optional[Tuple[str, str]] = None,
 ) -> Union[Dict[str, Any], str]:
     """The ``tracked`` item of candidate column *name*, or the sentence that says why it is carried.
 
-    *held* is the columns the history sets or a key holds, and the columns another is drawn given.
+    *held* is the columns the history sets or a key holds, the columns another column is drawn
+    given, and the columns another candidate is drawn given.
     """
-    fixed, given = held
+    fixed, given, given_by_candidates = held
     plan = source.plans.get(name)
     keys = _catalogue_keys(name, plan, source)
     if isinstance(keys, str):
@@ -884,6 +885,15 @@ def _track_candidate(
         )
     except _Skip as skipped:
         return str(skipped)
+    # A column that moves and is drawn given, or that is drawn given, is carried (ADR 0017,
+    # amendment of 2026-11-27): a tracked column takes its values from the history alone.
+    if _given_names(plan):
+        return (
+            "the column is drawn given another, and a tracked column takes its values from the "
+            "history alone, so it is carried"
+        )
+    if name in given_by_candidates:
+        return "another column is drawn given it, and a carried column keeps its first value"
     if keys:
         _declare_keys(plan, keys, source.catalogues[name][0])
     return item
@@ -906,9 +916,17 @@ def _track(
         if other not in candidates
         for name in _given_names(plan)
     )
+    given_by_candidates = frozenset(
+        str(parent)
+        for other, plan in source.plans.items()
+        if other in candidates
+        for parent in _given_names(plan)
+    )
     for name in sorted(str(key) for key in candidates):
         where = base + ("columns", name)
-        item = _track_candidate(name, candidates[name], where, source, (fixed, given), end_marker)
+        item = _track_candidate(
+            name, candidates[name], where, source, (fixed, given, given_by_candidates), end_marker
+        )
         if isinstance(item, str):
             result.unused += [(where + (key,), item) for key in ("initial", "transitions")]
             continue
