@@ -59,6 +59,9 @@ from flux_engine.core.rng import kernel_context
 from flux_engine.core.seedtree import SeedTreeRoot
 from flux_engine.generator.associations import pairings_of, seed_pairings
 from flux_engine.generator.dates import DatesTally
+from flux_engine.generator.history import handed_chains, seed_chains
+from flux_engine.generator.projections import chain_of
+from flux_engine.generator.relations import history_pick_of
 from flux_engine.generator.rows import GeneratorPlan, generate_row_slice, written_rows
 from flux_engine.generator.rules import new_tally
 from flux_engine.seam.contract import CompiledExpose
@@ -228,7 +231,10 @@ _EmitJob = Tuple[GeneratorPlan, CompiledExpose]
 
 
 def _start_worker(
-    emits: Mapping[str, _EmitJob], root: SeedTreeRoot, pairings: Mapping[Any, Any]
+    emits: Mapping[str, _EmitJob],
+    root: SeedTreeRoot,
+    pairings: Mapping[Any, Any],
+    chains: Mapping[Any, Any],
 ) -> None:
     _exit_with_parent()
     # The pipeline evaluates a run in the kernel's decimal context; a new
@@ -237,6 +243,9 @@ def _start_worker(
     # An association that holds each pair once is worked out once, by the process that starts
     # the pool, and every worker holds it as that process does (ADR 0039).
     seed_pairings(pairings)
+    # A history's version layout reads every entity, so it too is worked out once, here, and a
+    # worker holds it as this process does (ADR 0017, the amendment of 2026-11-28).
+    seed_chains(chains)
     _WORKER.update(emits=emits, root=root)
 
 
@@ -291,6 +300,18 @@ def _run_slice(task: Tuple[str, int, int, bool]) -> _SliceOutcome:
 def _pairings(emits: Mapping[str, _EmitJob], root: SeedTreeRoot) -> Dict[Any, Any]:
     """The distinct association pairings the emits read, worked out in this process (ADR 0039)."""
     return pairings_of([plan for plan, _ in emits.values()], root)
+
+
+def _chains(emits: Mapping[str, _EmitJob], root: SeedTreeRoot) -> Dict[Any, Any]:
+    """The version layout of every history the emits read, worked out in this process, one build each."""
+    found: Dict[Any, Any] = {}
+    for plan, _ in emits.values():
+        histories = [plan] if plan.projection is None else [plan, plan.projection.history]
+        for history in histories:
+            if history_pick_of(history) is not None:
+                chain_of(history, root)
+                found = handed_chains(found, root)
+    return found
 
 
 def _context() -> Any:
@@ -358,7 +379,12 @@ class FramedPool:
                 max_workers=workers,
                 mp_context=_context(),
                 initializer=_start_worker,
-                initargs=(self._emits, root, _pairings(self._emits, root)),
+                initargs=(
+                    self._emits,
+                    root,
+                    _pairings(self._emits, root),
+                    _chains(self._emits, root),
+                ),
             )
 
     def submit(
