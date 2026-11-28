@@ -22,6 +22,15 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ## Unreleased
 
+### Added
+
+- `history[].untracked`, the share of a history's ordinary changes that move no tracked column. Those versions
+  change only their validity window and keep every column. It is a decimal above 0 and below 1 (`FLX-3403`
+  otherwise, and beside no tracked column), works with one tracked column and no `reasons` or with several, and
+  is exact like the other shares. The `u` event of such a change takes `type.values["u"]`, and a history that
+  tracks no column may now declare `u` there. A history without the key keeps its plan and its bytes. ADR 0017
+  and ADR 0027 amendments of 2026-11-27.
+
 ### Fixed
 
 - `init` wrote no history for any table of a bundle when a history candidate was drawn given another column, and
@@ -42,6 +51,13 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   `fluxsim init` does not write the key's histogram or mean property when a bin is filled, since the generated
   rows cannot meet the published share of a filled bin, and a note on the expose says why. ADR 0017 amendment
   of 2026-11-27.
+- `fluxsim init` writes `untracked` for a history with one tracked column whose profile counts fewer moves of
+  that column than the history has changes. Before, every later version of such a history changed the column:
+  a foreign key into a reference table moved in all 850 changes of a history whose profile counts 400. The
+  share is the part of the history's changes that the column's transitions do not count. Neither count holds
+  the endings an end marker forces, one for each entity that ends, those that begin on the marker too. It is
+  written only past the rounding the release declares and where every count it needs is published. A history
+  whose column moves in as many changes as the history has keeps its bytes. ADR 0017 amendment of 2026-11-27.
 
 ## 0.13.1 - 2026-11-28
 

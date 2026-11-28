@@ -10,6 +10,7 @@ lines read the projected rows and the history's rows as written and never regene
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
@@ -727,6 +728,58 @@ def test_an_ending_hidden_u_of_an_entity_the_history_did_not_end_still_fails() -
     shown = history(end=CLOSE, tracked=(PLAN,))
     row = event(1, "u", day(5), "pro", "pro")
     assert events([row], CHAIN, held=shown)[EVENT_TRANSITION_MATCHES] == Holds(0, 1)
+
+
+def untracked_history(
+    share: Optional[str] = "0.5", end: Optional[HistoryEnd] = None
+) -> HistoryEntry:
+    """The one-column history of ``PLAN``, declaring that some changes move no tracked column."""
+    return replace(history(end=end, tracked=(PLAN,)), untracked=share)
+
+
+STILL_CHAIN = [
+    version(1, day(0), day(3), "basic"),
+    version(1, day(3), day(6), "basic"),
+    version(1, day(6), day(9), "basic"),
+    version(1, day(9), None, "pro"),
+]
+
+
+def test_a_u_that_moves_no_tracked_column_holds_when_the_history_declares_untracked() -> None:
+    rows = updates(("basic", "basic"), ("basic", "basic"), ("basic", "pro"))
+    kept = events(rows, STILL_CHAIN, held=untracked_history())
+    assert kept[EVENT_TRANSITION_MATCHES] == Holds(3, 3)
+    bare = events(rows, STILL_CHAIN, held=untracked_history(None))
+    assert bare[EVENT_TRANSITION_MATCHES] == Holds(1, 3)
+
+
+def test_an_untracked_u_is_excused_only_as_often_as_a_change_moved_no_tracked_column() -> None:
+    rows = updates(("basic", "basic"), ("basic", "basic"), ("basic", "basic"), ("basic", "pro"))
+    shown = events(rows, STILL_CHAIN, held=untracked_history())
+    assert shown[EVENT_TRANSITION_MATCHES] == Holds(3, 4)
+
+
+UNTRACKED_ENDED = [
+    version(1, day(0), day(3), "basic"),
+    version(1, day(3), day(5), "basic"),
+    version(1, day(5), day(9), "basic", "ended"),
+]
+
+
+def test_a_close_last_ending_change_adds_nothing_to_the_untracked_excuses() -> None:
+    """One change moves no tracked column and one is the ending: a third move-less ``u`` is planted."""
+    held = untracked_history(end=CLOSE)
+    ends = updates(("basic", "basic"), ("basic", "basic"))
+    assert events(ends, UNTRACKED_ENDED, held=held)[EVENT_TRANSITION_MATCHES] == Holds(2, 2)
+    planted = updates(("basic", "basic"), ("basic", "basic"), ("basic", "basic"))
+    assert events(planted, UNTRACKED_ENDED, held=held)[EVENT_TRANSITION_MATCHES] == Holds(2, 3)
+
+
+def test_a_final_version_ending_change_adds_nothing_to_the_untracked_excuses() -> None:
+    """The change into the final version is the ``d``: only the one before it moves no column."""
+    held = untracked_history(end=FINAL)
+    planted = updates(("basic", "basic"), ("basic", "basic"))
+    assert events(planted, UNTRACKED_ENDED, held=held)[EVENT_TRANSITION_MATCHES] == Holds(1, 2)
 
 
 def test_the_transition_line_is_present_only_when_a_tracked_column_is_carried() -> None:

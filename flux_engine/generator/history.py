@@ -1616,21 +1616,31 @@ def _reason_plan(
 ) -> Optional[ReasonPlan]:
     """The classes of the ordinary changes: ``LRM(T, reasons weights)`` keyed as ADR 0016 keys classes.
 
-    ``None`` for one tracked column, which is the reason of every change.
+    ``None`` for one tracked column with no ``untracked``, which is the reason of every change. With
+    ``untracked`` set, each tracked class keeps its share of ``1 - s`` and one class at the place
+    ``len(tracked)`` takes ``s``: a change of that class moves no tracked column.
     """
-    if len(entry.tracked) < 2:
+    share = None if entry.untracked is None else _weight(entry.untracked, "untracked")
+    if len(entry.tracked) < 2 and share is None:
         return None
     reasons = entry.reasons
-    if reasons is None:
+    if reasons is None and len(entry.tracked) > 1:
         raise _refuse(f"history ({entry.emit}): reasons name the tracked columns' shares")
     places = {tracked.column: place for place, tracked in enumerate(entry.tracked)}
-    try:
-        columns = tuple(places[name] for name in reasons.values)
-    except KeyError as unknown:
-        raise _refuse(
-            f"history ({entry.emit}).reasons names {unknown}, which is not tracked"
-        ) from None
-    weights = _exact_weights(reasons.weights, f"history ({entry.emit}).reasons.levelWeights")
+    if reasons is None:
+        columns: Tuple[int, ...] = (0,)
+        weights = [Fraction(1)]
+    else:
+        try:
+            columns = tuple(places[name] for name in reasons.values)
+        except KeyError as unknown:
+            raise _refuse(
+                f"history ({entry.emit}).reasons names {unknown}, which is not tracked"
+            ) from None
+        weights = _exact_weights(reasons.weights, f"history ({entry.emit}).reasons.levelWeights")
+    if share is not None:
+        weights = [weight * (1 - share) for weight in weights] + [share]
+        columns = (*columns, len(entry.tracked))
     width = len(str(len(weights) - 1))
     keyed = {str(place).zfill(width): weight for place, weight in enumerate(weights)}
     held = list(largest_remainder(total, keyed).values()) if total else [0] * len(weights)  # type: ignore[arg-type]
@@ -2023,8 +2033,11 @@ def entity_states(
         if not (forced and version == count - 1):
             change = offset + version - 1
             place = 0 if plan.reasons is None else plan.reasons.column_of(change)
-            stream = _change_stream(root, sim_id, expose_id, entity, version)
-            state[place] = specs[place].move(state[place], _draw_at(stream, _STATE_DRAW + place))
+            if place < len(specs):
+                stream = _change_stream(root, sim_id, expose_id, entity, version)
+                state[place] = specs[place].move(
+                    state[place], _draw_at(stream, _STATE_DRAW + place)
+                )
         states.append(tuple(state))
     return states
 

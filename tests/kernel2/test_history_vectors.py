@@ -221,6 +221,36 @@ CASES: Tuple[Dict[str, Any], ...] = (
         "chain": "nextStart",
         "openEnd": None,
     },
+    {
+        "name": "(e) finalVersion, one tracked column, a share of changes that move none, DATE",
+        "kind": "DATE",
+        "windowStart": "2023-01-01T00:00:00Z",
+        "until": "2025-12-31",
+        "entities": 12,
+        "rows": 40,
+        "versions": BINS.as_member(),
+        "start": None,
+        "end": {"mode": "finalVersion", "share": "0.5", "column": "status", "value": "gone"},
+        "tracked": [
+            {
+                "column": "plan",
+                "initial": {"levels": ["basic", "pro"], "levelWeights": ["0.75", "0.25"]},
+                "transitions": {
+                    "basic": {"pro": "0.8", "team": "0.2"},
+                    "pro": {"basic": "0.5", "team": "0.5"},
+                    "team": {"pro": "1"},
+                },
+                "levels": {"basic": "0.5", "pro": "0.3", "team": "0.2"},
+            },
+        ],
+        "reasons": None,
+        "untracked": "0.6",
+        "parentRows": None,
+        "parent": None,
+        "length": LENGTH.as_member(),
+        "chain": "nextStart",
+        "openEnd": None,
+    },
 )
 
 
@@ -427,6 +457,13 @@ def _state_draw(entity: int, version: int, column: int) -> int:
     return k2.philox_block((entity, version, 256 + column, 0), key)[0] >> 11
 
 
+def _reasons_member(case: Dict[str, Any]) -> Dict[str, Any]:
+    """The case's ``reasons``; one tracked column with none has itself as the one reason."""
+    if case["reasons"] is not None:
+        return case["reasons"]  # type: ignore[no-any-return]
+    return {"levels": [case["tracked"][0]["column"]], "levelWeights": ["1"]}
+
+
 def _reference_reasons(
     case: Dict[str, Any], counts: Sequence[int], ended: Sequence[int]
 ) -> Dict[str, Any]:
@@ -436,9 +473,12 @@ def _reference_reasons(
     offsets = [sum(per_entity[:e]) for e in range(len(counts) + 1)]
     total = offsets[-1]
     names = [tracked["column"] for tracked in case["tracked"]]
-    reasons = case["reasons"]
+    reasons = _reasons_member(case)
     weights = [Fraction(text) for text in reasons["levelWeights"]]
     weights = [weight / sum(weights) for weight in weights]
+    untracked = case.get("untracked")
+    if untracked is not None:
+        weights = [weight * (1 - Fraction(untracked)) for weight in weights] + [Fraction(untracked)]
     class_counts = k2._lrm(total, weights)
     key = _digest(reason_path(SIM, EXPOSE), ())
     starts = [sum(class_counts[:k]) for k in range(len(class_counts))]
@@ -446,7 +486,9 @@ def _reference_reasons(
     for change in range(total):
         slot = k2.permute(key, total, change)
         found = max(k for k, begin in enumerate(starts) if begin <= slot and class_counts[k])
-        classes.append(names.index(reasons["levels"][found]))
+        classes.append(
+            names.index(reasons["levels"][found]) if found < len(reasons["levels"]) else len(names)
+        )
     return {
         "key": key.hex(),
         "changeOffsets": offsets,
@@ -476,9 +518,10 @@ def _reference_states(
         used: List[Optional[int]] = [None] * len(tracked)
         if not (forced_ending and version == count - 1):
             place = columns[offset + version - 1]
-            used[place] = _state_draw(entity, version, place)
-            row = _levels_of(tracked[place]["transitions"][state[place]])
-            state[place] = k2.categorical(used[place], row)  # type: ignore[arg-type]
+            if place < len(tracked):
+                used[place] = _state_draw(entity, version, place)
+                row = _levels_of(tracked[place]["transitions"][state[place]])
+                state[place] = k2.categorical(used[place], row)  # type: ignore[arg-type]
         states.append(list(state))
         draws.append(used)  # type: ignore[arg-type]
     return {"entity": entity, "states": states, "draws": draws}
@@ -705,6 +748,7 @@ def _case_vector(case: Dict[str, Any]) -> Dict[str, Any]:
         "end": case["end"],
         "tracked": case["tracked"],
         "reasons": case["reasons"],
+        **({"untracked": case["untracked"]} if "untracked" in case else {}),
         "parentRows": case["parentRows"],
         "parent": case["parent"],
         "length": case["length"],
@@ -763,7 +807,7 @@ def _add_tracked(
     """The reasons of the ordinary changes and the tracked levels of the chosen entities."""
     forced = case["end"] is not None and case["end"]["column"] is not None
     reasons = _reference_reasons(case, counts, flagged)
-    vector["reasons"] = {**case["reasons"], **reasons}
+    vector["reasons"] = {**_reasons_member(case), **reasons}
     vector["states"] = [
         _reference_states(
             case,
@@ -955,6 +999,7 @@ def _entry(case: Dict[str, Any]) -> HistoryEntry:
         end=_end_of(case),
         tracked=tuple(_tracked_of(held) for held in case["tracked"]),
         reasons=_reasons_of(case),
+        untracked=case.get("untracked"),
     )
 
 
@@ -1164,8 +1209,13 @@ def test_the_reasons_are_the_vectors(vector: Dict[str, Any]) -> None:
     assert plan.reasons.columns_of(np.arange(reasons["total"], dtype=np.int64)).tolist() == classes
     # Each tracked column makes its share of the changes exactly.
     names = [held["column"] for held in vector["tracked"]]
-    for level, held in zip(reasons["levels"], reasons["classCounts"], strict=True):
+    held_by = reasons["classCounts"]
+    for level, held in zip(reasons["levels"], held_by, strict=False):
         assert classes.count(names.index(level)) == held
+    if "untracked" in vector:
+        # The class after the tracked ones moves no column, and takes its share of the changes.
+        assert classes.count(len(names)) == held_by[-1]
+        assert held_by[-1] == round(vector["reasons"]["total"] * float(vector["untracked"]))
 
 
 @pytest.mark.parametrize(
@@ -1195,7 +1245,7 @@ def test_the_tracked_values_are_the_vectors(vector: Dict[str, Any]) -> None:
             assert column.tolist() == [state[place] for state in found["states"]]
         # A version differs from its previous one: one reason, and no move to itself.
         for before, after in zip(found["states"], found["states"][1:], strict=False):
-            assert before != after or vector["end"] is not None
+            assert before != after or vector["end"] is not None or "untracked" in vector
 
 
 @pytest.mark.parametrize("vector", STORED["layouts"], ids=lambda vector: vector["name"])

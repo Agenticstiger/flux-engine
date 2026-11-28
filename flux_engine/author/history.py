@@ -132,6 +132,8 @@ class HistorySource:
     window: Tuple[str, str]
     minimum_cell: int
     fractional_bits: int
+    #: The largest rounding base any disclosure rule names: a published count is off by less.
+    rounding_base: int = 1
     set_by_rules: FrozenSet[str] = frozenset()
     dependents: FrozenSet[str] = frozenset()
     parents: Tuple[ParentCandidate, ...] = ()
@@ -2179,7 +2181,9 @@ def _tracked_and_end(
     names = [str(item["column"]) for item in tracking.columns]
     if tracking.columns:
         entry["tracked"] = tracking.columns
-    _reasons_entry(history, base, source, entry, written, names)
+    end = _final_end(marker, found[0]) if marker is not None and found is not None else None
+    untracked = _untracked_entry(history, base, source, entry, written, names, marker, end)
+    _reasons_entry(history, base, source, entry, written, names, untracked)
     if lifecycle.marker is not None:
         last = pointer if "lastVersion" in history else None
         _marker_end(entry, written, lifecycle.marker, found, last)
@@ -2247,6 +2251,107 @@ def _withheld_end(
     }
 
 
+_UNTRACKED_NOTE = (
+    "the profile counts {moved} changes that move {column} among {changes}, so the rest move no "
+    "tracked column"
+)
+
+
+def _free_moves(column: Mapping[str, Any], ended: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    """The changes a tracked column's published moves count, as ``(moved, groups, into)``.
+
+    ``moved`` is the sum of the published sizes of the groups that can move (the level *ended* has
+    none: only the ending version holds it) less ``into``, the cells that move into *ended*, which
+    are no ordinary change; ``groups`` is how many were summed. ``None`` when any of them is
+    withheld, so the count is not known.
+    """
+    moves = column.get("transitions")
+    groups = moves.get("groups") if isinstance(moves, Mapping) else None
+    levels = moves.get("levels") if isinstance(moves, Mapping) else None
+    if not isinstance(groups, list) or not isinstance(levels, list):
+        return None
+    by_level = {str(item.get("group")): item for item in groups if isinstance(item, Mapping)}
+    moved, summed = 0, 0
+    for level in levels:
+        if str(level) == ended:
+            continue
+        group = by_level.get(str(level))
+        size = _whole(group.get("k")) if group is not None else None
+        if group is None or group.get("status") != _FREE or size is None:
+            return None
+        moved += max(0, size)
+        summed += 1
+    into = 0
+    if ended is not None:
+        found = _marker_moves(moves, ended)
+        if found is None:
+            return None
+        into = max(0, found)
+    return max(0, moved - into), summed, into
+
+
+def _forced_endings(entry: Mapping[str, Any], end: Optional[Mapping[str, Any]]) -> int:
+    """The ordinary changes the generator takes out for the entities that end.
+
+    One for each entity the entry's ``end`` ends when it names a column (the generator's own rule,
+    :func:`~flux_engine.generator.history.declared_ended` of its share of every entity): that
+    entity's ending version is forced, not an ordinary change. An end with no column forces none.
+    """
+    from flux_engine.generator.history import declared_ended
+
+    if end is None or end.get("column") is None:
+        return 0
+    return declared_ended(int(entry["entities"]), str(end["share"]))
+
+
+def _untracked_entry(
+    history: Mapping[str, Any],
+    base: Tuple[str, ...],
+    source: HistorySource,
+    entry: Dict[str, Any],
+    written: HistoryWritten,
+    names: Sequence[str],
+    marker: Optional[Tuple[str, str]],
+    end: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """Write ``untracked`` when the one tracked column moves in fewer changes than the history has.
+
+    With one tracked column and no ``reasons``, every ordinary change moves it. The profile counts
+    the changes that move it (the published sizes of its transition groups, less the cells into the
+    end marker), and the history has ``rows - entities`` changes less one forced ending version for
+    each entity the entry's *end* ends (:func:`_forced_endings`). What is left moves no tracked
+    column. A column's transitions cover every change that moves it, those
+    that move several columns too, so ``reasons`` is not read. It is written only where it exceeds
+    the profile's rounding (a rounding base and one, for each count summed), and not at all when a
+    group or a cell it needs is withheld. Returns whether it was written.
+    """
+    if len(names) != 1:
+        return False
+    plan = source.plans.get(names[0])
+    columns = history.get("columns")
+    found = columns.get(names[0]) if isinstance(columns, Mapping) else None
+    if not isinstance(found, Mapping) or plan is None or plan.dropped_levels:
+        return False
+    ended = marker[1] if marker is not None and marker[0] == names[0] else None
+    free = _free_moves(found, ended)
+    if free is None:
+        return False
+    moved, summed, _ = free
+    changes = source.rows - int(entry["entities"]) - _forced_endings(entry, end)
+    slack = (source.rounding_base + 1) * summed
+    shortfall = changes - moved
+    if changes <= 0 or shortfall <= slack:
+        return False
+    share = Fraction(shortfall, changes)
+    text = share_texts([share, 1 - share])[0]
+    if not 0 < Fraction(text) < 1:
+        return False
+    entry["untracked"] = text
+    note = _UNTRACKED_NOTE.format(moved=moved, column=names[0], changes=changes)
+    written.notes.append(("history untracked", note))
+    return True
+
+
 def _reasons_entry(
     history: Mapping[str, Any],
     base: Tuple[str, ...],
@@ -2254,6 +2359,7 @@ def _reasons_entry(
     entry: Dict[str, Any],
     written: HistoryWritten,
     names: Sequence[str],
+    untracked: bool = False,
 ) -> None:
     pointer = base + ("reasons",)
     if "reasons" not in history:
@@ -2262,7 +2368,11 @@ def _reasons_entry(
         why = (
             "no column is tracked, so no change has a reason to share"
             if not names
-            else "one tracked column makes every change, so its share is not written"
+            else (
+                "one column is tracked, and its moves give the share of changes it makes"
+                if untracked
+                else "one tracked column makes every change, so its share is not written"
+            )
         )
         written.unused.append((pointer, why))
         return

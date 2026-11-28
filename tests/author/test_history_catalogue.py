@@ -192,7 +192,7 @@ def test_the_written_bundle_validates_and_resolves(tmp_path: Path) -> None:
 WITHOUT_TRACKING: Dict[str, str] = {
     "persona.flux.yml": "74f6062c0e15e70d2689583ad345103c7189b244886c3280c244573b49677755",
     "plans.fluid.yml": "13f3fbf211036962d53bcfc096eafb36463f913e12d60b9f2cb8587d0e8e8882",
-    "simulation.flux.yml": "6148ad202078a977497c5eea8f7aa498556fffa75cbf23d262272acc5cad1935",
+    "simulation.flux.yml": "38a71057d516acd473b1981fe516695dfd4e86d11d0d11b5a6997f8d80ed4dbe",
     "world.flux.yml": "20a3e0be50c0216bb8ef8ac07cdc72b0100a3cf4bddccbb91b7841fcc96b88cc",
 }
 

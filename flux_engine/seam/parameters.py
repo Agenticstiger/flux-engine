@@ -279,6 +279,7 @@ _OTHER_KEYS: Tuple[Tuple[str, ...], ...] = (
     ("history", "#", "tracked", "#", "initial", "levelWeights", "#"),
     ("history", "#", "tracked", "#", "transitions", "*", "*"),
     ("history", "#", "reasons", "levelWeights", "#"),
+    ("history", "#", "untracked"),
     ("history", "#", "end", "share"),
     *_histogram("events", "#", "lag"),
     ("periods", "#", "kinds", "#", "count"),

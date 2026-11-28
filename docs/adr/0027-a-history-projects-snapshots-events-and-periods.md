@@ -632,3 +632,20 @@ profile without it gives another bundle. The ledger therefore lists the histogra
 parent as used, with the reason it was refused and the part it still has, and not as unused. A statistic beside it,
 such as a mean, decides nothing: dropping it alone gives the same bundle, so it stays unused. Only the unused
 list of the ledger changes: what the bundle generates from does not.
+
+## Amendment of 2026-11-27: the event of a change that moves no tracked column
+
+ADR 0017's amendment of 2026-11-27 lets a history declare `untracked`, the share of its ordinary changes that move
+no tracked column. Section 4 says a `u` takes its change reason's text, and such a change has none.
+
+- **The text.** The `u` of a change that moves no tracked column takes `type.values["u"]`. `u` is allowed in
+  `values` when the history declares `untracked` and when it tracks no column, where every change is of this kind.
+  It is required when `untracked` is set and `on` keeps `u`, else `FLX-3403`. With no tracked column it is not
+  required, so a type block written before keeps its meaning.
+- **Before and after.** They are equal, since no column of the version moved. A `when` such as
+  `tier <> previous.tier` keeps the events that moved a column and drops the others.
+- **What does not move.** End modes, ending versions (not ordinary changes), parent bounds, `previous`, as-of links,
+  snapshots and periods. An events entry over a history without the key keeps its bytes.
+- **The check.** `event:transition_matches` excuses a `u` that moves no mapped column once for each change of its
+  entity that moves no tracked column, when the history declares `untracked`. An ending change is not counted, so no
+  change is excused twice.

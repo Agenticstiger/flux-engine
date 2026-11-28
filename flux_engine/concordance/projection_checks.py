@@ -20,7 +20,10 @@ rows and the history's rows are read as written and nothing is regenerated.
 * ``event:transition_matches``: counts ``u`` events. One holds the line when it moves exactly one
   tracked column along a transition whose weight is above zero, or, as an ending change, moves the
   ``end`` column to its value and nothing else is asked of it. It reads the tracked columns that
-  ``before`` and ``after`` both carry, so it is present only when some tracked column is carried.
+  ``before`` and ``after`` both carry, so it is present only when some tracked column is carried. A
+  ``u`` that moves no mapped column is excused once for each hidden ending, for each change on a
+  tracked column the events do not map, and, when the history declares ``untracked``, for each
+  change that moves no tracked column, an ending change not counted among those.
 * ``period:within_validity``: counts rows. A periodic row holds the line when its period holds a
   version of its entity under the entry's ``match``: ``overlap`` every version valid at some instant
   of the period, ``start`` the one valid at its first instant, ``end`` the one valid at its last
@@ -467,6 +470,31 @@ def _unmapped_changes(
     return found
 
 
+def _unchanged_tracked(
+    history: HistoryEntry, history_rows: Sequence[_Row], versions: Versions
+) -> "Counter[Tuple[Any, ...]]":
+    """For each entity, the version changes that move no tracked column, when the history declares ``untracked``.
+
+    An ending change is not one of them: the last change of an entity that ended with the end value
+    is the one the ending budget or the ``d`` counts, so no change is excused twice.
+    """
+    found: "Counter[Tuple[Any, ...]]" = Counter()
+    if history.untracked is None:
+        return found
+    end = history.end
+    sentinel = open_sentinel(history, history_rows, versions)
+    for key, chain in entity_chains(history_rows, versions, sentinel).items():
+        pairs = list(zip(chain, chain[1:], strict=False))
+        if pairs and end is not None and end.column is not None and end.value is not None:
+            last = chain[-1].get(end.column)
+            if chain_ended(chain, versions, history, sentinel) and str(last) == end.value:
+                pairs.pop()
+        for earlier, later in pairs:
+            if all(earlier.get(t.column) == later.get(t.column) for t in history.tracked):
+                found[key] += 1
+    return found
+
+
 @dataclass(frozen=True)
 class _History:
     """The history's written rows and the events' entity columns, which the excuses are counted from."""
@@ -490,6 +518,7 @@ class _Transitions:
         self.elsewhere = _unmapped_changes(
             history, read.rows, read.versions, self.before, self.after
         )
+        self.still = _unchanged_tracked(history, read.rows, read.versions)
 
     def maps_a_column(self) -> bool:
         """Whether the events carry at least one tracked column before and after."""
@@ -499,9 +528,9 @@ class _Transitions:
         )
 
     def _excused(self, row: _Row) -> bool:
-        """Whether a ``u`` that moves no mapped column is an ending or a change on an unmapped column."""
+        """Whether a ``u`` that moves no mapped column is an ending, or a change on an unmapped column or none."""
         key = tuple(row.get(column) for column in self.read.entity)
-        for budget in (self.endings, self.elsewhere):
+        for budget in (self.endings, self.elsewhere, self.still):
             if budget[key] > 0:
                 budget[key] -= 1
                 return True

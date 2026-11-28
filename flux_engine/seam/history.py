@@ -95,6 +95,7 @@ _ENTRY_KEYS = (
     "activation",
     "tracked",
     "reasons",
+    "untracked",
     "end",
 )
 _PARENT_KEYS = ("relationship", "minChildren", "parentWhen", "children", "lifetime")
@@ -232,6 +233,7 @@ class HistoryEntry:
     tracked: Tuple[HistoryTracked, ...] = ()
     reasons: Optional[ChildShape] = None
     end: Optional[HistoryEnd] = None
+    untracked: Optional[str] = None
 
     def as_member(self) -> Dict[str, Any]:
         """The entry as the emit's ``history`` member holds it: no ``emit``, no absent key."""
@@ -253,6 +255,8 @@ class HistoryEntry:
             member["tracked"] = [tracked.as_member() for tracked in self.tracked]
         if self.reasons is not None:
             member["reasons"] = self.reasons.as_member()
+        if self.untracked is not None:
+            member["untracked"] = self.untracked
         if self.end is not None:
             member["end"] = self.end.as_member()
         return member
@@ -558,6 +562,27 @@ def _chain(entry: Mapping[str, Any], at: str, refusal: ErrorCode) -> str:
     return str(chain)
 
 
+def _untracked(
+    entry: Mapping[str, Any], at: str, tracked: Sequence[HistoryTracked], refusal: ErrorCode
+) -> Optional[str]:
+    """The share of ordinary changes that move no tracked column, as text; ``None`` when not declared."""
+    if "untracked" not in entry:
+        return None
+    text = _decimal(entry["untracked"])
+    if text is None or not 0 < Fraction(text) < 1:
+        raise FluxError(
+            refusal,
+            f"{at}.untracked is a decimal above 0 and below 1: the share of changes that move "
+            "no tracked column",
+        )
+    if not tracked:
+        raise FluxError(
+            refusal,
+            f"{at}.untracked needs a tracked column; with none, no change moves one",
+        )
+    return text
+
+
 def _read_entry(
     entry: Mapping[str, Any], at: str, code: ErrorCode, refusal: ErrorCode
 ) -> HistoryEntry:
@@ -579,6 +604,7 @@ def _read_entry(
     )
     if len(tracked) > 1 and reasons is None:
         raise FluxError(refusal, f"{at}.reasons is required when more than one column is tracked")
+    untracked = _untracked(entry, at, tracked, refusal)
     return HistoryEntry(
         emit=nfc(str(entry["emit"])),
         entities=_entities(entry.get("entities"), at, refusal),
@@ -602,6 +628,7 @@ def _read_entry(
         activation=_optional_text(entry, "activation", at, refusal),
         tracked=tracked,
         reasons=reasons,
+        untracked=untracked,
         end=_end(entry["end"], f"{at}.end", code, refusal) if "end" in entry else None,
     )
 
@@ -619,7 +646,8 @@ def read_history_block(
     shape that is not ``levels`` or ``bins`` with one weight each, a missing ``until`` or
     ``length``, a ``length`` bin below one day, a ``chain`` other than
     ``nextStart`` or ``dayBefore``, a ``transitions`` level that moves to itself or a row that
-    totals zero, ``reasons`` missing when more than one column is tracked, an ``end`` whose
+    totals zero, ``reasons`` missing when more than one column is tracked, an ``untracked`` outside 0 to 1 or
+    beside no tracked column, an ``end`` whose
     ``mode`` is not ``closeLast`` or ``finalVersion``, a ``finalVersion`` without ``column`` and a
     ``share`` outside 0 to 1. What needs the contract (a level, a date, a column) is checked by
     :func:`check_history`.

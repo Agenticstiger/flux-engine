@@ -261,6 +261,8 @@ def test_the_entry_is_written_from_the_published_history(tmp_path: Path) -> None
                     },
                 }
             ],
+            # 800 moves of the tier among 850 changes: the other 50 move no tracked column.
+            "untracked": "0.058823529",
             "end": {"mode": "closeLast", "share": "0.15"},
         }
     ]
@@ -368,7 +370,8 @@ def test_every_published_member_is_used_or_unused_with_a_reason(tmp_path: Path) 
         f"{HISTORY}/columns/channel/initial",
         f"{HISTORY}/columns/channel/transitions",
     }
-    assert "one tracked column makes every change" in states[f"{HISTORY}/reasons"]["note"]
+    # The tier's moves give the share of changes it makes, so the histogram is not read.
+    assert "its moves give the share of changes" in states[f"{HISTORY}/reasons"]["note"]
 
 
 def test_no_closed_last_version_writes_no_end(tmp_path: Path) -> None:

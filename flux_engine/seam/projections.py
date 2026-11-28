@@ -875,16 +875,22 @@ def _check_type(entry: EventsEntry, target: ProjectionTarget, at: str, refusal: 
     history = target.history
     tracked = [item.column for item in history.tracked]
     ending = history.end is not None and history.end.column is not None
+    # ``u`` is the text of a change that moves no tracked column: the history's ``untracked`` share,
+    # and with no tracked column every change.
+    untracked = history.untracked is not None
     known = {"c", "d", "end", *tracked}
+    if untracked or not tracked:
+        known.add("u")
     stray = sorted(set(values) - known)
     if stray:
         raise FluxError(
             refusal,
-            f"{at}.type.values names {stray[0]!r}; it holds c, d, end and the tracked columns "
-            f"{tracked}",
+            f"{at}.type.values names {stray[0]!r}; it holds c, d, end, u (a change that moves no "
+            f"tracked column) and the tracked columns {tracked}",
         )
     needed: List[str] = [op for op in ("c", "d") if op in entry.on]
     needed += tracked if "u" in entry.on else []
+    needed += ["u"] if "u" in entry.on and untracked else []
     needed += ["end"] if ending else []
     missing = [name for name in needed if name not in values]
     if missing:
