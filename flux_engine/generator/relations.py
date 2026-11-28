@@ -1405,6 +1405,7 @@ class RelationReader:
             driver.counted.child_rows,
             driver.parent.rows,
             None if parent is None else parent.digest().value,
+            () if parent is None else run_set_key(parent),
             driver.counted,
             # The hook itself, not its id: the key keeps it alive, so no later hook can take its id.
             hook,
@@ -1510,7 +1511,10 @@ class RelationReader:
                 minimum=counted.minimum or 0,
                 eligible=eligible,
                 expected=expected,
-                identity=(None if parent is None else parent.digest().value, hook),
+                identity=(
+                    None if parent is None else (parent.digest().value, run_set_key(parent)),
+                    hook,
+                ),
             ),
             bound=_deferred_bound(self, owner, driver),
             ranged=driver.history.ranged,
@@ -1756,6 +1760,7 @@ class RelationReader:
             parent.sim_id,
             parent.expose.expose_id,
             parent.digest().value,
+            run_set_key(parent),
             driver.weight,
         )
         found = _THRESHOLDS.get(key)
@@ -2331,6 +2336,60 @@ def history_pick_of(plan: "_rows.GeneratorPlan") -> Optional[HistoryPick]:
         if isinstance(driver, (EntityColumn, ChainColumn, TrackedColumn)):
             return driver.history
     return None
+
+
+def end_shares_of(plan: "_rows.GeneratorPlan") -> Tuple[Tuple[str, str], ...]:
+    """What each ``end`` share in *plan*'s reach is a share of, as ``(expose, share_of)`` pairs.
+
+    The run sets it from the plan it executes and the plan's digest leaves it out, so a memo kept
+    per process under that digest keeps it as well. The reach is the plan, the plans it reads, the
+    child plans it sums and the history a projected plan reads. A plan reached twice is walked once.
+    """
+    found: Dict[str, str] = {}
+    seen: Set[int] = set()
+    pending = [plan]
+    while pending:
+        here = pending.pop()
+        if id(here) in seen:
+            continue
+        seen.add(id(here))
+        pick = history_pick_of(here)
+        if pick is not None and pick.entry.end is not None:
+            found[here.expose.expose_id] = pick.entry.end.share_of
+        pending.extend(read for _, read in here.reads)
+        pending.extend(summed for _, _, summed in here.sums)
+        if here.projection is not None:
+            pending.append(here.projection.history)
+    return tuple(sorted(found.items()))
+
+
+def run_set_key(plan: "_rows.GeneratorPlan", projection: Optional[Any] = None) -> Tuple[Any, ...]:
+    """What a memo kept per process under *plan*'s digest must also be keyed by.
+
+    The fields a run sets that the plan's digest leaves out and a build reads. Every memo keyed on a
+    plan's or a history's ``digest().value`` holds this beside it (``tests/generator/test_memo_keys.py``
+    fails for one that does not). *projection* is the projection the build cuts the history at, when
+    that is not *plan*'s own.
+
+    Checked against what the digest already covers, so that nothing else is held here: a history's
+    ``rangeSetters`` and ``dateRanges`` are its pick's ``validityRange`` and the columns' statistics;
+    ``scaleFloors`` moves the rows; ``projectedGivens`` and its kinds are the projection's
+    ``heldGivens``, ``fallbackGivens`` and ``fallbackMarginals``; ``projectedReads`` is the digest
+    of each plan read. A projection's ``periodRange`` is its ``clip``, which a history's digest does
+    not hold, and ``maxRows`` is its ``budget``, which changes no row but decides whether a build
+    refuses, so a layout kept under a larger budget must not answer for a smaller one.
+
+    Extend the tuple here, and only here, for a field a later run sets.
+    """
+    shown = projection if projection is not None else plan.projection
+    return (
+        # What each `end` share is a share of (the plan's reach).
+        end_shares_of(plan),
+        # The period range a periods projection is cut at.
+        None if shown is None else shown.clip,
+        # The periodic rows' budget, against which a build refuses.
+        None if shown is None else shown.budget,
+    )
 
 
 def bound_history_of(plan: "_rows.GeneratorPlan", root: SeedTreeRoot) -> HistoryPlan:

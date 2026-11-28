@@ -58,6 +58,18 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   the endings an end marker forces, one for each entity that ends, those that begin on the marker too. It is
   written only past the rounding the release declares and where every count it needs is published. A history
   whose column moves in as many changes as the history has keeps its bytes. ADR 0017 amendment of 2026-11-27.
+- A layout a process keeps is now kept under every field its run sets and its build reads. Three fields were held by
+  some of the keys and not by others: the clip of a periods emit (the range of the period column), what an `end`
+  share of a history is a share of, and the budget the periodic rows are refused against. Two recorded plans of one
+  bundle that differ only in one of them, for instance one made with `rangeSetters` and one without, or one made
+  before the `end` share moved to every entity, could share a layout cut for the other when their runs overlapped in
+  one process, so bytes depended on what else ran. They now keep separate layouts, so each gives the bytes it gives
+  alone; a run made alone keeps its bytes. The fields are held by one helper, which every memo keyed by a plan's
+  digest now holds (the layouts of periods, events, counted relationships and a history's versions, the thresholds
+  of a weighted pick, the entity layout of a history under a parent, the lifetimes of a parent's rows, the sources
+  of a projected emit and the whole rows of an emit or a projection), and a test fails for a key under
+  `flux_engine/` that holds a plan's digest without it. What an `end` share is a share of is read through the plans
+  a plan reads, the child plans it sums and the history a projection reads.
 
 ## 0.13.1 - 2026-11-28
 

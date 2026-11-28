@@ -55,6 +55,7 @@ from flux_engine.generator.relations import (
     EntityColumn,
     TrackedColumn,
     history_pick_of,
+    run_set_key,
 )
 from flux_engine.seam.contract import LogicalKind
 
@@ -338,7 +339,7 @@ _VIEWS: Dict[Tuple[Any, ...], VersionView] = {}
 
 def view_of(history: "_rows.GeneratorPlan", chain: HistoryPlan, root: SeedTreeRoot) -> VersionView:
     """The view of *history*'s versions for *root*, worked out once per process."""
-    held = (root.digest, root.seed_tree_version, history.digest().value)
+    held = (root.digest, root.seed_tree_version, history.digest().value, run_set_key(history))
     found = _VIEWS.get(held)
     if found is None:
         found = VersionView(history, chain, root)

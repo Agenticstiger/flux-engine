@@ -45,6 +45,7 @@ from flux_engine.core.rng import bounded_uint, uniform53
 from flux_engine.core.seedtree import SeedTreeRoot, counter_stream, key_label, path_key
 from flux_engine.generator.history import HistoryPlan, _StartTable, _table_over, unit_of
 from flux_engine.generator.paths import LAG_PATH_SHAPE, lag_path
+from flux_engine.generator.relations import run_set_key
 from flux_engine.generator.rows import (
     GeneratorPlan,
     cells_before_rules,
@@ -161,6 +162,7 @@ def layout_of(chain: HistoryPlan, projection: "ProjectionPlan") -> EventLayout:
         root.digest,
         root.seed_tree_version,
         projection.history.digest().value,
+        run_set_key(projection.history, projection),
         repr(entry),
     )
     found = _LAYOUTS.get(held)

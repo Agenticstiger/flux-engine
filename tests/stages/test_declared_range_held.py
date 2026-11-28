@@ -258,3 +258,50 @@ def test_a_parent_closed_before_the_validity_range_is_refused_naming_the_range(
     assert not refused.success and "FLX-3403" in refused.stderr
     assert "from the range on its validity columns (2025-06-01)" in refused.stderr
     assert "widen the range" in refused.stderr
+
+
+def _plan_both(target: Path, state: Path, monkeypatch: pytest.MonkeyPatch) -> Tuple[Any, Any]:
+    """Two recorded plans of one bundle: one with ``rangeSetters`` and one made without."""
+    held = plan_module.plan(target, state_dir=state, kernel=KERNEL_V2.version, stage=False)
+    assert held.success, held.stderr
+    execute = pipeline.execute
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            pipeline, "execute", lambda *a, **k: execute(*a, **{**k, "era": _unheld(k)})
+        )
+        unheld = plan_module.plan(target, state_dir=state, kernel=KERNEL_V2.version, stage=False)
+    assert unheld.success, unheld.stderr
+    return (
+        RunLayout.for_state_dir(state, held.artifacts["run_id"]),
+        RunLayout.for_state_dir(state, unheld.artifacts["run_id"]),
+    )
+
+
+def test_two_recorded_plans_of_one_bundle_keep_their_bytes_when_runs_share_a_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A range on the period column alone cuts the periods and leaves the history as it was.
+
+    The two plans then hold the same history, and a layout kept across the two runs is the only
+    thing that can carry one run's clip into the other.
+    """
+    from flux_engine.generator import periods
+
+    target = _ranged(tmp_path, "vehicle_month", "month")
+    state = tmp_path / "state"
+    held, unheld = _plan_both(target, state, monkeypatch)
+    assert "rangeSetters" in json.loads(held.plan_path.read_text("utf-8"))
+    assert "rangeSetters" not in json.loads(unheld.plan_path.read_text("utf-8"))
+
+    def run(layout: RunLayout) -> List[Dict[str, Any]]:
+        applied = apply_module.apply(target, run_id=layout.run_id, state_dir=state)
+        assert applied.success, applied.stderr
+        return rows(layout, "vehicle_month")
+
+    alone = {"held": run(held), "unheld": run(unheld)}
+    assert len(alone["held"]) < len(alone["unheld"])
+    # Two runs that overlap share the process's layouts: the reset between runs is held back.
+    monkeypatch.setattr(periods, "clear_layouts", lambda: None)
+    periods._LAYOUTS.clear()
+    together = {"held": run(held), "unheld": run(unheld)}
+    assert together == alone
