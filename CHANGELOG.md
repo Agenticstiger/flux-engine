@@ -22,14 +22,14 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
 
 ## 0.13.1 - 2026-11-28
 
-Fixes to the bundles `fluxsim init` writes from a private profile release. This resolves the three known issues listed
-for 0.13.0: a date column's declared range could be widened past the days a `derive` over it keeps in range, a contract
-check that orders a termination after an activation could hold on fewer rows than declared, and a profile cut by the
-unused list could give another bundle than the whole profile. For every case measured, a profile with the listed
-statistics removed now gives the same bundle; this is checked in CI over the repository's fixtures, and is not proved
-for every profile. `init` also writes the end share of a contract that marks an entity's end by a value. A release
-that lists a date pair with an order it does not publish now gets the lifetime of the contract's check of the two
-dates, so its bundle changes.
+Fixes to the bundles `fluxsim init` writes from a profile. This resolves the three known issues listed for 0.13.0: a
+date column's declared range could be widened past the days a `derive` over it keeps in range, a contract check that
+orders a termination after an activation could hold on fewer rows than declared (the contract-order fix concerns some
+private releases that publish a table's history), and a profile cut by the unused list could give another bundle than
+the whole profile. For every case measured, a profile with the listed statistics removed now gives the same bundle;
+this is checked in CI over the repository's fixtures, and is not proved for every profile. `init` also writes the end
+share of a contract that marks an entity's end by a value. A release that lists a date pair with an order it does not
+publish now gets the lifetime of the contract's check of the two dates, so its bundle changes.
 
 ### Fixed
 
@@ -63,7 +63,7 @@ dates, so its bundle changes.
   bound of a committed state, which hid the reading). A release made by dropping the listed statistic lost the range.
   The maximum is now read, and not listed.
 - `init` listed statistics as unused that decide how a table is written, so a release made by dropping the listed
-  statistics gave another bundle. This closes three shapes, and other shapes of the known issue remain.
+  statistics gave another bundle. This closes three shapes, and the last entry below closes four more.
   - A relationship's histogram of children per parent over an emit projected from a history. The count is refused and
     given to no history parent (the history writes its own, or the emit counts events or periods), but its presence
     has the emit's foreign key follow the history in place of being drawn over the span of the key it references. The
