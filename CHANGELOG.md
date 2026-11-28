@@ -70,6 +70,11 @@ Headings follow `## X.Y.Z - YYYY-MM-DD`.
   of a projected emit and the whole rows of an emit or a projection), and a test fails for a key under
   `flux_engine/` that holds a plan's digest without it. What an `end` share is a share of is read through the plans
   a plan reads, the child plans it sums and the history a projection reads.
+- A history gives each entity a version count its room fits. A new plan of a history with a `versions` shape
+  records `versionCounts: "fit"`. The counts are the same multiset as before, and each goes to an entity whose own
+  drawn lengths fit it before `until`, so the validity start's histogram over versions now follows the profile's
+  where the counts do not follow the start (ADR 0017, the amendment of 2026-11-28). A recorded plan without the key
+  replays as it was made, and a run with workers works the layout out once.
 
 ## 0.13.1 - 2026-11-28
 

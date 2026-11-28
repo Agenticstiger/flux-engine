@@ -378,6 +378,10 @@ so slot values never decrease with the slot.
   that order takes the value of slot `i`. When every `e_r` is equal this is exactly `v_sigma(r)`;
 - neither: `x_r = 1`.
 
+The rank coupling is what a history's versions take under a plan without `versionCounts`. A plan with
+`versionCounts: "fit"` gives the versions of a history with a shape to its entities by the fit rule of section 8.4,
+which reads no expected count; the multiset of counts is the layout's either way.
+
 **Given a class** (a `counts` entry with `given`, ADR 0037 decision 4; kernel `0.2.0` only). The entry names a column
 of the parent and a weight list for each of its classes over the shape's classes (SEAM-FIDELITY-SPEC section 3), a class
 with no list taking the shape's own weights. The classes of the column are its declared levels in NFC order, or its
@@ -541,7 +545,30 @@ function of the plan and the seed tree. Every draw is addressed by an entity and
    the expected counts of section 8.1, so the slot values go to the entities in the order of their room, the entity
    with the most room taking the most versions, the rank coupling of section 8.1. Without a shape, `expected` is
    none, so every entity counts alike and takes `floor(N / E)` or `ceil(N / E)` versions. The room reads drawn
-   first starts and `until`, never the window.
+   first starts and `until`, never the window. That is the rule of a plan without `versionCounts`; a plan with
+   `versionCounts: "fit"` takes the rule below for a history with a shape.
+
+**The fit** (`versionCounts: "fit"` in `plan.json`; a history with a shape only). The multiset of counts is that of
+`V = counted_layout(K_V, E, N, versions, 1, None, none)`, which follows from `N`, `E` and the shape alone, and `c` is
+its largest count. With entity `e`'s first start `a_e` drawn as below, its limit `L_e` the unit its chain must end
+at (`until`, or, where the entry keeps to its parent's lifetime or the validity columns declare a range, the least of
+`until`, the parent's last day `pe` and the end of the range, whichever binds, as the limit of the parent bound below),
+`z = 1` under `closeLast` and `z = 0` otherwise, and `d_(e,j)` the length of version `j` (below), all exact integers of the chain's unit:
+
+- the room is `r_e = L_e - a_e`, and the capacity is `cap_e = 1 + max { k in [0, c - 1] : d_(e,0) + ... + d_(e,k-1) <=
+  r_e - 1 - z }`, the sum for `k = 0` being 0 and the maximum being 0 when no `k` qualifies;
+- the priority is `p_e = permute/2(K_fit, E, e)`, `K_fit` being the key, by section 2, of
+  `("sim", sim_id, "gen", exposeId, "versions", "fit")`, a path with no ordinal part, and `p` is a permutation of
+  `0 .. E - 1`;
+- the counts, sorted descending as `m_0 >= m_1 >= ... >= m_(E-1)`, go out in that order: `m_i` goes to the entity with
+  no count yet, `cap_e >= m_i`, and the least `p_e`; when there is none, to the entity with no count yet that has the
+  greatest `cap_e`, a tie to the least `p_e`.
+
+The result is the count of each entity, whose offsets and child rows are those of a counted layout. The assignment
+draws nothing new: `d_(e,j)` is the draw of the next paragraph. The capacity reads it for versions past the entity's own
+count too, at the entity's own `change` addresses, which no counter reads or moves. Kernel `0.1.0`
+refuses a history, so no plan made under it records the marker. A plan with a history cut by `parent.lifetime` or a
+range applies the cap and pass of the room below to the result, as it does to the rank coupling's.
 
 Version row `i` is version `j = i - V.offsets[e]` of entity `e = V.parent_of(i)`, and entity `e` is a child of parent
 row `A.parent_of(e)`. An entity's versions are consecutive rows and so are a parent's entities, so the rows run in
@@ -560,7 +587,8 @@ primary key is `FLX-3403` in this version.
 
 **The three keys.** A layout key and a permutation key are the full 32-byte key of a path with no ordinal part,
 as section 8.1's key is: `K_A` and `K_V` above, `K_end` of `("sim", sim_id, "gen", exposeId, "ended")` and
-`K_reason` of `("sim", sim_id, "gen", exposeId, "reason")`.
+`K_reason` of `("sim", sim_id, "gen", exposeId, "reason")`; a plan of the fit adds `K_fit` of
+`("sim", sim_id, "gen", exposeId, "versions", "fit")`.
 
 **The first start and the lengths.** The chain's unit is a whole day for DATE columns and a millisecond for
 TIMESTAMP columns.
@@ -681,6 +709,7 @@ the per-row path read alike. A bundle that does not declare the key keeps every 
 |---|---|---|
 | `("sim", sim_id, "gen", exposeId, "entities", relationship)` | layout key | entities per parent |
 | `("sim", sim_id, "gen", exposeId, "versions")` | layout key | versions per entity |
+| `("sim", sim_id, "gen", exposeId, "versions", "fit")` | permutation key | which entity takes which count a plan of the fit gives (section 8.4) |
 | `("sim", sim_id, "gen", exposeId, "history", entity)` | stream, one ordinal | 0: the first start |
 | `("sim", sim_id, "gen", exposeId, "change", entity, version)` | stream, two ordinals | 0 to 255: the length, 0 for one `uniform53`, 1 to 255 reserved; `256 + c`: tracked column `c`'s value |
 | `("sim", sim_id, "gen", exposeId, "ended")` | permutation key | which entities end |
@@ -692,7 +721,7 @@ The layout and permutation keys stay out of the seed-path ledger, as section 8.1
 
 **Section 12.** These paths are additive. Each shape has, at the place after `exposeId`, a literal that no other
 shape has there (`entities`, `versions`, `history`, `change`, `ended` and `reason`, beside the existing `row`, `key`,
-`pair`, `count` and `allocate`), so every address is new. They are read only for a bundle that declares `history`.
+`pair`, `count` and `allocate`), so every address is new, and `fit` is a literal no other shape has after `versions`. They are read only for a bundle that declares `history`.
 Nothing that exists moves: the first version's cells draw on the generator cell path as they always did, the other
 versions' cells are never drawn, and the parent's foreign key draws nothing on its own stream. The vector file
 `tests/vectors/kernel2-history-vectors.json` pins each path's key, counters and blocks, and the layouts, chains, fits,
