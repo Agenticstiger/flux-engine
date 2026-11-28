@@ -75,7 +75,7 @@ FLX_2102: ErrorCode = register(
     "written by an incompatible version after the fact. A plan.json that cannot "
     "be read at all as the JSON object `fluxsim plan` wrote (truncated, not UTF-8 "
     "text, or not an object) is refused with this code too, and so is a recorded "
-    "plan whose `historyEndShare`, `dateRanges`, `scaleFloors`, `projectedGivens` or `projectedReads` value this "
+    "plan whose `historyEndShare`, `dateRanges`, `scaleFloors`, `versionCounts`, `projectedGivens` or `projectedReads` value this "
     "engine does not know "
     "(one written by a newer or incompatible version), and one whose emit states a `declaredRows` and "
     "`shortfall` that do not hold together (both are whole numbers, the shortfall is above "

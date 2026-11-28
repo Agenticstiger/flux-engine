@@ -2338,6 +2338,28 @@ def history_pick_of(plan: "_rows.GeneratorPlan") -> Optional[HistoryPick]:
     return None
 
 
+def _reach(plan: "_rows.GeneratorPlan") -> List["_rows.GeneratorPlan"]:
+    """*plan*, the plans it reads, the child plans it sums and the history a projected plan reads.
+
+    Each plan once, in no order a caller may rely on. The run sets fields on every plan of this
+    reach, and a memo kept under *plan*'s digest holds what each of them sets.
+    """
+    reached: List["_rows.GeneratorPlan"] = []
+    seen: Set[int] = set()
+    pending = [plan]
+    while pending:
+        here = pending.pop()
+        if id(here) in seen:
+            continue
+        seen.add(id(here))
+        reached.append(here)
+        pending.extend(read for _, read in here.reads)
+        pending.extend(summed for _, _, summed in here.sums)
+        if here.projection is not None:
+            pending.append(here.projection.history)
+    return reached
+
+
 def end_shares_of(plan: "_rows.GeneratorPlan") -> Tuple[Tuple[str, str], ...]:
     """What each ``end`` share in *plan*'s reach is a share of, as ``(expose, share_of)`` pairs.
 
@@ -2346,20 +2368,27 @@ def end_shares_of(plan: "_rows.GeneratorPlan") -> Tuple[Tuple[str, str], ...]:
     child plans it sums and the history a projected plan reads. A plan reached twice is walked once.
     """
     found: Dict[str, str] = {}
-    seen: Set[int] = set()
-    pending = [plan]
-    while pending:
-        here = pending.pop()
-        if id(here) in seen:
-            continue
-        seen.add(id(here))
+    for here in _reach(plan):
         pick = history_pick_of(here)
         if pick is not None and pick.entry.end is not None:
             found[here.expose.expose_id] = pick.entry.end.share_of
-        pending.extend(read for _, read in here.reads)
-        pending.extend(summed for _, _, summed in here.sums)
-        if here.projection is not None:
-            pending.append(here.projection.history)
+    return tuple(sorted(found.items()))
+
+
+def version_counts_of(plan: "_rows.GeneratorPlan") -> Tuple[Tuple[str, str], ...]:
+    """How each history in *plan*'s reach gives its version counts, as ``(expose, mode)`` pairs.
+
+    The run sets the mode from the plan it executes (a recorded plan without ``versionCounts``
+    gives the rank coupling). The digest holds it for a history with a ``versions`` shape and
+    leaves it out for one without, whose counts the mode does not move; a memo kept under that
+    digest holds it for both, so a layout is never served to a plan that sets the other mode. The
+    reach is the one of :func:`end_shares_of`.
+    """
+    found: Dict[str, str] = {}
+    for here in _reach(plan):
+        pick = history_pick_of(here)
+        if pick is not None:
+            found[here.expose.expose_id] = pick.entry.version_counts
     return tuple(sorted(found.items()))
 
 
@@ -2377,7 +2406,9 @@ def run_set_key(plan: "_rows.GeneratorPlan", projection: Optional[Any] = None) -
     ``heldGivens``, ``fallbackGivens`` and ``fallbackMarginals``; ``projectedReads`` is the digest
     of each plan read. A projection's ``periodRange`` is its ``clip``, which a history's digest does
     not hold, and ``maxRows`` is its ``budget``, which changes no row but decides whether a build
-    refuses, so a layout kept under a larger budget must not answer for a smaller one.
+    refuses, so a layout kept under a larger budget must not answer for a smaller one. A history's
+    ``versionCounts`` is in its digest only with a ``versions`` shape; :func:`version_counts_of`
+    holds it for every history, since the digest of one without a shape does not tell the modes apart.
 
     Extend the tuple here, and only here, for a field a later run sets.
     """
@@ -2389,6 +2420,8 @@ def run_set_key(plan: "_rows.GeneratorPlan", projection: Optional[Any] = None) -
         None if shown is None else shown.clip,
         # The periodic rows' budget, against which a build refuses.
         None if shown is None else shown.budget,
+        # How each history in the plan's reach gives its version counts.
+        version_counts_of(plan),
     )
 
 

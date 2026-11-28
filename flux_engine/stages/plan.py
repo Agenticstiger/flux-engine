@@ -88,7 +88,11 @@ from flux_engine.safeio import (
 )
 from flux_engine.seam.coverage import ExposeCoverage, printable
 from flux_engine.seam.declared import NotGenerated, render_not_generated
-from flux_engine.seam.history import END_SHARE_OF_ENTITIES, history_entries_of
+from flux_engine.seam.history import (
+    END_SHARE_OF_ENTITIES,
+    VERSION_COUNTS_FIT,
+    history_entries_of,
+)
 from flux_engine.seam.mean_reach import check_restated_means
 from flux_engine.seam.overlay import overlaid_profile
 from flux_engine.seam.parameters import check_profile_citations
@@ -405,6 +409,24 @@ def _range_setter_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     return {RANGE_SETTERS_PLAN_KEY: RANGE_SETTERS_HELD} if held else {}
 
 
+#: ``plan.json``'s key for each entity of a history taking a version count its room fits (ADR 0017,
+#: the amendment of 2026-11-28): ``"fit"``. Present only when the plan holds a history with a
+#: ``versions`` shape, so every other plan keeps its bytes and its planDigest. A recorded plan
+#: without it replays the rank coupling (:func:`flux_engine.stages.apply.plan_version_counts`).
+VERSION_COUNTS_PLAN_KEY = "versionCounts"
+
+
+def _version_count_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
+    """``versionCounts``, only for a plan in which a history with a ``versions`` shape fits its counts."""
+    fitted = any(
+        (pick := history_pick_of(plan)) is not None
+        and pick.entry.versions is not None
+        and pick.entry.version_counts == VERSION_COUNTS_FIT
+        for plan in _emit_plans(result)
+    )
+    return {VERSION_COUNTS_PLAN_KEY: VERSION_COUNTS_FIT} if fitted else {}
+
+
 def _max_rows_entries(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
     """``maxRows``, only for a plan whose periodic rows' budget is not the default."""
     budget = result.bounds.budget
@@ -563,6 +585,7 @@ def build_plan_document(result: "_pipeline.PipelineResult") -> Dict[str, Any]:
         **_scale_floor_entries(result),
         **_max_rows_entries(result),
         **_range_setter_entries(result),
+        **_version_count_entries(result),
         **_projected_given_entries(result),
         **_projected_read_entries(result),
         **(

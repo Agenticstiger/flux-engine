@@ -62,6 +62,8 @@ __all__ = [
     "END_SHARE_OF_ELIGIBLE",
     "END_SHARE_OF_ENTITIES",
     "HISTORY_KEY",
+    "VERSION_COUNTS_FIT",
+    "VERSION_COUNTS_RANK",
     "Histogram",
     "HistoryEnd",
     "HistoryEntry",
@@ -186,6 +188,17 @@ END_SHARE_OF_ENTITIES = "entities"
 END_SHARE_OF_ELIGIBLE = "eligible"
 
 
+#: How the version counts go to the entities (ADR 0017, the amendment of 2026-11-28): each entity
+#: takes a count its room fits, which a plan made by this engine's release and later asks for, and
+#: ``plan.json`` says so with ``versionCounts``.
+VERSION_COUNTS_FIT = "fit"
+
+#: The version counts as engine 0.13.1 and earlier gave them: the entity with the most room takes
+#: the most versions. A recorded plan with no ``versionCounts`` replays under it, so its run id
+#: keeps its digests.
+VERSION_COUNTS_RANK = "rank"
+
+
 @dataclass(frozen=True)
 class HistoryEnd:
     """How an entity's history ends: a ``mode``, a ``share`` and, optionally, a column and its value.
@@ -234,6 +247,11 @@ class HistoryEntry:
     reasons: Optional[ChildShape] = None
     end: Optional[HistoryEnd] = None
     untracked: Optional[str] = None
+    #: How the version counts go to the entities (:data:`VERSION_COUNTS_FIT`, or
+    #: :data:`VERSION_COUNTS_RANK` for a plan recorded before the fit). It is no part of the entry
+    #: a Simulation declares: the plan says it, and :func:`history_entries_of` sets it. It is part
+    #: of the entry's equality, so every cache keyed by the entry holds it.
+    version_counts: str = VERSION_COUNTS_FIT
 
     def as_member(self) -> Dict[str, Any]:
         """The entry as the emit's ``history`` member holds it: no ``emit``, no absent key."""
@@ -699,13 +717,18 @@ def bound_into_h(entries: Sequence[HistoryEntry], emit: str) -> Optional[Dict[st
 
 
 def history_entries_of(
-    extension: Optional[Mapping[str, Any]], emit: str, *, end_share: str = END_SHARE_OF_ENTITIES
+    extension: Optional[Mapping[str, Any]],
+    emit: str,
+    *,
+    end_share: str = END_SHARE_OF_ENTITIES,
+    version_counts: str = VERSION_COUNTS_FIT,
 ) -> Tuple[HistoryEntry, ...]:
     """The history an emit's bound extension holds (the member :func:`bound_into_h` made), or ``()``.
 
     *end_share* is what the entry's ``end`` share is a share of, which the plan the run executes
     states (:data:`END_SHARE_OF_ENTITIES`, or :data:`END_SHARE_OF_ELIGIBLE` for a plan that does
-    not). The Simulation does not declare it.
+    not). *version_counts* is how the counts go to the entities, which the plan states the same
+    way. The Simulation declares neither.
     """
     raw = extension.get(HISTORY_KEY) if extension is not None else None
     if not isinstance(raw, Mapping):
@@ -718,6 +741,8 @@ def history_entries_of(
     )
     if entry.end is not None and end_share != entry.end.share_of:
         entry = replace(entry, end=replace(entry.end, share_of=end_share))
+    if version_counts != entry.version_counts:
+        entry = replace(entry, version_counts=version_counts)
     return (entry,)
 
 

@@ -29,6 +29,7 @@ from flux_engine.generator import history, relations
 from flux_engine.generator import rows as rows_module
 from flux_engine.generator.rows import generate_row_slice, generate_rows
 from flux_engine.seam.counts import ChildShape
+from flux_engine.seam.history import VERSION_COUNTS_RANK
 
 from .test_history_end import EMIT, fresh_layouts  # noqa: F401  (an autouse fixture)
 from .test_history_layout import root_for
@@ -50,7 +51,10 @@ PINNED = {
 
 def _plan_of(shape: Any) -> Any:
     versions, rows = shape
-    held = tracked_entry(BOTH, entities=ENTITIES, versions=versions)
+    # The rank coupling, as a plan recorded before the fit has it: the digests are those it had.
+    held = tracked_entry(
+        BOTH, entities=ENTITIES, versions=versions, version_counts=VERSION_COUNTS_RANK
+    )
     return plans_with(held, [PRIOR_PLAN], rows=rows, entities=ENTITIES)[EMIT]
 
 

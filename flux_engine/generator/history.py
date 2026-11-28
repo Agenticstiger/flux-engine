@@ -64,24 +64,28 @@ from flux_engine.generator.counts import (
     digest_key,
     pass_excess,
 )
+from flux_engine.generator.history_fit import assign_counts, capacities, priorities
 from flux_engine.generator.paths import (
     CHANGE_PATH_SHAPE,
     ENDED_PATH_SHAPE,
     ENTITIES_PATH_SHAPE,
     HISTORY_PATH_SHAPE,
     REASON_PATH_SHAPE,
+    VERSIONS_FIT_PATH_SHAPE,
     VERSIONS_PATH_SHAPE,
     change_path,
     ended_path,
     entities_path,
     history_path,
     reason_path,
+    versions_fit_path,
     versions_path,
 )
 from flux_engine.seam.contract import LogicalKind
 from flux_engine.seam.counts import ChildShape
 from flux_engine.seam.history import (
     END_SHARE_OF_ELIGIBLE,
+    VERSION_COUNTS_FIT,
     Histogram,
     HistoryEntry,
     HistoryTracked,
@@ -101,6 +105,7 @@ __all__ = [
     "TrackedSpec",
     "chain_unit_kind",
     "build_chain",
+    "chain_builds",
     "chain_columns",
     "check_layout",
     "drawn_length",
@@ -113,6 +118,9 @@ __all__ = [
     "entity_chain",
     "entity_states",
     "first_start_at",
+    "fit_key",
+    "handed_chains",
+    "seed_chains",
     "validity_bound",
     "fit_lengths",
     "largest_count",
@@ -141,6 +149,15 @@ _NO_KEY = bytes(32)
 _PLANS_KEPT = 4
 _PLANS: Dict[Tuple[Any, ...], "HistoryPlan"] = {}
 _OUTERS: Dict[Tuple[Any, ...], CountedLayout] = {}
+#: The first :data:`_ADDRESS_PARTS` parts of a :data:`_PLANS` key: what names a history inside a
+#: run, without the parent's lifetimes and the entity layout, which no process but the one that
+#: starts a pool reads.
+_ADDRESS_PARTS = 10
+#: The layouts a worker process was handed (:func:`seed_chains`), by that address. A process that
+#: starts no pool holds none.
+_HANDED: Dict[Tuple[Any, ...], "HistoryPlan"] = {}
+#: How many times this process has worked out a history's layout (:func:`_chain`).
+_BUILDS = 0
 
 
 def _code() -> Any:
@@ -165,6 +182,11 @@ def entities_key(root: SeedTreeRoot, sim_id: str, expose_id: str, relationship: 
 def versions_key(root: SeedTreeRoot, sim_id: str, expose_id: str) -> bytes:
     """``K_V``: the 32-byte key of ``("sim", sim_id, "gen", exposeId, "versions")``."""
     return digest_key(root, versions_path(sim_id, expose_id), VERSIONS_PATH_SHAPE)
+
+
+def fit_key(root: SeedTreeRoot, sim_id: str, expose_id: str) -> bytes:
+    """``K_fit``: the 32-byte key of ``("sim", sim_id, "gen", exposeId, "versions", "fit")``."""
+    return digest_key(root, versions_fit_path(sim_id, expose_id), VERSIONS_FIT_PATH_SHAPE)
 
 
 def ended_key(root: SeedTreeRoot, sim_id: str, expose_id: str) -> bytes:
@@ -268,6 +290,10 @@ class HistoryPick:
         if self.ranged is not None:
             # Only a history its validity columns' ranges cut says where (ADR 0024, 2026-11-25).
             document["validityRange"] = list(self.ranged)
+        if self.entry.versions is not None and self.entry.version_counts == VERSION_COUNTS_FIT:
+            # Only a shaped history that gives each entity the count its room fits says so (ADR
+            # 0017, the amendment of 2026-11-28); a plan of the rank coupling keeps its digest.
+            document["versionCounts"] = VERSION_COUNTS_FIT
         return document
 
 
@@ -810,6 +836,14 @@ class _StartTable:
         draws = u.astype(np.int64)
         index = np.searchsorted(thresholds, draws, side="right")
         before = np.concatenate((np.zeros(1, dtype=np.int64), thresholds))[index]
+        widest = int(np.diff(np.concatenate((np.zeros(1, dtype=np.int64), thresholds))).max())
+        if widest * max(self.counts) < 1 << 63:
+            # No product of a position in a bin and the bin's values reaches 2**63, so the
+            # integer arithmetic below is exact in int64 and gives the same values.
+            widths_here = np.array(self.thresholds, dtype=np.int64)[index] - before
+            counts_here = np.array(self.counts, dtype=np.int64)[index]
+            firsts_here = np.array(self.firsts, dtype=np.int64)[index]
+            return firsts_here + ((draws - before) * counts_here) // widths_here
         widths = np.array(self.thresholds, dtype=object)[index] - before.astype(object)
         counts = np.array(self.counts, dtype=object)[index]
         offsets = ((draws - before).astype(object) * counts) // widths
@@ -1328,6 +1362,8 @@ def plan_history(
         held = held + (outer.cache_key(), bound.identity)
     chain = _PLANS.get(held)
     if chain is None:
+        chain = _HANDED.get(held[:_ADDRESS_PARTS])
+    if chain is None:
         chain = _chain(
             root,
             sim_id,
@@ -1347,6 +1383,32 @@ def plan_history(
     if per_parent is None:
         per_parent = _outer_layout(root, sim_id, expose_id, entities, outer)
     return replace(chain, per_parent=per_parent)
+
+
+def chain_builds() -> int:
+    """How many layouts this process has worked out with :func:`_chain` since it started."""
+    return _BUILDS
+
+
+def handed_chains(
+    chains: Mapping[Tuple[Any, ...], "HistoryPlan"], root: SeedTreeRoot
+) -> Dict[Tuple[Any, ...], "HistoryPlan"]:
+    """*chains* and the layouts this process holds for *root*, by their address in a run.
+
+    A process that starts a pool hands them to its workers (:func:`seed_chains`), so no worker
+    works a layout out again. A layout goes without its entities' parents, which a worker works
+    out as it always did.
+    """
+    found = dict(chains)
+    for held, chain in _PLANS.items():
+        if held[0] == root.digest and held[1] == root.seed_tree_version:
+            found[held[:_ADDRESS_PARTS]] = replace(chain, per_parent=None)
+    return found
+
+
+def seed_chains(chains: Mapping[Tuple[Any, ...], "HistoryPlan"]) -> None:
+    """Hold *chains* in this process, as a worker does with the layouts its run worked out."""
+    _HANDED.update(chains)
 
 
 def _outer_layout(
@@ -1394,6 +1456,8 @@ def _chain(
     *bounds* is the entities' layout per parent with the parents' lifetimes, and the validity
     columns' range; with either, each entity's first start and room read it (:func:`_bounded_chain`).
     """
+    global _BUILDS
+    _BUILDS += 1
     c = largest_count(entities, rows, entry.versions)
     until = unit_of(entry.until, kind)
     starts = np.zeros(0, dtype=np.int64)
@@ -1407,14 +1471,19 @@ def _chain(
             span = (first, last, until, c)
             held = (*_bound_rows(entities, bounds[0]), bounds[1])
             starts, cut = _bounded_chain(root, sim_id, expose_id, (entry, kind), span, held)
-    versions = counted_layout(
-        versions_key(root, sim_id, expose_id),
-        entities,
-        rows,
-        shape=None if entry.versions is None else entry.versions.as_member(),
-        minimum=1,
-        expected=_rooms_of(entry, until, starts, cut),
-    )
+    if entities and entry.versions is not None and entry.version_counts == VERSION_COUNTS_FIT:
+        versions = _fitted_layout(
+            root, sim_id, expose_id, (entry, kind, rows, c), starts, cut, until
+        )
+    else:
+        versions = counted_layout(
+            versions_key(root, sim_id, expose_id),
+            entities,
+            rows,
+            shape=None if entry.versions is None else entry.versions.as_member(),
+            minimum=1,
+            expected=_rooms_of(entry, until, starts, cut),
+        )
     if entities and int(versions.counts.max()) > c:
         raise _refuse(
             f"history ({entry.emit}): an entity takes {int(versions.counts.max())} versions, "
@@ -1554,6 +1623,48 @@ def _fitted_counts(
     )
     held = replace(cut, capped=int((counts > caps).sum()), moved=lost - left, shortfall=left)
     return layout, held
+
+
+def _fitted_layout(
+    root: SeedTreeRoot,
+    sim_id: str,
+    expose_id: str,
+    declared: Tuple[HistoryEntry, LogicalKind, int, int],
+    starts: "np.ndarray",
+    cut: Optional[ParentCut],
+    until: int,
+) -> CountedLayout:
+    """The versions per entity when each takes a count its room fits (ADR 0017, the amendment of 2026-11-28).
+
+    *declared* is the entry, the chain's kind, ``N`` and ``c``. The counts as a multiset are the
+    counted layout's, which the declared values alone settle; :mod:`~flux_engine.generator.history_fit`
+    says who takes which, from each entity's capacity, the versions its own drawn lengths fit
+    before its limit, and a permutation under ``K_fit``.
+    """
+    entry, kind, rows, largest = declared
+    assert entry.versions is not None
+    entities = int(starts.shape[0])
+    multiset = counted_layout(
+        versions_key(root, sim_id, expose_id),
+        entities,
+        rows,
+        shape=entry.versions.as_member(),
+        minimum=1,
+    ).counts
+    rooms = (until if cut is None else cut.limits) - starts
+    capacity = capacities(
+        _change_key(root, sim_id, expose_id),
+        length_table(entry, kind),
+        rooms,
+        1 if _closes_last(entry) else 0,
+        largest,
+    )
+    counts = assign_counts(
+        multiset, capacity, priorities(fit_key(root, sim_id, expose_id), entities)
+    )
+    return CountedLayout(
+        counts=counts, offsets=np.cumsum(counts) - counts, children=int(counts.sum())
+    )
 
 
 def _rooms_of(

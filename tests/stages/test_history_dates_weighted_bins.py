@@ -127,8 +127,9 @@ def test_the_accepted_plan_replays_to_its_digest(tmp_path: Path) -> None:
     assert again.run_id == layout.run_id and _digest(tmp_path / "again", again.run_id) == digest
 
 
-# The run digest of the default history-chain bundle, as the engine made it before this reading.
-BASELINE_RUN_DIGEST = "sha256:1cd3043f7030f4a28a71812a7b6344f3e63d2b046f524092e8bf0910a262e83b"
+# The run digest of the default history-chain bundle, as the engine makes it with the counts each entity's room fits
+# (it was sha256:1cd3043f7030f4a28a71812a7b6344f3e63d2b046f524092e8bf0910a262e83b under the rank coupling).
+BASELINE_RUN_DIGEST = "sha256:47f361cb1f7fee8d36f8afb75bf0850bb65e62d178635da2f697f4c83636c67c"
 
 
 def test_a_bundle_both_versions_accept_keeps_its_run_digest(tmp_path: Path) -> None:

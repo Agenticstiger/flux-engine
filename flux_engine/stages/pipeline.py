@@ -255,7 +255,12 @@ from flux_engine.seam.emit import (
     seam_digests,
     seam_entropy_bytes,
 )
-from flux_engine.seam.history import END_SHARE_OF_ENTITIES, HISTORY_KEY, history_entries_of
+from flux_engine.seam.history import (
+    END_SHARE_OF_ENTITIES,
+    HISTORY_KEY,
+    VERSION_COUNTS_FIT,
+    history_entries_of,
+)
 from flux_engine.seam.keys import compile_keys, declared_exposes, window_ends
 from flux_engine.seam.links import link_entries_of
 from flux_engine.seam.mapping import (
@@ -1927,6 +1932,9 @@ class PlanEra:
     changes no row.
     *hold_ranges* is false for a plan without ``rangeSetters`` (ADR 0024, the amendment of
     2026-11-25): its history and periods entries replay without keeping to the columns' ranges.
+    *version_counts* is how a shaped history gives its version counts to the entities (ADR 0017, the
+    amendment of 2026-11-28): each takes a count its room fits, or, for a plan without
+    ``versionCounts``, the count of its rank.
     *estimate_rows* is false for every recorded plan: it states its rows, so it runs with no
     estimate against *periodic_rows*, and ``MOST_ROWS`` alone bounds them.
     *projected_givens* is false for a plan without ``projectedGivens`` (ADR 0027, the amendment of
@@ -1945,6 +1953,7 @@ class PlanEra:
     scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
     periodic_rows: Optional[int] = None
     hold_ranges: bool = True
+    version_counts: str = VERSION_COUNTS_FIT
     estimate_rows: bool = True
     projected_givens: bool = True
     override_givens: bool = True
@@ -4061,7 +4070,12 @@ def _histories_of(
     """
     found: Dict[str, HistoryBinding] = {}
     for emit in resolved:
-        entries = history_entries_of(emit.extension, emit.expose_id, end_share=era.end_share)
+        entries = history_entries_of(
+            emit.extension,
+            emit.expose_id,
+            end_share=era.end_share,
+            version_counts=era.version_counts,
+        )
         if not entries:
             continue
         semantics = (
