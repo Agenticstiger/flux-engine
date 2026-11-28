@@ -979,12 +979,15 @@ def project_plan(
 
 def sources_of(plan: GeneratorPlan, root: SeedTreeRoot) -> Any:
     """The history row each row of the projected *plan* is read from, worked out once per process."""
+    from flux_engine.generator.relations import run_set_key
+
     projection = plan.projection
     assert projection is not None  # the caller routes a projected plan only
     held = (
         root.digest,
         root.seed_tree_version,
         plan.digest().value,
+        run_set_key(plan),
     )
     found = _SOURCES.get(held)
     if found is None:
@@ -1055,7 +1058,9 @@ def _whole(
     The window reads rows of every slice, so the emit is made whole and its rules applied over
     all of it, as :func:`~flux_engine.generator.rows.generate_row_slice` makes any such emit.
     """
-    held = (root.digest, root.seed_tree_version, plan.digest().value)
+    from flux_engine.generator.relations import run_set_key
+
+    held = (root.digest, root.seed_tree_version, plan.digest().value, run_set_key(plan))
     if held not in _WHOLE:
         if len(_WHOLE) >= _WHOLE_KEPT:
             _WHOLE.clear()

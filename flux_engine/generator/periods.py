@@ -49,6 +49,7 @@ from flux_engine.generator import rows as _rows
 from flux_engine.generator.counts import CountClass, classes_of, digest_key, slot_values
 from flux_engine.generator.history import HistoryPlan
 from flux_engine.generator.paths import KIND_PATH_SHAPE, kind_path
+from flux_engine.generator.relations import run_set_key
 from flux_engine.generator.rows import (
     OWN_DRAW,
     GeneratorPlan,
@@ -604,9 +605,9 @@ def layout_of(chain: HistoryPlan, projection: "ProjectionPlan") -> PeriodLayout:
         root.digest,
         root.seed_tree_version,
         projection.history.digest().value,
+        run_set_key(projection.history, projection),
         repr(entry),
         projection.window,
-        projection.budget,
     )
     found = _LAYOUTS.get(held)
     if found is None:

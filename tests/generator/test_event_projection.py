@@ -29,15 +29,17 @@ pipeline builds them. What is pinned, on kernel 0.2.0:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import pytest
 
+from flux_engine.generator import events as events_module
 from flux_engine.generator import projections
 from flux_engine.generator.events import lag_at, lags
-from flux_engine.generator.projections import KINDS, project_plan, sources_of
+from flux_engine.generator.projections import KINDS, chain_of, project_plan, sources_of
 from flux_engine.generator.rows import (
     GeneratorPlan,
     build_plan,
@@ -46,7 +48,12 @@ from flux_engine.generator.rows import (
 )
 from flux_engine.seam.contract import LogicalKind, compile_expose
 from flux_engine.seam.counts import ChildShape
-from flux_engine.seam.history import Histogram, HistoryEnd
+from flux_engine.seam.history import (
+    END_SHARE_OF_ELIGIBLE,
+    END_SHARE_OF_ENTITIES,
+    Histogram,
+    HistoryEnd,
+)
 from flux_engine.seam.projections import EVENTS_KEY, EventsEntry
 
 from .test_history_end import (
@@ -641,3 +648,35 @@ def test_an_ended_last_entity_with_no_change_left_takes_its_ending_text(mode: st
         assert any(
             row["change_type"] == ("ended" if mode == "closeLast" else "deleted") for row in ending
         )
+
+
+def test_two_runs_that_share_an_end_differently_share_no_layout() -> None:
+    """What an ``end`` share is a share of is set by the run, so the layout is kept under it."""
+    root = root_for()
+    ends = {
+        name: HistoryEnd("closeLast", "0.9", "status", "gone", share_of=name)
+        for name in (END_SHARE_OF_ENTITIES, END_SHARE_OF_ELIGIBLE)
+    }
+    projections_by = {
+        name: replace(events_plan(held(end, rows=40, entities=24)).projection, root=root)
+        for name, end in ends.items()
+    }
+    first, second = projections_by.values()
+    assert first.history.digest() == second.history.digest()
+
+    def laid(name: str) -> Any:
+        projection = projections_by[name]
+        layout = events_module.layout_of(chain_of(projection.history, root), projection)
+        return [
+            array.tolist() for array in (layout.about, layout.op, layout.before, layout.closing)
+        ]
+
+    def alone(name: str) -> Any:
+        events_module.clear_layouts()
+        return laid(name)
+
+    expected = {name: alone(name) for name in projections_by}
+    assert expected[END_SHARE_OF_ENTITIES] != expected[END_SHARE_OF_ELIGIBLE]
+    events_module.clear_layouts()
+    for name in (*projections_by, END_SHARE_OF_ENTITIES):
+        assert laid(name) == expected[name], name

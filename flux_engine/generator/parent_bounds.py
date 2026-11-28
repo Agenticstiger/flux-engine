@@ -48,6 +48,8 @@ def deferred_bound(
     kind: LogicalKind,
 ) -> DeferredBound:
     """The lifetime of every row of *parent*, read at *columns* and put in the chain's unit when asked for."""
+    from flux_engine.generator.relations import run_set_key
+
     chain_kind = _kind_name(kind)
     held = (
         root.digest,
@@ -55,6 +57,7 @@ def deferred_bound(
         parent.sim_id,
         parent.expose.expose_id,
         parent.digest().value,
+        run_set_key(parent),
         columns[0],
         columns[1],
         chain_kind,

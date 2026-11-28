@@ -2644,7 +2644,9 @@ def _whole_rows(plan: GeneratorPlan, streams: _Source) -> Tuple[Tuple[Any, ...],
     for held in _WHOLE:
         if held["plan"] is plan and held["root"] is root:
             return held["rows"]
-    key = (plan.digest().value, root.digest, root.seed_tree_version)
+    from flux_engine.generator.relations import run_set_key
+
+    key = (plan.digest().value, run_set_key(plan), root.digest, root.seed_tree_version)
     for held in _WHOLE:
         if held["key"] == key:
             held["plan"], held["root"] = plan, root
