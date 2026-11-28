@@ -59,7 +59,7 @@ from flux_engine.core.rng import kernel_context
 from flux_engine.core.seedtree import SeedTreeRoot
 from flux_engine.generator.associations import pairings_of, seed_pairings
 from flux_engine.generator.dates import DatesTally
-from flux_engine.generator.history import handed_chains, seed_chains
+from flux_engine.generator.history import hand_chains, seed_chains
 from flux_engine.generator.projections import chain_of
 from flux_engine.generator.relations import history_pick_of
 from flux_engine.generator.rows import GeneratorPlan, generate_row_slice, written_rows
@@ -303,15 +303,18 @@ def _pairings(emits: Mapping[str, _EmitJob], root: SeedTreeRoot) -> Dict[Any, An
 
 
 def _chains(emits: Mapping[str, _EmitJob], root: SeedTreeRoot) -> Dict[Any, Any]:
-    """The version layout of every history the emits read, worked out in this process, one build each."""
-    found: Dict[Any, Any] = {}
+    """The version layout of every history the emits read, worked out in this process, one build each.
+
+    Each is the layout its own plan's history returned, so a layout this process holds for another
+    run, or for another key, is never handed over.
+    """
+    layouts = []
     for plan, _ in emits.values():
         histories = [plan] if plan.projection is None else [plan, plan.projection.history]
         for history in histories:
             if history_pick_of(history) is not None:
-                chain_of(history, root)
-                found = handed_chains(found, root)
-    return found
+                layouts.append(chain_of(history, root))
+    return hand_chains(layouts)
 
 
 def _context() -> Any:

@@ -43,7 +43,19 @@ from functools import lru_cache
 from itertools import accumulate
 from math import lcm
 from threading import local
-from typing import Any, Callable, Dict, Hashable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Hashable,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from weakref import WeakKeyDictionary
 
 import numpy as np
@@ -107,6 +119,7 @@ __all__ = [
     "build_chain",
     "chain_builds",
     "chain_columns",
+    "clear_chains",
     "check_layout",
     "drawn_length",
     "declared_ended",
@@ -119,7 +132,7 @@ __all__ = [
     "entity_states",
     "first_start_at",
     "fit_key",
-    "handed_chains",
+    "hand_chains",
     "seed_chains",
     "validity_bound",
     "fit_lengths",
@@ -145,16 +158,21 @@ _EPOCH_ORDINAL = date(1970, 1, 1).toordinal()
 _TWO_53 = 1 << 53
 #: A key no path owns: the counts of a layout as a multiset never read it.
 _NO_KEY = bytes(32)
-#: How many histories a process keeps (each holds arrays over its entities and rows).
+#: How many entity layouts of parents a process keeps (:data:`_OUTERS`).
 _PLANS_KEPT = 4
+#: How many history layouts a run keeps (:data:`_PLANS`) before it forgets them all. A run of up to
+#: this many histories works each one out once; a process that builds layouts outside a run, with
+#: nothing to clear its memos, holds at most this many.
+_PLANS_BOUND = 64
+#: Every history layout this process worked out since the memos were last cleared
+#: (:func:`clear_chains`, which :func:`flux_engine.generator.rows.clear_memos` calls at the end of
+#: every run). None is evicted before then, up to :data:`_PLANS_BOUND`: a layout reads every
+#: entity, and a history dropped to make room for another would be worked out a second time. A
+#: layout is found under its whole key (:attr:`HistoryPlan.key`): everything its build reads.
 _PLANS: Dict[Tuple[Any, ...], "HistoryPlan"] = {}
 _OUTERS: Dict[Tuple[Any, ...], CountedLayout] = {}
-#: The first :data:`_ADDRESS_PARTS` parts of a :data:`_PLANS` key: what names a history inside a
-#: run, without the parent's lifetimes and the entity layout, which no process but the one that
-#: starts a pool reads.
-_ADDRESS_PARTS = 10
-#: The layouts a worker process was handed (:func:`seed_chains`), by that address. A process that
-#: starts no pool holds none.
+#: The layouts a worker process was handed (:func:`seed_chains`), by the same whole key. A process
+#: that starts no pool holds none.
 _HANDED: Dict[Tuple[Any, ...], "HistoryPlan"] = {}
 #: How many times this process has worked out a history's layout (:func:`_chain`).
 _BUILDS = 0
@@ -466,6 +484,10 @@ class HistoryPlan:
     changes: Optional["np.ndarray"] = None
     reasons: Optional[ReasonPlan] = None
     cut: Optional[ParentCut] = None
+    #: What this layout was worked out under: the key :func:`plan_history` keeps it by, every input
+    #: its build reads (empty for a layout built outside it). A worker finds a layout it was handed
+    #: by this key alone.
+    key: Tuple[Any, ...] = field(default=(), repr=False)
 
     @property
     def rooms(self) -> "np.ndarray":
@@ -1362,20 +1384,23 @@ def plan_history(
         held = held + (outer.cache_key(), bound.identity)
     chain = _PLANS.get(held)
     if chain is None:
-        chain = _HANDED.get(held[:_ADDRESS_PARTS])
+        chain = _HANDED.get(held)
     if chain is None:
-        chain = _chain(
-            root,
-            sim_id,
-            expose_id,
-            entry,
-            kind,
-            rows,
-            entities,
-            window,
-            (None if bound is None or per_parent is None else (per_parent, bound), ranged),
+        chain = replace(
+            _chain(
+                root,
+                sim_id,
+                expose_id,
+                entry,
+                kind,
+                rows,
+                entities,
+                window,
+                (None if bound is None or per_parent is None else (per_parent, bound), ranged),
+            ),
+            key=held,
         )
-        if len(_PLANS) >= _PLANS_KEPT:
+        if len(_PLANS) >= _PLANS_BOUND:
             _PLANS.clear()
         _PLANS[held] = chain
     if outer is None:
@@ -1385,25 +1410,30 @@ def plan_history(
     return replace(chain, per_parent=per_parent)
 
 
+def clear_chains() -> None:
+    """Forget the history layouts this process worked out, and those it was handed.
+
+    Called with the run's other memos (:func:`flux_engine.generator.rows.clear_memos`), at the end
+    of every run, however it ends.
+    """
+    _PLANS.clear()
+    _HANDED.clear()
+
+
 def chain_builds() -> int:
     """How many layouts this process has worked out with :func:`_chain` since it started."""
     return _BUILDS
 
 
-def handed_chains(
-    chains: Mapping[Tuple[Any, ...], "HistoryPlan"], root: SeedTreeRoot
-) -> Dict[Tuple[Any, ...], "HistoryPlan"]:
-    """*chains* and the layouts this process holds for *root*, by their address in a run.
+def hand_chains(layouts: Iterable["HistoryPlan"]) -> Dict[Tuple[Any, ...], "HistoryPlan"]:
+    """*layouts*, each under the key it was worked out under (:attr:`HistoryPlan.key`).
 
-    A process that starts a pool hands them to its workers (:func:`seed_chains`), so no worker
-    works a layout out again. A layout goes without its entities' parents, which a worker works
-    out as it always did.
+    A process that starts a pool hands the layouts its own plans' histories returned to its
+    workers (:func:`seed_chains`), so no worker works one out again. A layout goes without its
+    entities' parents, which a worker works out as it always did. Two layouts that differ in
+    anything their build reads have different keys, so neither takes the other's place.
     """
-    found = dict(chains)
-    for held, chain in _PLANS.items():
-        if held[0] == root.digest and held[1] == root.seed_tree_version:
-            found[held[:_ADDRESS_PARTS]] = replace(chain, per_parent=None)
-    return found
+    return {layout.key: replace(layout, per_parent=None) for layout in layouts if layout.key}
 
 
 def seed_chains(chains: Mapping[Tuple[Any, ...], "HistoryPlan"]) -> None:
