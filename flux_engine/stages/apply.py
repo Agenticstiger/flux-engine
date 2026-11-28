@@ -64,7 +64,12 @@ from flux_engine.safeio import (
 )
 from flux_engine.seam.attest import build_seam_attestation
 from flux_engine.seam.coverage import printable
-from flux_engine.seam.history import END_SHARE_OF_ELIGIBLE, END_SHARE_OF_ENTITIES
+from flux_engine.seam.history import (
+    END_SHARE_OF_ELIGIBLE,
+    END_SHARE_OF_ENTITIES,
+    VERSION_COUNTS_FIT,
+    VERSION_COUNTS_RANK,
+)
 from flux_engine.seam.resolve import load_bundle, profile_reference
 from flux_engine.stages import pipeline as _pipeline
 from flux_engine.stages._grades import (
@@ -110,6 +115,7 @@ from flux_engine.stages.plan import (
     REFERENCES_PLAN_KEY,
     SCALE_FLOORS_PLAN_KEY,
     SCALE_FLOORS_TRACKED,
+    VERSION_COUNTS_PLAN_KEY,
     column_provenance_text,
     parameter_register_text,
 )
@@ -131,6 +137,7 @@ __all__ = [
     "plan_scale_floors",
     "plan_max_rows",
     "plan_range_setters",
+    "plan_version_counts",
     "plan_end_share",
     "plan_projected_givens",
     "plan_override_givens",
@@ -209,6 +216,7 @@ def load_recorded_plan(layout: RunLayout) -> Dict[str, Any]:
     plan_scale_floors(document)
     plan_max_rows(document)
     plan_range_setters(document)
+    plan_version_counts(document)
     plan_projected_givens(document)
     plan_projected_reads(document)
     require_plan_shortfalls(document)
@@ -303,6 +311,22 @@ def plan_range_setters(plan_document: Mapping[str, Any]) -> bool:
     )
 
 
+def plan_version_counts(plan_document: Mapping[str, Any]) -> str:
+    """How a recorded plan's histories give their version counts to the entities, or the refusal (``FLX-2102``).
+
+    A plan with ``versionCounts`` says ``"fit"`` (ADR 0017, the amendment of 2026-11-28): each
+    entity takes a count its room fits. A plan without it was made by engine 0.13.1 or earlier,
+    or holds no history with a ``versions`` shape, and it replays the rank coupling, which only
+    a shaped history reads, so the rows it made keep their bytes. Any other value is refused as
+    ``historyEndShare`` is.
+    """
+    if _marker_named(
+        plan_document, VERSION_COUNTS_PLAN_KEY, VERSION_COUNTS_FIT, "gives the counts by rank"
+    ):
+        return VERSION_COUNTS_FIT
+    return VERSION_COUNTS_RANK
+
+
 def plan_max_rows(plan_document: Mapping[str, Any]) -> Optional[int]:
     """The periodic rows' budget a recorded plan names, or the refusal (``FLX-2102``).
 
@@ -381,6 +405,7 @@ def _recorded_era(plan_document: Mapping[str, Any]) -> "_pipeline.PlanEra":
         tracked_levels=plan_scale_floors(plan_document),
         periodic_rows=plan_max_rows(plan_document),
         hold_ranges=plan_range_setters(plan_document),
+        version_counts=plan_version_counts(plan_document),
         estimate_rows=False,
         projected_givens=plan_projected_givens(plan_document),
         override_givens=plan_override_givens(plan_document),

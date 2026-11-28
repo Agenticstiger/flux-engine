@@ -255,7 +255,12 @@ from flux_engine.seam.emit import (
     seam_digests,
     seam_entropy_bytes,
 )
-from flux_engine.seam.history import END_SHARE_OF_ENTITIES, HISTORY_KEY, history_entries_of
+from flux_engine.seam.history import (
+    END_SHARE_OF_ENTITIES,
+    HISTORY_KEY,
+    VERSION_COUNTS_FIT,
+    history_entries_of,
+)
 from flux_engine.seam.keys import compile_keys, declared_exposes, window_ends
 from flux_engine.seam.links import link_entries_of
 from flux_engine.seam.mapping import (
@@ -518,6 +523,13 @@ class PipelineResult:
     scale_widened: Mapping[str, FrozenSet[str]] = field(default_factory=dict)
     #: The drawn parents ``--scale`` kept at the rows their children's tracked levels need.
     scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
+    #: The version layout of each history whose notes the plan stage writes, by exposeId: the layout
+    #: this run worked out, handed over because the run's memos are cleared as it ends, and the
+    #: notes (:func:`advice_notes`) are written after. Empty for a run that stopped before its
+    #: rows (``deferred``).
+    history_layouts: Mapping[str, HistoryPlan] = field(
+        default_factory=dict, compare=False, repr=False
+    )
 
     def emit(self, expose_id: str) -> EmitOutcome:
         for outcome in self.emits:
@@ -738,30 +750,35 @@ def period_end_null_notes(resolved: Sequence[ResolvedEmit]) -> Tuple[str, ...]:
     return tuple(notes)
 
 
-def end_share_notes(plans: Sequence[GeneratorPlan], root: SeedTreeRoot) -> Tuple[str, ...]:
+def end_share_notes(
+    plans: Sequence[GeneratorPlan],
+    root: SeedTreeRoot,
+    layouts: Optional[Mapping[str, HistoryPlan]] = None,
+) -> Tuple[str, ...]:
     """One sentence for each history whose declared end share yields less than it declares.
 
     The share is a share of every entity, and an ``end`` with a column ends only entities of two
     versions or more, so a history with too few of them ends every one that can and the share
     generated is lower than the share declared (ADR 0017, the amendment of 2026-11-24). Advice
-    only: no plan document or digest carries it.
+    only: no plan document or digest carries it. *layouts* are the layouts the run worked out
+    (:attr:`PipelineResult.history_layouts`); a history without one is worked out here.
     """
     notes = (
         end_share_note(expose_id, pick.entry, chain)
-        for expose_id, pick, chain in _history_chains(
-            plans, root, lambda pick: pick.entry.end is not None
-        )
+        for expose_id, pick, chain in _history_chains(plans, root, _ends, layouts)
     )
     return tuple(note for note in notes if note is not None)
 
 
 def parent_bound_history_notes(
-    plans: Sequence[GeneratorPlan], root: SeedTreeRoot
+    plans: Sequence[GeneratorPlan],
+    root: SeedTreeRoot,
+    layouts: Optional[Mapping[str, HistoryPlan]] = None,
 ) -> Tuple[str, ...]:
     """The notes of each history that keeps to its parent's lifetime or its validity columns' range (:func:`parent_bound_notes`)."""
     return tuple(
         note
-        for expose_id, pick, chain in _history_chains(plans, root, _bounded)
+        for expose_id, pick, chain in _history_chains(plans, root, _bounded, layouts)
         for note in parent_bound_notes(
             expose_id,
             chain,
@@ -774,30 +791,63 @@ def parent_bound_history_notes(
     )
 
 
+def _ends(pick: HistoryPick) -> bool:
+    """Whether *pick*'s history declares an ``end``."""
+    return pick.entry.end is not None
+
+
 def _bounded(pick: HistoryPick) -> bool:
     """Whether *pick*'s layout keeps to a parent's lifetime or to its validity columns' range."""
     return pick.parent_lifetime is not None or pick.ranged is not None
 
 
+def _noted(pick: HistoryPick) -> bool:
+    """Whether the plan stage's notes read *pick*'s layout."""
+    return _ends(pick) or _bounded(pick)
+
+
 def _history_chains(
-    plans: Sequence[GeneratorPlan], root: SeedTreeRoot, wanted: Callable[[HistoryPick], bool]
+    plans: Sequence[GeneratorPlan],
+    root: SeedTreeRoot,
+    wanted: Callable[[HistoryPick], bool],
+    layouts: Optional[Mapping[str, HistoryPlan]] = None,
 ) -> Iterator[Tuple[str, HistoryPick, HistoryPlan]]:
-    """The exposeId, pick and layout of each history among *plans* that *wanted* names."""
+    """The exposeId, pick and layout of each history among *plans* that *wanted* names.
+
+    A layout comes from *layouts* when the run handed it over, and is worked out otherwise.
+    """
     for plan in plans:
         pick = history_pick_of(plan)
         if pick is not None and wanted(pick):
-            yield plan.expose.expose_id, pick, chain_of(plan, root)
+            expose_id = plan.expose.expose_id
+            held = None if layouts is None else layouts.get(expose_id)
+            yield expose_id, pick, chain_of(plan, root) if held is None else held
+
+
+def _plans_of(emits: Sequence[EmitOutcome], hidden: Sequence[HiddenOutcome]) -> List[GeneratorPlan]:
+    """The generator plan of each emit and hidden table that has one."""
+    outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*emits, *hidden]
+    return [outcome.plan for outcome in outcomes if outcome.plan is not None]
+
+
+def _layouts_of(plans: Sequence[GeneratorPlan], root: SeedTreeRoot) -> Dict[str, HistoryPlan]:
+    """The layout of each history among *plans* that the plan stage's notes read, by exposeId.
+
+    Called inside the run, which has worked each one out (or does here, once): the memos are
+    cleared as the run ends, and the notes are written after it.
+    """
+    return {expose_id: chain for expose_id, _, chain in _history_chains(plans, root, _noted)}
 
 
 def advice_notes(result: PipelineResult) -> Tuple[str, ...]:
     """The advice a plan prints, one sentence each: period ends, end shares, parent bounds, associations and range cuts."""
     outcomes: List[Union[EmitOutcome, HiddenOutcome]] = [*result.emits, *result.hidden_emits]
-    plans = [outcome.plan for outcome in outcomes if outcome.plan is not None]
+    plans = _plans_of(result.emits, result.hidden_emits)
     emits = [outcome.resolved for outcome in outcomes]
     return (
         period_end_null_notes(emits)
-        + end_share_notes(plans, result.root)
-        + parent_bound_history_notes(plans, result.root)
+        + end_share_notes(plans, result.root, result.history_layouts)
+        + parent_bound_history_notes(plans, result.root, result.history_layouts)
         + association_notes(plans, result.root)
         + tuple(note for plan in plans for note in fallback_notes(plan))
         + tuple(
@@ -1895,7 +1945,12 @@ def compile_declared_fidelity(resolved: ResolvedEmit) -> Optional[CompiledFideli
 
 @contextmanager
 def _memos_for_one_run() -> Iterator[None]:
-    """Clear the draws' memos when the run inside ends, however it ends."""
+    """Clear every memo the run's draws and layouts filled when the run inside ends, however it ends.
+
+    That includes the history layouts: a run keeps each one it works out until then, and a
+    long-lived process holds none between runs. What a stage writes after the run and reads from a
+    layout is handed over in the result (:attr:`PipelineResult.history_layouts`).
+    """
     try:
         yield
     finally:
@@ -1927,6 +1982,9 @@ class PlanEra:
     changes no row.
     *hold_ranges* is false for a plan without ``rangeSetters`` (ADR 0024, the amendment of
     2026-11-25): its history and periods entries replay without keeping to the columns' ranges.
+    *version_counts* is how a shaped history gives its version counts to the entities (ADR 0017, the
+    amendment of 2026-11-28): each takes a count its room fits, or, for a plan without
+    ``versionCounts``, the count of its rank.
     *estimate_rows* is false for every recorded plan: it states its rows, so it runs with no
     estimate against *periodic_rows*, and ``MOST_ROWS`` alone bounds them.
     *projected_givens* is false for a plan without ``projectedGivens`` (ADR 0027, the amendment of
@@ -1945,6 +2003,7 @@ class PlanEra:
     scale_floors: Mapping[str, ScaleFloor] = field(default_factory=dict)
     periodic_rows: Optional[int] = None
     hold_ranges: bool = True
+    version_counts: str = VERSION_COUNTS_FIT
     estimate_rows: bool = True
     projected_givens: bool = True
     override_givens: bool = True
@@ -2506,6 +2565,9 @@ def execute(
                 bounds=_run_bounds(era),
                 scale_widened=widened,
                 scale_floors=era.scale_floors,
+                history_layouts=(
+                    {} if deferred else _layouts_of(_plans_of(made, hidden_emits), root)
+                ),
             )
 
         if probing:
@@ -4061,7 +4123,12 @@ def _histories_of(
     """
     found: Dict[str, HistoryBinding] = {}
     for emit in resolved:
-        entries = history_entries_of(emit.extension, emit.expose_id, end_share=era.end_share)
+        entries = history_entries_of(
+            emit.extension,
+            emit.expose_id,
+            end_share=era.end_share,
+            version_counts=era.version_counts,
+        )
         if not entries:
             continue
         semantics = (

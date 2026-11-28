@@ -26,6 +26,7 @@ import pytest
 
 from flux_engine.core.lrm import largest_remainder
 from flux_engine.generator import columns
+from flux_engine.seam.history import VERSION_COUNTS_FIT, VERSION_COUNTS_RANK
 
 from .test_history_end import (
     by_entity,
@@ -144,3 +145,36 @@ def test_slices_make_the_whole_run(cuts: Any) -> None:
         joined += run_of(plans, start=start, stop=stop)
     assert joined == whole
     assert len(by_entity(whole)) == ENTITIES
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_the_untracked_share_splits_the_changes_of_a_fitted_layout_as_of_a_ranked_one(
+    seed: int,
+) -> None:
+    """The fit moves which entity holds which count, not the total of ordinary changes ``T`` the share splits."""
+    fitted = history_plan(
+        tracked_entry(PLAN_ONLY, versions=BINS, untracked="0.6", version_counts=VERSION_COUNTS_FIT),
+        rows=ROWS,
+        entities=ENTITIES,
+        seed=seed,
+    )
+    ranked = history_plan(
+        tracked_entry(
+            PLAN_ONLY, versions=BINS, untracked="0.6", version_counts=VERSION_COUNTS_RANK
+        ),
+        rows=ROWS,
+        entities=ENTITIES,
+        seed=seed,
+    )
+    assert sorted(fitted.versions.counts.tolist()) == sorted(ranked.versions.counts.tolist())
+    assert fitted.reasons is not None and ranked.reasons is not None
+    assert fitted.reasons.total == ranked.reasons.total == TOTAL
+    wanted = largest_remainder(TOTAL, {"0": Decimal("0.4"), "1": Decimal("0.6")})
+    assert fitted.reasons.cumulative == ranked.reasons.cumulative == (wanted["0"], TOTAL)
+    untracked = TOTAL - fitted.reasons.cumulative[0]
+    assert untracked == wanted["1"] == 42
+    held = tracked_entry(
+        PLAN_ONLY, versions=BINS, untracked="0.6", version_counts=VERSION_COUNTS_FIT
+    )
+    pairs = changes_of(run_of(plans_for(held, rows=ROWS, entities=ENTITIES), seed), ["plan"])
+    assert sum(1 for _b, _a, moved in pairs if not moved) == untracked

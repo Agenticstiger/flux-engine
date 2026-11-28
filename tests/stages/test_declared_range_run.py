@@ -170,7 +170,7 @@ def test_a_date_column_whose_bins_pass_its_range_is_drawn_inside_it(tmp_path: Pa
     assert min(dates) < "2001-03-01" and max(dates) > "2005-10-01"
     verified = _verified(target, state, layout)
     assert verified.success, verified.stderr
-    assert verified.stdout == FLEET_VERIFY.format(periods=1522)
+    assert verified.stdout == FLEET_VERIFY.format(periods=1523)
     assert "rangeConformance" not in verified.artifacts
 
 
@@ -250,16 +250,17 @@ def test_a_bundle_with_bins_inside_its_range_keeps_its_rows_and_its_verify_outpu
     state = tmp_path / "state"
     layout = run_bundle(target, state)
     assert _outside(_dates(layout)) == 0
-    # Pinned on the commit before the cut: nothing inside the range is moved by it.
+    # Pinned on the commit before the cut: nothing inside the range is moved by it. The digest is of the rows
+    # with the counts each entity's room fits (2bc7566a5c5e... under the rank coupling).
     digest = hashlib.sha256(layout.emit_path(VISIT).read_bytes()).hexdigest()
-    assert digest == "2bc7566a5c5e83285e86b380349a6323cf1b586476914e1a2493a9d690bbdb3d"
+    assert digest == "9e4af1643e0b1d8ba811c4095631d20835d679f5e858bc8d0b33631861a592e4"
     plan_text = plan_module.plan(
         target, state_dir=tmp_path / "again", kernel=KERNEL_V2.version, stage=False
     )
     assert not [line for line in plan_text.stderr.splitlines() if line.startswith("note: ")]
     verified = _verified(target, state, layout)
     assert verified.success, verified.stderr
-    assert verified.stdout == FLEET_VERIFY.format(periods=1489)
+    assert verified.stdout == FLEET_VERIFY.format(periods=1487)
 
 
 def test_a_bundle_with_no_declared_range_keeps_its_verify_output(tmp_path: Path) -> None:

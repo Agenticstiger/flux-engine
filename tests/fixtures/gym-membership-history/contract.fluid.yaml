@@ -1,0 +1,53 @@
+fluidVersion: 0.7.7
+kind: DataProduct
+id: gym
+name: gym
+metadata:
+  owner:
+    team: e2e-team
+exposes:
+- exposeId: membership_version
+  kind: table
+  binding:
+    platform: local
+    format: json
+    location:
+      path: rows.ndjson
+  semantics:
+    entities:
+    - name: member
+      type: natural
+      expr: member_id
+    dimensions:
+    - name: valid_from
+      type: time
+      typeParams:
+        timeGranularity: day
+        validityParams:
+          isStart: true
+    - name: valid_to
+      type: time
+      typeParams:
+        timeGranularity: day
+        validityParams:
+          isEnd: true
+          chain: nextStart
+  contract:
+    schema:
+    - name: member_id
+      type: integer
+      required: true
+    - name: valid_from
+      type: date
+      required: true
+    - name: valid_to
+      type: date
+    - name: tier
+      type: enum('basic','closed','plus')
+      required: true
+    - name: is_current
+      type: enum('N','Y')
+      required: true
+    - name: plan
+      type: enum('free','pro','team')
+      required: true

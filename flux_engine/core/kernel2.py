@@ -1093,13 +1093,22 @@ _PERMUTE_KEY_BYTES = 32
 ARRAY_ROWS = 1 << 63
 
 
-def permute2_array(key: bytes, domain: int, indexes: "np.ndarray") -> List[int]:
-    """``permute/2`` of every index in *indexes*, for a domain of at most ``2**128``.
+#: The indexes :func:`permute2_ndarray` works on at once: each chunk's halves, the words of a round
+#: and the walkers still outside the domain are arrays of this length, so a permutation of any size
+#: holds a few arrays of it beside its result and no more.
+PERMUTE_CHUNK = 1 << 18
 
-    :func:`flux_engine.core.permute.permute2`'s rounds and cycle walking on uint64 arrays.
-    A value is held as its two halves, each of which fits a word, so a round adds the
-    block's word 0 to one half and masks it, and only the values that walked out of the
-    domain take another pass. The images come back as Python integers, in order.
+
+def _permute2_words(
+    key: bytes, domain: int, indexes: "np.ndarray"
+) -> Tuple["np.ndarray", "np.ndarray", int]:
+    """The two halves of ``permute/2`` of every index, as uint64 arrays, and the right half's width.
+
+    :func:`flux_engine.core.permute.permute2`'s rounds and cycle walking on uint64 arrays, for a
+    domain of at most ``2**128`` (each half then fits a word). A value is held as its two halves,
+    so a round adds the block's word 0 to one half and masks it, and only the values that walked
+    out of the domain take another pass. The indexes are taken a chunk at a time
+    (:data:`PERMUTE_CHUNK`); each is permuted alone, so no chunk changes another's image.
     """
     if not 1 <= domain <= PERMUTE_ARRAY_MAX_DOMAIN:
         raise FluxError(
@@ -1112,46 +1121,87 @@ def permute2_array(key: bytes, domain: int, indexes: "np.ndarray") -> List[int]:
         raise FluxError(FLX_5021, f"a permutation key is {_PERMUTE_KEY_BYTES} bytes")
     if size and not (int(indexes.min()) >= 0 and int(indexes.max()) < domain):
         raise FluxError(FLX_5021, f"a permutation index lies in [0, {domain})")
+    done_left = np.zeros(size, dtype=np.uint64)
+    done_right = np.zeros(size, dtype=np.uint64)
     if domain == 1:
-        return [0] * size
+        return done_left, done_right, 0
     bits = (domain - 1).bit_length()
     left_bits = bits // 2
     right_bits = bits - left_bits
+    right_full = (1 << right_bits) - 1
     left_mask = np.uint64((1 << left_bits) - 1)
-    right_mask = np.uint64((1 << right_bits) - 1)
+    right_mask = np.uint64(right_full)
     # Every value of `bits` bits lies inside a domain that is exactly 2**bits.
     whole = domain == 1 << bits
     domain_left = np.uint64(0 if whole else domain >> right_bits)
-    domain_right = np.uint64(0 if whole else domain & ((1 << right_bits) - 1))
+    domain_right = np.uint64(0 if whole else domain & right_full)
     round_key = permute_round_key(key, domain)
-    values = [int(index) for index in indexes.tolist()]
-    left = np.array([value >> right_bits for value in values], dtype=np.uint64)
-    right = np.array([value & ((1 << right_bits) - 1) for value in values], dtype=np.uint64)
-    done_left = np.zeros(size, dtype=np.uint64)
-    done_right = np.zeros(size, dtype=np.uint64)
-    pending = np.arange(size)
-    while pending.shape[0]:
-        count = pending.shape[0]
-        zeros = np.zeros(count, dtype=np.uint64)
-        for round_index in range(4):
-            stage = np.full(count, round_index, dtype=np.uint64)
-            if round_index % 2 == 0:
-                word = philox_word0(right, zeros, stage, zeros, round_key)
-                left = (left + word) & left_mask
-            else:
-                word = philox_word0(left, zeros, stage, zeros, round_key)
-                right = (right + word) & right_mask
-        if whole:
-            inside = np.ones(count, dtype=bool)
+    for first in range(0, size, PERMUTE_CHUNK):
+        held = indexes[first : first + PERMUTE_CHUNK]
+        count = held.shape[0]
+        if held.dtype.kind in "iu":
+            values = held.astype(np.uint64, copy=False)
+            left = (
+                np.zeros(count, dtype=np.uint64)
+                if right_bits >= 64
+                else values >> np.uint64(right_bits)
+            )
+            right = values & right_mask
         else:
-            inside = (left < domain_left) | ((left == domain_left) & (right < domain_right))
-        done_left[pending[inside]] = left[inside]
-        done_right[pending[inside]] = right[inside]
-        outside = ~inside
-        pending, left, right = pending[outside], left[outside], right[outside]
+            python = [int(index) for index in held.tolist()]
+            left = np.array([value >> right_bits for value in python], dtype=np.uint64)
+            right = np.array([value & right_full for value in python], dtype=np.uint64)
+        pending = np.arange(count)
+        while pending.shape[0]:
+            walking = pending.shape[0]
+            zeros = np.zeros(walking, dtype=np.uint64)
+            for round_index in range(4):
+                stage = np.full(walking, round_index, dtype=np.uint64)
+                if round_index % 2 == 0:
+                    word = philox_word0(right, zeros, stage, zeros, round_key)
+                    left = (left + word) & left_mask
+                else:
+                    word = philox_word0(left, zeros, stage, zeros, round_key)
+                    right = (right + word) & right_mask
+            if whole:
+                inside = np.ones(walking, dtype=bool)
+            else:
+                inside = (left < domain_left) | ((left == domain_left) & (right < domain_right))
+            at = pending[inside] + first
+            done_left[at] = left[inside]
+            done_right[at] = right[inside]
+            outside = ~inside
+            pending, left, right = pending[outside], left[outside], right[outside]
+    return done_left, done_right, right_bits
+
+
+def permute2_ndarray(key: bytes, domain: int, indexes: "np.ndarray") -> "np.ndarray":
+    """``permute/2`` of every index in *indexes*, as an int64 array, for a domain of at most ``2**63``.
+
+    The images of :func:`flux_engine.core.permute.permute2`, one implementation of its rounds on
+    arrays (:func:`_permute2_words`), split and joined in numpy: no Python integer is made for
+    an index or an image.
+    """
+    if domain > ARRAY_ROWS:
+        raise FluxError(
+            FLX_5021, f"an ndarray permutation covers at most 2**63 values, got {domain}"
+        )
+    high, low, right_bits = _permute2_words(key, domain, indexes)
+    return ((high << np.uint64(right_bits)) | low).astype(np.int64)
+
+
+def permute2_array(key: bytes, domain: int, indexes: "np.ndarray") -> List[int]:
+    """``permute/2`` of every index in *indexes*, for a domain of at most ``2**128``.
+
+    :func:`permute2_ndarray`'s images, as Python integers in order; a domain past ``2**63`` joins the
+    halves of each image as integers, since an image no longer fits an int64.
+    """
+    if 1 <= domain <= ARRAY_ROWS:
+        return permute2_ndarray(key, domain, indexes).tolist()
+    high, low, right_bits = _permute2_words(key, domain, indexes)
     return [
-        (high << right_bits) | low
-        for high, low in zip(done_left.tolist(), done_right.tolist(), strict=True)
+        (left << right_bits) | right
+        for left, right in zip(high.tolist(), low.tolist(), strict=True)
     ]
 
 

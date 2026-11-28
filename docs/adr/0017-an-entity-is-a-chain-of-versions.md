@@ -1098,3 +1098,82 @@ transitions count 400 moves among 850 changes, and the history moved the column 
 - **ADR 0027.** The `u` event of such a change takes `type.values["u"]`. See section 4 of ADR 0027.
 - **What does not move.** Nothing changes for an entry without the key, and a profile whose one tracked column
   moves in as many changes as the history has (within the rounding) writes the entry it wrote before.
+
+## Amendment of 2026-11-28: an entity takes a version count its room fits, not the count of its rank
+
+Section 3 gives the version counts to the entities in the order of their room. The entity with the most room
+takes the most versions (the rank coupling), so a chain is compressed only where its drawn lengths overrun its
+horizon (the compression of section 4). That is a table cut at `until` in its strongest form, a count that follows the room
+exactly. A real table lies between: an entity's count is what its history drew, except that the cut at `until` stops
+a chain that would run past it. Under the rank coupling a table whose entities start across a long span and whose
+counts do not follow the start gave the entities that start first nearly all the long chains. The validity start's
+histogram over versions then leaned toward the early years, and the counts' rank correlation with the first start was
+close to -1 where the source's was close to 0.
+
+- **The rule: fit.** The multiset of counts is unchanged: the counted layout of `versions`, known at plan time, with
+  `c` the largest count. The first starts are drawn as section 4 draws them. Then:
+  1. **Capacity.** Each entity's capacity is the versions its own lengths fit before its limit. The limit is
+     `until`, or its parent's limit under `parent.lifetime` or a range on the validity columns.
+     - It is `1 + max { k <= c - 1 : d_0 + ... + d_(k-1) <= room - 1 - closing }`, where `room` is the limit less
+       the first start, and `closing` is 1 under `closeLast` and 0 otherwise. No `k` may qualify, and the capacity
+       is then 1.
+     - `d_j` is the length section 4 draws for version `j` at position 0 of its `change` path. An entity reads
+       lengths past its own count, and that moves no counter, since every version's length has its own position.
+  2. **Assignment.** The counts go out from the largest down. Count `k` goes to the entity with capacity `k` or more
+     that has no count yet and comes first in the permutation `permute/2(K_fit, E, ·)`. `K_fit` is the key of
+     `("sim", sim_id, "gen", exposeId, "versions", "fit")`.
+     - When no entity without a count has the capacity, the count goes to the one with the most capacity, a tie to
+       the earlier in the permutation. That chain is compressed as section 4 compresses it.
+     - The assignment uses exact integers and draws nothing past the permutation.
+  3. **The rest is unchanged.** Under `parent.lifetime` or a range the unit cap and pass of the amendment of
+     2026-11-24 then apply as before. The compression, the ends, the endings, the tracked changes, `reasons`,
+     `untracked` and the projections read the counts as they do now.
+- **The gate.** A plan made with this rule records `versionCounts: "fit"` in `plan.json`. The key is present only
+  when the plan holds a history with a `versions` shape, so every other plan keeps its bytes and its planDigest. A
+  recorded plan without it replays the rank coupling byte for byte, and any other value is refused (`FLX-2102`). The
+  bundle and its `H` do not change. The history's plan document says the same (`versionCounts` in its `history`
+  member, only for a shaped history of the fit), so every cache that is keyed by a plan's digest holds the rule.
+- **The kernel.** A history needs kernel `0.2.0`, and kernel `0.1.0` refuses it before any count is assigned, so no
+  plan made under `0.1.0` records the marker.
+- **What it keeps.**
+  - The versions histogram class for class.
+  - The first starts.
+  - The lengths, which each entity still draws.
+  - A count's relation to the first start, as the cut at `until` makes it: about none where chains are short against
+    the span, and close to the source's where the cut binds.
+  - Chains are compressed less often than under the rank coupling, since a count goes where it fits.
+- **`init`.** It changes nothing: the histogram properties of the validity start, the validity end and `activation`
+  are written as before, and the fit makes them hold where the counts do not follow the start.
+- **What it costs.**
+  - Every new plan of a history with a shape writes new bytes: its golden files are re-pinned, and new vectors pin
+    the rule.
+  - The plan reads `c - 1` lengths per entity and orders the entities once. A run with workers works the layout out
+    once, in the process that starts them, and hands it to each worker, as an association's pairing is. The layouts
+    handed over are the ones the run's own plans' histories returned, each under the whole key it was worked out
+    under (the parents' lifetimes of a history that keeps to them included), so a layout the process holds for
+    another key is never what a worker is given. A run keeps up to 64 layouts and its memos, layouts included,
+    are cleared as it ends, so a long-lived process holds none between runs. What the plan stage writes after the
+    run reads the layout the run's result carries, so the layout is worked out once. The hand-over is a pickle of
+    the counts (33 MB at a million entities); a memory-mapped counts array is the later route for much larger entity
+    counts.
+  - At a million entities (about three million rows) with one job, a plan takes about 9% less time than under the
+    rank coupling (22.3 s against 24.5 s) and about 3% more peak memory (1.84 GB against 1.78 GB, 58 MB); with 16
+    jobs it takes 12.0 s against 38.7 s and 1.56 GB against 1.54 GB. At 100,000 entities the same plan takes 3.05 s
+    against 3.41 s and 0.285 GB against 0.273 GB, a residual of 12 MB, which is inside the spread of the rank
+    coupling's own runs (0.261 to 0.276 GB). These are the medians of three runs each. The memory the plan holds above
+    the rank coupling grows with the entities and was not traced further. What is held at once for the capacities is
+    bounded in words, `1 << 13` lengths at a time, and the permutation is made in numpy arrays (`permute2_ndarray`:
+    the same rounds as `permute2_array`, split and joined in numpy), since its cost was large only while its indexes
+    and images were Python integers, a list of a million of each. `permute2_array` returns the array's images as a
+    list, so one implementation is pinned by the permutation vectors and by a test against the form it replaced.
+  - Where the cut binds, the entities whose drawn lengths are shorter take the longer chains. A table cut at a
+    calendar date shows the same lean, so the closed lengths read a little shorter than the drawn ones.
+  - A source whose counts follow something other than the cut, such as a cohort that changes more often, is not
+    modelled, and `verify` reports it.
+- **Not chosen.**
+  - A coupling weight between the rank coupling and none, chosen per history against the start's histogram (the
+    Iman-Conover pattern). It needs a criterion that also scores lengths, or it matches the histogram by compressing
+    chains, and one weight cannot follow a table where the cut binds for some entities and not others.
+  - A permutation law weighted by the room (the PermAlgo pattern). It needs a coefficient no profile publishes.
+  - Counts that are the renewals each chain fits, as a recurrent-event simulator draws them. That drops the versions
+    histogram, which this ADR keeps class for class.

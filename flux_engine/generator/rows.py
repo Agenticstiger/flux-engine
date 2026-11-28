@@ -200,11 +200,12 @@ _Exact = Tuple[int, Tuple[int, ...], int]
 
 
 def clear_memos() -> None:
-    """Forget every declaration the generator's memos remembered.
+    """Forget every declaration the generator's memos remembered, the history layouts among them.
 
     Safe at any time, since no row depends on what is remembered;
     :func:`flux_engine.stages.pipeline.execute` clears at the end of every
-    run, together with :func:`flux_engine.core.rng.clear_memos`.
+    run, together with :func:`flux_engine.core.rng.clear_memos`. What a stage reads from a layout
+    after the run is handed over in the run's result, not found here.
     """
     for memo in (
         _seam_bytes,
@@ -217,9 +218,11 @@ def clear_memos() -> None:
     ):
         memo.cache_clear()
     _WHOLE.clear()
+    from flux_engine.generator.history import clear_chains
     from flux_engine.generator.projections import clear_sources
 
     clear_sources()
+    clear_chains()
 
 
 def _exact(value: Decimal) -> _Exact:

@@ -101,6 +101,7 @@ __all__ = [
     "KIND_PATH_SHAPE",
     "LAG_PATH_SHAPE",
     "REASON_PATH_SHAPE",
+    "VERSIONS_FIT_PATH_SHAPE",
     "VERSIONS_PATH_SHAPE",
     "CellStreams",
     "GeneratorStreams",
@@ -124,6 +125,7 @@ __all__ = [
     "lag_path",
     "matches_generator_shape",
     "reason_path",
+    "versions_fit_path",
     "versions_path",
 ]
 
@@ -315,6 +317,14 @@ VERSIONS_PATH_SHAPE = PathShape(
     consumer="counted layout of the versions of each entity",
     pattern=("sim", PathKind.NAME, "gen", PathKind.NAME, "versions"),
 )
+#: Which entity takes which version count (ADR 0017, the amendment of 2026-11-28): a permutation
+#: key, names only. ``versions`` has no part after it in the layout's own path, so ``fit`` is a
+#: literal no other shape has there, and every address is new.
+VERSIONS_FIT_PATH_SHAPE = PathShape(
+    name="sim.history.versions.fit",
+    consumer="the order in which entities take the version counts their room fits",
+    pattern=("sim", PathKind.NAME, "gen", PathKind.NAME, "versions", "fit"),
+)
 HISTORY_PATH_SHAPE = PathShape(
     name="sim.history.first",
     consumer="the first start of one entity",
@@ -410,6 +420,11 @@ def entities_path(sim_id: str, expose_id: str, relationship: str) -> SeedPath:
 def versions_path(sim_id: str, expose_id: str) -> SeedPath:
     """Section 8.4's path: ``("sim", sim_id, "gen", exposeId, "versions")``."""
     return (*_history_head(sim_id, expose_id), "versions")
+
+
+def versions_fit_path(sim_id: str, expose_id: str) -> SeedPath:
+    """The fit's path: ``("sim", sim_id, "gen", exposeId, "versions", "fit")``."""
+    return (*_history_head(sim_id, expose_id), "versions", "fit")
 
 
 def history_path(sim_id: str, expose_id: str, entity: int) -> SeedPath:

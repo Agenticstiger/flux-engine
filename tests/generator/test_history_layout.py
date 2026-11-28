@@ -72,6 +72,7 @@ from flux_engine.generator.rules import plan_rules
 from flux_engine.seam.contract import LogicalKind, compile_expose
 from flux_engine.seam.counts import ChildShape
 from flux_engine.seam.history import (
+    VERSION_COUNTS_RANK,
     Histogram,
     HistoryEnd,
     HistoryEntry,
@@ -341,9 +342,14 @@ def test_without_a_shape_the_versions_spread_as_evenly_as_whole_counts_allow() -
     assert layout.c == 4
 
 
-def test_the_entity_with_the_most_room_takes_the_most_versions() -> None:
+def test_under_the_rank_coupling_the_entity_with_the_most_room_takes_the_most_versions() -> None:
+    """The coupling of a plan recorded before each entity took a count its room fits."""
     bins = ChildShape("bins", ("1", "2", "4", "9"), ("0.45", "0.35", "0.20"))
-    plans = plans_of(history_entry=entry(versions=bins), rows=40, entities=10)
+    plans = plans_of(
+        history_entry=entry(versions=bins, version_counts=VERSION_COUNTS_RANK),
+        rows=40,
+        entities=10,
+    )
     layout, _, _ = layout_of(plans)
     sigma = sigma_of(versions_key(root_for(), SIM_ID, EMIT), 10)
     order = sorted(range(10), key=lambda e: (int(layout.rooms[e]), sigma[e]))

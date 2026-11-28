@@ -46,6 +46,7 @@ from flux_engine.generator.history import (
     entity_chain,
     entity_states,
     first_start_at,
+    fit_key,
     fit_lengths,
     largest_count,
     plan_history,
@@ -65,6 +66,7 @@ from flux_engine.generator.paths import (
     KIND_PATH_SHAPE,
     LAG_PATH_SHAPE,
     REASON_PATH_SHAPE,
+    VERSIONS_FIT_PATH_SHAPE,
     VERSIONS_PATH_SHAPE,
     allocate_path,
     change_path,
@@ -75,6 +77,7 @@ from flux_engine.generator.paths import (
     kind_path,
     lag_path,
     reason_path,
+    versions_fit_path,
     versions_path,
 )
 from flux_engine.generator.periods import _runs, _slots, kind_key, period_grid
@@ -108,6 +111,7 @@ EPOCH = date(1970, 1, 1)
 SHAPES: Tuple[Tuple[str, Tuple[Any, ...], Tuple[int, ...], bool], ...] = (
     ("entities", entities_path(SIM, EXPOSE, "customer"), (), True),
     ("versions", versions_path(SIM, EXPOSE), (), True),
+    ("versions.fit", versions_fit_path(SIM, EXPOSE), (), True),
     ("history", history_path(SIM, EXPOSE, 41), (5,), False),
     ("change", change_path(SIM, EXPOSE, 41, 6), (5, 6), False),
     ("ended", ended_path(SIM, EXPOSE), (), True),
@@ -126,6 +130,7 @@ DAY_MS = 86_400_000
 CASES: Tuple[Dict[str, Any], ...] = (
     {
         "name": "(a) bins of versions under a parent, a start histogram, DATE",
+        "countRule": "rank",
         "kind": "DATE",
         "windowStart": "2023-01-01T00:00:00Z",
         "until": "2025-12-31",
@@ -147,6 +152,7 @@ CASES: Tuple[Dict[str, Any], ...] = (
     },
     {
         "name": "(b) no shape, an even spread, no parent, DATE",
+        "countRule": "fit",
         "kind": "DATE",
         "windowStart": "2023-01-01T00:00:00Z",
         "until": "2024-06-30",
@@ -166,6 +172,7 @@ CASES: Tuple[Dict[str, Any], ...] = (
     },
     {
         "name": "(c) levels, closeLast, bins closed above, TIMESTAMP",
+        "countRule": "fit",
         "kind": "TIMESTAMP",
         "windowStart": "2023-01-01T00:00:00Z",
         "until": "2024-03-01T00:00:00Z",
@@ -188,6 +195,7 @@ CASES: Tuple[Dict[str, Any], ...] = (
     },
     {
         "name": "(d) finalVersion, two tracked columns with reasons, DATE",
+        "countRule": "rank",
         "kind": "DATE",
         "windowStart": "2023-01-01T00:00:00Z",
         "until": "2025-12-31",
@@ -223,6 +231,7 @@ CASES: Tuple[Dict[str, Any], ...] = (
     },
     {
         "name": "(e) finalVersion, one tracked column, a share of changes that move none, DATE",
+        "countRule": "rank",
         "kind": "DATE",
         "windowStart": "2023-01-01T00:00:00Z",
         "until": "2025-12-31",
@@ -251,6 +260,19 @@ CASES: Tuple[Dict[str, Any], ...] = (
         "chain": "nextStart",
         "openEnd": None,
     },
+)
+
+#: The rank-coupling cases again under the fit: a recorded plan keeps (a), (d) and (e), a new plan takes these.
+#: A case under the rank coupling carries no ``countRule`` in the file, as a recorded plan carries no ``versionCounts``.
+CASES = (
+    *CASES,
+    *(
+        {**case, "name": name, "countRule": "fit"}
+        for case, name in (
+            (CASES[0], "(f) as (a), each entity taking a count its room fits"),
+            (CASES[3], "(g) as (d), each entity taking a count its room fits"),
+        )
+    ),
 )
 
 
@@ -301,6 +323,51 @@ def _reference_layout(
         "sigma": sigma,
         "counts": counts,
         "offsets": [sum(counts[:p]) for p in range(parents)],
+    }
+
+
+def _reference_fit(
+    case: Dict[str, Any], starts: Sequence[int], until: int, c: int
+) -> Dict[str, Any]:
+    """KERNEL-SPEC-2 section 8.4's fit, as the text says it and by the slowest route: no heap, no sort.
+
+    The multiset is the layout's, the capacity of an entity is the versions its own drawn lengths
+    fit, the priority is ``permute/2`` under the fit key, and each count, from the largest, takes the
+    entity it is dealt to by a scan of every entity.
+    """
+    entities, rows = case["entities"], case["rows"]
+    key_v = _digest(versions_path(SIM, EXPOSE), ())
+    multiset = sorted(
+        _reference_layout(key_v, entities, rows, 1, case["versions"], None)["counts"], reverse=True
+    )
+    closing = 1 if _closes(case) else 0
+    capacity = []
+    for entity in range(entities):
+        bound = until - starts[entity] - 1 - closing
+        total = fitted = 0
+        for k in range(1, c):
+            total += _drawn_length(case, entity, k - 1)
+            if total > bound:
+                break
+            fitted = k
+        capacity.append(1 + fitted)
+    key_fit = _digest(versions_fit_path(SIM, EXPOSE), ())
+    priority = [k2.permute(key_fit, entities, entity) for entity in range(entities)]
+    counts = [0] * entities
+    for count in multiset:
+        free = [e for e in range(entities) if counts[e] == 0]
+        fits = [e for e in free if capacity[e] >= count]
+        pool, order = (
+            (fits, lambda e: priority[e]) if fits else (free, lambda e: (-capacity[e], priority[e]))
+        )
+        counts[min(pool, key=order)] = count
+    offsets = [sum(counts[:p]) for p in range(entities)]
+    return {
+        "key": key_fit.hex(),
+        "priority": priority,
+        "capacity": capacity,
+        "counts": counts,
+        "offsets": offsets,
     }
 
 
@@ -736,8 +803,13 @@ def _case_vector(case: Dict[str, Any]) -> Dict[str, Any]:
     key_v = _digest(versions_path(SIM, EXPOSE), ())
     coupled = None if case["versions"] is None else [Fraction(room) for room in rooms]
     versions = _reference_layout(key_v, entities, rows, 1, case["versions"], coupled)
+    fitted = None
+    if case["versions"] is not None and case["countRule"] == "fit":
+        fitted = _reference_fit(case, starts, until, c)
+        versions = {**versions, "counts": fitted["counts"], "offsets": fitted["offsets"]}
     vector: Dict[str, Any] = {
         "name": case["name"],
+        **({"countRule": "fit"} if case["countRule"] == "fit" else {}),
         "kind": kind,
         "windowStart": case["windowStart"],
         "until": case["until"],
@@ -764,6 +836,10 @@ def _case_vector(case: Dict[str, Any]) -> Dict[str, Any]:
         "versionCounts": versions["counts"],
         "versionOffsets": versions["offsets"],
     }
+    if fitted is not None:
+        vector.update(
+            fitKey=fitted["key"], fitPriority=fitted["priority"], fitCapacity=fitted["capacity"]
+        )
     counts = versions["counts"]
     ended = None if case["end"] is None else _reference_ended(case, counts)
     chosen_set = {0, 1, counts.index(max(counts)), entities - 1}
@@ -896,6 +972,7 @@ def test_the_engine_root_is_the_vector_root() -> None:
 SHAPE_OF = {
     "entities": ENTITIES_PATH_SHAPE,
     "versions": VERSIONS_PATH_SHAPE,
+    "versions.fit": VERSIONS_FIT_PATH_SHAPE,
     "history": HISTORY_PATH_SHAPE,
     "change": CHANGE_PATH_SHAPE,
     "ended": ENDED_PATH_SHAPE,
@@ -927,10 +1004,11 @@ def test_the_layout_keys_are_the_engines_keys() -> None:
     root = _root()
     assert entities_key(root, SIM, EXPOSE, "customer").hex() == by_name["entities"]["layoutKey"]
     assert versions_key(root, SIM, EXPOSE).hex() == by_name["versions"]["layoutKey"]
+    assert fit_key(root, SIM, EXPOSE).hex() == by_name["versions.fit"]["layoutKey"]
     assert ended_key(root, SIM, EXPOSE).hex() == by_name["ended"]["layoutKey"]
     assert reason_key(root, SIM, EXPOSE).hex() == by_name["reason"]["layoutKey"]
     assert kind_key(root, SIM, EXPOSE, 2, 11).hex() == by_name["kind"]["layoutKey"]
-    for name in ("entities", "versions", "ended", "reason", "kind"):
+    for name in ("entities", "versions", "versions.fit", "ended", "reason", "kind"):
         key = bytes.fromhex(by_name[name]["layoutKey"])
         assert len(key) == 32
 
@@ -1000,6 +1078,7 @@ def _entry(case: Dict[str, Any]) -> HistoryEntry:
         tracked=tuple(_tracked_of(held) for held in case["tracked"]),
         reasons=_reasons_of(case),
         untracked=case.get("untracked"),
+        version_counts=case.get("countRule", "rank"),
     )
 
 
@@ -1092,6 +1171,40 @@ def test_the_largest_count_and_the_first_starts_are_the_vectors(vector: Dict[str
 
 def _kind(vector: Dict[str, Any]) -> LogicalKind:
     return LogicalKind.DATE if vector["kind"] == "DATE" else LogicalKind.TIMESTAMP
+
+
+@pytest.mark.parametrize(
+    "vector",
+    [v for v in STORED["layouts"] if "fitKey" in v],
+    ids=lambda vector: vector["name"],
+)
+def test_the_fit_is_the_vectors(vector: Dict[str, Any]) -> None:
+    """The capacities, the priorities and the counts of the fit, as the slow reference works them out."""
+    plan = _planned(vector)
+    root = _root()
+    assert fit_key(root, SIM, EXPOSE).hex() == vector["fitKey"]
+    assert plan.versions.counts.tolist() == vector["versionCounts"]
+    assert sorted(vector["versionCounts"]) == sorted(
+        _reference_layout(
+            bytes.fromhex(vector["versionKey"]),
+            vector["entities"],
+            vector["rows"],
+            1,
+            vector["versions"],
+            None,
+        )["counts"]
+    )
+    assert sorted(vector["fitPriority"]) == list(range(vector["entities"]))
+    assert all(1 <= held <= vector["c"] for held in vector["fitCapacity"])
+    capacity = vector["fitCapacity"]
+    # An entity holds more than its capacity only where no entity with room was left for the count.
+    for entity, count in enumerate(vector["versionCounts"]):
+        if count > capacity[entity]:
+            assert not [
+                e
+                for e, held in enumerate(vector["versionCounts"])
+                if e != entity and held < count and capacity[e] >= count
+            ]
 
 
 @pytest.mark.parametrize("vector", STORED["layouts"], ids=lambda vector: vector["name"])
